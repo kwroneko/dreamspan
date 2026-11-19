@@ -1,4 +1,4 @@
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { readSetting, putUserSetting } from "./settings.ts"
 import type { StImportPrefix } from "./stImportPrefix.ts"
 import { insertStMessageBatch, prepareStMessageBatch } from "./stMessageBatch.ts"
@@ -30,13 +30,13 @@ import { type ForkRow, recordedColumns } from "./rows.ts"
 // transaction in the writer, and a chat goes in over several: its start, its messages in
 // batches, its state. Nothing here reads a file: the format worker parsed them, and the main
 // thread resolved what the messages name.
-import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import { NOTE_SCHEMA_VERSION, type NoteDoc } from "@rp/shared/docs/note.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { validateDoc } from "@rp/shared/editing.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import { unfinishedTitle } from "@rp/shared/stImportApi.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import { NOTE_SCHEMA_VERSION, type NoteDoc } from "@dreamspan/shared/docs/note.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { validateDoc } from "@dreamspan/shared/editing.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import { unfinishedTitle } from "@dreamspan/shared/stImportApi.ts"
+import type { StateEventData } from "@dreamspan/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { docHash, searchText } from "./documents.ts"
@@ -57,7 +57,7 @@ import {
 } from "./stImportProgress.ts"
 import { newEvent, type PlaceEvent } from "./stImportPlace.ts"
 import { planTipRef, type StPlanTip, stepPlanTip } from "./stImportPlanOps.ts"
-import { StImportPlanChanged, ST_UNPLANNED_CHAT_MESSAGE } from "@rp/shared/stReimportPlan.ts"
+import { StImportPlanChanged, ST_UNPLANNED_CHAT_MESSAGE } from "@dreamspan/shared/stReimportPlan.ts"
 import {
   DEFAULT_PERSONA,
   DEFAULT_PRESET,

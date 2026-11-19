@@ -12,9 +12,9 @@ import type {
   SourceCapabilities,
   SourceInfo,
   SourcePage
-} from "@rp/shared/cardSources.ts"
-import type { CardOrigin, SourceList } from "@rp/shared/cardSources.ts"
-import { SourceAdminSettings } from "@rp/shared/cardSources.ts"
+} from "@dreamspan/shared/cardSources.ts"
+import type { CardOrigin, SourceList } from "@dreamspan/shared/cardSources.ts"
+import { SourceAdminSettings } from "@dreamspan/shared/cardSources.ts"
 import type { OperationExposure } from "../operations.ts"
 import type { ToolContext } from "../tools.ts"
 import type { Skill } from "../toolLoading.ts"

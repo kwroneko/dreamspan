@@ -3,7 +3,7 @@ import { readFile, writeFile, mkdir, symlink, link, unlink } from "node:fs/promi
 import { join } from "node:path"
 import { expect, it, describe } from "vitest"
 import { Effect } from "effect"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { checkPlugin } from "../src/plugins/check.ts"
 import { pluginFolder, saveFiles } from "../src/plugins/repo.ts"
 import { runPluginChild } from "../src/plugins/process.ts"
@@ -11,7 +11,7 @@ import { client, login, serverLayer, testConfig } from "./support/config.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 const fixture = (id: string, source: string, options: Record<string, unknown> = {}) => ({
-  "rp-plugin.json": JSON.stringify({
+  "dreamspan-plugin.json": JSON.stringify({
     id,
     name: "Synthetic plugin",
     api: 1,
@@ -28,7 +28,7 @@ const fixture = (id: string, source: string, options: Record<string, unknown> = 
   "index.ts": source
 })
 const empty =
-  'import { Effect, type Activate } from "@rp/plugin-api/server"; export const activate: Activate = () => Effect.void;'
+  'import { Effect, type Activate } from "@dreamspan/plugin-api/server"; export const activate: Activate = () => Effect.void;'
 it("checks a synthetic plugin and rejects type, import, activation, undeclared access and changed-tree attacks", async () => {
   const data = tempDir("plugin-check")
   const good = await saveFiles(data, "", "tiny", fixture("tiny", empty), true, "Initial")
@@ -38,15 +38,15 @@ it("checks a synthetic plugin and rejects type, import, activation, undeclared a
     ["probe", 'throw new Error("synthetic-secret"); ' + empty],
     [
       "probe",
-      'import { Effect, type Activate } from "@rp/plugin-api/server"; export const activate: Activate = () => Effect.sync(() => {throw new Error("synthetic-secret")});'
+      'import { Effect, type Activate } from "@dreamspan/plugin-api/server"; export const activate: Activate = () => Effect.sync(() => {throw new Error("synthetic-secret")});'
     ],
     [
       "probe",
-      'import { Effect, type Activate } from "@rp/plugin-api/server"; export const activate: Activate = (host) => host.registries.commands!.disable("unknown");'
+      'import { Effect, type Activate } from "@dreamspan/plugin-api/server"; export const activate: Activate = (host) => host.registries.commands!.disable("unknown");'
     ],
     [
       "probe",
-      'import { Effect, type Activate } from "@rp/plugin-api/server"; export const activate: Activate = () => Effect.never;'
+      'import { Effect, type Activate } from "@dreamspan/plugin-api/server"; export const activate: Activate = () => Effect.never;'
     ],
     ["types", 'import fs from "node:fs"; ' + empty]
   ] as const
@@ -65,7 +65,7 @@ it("checks worker activation and refuses a non-instance server entry", async () 
   const data = tempDir("plugin-worker-check")
   const files = fixture(
     "worker-demo",
-    'import {Effect, Schema, type Activate} from "@rp/plugin-api/worker"; export const activate: Activate = host => host.registries.stateKeys!.register({id:"worker-demo/flag",value:Schema.Boolean,ids:{ids:{}},scope:"branch"});',
+    'import {Effect, Schema, type Activate} from "@dreamspan/plugin-api/worker"; export const activate: Activate = host => host.registries.stateKeys!.register({id:"worker-demo/flag",value:Schema.Boolean,ids:{ids:{}},scope:"branch"});',
     { server: null, worker: "index.ts", surfaces: ["worker:stateKeys"] }
   )
   const commit = await saveFiles(data, "", "worker-demo", files, true, "Initial")
@@ -195,14 +195,14 @@ for (const workers of ["source", "bundle"] as const)
           const files = {
             ...fixture(
               "integrated",
-              'import {Effect,type Activate} from "@rp/plugin-api/server"; export const activate: Activate = host => host.registries.rolloutTools!.register({id:"synthetic_tool",label:"Synthetic",description:"Synthetic read",effect:"read",parameters:{type:"object",properties:{}},execute:()=>Effect.succeed({text:"synthetic result"})});',
+              'import {Effect,type Activate} from "@dreamspan/plugin-api/server"; export const activate: Activate = host => host.registries.rolloutTools!.register({id:"synthetic_tool",label:"Synthetic",description:"Synthetic read",effect:"read",parameters:{type:"object",properties:{}},execute:()=>Effect.succeed({text:"synthetic result"})});',
               {
                 worker: "worker.ts",
                 surfaces: ["server:rolloutTools", "worker:stateKeys", "worker:macros", "worker:projections"]
               }
             ),
             "worker.ts":
-              'import {Effect,Schema,registerMacro,type Activate} from "@rp/plugin-api/worker"; export const activate: Activate = host => Effect.gen(function*(){yield* host.registries.stateKeys!.register({id:"integrated/flag",value:Schema.Boolean,ids:{ids:{}},scope:"branch"});yield* registerMacro(host.registries.macros!,{kind:"value",name:"synthetic",handler:()=>"Hello"});yield* host.registries.projections!.register({id:"integrated/roles",label:"Synthetic roles",role:()=>"user"});});'
+              'import {Effect,Schema,registerMacro,type Activate} from "@dreamspan/plugin-api/worker"; export const activate: Activate = host => Effect.gen(function*(){yield* host.registries.stateKeys!.register({id:"integrated/flag",value:Schema.Boolean,ids:{ids:{}},scope:"branch"});yield* registerMacro(host.registries.macros!,{kind:"value",name:"synthetic",handler:()=>"Hello"});yield* host.registries.projections!.register({id:"integrated/roles",label:"Synthetic roles",role:()=>"user"});});'
           }
           const commit = yield* api.CreatePlugin({ scope: "instance", id: "integrated", files })
           const report = yield* api.EnablePlugin({ scope: "instance", id: "integrated", commit, consent: true })
@@ -250,7 +250,7 @@ for (const workers of ["source", "bundle"] as const)
             scope: null,
             data: { key: "integrated/flag", value: true } as never
           })
-          const { foldState } = yield* Effect.promise(() => import("@rp/shared/state.ts"))
+          const { foldState } = yield* Effect.promise(() => import("@dreamspan/shared/state.ts"))
           expect(
             foldState(
               yield* reader.StateEventsAt({
@@ -273,7 +273,7 @@ for (const workers of ["source", "bundle"] as const)
 it("rejects probe writes outside its folder and runs only bundled, vendored plugin tests", async () => {
   const data = tempDir("plugin-probe-write"),
     outside = join(data, "outside")
-  const source = `import {Effect,type Activate} from "@rp/plugin-api/server"; const fs = await Function('return import("node:fs")')(); fs.writeFileSync(${JSON.stringify(outside)},"denied"); export const activate: Activate = () => Effect.void;`
+  const source = `import {Effect,type Activate} from "@dreamspan/plugin-api/server"; const fs = await Function('return import("node:fs")')(); fs.writeFileSync(${JSON.stringify(outside)},"denied"); export const activate: Activate = () => Effect.void;`
   const commit = await saveFiles(
     data,
     "",
@@ -302,7 +302,7 @@ it("suspends a throwing registered tool and bounds a nonreturning asynchronous h
         const { ExecutionRegistry } = yield* Effect.promise(() => import("../src/execution.ts"))
         const execution = yield* ExecutionRegistry
         const source =
-          'import {Effect,type Activate} from "@rp/plugin-api/server"; export const activate: Activate = host => host.registries.rolloutTools!.register({id:"synthetic_failure",label:"Synthetic",description:"Synthetic read",effect:"read",parameters:{type:"object",properties:{}},execute:()=>Effect.die(new Error("synthetic-secret"))});'
+          'import {Effect,type Activate} from "@dreamspan/plugin-api/server"; export const activate: Activate = host => host.registries.rolloutTools!.register({id:"synthetic_failure",label:"Synthetic",description:"Synthetic read",effect:"read",parameters:{type:"object",properties:{}},execute:()=>Effect.die(new Error("synthetic-secret"))});'
         const commit = yield* api.CreatePlugin({
           scope: "instance",
           id: "handler-fault",
@@ -324,7 +324,7 @@ it("suspends a throwing registered tool and bounds a nonreturning asynchronous h
     )
   )
   const { declaredHandles } = await import("../src/plugins/handles.ts")
-  const { makeRegistry } = await import("@rp/shared/registry.ts")
+  const { makeRegistry } = await import("@dreamspan/shared/registry.ts")
   const { Scope, Exit } = await import("effect")
   const registry = makeRegistry<{ id: string; run: () => Effect.Effect<never> }>(),
     scope = Effect.runSync(Scope.make())
@@ -380,7 +380,7 @@ it("suspends a worker callback failure and keeps the server available", async ()
         const reader = yield* Reader,
           writer = yield* Writer
         const source =
-          'import {Effect,Schema,type Activate} from "@rp/plugin-api/worker"; export const activate: Activate = host => host.registries.stateKeys!.register({id:"worker-fault/flag",value:Schema.Boolean,ids:{ids:{}},scope:"branch",reduce:()=>{throw new Error("synthetic-secret")}});'
+          'import {Effect,Schema,type Activate} from "@dreamspan/plugin-api/worker"; export const activate: Activate = host => host.registries.stateKeys!.register({id:"worker-fault/flag",value:Schema.Boolean,ids:{ids:{}},scope:"branch",reduce:()=>{throw new Error("synthetic-secret")}});'
         const commit = yield* api.CreatePlugin({
           scope: "instance",
           id: "worker-fault",
@@ -426,7 +426,7 @@ it("PLUGINS=off suppresses activation and client descriptors without erasing pin
     config = testConfig({ dataDir: data })
   let commit = ""
   const source =
-    'import {Effect,type Activate} from "@rp/plugin-api/server"; export const activate: Activate = host => host.registries.rolloutTools!.register({id:"synthetic_off",label:"Synthetic",description:"Synthetic",effect:"read",parameters:{type:"object",properties:{}},execute:()=>Effect.succeed({text:"off"})});'
+    'import {Effect,type Activate} from "@dreamspan/plugin-api/server"; export const activate: Activate = host => host.registries.rolloutTools!.register({id:"synthetic_off",label:"Synthetic",description:"Synthetic",effect:"read",parameters:{type:"object",properties:{}},execute:()=>Effect.succeed({text:"off"})});'
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -653,7 +653,7 @@ it("states full runtime trust even when the manifest has no network handle", asy
           const api = yield* client()
           const { ExecutionRegistry } = yield* Effect.promise(() => import("../src/execution.ts"))
           const source =
-            'import {Effect,type Activate} from "@rp/plugin-api/server"; export const activate:Activate = host => host.registries.rolloutTools!.register({id:"synthetic_trust",label:"Trust",description:"Synthetic trust proof",effect:"read",parameters:{},execute:()=>Effect.succeed({text:host.log.constructor("return process")().env.RP_SYNTHETIC_PLUGIN_SECRET})});'
+            'import {Effect,type Activate} from "@dreamspan/plugin-api/server"; export const activate:Activate = host => host.registries.rolloutTools!.register({id:"synthetic_trust",label:"Trust",description:"Synthetic trust proof",effect:"read",parameters:{},execute:()=>Effect.succeed({text:host.log.constructor("return process")().env.RP_SYNTHETIC_PLUGIN_SECRET})});'
           const commit = yield* api.CreatePlugin({
             scope: "instance",
             id: "full-trust",
@@ -708,8 +708,8 @@ it("ignores plugin build/package configuration and refuses WASM and native impor
 it("checks a JavaScript entry with the same API as TypeScript", async () => {
   const data = tempDir("plugin-javascript")
   const files = {
-    "rp-plugin.json": fixture("javascript", empty, { server: "index.js" })["rp-plugin.json"],
-    "index.js": 'import {Effect} from "@rp/plugin-api/server"; export const activate = () => Effect.void;'
+    "dreamspan-plugin.json": fixture("javascript", empty, { server: "index.js" })["dreamspan-plugin.json"],
+    "index.js": 'import {Effect} from "@dreamspan/plugin-api/server"; export const activate = () => Effect.void;'
   }
   const commit = await saveFiles(data, "", "javascript", files, true, "Synthetic JS")
   const report = await checkPlugin(data, "", "javascript", commit)
@@ -768,7 +768,7 @@ it("checks browser JSX against the shipped API and serves only attested unchange
   const data = tempDir("plugin-browser-build")
   const id = "browser-build"
   const source =
-    'import React, {ui,type Activate,useState} from "@rp/plugin-api/client"; export const activate: Activate = host => { host.registries.composerControls!.register({id:"browser.roll",order:1,placement:"tools",component:({draft})=>{const [n,setN]=useState(0);return <ui.Button hint="Synthetic roll" onClick={()=>{setN(n+1);draft.append(String(n))}}>Roll</ui.Button>}}) };'
+    'import React, {ui,type Activate,useState} from "@dreamspan/plugin-api/client"; export const activate: Activate = host => { host.registries.composerControls!.register({id:"browser.roll",order:1,placement:"tools",component:({draft})=>{const [n,setN]=useState(0);return <ui.Button hint="Synthetic roll" onClick={()=>{setN(n+1);draft.append(String(n))}}>Roll</ui.Button>}}) };'
   const files = {
     ...fixture(id, "export const unused = true", {
       server: null,

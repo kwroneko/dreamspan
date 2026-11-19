@@ -1,8 +1,8 @@
 import { putUserSetting } from "./settings.ts"
 // The user's display choices in `settings` (DESIGN §7.4: reasoning's sticky open or folded
 // state while a reply streams). One row per user, key `display`, merged atomically.
-import { DEFAULT_DISPLAY_PREFS, DisplayPrefs } from "@rp/shared/chatApi.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { DEFAULT_DISPLAY_PREFS, DisplayPrefs } from "@dreamspan/shared/chatApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import type { ReadOps, WriteOps } from "./ops.ts"

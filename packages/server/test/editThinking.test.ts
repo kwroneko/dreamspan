@@ -6,8 +6,8 @@
 // it later. Synthetic chats only.
 import { assert, describe, it } from "@effect/vitest"
 import { Type } from "@earendil-works/pi-ai"
-import { NewVersion, type EntityId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { NewVersion, type EntityId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import type { ServerResponse } from "node:http"
 import type { RolloutTool } from "../src/agent/tools.ts"

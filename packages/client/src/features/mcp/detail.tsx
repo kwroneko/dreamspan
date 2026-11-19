@@ -1,7 +1,7 @@
 // One MCP server's page (spec/MCP.md §13.1). Its sections are entries in the `mcp.sections` slot,
 // so a plugin can add its own, as for provider connections.
-import type { Credential, CredentialId, ProxyMode } from "@rp/shared/providers.ts"
-import { originOf } from "@rp/shared/providers.ts"
+import type { Credential, CredentialId, ProxyMode } from "@dreamspan/shared/providers.ts"
+import { originOf } from "@dreamspan/shared/providers.ts"
 import {
   MCP_DESCRIPTION_LIMIT,
   type McpCall,
@@ -14,7 +14,7 @@ import {
   mcpToolIsNew,
   type McpTool,
   type RemoteMcpTransport
-} from "@rp/shared/mcp.ts"
+} from "@dreamspan/shared/mcp.ts"
 import { Link, useNavigate, useParams } from "@tanstack/react-router"
 import { type FormEvent, useId, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"

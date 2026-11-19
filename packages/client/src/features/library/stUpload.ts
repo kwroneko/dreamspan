@@ -1,12 +1,12 @@
 // Sending an ST data folder picked in the browser (ARCHITECTURE.md §13): which of its files
-// go, in what order (the plan the server uses for a folder it reads, `@rp/shared/stPlan.ts`),
+// go, in what order (the plan the server uses for a folder it reads, `@dreamspan/shared/stPlan.ts`),
 // and each one over HTTP, a chat in parts cut at line ends; and the chat files a re-import
 // preview asks for (`POST /st-import/plan-file`), the same way. A folder named by its path is
 // imported on the server instead (StartStPathImport): nothing of it passes through here.
-import { findStRoots, ST_CHAT_PART_BYTES, type StRoot } from "@rp/shared/stFolder.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
-import { StFileResult } from "@rp/shared/stImportApi.ts"
-import { orderStBranches, ST_HEAD_BYTES, stMainChat, type StPlanned, stPlan } from "@rp/shared/stPlan.ts"
+import { findStRoots, ST_CHAT_PART_BYTES, type StRoot } from "@dreamspan/shared/stFolder.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { StFileResult } from "@dreamspan/shared/stImportApi.ts"
+import { orderStBranches, ST_HEAD_BYTES, stMainChat, type StPlanned, stPlan } from "@dreamspan/shared/stPlan.ts"
 import { Schema } from "effect"
 import { failure } from "./files.ts"
 

@@ -1,7 +1,7 @@
 // Synthetic performance data is seeded in a worker, outside the browser and server event loops.
 import { DatabaseSync } from "node:sqlite"
 import { parentPort, workerData } from "node:worker_threads"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { syntheticMarkdown } from "../../server/src/dev/syntheticText.ts"
 import { rebuildForkLabels } from "../../server/src/db/forkLabels.ts"
 const { file, chats, longCount } = workerData as { file: string; chats: Array<string>; longCount: number }

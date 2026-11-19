@@ -1,8 +1,8 @@
 import { putUserSetting } from "./settings.ts"
 // Recycle bin write handlers (DESIGN §6.2), in the writer worker.
 import { readBinLimits } from "./binLimits.ts"
-import { defaultBinLimits, type BinLimits } from "@rp/shared/bin.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { defaultBinLimits, type BinLimits } from "@dreamspan/shared/bin.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { type Bin, toBinItem } from "./bin.ts"

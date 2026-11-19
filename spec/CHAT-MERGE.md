@@ -94,7 +94,7 @@ With per-character agents (Phase 4), only agents whose character was in the sour
 
 ## 8. API and commands
 
-`PreviewChatMerge`, `MergeChat`, `MergeMessages` (`@rp/shared/mergeApi.ts`, merged into AppApi). `MergeChat` dispatches through the registered command `chat.merge`, so a plugin or the in-app agent merges the same way. The writer's `MergeChat` is one transaction: recompute and compare the preview's digest, write J (append or insert), its version, the `chat_merges` and message rows, the join events, the copied notes; chat in the fork. The API publishes J as the fork's `Slot` (with its position), the chat, the cast and `Lcm`.
+`PreviewChatMerge`, `MergeChat`, `MergeMessages` (`@dreamspan/shared/mergeApi.ts`, merged into AppApi). `MergeChat` dispatches through the registered command `chat.merge`, so a plugin or the in-app agent merges the same way. The writer's `MergeChat` is one transaction: recompute and compare the preview's digest, write J (append or insert), its version, the `chat_merges` and message rows, the join events, the copied notes; chat in the fork. The API publishes J as the fork's `Slot` (with its position), the chat, the cast and `Lcm`.
 
 ## 9. Scale
 

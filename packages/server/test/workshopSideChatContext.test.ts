@@ -5,9 +5,9 @@
 // reply started: spec/WORKSHOP-BRANCHES.md §2.2), and never past that message.
 // All against a mock provider: nothing reaches a real one.
 import { assert, describe, it } from "@effect/vitest"
-import type { Chat, EntityId, ForkId, StoryAt, VersionId } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { Chat, EntityId, ForkId, StoryAt, VersionId } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Type } from "@earendil-works/pi-ai"
 import { ExecutionRegistry } from "../src/execution.ts"
 import { Effect, Stream } from "effect"

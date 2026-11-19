@@ -3,10 +3,17 @@
 // was assembled, a written message as the cast stood; Mute alone records nothing; a merge
 // copies who knew each source message. Through a real server and a mock provider.
 import { assert, describe, it } from "@effect/vitest"
-import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { AWAY_ACTS_AS_MUTED } from "@rp/shared/knowledge.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
+import {
+  type ChatId,
+  type EntityId,
+  type ForkId,
+  NewVersion,
+  type SlotId,
+  type VersionId
+} from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { AWAY_ACTS_AS_MUTED } from "@dreamspan/shared/knowledge.ts"
+import type { StateEventData } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import { Generator } from "../src/chat/Generator.ts"

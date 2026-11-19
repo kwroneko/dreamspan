@@ -3,8 +3,8 @@ import { composerChoice, setGuidance } from "./support/composer.ts"
 // most of its height for the conversation even with a group and multiline guidance.
 import { mkdirSync } from "node:fs"
 import { expect, type Page, test } from "@playwright/test"
-import type { SendResult } from "@rp/shared/chatApi.ts"
-import type { EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
+import type { EntityId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
@@ -206,7 +206,7 @@ for (const width of [1440, 390])
       await rpc((api) => setGuidance(api, chatId, true))
       await page.setViewportSize({ width, height: 844 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await page.goto(`${server().url}/chats/${chatId}`)
       await expect(toggle(page)).toBeChecked()

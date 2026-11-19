@@ -65,7 +65,7 @@ export function cardSourceUpdateTests() {
           await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
           await page.setViewportSize({ width, height: 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await page.goto(`${server.url}/library/${added.refId}`)
           await expect(page.getByRole("heading", { level: 1, name: card.name })).toBeVisible({ timeout: 30_000 })
           const notice = page.getByText("A newer version is on cardex", { exact: true })

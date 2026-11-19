@@ -47,7 +47,7 @@ const setUp = async (page: Page, preset: string, historyLast: boolean) => {
       description: "A harbor pilot.",
       first_mes: "The bell rings.",
       extensions: {
-        rp_harness: {
+        dreamspan: {
           notes: [
             note("n-depth", "Tide table", { mode: "depth", depth: 2, role: "system" }),
             note("n-top", "Pilot's log", { mode: "depth", depth: 4, role: "system" }),
@@ -98,7 +98,7 @@ for (const [width, height] of [
     }) => {
       await page.setViewportSize({ width, height })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const chatId = await setUp(page, `Plain ${width} ${theme}`, false)
       const overlay = await open(page, chatId)
       const scroll = overlay.getByTestId("preset-scroll")
@@ -186,7 +186,7 @@ for (const width of [1440, 390])
     test(`Find opens and selects its match (${width}px ${theme})`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const chatId = await setUp(page, `Find navigation ${width} ${theme}`, false)
       const overlay = await open(page, chatId)
       // The search is folded away until asked for.
@@ -240,7 +240,7 @@ for (const width of [1440, 390])
     test(`Close and preset identity stay in the header (${width}px ${theme})`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const name = `Sticky identity ${width} ${theme}`
       const chatId = await setUp(page, name, false)
       const overlay = await open(page, chatId)
@@ -274,7 +274,7 @@ for (const width of [1440, 390])
     test(`Find reveals and highlights a marker name (${width}px ${theme})`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const chatId = await setUp(page, `Marker navigation ${width} ${theme}`, false)
       const overlay = await open(page, chatId)
       // The search is folded away until asked for.

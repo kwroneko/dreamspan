@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import { chatCommands, runCommandShortcut, type ChatCommandContext } from "../src/features/chat/commands.tsx"
 import { invokeMessageAction, messageActions } from "../src/features/chat/messageActions.tsx"
 import { registerReplyCommands } from "../src/features/chat/replyCommands.ts"

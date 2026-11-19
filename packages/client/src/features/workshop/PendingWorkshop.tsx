@@ -10,10 +10,10 @@
 // then the new chat's path and cast seeded (`seedChat`), so it opens on them with nothing
 // loading in between. What's typed is kept as a pending chat's first message is (`useUserDraft`).
 // Used beside a story (`PendingSideChat`, the Workshop tab) and on its own page (StartWorkshopPage.tsx).
-import type { CastCard, Chat, ChatId, EntityId, ForkId } from "@rp/shared/chat.ts"
-import type { Draft } from "@rp/shared/drafts.ts"
-import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
-import type { WorkshopPresetChoice } from "@rp/shared/workshopApi.ts"
+import type { CastCard, Chat, ChatId, EntityId, ForkId } from "@dreamspan/shared/chat.ts"
+import type { Draft } from "@dreamspan/shared/drafts.ts"
+import { BUILTIN_PRESET_LABEL } from "@dreamspan/shared/generation.ts"
+import type { WorkshopPresetChoice } from "@dreamspan/shared/workshopApi.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { Effect, Option } from "effect"
 import { AsyncResult } from "effect/reactivity"

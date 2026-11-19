@@ -4,8 +4,8 @@
 // No reply policy, round, Next face or Speak-now list ever picks that other persona, however
 // recently or often it spoke, in one-to-one and group chats alike.
 import { assert, it } from "@effect/vitest"
-import { CastCard, type EntityId, type PathEntry } from "@rp/shared/chat.ts"
-import { Cast } from "@rp/shared/chatSetupApi.ts"
+import { CastCard, type EntityId, type PathEntry } from "@dreamspan/shared/chat.ts"
+import { Cast } from "@dreamspan/shared/chatSetupApi.ts"
 import { Effect } from "effect"
 import { replyFaces } from "../src/features/chat/cast.ts"
 import { nextInTurn, planReply, replyPolicies } from "../src/features/chat/replyPolicy.ts"

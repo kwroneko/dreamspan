@@ -5,7 +5,7 @@
 // Redirects are followed only within the origin (Network.fetchFor).
 import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
-import { SourceFailed } from "@rp/shared/cardSources.ts"
+import { SourceFailed } from "@dreamspan/shared/cardSources.ts"
 import { Effect } from "effect"
 import type { NetworkShape } from "../net/Network.ts"
 import { DEFAULT_BYPASS, parseBypass } from "../net/route.ts"
@@ -17,7 +17,7 @@ const MiB = 1024 * 1024
 const RESPONSE_CAPS: Record<ResponseKind, number> = { json: 2 * MiB, card: 64 * MiB, image: 16 * MiB }
 const FIRST_BYTE_MS = 15_000
 const TOTAL_MS = 60_000
-const USER_AGENT = "rp-harness/0.0.0 (self-hosted roleplay app; browses card sources on its user's request)"
+const USER_AGENT = "Dreamspan/0.0.0 (self-hosted roleplay app; browses card sources on its user's request)"
 
 /** Every local range: loopback, RFC 1918, link-local, CGNAT, IPv6 ULA and link-local. */
 const PRIVATE = parseBypass([

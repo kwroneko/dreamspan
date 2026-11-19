@@ -1,16 +1,16 @@
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 /** One writer transaction creates the seeds, their setting, the chat and its greeting. */
-import { type ChatId, type EntityId, type ForkId, NewVersion } from "@rp/shared/chat.ts"
-import { newCardDoc } from "@rp/shared/editing.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { type ChatId, type EntityId, type ForkId, NewVersion } from "@dreamspan/shared/chat.ts"
+import { newCardDoc } from "@dreamspan/shared/editing.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import type { Bin } from "./bin.ts"
 import type { LibrarySteps } from "./editorWrites.ts"
 import { newChatLcmSettings, ownedPersona, readDefaults } from "./generationSettings.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { writeGrant } from "./workshopGrants.ts"
 import { SIDE_STORY_READ_MODE } from "../agent/capabilities.ts"
 import { type ChatRow, toChat } from "./rows.ts"
@@ -22,8 +22,8 @@ import {
   type StoredWorkshopDefaults,
   workshopDefaultsOf
 } from "./workshopDefaults.ts"
-import { WORKSHOP_SUMMARY_INSTRUCTION, workshopLcmSizes } from "@rp/shared/workshopLcm.ts"
-import { resolveModel } from "@rp/shared/providers.ts"
+import { WORKSHOP_SUMMARY_INSTRUCTION, workshopLcmSizes } from "@dreamspan/shared/workshopLcm.ts"
+import { resolveModel } from "@dreamspan/shared/providers.ts"
 import { toModel, type ModelRow } from "./providers.ts"
 import { defaultSeed } from "./workshopSeeds.ts"
 

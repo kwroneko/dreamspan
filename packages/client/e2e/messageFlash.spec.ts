@@ -5,8 +5,8 @@
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, test, type Page } from "@playwright/test"
-import type { SlotId } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { clearFlashes, expectFlashedThenUnmarked, flashedSlots, flashes, recordFlashes } from "./support/flashes.ts"
@@ -78,7 +78,7 @@ for (const width of [1440, 390])
       const tag = `${width}${theme}`
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await recordFlashes(page)
       const data = await seed(tag)
@@ -168,7 +168,7 @@ for (const width of [1440, 390])
     test(`${width} ${theme}: with reduced motion a jump's highlight fades once instead`, async ({ page }) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await recordFlashes(page)
       const data = await seed(`reduced${width}${theme}`)

@@ -8,7 +8,7 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import { BlockList, connect, isIP, type Socket } from "node:net"
 import { networkInterfaces } from "node:os"
 import { rm } from "node:fs/promises"
-import { makeRegistry } from "@rp/shared/registry.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { isPublicMediaAddress } from "../net/externalMedia.ts"
 
 export type Resolve = (host: string) => Promise<ReadonlyArray<string>>

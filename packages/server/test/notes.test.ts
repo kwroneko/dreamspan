@@ -1,9 +1,9 @@
 // Notes in assembly (DESIGN §4.1): the five positions, conditions (on a card's turn, while a
 // card isn't muted), their cache behaviour, the lorebook scan switch and "on in every chat".
 // Synthetic cards and notes only.
-import type { NoteDoc } from "@rp/shared/docs/note.ts"
-import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
+import type { NoteDoc } from "@dreamspan/shared/docs/note.ts"
+import type { LegacyPresetDoc as PresetDoc } from "@dreamspan/shared/docs/preset.ts"
+import type { StateEventData } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import type { PositionedEvent } from "../src/assembler/pipeline.ts"

@@ -2,7 +2,7 @@
 // The original draft/version travels with the keystroke; server acknowledgements remove it.
 import { pendingOf, type Copy } from "./backup.ts"
 
-const key = (userId: string, targetId: string) => `rp.pendingTyped:${userId}:${targetId}`
+const key = (userId: string, targetId: string) => `dreamspan.pendingTyped:${userId}:${targetId}`
 const hasTypedBackup = (targetId: string, field: string) =>
   field === "First message" &&
   (targetId.startsWith("pending-chat:") ||
@@ -28,7 +28,7 @@ export const readTypedBackup = (userId: string, targetId: string): Copy | null =
         save: {
           kind: "userDraft",
           payload: {
-            ownerId: userId as import("@rp/shared/domain.ts").UserId,
+            ownerId: userId as import("@dreamspan/shared/domain.ts").UserId,
             targetId,
             field: "First message",
             content: copy.content,

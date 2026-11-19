@@ -2,7 +2,7 @@ import { isNudge } from "./messages.ts"
 // A transcript as the steps a version shows (spec/AGENTIC.md §5.1): the same projection live,
 // as the loop runs, and afterwards from the stored transcript.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { ApprovalPrompt, RolloutStep, SubagentRow } from "@rp/shared/agent.ts"
+import type { ApprovalPrompt, RolloutStep, SubagentRow } from "@dreamspan/shared/agent.ts"
 import type { FrozenTool } from "./tools.ts"
 
 type Presentation = NonNullable<ApprovalPrompt["presentation"]>
@@ -117,7 +117,7 @@ export const placedSteps = (
   // plain turn is the message, nudged or not (one stopped or failed before any nudge too), but the
   // answer to the cap's "write now".
   const sendOnly = (messages.find((m) => m.role === "rpRequest") as { contract?: string } | undefined)?.contract
-  const writeNowAnswer = messages[plain - 1]?.role === "rpHarness" && !isNudge(messages[plain - 1])
+  const writeNowAnswer = messages[plain - 1]?.role === "rpApp" && !isNudge(messages[plain - 1])
   const stray =
     plain >= 0 && !writeNowAnswer && (sendOnly === "send_message" || messages.slice(0, plain).some((m) => isNudge(m)))
   // A message sent after a plain turn (one the app asked to be sent) makes that turn a step.

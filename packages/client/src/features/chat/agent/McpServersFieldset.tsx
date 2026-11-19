@@ -3,7 +3,7 @@
 // branch's choice, else the account's; Reset, shown only while the branch has a choice, goes back
 // to the account's. Turning one on is the consent: its allowed tools then run without asking.
 import { useAtomValue } from "@effect/atom-react"
-import type { StoryMcpServer } from "@rp/shared/mcpApi.ts"
+import type { StoryMcpServer } from "@dreamspan/shared/mcpApi.ts"
 import { Link } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useState } from "react"

@@ -2,9 +2,9 @@
 // model when a reply that must be sent with the send tool ends in plain text instead. A prompt of
 // the preset outside the order; without it, or empty, the app's default is sent (the Agent
 // instructions' fallback rule).
-import type { PresetPrompt } from "@rp/shared/docs/preset.ts"
-import { agentInstructionsPrompt } from "@rp/shared/presetOrder.ts"
-import { SEND_NUDGE_PROMPT, sendNudgeText } from "@rp/shared/agentInstructions.ts"
+import type { PresetPrompt } from "@dreamspan/shared/docs/preset.ts"
+import { agentInstructionsPrompt } from "@dreamspan/shared/presetOrder.ts"
+import { SEND_NUDGE_PROMPT, sendNudgeText } from "@dreamspan/shared/agentInstructions.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Card, CardHeader } from "../../ui/Surface.tsx"
 import { TextField } from "./controls.tsx"

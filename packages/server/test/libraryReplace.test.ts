@@ -4,9 +4,9 @@
 // that writes a revision per entry; an entry changed since its preview is left alone; undo
 // keeps an entry changed since.
 import { assert, describe, it } from "@effect/vitest"
-import { textField, valueField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
-import type { LibraryPreview, LibrarySearch } from "@rp/shared/libraryReplace.ts"
+import { textField, valueField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import type { LibraryPreview, LibrarySearch } from "@dreamspan/shared/libraryReplace.ts"
 import { Effect } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

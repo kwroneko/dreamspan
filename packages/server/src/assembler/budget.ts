@@ -1,4 +1,4 @@
-import type { BudgetOrigins } from "@rp/shared/inspectorApi.ts"
+import type { BudgetOrigins } from "@dreamspan/shared/inspectorApi.ts"
 import { need, type Assembly } from "./pipeline.ts"
 import type { ModelInput } from "./types.ts"
 

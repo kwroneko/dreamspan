@@ -6,9 +6,9 @@
 // The choice is the tab's URL (`summariesOf`), so a reload or a copied link shows the same view;
 // a character no longer offered there reads as Shared. A summary written for one character
 // carries that character's name.
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { Cast } from "@rp/shared/chatSetupApi.ts"
-import type { LcmState, LcmSummary } from "@rp/shared/lcm.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { Cast } from "@dreamspan/shared/chatSetupApi.ts"
+import type { LcmState, LcmSummary } from "@dreamspan/shared/lcm.ts"
 import { useEffect, useSyncExternalStore } from "react"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { Field } from "../../ui/Field.tsx"

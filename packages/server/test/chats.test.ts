@@ -10,9 +10,9 @@ import {
   type SlotId,
   type Version,
   type VersionId
-} from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { ChatEvent, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
+} from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { ChatEvent, PathRange, PathWindow } from "@dreamspan/shared/chatApi.ts"
 import { ConfigProvider, Effect, Fiber, Layer, Option, Stream } from "effect"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { GenerationFailed, Generator } from "../src/chat/Generator.ts"

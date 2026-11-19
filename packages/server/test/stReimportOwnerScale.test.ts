@@ -8,8 +8,8 @@ import { appendFileSync, mkdirSync, statSync, writeFileSync } from "node:fs"
 import { loadavg } from "node:os"
 import { join } from "node:path"
 import { assert, it as plain, layer } from "@effect/vitest"
-import type { SlotId } from "@rp/shared/chat.ts"
-import { ST_CHANGED_SINCE_CHECK } from "@rp/shared/stReimportPlan.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import { ST_CHANGED_SINCE_CHECK } from "@dreamspan/shared/stReimportPlan.ts"
 import { Effect, Fiber } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
@@ -28,7 +28,7 @@ if (process.env.ST_REIMPORT_OWNER_SCALE !== "1") {
   const config = testConfig({ dbReaders: 2 })
 
   /** Checks the folder, then imports it from the check; the writer pause a rename sees meanwhile. */
-  const checkedImport = (api: Api, root: string, probeChat: import("@rp/shared/chat.ts").ChatId) =>
+  const checkedImport = (api: Api, root: string, probeChat: import("@dreamspan/shared/chat.ts").ChatId) =>
     Effect.gen(function* () {
       const checkStarted = performance.now()
       const { plan } = yield* api.StartStImportPlan({ folder: { root, prefix: "" } })

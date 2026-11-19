@@ -6,7 +6,7 @@
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, test } from "@playwright/test"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { serverPerFile, withAdmin, apiLogin, ADMIN } from "./support/server.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { openPanel, closePanel } from "./support/panel.ts"

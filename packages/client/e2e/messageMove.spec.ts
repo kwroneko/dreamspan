@@ -3,8 +3,8 @@
 // their reason, and a branch made before the move keeping its order. At 1440 and 390 pixels,
 // light and dark. Every card and message here is made up.
 import { expect, type Page, test } from "@playwright/test"
-import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { showActions } from "./support/message.ts"
@@ -78,7 +78,7 @@ for (const [width, height, theme] of [
     test.setTimeout(90_000)
     await page.setViewportSize({ width, height })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-    await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+    await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
     const fixture = await harbor(`Harbor move ${width} ${theme}`)
     await page.goto(`${server().url}/chats/${fixture.chatId}?fork=${fixture.main}`)
     await expect(message(page, LINES[2])).toBeVisible()

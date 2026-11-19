@@ -2,7 +2,7 @@
 // and History's "Revision N" count (owner, 2026-11-01). A fork's line runs on through the
 // revisions it was forked from, as a git branch's log does (owner, 2026-11-06), so its numbers
 // continue its original's.
-import type { RevisionUse } from "@rp/shared/library.ts"
+import type { RevisionUse } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 

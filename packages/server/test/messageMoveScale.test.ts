@@ -8,7 +8,7 @@
 // Run: env VITEST_MAX_WORKERS=1
 //   npx vitest run --project server-slow packages/server/test/messageMoveScale.test.ts
 import { assert, it } from "@effect/vitest"
-import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { testConfig } from "./support/config.ts"

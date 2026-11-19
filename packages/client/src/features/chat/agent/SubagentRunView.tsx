@@ -3,8 +3,8 @@
 // chat), the tools it was offered as frozen, every request after the first with what each added
 // and the model's answer, and its requests' usage and cost. Read only: a subagent's steps have no
 // Edit or Resume from here (a later milestone resumes inside it).
-import type { ChatId, VersionId } from "@rp/shared/chat.ts"
-import type { InspectorUsage } from "@rp/shared/inspectorApi.ts"
+import type { ChatId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { InspectorUsage } from "@dreamspan/shared/inspectorApi.ts"
 import { Link } from "@tanstack/react-router"
 import { type ComponentType, useMemo } from "react"
 import { AsyncView } from "../../../actions.tsx"

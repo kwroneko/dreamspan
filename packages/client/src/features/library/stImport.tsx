@@ -7,9 +7,9 @@ import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 // (`stImportSections`), so a plugin can replace or remove one. Report text quotes files, so
 // it's rendered as text.
 import { RegistryContext, useAtomValue } from "@effect/atom-react"
-import { formatByteSize } from "@rp/shared/byteSize.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { StRoot } from "@rp/shared/stFolder.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { StRoot } from "@dreamspan/shared/stFolder.ts"
 import type {
   StFolderEntry,
   StHiddenRun,
@@ -18,9 +18,9 @@ import type {
   StImportReport,
   StLinkChoice,
   StPlanChoice
-} from "@rp/shared/stImportApi.ts"
-import { type StSentKind, stPlan, stPlanKinds, stSendRounds } from "@rp/shared/stPlan.ts"
-import { ST_CHANGED_SINCE_CHECK } from "@rp/shared/stReimportPlan.ts"
+} from "@dreamspan/shared/stImportApi.ts"
+import { type StSentKind, stPlan, stPlanKinds, stSendRounds } from "@dreamspan/shared/stPlan.ts"
+import { ST_CHANGED_SINCE_CHECK } from "@dreamspan/shared/stReimportPlan.ts"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { Context, Effect } from "effect"
 import { AsyncResult, AtomRegistry } from "effect/reactivity"
@@ -99,7 +99,7 @@ const OUTCOMES = ["added", "updated", "failed"] as const
  * Where the folder browser starts: the folder this account last looked in on this device, else
  * the newest path import's. A preference per account (another account signing in here has its own).
  */
-const lastFolderKey = (userId: string) => `rp.st-import.folder.${userId}`
+const lastFolderKey = (userId: string) => `dreamspan.st-import.folder.${userId}`
 
 const lastFolder = (userId: string, jobs: ReadonlyArray<StImportJob>) => {
   try {

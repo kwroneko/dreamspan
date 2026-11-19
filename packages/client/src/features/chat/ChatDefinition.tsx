@@ -1,7 +1,7 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 // The card as this chat reads it, read-only, for a chat that uses an earlier version: the tab's
 // text boxes edit the library's latest, so this is the one place the chat's own version shows.
-import type { ChatCard } from "@rp/shared/chatSetupApi.ts"
+import type { ChatCard } from "@dreamspan/shared/chatSetupApi.ts"
 import { useId, useState } from "react"
 import { Disclosure } from "../../ui/Surface.tsx"
 

@@ -16,8 +16,8 @@
 // revisions and the text being typed into an entry: a change to any breaks every run.
 // So a turn costs one probe of an empty table when nothing was noted, whatever the chat's size;
 // a foreign write to a message walks the branch's path once, down to that message's depth.
-import { AutoRefused } from "@rp/shared/errors.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { AutoRefused } from "@dreamspan/shared/errors.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { selectedIn, shownIn } from "./forkState.ts"

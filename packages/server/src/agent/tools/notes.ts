@@ -6,10 +6,10 @@ import { listNotes as listNotesPart, switchNote as switchNotePart } from "./note
 // (DESIGN §4.1a [D]): a note marked agent-editable, one the agent wrote, or one the chat allows
 // (`agent.permission`), never one the chat forbids.
 import { Type } from "@earendil-works/pi-ai"
-import type { EntityId } from "@rp/shared/chat.ts"
-import { NOTE_SCHEMA_VERSION, readNoteCondition } from "@rp/shared/docs/note.ts"
-import type { Doc, RevisionId } from "@rp/shared/library.ts"
-import { type ChatState, foldState, noteSwitches, permissionKey } from "@rp/shared/state.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { NOTE_SCHEMA_VERSION, readNoteCondition } from "@dreamspan/shared/docs/note.ts"
+import type { Doc, RevisionId } from "@dreamspan/shared/library.ts"
+import { type ChatState, foldState, noteSwitches, permissionKey } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import type { RolloutTool, ToolContext } from "../tools.ts"
 import { safely } from "./history.ts"

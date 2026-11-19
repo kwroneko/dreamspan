@@ -41,7 +41,7 @@ for (const width of [1440, 390]) {
       test.setTimeout(240_000)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: scheme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), scheme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), scheme)
       const tooltip = page.locator('[data-layout-overlay="Tooltip floats above the page"]')
       const tag = `${width}${scheme}`
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)

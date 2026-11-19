@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react"
-import type { EntityKind, RefId } from "@rp/shared/library.ts"
+import type { EntityKind, RefId } from "@dreamspan/shared/library.ts"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { useState } from "react"

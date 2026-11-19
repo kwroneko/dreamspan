@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test"
-import { DEFAULT_DISPLAY_PREFS, type SendResult } from "@rp/shared/chatApi.ts"
-import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
+import { DEFAULT_DISPLAY_PREFS, type SendResult } from "@dreamspan/shared/chatApi.ts"
+import type { PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"

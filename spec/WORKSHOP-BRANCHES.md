@@ -22,7 +22,7 @@ ARCHITECTURE §16: `CreateWorkshop { attachTo }` writes a chat-wide `workshop.at
 
 ### 2.1 Stored per workshop branch
 
-- New state key **`workshop.paired { fork: ForkId }`** (`@rp/shared/state.ts`), branch-owned (in `branchOwned`, so it is fork-scoped with `slot_id` null), written in a workshop fork. `IdField` gains `{ table: "storyFork" }`, checked by `db/stateRefs.ts`: a live fork of the chat that this workshop's `workshop.attached` names.
+- New state key **`workshop.paired { fork: ForkId }`** (`@dreamspan/shared/state.ts`), branch-owned (in `branchOwned`, so it is fork-scoped with `slot_id` null), written in a workshop fork. `IdField` gains `{ table: "storyFork" }`, checked by `db/stateRefs.ts`: a live fork of the chat that this workshop's `workshop.attached` names.
 - A workshop fork's **paired story branch** is the `workshop.paired` event in force there, i.e. the one with the greatest fork label at or below its point (the existing fork-scoped event rule, `db/forkLabels.ts`). So a branch the workshop makes of itself (Branch from here, sending below an older message, a "several" resume) inherits its parent's pairing and reads the same story branch (§6.5) without writing anything.
 - Like `workshop.attached`, only two writers may insert it: `CreateWorkshop` and the story-fork hook (§3). Generic state writes, merges and tool writes get `NotFound`, as `insertStateEvent` does for `workshop.attached` today (`graphWrites.ts`).
 - `CreateWorkshop { attachTo, attachFork }`: `attachFork` (required with `attachTo`) is the story branch the workshop is started beside; the workshop's first fork gets `workshop.paired { fork: attachFork }` in the creating transaction. `workshop.attached` stays: it names the story chat for permissions, listing and the chip row.

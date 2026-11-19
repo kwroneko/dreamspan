@@ -2,11 +2,11 @@
 // (the branch the threads started in), Wren at the docks, Pell upstairs and Quill in the garden,
 // the user playing Tobin, and optionally Nara, a narrator in every thread. Synthetic data only.
 import { DatabaseSync } from "node:sqlite"
-import { type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import type { MergeTimelines } from "@rp/shared/mergeApi.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { awayAt } from "@rp/shared/knowledge.ts"
-import { foldState } from "@rp/shared/state.ts"
+import { type EntityId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { MergeTimelines } from "@dreamspan/shared/mergeApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { awayAt } from "@dreamspan/shared/knowledge.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../../src/assembler/types.ts"
 import { databaseFile } from "../../src/db/connection.ts"

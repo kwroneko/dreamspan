@@ -7,8 +7,8 @@
 // This module is pure: matching, the split, the loaded set and the index text.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { Message } from "@earendil-works/pi-ai"
-import { CARD_SKILL_LIMITS, cardSkillList, readCardSkill } from "@rp/shared/cardSkills.ts"
-import { pinnedRoute } from "@rp/shared/providers.ts"
+import { CARD_SKILL_LIMITS, cardSkillList, readCardSkill } from "@dreamspan/shared/cardSkills.ts"
+import { pinnedRoute } from "@dreamspan/shared/providers.ts"
 import type { FrozenTool, RolloutTool } from "./tools.ts"
 
 export const TOOL_SEARCH = "tool_search"
@@ -76,7 +76,7 @@ export interface Skill {
 /**
  * The skills a card carries: references to registered skills (`{ "use": "cards" }`) and skills
  * written in the card (`{ "name", "description", "instructions", "tools" }`), read from
- * `extensions.rp_harness.skills` by the shared rules (`@rp/shared/cardSkills.ts`, which the card
+ * `extensions.dreamspan.skills` by the shared rules (`@dreamspan/shared/cardSkills.ts`, which the card
  * editor shows). Anything else, and entries past 16, are ignored, so a card made elsewhere is
  * read as an ordinary card.
  */
@@ -106,10 +106,10 @@ export const cardSkills = (
 
 /** Reading a card is not approval to activate its skills. Keep skill bodies behind load_skill. */
 export const withoutCardSkills = <T extends { readonly extensions?: Readonly<Record<string, unknown>> }>(doc: T): T => {
-  const ours = doc.extensions?.rp_harness
+  const ours = doc.extensions?.dreamspan
   if (!ours || typeof ours !== "object" || Array.isArray(ours) || !Object.hasOwn(ours, "skills")) return doc
   const { skills: _skills, ...rest } = ours as Record<string, unknown>
-  return { ...doc, extensions: { ...doc.extensions, rp_harness: rest } }
+  return { ...doc, extensions: { ...doc.extensions, dreamspan: rest } }
 }
 
 /**

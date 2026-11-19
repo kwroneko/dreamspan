@@ -1,6 +1,6 @@
 import { checkStoryWrite } from "./storyWriteScope.ts"
 import { displayEndOf } from "./displayPath.ts"
-import type { StoryAt } from "@rp/shared/chat.ts"
+import type { StoryAt } from "@dreamspan/shared/chat.ts"
 import { safeAgentDocument } from "./agentDocuments.ts"
 import { historyCurrent, historyFork } from "./historyShared.ts"
 import { nextReceiptTime, pendingOperationResult, unwrapOperationResult } from "./operationReceipts.ts"
@@ -17,19 +17,19 @@ import { settingsRegistry, writeSetting } from "./settings.ts"
 import { Schema } from "effect"
 // Setup tools compose the same typed user operations in one outer writer transaction.
 // The receipt and all undo recipes commit with them. No external work occurs here.
-import { EffectUndoRefused, type RolloutEffect } from "@rp/shared/workshopApi.ts"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
-import { newCardDoc, validateDoc, withoutGrantedAgentEdits, withHtmlApprovals } from "@rp/shared/editing.ts"
-import { InvalidDocument } from "@rp/shared/editorApi.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { EffectUndoRefused, type RolloutEffect } from "@dreamspan/shared/workshopApi.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
+import { newCardDoc, validateDoc, withoutGrantedAgentEdits, withHtmlApprovals } from "@dreamspan/shared/editing.ts"
+import { InvalidDocument } from "@dreamspan/shared/editorApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { Rpc } from "effect/rpc"
 import type { OpsOf } from "./opsOf.ts"
-import type { Doc, EntityKind, RefId, RevisionId } from "@rp/shared/library.ts"
+import type { Doc, EntityKind, RefId, RevisionId } from "@dreamspan/shared/library.ts"
 import { encodeLibraryDoc } from "./libraryWrites.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { makeRegistry } from "@rp/shared/registry.ts"
-import { DraftKey } from "@rp/shared/drafts.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
+import { DraftKey } from "@dreamspan/shared/drafts.ts"
 import { toBinItem, type Bin } from "./bin.ts"
 import { NotFound, WriteOps } from "./ops.ts"
 import { adoptedKind } from "./cardOrigins.ts"
@@ -122,8 +122,8 @@ interface Undoer {
     Record<string, unknown>,
     | NotFound
     | EffectUndoRefused
-    | import("@rp/shared/errors.ts").StaleWrite
-    | import("@rp/shared/editorApi.ts").InvalidDocument
+    | import("@dreamspan/shared/errors.ts").StaleWrite
+    | import("@dreamspan/shared/editorApi.ts").InvalidDocument
     | import("./ops.ts").RefOperationRefused
     | import("./ops.ts").StorageError
     | import("effect/sql").SqlError.SqlError
@@ -668,8 +668,8 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                 if (expected?.proof) {
                   const proof = expected.proof as {
                     storyAt?: StoryAt
-                    chat?: { id: import("@rp/shared/chat.ts").ChatId }
-                    chats?: ReadonlyArray<{ id: import("@rp/shared/chat.ts").ChatId }>
+                    chat?: { id: import("@dreamspan/shared/chat.ts").ChatId }
+                    chats?: ReadonlyArray<{ id: import("@dreamspan/shared/chat.ts").ChatId }>
                     historyTargets?: ReadonlyArray<{ chatId: string; forkId: string }>
                     refs?: Array<{ refId: string; rowVersion: number; archivedAt?: number | null }>
                   }
@@ -720,7 +720,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                   const safe = yield* Effect.try({
                     try: () => {
                       const doc = JSON.parse(String(file.docJson)) as Doc
-                      const ours = (doc.extensions as { rp_harness?: { skills?: unknown } } | undefined)?.rp_harness
+                      const ours = (doc.extensions as { dreamspan?: { skills?: unknown } } | undefined)?.dreamspan
                       if (ours?.skills !== undefined) return null
                       return encodeLibraryDoc(
                         safeAgentDocument(
@@ -793,7 +793,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                     const safe = yield* Effect.try({
                       try: () => {
                         const file = JSON.parse(String(value.docJson)) as Doc
-                        const ours = (file.extensions as { rp_harness?: { skills?: unknown } } | undefined)?.rp_harness
+                        const ours = (file.extensions as { dreamspan?: { skills?: unknown } } | undefined)?.dreamspan
                         if (kind === "note" || ours?.skills !== undefined) return null
                         const whole = kind === "preset" ? (JSON.parse(encodeLibraryDoc(file).json) as Doc) : file
                         return encodeLibraryDoc(
@@ -1161,12 +1161,12 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               })
             const chat = yield* ops.StartGreetingChat(input)
             let binding: {
-              connection: import("@rp/shared/providers.ts").ConnectionId
-              model: import("@rp/shared/providers.ts").ModelId
+              connection: import("@dreamspan/shared/providers.ts").ConnectionId
+              model: import("@dreamspan/shared/providers.ts").ModelId
             } | null = null
             if (input.model !== null) {
               const [row] = yield* sql<{
-                connection_id: import("@rp/shared/providers.ts").ConnectionId
+                connection_id: import("@dreamspan/shared/providers.ts").ConnectionId
               }>`SELECT m.connection_id FROM models m JOIN connections c ON c.id = m.connection_id WHERE m.id = ${input.model} AND c.owner_user_id = ${input.userId} AND c.deleted_at IS NULL`
               if (!row) return yield* new NotFound({ entity: "model", id: input.model })
               binding = { connection: row.connection_id, model: input.model }

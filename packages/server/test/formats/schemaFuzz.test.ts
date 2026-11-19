@@ -1,8 +1,8 @@
 // Every field of the fixtures replaced in turn by values that are wrong in some way. Each
 // import must either succeed with a document its schema accepts, or fail with FormatError;
 // never with a defect.
-import { CardDoc } from "@rp/shared/docs/card.ts"
-import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
+import { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
 import { Cause, Effect, Exit, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { importCard } from "../../src/formats/cardImport.ts"

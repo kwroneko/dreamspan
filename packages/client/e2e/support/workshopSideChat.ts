@@ -9,7 +9,7 @@ import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./layoutAudit.ts"
 import { showActions } from "./message.ts"
 import { asUser } from "./rpc.ts"
@@ -86,7 +86,7 @@ export function workshopSideChatEffectsTests() {
           )
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
           await page.goto(`${server().url}/chats/${story.id}?panel=workshop&workshop=${workshop.id}`)
           const side = sidePanel(page).locator(`[data-side-chat="${workshop.id}"]`)
@@ -247,7 +247,7 @@ export function workshopSideChatTests() {
           const story = await makeStory(server, title)
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
           const shot = async (name: string) => {
             if (shots) {
@@ -454,7 +454,7 @@ export function workshopSideChatChangesTests() {
           )
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
           await page.goto(`${server().url}/chats/${story.id}?fork=${original}&panel=workshop&workshop=${workshop.id}`)
           const side = sidePanel(page).locator(`[data-side-chat="${workshop.id}"]`)

@@ -1,10 +1,10 @@
 // The notes the context assembler reads at a position: the chat's own and its characters'.
 // One read for the Notes panel (`ListChatNotes`) and for the workshop tools that name a note there.
-import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import { ChatNote } from "@rp/shared/chatSetupApi.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { RevisionId } from "@rp/shared/library.ts"
-import { foldState, noteSwitches } from "@rp/shared/state.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import { ChatNote } from "@dreamspan/shared/chatSetupApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { RevisionId } from "@dreamspan/shared/library.ts"
+import { foldState, noteSwitches } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import type { Reader } from "../db/Database.ts"
 

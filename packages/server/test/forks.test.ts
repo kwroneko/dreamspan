@@ -4,7 +4,7 @@
 // in the isolation matrix; the migration is in forkMigration.test.ts.
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import { client, outcome, posted, testConfig, typeInto, withServer } from "./support/config.ts"

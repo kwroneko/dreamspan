@@ -3,7 +3,7 @@
 // a model the user added by id). Each is a registered part (spec/PLUGINS.md §3.1): a plugin can
 // add one, override a built-in or disable it. The newest registration is asked first.
 import type { Api, Model } from "@earendil-works/pi-ai"
-import type { CatalogMatch, ModelUpstream } from "@rp/shared/providers.ts"
+import type { CatalogMatch, ModelUpstream } from "@dreamspan/shared/providers.ts"
 import { Effect } from "effect"
 import type { ListedModel } from "./modelLists.ts"
 

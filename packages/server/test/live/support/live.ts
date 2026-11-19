@@ -24,14 +24,21 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { deflateSync } from "node:zlib"
-import { NewVersion, type Chat, type EntityId, type SlotId, type Version, type VersionId } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { CardDoc } from "@rp/shared/docs/card.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { NextContext, RunContext } from "@rp/shared/inspectorApi.ts"
-import type { Model, ModelOverrides } from "@rp/shared/providers.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
-import type { LlmRequest } from "@rp/shared/usage.ts"
+import {
+  NewVersion,
+  type Chat,
+  type EntityId,
+  type SlotId,
+  type Version,
+  type VersionId
+} from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { NextContext, RunContext } from "@dreamspan/shared/inspectorApi.ts"
+import type { Model, ModelOverrides } from "@dreamspan/shared/providers.ts"
+import type { StateEventData } from "@dreamspan/shared/state.ts"
+import type { LlmRequest } from "@dreamspan/shared/usage.ts"
 import { Effect, Stream } from "effect"
 import { Writer } from "../../../src/db/Database.ts"
 import { databaseFile } from "../../../src/db/connection.ts"

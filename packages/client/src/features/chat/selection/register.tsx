@@ -4,8 +4,8 @@
 // Cancel, Hide from the model / Show to the model (job selecthide1) and Delete. Delete confirms,
 // then deletes them in this branch as one change, one toast, one Undo, as Delete message would
 // each; Hide and Show act at once, as the message menu's do, also as one change with one Undo.
-import type { BinItem } from "@rp/shared/bin.ts"
-import type { ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
+import type { BinItem } from "@dreamspan/shared/bin.ts"
+import type { ForkId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { Button } from "../../../ui/Button.tsx"
 import { RowTick } from "../../../ui/Choice.tsx"

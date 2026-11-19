@@ -2,8 +2,8 @@
 // §2.4; DESIGN §7.6). Soft refusals are decided here and nowhere else: no pattern, phrase or
 // length rule looks at the output. It is never mandatory: with no judge chosen, every output is
 // "unjudged" and only a provider's own refusal signal (a hard refusal) is ever detected.
-import type { ChatId, VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { ChatId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Context, Effect, Layer, Stream } from "effect"
 import { Reader } from "../db/Database.ts"
 import { SummaryChecks } from "../lcm/OutputChecks.ts"

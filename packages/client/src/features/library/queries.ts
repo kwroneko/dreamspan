@@ -1,6 +1,6 @@
 // Give each library list one atom so all
 // registered surfaces share its read and the same write invalidation.
-import type { EntityKind, LibraryRef } from "@rp/shared/library.ts"
+import type { EntityKind, LibraryRef } from "@dreamspan/shared/library.ts"
 import { Atom, AsyncResult } from "effect/reactivity"
 import { AppClient } from "../../rpc.ts"
 

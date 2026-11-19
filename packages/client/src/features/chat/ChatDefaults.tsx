@@ -14,9 +14,13 @@ import { accountSettingSections, summarySettingFields } from "./presentation.tsx
 // so a change here never puts back what another tab changed since this page read them. The
 // instruction is saved by its button; until then userDraft.tsx keeps a server draft,
 // undo history, and an unacknowledged browser copy.
-import { BUILTIN_PRESET_LABEL, type GenerationDefaults, type GenerationDefaultsChange } from "@rp/shared/generation.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
-import { LCM_BUILTIN, lcmMisfits, resolveLcm } from "@rp/shared/lcmSettings.ts"
+import {
+  BUILTIN_PRESET_LABEL,
+  type GenerationDefaults,
+  type GenerationDefaultsChange
+} from "@dreamspan/shared/generation.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
+import { LCM_BUILTIN, lcmMisfits, resolveLcm } from "@dreamspan/shared/lcmSettings.ts"
 import { Effect } from "effect"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"

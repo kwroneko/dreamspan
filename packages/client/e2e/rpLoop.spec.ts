@@ -7,8 +7,8 @@ import { mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
@@ -139,7 +139,7 @@ for (const width of [1440, 390])
       const shot = (name: string) => shoot(page, name, width, theme)
       await page.setViewportSize({ width, height: width > 500 ? 1000 : 844 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await setGuidance(false)
       await usePreset("Night RP 3.1")

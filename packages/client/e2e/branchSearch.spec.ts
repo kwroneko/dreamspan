@@ -2,7 +2,7 @@
 // panel's foot list of the open chat's branches and the panel's list of one chat's branches
 // each filter by the words in a branch's name or last message. Synthetic chat; layout audit
 // on each surface with the filter in use, at 1440 and 390.
-import type { ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"

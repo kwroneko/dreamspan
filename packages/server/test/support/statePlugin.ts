@@ -1,6 +1,6 @@
 // Synthetic trusted modules. The passed registry is the worker's, including in bundles.
 import { Effect, Schema } from "effect"
-import { EntityId } from "@rp/shared/chat.ts"
+import { EntityId } from "@dreamspan/shared/chat.ts"
 import type { InstallStateModule } from "../../src/db/stateModules.ts"
 
 export const install: InstallStateModule = (keys) =>

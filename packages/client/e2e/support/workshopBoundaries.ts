@@ -25,7 +25,7 @@ export function workshopBoundaryTests() {
           )
           await page.setViewportSize({ width, height: 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
           await page.goto(`${server().url}/chats/${workshop.id}`)
           await expect(page.getByTestId("composer")).toBeVisible()

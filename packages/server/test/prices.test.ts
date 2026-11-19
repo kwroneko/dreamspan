@@ -1,8 +1,8 @@
 // The built-in price table and the order prices are chosen in (spec/PRICES.md §3.2, §5.1).
 import { assert, describe, it } from "@effect/vitest"
-import type { CostRule } from "@rp/shared/costFormulas.ts"
-import type { Model, Price } from "@rp/shared/providers.ts"
-import { unknownCounts } from "@rp/shared/usage.ts"
+import type { CostRule } from "@dreamspan/shared/costFormulas.ts"
+import type { Model, Price } from "@dreamspan/shared/providers.ts"
+import { unknownCounts } from "@dreamspan/shared/usage.ts"
 import { Effect } from "effect"
 import { piCatalogs, withCatalog } from "../src/providers/catalog.ts"
 import { priceSources } from "../src/providers/priceSources.ts"

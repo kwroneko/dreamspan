@@ -1,7 +1,7 @@
 // Asking which new sites a saved entry may download its media from (spec/SAVED-MEDIA.md §3.2).
 // Imports and card sources call `askMediaApproval`; the dialog (SavedMediaHost.tsx) opens only
 // when the entries name sites the user hasn't decided about.
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 
 /** These entries' media, or (null) every file of the account waiting for approval. */
 type ApprovalRequest = { readonly refIds: ReadonlyArray<RefId> | null }

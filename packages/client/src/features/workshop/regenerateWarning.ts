@@ -4,7 +4,7 @@
 // here; the one host in `appTools` (RegenerateWarning.tsx) reads the reply's changes and, when any
 // still stand, asks in a dialog, so the asking survives the menu that asked closing.
 import { useSyncExternalStore } from "react"
-import type { RolloutStep } from "@rp/shared/agent.ts"
+import type { RolloutStep } from "@dreamspan/shared/agent.ts"
 import type { ReplyGuardRequest } from "../chat/replyGuards.ts"
 import { kindShows } from "../chat/kindLooks.ts"
 import { CHANGES } from "./effects.ts"

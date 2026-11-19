@@ -31,13 +31,13 @@ import {
   type SourcePrefs,
   type SourceQuery,
   type SourceSuggestions
-} from "@rp/shared/cardSources.ts"
-import { CastCard, type EntityId } from "@rp/shared/chat.ts"
-import { CardForChat } from "@rp/shared/chatSetupApi.ts"
-import type { CredentialId } from "@rp/shared/providers.ts"
-import type { User, UserId } from "@rp/shared/domain.ts"
-import { Forbidden, NotFound, ServerError } from "@rp/shared/errors.ts"
-import { mediaWidth } from "@rp/shared/media.ts"
+} from "@dreamspan/shared/cardSources.ts"
+import { CastCard, type EntityId } from "@dreamspan/shared/chat.ts"
+import { CardForChat } from "@dreamspan/shared/chatSetupApi.ts"
+import type { CredentialId } from "@dreamspan/shared/providers.ts"
+import type { User, UserId } from "@dreamspan/shared/domain.ts"
+import { Forbidden, NotFound, ServerError } from "@dreamspan/shared/errors.ts"
+import { mediaWidth } from "@dreamspan/shared/media.ts"
 import { Context, Effect, Layer, Schedule, Schema } from "effect"
 import { AppConfig } from "../config.ts"
 import { cardTextOfDoc } from "../db/cards.ts"
@@ -88,7 +88,9 @@ interface SourceImage {
 export interface CardSourcesShape {
   /** The adapters. A plugin adds, replaces or disables one for the length of a scope (PLUGINS §6). */
   readonly registry: Registry<CardSourceAdapter>
-  readonly list: (user: User) => Effect.Effect<typeof import("@rp/shared/cardSources.ts").SourceList.Type, ServerError>
+  readonly list: (
+    user: User
+  ) => Effect.Effect<typeof import("@dreamspan/shared/cardSources.ts").SourceList.Type, ServerError>
   readonly setEnabled: (user: User, sourceId: string, enabled: boolean) => Effect.Effect<void, NotFound | ServerError>
   readonly setAdminDisabled: (
     user: User,

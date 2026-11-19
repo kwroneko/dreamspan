@@ -5,12 +5,12 @@ import { useSplitChats } from "./splitChats.ts"
 // chat opens and again whenever what it lists may have changed: the fork shown, the chat's
 // record (its current fork), a branch's name, or a branch made, renamed or deleted here
 // (`forksChanged`). How every list names a branch is here too (`forkLabel`).
-import type { ChatId, Fork } from "@rp/shared/chat.ts"
+import type { ChatId, Fork } from "@dreamspan/shared/chat.ts"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import type { ChatSession, ChatView } from "./session.ts"
 
-export { formatMoment, forkLabel } from "@rp/shared/branchNaming.ts"
-import { forkLabel } from "@rp/shared/branchNaming.ts"
+export { formatMoment, forkLabel } from "@dreamspan/shared/branchNaming.ts"
+import { forkLabel } from "@dreamspan/shared/branchNaming.ts"
 
 /** `forkLabel` of a fork as ListForks reads it. */
 export const branchLabel = (fork: Fork) =>

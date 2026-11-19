@@ -8,9 +8,9 @@ import { mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import type { CastCard, ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
-import { valueField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { CastCard, ChatId, EntityId, SlotId } from "@dreamspan/shared/chat.ts"
+import { valueField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { openPanel } from "./support/panel.ts"
@@ -152,7 +152,7 @@ test.afterAll(async () => {
 const notesAt = async (page: Page, width: number, theme: "light" | "dark") => {
   await page.setViewportSize({ width, height: 1000 })
   await page.emulateMedia({ colorScheme: theme })
-  await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+  await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${inn.chatId}`)
   return openPanel(page, "Notes")

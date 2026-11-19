@@ -1,7 +1,7 @@
 // A chat row's preview of a greeting shows its macros replaced, as the chat shows them:
 // `{{user}}` is the persona's name, `{{char}}` the greeter's. The sidebar and the Chats page.
 import { expect, test } from "@playwright/test"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"

@@ -2,8 +2,8 @@
 import { useState, useSyncExternalStore, type ComponentType } from "react"
 import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
-import type { ClientPlugin } from "@rp/shared/pluginClient.ts"
-import { builtinReplacement } from "@rp/shared/builtinParts.ts"
+import type { ClientPlugin } from "@dreamspan/shared/pluginClient.ts"
+import { builtinReplacement } from "@dreamspan/shared/builtinParts.ts"
 import type {
   Activate,
   ClientHost,

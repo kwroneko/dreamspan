@@ -42,7 +42,7 @@ export function cardexLorebookTests() {
           await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
           await page.setViewportSize({ width, height: 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await page.goto(`${server.url}/?show=src.cardex&sq=gazetteer`)
           const main = page.getByRole("main")
           const tile = (slug: string) => main.locator(`[data-remote-card="${slug}"]`)

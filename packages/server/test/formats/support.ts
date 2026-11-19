@@ -251,7 +251,7 @@ export const worldInfo = () => ({
       characterFilter: { isExclude: true, names: ["Wren.png"], tags: ["t1"] },
       triggers: ["continue"],
       displayIndex: 1,
-      extensions: { "some-plugin": { x: 1 }, rp_harness: { decision_hint: "Is anyone at the harbor?", other: 2 } },
+      extensions: { "some-plugin": { x: 1 }, dreamspan: { decision_hint: "Is anyone at the harbor?", other: 2 } },
       someNewStField: "kept"
     },
     "9": { key: ["gull"], content: "Gulls nest on the roof." }

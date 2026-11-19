@@ -1,4 +1,4 @@
-import { makeRegistry } from "@rp/shared/registry.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
 
 export const rolloutEffectClasses = makeRegistry([
   { id: "read", outsideChat: false },

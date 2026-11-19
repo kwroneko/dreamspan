@@ -3,7 +3,7 @@
 // lineage the shell read reports (`ShellCard.family`); nothing is stored for it. The grouping
 // runs over the cards a list already shows, in its order, so the filter, the search and the
 // sort keep deciding which cards there are and where a family stands.
-import type { ShellCard } from "@rp/shared/chatSetupApi.ts"
+import type { ShellCard } from "@dreamspan/shared/chatSetupApi.ts"
 
 export interface FamilyPlace {
   /** The family's first card's id (`ShellCard.family`). */

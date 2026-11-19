@@ -1,6 +1,6 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 // A search over the library's lorebooks, to add one to a chat or attach one to a preset.
-import type { LibraryRef } from "@rp/shared/library.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { useId, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"

@@ -1,8 +1,8 @@
 // What new workshops start with (spec/WORKSHOP-CONTEXT.md §4.3): the assistant card, the preset and
 // the workshop persona, the user setting `workshop.defaults`. The persona is the workshop's own,
 // independent of the story default (`chat.persona`): changing either never changes the other.
-import type { UserId } from "@rp/shared/domain.ts"
-import type { WorkshopDefaults } from "@rp/shared/workshopApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { WorkshopDefaults } from "@dreamspan/shared/workshopApi.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { ownedPersona } from "./generationSettings.ts"

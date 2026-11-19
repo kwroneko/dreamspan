@@ -2,10 +2,10 @@
 // the writer connection; all validation, copies, overrides and receipts commit together.
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import type { HistoryEdit } from "@rp/shared/historyApi.ts"
-import { HistoryRejected } from "@rp/shared/historyApi.ts"
-import { NotFound } from "@rp/shared/errors.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import type { HistoryEdit } from "@dreamspan/shared/historyApi.ts"
+import { HistoryRejected } from "@dreamspan/shared/historyApi.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { effectiveOverride, selectedIn, slotDeletedIn, versionDeletedIn } from "./forkState.ts"
 import { onDisplayPath, pathPieces } from "./displayPath.ts"
 

@@ -1,4 +1,4 @@
-import type { Snippet } from "@rp/shared/snippetsApi.ts"
+import type { Snippet } from "@dreamspan/shared/snippetsApi.ts"
 import { defineSlot } from "../../slots.tsx"
 import type { SnippetWorkspace } from "./workspace.ts"
 

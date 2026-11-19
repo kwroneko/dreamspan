@@ -1,7 +1,7 @@
 // The timeline's row where threads part (spec/THREADS.md §13.3; `timeline.threads`), after S:
 // "Parallel threads from here: At the Lantern (this one) · At the docks", each name a link
 // (a middle-click opens it in a new tab), and the set's Undo, a divider as the summaries' is.
-import type { ThreadSet } from "@rp/shared/threads.ts"
+import type { ThreadSet } from "@dreamspan/shared/threads.ts"
 import { Link } from "@tanstack/react-router"
 import { Fragment } from "react"
 import { Button } from "../../ui/Button.tsx"

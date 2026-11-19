@@ -1,9 +1,9 @@
-// Recycle bin RPC handlers (@rp/shared/binApi.ts). Every handler acts as the authenticated
+// Recycle bin RPC handlers (@dreamspan/shared/binApi.ts). Every handler acts as the authenticated
 // user; storage enforces ownership, so another user's items are NotFound. Restoring
 // something inside a chat tells its open tabs to read it again.
-import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { ChatId } from "@rp/shared/chat.ts"
+import { type AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"

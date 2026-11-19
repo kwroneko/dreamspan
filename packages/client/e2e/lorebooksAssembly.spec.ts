@@ -7,8 +7,8 @@ import { mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
+import type { ChatId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
@@ -119,7 +119,7 @@ test.afterAll(async () => {
 const setUp = async (page: Page, width: number, theme: "light" | "dark", login = true) => {
   await page.setViewportSize({ width, height: 1000 })
   await page.emulateMedia({ colorScheme: theme })
-  await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+  await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
   // Logins are rate-limited: a page logs in once.
   if (login) await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   return async (name: string) => {

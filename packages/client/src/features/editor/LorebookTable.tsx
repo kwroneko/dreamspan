@@ -10,8 +10,8 @@ import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // stays fast; the order is fixed when the search, filter or sort changes, so a row never
 // jumps away while it's edited.
 import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
-import type { LorebookDoc, LorebookEntry } from "@rp/shared/docs/lorebook.ts"
-import { type FieldPath, getAt, parseField, valueField } from "@rp/shared/editing.ts"
+import type { LorebookDoc, LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
+import { type FieldPath, getAt, parseField, valueField } from "@dreamspan/shared/editing.ts"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   memo,

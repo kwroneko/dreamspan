@@ -9,8 +9,8 @@ import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { SlotId } from "@rp/shared/chat.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { AGENT_REPLY, PLAIN_REPLY, startAgentProvider, THINKING } from "./support/agentProvider.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -37,7 +37,7 @@ for (const width of [1440, 390])
       test.setTimeout(180_000)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const shot = async (name: string) => {
         if (shots) {

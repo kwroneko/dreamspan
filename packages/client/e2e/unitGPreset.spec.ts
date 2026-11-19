@@ -4,8 +4,8 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ShellLibrary } from "@rp/shared/chatSetupApi.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
+import type { ShellLibrary } from "@dreamspan/shared/chatSetupApi.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
@@ -89,7 +89,7 @@ for (const width of [1440, 390])
     test(`preset document walkthrough ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const fork = library.forks.find((f) => f.current && f.cast.length === 1)!
       await page.goto(`${server().url}/chats/${fork.chat.id}`)

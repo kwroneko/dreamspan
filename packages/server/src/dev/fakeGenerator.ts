@@ -3,7 +3,7 @@
 // it; the production image doesn't contain it (.dockerignore).
 import { Effect, Layer, Option, Stream } from "effect"
 import { type GenerationChunk, Generator } from "../chat/Generator.ts"
-import { DEFAULT_REPLY_SECTIONS } from "@rp/shared/replySections.ts"
+import { DEFAULT_REPLY_SECTIONS } from "@dreamspan/shared/replySections.ts"
 import { compilePairs, parseReply, throughParse } from "../chat/replySections.ts"
 import { seedOf, syntheticMarkdown, syntheticReasoning, tokenize } from "./syntheticText.ts"
 

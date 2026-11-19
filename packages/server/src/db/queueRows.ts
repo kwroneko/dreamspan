@@ -1,7 +1,7 @@
 // The send queue's rows (migration 0012), read by the readers and the writer. Every query
 // reaches the owner through the chat: a queued message has no owner of its own.
-import { type ChatId, type EntityId, type ForkId, QueuedMessage, type SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { type ChatId, type EntityId, type ForkId, QueuedMessage, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 

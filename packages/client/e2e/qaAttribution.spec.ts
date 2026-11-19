@@ -28,7 +28,7 @@ for (const width of [1440, 390])
     }) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const refs = await admin((api) =>
         Effect.gen(function* () {
           const sam = yield* api.CreateCard({ label: "Sam", name: "Sam" })
@@ -160,7 +160,7 @@ for (const width of [1440, 390])
     test(`summary search results open their summary at ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const fixture = await admin((api) =>
         Effect.gen(function* () {
           const chat = yield* api.CreateChat({ title: "Summary search" })
@@ -218,7 +218,7 @@ for (const width of [1440, 390])
     test(`group header gives the full name room at ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const title = "Masquerade at Corvina Hall"
       const chat = await admin((api) =>
         Effect.gen(function* () {

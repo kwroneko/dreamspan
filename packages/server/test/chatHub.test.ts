@@ -1,8 +1,8 @@
 // The hub's per-subscriber backlog: a subscriber that stops taking can't grow it for
 // ever; it starts over with a fresh Hello, and what follows continues from there.
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatId, VersionId } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { ChatId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { Effect, Queue } from "effect"
 import { ChatHub } from "../src/chat/ChatHub.ts"
 

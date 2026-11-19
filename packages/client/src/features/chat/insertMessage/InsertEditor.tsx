@@ -2,8 +2,8 @@
 // the stream, so the messages around it stay in view; a sheet on phones. Who speaks, the text (a
 // direction for Generate), what inserting there changes, and the actions, all visible. What the
 // next reply re-reads shows in the strip's cache chip while it's open.
-import type { EntityId, PathEntry, SlotId } from "@rp/shared/chat.ts"
-import type { InsertBody } from "@rp/shared/messagesApi.ts"
+import type { EntityId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
+import type { InsertBody } from "@dreamspan/shared/messagesApi.ts"
 import { useEffect, useId, useState, useSyncExternalStore } from "react"
 import { AutoGrowTextarea } from "../../../ui/AutoGrowTextarea.tsx"
 import { Button } from "../../../ui/Button.tsx"

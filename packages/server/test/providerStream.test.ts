@@ -3,8 +3,8 @@
 // module and the database workers.
 import type { AssistantMessage, Context as PiContext } from "@earendil-works/pi-ai"
 import { assert, describe, it } from "@effect/vitest"
-import type { UserId } from "@rp/shared/domain.ts"
-import { resolveModel, type ConnectionSettings, type ModelId, type ProviderKind } from "@rp/shared/providers.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { resolveModel, type ConnectionSettings, type ModelId, type ProviderKind } from "@dreamspan/shared/providers.ts"
 import { Effect, Exit, Fiber, Layer, Scope, Stream } from "effect"
 import * as Database from "../src/db/Database.ts"
 import * as Network from "../src/net/Network.ts"
@@ -1572,7 +1572,7 @@ describe("provider registry", () => {
           registry.transforms.register({
             id: "tag-requests",
             appliesTo: (target) => target.kind === "my-gateway",
-            transform: (payload) => ({ ...payload, user: "rp-harness" })
+            transform: (payload) => ({ ...payload, user: "dreamspan" })
           })
         ])
       )
@@ -1592,7 +1592,7 @@ describe("provider registry", () => {
       )
       assert.strictEqual(events.at(-1)!.type, "done")
       const sent = server.requests().find((r) => r.path.endsWith("/chat/completions"))!
-      assert.strictEqual(sent.body!.user, "rp-harness")
+      assert.strictEqual(sent.body!.user, "dreamspan")
 
       // Closing the plugin's scope unregisters both; its connection becomes unusable.
       yield* Scope.close(plugin, Exit.void)

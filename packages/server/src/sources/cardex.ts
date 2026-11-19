@@ -26,14 +26,14 @@
 // Registered only where FAKE_CARD_SOURCE is unset (runMain.ts). Tests and the development
 // instance point this same adapter at the fake archive's origin instead
 // (test/support/fakeArchive.ts, `dev/fakeCardSource.ts`), so it never reaches cardex.zip there.
-import { CARDEX_SITE_LABELS, SourceFailed } from "@rp/shared/cardSources.ts"
+import { CARDEX_SITE_LABELS, SourceFailed } from "@dreamspan/shared/cardSources.ts"
 import type {
   RemoteCreator,
   RemoteRelative,
   SourceCapabilities,
   SourceFilter,
   SourceQuery
-} from "@rp/shared/cardSources.ts"
+} from "@dreamspan/shared/cardSources.ts"
 import { Effect, Schema } from "effect"
 import type { AdapterSummary, CardSourceAdapter, SourceHttp, SourceResponse, SourceVersion } from "./adapter.ts"
 

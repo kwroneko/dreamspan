@@ -1,7 +1,7 @@
 // Anthropic's own API (the `anthropic` kind). Every model the deprecation page lists as active
 // or deprecated-but-callable on 2026-11-16, with its priced name from the pricing page.
 // Not here: claude-mythos-preview (deprecated, still callable, but the pricing page has no row).
-import type { Price } from "@rp/shared/providers.ts"
+import type { Price } from "@dreamspan/shared/providers.ts"
 import type { PriceEntry, PriceTable } from "./types.ts"
 
 const source = "https://platform.claude.com/docs/en/about-claude/pricing"

@@ -1,9 +1,9 @@
 // Main-thread orchestration only: each chunk is a short writer transaction over private
 // TEMP data. The final existing write publishes everything, or refuses a changed snapshot.
 import { Effect } from "effect"
-import type { HistoryEdit } from "@rp/shared/historyApi.ts"
-import type { ChatId, ForkId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { HistoryEdit } from "@dreamspan/shared/historyApi.ts"
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { Writer } from "./db/Database.ts"
 
 interface Application {

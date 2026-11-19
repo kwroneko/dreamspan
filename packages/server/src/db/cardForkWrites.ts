@@ -1,14 +1,14 @@
 // Card forks (spec/CARD-FORKS-DELTA.md §2, ARCHITECTURE.md §3.9): a fork is a card of its
 // own, an entity with one ref, tied to the card it came from only by the relationship
 // recorded on it. Each handler is one writer transaction, through the library's steps.
-import { cardNameClash } from "@rp/shared/cardNames.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
-import { readNoteCondition } from "@rp/shared/docs/note.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { Doc, RefId } from "@rp/shared/library.ts"
+import { cardNameClash } from "@dreamspan/shared/cardNames.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { readNoteCondition } from "@dreamspan/shared/docs/note.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { Doc, RefId } from "@dreamspan/shared/library.ts"
 import { Effect, Schema } from "effect"
-import { FoldableEvent, foldState } from "@rp/shared/state.ts"
-import { ComposerChoice } from "@rp/shared/composerApi.ts"
+import { FoldableEvent, foldState } from "@dreamspan/shared/state.ts"
+import { ComposerChoice } from "@dreamspan/shared/composerApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { makeDraftCarry } from "./carryDrafts.ts"
 import { noteSwitchesOnPath, stateEventsThrough } from "./stateRead.ts"

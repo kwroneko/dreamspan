@@ -34,7 +34,7 @@ for (const width of [1440, 390]) {
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       let holdAdd = false
       let releaseAdd: (() => void) | undefined
       await page.routeWebSocket(/\/rpc$/, (socket) => {

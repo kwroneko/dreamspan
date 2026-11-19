@@ -1,6 +1,6 @@
 // Choices are shared across tabs and scoped to a draft, including writes crossing a branch switch.
-import type { EntityId } from "@rp/shared/chat.ts"
-import { ComposerChoice } from "@rp/shared/composerApi.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { ComposerChoice } from "@dreamspan/shared/composerApi.ts"
 import { expect, it, vi } from "vitest"
 import { composerChoice } from "../src/features/chat/speaker.ts"
 import type { ChatSession } from "../src/features/chat/session.ts"

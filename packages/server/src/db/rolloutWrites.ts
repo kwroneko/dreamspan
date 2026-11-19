@@ -1,10 +1,10 @@
 import { ownedModel } from "./generationSettings.ts"
 // A resumed agent reply's writes (spec/AGENTIC.md §4.2): the new version and its rollout, with
 // the stopped one's effects for the calls kept. The effects themselves: rolloutEffects.ts.
-import { NotResumable } from "@rp/shared/agent.ts"
-import type { ChatId, ForkId, Version } from "@rp/shared/chat.ts"
-import { NotFound, type StaleWrite } from "@rp/shared/errors.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { NotResumable } from "@dreamspan/shared/agent.ts"
+import type { ChatId, ForkId, Version } from "@dreamspan/shared/chat.ts"
+import { NotFound, type StaleWrite } from "@dreamspan/shared/errors.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { effectRef } from "./rolloutEffects.ts"
@@ -13,7 +13,7 @@ import { placeAsShown } from "./forkOrder.ts"
 import type { ForkRow } from "./rows.ts"
 import type { StorageError, WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
-import { parsePresence } from "@rp/shared/knowledge.ts"
+import { parsePresence } from "@dreamspan/shared/knowledge.ts"
 import { presenceJson } from "./participation.ts"
 import { readPresenceRanges, rangedPresence } from "./presenceRanges.ts"
 

@@ -7,8 +7,8 @@ import { defaultsAtom } from "../pickers/defaults.ts"
 // nothing is written and nothing goes to a provider. It's asked again, after a pause, whenever
 // what the first send would send changes: the greetings picked, the persona, who speaks or
 // replies, the text, guidance, the model or the preset.
-import type { DraftChatPreview } from "@rp/shared/inspectorApi.ts"
-import type { AppRpcs } from "@rp/shared/api.ts"
+import type { DraftChatPreview } from "@dreamspan/shared/inspectorApi.ts"
+import type { AppRpcs } from "@dreamspan/shared/api.ts"
 import type { Rpc } from "effect/rpc"
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "../../ui/Button.tsx"

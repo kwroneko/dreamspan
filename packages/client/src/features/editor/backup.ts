@@ -3,12 +3,12 @@
 // is the save as typed, including its base, and replay never refreshes that base. Authored
 // settings and pending messages also have user_field drafts; legacy browser-only copies
 // remain readable until their editor transfers them or they are explicitly deleted.
-import type { DraftDisplacement } from "@rp/shared/drafts.ts"
-import { ComposerBeacon } from "@rp/shared/composerApi.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import { UserDraftSave, EditorDraftSave } from "@rp/shared/editorApi.ts"
-import { SummaryDraftSave } from "@rp/shared/lcm.ts"
-import { MessageDraftSave } from "@rp/shared/chatApi.ts"
+import type { DraftDisplacement } from "@dreamspan/shared/drafts.ts"
+import { ComposerBeacon } from "@dreamspan/shared/composerApi.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import { UserDraftSave, EditorDraftSave } from "@dreamspan/shared/editorApi.ts"
+import { SummaryDraftSave } from "@dreamspan/shared/lcm.ts"
+import { MessageDraftSave } from "@dreamspan/shared/chatApi.ts"
 import { Option, Schema } from "effect"
 
 const PendingSave = Schema.Union([
@@ -37,7 +37,7 @@ const PendingSave = Schema.Union([
 ])
 type PendingSave = typeof PendingSave.Type
 
-const DATABASE = "rp-editor-copies"
+const DATABASE = "dreamspan-editor-copies"
 const STORE = "copies"
 export interface Copy {
   readonly key: string
@@ -71,7 +71,7 @@ const database = () => {
 }
 
 // Completed IndexedDB mutations refresh recovery counts here and in other tabs.
-const copiesChanged = "rp-browser-copies"
+const copiesChanged = "dreamspan-browser-copies"
 let copiesChannel: BroadcastChannel | null = null
 const channel = () => {
   if (copiesChannel === null && typeof BroadcastChannel !== "undefined") {

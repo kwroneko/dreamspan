@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, ForkId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, VersionId } from "@dreamspan/shared/chat.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { startProvider, type FakeProvider } from "./support/provider.ts"

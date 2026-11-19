@@ -3,16 +3,16 @@
 // the same consent: nothing reaches a source the user has turned off (§5.1), and a search uses the
 // user's content rating (§5.3), which the assistant may only narrow to the source's safe choice.
 // The registered tools over these are in `exposures/cardSources.ts`.
-import { CurrentUser } from "@rp/shared/api.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
 import {
   SourceFilterValue,
   type SourceCapabilities,
   type SourceFailed,
   type SourceInfo,
   type SourceQuery
-} from "@rp/shared/cardSources.ts"
-import type { User } from "@rp/shared/domain.ts"
-import { HistoryRejected } from "@rp/shared/historyApi.ts"
+} from "@dreamspan/shared/cardSources.ts"
+import type { User } from "@dreamspan/shared/domain.ts"
+import { HistoryRejected } from "@dreamspan/shared/historyApi.ts"
 import { Effect, Schema } from "effect"
 import { makeCommand, type Command } from "../commands.ts"
 import { Writer } from "../db/Database.ts"

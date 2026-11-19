@@ -8,9 +8,9 @@
 // layer where it covers something the viewer doesn't know. The stage and the views are each
 // registered and replaceable.
 import { Effect } from "effect"
-import { foldState, type FoldableEvent } from "@rp/shared/state.ts"
+import { foldState, type FoldableEvent } from "@dreamspan/shared/state.ts"
 import { historyLeafOf } from "./types.ts"
-import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
+import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { viewedJoin } from "./mergeKnowledge.ts"
 import { AssemblySources, need, type Assembly, type AssemblerStage, type Cast } from "./pipeline.ts"
@@ -23,7 +23,7 @@ export interface ContextView {
   readonly description: string
   /**
    * The card whose knowledge this request's history is filtered by: what it was present for
-   * (`@rp/shared/knowledge.ts`). Null: the whole path, as one shared context sends it.
+   * (`@dreamspan/shared/knowledge.ts`). Null: the whole path, as one shared context sends it.
    */
   readonly viewer: (input: {
     readonly assembly: Assembly

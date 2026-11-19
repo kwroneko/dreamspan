@@ -3,8 +3,8 @@
 // reload, nothing generates, and it's sent again once shown. On a phone the reason shows
 // under the message once it's tapped.
 import { expect, type Page, test } from "@playwright/test"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { Effect } from "effect"
 import { messageMenu, showActions } from "./support/message.ts"
 import { asUser } from "./support/rpc.ts"

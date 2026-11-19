@@ -1,7 +1,7 @@
 import { Worker } from "node:worker_threads"
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import { NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
 import type { AppendResult } from "../src/db/ops.ts"
 import type { LcmSlot } from "../src/db/lcmPath.ts"
 import { databaseFile } from "../src/db/connection.ts"

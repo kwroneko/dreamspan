@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import type { Notice } from "@rp/shared/noticeApi.ts"
+import type { Notice } from "@dreamspan/shared/noticeApi.ts"
 // Load the UI graph before test deadlines; no assertion depends on import/transform speed.
 import * as sound from "../src/features/completionSound.ts"
 import { register } from "../src/features/completionSoundFeature.tsx"

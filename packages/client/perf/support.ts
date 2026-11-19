@@ -1,4 +1,4 @@
-import { TransportApi, TransportJson, type TransportRpcs } from "@rp/shared/transportApi.ts"
+import { TransportApi, TransportJson, type TransportRpcs } from "@dreamspan/shared/transportApi.ts"
 // The performance harness's server: the real one, built, with bundled database workers and
 // the fake generator, on a random loopback port and a data directory prepared beforehand.
 // No account has a password, so loopback is the local admin: the harness's RPCs need no login.

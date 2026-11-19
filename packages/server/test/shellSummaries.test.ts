@@ -2,7 +2,7 @@
 // the walk reads makes its chat's summaries stale, and a read from what was stored equals one
 // computed from scratch. Through the real workers.
 import { assert, describe, it } from "@effect/vitest"
-import { type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import { type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import * as Database from "../src/db/Database.ts"
 import type { ShellLibraryRead } from "../src/db/ops.ts"

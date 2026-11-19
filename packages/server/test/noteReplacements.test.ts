@@ -2,10 +2,10 @@
 // sent in a preset prompt's or card field's place; empty, the prompt is off; off, the prompt is
 // back; with its own position it goes there and the prompt is left out. Made-up cards and the
 // built-in default preset.
-import type { CardDoc } from "@rp/shared/docs/card.ts"
-import type { NoteDoc } from "@rp/shared/docs/note.ts"
-import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import type { NoteDoc } from "@dreamspan/shared/docs/note.ts"
+import type { LegacyPresetDoc as PresetDoc } from "@dreamspan/shared/docs/preset.ts"
+import type { StateEventData } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import type { PositionedEvent } from "../src/assembler/pipeline.ts"

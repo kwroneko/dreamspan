@@ -1,7 +1,7 @@
 // Three explicit import surfaces for the three things bundled in an ST preset file.
-import { promptPreset } from "@rp/shared/docs/preset.ts"
-import { ModelSettings, StSettingsImport } from "@rp/shared/modelSettings.ts"
-import { ImportReport, ReportBuilder, shownList } from "@rp/shared/importReport.ts"
+import { promptPreset } from "@dreamspan/shared/docs/preset.ts"
+import { ModelSettings, StSettingsImport } from "@dreamspan/shared/modelSettings.ts"
+import { ImportReport, ReportBuilder, shownList } from "@dreamspan/shared/importReport.ts"
 import { Predicate, Schema } from "effect"
 import { exportStPreset, importStPreset, MAX_PRESET_BYTES } from "./preset.ts"
 import { defaultLimits, FormatError, parseJson } from "./safety.ts"
@@ -137,7 +137,7 @@ export const importStSettings = (input: string, surface: "model" | "connection")
 }
 
 /** Prompt exports carry only the prompt portion of an ST preset. */
-export const exportPromptPreset = (doc: import("@rp/shared/docs/preset.ts").LegacyPresetDoc) => {
+export const exportPromptPreset = (doc: import("@dreamspan/shared/docs/preset.ts").LegacyPresetDoc) => {
   const output = exportStPreset(doc)
   const keys = new Set([
     ...Object.keys(doc.samplers),

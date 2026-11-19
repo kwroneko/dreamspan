@@ -1,6 +1,6 @@
 // Image token estimates as the chat shows them (DESIGN §10.2a): each figure says where it
 // comes from, and an image whose cost nothing states yet reads as unknown, never as zero.
-import type { ContextImage, NextContext } from "@rp/shared/inspectorApi.ts"
+import type { ContextImage, NextContext } from "@dreamspan/shared/inspectorApi.ts"
 import { Badge } from "../../ui/Surface.tsx"
 
 const basisLabel: Record<ContextImage["basis"], string> = {

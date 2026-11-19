@@ -2,7 +2,7 @@
 // CHARACTER-CONTEXT.md §5, §9.2 unit CU3; awayMarks.ts): under the message the mark is at, as
 // the split-chat divider is, with the character's face, who set it, and Undo for the scene
 // check's mark, left or back. A `messageStream` entry, so a plugin can replace or remove it.
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import { useState, useSyncExternalStore } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"

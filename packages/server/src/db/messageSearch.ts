@@ -1,4 +1,4 @@
-// Message text search across all of the user's chats (SearchMessages; @rp/shared/messageSearch.ts,
+// Message text search across all of the user's chats (SearchMessages; @dreamspan/shared/messageSearch.ts,
 // ARCHITECTURE §12 "Finding a message"). A hit is a message version, the text as written, with
 // the live branches that show it: a message a hundred branches share is one hit. Read newest
 // first through the version full-text index, a batch of matches at a time; each match is checked
@@ -8,10 +8,10 @@
 // after `SCAN` matches, whichever comes first, with a cursor to go on from, so a query no
 // version of the user's matches still answers in bounded time. Every statement is separate, so
 // a superseded query interrupted by its caller stops at the next one (readerPool.ts).
-import { importState, unfinishedTitle } from "@rp/shared/stImportApi.ts"
-import { chatName } from "@rp/shared/chatName.ts"
-import type { ChatId, EntityId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { importState, unfinishedTitle } from "@dreamspan/shared/stImportApi.ts"
+import { chatName } from "@dreamspan/shared/chatName.ts"
+import type { ChatId, EntityId, ForkId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import {
   excerpt,
   focusPhrase,
@@ -23,7 +23,7 @@ import {
   type ParsedQuery,
   parseQuery,
   queryWords
-} from "@rp/shared/messageSearch.ts"
+} from "@dreamspan/shared/messageSearch.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { onDisplayPath, type PathPiece, pathPieces, positionOf } from "./displayPath.ts"

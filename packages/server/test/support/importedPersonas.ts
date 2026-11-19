@@ -2,7 +2,7 @@
 // every persona who spoke, only the last one selected, and none is ever a character (DESIGN
 // §2.2). Shared by importedPersonas.test.ts and its scale run.
 import { assert } from "@effect/vitest"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Reader } from "../../src/db/Database.ts"
 import type { client } from "./config.ts"

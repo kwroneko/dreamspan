@@ -1,6 +1,6 @@
 // A snippet's revisions (DESIGN §6.2): History beside its Save, as every editor has. Its text's
 // own edit history is the control beside the box.
-import type { Snippet } from "@rp/shared/snippetsApi.ts"
+import type { Snippet } from "@dreamspan/shared/snippetsApi.ts"
 import { useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"

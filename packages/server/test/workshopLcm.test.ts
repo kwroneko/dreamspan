@@ -1,8 +1,8 @@
 import { assert, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import { foldState } from "@rp/shared/state.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
 import { lcmServer } from "./support/lcmHarness.ts"
@@ -10,8 +10,8 @@ import { activeRunSummaries } from "../src/agent/compaction.ts"
 import { client, posted } from "./support/config.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { eventually, finished } from "./support/generation.ts"
-import { newCardDoc } from "@rp/shared/editing.ts"
-import { workshopLcmSizes } from "@rp/shared/workshopLcm.ts"
+import { newCardDoc } from "@dreamspan/shared/editing.ts"
+import { workshopLcmSizes } from "@dreamspan/shared/workshopLcm.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 
 const toolCall = (name: string, args: object, id: string) => [
@@ -157,7 +157,7 @@ it.live(
               api_key: "synthetic-nested-secret",
               refresh_token: "synthetic-refresh-secret"
             }),
-            rp_harness: {
+            dreamspan: {
               skills: [
                 {
                   name: "unapproved",
@@ -416,7 +416,7 @@ it.live("does not inherit an unrelated later Undo through an identical call id a
     yield* eventually(() => events.length > 0)
     let parent = workshop.activeLeafSlotId
     let early: typeof parent = null
-    let earlyVersion: import("@rp/shared/chat.ts").VersionId | null = null
+    let earlyVersion: import("@dreamspan/shared/chat.ts").VersionId | null = null
     for (const content of ["First independent turn.", "Later independent turn."]) {
       const sent = yield* posted(api.SendMessage({ chatId: workshop.id, parentSlotId: parent, branch: false, content }))
       const reply = yield* posted(api.Generate({ chatId: workshop.id, parentSlotId: sent.entry.slotId, branch: false }))

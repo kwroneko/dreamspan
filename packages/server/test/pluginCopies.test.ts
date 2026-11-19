@@ -11,7 +11,7 @@ import { Reader, Writer } from "../src/db/Database.ts"
 import { pluginFolder } from "../src/plugins/repo.ts"
 import { frozenTool, type ToolContext } from "../src/agent/tools.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
-import { foldState } from "@rp/shared/state.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { generateReply, eventually, finished } from "./support/generation.ts"
 import { startMockProvider, sse, completionChunks } from "./support/mockProvider.ts"
 
@@ -620,7 +620,7 @@ for (const [id, entry, args] of [
             pluginId: `${id.replaceAll("_", "-")}-copy`
           })
           expect(made.report, JSON.stringify(made.report)).toMatchObject({ ok: true })
-          const source = `import {Effect,type Activate} from "@rp/plugin-api/server"
+          const source = `import {Effect,type Activate} from "@dreamspan/plugin-api/server"
 import {${entry}} from "./part/${id.endsWith("notes") || id === "switch_note" ? "notesPart" : "historyPart"}.ts"
 const replacement:typeof ${entry}={...${entry},execute:(context,args)=>Effect.map(${entry}.execute(context,args),out=>({...out,text:"Copied: "+out.text}))}
 export const activate:Activate=host=>host.registries.rolloutTools!.register(replacement)`

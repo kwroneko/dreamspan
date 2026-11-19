@@ -1,7 +1,7 @@
 // Regex scripts as ST 1.19 runs them on text as it's written and from every list (ARCHITECTURE
 // §12 "Rewrites", §15 "Regex scripts"): placements, scopes and their order, approval, depth,
 // run-on-edit, failures and timeouts, world info and the inspector's record. Synthetic only.
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
 import { Effect, Scope } from "effect"
 import { describe, expect, it } from "vitest"
 import { makeAssembler } from "../src/assembler/assembler.ts"

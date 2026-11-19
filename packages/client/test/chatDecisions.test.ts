@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { ConnectionDecisions, DecisionPointInfo } from "@rp/shared/decisions.ts"
+import type { ConnectionDecisions, DecisionPointInfo } from "@dreamspan/shared/decisions.ts"
 import { chatDecisionRows, withDecision } from "../src/features/decisions/ChatDecisions.tsx"
 
 const points: ReadonlyArray<DecisionPointInfo> = [

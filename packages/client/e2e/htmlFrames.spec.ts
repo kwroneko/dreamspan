@@ -18,8 +18,8 @@ const panel = (label: string) =>
     "```html",
     "<!doctype html>",
     "<html><head><style>",
-    "body { margin: 0; color: var(--rp-text); background: var(--rp-background) }",
-    ".box { box-sizing: border-box; height: 20vh; padding: 8px; border: 2px solid var(--rp-accent) }",
+    "body { margin: 0; color: var(--dreamspan-text); background: var(--dreamspan-background) }",
+    ".box { box-sizing: border-box; height: 20vh; padding: 8px; border: 2px solid var(--dreamspan-accent) }",
     "</style></head>",
     `<body><div class="box" id="panel">${label} panel</div>`,
     "<script>document.body.dataset.ran = 'yes'</script>",
@@ -33,7 +33,7 @@ for (const width of [1440, 390])
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const violations: string[] = []
       page.on("console", (message) => {
         if (message.text().includes("Content Security Policy")) violations.push(message.text())

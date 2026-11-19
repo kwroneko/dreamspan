@@ -1,8 +1,8 @@
 // What a preset's unsaved drafts change, in words, for the Prompt preset tab's bar: the order,
 // switches, prompts added or deleted, whose text or options changed, and anything else.
-import type { PresetLorebook, PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
-import { parseField } from "@rp/shared/editing.ts"
-import { presetOrder } from "@rp/shared/presetOrder.ts"
+import type { PresetLorebook, PresetPrompt, PromptOrderEntry } from "@dreamspan/shared/docs/preset.ts"
+import { parseField } from "@dreamspan/shared/editing.ts"
+import { presetOrder } from "@dreamspan/shared/presetOrder.ts"
 import { promptLabel } from "./promptLabel.ts"
 
 interface PresetLike {

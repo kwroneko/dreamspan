@@ -1,5 +1,5 @@
 // MCP connection and ledger reads (spec/MCP.md §12), in the reader workers.
-import type { CredentialId } from "@rp/shared/providers.ts"
+import type { CredentialId } from "@dreamspan/shared/providers.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { type McpCallRow, makeMcpQueries, toMcpCall, toMcpConnection, toMcpSummary } from "./mcpRows.ts"

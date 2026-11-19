@@ -10,15 +10,15 @@
 // marked complete with the chat state it mapped and the file's last slot (`end`). A run
 // that finds a record goes on from it: an unfinished one is finished as the run that
 // started it would have, a complete one takes only what's new.
-import { summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
-import type { PresetDoc } from "@rp/shared/docs/preset.ts"
-import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
-import type { User } from "@rp/shared/domain.ts"
-import { NotFound, ServerError } from "@rp/shared/errors.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import { shownText } from "@rp/shared/importReport.ts"
-import type { EntityKind, RefId } from "@rp/shared/library.ts"
-import { classifyStPath, type StFile, stParentPath } from "@rp/shared/stFolder.ts"
+import { summaryMacroPrompts } from "@dreamspan/shared/lcmSettings.ts"
+import type { PresetDoc } from "@dreamspan/shared/docs/preset.ts"
+import type { ChatId, EntityId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { User } from "@dreamspan/shared/domain.ts"
+import { NotFound, ServerError } from "@dreamspan/shared/errors.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import { shownText } from "@dreamspan/shared/importReport.ts"
+import type { EntityKind, RefId } from "@dreamspan/shared/library.ts"
+import { classifyStPath, type StFile, stParentPath } from "@dreamspan/shared/stFolder.ts"
 import { sourceTime, stIdTime } from "../formats/sourceTime.ts"
 import {
   StFileResult,
@@ -27,7 +27,7 @@ import {
   type StArrival,
   StIssue,
   StLinkChoice
-} from "@rp/shared/stImportApi.ts"
+} from "@dreamspan/shared/stImportApi.ts"
 import { createHash } from "node:crypto"
 import { lstat, rm } from "node:fs/promises"
 import { join } from "node:path"
@@ -41,7 +41,7 @@ import { Formats } from "./Formats.ts"
 import { MediaHolds } from "./MediaHolds.ts"
 import { prepareAvatarThumbnails } from "./prepareThumbnails.ts"
 import { describeImage } from "./images.ts"
-import { stGalleryFolder } from "@rp/shared/stFolder.ts"
+import { stGalleryFolder } from "@dreamspan/shared/stFolder.ts"
 import { storeMedia } from "./mediaFiles.ts"
 import type { ParsedFile, StChatHeader, StPersona, StSettings, StSpeaker } from "./ops.ts"
 import { Report } from "./stReport.ts"
@@ -54,9 +54,12 @@ import {
   type StStagedBatch
 } from "../db/stImportProgress.ts"
 import type { StBatchPlan } from "../db/stImportPlanOps.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
+import type { StateEventData } from "@dreamspan/shared/state.ts"
 import { stBytesHash, type StPlanExpect, type StPlanExpectFile, stPartsHash } from "./stPlanExpect.ts"
-import { ST_CHANGED_SINCE_CHECK as CHANGED_SINCE_CHECK, ST_UNPLANNED_CHAT_MESSAGE } from "@rp/shared/stReimportPlan.ts"
+import {
+  ST_CHANGED_SINCE_CHECK as CHANGED_SINCE_CHECK,
+  ST_UNPLANNED_CHAT_MESSAGE
+} from "@dreamspan/shared/stReimportPlan.ts"
 import {
   type CardInfo,
   chatStateChange,

@@ -6,9 +6,9 @@ import { readTextCalibration } from "./textCalibration.ts"
 // provider: the connection's own, or another of their connections used only for counting.
 // `settings` key `token_counting`, `{ connections: { [id]: viaId } }`. Only choices whose two
 // connections are still the user's and live read back; anything else counts on this server.
-import type { ConnectionId } from "@rp/shared/providers.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { TokenCountingChoice } from "@rp/shared/generation.ts"
+import type { ConnectionId } from "@dreamspan/shared/providers.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { TokenCountingChoice } from "@dreamspan/shared/generation.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"

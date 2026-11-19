@@ -1,5 +1,5 @@
-import { CostSettings, type CostRule, type CostRates } from "@rp/shared/costFormulas.ts"
-import type { Connection } from "@rp/shared/providers.ts"
+import { CostSettings, type CostRule, type CostRates } from "@dreamspan/shared/costFormulas.ts"
+import type { Connection } from "@dreamspan/shared/providers.ts"
 import { Schema } from "effect"
 import { useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../actions.tsx"

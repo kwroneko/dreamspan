@@ -10,7 +10,7 @@ import {
   type McpConnection,
   type McpConnectionSettings,
   type McpTool
-} from "@rp/shared/mcp.ts"
+} from "@dreamspan/shared/mcp.ts"
 import { Cause, Effect, Logger } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { buildCatalog, exposedNames, hashedToolName, plainToolName } from "../src/mcp/catalog.ts"

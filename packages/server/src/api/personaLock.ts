@@ -1,7 +1,7 @@
-// RPC handlers for the persona locked to a character (@rp/shared/personaLockApi.ts, DESIGN
+// RPC handlers for the persona locked to a character (@dreamspan/shared/personaLockApi.ts, DESIGN
 // §2.2). They act as the authenticated user; storage enforces ownership (db/personaLocks.ts).
-import { CurrentUser } from "@rp/shared/api.ts"
-import type { PersonaLockApi } from "@rp/shared/personaLockApi.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import type { PersonaLockApi } from "@dreamspan/shared/personaLockApi.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"

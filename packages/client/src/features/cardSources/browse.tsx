@@ -11,7 +11,7 @@ import type {
   SourceFilterValue,
   SourceInfo,
   SourceQuery
-} from "@rp/shared/cardSources.ts"
+} from "@dreamspan/shared/cardSources.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react"
@@ -32,7 +32,7 @@ import type { RemoteBrowse } from "../characters/homeSearch.ts"
 import { SortDirection, type SortOrder } from "../characters/cardBrowse.tsx"
 import { TILE_CLASS, TILE_SURFACE_CLASS, TileFace, useOpenCharacter } from "../characters/shellData.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { canHideCreator, CreatorHeader, hideCreator, showCreator, shownCreator } from "./creator.tsx"
 import {
   cardSourceViews,

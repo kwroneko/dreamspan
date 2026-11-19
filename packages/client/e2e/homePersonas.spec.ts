@@ -2,7 +2,7 @@
 // own Personas tab and left out of the other tabs, unless Include personas is on, which
 // mixes them in marked "Persona". The choice is remembered and in the URL. Every card is made up.
 import { expect, test, type Page } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { openPanel, closePanel } from "./support/panel.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"

@@ -1,8 +1,8 @@
 import { Formats } from "../importer/Formats.ts"
 // Client RPC handlers for the user's generation defaults (ARCHITECTURE §15). Storage checks
 // that the model and the preset are the user's own: anything else is NotFound.
-import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import { ServerError } from "@rp/shared/errors.ts"
+import { type AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
+import { ServerError } from "@dreamspan/shared/errors.ts"
 import { Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"

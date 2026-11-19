@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { EntityId, SlotId } from "@dreamspan/shared/chat.ts"
 import type { ChatSession } from "../src/features/chat/session.ts"
-import type { AwayMark } from "@rp/shared/contextsApi.ts"
+import type { AwayMark } from "@dreamspan/shared/contextsApi.ts"
 import {
   awayExplanation,
   awayLabel,

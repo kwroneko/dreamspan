@@ -1,7 +1,7 @@
 // Grants chosen in a workshop's composer before its first message (owner, 2026-11-17): the chip
 // shows the rows as they'll stand once made, and the choices go to `CreateWorkshop` as made.
 import { describe, expect, it, vi } from "vitest"
-import type { WorkshopCapability } from "@rp/shared/workshopApi.ts"
+import type { WorkshopCapability } from "@dreamspan/shared/workshopApi.ts"
 
 vi.hoisted(() => {
   vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })

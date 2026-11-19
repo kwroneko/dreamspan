@@ -7,8 +7,8 @@ import { makeAssemblyReadHandlers } from "../../src/db/assemblyReads.ts"
 import { makeLcmPlanningHandlers } from "../../src/db/lcmPlanning.ts"
 import { makeLcmEnableReadHandlers } from "../../src/db/lcmEnableReads.ts"
 import { readerConnection } from "../../src/db/connection.ts"
-import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { ChatId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 
 const { dbPath, userId, jobId, attempt } = workerData as {
   dbPath: string

@@ -1,12 +1,12 @@
 // What a file opens in (spec/FILES-AND-ENVIRONMENT.md §8.2), by type: a registry, so a plugin can
 // add or replace a viewer (the full set, PDF and the editor among them, is track B2). Built in:
 // text and code (read-only here), images, video and audio. Anything else offers a download.
-import { viewOf, type FileView } from "@rp/shared/files.ts"
+import { viewOf, type FileView } from "@dreamspan/shared/files.ts"
 import { useEffect, useState, type ComponentType } from "react"
 import { makeRegistry } from "../../registry.ts"
 import { CodeEditor } from "../../ui/CodeEditor.tsx"
 import { ImageViewer, type Zoom } from "../../ui/ImageViewer.tsx"
-import { formatByteSize } from "@rp/shared/byteSize.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import type { FilesSource } from "./source.ts"
 
 interface ViewerProps {

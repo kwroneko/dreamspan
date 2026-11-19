@@ -61,7 +61,7 @@ for (const width of [1440, 390])
     test(`grid toggle visibility ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await admin((api) =>
         Effect.gen(function* () {
           for (const c of (yield* api.GetShellLibrary()).cards)

@@ -2,8 +2,8 @@
 // show the text, with where the message is in each, and the ones that hold it only in the bin,
 // through the real workers.
 import { assert, describe, it } from "@effect/vitest"
-import type { BinBranch } from "@rp/shared/bin.ts"
-import { type ChatId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import type { BinBranch } from "@dreamspan/shared/bin.ts"
+import { type ChatId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { cardDoc } from "./support/docs.ts"

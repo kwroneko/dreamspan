@@ -2,7 +2,7 @@ import { createPortal } from "react-dom"
 import { kindRootProps, kindTitle, useChatKindLook } from "./kindLooks.ts"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // The chat panel host: descriptors own its tabs and bodies; the host owns layout and retention.
-import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, SlotId } from "@dreamspan/shared/chat.ts"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useLocation, useNavigate, useRouter } from "@tanstack/react-router"
 import { Button } from "../../ui/Button.tsx"

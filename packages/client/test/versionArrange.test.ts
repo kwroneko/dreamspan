@@ -1,7 +1,7 @@
 // The version picker's text filter and sort (VersionPicker.tsx `arrange`): any case, every
 // sort with ties in the order written, and quick with fifty long versions.
 import { expect, test } from "vitest"
-import { Version, type SlotId, type VersionId } from "@rp/shared/chat.ts"
+import { Version, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
 import { arrange, plain } from "../src/features/chat/VersionPicker.tsx"
 
 const version = (n: number, content: string, fields: { starred?: boolean; createdAt?: number } = {}) =>

@@ -4,7 +4,7 @@ import { readFile, lstat } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 import { join, dirname, posix, resolve, sep } from "node:path"
 import { Schema } from "effect"
-import { PluginManifest, type BuiltinComparison } from "@rp/shared/plugins.ts"
+import { PluginManifest, type BuiltinComparison } from "@dreamspan/shared/plugins.ts"
 import { builtinCopy, type builtinCopies } from "./builtins.ts"
 import { rewriteImports } from "./importPolicy.ts"
 import { commitFiles, confined, pluginFolder, validPath } from "./repo.ts"
@@ -44,7 +44,7 @@ export const prepareBuiltinCopy = async (registry: string, id: string, pluginId:
   for (const [path, text] of Object.entries(originals)) {
     const rewritten = rewriteImports(text, path, (value) => {
       if (value === "react" && part.side === "client") return value
-      if (value === "effect" && part.side !== "client") return `@rp/plugin-api/${part.side}`
+      if (value === "effect" && part.side !== "client") return `@dreamspan/plugin-api/${part.side}`
       if (!value.startsWith(".")) return undefined
       const target = posix.normalize(posix.join(posix.dirname(path), value))
       const api = (part.imports as Readonly<Record<string, string>>)[target]
@@ -63,8 +63,8 @@ export const prepareBuiltinCopy = async (registry: string, id: string, pluginId:
     2
   )
   files["NOTICE.md"] =
-    "Editable copy of shipped rp-harness source. The project has no declared redistribution licence. No third-party implementation is copied; React and Effect remain installed API dependencies under their own licences.\n"
-  files["rp-plugin.json"] = JSON.stringify(
+    "Editable copy of shipped Dreamspan source. The project has no declared redistribution licence. No third-party implementation is copied; React and Effect remain installed API dependencies under their own licences.\n"
+  files["dreamspan-plugin.json"] = JSON.stringify(
     {
       id: pluginId,
       name: part.label + " (editable)",
@@ -84,7 +84,7 @@ export const prepareBuiltinCopy = async (registry: string, id: string, pluginId:
     null,
     2
   )
-  const api = `@rp/plugin-api/${part.side}`
+  const api = `@dreamspan/plugin-api/${part.side}`
   files[`src/${part.side}.${part.side === "client" ? "tsx" : "ts"}`] =
     `import { ${part.side === "worker" ? "Effect, registerMacro, " : part.side === "server" ? "Effect, " : ""}type Activate } from "${api}"\n` +
     `import { ${part.entry} } from "./part/${posix.basename(part.path)}"\n` +
@@ -118,7 +118,7 @@ export const compareBuiltin = async (
 ): Promise<typeof BuiltinComparison.Type | null> => {
   const files = await commitFiles(pluginFolder(dataDir, owner, id), commit)
   const manifest = Schema.decodeUnknownSync(PluginManifest)(
-    JSON.parse(Buffer.from(files.get("rp-plugin.json")!).toString("utf8"))
+    JSON.parse(Buffer.from(files.get("dreamspan-plugin.json")!).toString("utf8"))
   )
   if (!manifest.base) return null
   const unavailable = { changed: true, available: false, files: [] }

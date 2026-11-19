@@ -42,7 +42,7 @@ export const pluginDisplayCopyTests = (options: { readonly layoutOnly?: boolean 
         test.setTimeout(600_000)
         await page.setViewportSize({ width, height: 1000 })
         await page.emulateMedia({ colorScheme: theme })
-        await page.addInitScript((theme) => localStorage.setItem("rp.theme", theme), theme)
+        await page.addInitScript((theme) => localStorage.setItem("dreamspan.theme", theme), theme)
         await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
         const fixture = await admin((api) =>
           Effect.gen(function* () {

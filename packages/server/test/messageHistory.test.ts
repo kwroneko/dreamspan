@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { DraftHistoryPolicy, DraftKey } from "@rp/shared/drafts.ts"
+import { DraftHistoryPolicy, DraftKey } from "@dreamspan/shared/drafts.ts"
 import { Generator } from "../src/chat/Generator.ts"
 import { Writer } from "../src/db/Database.ts"
 import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"

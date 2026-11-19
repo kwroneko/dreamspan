@@ -5,8 +5,8 @@
 // Arguments: the data directory, the user id, the chat id, the window size.
 import { NodeRuntime } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect, Logger } from "effect"
 import { databaseFile } from "../../src/db/connection.ts"
 import { makeReadHandlers } from "../../src/db/reads.ts"

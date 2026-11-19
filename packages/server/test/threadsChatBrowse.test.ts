@@ -1,7 +1,7 @@
 // merge-batch10 seam: the Chats tab's Workshops filter (decisions1113) beside parallel threads'
 // rows in the left panel (batch 9). Synthetic data only.
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatBrowse } from "@rp/shared/chatBrowse.ts"
+import type { ChatBrowse } from "@dreamspan/shared/chatBrowse.ts"
 import { Effect } from "effect"
 import { runStory } from "./support/threadStory.ts"
 

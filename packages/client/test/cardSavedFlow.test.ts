@@ -1,7 +1,7 @@
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { expect, it, vi } from "vitest"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { CardSavedFlow } from "../src/features/editor/CardSavedFlow.tsx"
 import { cardSavedContributions } from "../src/features/editor/cardSaved.ts"
 import { Resume } from "../src/features/cardRename/Resume.tsx"

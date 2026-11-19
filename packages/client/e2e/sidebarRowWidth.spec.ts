@@ -53,7 +53,7 @@ for (const theme of ["light", "dark"] as const)
   test(`sidebar rows stay aligned at default and dragged-wide widths (${theme})`, async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1080 })
     await page.emulateMedia({ colorScheme: theme })
-    await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+    await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chatId}`)
     const sidebar = page.getByRole("complementary", { name: "Sidebar", exact: true })

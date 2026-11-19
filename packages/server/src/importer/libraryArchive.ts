@@ -4,10 +4,10 @@
 // in `worlds/`, presets in `OpenAI Settings/`, each chat's branches in `chats/<card>/` (a chat
 // with several characters in `group chats/`, its group in `groups/`). Written as it's read:
 // one file's bytes at a time, chats a window of messages at a time.
-import type { Chat } from "@rp/shared/chat.ts"
-import { chatCursor } from "@rp/shared/chatApi.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { EntityKind, LibraryRef, RefId } from "@rp/shared/library.ts"
+import type { Chat } from "@dreamspan/shared/chat.ts"
+import { chatCursor } from "@dreamspan/shared/chatApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { EntityKind, LibraryRef, RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { fileStem } from "../formats/stChatExport.ts"
 import type { ZipStreamEntry } from "../formats/zipStream.ts"

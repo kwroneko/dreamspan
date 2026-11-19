@@ -4,8 +4,8 @@
 // sort and direction and the search. Tiles open the full editor; their separate Add control
 // joins the character at the viewed leaf. Existing members keep a disabled In chat control.
 // It's the `cast.add-characters` entry of `castSections`, so a plugin can replace or remove it.
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { Cast } from "@rp/shared/chatSetupApi.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { Cast } from "@dreamspan/shared/chatSetupApi.ts"
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { AsyncView } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"

@@ -2,7 +2,7 @@
 // tab, full width, with the folder tree beside the list where there's room. Its place is its URL
 // (`?path=` the folder, `?file=` the file open in it), so it opens as a workbench tab, splits and
 // reloads like any page; each file opened from the list is a tab of its own (the `files` kind).
-import { FILES_TOP, nameOf, normalizePath } from "@rp/shared/files.ts"
+import { FILES_TOP, nameOf, normalizePath } from "@dreamspan/shared/files.ts"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { Card, CardHeader } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"

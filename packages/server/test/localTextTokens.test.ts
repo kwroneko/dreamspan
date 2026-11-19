@@ -10,7 +10,7 @@ import { countTokens, type LocalEncoding } from "../src/importer/tokenizer.ts"
 import { localTextEncoding } from "../src/providers/localTextModels.ts"
 import { payloadText } from "../src/providers/textPayload.ts"
 import { calibrateText } from "../src/providers/textCalibration.ts"
-import { TokenizerInfo } from "@rp/shared/generation.ts"
+import { TokenizerInfo } from "@dreamspan/shared/generation.ts"
 
 const references = JSON.parse(
   readFileSync(new URL("./support/textTokenReferences.json", import.meta.url), "utf8")

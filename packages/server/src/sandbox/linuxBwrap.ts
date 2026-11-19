@@ -411,11 +411,11 @@ const checkAvailable = async (): Promise<Availability> => {
 }
 
 /** Where each command's runtime folder goes: short, for the socket path limit. */
-const runtimeRoot = () => process.env.RP_SANDBOX_RUNTIME ?? tmpdir()
+const runtimeRoot = () => process.env.DREAMSPAN_SANDBOX_RUNTIME ?? tmpdir()
 
 /** A run folder's name carries the server's process id, so a later start knows whose it was. */
-const RUN_PREFIX = "rp-sbx-"
-const RUN_FOLDER = /^rp-sbx-(?:(\d+)-)?[A-Za-z0-9]{6}$/
+const RUN_PREFIX = "dreamspan-sbx-"
+const RUN_FOLDER = /^dreamspan-sbx-(?:(\d+)-)?[A-Za-z0-9]{6}$/
 
 const alive = (pid: number) => {
   try {
@@ -516,7 +516,7 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
       "RP_END",
       marker
     ])
-    const argv = ["--args", String(argsFd), "/bin/bash", "-c", prelude(spec), "rp-sandbox", spec.command]
+    const argv = ["--args", String(argsFd), "/bin/bash", "-c", prelude(spec), "dreamspan-sandbox", spec.command]
     // The command's own cgroup, where one can be made: a real memory cap for all its processes.
     const limiter = await selectLimiter(bwrapLimiters)
     if (!("none" in limiter))

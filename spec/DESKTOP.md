@@ -24,7 +24,7 @@ The owner's requirements: the app ships for Linux, Windows and macOS and has to 
 | Client | Vite build in `packages/client/dist`, plus client source for editable built-in copies (§17) | Unchanged, served by the server over loopback |
 | Native modules | `sharp` (N-API, platform package `@img/sharp-*` with libvips), `rolldown` (N-API binding, used by the plugin compiler), `tiktoken` (WebAssembly) | The target platform's optional packages, installed per CI job (§9) |
 | Child processes | Plugin compiler, probe, test and Git children (`process.execPath`), confined by `setpriv --seccomp-filter` on Linux | Same children, on the shipped Node. Confinement on macOS and Windows comes from the new `pluginCheckConfinement` part (§8). Until it exists, plugin checks that run code are refused there, as on any non-Linux host today |
-| Command sandbox and tools | FILES §3: bubblewrap/socat and the toolchain in the image | FILES §3.2, §3.4: bundled `bwrap`/`socat` static builds (Linux), Seatbelt (macOS), `rp-sandbox-win.exe` (Windows), the toolchain fetched on first use (§5) |
+| Command sandbox and tools | FILES §3: bubblewrap/socat and the toolchain in the image | FILES §3.2, §3.4: bundled `bwrap`/`socat` static builds (Linux), Seatbelt (macOS), `dreamspan-sandbox-win.exe` (Windows), the toolchain fetched on first use (§5) |
 
 Measured sizes (2026-11-17):
 
@@ -103,7 +103,7 @@ A new entry in the auth modes (§8), beside `single` and `proxy`:
 
 - **Loopback only.** `HOST` must be loopback, unless LAN access is on (§4.3).
 - **Every request needs a session**, even from loopback. Without that, any other OS user on the machine, and any local program, could act as the admin through the port. (A local program running as the same user can read the data folder anyway; this protects against the others, and against browsers, below.)
-- **The shell signs its windows in.** At each start the shell creates a one-time launch token, sends its hash to the server over IPC, and opens `/auth/desktop?token=…`. The server checks it, sets the ordinary `rp_session` cookie (`HttpOnly`, `SameSite=Strict`), and redirects to the app. A token works once and expires after 60 s. Sessions of the desktop account are the existing kind, kept 30 days.
+- **The shell signs its windows in.** At each start the shell creates a one-time launch token, sends its hash to the server over IPC, and opens `/auth/desktop?token=…`. The server checks it, sets the ordinary `dreamspan_session` cookie (`HttpOnly`, `SameSite=Strict`), and redirects to the app. A token works once and expires after 60 s. Sessions of the desktop account are the existing kind, kept 30 days.
 - **The account** is the local admin (`local`, as today when no password is set). Setting a password is optional. It's needed only for LAN access (§4.3).
 - **Open in browser** (app menu and the shell's tray menu) makes a fresh launch token and opens the same link in the user's default browser, which then has its own session. The browser tab shows the URL, as on the server.
 
@@ -202,7 +202,7 @@ The first real migration, `0002_files`, is planned (FILES §10). Until the owner
 
 What is built and stays (ARCHITECTURE §17): an enabled plugin is pinned to an approved commit with consent for exactly that commit. When the app's sources, lockfile or worker stamp change, startup re-runs the complete check from the verified approved commit before listening. A failure is caught, its partial activation disposed, and the plugin suspended with a notice. A suspended plugin stays off until it is explicitly enabled again, and `PLUGINS=off` starts with none. So a plugin can't stop an update from starting. Added:
 
-- **The plugin API's version** is `@rp/plugin-api`'s semver (1.0.0 today) and the `api: 1` that every registration carries. A minor version only adds; a major one removes or changes something. Each app release supports its API major and the previous one for at least one minor release, through adapters, with the removed parts listed in `release.json`. The plugin manifest gains `api: "1.2"` (the minimum it needs), which the checker compares with the app's.
+- **The plugin API's version** is `@dreamspan/plugin-api`'s semver (1.0.0 today) and the `api: 1` that every registration carries. A minor version only adds; a major one removes or changes something. Each app release supports its API major and the previous one for at least one minor release, through adapters, with the removed parts listed in `release.json`. The plugin manifest gains `api: "1.2"` (the minimum it needs), which the checker compares with the app's.
 - **Before installing an update**, the running app compares every enabled plugin (the instance's and every account's) with the new release's compatibility list: the API major, removed or changed surfaces, and built-in parts that were renamed or removed, which matters to plugins that replace a built-in (`replaces: ["registry:id"]`). The update notice names the plugins that will be turned off: "2 plugins will be turned off by this update: Scene timer (uses a part this version removes)". The user can update them first, or install anyway.
 - **After the update**, the existing startup recheck is the real test. A plugin that fails is suspended, with a notice: "Turned off after the update: Scene timer. It was made for an older version." with **Fix with the assistant**, which opens a workshop on that plugin's repository (DESIGN §12: the agent extends the harness; FILES §5.3). Its approval is per commit, so a fixed version needs consent again, as every commit does.
 - **Replaced built-ins.** When an update changes a built-in that an enabled plugin, or an editable copy (P5), replaces, the plugin keeps running if its check passes. Its row says "The original changed in this update" with **Compare**, the P5 comparison of the saved original with the current one, which already exists. Nothing is merged on its own.
@@ -212,7 +212,7 @@ What is built and stays (ARCHITECTURE §17): an enabled plugin is pinned to an a
 
 - **Desktop**: the toolchain manifest is part of the app (FILES §3.4), so a new release can change it. After an update with a changed manifest, the new artifacts are fetched in the background when the app is idle (or when a command first needs them), into a new versioned folder beside the old one. The switch happens after every artifact is checked, at a moment no command is running. The old folder is removed after that. A failed fetch leaves the old toolchain in use and shows a retry in Settings → Assistant tools. A fix that only changes tools (a Git or Python security release) ships as an ordinary patch release whose only change is the manifest; differential updates make that a small download.
 - **Server**: the toolchain is in the image and changes with it.
-- The sandbox helpers (`rp-sandbox-win.exe`, the bundled `bwrap` and `socat`, the deb's AppArmor profile) are part of the package and change with it.
+- The sandbox helpers (`dreamspan-sandbox-win.exe`, the bundled `bwrap` and `socat`, the deb's AppArmor profile) are part of the package and change with it.
 
 ### 6.8 What the user sees
 
@@ -332,7 +332,7 @@ These were decided as recommendations, not asked:
 
 ## Appendix A. Names
 
-The repository's working name is rp-harness (README). These candidates were checked on 2026-11-17. The checks: the npm package name (`npm view`); a GitHub user or organization of that name (the API), plus repositories with the name; `.com` (Verisign RDAP), `.app` and `.dev` (Google Registry RDAP); a web and app-store search for software of that name, AI and chat apps above all; and meanings in English, Spanish, French, German, Italian and Portuguese. A registered domain may only be parked. None of these were searched in the USPTO, EUIPO or WIPO databases: a knockout search there is still needed before adopting one. No name points at a card archive, or at any gateway or proxy.
+The repository's working name was rp-harness until 2026-11-19, when the owner chose **Dreamspan**, which was not among these candidates (DESIGN.md §12). These candidates were checked on 2026-11-17. The checks: the npm package name (`npm view`); a GitHub user or organization of that name (the API), plus repositories with the name; `.com` (Verisign RDAP), `.app` and `.dev` (Google Registry RDAP); a web and app-store search for software of that name, AI and chat apps above all; and meanings in English, Spanish, French, German, Italian and Portuguese. A registered domain may only be parked. None of these were searched in the USPTO, EUIPO or WIPO databases: a knockout search there is still needed before adopting one. No name points at a card archive, or at any gateway or proxy.
 
 | Name | npm | GitHub account | Repos named so | .com / .app / .dev | Software or trademark conflicts | Meanings | Mark |
 |---|---|---|---|---|---|---|---|

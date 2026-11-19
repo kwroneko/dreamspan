@@ -9,7 +9,7 @@
 // SHELL_MODEL_STATS names a file for each seed's tally of writes).
 import { appendFileSync } from "node:fs"
 import { assert, describe, it } from "@effect/vitest"
-import { type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
+import { type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
 import { Cause, Effect, Exit } from "effect"
 import * as Database from "../src/db/Database.ts"
 import type { ShellLibraryRead } from "../src/db/ops.ts"

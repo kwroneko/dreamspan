@@ -3,8 +3,8 @@
 // libraryImport.test.ts.
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { Doc, RefId } from "@rp/shared/library.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { Doc, RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"

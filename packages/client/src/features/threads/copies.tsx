@@ -2,9 +2,9 @@
 // message of its thread, and the group only prompts. The header's "Also in At the docks" links
 // to the other copy; an edit offers "Save in both" beside "Save here", amending each copy in its
 // own thread as an edit there would; a delete's toast offers to delete the other copy too.
-import type { BinItem } from "@rp/shared/bin.ts"
-import type { EntityId, PathEntry, SlotId } from "@rp/shared/chat.ts"
-import type { ThreadSet } from "@rp/shared/threads.ts"
+import type { BinItem } from "@dreamspan/shared/bin.ts"
+import type { EntityId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
+import type { ThreadSet } from "@dreamspan/shared/threads.ts"
 import { Link } from "@tanstack/react-router"
 import { Fragment } from "react"
 import { Button } from "../../ui/Button.tsx"

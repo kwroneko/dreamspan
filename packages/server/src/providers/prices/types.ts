@@ -1,6 +1,6 @@
 // The built-in price supplement's data shape (spec/PRICES.md §3.2). Data only: one file per
 // provider, each entry naming the public page it was read from and the date it was checked.
-import type { Price } from "@rp/shared/providers.ts"
+import type { Price } from "@dreamspan/shared/providers.ts"
 
 /**
  * Cheaper hours: outside the listed UTC hours of the listed weekdays (0 = Sunday) every rate is

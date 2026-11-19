@@ -8,8 +8,8 @@ import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { RefId } from "@rp/shared/library.ts"
-import { textField } from "@rp/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { expectLayout } from "./layoutAudit.ts"
 import { openPanel } from "./panel.ts"
 import { asUser, type Client } from "./rpc.ts"
@@ -64,7 +64,7 @@ export function workshopChangesTests() {
           const workshop = await admin((api) => api.CreateWorkshop({ title: `Changes ${width} ${theme}` }))
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
           const shot = async (name: string) => {
             if (shots) {

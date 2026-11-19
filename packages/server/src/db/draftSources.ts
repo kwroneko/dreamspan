@@ -5,20 +5,20 @@
 // first send reads them; the chat's own parts (its starting events, the greetings as picked, the
 // typed message and the reply after it) come from the draft. A card from a card source has no
 // row yet: its document and Character's Note come with the draft, under its placeholder id.
-import type { EntityId } from "@rp/shared/chat.ts"
-import { NotFound } from "@rp/shared/errors.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { NoteDoc } from "@rp/shared/docs/note.ts"
-import type { CardDoc } from "@rp/shared/docs/card.ts"
-import type { FirstTurn } from "@rp/shared/chatSetupApi.ts"
-import type { FoldableEvent } from "@rp/shared/state.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { NoteDoc } from "@dreamspan/shared/docs/note.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import type { FirstTurn } from "@dreamspan/shared/chatSetupApi.ts"
+import type { FoldableEvent } from "@dreamspan/shared/state.ts"
 import { Effect, Layer } from "effect"
 import type { SqlClient } from "effect/sql"
 import { AssemblySources, type PositionedEvent } from "../assembler/pipeline.ts"
 import type { CardInput, HistoryEntry, NoteInput } from "../assembler/types.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 
 /** The chat id the draft's sources answer to: no chat has it, so no chat-owned row is read. */
 const DRAFT_CHAT = "draft" as ChatId

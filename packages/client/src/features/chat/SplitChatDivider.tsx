@@ -1,4 +1,4 @@
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import { useSyncExternalStore } from "react"
 import { SplitLink } from "./SplitChatSection.tsx"
 import { useSplitChats } from "./splitChats.ts"

@@ -1,11 +1,11 @@
 // Inserting a message anywhere in a fork's history (spec/MESSAGE-INSERT.md §4, §5; owner
 // decision DESIGN §3.1, 2026-10-30). The RPC dispatches through the registered command
 // `message.insert`, so a plugin can replace it and an agent inserts messages the same way.
-import { type AuthenticatedMoveApi, CurrentUser, type AppApi } from "@rp/shared/api.ts"
-import { PathEntry } from "@rp/shared/chat.ts"
-import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
-import { StaleWrite } from "@rp/shared/errors.ts"
-import { Chat, type ChatId } from "@rp/shared/chat.ts"
+import { type AuthenticatedMoveApi, CurrentUser, type AppApi } from "@dreamspan/shared/api.ts"
+import { PathEntry } from "@dreamspan/shared/chat.ts"
+import { GenerationUnavailable } from "@dreamspan/shared/chatApi.ts"
+import { StaleWrite } from "@dreamspan/shared/errors.ts"
+import { Chat, type ChatId } from "@dreamspan/shared/chat.ts"
 import {
   InsertedMessage,
   InsertMessageInput,
@@ -14,7 +14,7 @@ import {
   MoveMessageInput,
   MoveRefused,
   UndoMoveInput
-} from "@rp/shared/messagesApi.ts"
+} from "@dreamspan/shared/messagesApi.ts"
 import { Effect, Option } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"

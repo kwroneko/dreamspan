@@ -7,10 +7,10 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { ServerResponse } from "node:http"
 import { DatabaseSync } from "node:sqlite"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { EntityId, PathEntry, VersionId } from "@rp/shared/chat.ts"
-import { SEND_NUDGE_PROMPT, SEND_NUDGES, sendNudgeText } from "@rp/shared/agentInstructions.ts"
-import { agentInstructionsPrompt } from "@rp/shared/presetOrder.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { EntityId, PathEntry, VersionId } from "@dreamspan/shared/chat.ts"
+import { SEND_NUDGE_PROMPT, SEND_NUDGES, sendNudgeText } from "@dreamspan/shared/agentInstructions.ts"
+import { agentInstructionsPrompt } from "@dreamspan/shared/presetOrder.ts"
 import { Effect } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import { importStPreset } from "../src/formats/preset.ts"
@@ -167,7 +167,7 @@ describe("reply contract", () => {
           { role: "assistant", content: "Plain words." },
           { role: "user", content: NUDGE }
         ])
-        const stored = transcriptOf(config.dataDir, version.id).filter((m) => m.role === "rpHarness")
+        const stored = transcriptOf(config.dataDir, version.id).filter((m) => m.role === "rpApp")
         assert.deepStrictEqual(
           stored.map((m) => m.nudge),
           [1]
@@ -288,7 +288,7 @@ describe("reply contract", () => {
       assert.strictEqual(resumed.status, "failed")
       assert.strictEqual(resumed.error?.class, "contract")
       assert.deepStrictEqual(
-        transcriptOf(config.dataDir, entry.version.id).flatMap((m) => (m.role === "rpHarness" ? [m.nudge] : [])),
+        transcriptOf(config.dataDir, entry.version.id).flatMap((m) => (m.role === "rpApp" ? [m.nudge] : [])),
         [1, 2, 3]
       )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))

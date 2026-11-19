@@ -11,8 +11,8 @@ import {
   type ReactNode
 } from "react"
 import { positionOf } from "./position.ts"
-import type { MessageImages, PathEntry } from "@rp/shared/chat.ts"
-import type { ImagesLeftOut } from "@rp/shared/inspectorApi.ts"
+import type { MessageImages, PathEntry } from "@dreamspan/shared/chat.ts"
+import type { ImagesLeftOut } from "@dreamspan/shared/inspectorApi.ts"
 import { useSession } from "../../session.ts"
 import { uuid } from "../../uuid.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -919,7 +919,7 @@ function MessageThumbnails({ entry, session }: { entry: PathEntry; session: Chat
   return <ImageThumbnails images={entry.version.images ?? []} speaker={speaker} controls={{ entry, session }} />
 }
 
-function QueuedThumbnails({ queued }: { queued: import("@rp/shared/chat.ts").QueuedMessage }) {
+function QueuedThumbnails({ queued }: { queued: import("@dreamspan/shared/chat.ts").QueuedMessage }) {
   const cast = useCast()
   return <ImageThumbnails images={queued.images ?? []} speaker={nameOf(cast, queued.speakerEntityId) ?? "you"} />
 }

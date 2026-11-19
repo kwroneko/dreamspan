@@ -6,9 +6,9 @@
 // (SCREENSHOT_DIR). Every name and text is made up; the provider is a fake on loopback.
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import type { ChatId, EntityId, PathEntry, VersionId } from "@rp/shared/chat.ts"
-import { valueField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { ChatId, EntityId, PathEntry, VersionId } from "@dreamspan/shared/chat.ts"
+import { valueField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { type FakeProvider, startProvider } from "./support/provider.ts"

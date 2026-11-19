@@ -1,5 +1,5 @@
-import type { EntityId, PathEntry } from "@rp/shared/chat.ts"
-import type { Cast } from "@rp/shared/chatSetupApi.ts"
+import type { EntityId, PathEntry } from "@dreamspan/shared/chat.ts"
+import type { Cast } from "@dreamspan/shared/chatSetupApi.ts"
 import {
   hashSeed,
   listOrder,
@@ -8,7 +8,7 @@ import {
   naturalOrder,
   pooledOrder,
   TALKATIVENESS_DEFAULT
-} from "@rp/shared/naturalOrder.ts"
+} from "@dreamspan/shared/naturalOrder.ts"
 import { makeRegistry } from "../../registry.ts"
 
 /**
@@ -70,7 +70,7 @@ const roundRobin = (
 }
 
 /**
- * ST's natural order (`@rp/shared/naturalOrder.ts`): everyone it activates, in turn (one reply
+ * ST's natural order (`@dreamspan/shared/naturalOrder.ts`): everyone it activates, in turn (one reply
  * a send, the first, when the chat takes one at a time). Those named in the text being sent
  * reply first; then each candidate who passes a roll by their card's talkativeness. With nothing typed, the mentions come from the tip's message and, when a
  * character wrote it, they don't answer themselves unless no one else can. The rolls are seeded

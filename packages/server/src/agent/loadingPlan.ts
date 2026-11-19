@@ -2,8 +2,8 @@
 // revisions the assembly used, then splits the offer through the registered profile and wire. With
 // no wire for the model (every tool from the start), the run still offers load_skill for the same
 // skills, so skills work alike in every mode; nothing is deferred.
-import type { RefId, RevisionId } from "@rp/shared/library.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { RefId, RevisionId } from "@dreamspan/shared/library.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import type { AgentSkills, ModelInput } from "../assembler/types.ts"
 import type { Reader } from "../db/Database.ts"

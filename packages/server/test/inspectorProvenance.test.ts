@@ -3,9 +3,9 @@ import { importStPreset } from "../src/formats/preset.ts"
 // is and where it came from, recorded at send time, and a capture from before parts were
 // recorded still opens with its text. Synthetic cards, notes and lore through a mock provider.
 import { assert, it } from "@effect/vitest"
-import type { EntityId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { ContextMessage, RunContext } from "@rp/shared/inspectorApi.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
+import type { EntityId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { ContextMessage, RunContext } from "@dreamspan/shared/inspectorApi.ts"
+import type { StateEventData } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"

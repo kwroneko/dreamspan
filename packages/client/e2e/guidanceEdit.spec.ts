@@ -4,7 +4,7 @@ import { setGuidance } from "./support/composer.ts"
 // which stays; ✕ gives back the draft typed before, which a reload also shows.
 import { mkdirSync } from "node:fs"
 import { expect, type Page, test } from "@playwright/test"
-import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { messageMenu, showActions } from "./support/message.ts"
@@ -98,7 +98,7 @@ for (const width of [1440, 390]) {
       await settled(slotId, 1)
       await page.setViewportSize({ width, height: 844 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await page.goto(`${server().url}/chats/${chatId}`)
       await expect(toggle(page)).toBeEnabled()

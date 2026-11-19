@@ -3,8 +3,8 @@ import { libraryListAtom } from "../library/queries.ts"
 // them: the composer's chip and the Prompt preset tab share these queries, so a choice or an
 // archive made in one shows in the other at once.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
-import type { LibraryRef, RefId } from "@rp/shared/library.ts"
+import { BUILTIN_PRESET_LABEL } from "@dreamspan/shared/generation.ts"
+import type { LibraryRef, RefId } from "@dreamspan/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { allOf, useAction } from "../../actions.tsx"

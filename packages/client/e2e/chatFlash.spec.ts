@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, test } from "@playwright/test"
-import type { SendResult } from "@rp/shared/chatApi.ts"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { showAppNavigation } from "./support/appMenu.ts"
@@ -75,7 +75,7 @@ for (const width of [1440, 390])
         await server().pause()
         execFileSync(process.execPath, [
           process.env.CHATFLASH_SCALE,
-          join(server().dataDir, "rp-harness.db"),
+          join(server().dataDir, "dreamspan.db"),
           JSON.stringify(ids)
         ])
         await server().restart()

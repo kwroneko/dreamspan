@@ -3,8 +3,8 @@
 // compared with: the history start, summaries' ranges and the LCM cursor, search hits. `depth`
 // stays structural (paging, branches). A window of a fork without insertions carries no
 // positions, and there a position is the depth.
-import type { PathEntry } from "@rp/shared/chat.ts"
-import type { LcmState } from "@rp/shared/lcm.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
+import type { LcmState } from "@dreamspan/shared/lcm.ts"
 
 export const positionOf = (entry: Pick<PathEntry, "position" | "depth">): number => entry.position ?? entry.depth
 

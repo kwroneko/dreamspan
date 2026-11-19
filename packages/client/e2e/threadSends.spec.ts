@@ -5,7 +5,7 @@
 // other copy too. Synthetic chats only; the fake generator replies.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { showActions } from "./support/message.ts"
 import { asUser } from "./support/rpc.ts"
@@ -82,7 +82,7 @@ const texts = (chatId: ChatId, forkId: ForkId) =>
 const open = async (page: Page, path: string, width: number, theme: "light" | "dark") => {
   await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
   await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-  await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+  await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}${path}`)
   await expect(page.getByTestId("composer")).toBeVisible()

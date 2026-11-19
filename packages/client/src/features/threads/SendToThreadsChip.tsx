@@ -2,7 +2,7 @@
 // next-reply strip, only in a thread: its popover lists the other threads of every set this one
 // is in, innermost first, each with a tick, its name, its characters' faces and whom the user
 // writes as there. Ticked, the chip reads "To 2 threads" and Send says where the message goes.
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { useState } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Checkbox } from "../../ui/Choice.tsx"

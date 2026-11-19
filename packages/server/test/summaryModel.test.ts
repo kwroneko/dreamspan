@@ -2,8 +2,8 @@
 // summary model, else the account's, else the chat's model; a reply always uses the chat's model.
 // Synthetic cards and connection ids only.
 import { assert, it } from "@effect/vitest"
-import type { LcmDefaults } from "@rp/shared/lcmSettings.ts"
-import { summaryModelBinding } from "@rp/shared/lcmSettings.ts"
+import type { LcmDefaults } from "@dreamspan/shared/lcmSettings.ts"
+import { summaryModelBinding } from "@dreamspan/shared/lcmSettings.ts"
 import { Effect } from "effect"
 import { importStPreset } from "../src/formats/preset.ts"
 import { assembleFixture, type AssemblyFixture } from "./support/assemblySources.ts"

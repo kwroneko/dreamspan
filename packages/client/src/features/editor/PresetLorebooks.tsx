@@ -4,8 +4,8 @@
 // scans them, as it does its own books. Attaching a book or taking one off waits behind the
 // unsaved bar's Save, as a prompt added or deleted does (owner, 2026-11-02; EditorStore's held
 // changes); a book's switch is live, as a prompt's is, and Save cuts a revision.
-import type { PresetLorebook } from "@rp/shared/docs/preset.ts"
-import type { LibraryRef, RefId } from "@rp/shared/library.ts"
+import type { PresetLorebook } from "@dreamspan/shared/docs/preset.ts"
+import type { LibraryRef, RefId } from "@dreamspan/shared/library.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { Button } from "../../ui/Button.tsx"

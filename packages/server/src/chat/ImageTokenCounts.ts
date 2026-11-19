@@ -6,8 +6,8 @@
 // connection's Token counts setting (owner, 2026-11-02: "NEVER send anything to providers users
 // didn't actually choose to"; DESIGN §11). Otherwise only a local counter can count, and the
 // estimate keeps its formula, calibration or unknown basis.
-import type { UserId } from "@rp/shared/domain.ts"
-import type { ConnectionId } from "@rp/shared/providers.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { ConnectionId } from "@dreamspan/shared/providers.ts"
 import { Context, Effect, FiberSet, Layer, Semaphore } from "effect"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"

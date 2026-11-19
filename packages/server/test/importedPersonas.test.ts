@@ -5,9 +5,9 @@
 // the user can still switch to any of them. Owner-shaped synthetic data: a switch every 300
 // messages, one-to-one and group chats, branches of branches (scale: importedPersonasScale).
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { Writer } from "../src/db/Database.ts"
-import type { ChatId, EntityId, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, ForkId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect, Stream } from "effect"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished } from "./support/generation.ts"

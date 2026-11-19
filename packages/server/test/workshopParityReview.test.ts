@@ -3,8 +3,8 @@
 // grouped Undo, a finished folder import through the tool, and the file import's limits.
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
-import type { SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
@@ -332,7 +332,7 @@ describe("notes and files tools: review", () => {
                 maxDepth: null
               }
             ],
-            rp_harness: { regex_approved: true, html_scripts_approved: true }
+            dreamspan: { regex_approved: true, html_scripts_approved: true }
           }
         }
       })

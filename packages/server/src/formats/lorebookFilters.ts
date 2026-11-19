@@ -1,4 +1,4 @@
-import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
+import type { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
 import type { StLoreMapping } from "../importer/ops.ts"
 
 /** Resolve installation-local ST identities before the imported revision is stored. */

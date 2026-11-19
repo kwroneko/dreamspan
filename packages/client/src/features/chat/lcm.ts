@@ -1,6 +1,6 @@
 // What the summary screens share (DESIGN §8, ARCHITECTURE §16): how a range, a size and a
 // state are said and the boundary's text.
-import type { LcmJob, LcmState, LcmSummary } from "@rp/shared/lcm.ts"
+import type { LcmJob, LcmState, LcmSummary } from "@dreamspan/shared/lcm.ts"
 
 /** Message numbers are one-based and count the path's messages, as the context view does. */
 export const rangeText = (from: number, to: number) => (from === to ? `Message ${from}` : `Messages ${from}–${to}`)

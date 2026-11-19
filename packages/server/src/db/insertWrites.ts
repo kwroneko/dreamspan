@@ -2,9 +2,9 @@
 // decision DESIGN §3.1, 2026-10-30). The message is an ordinary slot below its anchor, marked
 // inserted, and an `insert` override places it in the fork; forks made from that fork later
 // inherit it, and no other fork shows it (displayPath.ts). One writer transaction.
-import type { SlotId } from "@rp/shared/chat.ts"
-import { NewVersion } from "@rp/shared/chat.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import { NewVersion } from "@dreamspan/shared/chat.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
@@ -12,7 +12,7 @@ import { onDisplayPath, pathPieces, placedMoves, positionOf, slotPlace } from ".
 import { selectionIn, shownIn, slotDeletedIn, versionAsShown, writeInsert, writeOverride } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { presenceAt, presenceJson } from "./participation.ts"
-import { InsertRefused } from "@rp/shared/messagesApi.ts"
+import { InsertRefused } from "@dreamspan/shared/messagesApi.ts"
 import { InsertResult, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
 import { type ChatRow, toChat, toVersion } from "./rows.ts"
 import { transaction } from "./tx.ts"

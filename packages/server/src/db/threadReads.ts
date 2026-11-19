@@ -3,10 +3,10 @@
 // fork a link to each opens (of its live forks, the one current most recently) and how many it
 // has. Everything comes from the chat's fork summaries (stored, db/forkSummaries.ts) and the
 // set's few member rows, so it costs the forks' stored rows, not their paths.
-import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import { awayAt } from "@rp/shared/knowledge.ts"
-import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
-import type { ThreadPlace, ThreadSet } from "@rp/shared/threads.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import { awayAt } from "@dreamspan/shared/knowledge.ts"
+import { type FoldableEvent, foldState } from "@dreamspan/shared/state.ts"
+import type { ThreadPlace, ThreadSet } from "@dreamspan/shared/threads.ts"
 
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"

@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 
 import { spawn } from "node:child_process"

@@ -1,4 +1,4 @@
-import type { Version } from "@rp/shared/chat.ts"
+import type { Version } from "@dreamspan/shared/chat.ts"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"

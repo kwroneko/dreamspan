@@ -1,8 +1,8 @@
 // Where a card came from: links to the archives and sites it was uploaded to, built from its
 // CCv3 `source` entries and the fields sites write into `data.extensions`. Each site is a
 // recognizer in a registry, so a plugin can add a site, replace one or disable one.
-import { CARDEX_SITE_LABELS } from "@rp/shared/cardSources.ts"
-import type { CardDoc } from "@rp/shared/docs/card.ts"
+import { CARDEX_SITE_LABELS } from "@dreamspan/shared/cardSources.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
 import { makeRegistry } from "../../registry.ts"
 
 /** The parts of a card a recognizer reads. */

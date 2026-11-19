@@ -4,9 +4,9 @@
 // on phones, a card's chats on its page and a group's on its own. It reads a page at a time, with Load more for
 // older chats; finding a chat asks the server, so it finds chats not loaded yet.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import type { Chat, ChatId, ChatSummary, EntityId } from "@rp/shared/chat.ts"
-import { chatCursor } from "@rp/shared/chatApi.ts"
-import { importState } from "@rp/shared/stImportApi.ts"
+import type { Chat, ChatId, ChatSummary, EntityId } from "@dreamspan/shared/chat.ts"
+import { chatCursor } from "@dreamspan/shared/chatApi.ts"
+import { importState } from "@dreamspan/shared/stImportApi.ts"
 import { Link, useRouterState, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type MouseEvent, useEffect, useMemo, useState } from "react"

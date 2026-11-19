@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import { textField } from "@rp/shared/editing.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { asUser } from "./support/rpc.ts"
@@ -33,7 +33,7 @@ for (const width of [1440, 390])
       test.setTimeout(180_000)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const parent = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         Effect.gen(function* () {
@@ -276,7 +276,7 @@ for (const width of [1440, 390])
     test(`fork dialog preserves long card names at ${width} ${theme}`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: theme })
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const parent = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         api.CreateCard({ label: `Long names ${width} ${theme}`, name: `Long names ${width} ${theme}` })

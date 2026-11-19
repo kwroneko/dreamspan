@@ -2,9 +2,9 @@
 // All cards, messages and books below are synthetic.
 import { readFileSync } from "node:fs"
 import { expect, test, type Page } from "@playwright/test"
-import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"

@@ -7,9 +7,9 @@ import { tokenizerText } from "../editor/tokenCounts.ts"
 // breakpoints between them; then the model, the samplers and what the provider reported.
 // Text is shown as text. Measured virtual rows keep dense contexts bounded; collapsed
 // messages render only their previews.
-import type { ChatId, ForkId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, VersionId } from "@dreamspan/shared/chat.ts"
 import { scriptLabel } from "./rewrites.tsx"
-import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
+import { BUILTIN_PRESET_LABEL } from "@dreamspan/shared/generation.ts"
 import type {
   ContextMessage,
   ContextSource,
@@ -17,7 +17,7 @@ import type {
   RunContext,
   InspectorUsage,
   SourceActivation
-} from "@rp/shared/inspectorApi.ts"
+} from "@dreamspan/shared/inspectorApi.ts"
 import { Link, Navigate, useParams, useSearch } from "@tanstack/react-router"
 import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
 import { type Reuse, ReuseLine, reuseByMessage } from "../editor/promptLines.tsx"

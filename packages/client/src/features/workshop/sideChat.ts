@@ -2,7 +2,7 @@
 // The URL names it (`workshop=<id>`), so a reload or a second browser tab shows the same one;
 // without one, or naming one that isn't beside this story any more, the newest is shown.
 // `workshop=new` is one not made yet: its composer, made by its first message (owner, 2026-11-17).
-import type { Chat } from "@rp/shared/chat.ts"
+import type { Chat } from "@dreamspan/shared/chat.ts"
 
 export const SIDE_CHAT_TAB = "workshop"
 /** The URL key naming the workshop shown. */

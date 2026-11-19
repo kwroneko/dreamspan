@@ -1,6 +1,6 @@
-import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
+import type { LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
 
-export { lorebookFields, standaloneLorebookFields } from "@rp/shared/libraryText.ts"
+export { lorebookFields, standaloneLorebookFields } from "@dreamspan/shared/libraryText.ts"
 
 /** Whether an entry's title, keys or text contain the filter, ignoring case. */
 export const entryMatches = (entry: LorebookEntry, filter: string) => {

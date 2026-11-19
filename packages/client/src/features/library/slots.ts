@@ -1,5 +1,5 @@
 import { defineSlot } from "../../slots.tsx"
-import type { EntityKind, RefId } from "@rp/shared/library.ts"
+import type { EntityKind, RefId } from "@dreamspan/shared/library.ts"
 
 export const libraryActions = defineSlot<{ kind: EntityKind; personas: boolean }>("library.actions")
 

@@ -1,6 +1,6 @@
 // Who the user is and how they're signed in (GetSession), plus login and logout, which
 // are plain HTTP because only a response can set the session cookie (ARCHITECTURE §4).
-import type { Session } from "@rp/shared/api.ts"
+import type { Session } from "@dreamspan/shared/api.ts"
 import { createContext, useContext } from "react"
 import { browserOnly, flushCopies } from "./features/editor/backup.ts"
 import { AppClient } from "./rpc.ts"

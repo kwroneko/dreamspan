@@ -3,9 +3,9 @@
 // and the reverse, so an image taken out of one fork never reaches it through a summary written
 // in another; each fork gets its own summary over the same inputs, by the existing rewrite rule.
 import { assert } from "@effect/vitest"
-import type { ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
-import type { SummaryId } from "@rp/shared/lcm.ts"
+import type { SummaryId } from "@dreamspan/shared/lcm.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { AssemblyModules } from "../src/assembler/modules.ts"
 import { serverPort } from "./support/config.ts"

@@ -4,9 +4,9 @@ import { expectTextBox } from "./support/textbox.ts"
 // history starts, the panel it opens (edit through a draft, revisions, asking for a summary
 // again), the distinct marks on summarized, dropped and hidden messages, the coverage rail,
 // the chat setting, and the context view. Each viewport runs the same flows.
-import type { ChatId, ForkId, PathEntry } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
-import type { VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, PathEntry } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
@@ -638,7 +638,7 @@ test.describe("the text of a summary's edit", () => {
     await page.evaluate(
       (copy) =>
         new Promise<void>((resolve) => {
-          const request = indexedDB.open("rp-editor-copies", 1)
+          const request = indexedDB.open("dreamspan-editor-copies", 1)
           request.onupgradeneeded = () => {
             const store = request.result.createObjectStore("copies", { keyPath: "key" })
             store.createIndex("userId", "userId")

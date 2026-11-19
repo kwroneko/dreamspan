@@ -3,10 +3,10 @@
 // until it changes; the capability has no standing Allowed. A preset prompt that merely shares a
 // skill marker's identifier is sent, or not, as it always was. Synthetic cards only.
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
-import { valueField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
+import { valueField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect, Stream } from "effect"
 import { compose, type StPrompt } from "../src/assembler/st.ts"
 import { loadSkillDescription, type Skill } from "../src/agent/toolLoading.ts"
@@ -91,7 +91,7 @@ for (const mode of ["every", "auto", "dispatcher"] as const) {
       })
       const user = yield* api.Whoami()
       const { Writer } = yield* Effect.promise(() => import("../src/db/Database.ts"))
-      const { newCardDoc } = yield* Effect.promise(() => import("@rp/shared/editing.ts"))
+      const { newCardDoc } = yield* Effect.promise(() => import("@dreamspan/shared/editing.ts"))
       const helper = yield* (yield* Writer).CreateEntity({
         userId: user.id,
         kind: "card",
@@ -100,7 +100,7 @@ for (const mode of ["every", "auto", "dispatcher"] as const) {
         schemaVersion: 1,
         origin: "import",
         sourcePath: null,
-        doc: { ...newCardDoc("Synthetic helper"), extensions: { rp_harness: { skills: [skill(first)] } } }
+        doc: { ...newCardDoc("Synthetic helper"), extensions: { dreamspan: { skills: [skill(first)] } } }
       })
       const workshop = Effect.gen(function* () {
         const chat = yield* api.CreateWorkshop({ card: helper.ref.entityId })
@@ -198,7 +198,7 @@ for (const mode of ["every", "auto", "dispatcher"] as const) {
       // shows the new words, and declined, they never reach the model.
       const refId = helper.ref.id as RefId
       const opened = yield* api.OpenEditor({ refId })
-      const field = valueField(["extensions", "rp_harness"])
+      const field = valueField(["extensions", "dreamspan"])
       const draft = yield* api.SaveEditorDraft({
         refId,
         field,

@@ -1,6 +1,6 @@
 // One cold-prefix writer per owner; SDK callbacks are promises, so the gate uses the
 // request's AbortSignal. Its lifetime is the provider attempt, including interruption.
-import type { LlmRequestId } from "@rp/shared/usage.ts"
+import type { LlmRequestId } from "@dreamspan/shared/usage.ts"
 
 export interface CacheReleasePolicy {
   readonly after: "first-chunk" | "complete"

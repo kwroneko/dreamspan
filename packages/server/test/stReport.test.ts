@@ -1,6 +1,6 @@
 // Synthetic paths: reports must retain each file's identity when names share a long prefix.
 import { describe, expect, it } from "vitest"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Report } from "../src/importer/stReport.ts"
 
 describe("ST report file links", () => {

@@ -1,6 +1,6 @@
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { useUserDraft, UserDraftStatus } from "./userDraft.tsx"
-import { cardNames } from "@rp/shared/cardNames.ts"
+import { cardNames } from "@dreamspan/shared/cardNames.ts"
 import { Effect } from "effect"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 import { checkCardNames } from "./checkCardNames.ts"

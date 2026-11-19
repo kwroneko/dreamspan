@@ -1,9 +1,9 @@
 // What the threads' surfaces say and decide, apart from React (spec/THREADS.md §5.1, §13):
 // a thread's name, which forks the Branches list leaves out, the start dialog's rows, its
 // default "Writes as", what's wrong with a request, and its line on the messages after S.
-import type { EntityId, Fork, ForkId } from "@rp/shared/chat.ts"
-import type { ThreadInfo, ThreadSet } from "@rp/shared/threads.ts"
-import type { StartThreadsInput } from "@rp/shared/threadsApi.ts"
+import type { EntityId, Fork, ForkId } from "@dreamspan/shared/chat.ts"
+import type { ThreadInfo, ThreadSet } from "@dreamspan/shared/threads.ts"
+import type { StartThreadsInput } from "@dreamspan/shared/threadsApi.ts"
 import { listNames } from "../chat/cast.ts"
 
 /** A thread as people read it: its name, else its characters' names, else "Thread 2". */

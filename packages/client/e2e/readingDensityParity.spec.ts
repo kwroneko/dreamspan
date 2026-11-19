@@ -4,8 +4,8 @@ import { readFileSync, mkdirSync } from "node:fs"
 import { extname, join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { SendResult } from "@rp/shared/chatApi.ts"
-import type { SlotId } from "@rp/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -145,7 +145,7 @@ for (const width of [1440, 390])
           reducedMotion: "reduce",
           permissions: ["local-network-access"]
         })
-        await context.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+        await context.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
         await apiLogin(context.request, server(), ADMIN.handle, ADMIN.password)
         const page = await context.newPage()
         await page.route("**/healthz", async (route) => {

@@ -7,8 +7,8 @@
 import { mkdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { openPanel, panelTab } from "./support/panel.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
@@ -128,7 +128,7 @@ const shoot = async (page: Page, name: string) => {
 const open = async (page: Page, width: number, height: number, theme: "light" | "dark" = "light", path?: string) => {
   await page.setViewportSize({ width, height })
   await page.emulateMedia({ colorScheme: theme })
-  await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+  await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}${path ?? `/chats/${chatId}`}`)
   // A loaded host can take a while to open the chat.

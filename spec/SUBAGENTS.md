@@ -129,7 +129,7 @@ Story types are in §9, and only if the owner accepts them.
 ### 3.2 Background and parallel children
 
 - `background: true` returns at once: "Started cache TTLs (research-2). Its report will reach you when it's done." The parent goes on.
-- **Reports arrive as harness messages.** When a background child ends, its report is queued into the parent with pi-agent-core 1.0.3's `steer()` (the same mechanism reference-harness uses for interjections), as an `rpHarness` user message: "Subagent research-2 (cache TTLs) finished:" and the report in the data envelope. It reaches the model at the parent's next request boundary and is part of the flushed transcript, so the inspector and Resume see exactly where it arrived.
+- **Reports arrive as harness messages.** When a background child ends, its report is queued into the parent with pi-agent-core 1.0.3's `steer()` (the same mechanism reference-harness uses for interjections), as an `rpApp` user message: "Subagent research-2 (cache TTLs) finished:" and the report in the data envelope. It reaches the model at the parent's next request boundary and is part of the flushed transcript, so the inspector and Resume see exactly where it arrived.
 - **A run doesn't end while its children run.** When the parent's model ends its turn (a final text) with background children still running, the run posts that text as a message (contract `several`, WORKSHOP §2.3), stays `running` with no provider request open, and the header badge says "Waiting for 2 subagents". Each report then arrives through `followUp()` and the run continues, so the assistant can use the results and write further messages. Stop ends the wait. This is Claude Code's "completion notification in a later turn", kept inside one run so that nothing reaches the model that isn't in its transcript.
 - **Parallel work** is several background children. They run at once, within the caps of §6.3.
 
@@ -144,7 +144,7 @@ Story types are in §9, and only if the owner accepts them.
 Owner [D]: "Claude code can also message its agents continuously."
 
 - **`message_agent { agent, message, background? }`** (parent): `agent` is a handle from an earlier result (`research-2`) or the child's `name`.
-  - **To a running child**: the message is steered in as an `rpHarness` user message, "Message from the assistant that started you:" and the text, at its next request boundary. The tool returns "Delivered to research-2." at once.
+  - **To a running child**: the message is steered in as an `rpApp` user message, "Message from the assistant that started you:" and the text, at its next request boundary. The tool returns "Delivered to research-2." at once.
   - **To a finished child**: a **continuation**, a new child rollout with `parent_rollout_id` = the finished one (the built meaning: carried on from) and `spawned_by_*` = the current parent call. Its request is the previous child's last request plus its whole transcript plus the new message, so the provider reads it from cache and the child remembers everything it read (WORKSHOP §2.4's continuity, applied to a child). Foreground by default, returning the new report; `background: true` works as in §3.2.
   - A stopped or failed child is continued the same way (it resumes invisibly first, §8, then takes the message).
 - **`report_progress { text }`** (child, every type): a one-line status shown in the child's row at once ("Read 12 of 40 files"). For a **background** child it is also steered into the parent as a harness message, at most one per parent request (later ones replace an undelivered earlier one), so the parent can react. A foreground child's progress stays in the row: the parent is waiting in the call and has nothing to react with.
@@ -258,7 +258,7 @@ Checked against DESIGN §7.1: a **per-character agent** (one rollout per charact
 
 ## 10. Types from plugins and users (self-customizable)
 
-- **`subagentTypes`** is a scoped server registry (`@rp/shared/registry.ts`), like `rolloutTools`: a plugin adds, replaces or disables types; a disabled built-in type isn't offered and its running children finish. Each type's instructions text is an ordinary prompt the user can edit.
+- **`subagentTypes`** is a scoped server registry (`@dreamspan/shared/registry.ts`), like `rolloutTools`: a plugin adds, replaces or disables types; a disabled built-in type isn't offered and its running children finish. Each type's instructions text is an ordinary prompt the user can edit.
 - **User types**: Settings → Assistant tools → Subagents lists the types with Edit and **New type** (label, explanation, instructions, tools from a checklist of what the kinds offer, default alias, context, isolation, caps). They're stored in the settings registry (`subagents.types`), so no table. A user type can't name a tool its kinds don't have, and its tools still narrow to the parent's (§6.1).
 - **The workshop agent can write a type** through `change_setting` (WORKSHOP §3.2) if the setting opts in, as a `setup` effect with Undo, but the model list (§5) and the caps are excluded from agent writes: those are consent and spend, which only the user changes.
 - The `agent` and `message_agent` tools, the runner and the row are registered parts too (`rolloutTools`, `stepActions`, `reasoningPanels`), replaceable like the rest.

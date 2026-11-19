@@ -37,10 +37,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, EntityId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import { findStRoots } from "@rp/shared/stFolder.ts"
-import { textField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { ChatId, EntityId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import { findStRoots } from "@dreamspan/shared/stFolder.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { layoutAudit, expectLayout } from "./support/layoutAudit.ts"
 import { loginCookie, withCookie, type Client } from "./support/rpc.ts"
 import { ADMIN, apiLogin, startServer, type TestServer, withAdmin } from "./support/server.ts"
@@ -241,7 +241,7 @@ for (const width of [1440, 390])
         const user = await withCookie(server, "", (api) => api.Whoami())
         await page.evaluate(async (userId) => {
           const db = await new Promise<IDBDatabase>((resolve, reject) => {
-            const request = indexedDB.open("rp-editor-copies", 1)
+            const request = indexedDB.open("dreamspan-editor-copies", 1)
             request.onsuccess = () => resolve(request.result)
             request.onerror = () => reject(request.error)
           })
@@ -261,7 +261,7 @@ for (const width of [1440, 390])
             tx.oncomplete = () => resolve()
           })
           db.close()
-          window.dispatchEvent(new Event("rp-browser-copies"))
+          window.dispatchEvent(new Event("dreamspan-browser-copies"))
         }, user.id)
         await expect(warning).toHaveText("2 unsaved texts")
         const tiles = nav.locator("a").first()
@@ -2456,7 +2456,7 @@ test.describe("revision dialogs", () => {
         await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
         await page.setViewportSize({ width, height: 960 })
         await page.emulateMedia({ colorScheme: theme })
-        await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+        await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
         const findings: unknown[] = []
         const gaps: unknown[] = []
         const geometry: unknown[] = []

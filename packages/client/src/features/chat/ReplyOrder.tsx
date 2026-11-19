@@ -11,7 +11,7 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { oneReplyAtATime, replyPolicies, replyPolicyOf } from "./replyPolicy.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import type { PendingChat } from "./pendingChat.ts"
 import type { ChatSession } from "./session.ts"
 

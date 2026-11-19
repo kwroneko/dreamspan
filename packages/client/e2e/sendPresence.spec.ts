@@ -3,7 +3,7 @@
 // belongs to the chat it was set in. At 1440 and 390, light and dark, with the layout audit.
 // Nothing is generated here; every card is made up.
 import { expect, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"

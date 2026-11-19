@@ -7,7 +7,7 @@ import {
   type ReplySections,
   type ReplySectionSettings,
   sectionsDisplay
-} from "@rp/shared/replySections.ts"
+} from "@dreamspan/shared/replySections.ts"
 import type { GenerationChunk } from "../src/chat/Generator.ts"
 import { compilePairs, parseReply, settleHeld } from "../src/chat/replySections.ts"
 

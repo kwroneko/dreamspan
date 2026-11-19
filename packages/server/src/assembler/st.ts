@@ -1,7 +1,7 @@
 // SillyTavern 1.19's chat-completion prompt building, function by function (ARCHITECTURE §15,
 // "The one assembly path"; each function names the ST one it follows).
-import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
-import { budgetTokens, type ImageEstimate } from "@rp/shared/imageTokens.ts"
+import type { LegacyPresetDoc as PresetDoc } from "@dreamspan/shared/docs/preset.ts"
+import { budgetTokens, type ImageEstimate } from "@dreamspan/shared/imageTokens.ts"
 import { AssemblyFailed, type RequestImage, type Role } from "./types.ts"
 
 /** A prompt of the collection, as ST's PromptManager prepares it. */

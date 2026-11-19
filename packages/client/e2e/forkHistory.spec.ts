@@ -5,7 +5,7 @@
 // entry here is made up.
 import { mkdirSync } from "node:fs"
 import { expect, type Locator, type Page, test, type TestInfo } from "@playwright/test"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { saveField, seedPresetFork } from "./support/forkMerge.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -46,7 +46,7 @@ for (const width of [1440, 390])
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const { fork, parent } = await seedPresetFork(server(), ` ${width} ${theme}`)
       const { history, rows } = await openHistory(page, fork.id)

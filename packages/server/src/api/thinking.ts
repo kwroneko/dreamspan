@@ -1,7 +1,7 @@
-// Hiding a version's thinking from the model (@rp/shared/thinkingApi.ts). Like hiding a
+// Hiding a version's thinking from the model (@dreamspan/shared/thinkingApi.ts). Like hiding a
 // message, it's an edit: it changes what's sent next and starts nothing.
-import { CurrentUser } from "@rp/shared/api.ts"
-import type { ForkId, ThinkingPart, VersionId } from "@rp/shared/chat.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import type { ForkId, ThinkingPart, VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Reader, Writer } from "../db/Database.ts"

@@ -1,11 +1,11 @@
 // Workshop turn continuity is a delta from reference-harness's loadCompletedSessionMaterial:
 // retain the frozen request and the WHOLE transcript; verify the shown path before reuse.
 import { isDeepStrictEqual } from "node:util"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { PathWindow } from "@rp/shared/chatApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { PathWindow } from "@dreamspan/shared/chatApi.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { ChatId, ForkId, PathEntry, StoryAt, VersionId } from "@rp/shared/chat.ts"
-import type { RolloutStep } from "@rp/shared/agent.ts"
+import type { ChatId, ForkId, PathEntry, StoryAt, VersionId } from "@dreamspan/shared/chat.ts"
+import type { RolloutStep } from "@dreamspan/shared/agent.ts"
 import { Effect } from "effect"
 import { ASSEMBLER_VERSION, type ContextSnapshot } from "../assembler/types.ts"
 import type { Reader } from "../db/Database.ts"

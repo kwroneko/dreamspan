@@ -4,7 +4,7 @@
 // is its own tab list over the same panels, so a character named "Model" is never one of the tools.
 import { Tabs as BaseTabs } from "@base-ui/react/tabs"
 import { useLayoutEffect, useRef, useState } from "react"
-import type { AvatarCrop } from "@rp/shared/media.ts"
+import type { AvatarCrop } from "@dreamspan/shared/media.ts"
 import { Avatar } from "./Avatar.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
 import { UnsavedDot } from "./UnsavedChanges.tsx"

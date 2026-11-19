@@ -51,7 +51,7 @@ for (const width of [1440, 390])
     test(`a card takes a new version of its file wholesale ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 960 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const response = await page.request.post(`${server().url}/library/import?name=wren.png`, {
         headers: { "content-type": "application/octet-stream", origin: server().url },

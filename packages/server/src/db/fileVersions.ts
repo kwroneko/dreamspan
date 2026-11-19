@@ -1,14 +1,14 @@
 // File versions (spec/FILES-AND-ENVIRONMENT.md §1.3, §10): an account's earlier file contents,
 // in the content-addressed media store. The bytes are written first, on the main thread
 // (importer/mediaFiles.ts, held from the sweep), then recorded here in one transaction.
-import { uuidv7 } from "@rp/shared/id.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { mediaPath } from "./media.ts"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
-import { EffectUndoRefused } from "@rp/shared/workshopApi.ts"
+import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
 
 export const makeFileVersionWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient

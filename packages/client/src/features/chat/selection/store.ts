@@ -2,8 +2,8 @@
 // One store per open chat, in the tab only: a selection is a moment's work, gone on reload, as a
 // confirmation is. Each row reads only its own tick (`ticked`), so ticking or a range of 500
 // re-renders the rows whose ticks change, never the message list. Hide and Show (selecthide1) use it too.
-import type { ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
-import { MULTI_DELETE_LIMIT } from "@rp/shared/bin.ts"
+import type { ForkId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
+import { MULTI_DELETE_LIMIT } from "@dreamspan/shared/bin.ts"
 import type { ChatSession } from "../session.ts"
 import { positionOf } from "../position.ts"
 

@@ -3,7 +3,7 @@
 // editor says the default is sent and adds them on request. Tools on, This chat offers "Model
 // requests per reply", saved for the chat. Nothing is generated; every card is made up.
 import { expect, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"

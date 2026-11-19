@@ -14,13 +14,13 @@ import {
   summaryPreset,
   type SummaryPreset,
   summaryWords
-} from "@rp/shared/lcmSettings.ts"
-import type { LcmSettingsView } from "@rp/shared/lcm.ts"
+} from "@dreamspan/shared/lcmSettings.ts"
+import type { LcmSettingsView } from "@dreamspan/shared/lcm.ts"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { Field, Fieldset, Input } from "../../ui/Field.tsx"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { usePresetSelection } from "../pickers/presetSelection.ts"
 import { PresetPickerPopover } from "../pickers/PresetPicker.tsx"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"

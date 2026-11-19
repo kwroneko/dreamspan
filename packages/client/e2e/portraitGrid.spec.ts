@@ -2,7 +2,7 @@
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
@@ -84,7 +84,7 @@ for (const mode of ["1440", "390", "wide-panel"] as const)
       }
       await page.setViewportSize({ width: mode === "390" ? 390 : mode === "wide-panel" ? 1920 : 1440, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await page.goto(server().url)
       const main = page.getByRole("main")
@@ -169,7 +169,7 @@ for (const width of [1440, 390])
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const results: Record<string, Awaited<ReturnType<typeof measure>>> = {}
       await page.goto(`${server().url}/library`)

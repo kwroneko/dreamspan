@@ -1,5 +1,5 @@
-import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
-import { makeMacroRegistry } from "@rp/shared/macros/registry.ts"
+import { registerBuiltinMacros } from "@dreamspan/shared/macros/builtins.ts"
+import { makeMacroRegistry } from "@dreamspan/shared/macros/registry.ts"
 import { Effect, Scope } from "effect"
 
 /** Shared by display and editor highlighting; plugin overrides use the same registry. */

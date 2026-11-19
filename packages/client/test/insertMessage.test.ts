@@ -1,9 +1,9 @@
 // Inserting messages in the client (spec/MESSAGE-INSERT.md §4, unit 9): which message actions
 // are offered where, the editor's estimate lines and default speaker, and how an open chat
 // places an inserted message and renumbers what follows it, whichever tab inserted it.
-import type { Chat, ChatId, EntityId, ForkId, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
-import type { ChatEvent, PathWindow } from "@rp/shared/chatApi.ts"
-import { Cast } from "@rp/shared/chatSetupApi.ts"
+import type { Chat, ChatId, EntityId, ForkId, PathEntry, SlotId, Version, VersionId } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent, PathWindow } from "@dreamspan/shared/chatApi.ts"
+import { Cast } from "@dreamspan/shared/chatSetupApi.ts"
 import { AtomRegistry } from "effect/reactivity"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 

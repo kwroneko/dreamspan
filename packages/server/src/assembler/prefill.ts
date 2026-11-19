@@ -1,6 +1,6 @@
 // Provider-specific prerequisites, resolved with the model independently of context budgeting.
 import { estimateTokens } from "./st.ts"
-import { type EffectiveModel, routeFailure } from "@rp/shared/providers.ts"
+import { type EffectiveModel, routeFailure } from "@dreamspan/shared/providers.ts"
 import type { ModelInput } from "./types.ts"
 
 /**

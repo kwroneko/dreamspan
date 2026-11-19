@@ -1,8 +1,8 @@
 // Calls the typed storage operations using the worker's SQL service, captured before activation.
 import { Effect, Option } from "effect"
 import { SqlClient } from "effect/sql"
-import type { UserId } from "@rp/shared/domain.ts"
-import { PluginRejected } from "@rp/shared/plugins.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { PluginRejected } from "@dreamspan/shared/plugins.ts"
 import type { PrivateStorage } from "../../../plugin-api/src/common.ts"
 import { makePluginReadHandlers, makePluginWriteHandlers, PluginDataGrant } from "../db/pluginData.ts"
 export const workerStorage = (pluginId: string): Effect.Effect<PrivateStorage> =>

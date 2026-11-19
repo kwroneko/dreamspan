@@ -3,7 +3,7 @@
 // another, changing no fork and leaving every composer where it was. Cross-user access is in
 // the isolation matrix.
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatId, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { client, outcome, posted, testConfig, typeInto, withServer } from "./support/config.ts"
 

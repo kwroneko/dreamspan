@@ -11,7 +11,7 @@ import type {
   SourceQuery,
   SourceTag,
   SourceSuggestions
-} from "@rp/shared/cardSources.ts"
+} from "@dreamspan/shared/cardSources.ts"
 import type { Effect } from "effect"
 
 /** A response, read whole under its cap. */

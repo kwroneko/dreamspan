@@ -7,8 +7,8 @@
 //   npx vitest run --project server-slow packages/server/test/separateContextsScale.test.ts
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { assert, it } from "@effect/vitest"
-import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
+import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { StateEventData } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { AssemblySources } from "../src/assembler/pipeline.ts"

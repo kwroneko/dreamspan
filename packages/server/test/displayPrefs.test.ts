@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import { CHAT_WIDTH, DEFAULT_DISPLAY_PREFS, DisplayPrefsChange } from "@rp/shared/chatApi.ts"
+import { CHAT_WIDTH, DEFAULT_DISPLAY_PREFS, DisplayPrefsChange } from "@dreamspan/shared/chatApi.ts"
 import { Effect, Schema } from "effect"
 import { client, testConfig, withServer } from "./support/config.ts"
 import { generateReply, eventually, finished } from "./support/generation.ts"

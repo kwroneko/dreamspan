@@ -4,7 +4,7 @@
 // ones come in, from the join on, on the merging branch only; the source keeps its own. Proven on
 // the exact requests the characters' replies send. Synthetic data only.
 import { assert, describe, it } from "@effect/vitest"
-import type { EntityId, ForkId } from "@rp/shared/chat.ts"
+import type { EntityId, ForkId } from "@dreamspan/shared/chat.ts"
 import { Effect, Exit } from "effect"
 import { runMergeStory, sentText } from "./support/mergeOrigin.ts"
 

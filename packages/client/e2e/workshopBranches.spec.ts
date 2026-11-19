@@ -5,7 +5,7 @@
 // it. At 1440 and 390; with LAYOUT_AUDIT=1 each surface is audited. Synthetic data, no provider.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { messageMenu } from "./support/message.ts"
 import { asUser } from "./support/rpc.ts"

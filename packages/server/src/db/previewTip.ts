@@ -1,7 +1,7 @@
 // A fork's last message start for a list, with a greeting's macros replaced as the chat shows
 // them (db/previewText.ts): against the cast before the message, in that fork.
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { chatStateAt, previewNamesOf } from "./cards.ts"

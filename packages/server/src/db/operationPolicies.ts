@@ -1,23 +1,23 @@
 import { historyFork } from "./historyShared.ts"
 import { onForkPath } from "./forks.ts"
 import { generatingIn } from "./forkState.ts"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 // Worker-only undo policies for operation exposures. No non-database work in a transaction.
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { makeRegistry } from "@rp/shared/registry.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { User } from "@rp/shared/domain.ts"
-import type { ChatId, SlotId, ForkId } from "@rp/shared/chat.ts"
-import { foldState } from "@rp/shared/state.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { User } from "@dreamspan/shared/domain.ts"
+import type { ChatId, SlotId, ForkId } from "@dreamspan/shared/chat.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { settingsRegistry, readSetting, writeSetting } from "./settings.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
 import type { Rpc } from "effect/rpc"
 import type { OpsOf } from "./opsOf.ts"
-import type { Doc, RefId } from "@rp/shared/library.ts"
-import type { StoredStateEventData } from "@rp/shared/state.ts"
-import { EffectUndoRefused } from "@rp/shared/workshopApi.ts"
+import type { Doc, RefId } from "@dreamspan/shared/library.ts"
+import type { StoredStateEventData } from "@dreamspan/shared/state.ts"
+import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
 import { makeLibraryQueries } from "./library.ts"
 
 export const refuseOperation = (message: string) => new EffectUndoRefused({ message })
@@ -551,7 +551,7 @@ export const operationPolicies = makeRegistry<OperationPolicy>([
 
 export const operationInfo = (
   sql: SqlClient.SqlClient,
-  input: { userId: UserId; chatId?: ChatId; storyAt?: import("@rp/shared/chat.ts").StoryAt }
+  input: { userId: UserId; chatId?: ChatId; storyAt?: import("@dreamspan/shared/chat.ts").StoryAt }
 ) =>
   Effect.gen(function* () {
     const [row] = yield* sql<{

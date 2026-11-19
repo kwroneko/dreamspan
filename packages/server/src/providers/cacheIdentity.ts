@@ -2,7 +2,7 @@
 // Raw tools, images and routing data are hashed here in memory; only digests leave this module.
 import { createHash } from "node:crypto"
 import { Predicate } from "effect"
-import { canonicalJson } from "@rp/shared/editing.ts"
+import { canonicalJson } from "@dreamspan/shared/editing.ts"
 import type { WireContext } from "../assembler/types.ts"
 import { sentWire } from "../assembler/wire.ts"
 

@@ -1,5 +1,5 @@
-import type { VersionId } from "@rp/shared/chat.ts"
-import { versionMetricsOf } from "@rp/shared/inspectorApi.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
+import { versionMetricsOf } from "@dreamspan/shared/inspectorApi.ts"
 import { afterEach, expect, it, vi } from "vitest"
 import { MetricsLoader } from "../src/features/chat/metricsLoader.ts"
 import type { ChatSession } from "../src/features/chat/session.ts"

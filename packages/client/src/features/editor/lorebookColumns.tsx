@@ -2,9 +2,9 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 // The lorebook table's default columns, sort orders and row actions (lorebookTable.ts), as
 // SillyTavern's World Info editor has them: strategy, position, depth, order and trigger %
 // inline, and duplicate, copy or move to another book, and delete in a row's menu.
-import type { LorebookDoc, LorebookEntry } from "@rp/shared/docs/lorebook.ts"
-import { type FieldPath, valueField } from "@rp/shared/editing.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
+import type { LorebookDoc, LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
+import { type FieldPath, valueField } from "@dreamspan/shared/editing.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"

@@ -9,8 +9,8 @@ import {
   DEFAULT_SECTION_PAIRS,
   type ReplySectionSettings,
   type SectionPair
-} from "@rp/shared/replySections.ts"
-import { valueField } from "@rp/shared/editing.ts"
+} from "@dreamspan/shared/replySections.ts"
+import { valueField } from "@dreamspan/shared/editing.ts"
 import { FieldRevert } from "./FieldRevert.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { useEffect, useRef, useState } from "react"

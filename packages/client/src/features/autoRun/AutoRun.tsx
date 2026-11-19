@@ -3,8 +3,8 @@
 // Stop. The row is also the run's driver: it is the only thing that starts a reply, and it only
 // does while it is on screen in the tab that started the run.
 import { useAtomValue } from "@effect/atom-react"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { VersionId } from "@rp/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
 import { useEffect, useId, useRef, useSyncExternalStore } from "react"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useChatPlaceKey } from "../chat/chatPlace.ts"

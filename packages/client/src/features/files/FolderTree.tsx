@@ -1,7 +1,7 @@
 // The folders as a tree beside the list, where there's room (spec/FILES-AND-ENVIRONMENT.md §8.1):
 // each folder opens one level at a time, read when it's first opened; the folders down to the one
 // shown are open. A click shows that folder in the list.
-import { crumbsOf, FILES_TOP, isWithin, joinPath, nameOf, sortEntries } from "@rp/shared/files.ts"
+import { crumbsOf, FILES_TOP, isWithin, joinPath, nameOf, sortEntries } from "@dreamspan/shared/files.ts"
 import { useEffect, useRef, useState } from "react"
 import { Icon } from "../../ui/Icon.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"

@@ -1,4 +1,4 @@
-import type { DisplayPrefsChange } from "@rp/shared/chatApi.ts"
+import type { DisplayPrefsChange } from "@dreamspan/shared/chatApi.ts"
 
 // Shared by the account's consumers in one atom registry. Reads carry the last
 // acknowledged write at request start, so an older read cannot retire newer choices.

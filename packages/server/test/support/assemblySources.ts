@@ -1,12 +1,12 @@
 // The assembler's sources over an in-memory chat, for tests and the ST harness: the same
 // pipeline the reader worker runs, without a database.
-import type { CardDoc } from "@rp/shared/docs/card.ts"
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
-import type { ReplySections } from "@rp/shared/replySections.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
+import type { ReplySections } from "@dreamspan/shared/replySections.ts"
 import type { RewriteOptions } from "../../src/assembler/scriptSources.ts"
-import type { NoteDoc } from "@rp/shared/docs/note.ts"
-import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
-import type { FoldableEvent } from "@rp/shared/state.ts"
+import type { NoteDoc } from "@dreamspan/shared/docs/note.ts"
+import type { LegacyPresetDoc as PresetDoc } from "@dreamspan/shared/docs/preset.ts"
+import type { FoldableEvent } from "@dreamspan/shared/state.ts"
 import { Effect, Layer, Scope } from "effect"
 import { type Assembler, makeAssembler } from "../../src/assembler/assembler.ts"
 import { AssemblySources, type PositionedEvent } from "../../src/assembler/pipeline.ts"
@@ -44,7 +44,7 @@ export interface AssemblyFixture {
   readonly historyStart?: ContextSnapshot["historyStart"] | null
   readonly chatId?: string
   /** The path, root first; the message being generated comes after it. */
-  readonly summaries?: ReadonlyArray<import("@rp/shared/lcm.ts").Summary>
+  readonly summaries?: ReadonlyArray<import("@dreamspan/shared/lcm.ts").Summary>
   readonly messages: ReadonlyArray<FixtureMessage>
   readonly target?: {
     readonly speaker?: string
@@ -70,7 +70,7 @@ export interface AssemblyFixture {
   /** Each binding the model stage asked for, in order (the fixture's `model` answers them all). */
   readonly modelAsked?: Array<{ readonly connection: string; readonly model: string } | null>
   /** The account's summary defaults; absent: the source isn't offered. */
-  readonly lcmDefaults?: import("@rp/shared/lcmSettings.ts").LcmDefaults | null
+  readonly lcmDefaults?: import("@dreamspan/shared/lcmSettings.ts").LcmDefaults | null
   readonly now?: number
 }
 

@@ -12,7 +12,7 @@ for (const width of [1440, 390])
     test(`custom cost formulas ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await page.goto(`${server().url}/settings/costs`)
       await expect(page.getByRole("heading", { level: 1, name: "Costs", exact: true })).toBeVisible()

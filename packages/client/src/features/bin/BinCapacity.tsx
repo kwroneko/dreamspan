@@ -1,4 +1,4 @@
-import type { BinLimits } from "@rp/shared/bin.ts"
+import type { BinLimits } from "@dreamspan/shared/bin.ts"
 import { useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"

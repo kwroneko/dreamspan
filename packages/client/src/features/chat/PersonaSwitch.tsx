@@ -1,7 +1,7 @@
 // Who you play in this chat (`{{user}}`, DESIGN §2.2), switched from the This chat, Cast and
 // persona tabs alike: one persona, in one write, from the latest message on, on this branch.
 // A card not in the chat joins; a persona-folder card played until now leaves.
-import type { CastCard } from "@rp/shared/chat.ts"
+import type { CastCard } from "@dreamspan/shared/chat.ts"
 import { type ReactNode, useCallback, useMemo, useState, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
 import { castView, CastContext } from "./cast.ts"

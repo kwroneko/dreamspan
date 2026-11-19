@@ -8,7 +8,7 @@
 import { createServer, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
 import { expect, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { showActions } from "./support/message.ts"
@@ -147,7 +147,7 @@ for (const width of [1440, 390])
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), colorScheme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), colorScheme)
       const chatId = await chatWithMira(`${width} ${colorScheme}`)
       const other = await chatWithMira(`${width} ${colorScheme} other`)
       await page.goto(`${server().url}/chats/${chatId}`)

@@ -5,8 +5,8 @@
 // the Pier, neither reads the other's in its reply, and only the shared chain (a narrator's)
 // holds both. Nothing is blended into a character's view. Synthetic data only.
 import { assert, describe } from "@effect/vitest"
-import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
+import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { cardDoc } from "./support/docs.ts"

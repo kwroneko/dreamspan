@@ -2,8 +2,8 @@
 // its step's row and in the Changes tab. Undo is refused once the item changed since (an edit by
 // hand, say); the reason shows with Open beside it, to look at its history first.
 import { syncClientPlugins } from "../../pluginLifecycle.ts"
-import { type StoryScope as Scope } from "@rp/shared/branchNaming.ts"
-import type { StoryAt } from "@rp/shared/chat.ts"
+import { type StoryScope as Scope } from "@dreamspan/shared/branchNaming.ts"
+import type { StoryAt } from "@dreamspan/shared/chat.ts"
 import { StoryScope } from "./StoryScope.tsx"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"

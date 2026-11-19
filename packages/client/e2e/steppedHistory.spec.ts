@@ -1,8 +1,8 @@
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, ForkId, PathEntry } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { ChatId, ForkId, PathEntry } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
 import { messageMenu } from "./support/message.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -171,7 +171,7 @@ for (const width of [1440, 390])
     }) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       // Before the summarized test below, which summarizes these messages in this chat: here they're
       // only dropped. The imported branch, named.

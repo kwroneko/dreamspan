@@ -1,4 +1,4 @@
-import { deletedSince } from "@rp/shared/drafts.ts"
+import { deletedSince } from "@dreamspan/shared/drafts.ts"
 // The composer's text as a server draft (DESIGN §6.2): one per fork, saved while the
 // user types, read back on a reload or another device, with its undo history on the server.
 // It follows the editors' rules (features/editor/store.ts): a copy in this browser while a
@@ -16,9 +16,9 @@ import { deletedSince } from "@rp/shared/drafts.ts"
 // - A copy in this browser is deleted only once the server has acknowledged it, or when a
 //   newer copy of the same draft, typed from its text, replaces it.
 // Server calls run one at a time, in order.
-import type { ForkId } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
-import { Draft, type DraftState } from "@rp/shared/drafts.ts"
+import type { ForkId } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
+import { Draft, type DraftState } from "@dreamspan/shared/drafts.ts"
 import type { ReplayConflict } from "../editor/backup.ts"
 import type { AppError } from "../../errors.ts"
 import {

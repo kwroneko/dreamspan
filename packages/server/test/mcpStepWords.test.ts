@@ -1,7 +1,7 @@
 // A message's step summary (spec/WORKSHOP-CONTEXT.md §3.2) goes to the model outside the data
 // boundary, so an MCP tool is named there by its exposed name, never the server's title (spec/MCP.md §9).
 import { assert, describe, it } from "@effect/vitest"
-import type { RolloutStep } from "@rp/shared/agent.ts"
+import type { RolloutStep } from "@dreamspan/shared/agent.ts"
 import { stepWords } from "../src/agent/continuity.ts"
 
 const tool = (extra: Record<string, unknown>) =>

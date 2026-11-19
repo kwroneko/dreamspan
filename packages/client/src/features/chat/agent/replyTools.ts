@@ -1,5 +1,5 @@
 // Registered tools for the independent Tools setting and Model may change list.
-import type { ReplyTools } from "@rp/shared/agent.ts"
+import type { ReplyTools } from "@dreamspan/shared/agent.ts"
 import { useEffect, useState } from "react"
 import type { ChatSession } from "../session.ts"
 

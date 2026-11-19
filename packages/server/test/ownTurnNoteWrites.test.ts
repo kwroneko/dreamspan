@@ -1,5 +1,5 @@
 import { assert, layer } from "@effect/vitest"
-import { readNoteCondition } from "@rp/shared/docs/note.ts"
+import { readNoteCondition } from "@dreamspan/shared/docs/note.ts"
 import { Effect } from "effect"
 import { Writer, Reader } from "../src/db/Database.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"

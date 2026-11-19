@@ -296,7 +296,7 @@ test("composer and Enter sends display at desktop and phone widths in both theme
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme as "light" | "dark" })
       await page.goto(`${server().url}/chats/${chat.id}`)
-      await page.evaluate((theme) => localStorage.setItem("rp.theme", theme), theme)
+      await page.evaluate((theme) => localStorage.setItem("dreamspan.theme", theme), theme)
       await page.reload()
       await expect(page.getByTestId("composer")).toBeEditable()
       await page.getByTestId("composer").fill("We should leave before the watch changes.\nThere is still time.")

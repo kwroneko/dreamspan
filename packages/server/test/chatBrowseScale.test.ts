@@ -3,7 +3,7 @@
 import { writeFileSync } from "node:fs"
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { CHAT_SORTS } from "@rp/shared/chatBrowse.ts"
+import { CHAT_SORTS } from "@dreamspan/shared/chatBrowse.ts"
 import { Generator } from "../src/chat/Generator.ts"
 import { FORK_SUMMARY_FORMAT } from "../src/db/forkSummaries.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

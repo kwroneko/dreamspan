@@ -1,8 +1,8 @@
 // The MCP server RPCs (McpApi, spec/MCP.md §13.1): the user's own connections, their secrets,
 // Check, the allow list and the call ledger. Every one acts as the signed-in user on what they own.
-import { CurrentUser } from "@rp/shared/api.ts"
-import { MCP_CALLS_PAGE } from "@rp/shared/mcp.ts"
-import type { McpApi } from "@rp/shared/mcpApi.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import { MCP_CALLS_PAGE } from "@dreamspan/shared/mcp.ts"
+import type { McpApi } from "@dreamspan/shared/mcpApi.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { McpConnections } from "../mcp/McpConnections.ts"

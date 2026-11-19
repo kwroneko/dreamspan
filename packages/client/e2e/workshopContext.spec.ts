@@ -59,7 +59,7 @@ for (const width of [1440, 390])
     test(`window, conversion and workshop persona at ${width} ${theme}`, async ({ page }, info) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const shot = async (name: string) => {
         if (shots) {

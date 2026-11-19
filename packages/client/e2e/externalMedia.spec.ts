@@ -1,7 +1,7 @@
 // Consent in the existing message note, chat settings, Interface and card editor. Synthetic
 // media responses are intercepted at the app route; server tests exercise the actual proxy.
 import { expect, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { SYNTHETIC_TTF } from "./support/syntheticFont.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"
@@ -19,7 +19,7 @@ for (const width of [1440, 390])
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         api.SetExternalMedia({ target: { _tag: "Default" }, allow: false })

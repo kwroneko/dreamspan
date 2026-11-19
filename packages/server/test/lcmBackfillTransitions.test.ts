@@ -6,7 +6,7 @@ import { environment } from "./support/backfillReview.ts"
 import { lcmTest } from "./support/lcmHarness.ts"
 import { completionChunks, sse } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
-import { LcmEstimateChanged } from "@rp/shared/lcm.ts"
+import { LcmEstimateChanged } from "@dreamspan/shared/lcm.ts"
 import { posted } from "./support/config.ts"
 const flat = (x: unknown) =>
   typeof x === "string" ? x : ((x ?? []) as Array<{ text?: string }>).map((p) => p.text ?? "").join("")
@@ -63,7 +63,7 @@ lcmTest("concurrent leaf and condensation requests keep charged plus reserved sp
     const a = { chatId: p.chatId, leafSlotId: p.leaf }
     yield* h.api.EnableLcm({ ...a, choice: "scratch" })
     const pairs: Array<{ levels: number[]; spent: number | null; cap: number | null }> = []
-    let state: import("@rp/shared/lcm.ts").LcmBackfill | null = null
+    let state: import("@dreamspan/shared/lcm.ts").LcmBackfill | null = null
     for (let pass = 0; pass < 100; pass++) {
       yield* h.summarizer.planNow({ userId: h.userId, ...a }, pass === 0 ? "reply" : "completion")
       const j1 = yield* h.writer.ClaimSummaryJob({ userId: h.userId })

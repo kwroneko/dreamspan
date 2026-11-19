@@ -1,7 +1,7 @@
 // A card's Model may change list (spec/AGENTIC.md §4.3, `agent_editable_fields`): which of its
 // prompt fields agent replies may change with `edit_card`, in every chat that doesn't decide for
 // itself. Saved with the card; only the user's own edit sets it (a file or merge never does).
-import { REPLACEABLE_CARD_FIELDS, type ReplaceableCardField } from "@rp/shared/docs/note.ts"
+import { REPLACEABLE_CARD_FIELDS, type ReplaceableCardField } from "@dreamspan/shared/docs/note.ts"
 import { Checkbox } from "../../../ui/Choice.tsx"
 import { Fieldset } from "../../../ui/Field.tsx"
 import { CARD_FIELD_LABELS } from "../../editor/noteTargets.ts"

@@ -3,7 +3,7 @@
 // in the bin, each a link to that branch at that message, highlighted as a message link opens
 // it. Links open in a new tab, so a plain click never loses the confirmation; the list scrolls
 // inside the dialog, which never outgrows the screen, however many branches there are.
-import type { BinBranch } from "@rp/shared/bin.ts"
+import type { BinBranch } from "@dreamspan/shared/bin.ts"
 import { Icon } from "../../ui/Icon.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { readableChatTitle } from "../chat/chatTitle.ts"

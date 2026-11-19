@@ -1,4 +1,4 @@
-import type { Price } from "@rp/shared/providers.ts"
+import type { Price } from "@dreamspan/shared/providers.ts"
 
 /** Every rate of a price (tiers included, thresholds not) multiplied, rounded to 1e-9. */
 export const scalePrice = (price: Price, by: number): Price => {

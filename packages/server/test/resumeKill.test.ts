@@ -4,8 +4,8 @@
 // user resumes, and Resume carries the run on without a new user message. Slow: it spawns the
 // server (vitest.config.ts SLOW_SERVER_FILES).
 import { assert, it } from "@effect/vitest"
-import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { ChatId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { Effect, Stream } from "effect"
 import { spawn } from "node:child_process"
 import type { ServerResponse } from "node:http"

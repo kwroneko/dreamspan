@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { ContextSnapshot, WireContext } from "../assembler/types.ts"
 import { prefixChange } from "../assembler/warmth.ts"
 import { fallbackDescription } from "../assembler/sourceDescriptors.ts"

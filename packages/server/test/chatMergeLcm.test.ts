@@ -2,7 +2,7 @@
 // §5): the next reply's request places the source's section by the chat's layout with the join
 // marker at the join, and a summary request over the join asks for one section per line.
 import { assert } from "@effect/vitest"
-import { type ChatId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
+import { type ChatId, type ForkId, NewVersion, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { lcmHarness, lcmTest, requestsTo } from "./support/lcmHarness.ts"

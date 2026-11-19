@@ -10,10 +10,10 @@
 // version of the message, which the chat then shows being written. What a resume or an edit cut
 // from the run it carried on shows folded where it was cut. Step edits use server-kept drafts;
 // the URL records which editor is open, so reloading restores both the editor and its text.
-import type { CutSpan, OfferedTool, StepEdit, TranscriptEntry, TurnPart } from "@rp/shared/agent.ts"
-import type { ForkId, VersionId } from "@rp/shared/chat.ts"
-import type { InspectorUsage, RunContext } from "@rp/shared/inspectorApi.ts"
-import { displayToolData } from "@rp/shared/toolData.ts"
+import type { CutSpan, OfferedTool, StepEdit, TranscriptEntry, TurnPart } from "@dreamspan/shared/agent.ts"
+import type { ForkId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { InspectorUsage, RunContext } from "@dreamspan/shared/inspectorApi.ts"
+import { displayToolData } from "@dreamspan/shared/toolData.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { Effect } from "effect"

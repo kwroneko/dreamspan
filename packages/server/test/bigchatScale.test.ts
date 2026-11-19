@@ -4,10 +4,10 @@ import { appendFileSync, copyFileSync, mkdirSync, readFileSync, rmSync, writeFil
 import { join } from "node:path"
 import { BroadcastChannel, Worker } from "node:worker_threads"
 import { assert, it } from "@effect/vitest"
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { ShellForks } from "@rp/shared/chatSetupApi.ts"
-import { applyShellForks } from "@rp/shared/shellUpdates.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { ShellForks } from "@dreamspan/shared/chatSetupApi.ts"
+import { applyShellForks } from "@dreamspan/shared/shellUpdates.ts"
 import { Effect, Stream } from "effect"
 import { StImports } from "../src/importer/StImports.ts"
 import * as Fake from "../src/dev/fakeGenerator.ts"
@@ -43,7 +43,7 @@ for (const size of sizes) {
       const config = testConfig({ dbReaders: 2 })
       const restored = previous.find((row) => row.size === size)
       if (reuse && !restored) throw new Error(`No synthetic snapshot measurements for ${size}`)
-      if (reuse) copyFileSync(`${reuse}-${size}.db`, join(config.dataDir, "rp-harness.db"))
+      if (reuse) copyFileSync(`${reuse}-${size}.db`, join(config.dataDir, "dreamspan.db"))
       const fixture = restored
         ? {
             bytes: restored.bytes,
@@ -325,7 +325,7 @@ for (const size of sizes) {
             const db = new DatabaseSync(workerData.source, { readOnly: true })
             backup(db, workerData.destination).then(() => db.close())
           `,
-                  { eval: true, workerData: { source: join(config.dataDir, "rp-harness.db"), destination } }
+                  { eval: true, workerData: { source: join(config.dataDir, "dreamspan.db"), destination } }
                 )
                 worker.once("error", reject)
                 worker.once("exit", (code) =>

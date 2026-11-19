@@ -1,7 +1,7 @@
 import { pathSegments } from "./pathSegments.ts"
 import { summaryChoices } from "./lcmFork.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { Summary } from "@rp/shared/lcm.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { Summary } from "@dreamspan/shared/lcm.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { readSummary, SummaryReads, primeSummaryReads } from "./lcmReads.ts"
@@ -17,7 +17,7 @@ import {
   seamStale,
   type LcmView
 } from "./lcmDisplay.ts"
-import { Summary as SummaryClass } from "@rp/shared/lcm.ts"
+import { Summary as SummaryClass } from "@dreamspan/shared/lcm.ts"
 
 /** A summary as a layer walk sees it at a seam: covering the gap after it (or before it), stale. */
 const extend = (s: Summary, change: Partial<Summary>) => new SummaryClass({ ...s, ...change })

@@ -11,7 +11,7 @@ import {
   type Skill
 } from "../src/agent/toolLoading.ts"
 import { previousRun, type ContinuousSnapshot } from "../src/agent/continuity.ts"
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import { ASSEMBLER_VERSION } from "../src/assembler/types.ts"
 import { planToolLoading } from "../src/agent/loadingPlan.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
@@ -39,7 +39,7 @@ const plan = Effect.gen(function* () {
           Effect.succeed({
             name: "Synthetic",
             extensions: {
-              rp_harness: {
+              dreamspan: {
                 skills: [
                   { use: "cards" },
                   { name: own.id, description: own.description, instructions: own.instructions, tools: own.tools }
@@ -174,7 +174,7 @@ describe("tool loading review regressions", () => {
       tools: Array(100).fill("read_card")
     }
     const parsed = cardSkills(
-      { extensions: { rp_harness: { skills: Array(100).fill(entry) } } },
+      { extensions: { dreamspan: { skills: Array(100).fill(entry) } } },
       { entity: "e", name: "C" }
     )
     assert.lengthOf(parsed.own, 16)
@@ -224,7 +224,7 @@ it.effect("read_card cannot reveal a card's skill body through extensions", () =
     const ref = { id: "r", entityId: "e", label: "Synthetic", headRevisionId: "rev" }
     const doc = {
       name: "Synthetic",
-      extensions: { keep: "ordinary metadata", rp_harness: { keep: "kept", skills: [own] } }
+      extensions: { keep: "ordinary metadata", dreamspan: { keep: "kept", skills: [own] } }
     }
     const context = {
       reader: {
@@ -243,7 +243,7 @@ it.effect("read_card cannot reveal a card's skill body through extensions", () =
       assert.notInclude(output.text, malicious)
       assert.include(output.text, "ordinary metadata")
     }
-    assert.strictEqual(doc.extensions.rp_harness.skills[0], own, "reading does not alter the saved card")
+    assert.strictEqual(doc.extensions.dreamspan.skills[0], own, "reading does not alter the saved card")
   }).pipe(Effect.provide(ExecutionRegistry.layer))
 )
 
@@ -266,6 +266,6 @@ it("does not choose between two cards carrying the same skill name", () => {
 })
 
 it("keeps ordinary cards byte-identical when they carry no skills", () => {
-  const doc = { extensions: { rp_harness: { notes: [] }, another_app: { x: 1 } } }
+  const doc = { extensions: { dreamspan: { notes: [] }, another_app: { x: 1 } } }
   assert.strictEqual(withoutCardSkills(doc), doc)
 })

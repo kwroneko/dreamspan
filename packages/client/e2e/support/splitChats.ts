@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import type { Client } from "./rpc.ts"
 
 /** Synthetic review chats, made entirely through the same operations as the app. */

@@ -2,8 +2,8 @@
 // which show the slot directly after another one (displayPath.ts). Forks made from it later
 // inherit the order; no other fork changes. One writer transaction each; Undo writes back what
 // the move replaced, while nothing changed it since.
-import type { SlotId } from "@rp/shared/chat.ts"
-import { MoveRefused, type MoveStep } from "@rp/shared/messagesApi.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import { MoveRefused, type MoveStep } from "@dreamspan/shared/messagesApi.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"

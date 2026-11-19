@@ -5,7 +5,7 @@
 // own strip has). The bar is above the text, so stepping to a longer or shorter version never
 // moves it. The browser's own menu stays over the text.
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react"
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import { EditorTextActions, type OwnVersionTarget } from "../../textActions.tsx"
 import { selectedSourceText } from "../../ui/messageCopy.tsx"
 import { keepInPlace } from "../../ui/reveal.ts"

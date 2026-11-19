@@ -3,8 +3,8 @@
 // stale, one in the danger color failed, a pulsing one is being written. A click opens the
 // summary. It reads only the window of the path that is loaded (GetLcmCoverage).
 import { positionOf } from "./position.ts"
-import type { PathEntry } from "@rp/shared/chat.ts"
-import type { LcmState, LcmSummary } from "@rp/shared/lcm.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
+import type { LcmState, LcmSummary } from "@dreamspan/shared/lcm.ts"
 import { useEffect, useState } from "react"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { healthOf, jobText, rangeText } from "./lcm.ts"

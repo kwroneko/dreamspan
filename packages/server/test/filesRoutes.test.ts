@@ -1,10 +1,10 @@
-// The file manager's HTTP routes (spec/FILES-AND-ENVIRONMENT.md §1.1, §8.1; `@rp/shared/files.ts`) at
+// The file manager's HTTP routes (spec/FILES-AND-ENVIRONMENT.md §1.1, §8.1; `@dreamspan/shared/files.ts`) at
 // the real boundary: upload with the batch's conflict answers, listing, Range reads, folders,
 // renames, deletion, and links planted in the tree listed but never followed. Synthetic files only.
 import { assert, describe, it } from "@effect/vitest"
 import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { FolderListing } from "@rp/shared/files.ts"
+import type { FolderListing } from "@dreamspan/shared/files.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"

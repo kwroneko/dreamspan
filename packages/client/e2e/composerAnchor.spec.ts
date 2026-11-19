@@ -6,7 +6,7 @@
 // the card source is the fake archive.
 import { createServer } from "node:net"
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, startServer, type TestServer, withAdmin } from "./support/server.ts"
@@ -119,7 +119,7 @@ for (const [width, height] of [
       test.beforeEach(async ({ page }) => {
         await page.setViewportSize({ width, height })
         await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-        await page.addInitScript((shown) => localStorage.setItem("rp.theme", shown), theme)
+        await page.addInitScript((shown) => localStorage.setItem("dreamspan.theme", shown), theme)
         await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
       })
 
@@ -158,7 +158,7 @@ for (const theme of ["light", "dark"] as const)
   test(`1440 ${theme}: two one-message chats in split panes`, async ({ page }, info) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-    await page.addInitScript((shown) => localStorage.setItem("rp.theme", shown), theme)
+    await page.addInitScript((shown) => localStorage.setItem("dreamspan.theme", shown), theme)
     await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
     const left = await oneMessageChat(page, `Left ${theme}`)
     await oneMessageChat(page, `Right ${theme}`)

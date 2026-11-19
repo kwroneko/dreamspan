@@ -2,7 +2,7 @@ import { unreadChatPart } from "../../src/importer/stParse.ts"
 // ST chat files and the rest of an ST folder (formats/stChat.ts, formats/stData.ts), on
 // synthetic files. Each cap has a crafted file.
 import { describe, expect, it } from "@effect/vitest"
-import { ReportBuilder } from "@rp/shared/importReport.ts"
+import { ReportBuilder } from "@dreamspan/shared/importReport.ts"
 import { FormatError } from "../../src/formats/safety.ts"
 import { parseStChatPart, parseStDate, type StMessage, stChatLimits } from "../../src/formats/stChat.ts"
 import { parseStGroup, parseStSettings } from "../../src/formats/stData.ts"

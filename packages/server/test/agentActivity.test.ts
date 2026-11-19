@@ -1,6 +1,6 @@
 // Synthetic ledger rows: pagination must retain work started in the same millisecond.
 import { assert, it } from "@effect/vitest"
-import type { ActivityPage } from "@rp/shared/agent.ts"
+import type { ActivityPage } from "@dreamspan/shared/agent.ts"
 import { Effect } from "effect"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"

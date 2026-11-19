@@ -1,11 +1,11 @@
 // What produces a version's text. The real one will be the context assembler in front of
 // the provider layer (PLAN phase 2); until it exists, only tests, the development server
 // and the performance harness have one: the fake (fakeGenerator.ts).
-import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
-import type { ReplySections } from "@rp/shared/replySections.ts"
-import type { RolloutStep } from "@rp/shared/agent.ts"
+import type { ChatId, ForkId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
+import type { ReplySections } from "@dreamspan/shared/replySections.ts"
+import type { RolloutStep } from "@dreamspan/shared/agent.ts"
 import { Context, Layer, Option, Schema, type Stream } from "effect"
 
 /** Transient authorization inherited by decision calls and tool rounds of this reply. */
@@ -34,7 +34,7 @@ export interface GenerationRequest {
    * A side chat's request (spec/WORKSHOP.md §4): where its story tools read the story, as the
    * browser tab it was sent from showed it. Absent: the story can't be read for this reply.
    */
-  readonly storyAt?: import("@rp/shared/chat.ts").StoryAt
+  readonly storyAt?: import("@dreamspan/shared/chat.ts").StoryAt
   readonly onNotice?: (message: string) => void
   readonly onWaitingCache?: (waiting: boolean) => void
   /**

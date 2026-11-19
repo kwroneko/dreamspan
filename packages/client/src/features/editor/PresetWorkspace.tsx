@@ -1,7 +1,7 @@
 import { useNavigate, useSearch } from "@tanstack/react-router"
-import type { PresetContext } from "@rp/shared/inspectorApi.ts"
-import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { PresetContext } from "@dreamspan/shared/inspectorApi.ts"
+import type { ChatNotePosition } from "@dreamspan/shared/editorApi.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import {
   createContext,
   type ReactNode,

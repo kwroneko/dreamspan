@@ -208,7 +208,7 @@ test("a reply's cost sits in its header, opens the panel, and never adds a line"
           for (const theme of ["light", "dark"] as const) {
             await page.emulateMedia({ colorScheme: theme })
             await page.goto(`${server().url}/chats/${id}`)
-            await page.evaluate((value) => localStorage.setItem("rp.theme", value), theme)
+            await page.evaluate((value) => localStorage.setItem("dreamspan.theme", value), theme)
             await page.reload()
             await expect(lastReply(page)).toContainText(REPLY)
             await expect(costOf(lastReply(page))).toHaveCount(shown ? 1 : 0)

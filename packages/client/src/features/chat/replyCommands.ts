@@ -3,7 +3,7 @@ import { invokeMessageAction, messageActions, type MessageActionContext } from "
 import { invokeVersionStep, versionNavigationAvailable } from "./versionNavigation.ts"
 import { showToast } from "../../ui/Toast.tsx"
 import { messageSide } from "./cast.ts"
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 
 const contextFor = ({ session, view }: ChatCommandContext, entry: PathEntry): MessageActionContext => {
   const report: MessageActionContext["report"] = (outcome) => {

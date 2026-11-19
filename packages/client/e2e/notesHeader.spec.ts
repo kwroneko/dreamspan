@@ -4,7 +4,7 @@
 // shown and greyed out until something changed, and the rename pencil and save cluster on the
 // title's line. At 1440 and 390 wide, with a header-width regression case. The cards and notes are made up.
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"

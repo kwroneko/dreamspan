@@ -3,7 +3,7 @@
 import { assert, it } from "@effect/vitest"
 import { writeFileSync } from "node:fs"
 import { Effect, Stream } from "effect"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"

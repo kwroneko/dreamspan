@@ -1,4 +1,4 @@
-import type { EntityKind } from "@rp/shared/library.ts"
+import type { EntityKind } from "@dreamspan/shared/library.ts"
 import { libraryListAtom } from "./queries.ts"
 // What the library screens read. An import makes the `library` key stale.
 import { allOf } from "../../actions.tsx"

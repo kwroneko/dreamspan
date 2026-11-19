@@ -1,9 +1,9 @@
 // Card import: a file's bytes to our card document, the images it carries, and its import
 // report. The format is detected from the bytes, never trusted from the file name.
-import { formatByteSize } from "@rp/shared/byteSize.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import { sourceTime } from "./sourceTime.ts"
-import type { CardDoc } from "@rp/shared/docs/card.ts"
-import { type ImportReport, ReportBuilder, shownText } from "@rp/shared/importReport.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import { type ImportReport, ReportBuilder, shownText } from "@dreamspan/shared/importReport.ts"
 import type { Effect } from "effect"
 import { posix } from "node:path"
 import { cardFromJson } from "./card.ts"

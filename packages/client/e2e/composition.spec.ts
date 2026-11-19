@@ -10,7 +10,7 @@ import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { AGENT_REPLY, PLAIN_REPLY, startAgentProvider } from "./support/agentProvider.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { messageMenu } from "./support/message.ts"
@@ -154,7 +154,7 @@ for (const [width, theme] of [
     test.setTimeout(180_000)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await page.emulateMedia({ colorScheme: theme })
-    await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+    await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const chatId = await chatWithSwipes(`Ferry ${width}`)
     await page.goto(`${server().url}/chats/${chatId}`)
@@ -337,7 +337,7 @@ for (const width of [1440, 1024, 390])
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const chatId = await chatWithSwipes(`Ferry layout ${width} ${theme}`)
       await page.goto(`${server().url}/chats/${chatId}`)

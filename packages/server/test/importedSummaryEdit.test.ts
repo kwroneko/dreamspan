@@ -1,8 +1,8 @@
 // Imported summaries edited through the same HTTP boundary as the chat's note editor.
 import { expect, it } from "vitest"
 import { Effect } from "effect"
-import { NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import { textField } from "@rp/shared/editing.ts"
+import { NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

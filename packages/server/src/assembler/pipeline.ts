@@ -1,12 +1,12 @@
 import type { LoreReceipt, LoreTimingState } from "./loreTiming.ts"
 // The assembler's stage pipeline and its sources (PLUGINS §8; ARCHITECTURE §15).
-import type { SourceActivation } from "@rp/shared/inspectorApi.ts"
-import type { FoldableEvent, ChatState, HtmlDepth } from "@rp/shared/state.ts"
-import { presenceOf } from "@rp/shared/knowledge.ts"
-import type { FrozenValues, MacroLookup } from "@rp/shared/macros/expand.ts"
-import type { VariableEffect } from "@rp/shared/macros/variables.ts"
-import type { NoteDoc } from "@rp/shared/docs/note.ts"
-import type { NotFound } from "@rp/shared/errors.ts"
+import type { SourceActivation } from "@dreamspan/shared/inspectorApi.ts"
+import type { FoldableEvent, ChatState, HtmlDepth } from "@dreamspan/shared/state.ts"
+import { presenceOf } from "@dreamspan/shared/knowledge.ts"
+import type { FrozenValues, MacroLookup } from "@dreamspan/shared/macros/expand.ts"
+import type { VariableEffect } from "@dreamspan/shared/macros/variables.ts"
+import type { NoteDoc } from "@dreamspan/shared/docs/note.ts"
+import type { NotFound } from "@dreamspan/shared/errors.ts"
 import { Context, Effect } from "effect"
 import type { SqlError } from "effect/sql"
 import { makeRegistry, type Registry } from "../registry.ts"
@@ -14,8 +14,8 @@ import type { MacroEnvironment } from "./macros.ts"
 import type { ScriptRunner } from "./regex.ts"
 import type { RewriteOptions, ScriptSource } from "./scriptSources.ts"
 import type { Knowledge } from "./knowledge.ts"
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
-import type { ScriptRef } from "@rp/shared/regexScripts.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
+import type { ScriptRef } from "@dreamspan/shared/regexScripts.ts"
 import type { Composition, Stability, StMessage } from "./st.ts"
 import type {
   AssembledRequest,
@@ -42,11 +42,11 @@ import type {
   DecisionAssembly,
   LoreDecisionInput
 } from "./types.ts"
-import { replySectionsOf } from "@rp/shared/replySections.ts"
-import { ownSendNudge } from "@rp/shared/agentInstructions.ts"
+import { replySectionsOf } from "@dreamspan/shared/replySections.ts"
+import { ownSendNudge } from "@dreamspan/shared/agentInstructions.ts"
 import { ASSEMBLER_VERSION, AssemblyFailed, historyLeafOf } from "./types.ts"
-import type { LcmDefaults, ResolvedLcm } from "@rp/shared/lcmSettings.ts"
-import type { CalibrationSample, ImageTokenRule } from "@rp/shared/imageTokens.ts"
+import type { LcmDefaults, ResolvedLcm } from "@dreamspan/shared/lcmSettings.ts"
+import type { CalibrationSample, ImageTokenRule } from "@dreamspan/shared/imageTokens.ts"
 
 export type SourceError = AssemblyFailed | NotFound | SqlError.SqlError
 
@@ -324,7 +324,7 @@ export interface Assembly {
   /** The `lore` decision point's input, when an entry the keys left out has a question. */
   loreDecision?: LoreDecisionInput
   lore?: ReadonlyArray<{
-    readonly entry: import("@rp/shared/docs/lorebook.ts").LorebookEntry
+    readonly entry: import("@dreamspan/shared/docs/lorebook.ts").LorebookEntry
     readonly piece: number
     readonly book: string
     readonly revision: string
@@ -363,8 +363,8 @@ export interface Assembly {
   historyMove?: ContextSnapshot["historyMove"]
   /** The path's images the request leaves out and why (`images` stage); later stages may add their own. */
   imagesLeftOut?: {
-    images: Array<import("@rp/shared/inspectorApi.ts").ImageLeftOut>
-    ranges: Array<import("@rp/shared/inspectorApi.ts").ImagesLeftOut["ranges"][number]>
+    images: Array<import("@dreamspan/shared/inspectorApi.ts").ImageLeftOut>
+    ranges: Array<import("@dreamspan/shared/inspectorApi.ts").ImagesLeftOut["ranges"][number]>
   }
   /** The messages of `history` that enter the context, with the pieces recording their text. */
   resolved?: ReadonlyArray<{ readonly entry: HistoryEntry; readonly piece: number }>

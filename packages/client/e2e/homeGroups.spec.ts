@@ -3,7 +3,7 @@
 // latest, its action lists them all. The bin names a chat by its readable name, never ST's
 // file name.
 import { expect, type Page, test } from "@playwright/test"
-import type { ChatId, EntityId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"

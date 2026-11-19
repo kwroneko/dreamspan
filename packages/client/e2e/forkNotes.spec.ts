@@ -3,7 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { expect, test } from "@playwright/test"
-import { textField } from "@rp/shared/editing.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser, type Client } from "./support/rpc.ts"
@@ -11,8 +11,8 @@ import { messageMenu } from "./support/message.ts"
 import { noteBlock, noteText } from "./support/notes.ts"
 import { closePanel } from "./support/panel.ts"
 import { expectTextBox } from "./support/textbox.ts"
-import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { ChatNotePosition } from "@dreamspan/shared/editorApi.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -172,7 +172,7 @@ for (const width of [1440, 390])
       const h = await seeded()
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await page.goto(`${url}/chats/${h.chat.id}`)
       const message = page.getByTestId("messages").locator("[data-slot]").filter({ hasText: h.a.version.content })
@@ -277,7 +277,7 @@ for (const width of [1440, 390])
       )
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const shot = async (name: string) => {
         if (!process.env.SCREENSHOT_DIR) return

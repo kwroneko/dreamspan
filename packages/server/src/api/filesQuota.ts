@@ -1,9 +1,9 @@
 // The Files quota's RPCs (filesQuotaApi.ts): an account's own usage, and an admin's view of and
 // quota for any account. Measuring and enforcing live in files/quota.ts.
-import { CurrentUser } from "@rp/shared/api.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { Forbidden, NotFound, ServerError } from "@rp/shared/errors.ts"
-import type { FilesQuotaApi, FilesUsage } from "@rp/shared/filesQuotaApi.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { Forbidden, NotFound, ServerError } from "@dreamspan/shared/errors.ts"
+import type { FilesQuotaApi, FilesUsage } from "@dreamspan/shared/filesQuotaApi.ts"
 import { Effect } from "effect"
 import { Reader } from "../db/Database.ts"
 import { WorkshopFiles } from "../files/WorkshopFiles.ts"

@@ -2,7 +2,7 @@ import { toolResultFrame } from "../toolData.ts"
 /** Library heads only; every lookup and snapshot is scoped to the rollout's owner. */
 import { withoutCardSkills } from "../toolLoading.ts"
 import { Type } from "@earendil-works/pi-ai"
-import type { EntityKind, LibraryRef } from "@rp/shared/library.ts"
+import type { EntityKind, LibraryRef } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import type { RolloutTool, ToolContext } from "../tools.ts"
 

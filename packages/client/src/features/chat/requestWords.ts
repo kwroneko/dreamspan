@@ -1,7 +1,7 @@
 // What a request to a model was for, and how it ended, in words (owner, 2026-11-02): the
 // stored `purpose` and `status` are identifiers, so every screen that shows a request (the
 // summary's Details, the request inspector) says them through these.
-import type { RequestPurpose, RequestStatus } from "@rp/shared/usage.ts"
+import type { RequestPurpose, RequestStatus } from "@dreamspan/shared/usage.ts"
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`
 

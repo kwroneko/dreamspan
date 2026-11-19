@@ -2,7 +2,7 @@
 // tile-only hover does not apply IconButton's hover/popup background rules.
 import { expect, test, type Locator, type Page } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -134,7 +134,7 @@ for (const theme of ["light", "dark"] as const)
     test.setTimeout(180_000)
     await page.setViewportSize({ width: 1440, height: 1000 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-    await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+    await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(server().url)
     await checkStars(page, page.getByRole("main"), "home")

@@ -1,7 +1,7 @@
 // An entry's Saved media section (spec/SAVED-MEDIA.md §3.5), in the card, preset and lorebook
 // editors: how many of its current revision's media files are kept here, which wait for the
 // user's approval, and which couldn't be saved and why.
-import type { SavedMediaStatus } from "@rp/shared/savedMedia.ts"
+import type { SavedMediaStatus } from "@dreamspan/shared/savedMedia.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"

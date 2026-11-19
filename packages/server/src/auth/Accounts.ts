@@ -5,9 +5,9 @@
 //   LOOPBACK_REQUIRES_LOGIN is off, which acts as the oldest enabled admin.
 import { createHash, randomBytes } from "node:crypto"
 import { readFileSync } from "node:fs"
-import { Authentication, CurrentUser, type Session, Unauthorized } from "@rp/shared/api.ts"
-import type { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
-import { AccountRejected, Forbidden, NotFound, ServerError } from "@rp/shared/errors.ts"
+import { Authentication, CurrentUser, type Session, Unauthorized } from "@dreamspan/shared/api.ts"
+import type { User, UserAccount, UserId, UserRole } from "@dreamspan/shared/domain.ts"
+import { AccountRejected, Forbidden, NotFound, ServerError } from "@dreamspan/shared/errors.ts"
 import { Context, Data, Effect, Layer, Option, Predicate, Redacted, Semaphore } from "effect"
 import { Cookies } from "effect/http"
 import type { RpcClientError } from "effect/rpc"
@@ -24,7 +24,7 @@ import {
   verifyPassword
 } from "./passwords.ts"
 
-export const SESSION_COOKIE = "rp_session"
+export const SESSION_COOKIE = "dreamspan_session"
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000
 /** Set by the server from the socket's address (server.ts); any copy a client sends is replaced. */
 export const PEER_HEADER = "x-rp-peer"

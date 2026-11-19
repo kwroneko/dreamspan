@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { MessageImages } from "@rp/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { MessageImages } from "@dreamspan/shared/chat.ts"
 import { Effect, Stream } from "effect"
 import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"

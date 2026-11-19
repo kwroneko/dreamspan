@@ -7,8 +7,8 @@
 // token, reasoning time, tokens per second and the last request apart. Unknown figures say so;
 // one not recorded at all isn't shown. In the header, after the time, what the reply cost
 // (msgcost1, the ledger's cost; none for an import or a user's turn), opening the same panel.
-import type { RecordedGeneration } from "@rp/shared/chat.ts"
-import type { CostAmount, VersionMetrics } from "@rp/shared/inspectorApi.ts"
+import type { RecordedGeneration } from "@dreamspan/shared/chat.ts"
+import type { CostAmount, VersionMetrics } from "@dreamspan/shared/inspectorApi.ts"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { Popover } from "../../ui/Popover.tsx"
 import { formatFullTime, type MessageDetailProps, messageDetails } from "./messageDetails.tsx"

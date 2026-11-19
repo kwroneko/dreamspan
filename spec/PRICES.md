@@ -4,12 +4,12 @@
 
 ## 1. What exists today
 
-- **Price data** is the `Price` shape (`@rp/shared/providers.ts`): per million tokens, `input`, `output`, optional `cacheRead`, `cacheWrite`, and `tiers` by total input (`inputTokensAbove`). It lives in `models.upstream_json.price`, rewritten by every refresh.
+- **Price data** is the `Price` shape (`@dreamspan/shared/providers.ts`): per million tokens, `input`, `output`, optional `cacheRead`, `cacheWrite`, and `tiers` by total input (`inputTokensAbove`). It lives in `models.upstream_json.price`, rewritten by every refresh.
 - **Where a model's price comes from** (`modelLists.ts`, `catalog.ts`):
   - the model list where it reports prices (OpenRouter's `GET /models` `pricing`, USD per token as decimal strings, scaled to per million);
   - otherwise pi-ai's catalog (`withCatalog` fills `price` only when the list gave none);
   - for an OpenRouter model whose routing pins one provider, that provider's endpoint price from `GET /models/{author}/{slug}/endpoints` (`upstream.endpoints`, discount applied, prompt-length overrides as tiers; 24 h TTL, 10 min retry after a failure). `routedPrice` picks it, falling back to the list price.
-- **Cost formulas** (`usage.ts`, `userCosts.ts`), tried newest registration first: `user-pricing` (Settings → Costs rules, `CostRule` in `@rp/shared/costFormulas.ts`, five rates incl. `writeLong`, tiers, currency label), then `reported` (OpenRouter's `usage.cost`), then `builtin` (`priceCost` over the resolved `Price`; long cache writes at 2× input; always USD).
+- **Cost formulas** (`usage.ts`, `userCosts.ts`), tried newest registration first: `user-pricing` (Settings → Costs rules, `CostRule` in `@dreamspan/shared/costFormulas.ts`, five rates incl. `writeLong`, tiers, currency label), then `reported` (OpenRouter's `usage.cost`), then `builtin` (`priceCost` over the resolved `Price`; long cache writes at 2× input; always USD).
 - **The ledger** (`llm_requests`) stores `cost`, `cost_currency` and `cost_formula` (`builtin`, `reported`, or `user:<rule>:<revision>`). A trigger lets only the cost change on a closed row. Recomputing past rows is specified (PROVIDERS §9.3 "Recomputing") but not built.
 - **Gaps this spec closes:** no per-TTL write price outside user rules (`builtin` hardcodes 2×); no per-call price; `builtin` can't say which source (catalog, list, endpoint list) its rates came from; no way for a connection's own server to publish prices; no rule for what a price correction may rewrite.
 

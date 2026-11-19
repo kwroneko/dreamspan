@@ -1,12 +1,12 @@
 // Valid documents for tests: every revision is checked against its kind's schema, so a
 // test's card or preset is a real one, with only what the test cares about changed.
 import { readFileSync } from "node:fs"
-import type { CardDoc } from "@rp/shared/docs/card.ts"
-import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
-import { LOREBOOK_SCHEMA_VERSION } from "@rp/shared/docs/lorebook.ts"
-import { newCardDoc, newCardNote } from "@rp/shared/editing.ts"
-import type { Doc, EntityKind } from "@rp/shared/library.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import type { LegacyPresetDoc as PresetDoc } from "@dreamspan/shared/docs/preset.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { LOREBOOK_SCHEMA_VERSION } from "@dreamspan/shared/docs/lorebook.ts"
+import { newCardDoc, newCardNote } from "@dreamspan/shared/editing.ts"
+import type { Doc, EntityKind } from "@dreamspan/shared/library.ts"
 import { importStPreset } from "../../src/formats/preset.ts"
 
 /** A card with these fields, the others empty. */

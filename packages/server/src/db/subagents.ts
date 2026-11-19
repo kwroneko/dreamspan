@@ -3,10 +3,10 @@
 // links: resumes and carried-on turns), so a child is found only from the reply it belongs to.
 // Owner-scoped like every rollout read; the migration 0003_subagents holds the link.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { ChildStep, SubagentRow, SubagentStatus } from "@rp/shared/agent.ts"
-import type { InspectorUsage } from "@rp/shared/inspectorApi.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { VersionId } from "@rp/shared/chat.ts"
+import type { ChildStep, SubagentRow, SubagentStatus } from "@dreamspan/shared/agent.ts"
+import type { InspectorUsage } from "@dreamspan/shared/inspectorApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { stepsOf } from "../agent/steps.ts"

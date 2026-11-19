@@ -1,7 +1,7 @@
-// The decision-model settings RPCs (@rp/shared/decisionApi.ts). Storage checks the connection
+// The decision-model settings RPCs (@dreamspan/shared/decisionApi.ts). Storage checks the connection
 // and the model are the caller's; the points are the engine's registry, so a plugin's show too.
-import { CurrentUser } from "@rp/shared/api.ts"
-import type { DecisionApi } from "@rp/shared/decisionApi.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import type { DecisionApi } from "@dreamspan/shared/decisionApi.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { DecisionEngine } from "../decision/engine.ts"

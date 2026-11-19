@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { RequestPurpose, RequestStatus } from "@rp/shared/usage.ts"
+import { RequestPurpose, RequestStatus } from "@dreamspan/shared/usage.ts"
 import { requestPurposeText, requestStatusText } from "../src/features/chat/requestWords.ts"
 
 test("a summary request's purpose and status read as words", () => {

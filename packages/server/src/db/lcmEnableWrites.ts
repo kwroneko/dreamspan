@@ -4,7 +4,7 @@ import { eventApplies, forkAt } from "./forkState.ts"
 // §2.11). Bounded preparation precedes one publication transaction: the imported summary becomes the first level over the run
 // it covers (or the run is just shown), the switch is written, and the backfill is recorded. It
 // never generates; the next reply, or "Summarize now", plans the work.
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import {
   imageExcludedIn,
   inFork,
@@ -16,7 +16,7 @@ import {
   viewAt
 } from "./forkState.ts"
 import { gatheredImages } from "./lcmImages.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { tokensOf } from "../assembler/st.ts"
@@ -25,7 +25,7 @@ import { makeGraphWrites } from "./graphWrites.ts"
 import { BACKFILL_KIND, type BackfillPayload, backfillOf, capFor, spentSince } from "./lcmBackfill.ts"
 import type { ImportedSummary } from "./lcmImported.ts"
 import { NotFound, StorageError, type WriteOps } from "./ops.ts"
-import { LcmSettingsInvalid } from "@rp/shared/lcm.ts"
+import { LcmSettingsInvalid } from "@dreamspan/shared/lcm.ts"
 import { transaction } from "./tx.ts"
 
 /** Why settings with a target at or above its maximum can't be stored, or null. */

@@ -4,7 +4,7 @@ import { copyText } from "../../copyText.ts"
 // or delete for good (the one place that asks first), and the text recovered from drafts.
 import { SlotOutlet, defineSlot } from "../../slots.tsx"
 import { RegistryContext } from "@effect/atom-react"
-import type { BinBranch, BinItem, RecoveredText } from "@rp/shared/bin.ts"
+import type { BinBranch, BinItem, RecoveredText } from "@dreamspan/shared/bin.ts"
 import { Link } from "@tanstack/react-router"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useContext, useEffect, useState } from "react"

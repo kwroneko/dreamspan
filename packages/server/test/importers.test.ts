@@ -2,13 +2,13 @@
 // file goes to the importer its bytes call for, whatever its name says.
 import { readFileSync } from "node:fs"
 import { assert, describe, it } from "@effect/vitest"
-import { ImportReport } from "@rp/shared/importReport.ts"
+import { ImportReport } from "@dreamspan/shared/importReport.ts"
 import { Effect } from "effect"
 import { sniff } from "../src/importer/detect.ts"
 import * as Importers from "../src/importer/importers.ts"
 import { cardChunk, cardV3, json, png, stCardV2, worldInfo, zip } from "./formats/support.ts"
 import { presetDoc } from "./support/docs.ts"
-import { mainPrompt } from "@rp/shared/presetOrder.ts"
+import { mainPrompt } from "@dreamspan/shared/presetOrder.ts"
 import { cardDoc } from "./support/docs.ts"
 
 const parse = (bytes: Uint8Array, name = "upload.bin") =>

@@ -1,6 +1,6 @@
 import { assert } from "@effect/vitest"
-import { NewVersion } from "@rp/shared/chat.ts"
-import { newCardDoc } from "@rp/shared/editing.ts"
+import { NewVersion } from "@dreamspan/shared/chat.ts"
+import { newCardDoc } from "@dreamspan/shared/editing.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { lcmHarness, lcmTest } from "./support/lcmHarness.ts"

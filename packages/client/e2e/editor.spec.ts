@@ -7,8 +7,8 @@ import { expectTextBox } from "./support/textbox.ts"
 // approved, searched and resolved. Every card and preset here is made up.
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { textField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
@@ -557,7 +557,7 @@ const storedCopies = (page: Page) =>
   page.evaluate(
     () =>
       new Promise<Array<Pick<StoredCopy, "refId">>>((resolve) => {
-        const request = indexedDB.open("rp-editor-copies", 1)
+        const request = indexedDB.open("dreamspan-editor-copies", 1)
         request.onupgradeneeded = () => {
           const store = request.result.createObjectStore("copies", { keyPath: "key" })
           store.createIndex("userId", "userId")
@@ -579,7 +579,7 @@ const leaveCopy = (page: Page, copy: StoredCopy) =>
   page.evaluate(
     (copy) =>
       new Promise<void>((resolve) => {
-        const request = indexedDB.open("rp-editor-copies", 1)
+        const request = indexedDB.open("dreamspan-editor-copies", 1)
         request.onupgradeneeded = () => {
           const store = request.result.createObjectStore("copies", { keyPath: "key" })
           store.createIndex("userId", "userId")

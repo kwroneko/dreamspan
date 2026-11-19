@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { Generator } from "../src/chat/Generator.ts"
 import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"

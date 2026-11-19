@@ -1,7 +1,7 @@
 // Synthetic cards: account settings resolve only live persona-folder cards, and never
 // rewrite a chat's selected persona. Settings still share the existing worker RPCs.
 import { assert, describe, it } from "@effect/vitest"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { Writer, Reader } from "../src/db/Database.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"

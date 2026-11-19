@@ -1,4 +1,4 @@
-import { TokenizerInfo } from "@rp/shared/generation.ts"
+import { TokenizerInfo } from "@dreamspan/shared/generation.ts"
 
 interface TextCalibration {
   readonly ratio: number

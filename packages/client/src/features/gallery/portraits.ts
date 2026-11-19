@@ -1,5 +1,5 @@
-import type { RefId } from "@rp/shared/library.ts"
-import type { CardGallery } from "@rp/shared/gallery.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import type { CardGallery } from "@dreamspan/shared/gallery.ts"
 
 export const galleryPortraits = (refId: string, gallery: typeof CardGallery.Type) =>
   gallery.images.map((image, index) => ({

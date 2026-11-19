@@ -64,8 +64,8 @@ for (const width of [1440, 390])
             const regex = yield* api.GetGlobalRegex()
             if (regex.scripts.length === 0) yield* api.SetGlobalRegex({ scripts, expectedRevision: regex.revision })
             const chat = yield* api.CreateChat({ title: "Independent display corpus" })
-            const slots: import("@rp/shared/chat.ts").SlotId[] = []
-            let parent = null as import("@rp/shared/chat.ts").SlotId | null
+            const slots: import("@dreamspan/shared/chat.ts").SlotId[] = []
+            let parent = null as import("@dreamspan/shared/chat.ts").SlotId | null
             for (const content of corpus) {
               const sent = yield* api.SendMessage({ chatId: chat.id, parentSlotId: parent, branch: false, content })
               if (sent._tag !== "Posted") throw new Error("Unexpected queue")

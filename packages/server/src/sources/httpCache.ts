@@ -1,7 +1,7 @@
 // Conditional upstream reads share the existing bounded, per-user disk cache. Parsed
 // pages/cards keep their normal lifetimes; validators outlive them so a refresh can use 304.
 import { createHash } from "node:crypto"
-import { SourceFailed } from "@rp/shared/cardSources.ts"
+import { SourceFailed } from "@dreamspan/shared/cardSources.ts"
 import { Effect, Exit } from "effect"
 import type { SourceHttp, SourceResponse } from "./adapter.ts"
 import type { SourceCache } from "./cache.ts"

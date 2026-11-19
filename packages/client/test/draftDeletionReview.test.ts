@@ -1,12 +1,12 @@
-import type { ChatId, ForkId, VersionId } from "@rp/shared/chat.ts"
-import type { LcmSummary } from "@rp/shared/lcm.ts"
+import type { ChatId, ForkId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { LcmSummary } from "@dreamspan/shared/lcm.ts"
 import type { ChatSession } from "../src/features/chat/session.ts"
 import type { Caller } from "../src/features/editor/caller.ts"
 import type { Copy } from "../src/features/editor/backup.ts"
 import { Effect, Exit } from "effect"
 import { it, expect, vi, beforeEach } from "vitest"
-import { valueField } from "@rp/shared/editing.ts"
-import { Draft, DraftKey } from "@rp/shared/drafts.ts"
+import { valueField } from "@dreamspan/shared/editing.ts"
+import { Draft, DraftKey } from "@dreamspan/shared/drafts.ts"
 import { makeCopy } from "../src/features/editor/backup.ts"
 vi.hoisted(() => vi.stubGlobal("location", { protocol: "http:", host: "localhost" }))
 const copies = vi.hoisted(() => new Map<string, Copy>())

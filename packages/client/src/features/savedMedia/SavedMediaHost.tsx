@@ -1,6 +1,6 @@
 // The signed-in app's part of saved card media: it answers the renderer's lookups
 // (ui/html/savedMedia.ts) and shows the dialog that approves new sites (approval.ts).
-import type { MediaApprovalHost, MediaChoice, MediaKind } from "@rp/shared/savedMedia.ts"
+import type { MediaApprovalHost, MediaChoice, MediaKind } from "@dreamspan/shared/savedMedia.ts"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"

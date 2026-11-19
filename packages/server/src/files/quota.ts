@@ -16,7 +16,7 @@
 import { lstat, readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { Effect, Schema } from "effect"
-import { formatByteSize } from "@rp/shared/byteSize.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import type { Reader, Writer } from "../db/Database.ts"
 
 /** Bytes from `10G`, `512M`, `2T`, `1.5G`, `1048576` (binary units); null when unreadable. */

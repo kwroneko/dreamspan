@@ -6,8 +6,8 @@ import { chatPanels, isPanelTab, useChatPanels } from "./panels.tsx"
 // it asks to be in both (`menu: true`), and its keys are in its control's explanation (DESIGN
 // §10.1); one with a `dialog` opens it from the menu.
 import { type ComponentType, Fragment, useEffect, useState, useSyncExternalStore } from "react"
-import type { BinItem } from "@rp/shared/bin.ts"
-import type { SlotId } from "@rp/shared/chat.ts"
+import type { BinItem } from "@dreamspan/shared/bin.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
 import type { useNavigate } from "@tanstack/react-router"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useChatPlaceKey } from "./chatPlace.ts"

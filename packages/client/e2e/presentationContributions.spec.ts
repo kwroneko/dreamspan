@@ -7,7 +7,7 @@ import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { level1 } from "./support/summaries.ts"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import type { install, close } from "./support/presentationContributions.ts"
 test.use({ actionTimeout: 15_000 })
 
@@ -77,7 +77,7 @@ test("remaining presentation seams update mounted hosts and restore scoped defau
       const card = yield* api.CreateCard({ label: "Seam Mira", name: "Mira" })
       const chat = yield* api.CreateChat({ title: "Synthetic presentation seams" })
       yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
-      let parent = null as import("@rp/shared/chat.ts").SlotId | null
+      let parent = null as import("@dreamspan/shared/chat.ts").SlotId | null
       for (let n = 1; n <= 6; n++) {
         const sent = yield* api.SendMessage({
           chatId: chat.id,
@@ -100,7 +100,7 @@ test("remaining presentation seams update mounted hosts and restore scoped defau
     })
   )
   await level1(server().dataDir, fixture.chat.id, fixture.entries.slice(0, 3), "Synthetic retained summary")
-  const modelVersion = uuidv7() as import("@rp/shared/chat.ts").VersionId
+  const modelVersion = uuidv7() as import("@dreamspan/shared/chat.ts").VersionId
   await Effect.runPromise(
     fixtureSql(server().dataDir, [
       {

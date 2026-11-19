@@ -1,6 +1,6 @@
 import { useMemo } from "react"
 import { useNavigate, useSearch } from "@tanstack/react-router"
-import { CHAT_FILTERS, CHAT_SORTS, type ChatBrowse } from "@rp/shared/chatBrowse.ts"
+import { CHAT_FILTERS, CHAT_SORTS, type ChatBrowse } from "@dreamspan/shared/chatBrowse.ts"
 
 import { chatBrowseSearch } from "./chatBrowseSearch.ts"
 const read = (value: Record<string, unknown>): ChatBrowse => ({

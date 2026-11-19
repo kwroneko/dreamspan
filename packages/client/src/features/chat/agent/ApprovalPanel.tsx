@@ -6,7 +6,7 @@
 import { syncClientPlugins } from "../../../pluginLifecycle.ts"
 import { useCaller } from "../../editor/caller.ts"
 import { StoryScope } from "../../workshop/StoryScope.tsx"
-import type { ApprovalAnswer } from "@rp/shared/workshopApi.ts"
+import type { ApprovalAnswer } from "@dreamspan/shared/workshopApi.ts"
 import { useState } from "react"
 import { ErrorAlert, useAction } from "../../../actions.tsx"
 import { Button } from "../../../ui/Button.tsx"

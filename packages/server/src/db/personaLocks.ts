@@ -3,8 +3,8 @@
 // character's new single chats start with. A lock only chooses a new chat's starting persona;
 // it never changes a chat that has started. Keyed by the card entity, as favourites are: a
 // card fork is its own character (spec/LIBRARY-FORKS.md), with its own lock or none.
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { loadCastCards } from "./cards.ts"

@@ -5,10 +5,10 @@
 // in place of the sections, in a user's own version's history, and exported back with ST's
 // `reasoning_type` (`edited`, `manual`) where the user had a hand in it. Synthetic data only.
 import { assert, layer } from "@effect/vitest"
-import { type ChatId, type EntityId, NewVersion, type PathEntry, type Version } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { ReportBuilder } from "@rp/shared/importReport.ts"
-import { editableThinking } from "@rp/shared/replySections.ts"
+import { type ChatId, type EntityId, NewVersion, type PathEntry, type Version } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { ReportBuilder } from "@dreamspan/shared/importReport.ts"
+import { editableThinking } from "@dreamspan/shared/replySections.ts"
 import { Effect } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { parseStChatPart, type StMessage } from "../src/formats/stChat.ts"

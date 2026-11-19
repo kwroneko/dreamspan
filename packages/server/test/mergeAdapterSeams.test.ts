@@ -15,8 +15,8 @@ import { assembleFixture, type AssemblyFixture } from "./support/assemblySources
 import { importStPreset } from "../src/formats/preset.ts"
 import { cardDoc, presetDoc } from "./support/docs.ts"
 import { takeSummaryPrefix } from "../src/lcm/prefix.ts"
-import { cutOwnTurnText, ownTurnSelectionError } from "@rp/shared/docs/note.ts"
-import { WORKSHOP_SUMMARY_INSTRUCTION } from "@rp/shared/workshopLcm.ts"
+import { cutOwnTurnText, ownTurnSelectionError } from "@dreamspan/shared/docs/note.ts"
+import { WORKSHOP_SUMMARY_INSTRUCTION } from "@dreamspan/shared/workshopLcm.ts"
 
 for (const [mode, target, expectedWire] of [
   ["every", { kind: "openai-chat", api: "openai-completions", key: "gpt-5.4-mini", toolLoading: "every" }, undefined],

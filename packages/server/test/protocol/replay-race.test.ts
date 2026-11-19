@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
-import { textField } from "@rp/shared/editing.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { client, outcome, testConfig, withServer } from "../support/config.ts"
 import { FakeIndexedDb } from "./fakeIndexedDb.ts"
 const idb = new FakeIndexedDb()

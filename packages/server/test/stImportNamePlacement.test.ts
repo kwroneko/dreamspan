@@ -1,5 +1,5 @@
 import { assert, layer } from "@effect/vitest"
-import { foldState } from "@rp/shared/state.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { Reader } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

@@ -1,8 +1,8 @@
 // The routing actually sent, rather than the current settings, determines whether a frozen run
 // can defer tools. Synthetic OpenRouter replies exercise the complete persistence/replay path.
 import { assert, it } from "@effect/vitest"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { VersionId } from "@rp/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect, Stream } from "effect"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"

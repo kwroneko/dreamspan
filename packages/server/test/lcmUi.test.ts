@@ -3,8 +3,8 @@
 // never generate, the LCM switch, the draft behind an edit, and the event open chats get.
 // Cross-user access is in the isolation matrix.
 import { assert, it } from "@effect/vitest"
-import { NewVersion } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import { NewVersion } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { Effect, Stream } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import type { AppendResult } from "../src/db/ops.ts"

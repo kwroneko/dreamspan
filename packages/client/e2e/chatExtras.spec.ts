@@ -3,8 +3,8 @@
 // and delete for good, recovered text, and a reply finishing in a chat not being looked at.
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { Effect } from "effect"
 import { typeInto } from "./support/composer.ts"
 import { asUser } from "./support/rpc.ts"
@@ -224,7 +224,7 @@ for (const scheme of ["light", "dark"] as const)
         await toggle.click()
         await expect(toggle).toBeChecked()
         expect(await asked()).toBe(2)
-        expect(await page.evaluate(() => localStorage.getItem("rp.notifications.system"))).toBe("on")
+        expect(await page.evaluate(() => localStorage.getItem("dreamspan.notifications.system"))).toBe("on")
       }
     )
 

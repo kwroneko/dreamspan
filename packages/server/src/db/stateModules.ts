@@ -1,5 +1,5 @@
 import { rolloutUndoers } from "./workshopEffects.ts"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { settingsRegistry } from "./settings.ts"
 import { storageKinds } from "./storageKinds.ts"
 // Trusted code references only: never accept these from chat/library content or public RPC.
@@ -7,7 +7,7 @@ import { storageKinds } from "./storageKinds.ts"
 import { Context, Effect, Layer, Schema, Scope, Exit, Cause } from "effect"
 import { RpcClient } from "effect/rpc"
 import type { Headers } from "effect/http"
-import { stateKeys, type StateKeyRegistrationError } from "@rp/shared/state.ts"
+import { stateKeys, type StateKeyRegistrationError } from "@dreamspan/shared/state.ts"
 
 const ModuleSource = Schema.Struct({ id: Schema.String, module: Schema.String, exportName: Schema.String })
 type ModuleSource = typeof ModuleSource.Type

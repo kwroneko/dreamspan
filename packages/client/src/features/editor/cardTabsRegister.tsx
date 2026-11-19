@@ -1,6 +1,6 @@
 // The built-in card editor tabs (`cardTabs.ts`), each loaded with the editor that shows it.
 import { lazy, Suspense } from "react"
-import type { FieldPath } from "@rp/shared/editing.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
 import { Loading } from "../../ui/Spinner.tsx"
 import {
   CARD_TAB_DEFINITION,
@@ -19,8 +19,8 @@ const top =
   (path: FieldPath) =>
     fields.includes(String(path[0]))
 
-/** A card's skills (`extensions.rp_harness`), which the Extra tab's Skills section edits. */
-const skills = (path: FieldPath) => path[0] === "extensions" && path[1] === "rp_harness"
+/** A card's skills (`extensions.dreamspan`), which the Extra tab's Skills section edits. */
+const skills = (path: FieldPath) => path[0] === "extensions" && path[1] === "dreamspan"
 
 type Panel = "definition" | "greetings" | "metadata" | "lorebook" | "notes" | "extra"
 

@@ -1,7 +1,7 @@
 import { Effect } from "effect"
-import { EditRefused } from "@rp/shared/editorApi.ts"
-import { cardNameClash } from "@rp/shared/cardNames.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
+import { EditRefused } from "@dreamspan/shared/editorApi.ts"
+import { cardNameClash } from "@dreamspan/shared/cardNames.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import type { AppClient } from "../../rpc.ts"
 
 /** Read directly at submission: another tab or an import may have changed the pair. */

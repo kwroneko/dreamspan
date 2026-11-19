@@ -1,5 +1,5 @@
-import { WORKSHOP_SUMMARY_INSTRUCTION } from "@rp/shared/workshopLcm.ts"
-import { summaryWords } from "@rp/shared/lcmSettings.ts"
+import { WORKSHOP_SUMMARY_INSTRUCTION } from "@dreamspan/shared/workshopLcm.ts"
+import { summaryWords } from "@dreamspan/shared/lcmSettings.ts"
 import type { ContextSnapshot } from "../assembler/types.ts"
 
 export interface SummaryInstruction {

@@ -6,7 +6,7 @@
 // The changes are the ones an open editor has (its typing flushed first), or the server's
 // drafts when none is open.
 import { useNavigate } from "@tanstack/react-router"
-import { readReplaceTarget } from "@rp/shared/docs/note.ts"
+import { readReplaceTarget } from "@dreamspan/shared/docs/note.ts"
 import { AboutHint } from "../../ui/AboutHint.tsx"
 import { useEffect, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"

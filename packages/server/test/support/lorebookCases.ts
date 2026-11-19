@@ -1,5 +1,5 @@
 // Synthetic vectors verified against public ST 1.19.0; see spec/ST-WORLD-INFO.md.
-import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
+import type { LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
 import type { matchLorebooks } from "../../src/assembler/lorebook.ts"
 type Input = Parameters<typeof matchLorebooks>
 interface Case {

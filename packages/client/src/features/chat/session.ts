@@ -1,7 +1,7 @@
 import { forksChanged } from "./forks.ts"
 import { refreshTokenCounts } from "../editor/tokenCounts.ts"
-import type { ForkNoteSelection } from "@rp/shared/chatApi.ts"
-import type { SendToThreadsInput } from "@rp/shared/threadsApi.ts"
+import type { ForkNoteSelection } from "@dreamspan/shared/chatApi.ts"
+import type { SendToThreadsInput } from "@dreamspan/shared/threadsApi.ts"
 // One open chat (CLIENT-FRAMEWORK §5): the loaded window of its path, kept current by its
 // subscription, and the text of versions still generating. The server is the source of
 // truth: the window is what reads and events said, and writes apply the server's reply.
@@ -9,8 +9,8 @@ import type { SendToThreadsInput } from "@rp/shared/threadsApi.ts"
 // Streamed text never goes through the list. Each generating version's text is an atom
 // of its own, which only its message's body reads, and deltas are applied once per
 // animation frame, so a token re-renders one row.
-import { sectionsDisplay } from "@rp/shared/replySections.ts"
-import type { RolloutStep } from "@rp/shared/agent.ts"
+import { sectionsDisplay } from "@dreamspan/shared/replySections.ts"
+import type { RolloutStep } from "@dreamspan/shared/agent.ts"
 import {
   type Chat,
   type ChatId,
@@ -23,12 +23,12 @@ import {
   type Version,
   type VersionId,
   versionInContext
-} from "@rp/shared/chat.ts"
-import type { Cast, CastChange } from "@rp/shared/chatSetupApi.ts"
-import type { ComposerChoice } from "@rp/shared/composerApi.ts"
-import type { CardFields } from "@rp/shared/macros/context.ts"
-import { NotFound } from "@rp/shared/errors.ts"
-import type { Draft } from "@rp/shared/drafts.ts"
+} from "@dreamspan/shared/chat.ts"
+import type { Cast, CastChange } from "@dreamspan/shared/chatSetupApi.ts"
+import type { ComposerChoice } from "@dreamspan/shared/composerApi.ts"
+import type { CardFields } from "@dreamspan/shared/macros/context.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
+import type { Draft } from "@dreamspan/shared/drafts.ts"
 import type {
   BranchSwitch,
   ChatEvent,
@@ -36,10 +36,10 @@ import type {
   PathRange,
   PathWindow,
   SendResult
-} from "@rp/shared/chatApi.ts"
-import type { CacheWarmth, NextContext } from "@rp/shared/inspectorApi.ts"
-import type { LcmCoverage, LcmState } from "@rp/shared/lcm.ts"
-import type { InsertBody, InsertedMessage, MovedMessage } from "@rp/shared/messagesApi.ts"
+} from "@dreamspan/shared/chatApi.ts"
+import type { CacheWarmth, NextContext } from "@dreamspan/shared/inspectorApi.ts"
+import type { LcmCoverage, LcmState } from "@dreamspan/shared/lcm.ts"
+import type { InsertBody, InsertedMessage, MovedMessage } from "@dreamspan/shared/messagesApi.ts"
 import { Cause, Context, Effect, Exit, Fiber, Schedule, Stream } from "effect"
 import { Atom, type AtomRegistry, AtomRegistry as Registry, Reactivity } from "effect/reactivity"
 import { type AppError, describeCause } from "../../errors.ts"
@@ -1552,7 +1552,7 @@ export class ChatSession {
     composer?: ComposerSource,
     /** False when no one may reply (every character muted, DESIGN §3.5): the message is only posted. */
     reply = true,
-    images?: import("@rp/shared/chat.ts").MessageImages,
+    images?: import("@dreamspan/shared/chat.ts").MessageImages,
     imageDraftIds?: readonly string[],
     /** Who replies after `replySpeaker`, in turn: the rest of the round (DESIGN §2.3). */
     round: ReadonlyArray<EntityId> = [],
@@ -1895,7 +1895,7 @@ export class ChatSession {
   /** Hides the version's thinking from the model in the fork shown, or sends it again; it stays on the message. */
   setThinkingHidden(
     entry: PathEntry,
-    part: import("@rp/shared/chat.ts").ThinkingPart,
+    part: import("@dreamspan/shared/chat.ts").ThinkingPart,
     hidden: boolean,
     forkId = this.view.forkId
   ): Promise<Outcome<PathEntry>> {
@@ -1920,7 +1920,7 @@ export class ChatSession {
     entry: PathEntry,
     content: string,
     draft: DraftCommit | null = null,
-    images?: import("@rp/shared/chat.ts").MessageImages,
+    images?: import("@dreamspan/shared/chat.ts").MessageImages,
     thinking?: { readonly text: string; readonly draft: DraftCommit | null }
   ): Promise<Outcome<unknown>> {
     const { version } = entry
@@ -1979,7 +1979,7 @@ export class ChatSession {
     entry: PathEntry,
     content: string,
     draft: DraftCommit | null = null,
-    images?: import("@rp/shared/chat.ts").MessageImages
+    images?: import("@dreamspan/shared/chat.ts").MessageImages
   ): Promise<Outcome<unknown>> {
     return this.slotWrite(entry.slotId, (client) =>
       client("WriteVersion", {

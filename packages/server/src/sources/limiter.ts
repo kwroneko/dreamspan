@@ -1,7 +1,7 @@
 // The server limits itself (spec/CARD-SOURCES.md §5.5): a token bucket per source for the
 // whole instance, `Retry-After` honoured with exponential backoff to 5 minutes, and identical
 // concurrent requests sharing one upstream request, dropped when nobody waits on it any more.
-import { SourceFailed } from "@rp/shared/cardSources.ts"
+import { SourceFailed } from "@dreamspan/shared/cardSources.ts"
 import { Effect, Exit, Fiber } from "effect"
 
 export const DEFAULT_RATE = { perSecond: 2, burst: 8 } as const

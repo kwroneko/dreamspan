@@ -5,8 +5,8 @@ import type { SqlClient } from "effect/sql"
 import { lineageCte } from "./forkLabels.ts"
 import { type ForkRef, withFork } from "./forkState.ts"
 import type { PathPiece } from "./displayPath.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { VersionPresence } from "@rp/shared/knowledge.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { VersionPresence } from "@dreamspan/shared/knowledge.ts"
 
 export interface PresenceRange {
   readonly identities: ReadonlyArray<string>

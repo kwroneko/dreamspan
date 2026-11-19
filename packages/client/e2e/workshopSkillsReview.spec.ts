@@ -3,8 +3,8 @@
 // doesn't claim a skill is installed, and start choices that live in the URL: Back restores the
 // previous one, and an id the library doesn't have is dropped rather than sent. Made-up cards only.
 import { expect, type Page, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { saveRevision } from "./support/saveRevision.ts"
@@ -36,7 +36,7 @@ const importCard = async (page: Page, name: string, skills: ReadonlyArray<unknow
     tags: [],
     creator: "Synthetic",
     character_version: "1.0",
-    extensions: { rp_harness: { skills, kept: "other data" } }
+    extensions: { dreamspan: { skills, kept: "other data" } }
   }
   const body = Buffer.from(JSON.stringify({ spec: "chara_card_v3", spec_version: "3.0", data }))
   const response = await page.request.post(`${server().url}/library/import?name=card.json`, {
@@ -49,8 +49,8 @@ const importCard = async (page: Page, name: string, skills: ReadonlyArray<unknow
 
 const savedSkills = async (refId: RefId) => {
   const opened = await admin((api) => api.OpenEditor({ refId }))
-  const ours = (opened.doc as { extensions?: { rp_harness?: { skills?: Array<{ name?: string; use?: string }> } } })
-    .extensions?.rp_harness
+  const ours = (opened.doc as { extensions?: { dreamspan?: { skills?: Array<{ name?: string; use?: string }> } } })
+    .extensions?.dreamspan
   return { names: ours?.skills?.map((s) => s.name ?? `use:${s.use}`), ours }
 }
 

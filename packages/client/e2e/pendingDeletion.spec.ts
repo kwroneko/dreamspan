@@ -47,7 +47,7 @@ test("deletion on another device defeats old browser text; a new keystroke after
     const kept = await first.evaluate(() => {
       let count = 0
       for (const key of Object.keys(localStorage)) {
-        if (!key.startsWith("rp.pendingTyped:")) continue
+        if (!key.startsWith("dreamspan.pendingTyped:")) continue
         const copy = JSON.parse(localStorage.getItem(key)!)
         copy.key = `synthetic-stale:${copy.key}`
         copy.at = Date.now() + 365 * 24 * 60 * 60 * 1000
@@ -137,7 +137,7 @@ test("an editor's stale browser copy cannot restore a field emptied on another d
           }
         }
         await new Promise<void>((resolve, reject) => {
-          const opening = indexedDB.open("rp-editor-copies", 1)
+          const opening = indexedDB.open("dreamspan-editor-copies", 1)
           opening.onsuccess = () => {
             const db = opening.result
             const tx = db.transaction("copies", "readwrite")
@@ -240,7 +240,7 @@ for (const width of [1440, 390])
           page.evaluate(
             () =>
               new Promise<boolean>((resolve) => {
-                const open = indexedDB.open("rp-editor-copies", 1)
+                const open = indexedDB.open("dreamspan-editor-copies", 1)
                 open.onsuccess = () => {
                   const db = open.result
                   const all = db.transaction("copies").objectStore("copies").getAll()
@@ -308,7 +308,7 @@ test("a whole pending-message clear survives a blocked history queue, new text a
     // A retained pre-clear copy can be an earlier save whose acknowledgement was lost.
     // Keep that exact starting text without an additional live edit racing B's opening.
     await first.evaluate(
-      (copy) => localStorage.setItem(`rp.pendingTyped:${copy.userId}:${copy.refId}`, JSON.stringify(copy)),
+      (copy) => localStorage.setItem(`dreamspan.pendingTyped:${copy.userId}:${copy.refId}`, JSON.stringify(copy)),
       {
         key: `synthetic-root-stale:${initial.id}`,
         userId: ownerId,
@@ -341,7 +341,7 @@ test("a whole pending-message clear survives a blocked history queue, new text a
     // The two input transitions replace the unsent empty backup with one final copy.
     const retained = await second.evaluate(() =>
       Object.keys(localStorage)
-        .filter((key) => key.startsWith("rp.pendingTyped:"))
+        .filter((key) => key.startsWith("dreamspan.pendingTyped:"))
         .map((key) => JSON.parse(localStorage.getItem(key)!))
     )
     expect(retained).toHaveLength(1)

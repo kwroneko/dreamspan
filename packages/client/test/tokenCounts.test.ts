@@ -1,6 +1,6 @@
 // The editors' token counts (tokenCounts.ts): the texts every field wants go in one request,
 // each text is counted once per model, and the explanation says which tokenizer counted.
-import { TokenizerInfo } from "@rp/shared/generation.ts"
+import { TokenizerInfo } from "@dreamspan/shared/generation.ts"
 import { describe, expect, it, vi } from "vitest"
 import type { Caller } from "../src/features/editor/caller.ts"
 import { refreshTokenCounts, requestCounts, tokenizerText, tokensText } from "../src/features/editor/tokenCounts.ts"

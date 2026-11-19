@@ -3,7 +3,7 @@
 // thread), which forks the Branches list leaves out, and sections above that list. The threads
 // feature registers one; a plugin can replace or add its own. A part reads stores of its own,
 // so it says when what it returns changed (`branchPartsChanged`).
-import type { Fork } from "@rp/shared/chat.ts"
+import type { Fork } from "@dreamspan/shared/chat.ts"
 import { type ComponentType, useSyncExternalStore } from "react"
 import { makeRegistry } from "../../registry.ts"
 import type { IconName } from "../../ui/Icon.tsx"

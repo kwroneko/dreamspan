@@ -3,8 +3,8 @@
 // Generate saying whose turn it writes, a speaker that stays chosen through a reload and in
 // a second tab, and the switcher's search. Every card here is made up.
 import { expect, type Page, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { Effect } from "effect"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -92,7 +92,7 @@ for (const theme of ["light", "dark"] as const)
     await admin((api) =>
       Effect.gen(function* () {
         const mira = (yield* api.ListCards()).find((card) => card.name === "Mira")!.entityId
-        let parent: import("@rp/shared/chat.ts").SlotId | null = null
+        let parent: import("@dreamspan/shared/chat.ts").SlotId | null = null
         for (let i = 0; i < 8; i++) {
           const sent: SendResult = yield* api.SendMessage({
             chatId,
@@ -140,7 +140,7 @@ for (const [width, height] of [
         Effect.gen(function* () {
           const cards = yield* api.ListCards()
           const entity = (name: string) => cards.find((card) => card.name === name)!.entityId
-          let parent = null as import("@rp/shared/chat.ts").SlotId | null
+          let parent = null as import("@dreamspan/shared/chat.ts").SlotId | null
           for (let index = 0; index < turns; index++) {
             const sent = yield* api.SendMessage({
               chatId,
@@ -448,7 +448,7 @@ test("Auto's pick follows the branch tip, beyond the loaded window", async ({ pa
     Effect.gen(function* () {
       const cards = yield* api.ListCards()
       const entity = (name: string) => cards.find((card) => card.name === name)!.entityId
-      let parent = null as import("@rp/shared/chat.ts").SlotId | null
+      let parent = null as import("@dreamspan/shared/chat.ts").SlotId | null
       let first = parent
       for (let index = 0; index < 82; index++) {
         const sent = yield* api.SendMessage({

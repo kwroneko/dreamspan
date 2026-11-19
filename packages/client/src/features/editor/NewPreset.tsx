@@ -1,4 +1,4 @@
-import type { LibraryRef } from "@rp/shared/library.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"

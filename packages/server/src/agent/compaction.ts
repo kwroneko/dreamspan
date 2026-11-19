@@ -1,5 +1,5 @@
 import { escapeToolData } from "./toolData.ts"
-import { decodeToolData } from "@rp/shared/toolData.ts"
+import { decodeToolData } from "@dreamspan/shared/toolData.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { Message } from "@earendil-works/pi-ai"
 
@@ -151,7 +151,7 @@ export const transcriptData = (messages: ReadonlyArray<AgentMessage>): string =>
             }
           ]
         if (m.role === "rpUser") return [{ role: "user", content: summarySafeText(m.message.content) }]
-        if (m.role === "rpHarness" || m.role === "user") return [{ role: m.role, content: m.content }]
+        if (m.role === "rpApp" || m.role === "user") return [{ role: m.role, content: m.content }]
         if (m.role === "rpCompaction")
           return [{ role: "summary", content: m.content, from: m.from, through: m.through }]
         return []

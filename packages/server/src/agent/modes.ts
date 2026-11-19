@@ -1,7 +1,7 @@
 // Internal reply planning (CHARACTER-CONTEXT §1): plugins replace or wrap the default
 // entry. The built-in planner combines independent chat settings; modes are not chat state.
-import { agentInstructions } from "@rp/shared/agentInstructions.ts"
-import { type ChatState, DEFAULT_REQUEST_CAP } from "@rp/shared/state.ts"
+import { agentInstructions } from "@dreamspan/shared/agentInstructions.ts"
+import { type ChatState, DEFAULT_REQUEST_CAP } from "@dreamspan/shared/state.ts"
 
 export type OutputContract = "final_text" | "send_message" | "both" | "several"
 

@@ -5,8 +5,8 @@ import { openPanel } from "./support/panel.ts"
 import { level1 } from "./support/summaries.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { SendResult } from "@rp/shared/chatApi.ts"
-import type { SlotId } from "@rp/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -145,7 +145,7 @@ for (const width of [1440, 390])
         colorScheme: theme,
         ...(width === 390 ? { isMobile: true, hasTouch: true } : {})
       })
-      await context.addInitScript((theme) => localStorage.setItem("rp.theme", theme), theme)
+      await context.addInitScript((theme) => localStorage.setItem("dreamspan.theme", theme), theme)
       const page = await context.newPage()
       const chatId = await seed()
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)

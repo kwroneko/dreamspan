@@ -2,7 +2,7 @@
 // through a reload and in a second tab, until another choice under Next. A pick under it is one
 // reply, then No one again; an empty Send still asks Auto's pick for one reply. Every card here is made up.
 import { expect, type Page, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"

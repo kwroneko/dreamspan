@@ -6,8 +6,8 @@
 // menu opens the same list (`requestBranches`), in a dialog while the header shows no control.
 // Its rows are the left panel's branch rows (ShellBrowser `BranchListRow`): the same box, title
 // line, preview, time and corner actions, grouped as the panel groups them (branchmenu).
-import { branchMatches } from "@rp/shared/branchNaming.ts"
-import type { Fork, SlotId } from "@rp/shared/chat.ts"
+import { branchMatches } from "@dreamspan/shared/branchNaming.ts"
+import type { Fork, SlotId } from "@dreamspan/shared/chat.ts"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useState } from "react"
 import { useAction } from "../../actions.tsx"

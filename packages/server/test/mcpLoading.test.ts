@@ -5,7 +5,7 @@
 // while "Use the server's instructions" is on. Synthetic connections; nothing is sent anywhere.
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import type { McpConnection, McpLoading } from "@rp/shared/mcp.ts"
+import type { McpConnection, McpLoading } from "@dreamspan/shared/mcp.ts"
 import { planToolLoading } from "../src/agent/loadingPlan.ts"
 import {
   mcpLoadingOf,

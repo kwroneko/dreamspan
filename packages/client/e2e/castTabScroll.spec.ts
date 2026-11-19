@@ -1,6 +1,6 @@
 // Synthetic cast cards: ordinary tab navigation starts at the card header.
 import { expect, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"
@@ -13,7 +13,7 @@ const server = serverPerFile({
 test("cast tabs open at the top of the panel", async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.emulateMedia({ colorScheme: "dark" })
-  await page.addInitScript(() => localStorage.setItem("rp.theme", "dark"))
+  await page.addInitScript(() => localStorage.setItem("dreamspan.theme", "dark"))
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const cards: EntityId[] = []
   for (const name of ["Alice", "Sam"]) {

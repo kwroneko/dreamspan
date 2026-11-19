@@ -19,9 +19,9 @@ import {
   type MessageExtraInfo,
   ResultSchema
 } from "@modelcontextprotocol/sdk/types.js"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { NotFound, StaleWrite } from "@rp/shared/errors.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { NotFound, StaleWrite } from "@dreamspan/shared/errors.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import {
   MCP_LISTING_BYTES_LIMIT,
   MCP_TIMEOUT_MAX_S,
@@ -35,8 +35,8 @@ import {
   type McpServerInfo,
   type McpTool,
   type RemoteMcpTransport
-} from "@rp/shared/mcp.ts"
-import { type CredentialId, originOf, type ProxyMode } from "@rp/shared/providers.ts"
+} from "@dreamspan/shared/mcp.ts"
+import { type CredentialId, originOf, type ProxyMode } from "@dreamspan/shared/providers.ts"
 import { Context, Effect, Exit, Layer, Option, type Scope } from "effect"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
@@ -49,7 +49,7 @@ import { Secrets } from "../secrets.ts"
 import { buildCatalog, serverInfoOf } from "./catalog.ts"
 
 /** What the app says it is to every server (spec/MCP.md §2.1): no capabilities declared. */
-const MCP_CLIENT_INFO = { name: "rp-harness", version: "0.0.0" }
+const MCP_CLIENT_INFO = { name: "dreamspan", version: "0.0.0" }
 
 const headersBinding = (connectionId: string) => `mcp:${connectionId}:headers`
 const proxyBinding = (connectionId: string) => `mcp:${connectionId}:proxy_url`

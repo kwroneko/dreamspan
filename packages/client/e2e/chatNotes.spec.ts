@@ -4,9 +4,9 @@
 // loopback, and the cards are made up.
 import { openPanel, panelTab } from "./support/panel.ts"
 import { expect, type Page, test } from "@playwright/test"
-import { textField } from "@rp/shared/editing.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { Effect } from "effect"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { NOTHING_TO_SAVE, expectSaveState, saveRevision } from "./support/saveRevision.ts"

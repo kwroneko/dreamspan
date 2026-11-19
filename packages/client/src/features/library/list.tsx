@@ -5,9 +5,9 @@ import { usePlaceParam } from "../../usePlaceParam.ts"
 // The library: every card, lorebook and preset, found by name and opened from here. Each
 // item shows what identifies it, a direct action or two, and the rest in its menu.
 import { useAtomValue } from "@effect/atom-react"
-import type { CastCard } from "@rp/shared/chat.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
-import type { ExportFormatInfo } from "@rp/shared/libraryImport.ts"
+import type { CastCard } from "@dreamspan/shared/chat.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
+import type { ExportFormatInfo } from "@dreamspan/shared/libraryImport.ts"
 import { Link, useLocation, useNavigate, useRouter, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useRef, useState, type ReactNode } from "react"

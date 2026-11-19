@@ -4,7 +4,7 @@ import { logoutFromSettings } from "./support/appMenu.ts"
 // up logout (it waits for the next login). Since the independent shell (8e20190) the paged
 // list is the Chats page's; a card's page lists its forks from the shell.
 import { expect, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { asUser } from "./support/rpc.ts"

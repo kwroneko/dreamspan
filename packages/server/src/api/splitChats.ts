@@ -1,12 +1,12 @@
-import type { ChatId, ForkId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
-import { CurrentUser } from "@rp/shared/api.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"
-import type { SplitChatTitle } from "@rp/shared/splitChat.ts"
+import type { SplitChatTitle } from "@dreamspan/shared/splitChat.ts"
 
 export const makeSplitChatHandlers = Effect.gen(function* () {
   const reader = yield* Reader

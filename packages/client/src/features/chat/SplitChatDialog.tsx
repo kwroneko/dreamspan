@@ -2,7 +2,7 @@
 // It says what splitting does and lets the new chat be titled, prefilled with the branch's own
 // name, else the title of the chat it leaves. The title and split are one guarded write.
 import { useEffect, useState } from "react"
-import type { ChatId, Fork, ForkId } from "@rp/shared/chat.ts"
+import type { ChatId, Fork, ForkId } from "@dreamspan/shared/chat.ts"
 import { useAction } from "../../actions.tsx"
 import type { ChatCommandDialogProps } from "./commands.tsx"
 import { showToast } from "../../ui/Toast.tsx"
@@ -10,7 +10,7 @@ import { branchLabel, forksChanged } from "./forks.ts"
 import { NameDialog } from "./NameDialog.tsx"
 import { useSplitChats } from "./splitChats.ts"
 import { requestSplitReveal } from "./splitReveal.ts"
-import { cleanName } from "@rp/shared/chatName.ts"
+import { cleanName } from "@dreamspan/shared/chatName.ts"
 
 export function SplitChatDialog({
   chatId,

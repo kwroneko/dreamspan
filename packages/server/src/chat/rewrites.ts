@@ -3,10 +3,10 @@
 // reader worker, inside the bounded engine (`RewriteText`); the main thread only sends the text
 // and stores what comes back, with the text as it was. If the rewrite itself can't run, the
 // text is written as it is.
-import type { ChatId, EntityId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { StoredRewrite } from "@rp/shared/regexScripts.ts"
-import type { ReplySections } from "@rp/shared/replySections.ts"
+import type { ChatId, EntityId, ForkId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { StoredRewrite } from "@dreamspan/shared/regexScripts.ts"
+import type { ReplySections } from "@dreamspan/shared/replySections.ts"
 import { type Context, Effect } from "effect"
 import type { Reader } from "../db/Database.ts"
 

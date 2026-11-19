@@ -6,9 +6,9 @@ import { setFavourite } from "./cardFavourites.ts"
 import { storeSummaries } from "./forkSummaries.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
-import { cleanName } from "@rp/shared/chatName.ts"
-import { EditRefused } from "@rp/shared/editorApi.ts"
-import type { ChatId } from "@rp/shared/chat.ts"
+import { cleanName } from "@dreamspan/shared/chatName.ts"
+import { EditRefused } from "@dreamspan/shared/editorApi.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 
 /** What a browser shows as an image, as `/library/media` serves. */

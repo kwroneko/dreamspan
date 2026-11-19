@@ -1,8 +1,8 @@
 // One browser profile, with the editors and workshop open in separate tabs. Synthetic only.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { PresetDoc } from "@rp/shared/docs/preset.ts"
-import { textField } from "@rp/shared/editing.ts"
+import type { PresetDoc } from "@dreamspan/shared/docs/preset.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { loginCookie, withCookie, type Client } from "./rpc.ts"
 import { startWorkshopProvider, WORKSHOP_ANSWER } from "./workshopProvider.ts"
@@ -25,7 +25,7 @@ export function workshopDocumentTests() {
           test.setTimeout(180_000)
           await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await context.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await context.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
           const suffix = `${width} ${theme}`
           const preset = await admin((api) => api.CreatePreset({ label: `Draft preset ${suffix}` }))

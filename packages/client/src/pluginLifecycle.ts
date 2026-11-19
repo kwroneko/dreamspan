@@ -7,7 +7,7 @@ let changes: BroadcastChannel | undefined
 /** Server notices cover devices; this also covers a local change before another tab subscribes. */
 export const listenForPluginChanges = (check: () => void) => {
   changes?.close()
-  changes = new BroadcastChannel("rp.plugins.changed")
+  changes = new BroadcastChannel("dreamspan.plugins.changed")
   changes.onmessage = check
 }
 /** @public Applies a local plugin management result; consumed by external host users. */

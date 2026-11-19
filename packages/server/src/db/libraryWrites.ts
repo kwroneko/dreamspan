@@ -5,20 +5,20 @@ import { makeWorkshopWriteHandlers } from "./workshopWrites.ts"
 import { archiveCandidates } from "./cardArchive.ts"
 import { newestLiveFork } from "./cardOrigins.ts"
 import { makeForkMergeQueries } from "./forkMerge.ts"
-import { libraryMergePolicies, defaultLibraryMergePolicy } from "@rp/shared/forkMerge.ts"
+import { libraryMergePolicies, defaultLibraryMergePolicy } from "@dreamspan/shared/forkMerge.ts"
 import { makeForkMergeWriteHandlers } from "./forkMergeWrites.ts"
 import { makeRolloutEffectHandlers } from "./rolloutEffects.ts"
-import { withMain } from "@rp/shared/presetOrder.ts"
-import { PresetDoc } from "@rp/shared/docs/preset.ts"
-import { getAt, parseField } from "@rp/shared/editing.ts"
+import { withMain } from "@dreamspan/shared/presetOrder.ts"
+import { PresetDoc } from "@dreamspan/shared/docs/preset.ts"
+import { getAt, parseField } from "@dreamspan/shared/editing.ts"
 // Library write handlers (DATA-MODEL §3.2). They run in the writer worker, each as one
 // transaction. Every change to a ref flows on to the refs that follow it.
-import type { EntityId } from "@rp/shared/chat.ts"
-import { conditionCards, NOTE_SCHEMA_VERSION, type NoteDoc, readNoteCondition } from "@rp/shared/docs/note.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { Doc, EntityKind, MergeOutcome, RefId } from "@rp/shared/library.ts"
-import { ImportedFollower, LibraryImport } from "@rp/shared/libraryImport.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { conditionCards, NOTE_SCHEMA_VERSION, type NoteDoc, readNoteCondition } from "@dreamspan/shared/docs/note.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { Doc, EntityKind, MergeOutcome, RefId } from "@dreamspan/shared/library.ts"
+import { ImportedFollower, LibraryImport } from "@dreamspan/shared/libraryImport.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import {
   hasSchema,
   keepsRegexApproval,
@@ -26,12 +26,12 @@ import {
   protectedChanges,
   validateDoc,
   withoutGrantedAgentEdits
-} from "@rp/shared/editing.ts"
-import { InvalidDocument } from "@rp/shared/editorApi.ts"
-import { replacementDoc } from "@rp/shared/cardReplace.ts"
-import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
-import { isHeldField } from "@rp/shared/editing.ts"
-import { editedDoc } from "@rp/shared/presetConditions.ts"
+} from "@dreamspan/shared/editing.ts"
+import { InvalidDocument } from "@dreamspan/shared/editorApi.ts"
+import { replacementDoc } from "@dreamspan/shared/cardReplace.ts"
+import { DraftKey, entityDraftTarget } from "@dreamspan/shared/drafts.ts"
+import { isHeldField } from "@dreamspan/shared/editing.ts"
+import { editedDoc } from "@dreamspan/shared/presetConditions.ts"
 import { fieldContent } from "./drafts.ts"
 import { Schema, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
@@ -147,7 +147,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
      * A merge grants nothing the head didn't have: a preset's or card's regex approval survives only with
      * the scripts it was given for, so scripts merged in from a file never arrive approved, and
      * the agent's permission to edit a note or module stays off where it was off (DESIGN §11,
-     * §4.1a; @rp/shared/editing.ts).
+     * §4.1a; @dreamspan/shared/editing.ts).
      */
     const withoutGrants = (ref: RefRow, doc: Doc) =>
       Effect.map(lib.loadDoc(ref.head_revision_id), (ours) => {
@@ -957,7 +957,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
               created: false,
               ref: toLibraryRef(upstream),
               outcome: null,
-              stagedRevisionId: upstream.import_head! as import("@rp/shared/library.ts").RevisionId,
+              stagedRevisionId: upstream.import_head! as import("@dreamspan/shared/library.ts").RevisionId,
               followers: [],
               note: null,
               keptAvatar,

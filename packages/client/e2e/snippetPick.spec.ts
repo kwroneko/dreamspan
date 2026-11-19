@@ -2,7 +2,7 @@
 // snippet expanded in a shown Snippets panel, the one opened, clicked or typed into last, marked on
 // its header; with none shown, on a phone, or on a right-click, a menu at the button chooses one.
 import { expect, type Locator, type Page, type TestInfo, test } from "@playwright/test"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { closePanel, openPanel, panelTab } from "./support/panel.ts"

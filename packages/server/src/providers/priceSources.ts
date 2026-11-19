@@ -1,6 +1,6 @@
 // Which prices a request's model has, by source (spec/PRICES.md §3.1, §5.1). The formulas
 // (usage.ts, userCosts.ts) pick among them in the owner's order.
-import { type Model, routedPrice } from "@rp/shared/providers.ts"
+import { type Model, routedPrice } from "@dreamspan/shared/providers.ts"
 import { BUILTIN_PRICE_VERSION, type PriceContext, supplementPrice } from "./prices/index.ts"
 import type { PriceSources } from "./registry.ts"
 

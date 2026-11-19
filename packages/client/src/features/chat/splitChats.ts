@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react"
-import type { ChatId, ForkId } from "@rp/shared/chat.ts"
-import type { SplitChats } from "@rp/shared/splitChat.ts"
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
+import type { SplitChats } from "@dreamspan/shared/splitChat.ts"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { AppClient } from "../../rpc.ts"
 

@@ -1,6 +1,6 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
-import type { LcmSummary, SummaryDetails as Details } from "@rp/shared/lcm.ts"
+import type { LcmSummary, SummaryDetails as Details } from "@dreamspan/shared/lcm.ts"
 import { Link, useParams, useSearch } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { useAction } from "../../actions.tsx"

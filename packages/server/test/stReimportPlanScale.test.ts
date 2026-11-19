@@ -10,7 +10,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { assert, layer } from "@effect/vitest"
-import { ST_CHANGED_SINCE_CHECK } from "@rp/shared/stReimportPlan.ts"
+import { ST_CHANGED_SINCE_CHECK } from "@dreamspan/shared/stReimportPlan.ts"
 import { Effect } from "effect"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { card, message, writeStBranchFamily } from "./support/stFolder.ts"

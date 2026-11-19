@@ -1,8 +1,8 @@
 // MCP connection rows as the reads and writes see them (spec/MCP.md §12): one query shape for both
 // workers, so a write returns exactly what a read would. Until sharing (M5) a user sees only
 // the connections they own.
-import type { UserId } from "@rp/shared/domain.ts"
-import type { CredentialId } from "@rp/shared/providers.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { CredentialId } from "@dreamspan/shared/providers.ts"
 import {
   McpCall,
   McpConnection,
@@ -11,7 +11,7 @@ import {
   type McpServerInfo,
   type McpTool,
   type McpToolChoices
-} from "@rp/shared/mcp.ts"
+} from "@dreamspan/shared/mcp.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { NotFound } from "./ops.ts"

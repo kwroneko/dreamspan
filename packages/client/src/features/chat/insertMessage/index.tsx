@@ -2,7 +2,7 @@
 // §3.1, 2026-10-30): the message actions Insert message below, Insert message above (on the
 // first message shown) and Duplicate, and the insertion editor, which fills the message stream's
 // slot after its anchor. Every part is a registration, so a plugin can replace or disable it.
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import { lazy, Suspense, useSyncExternalStore } from "react"
 import { messageActions, viewOf, type MessageActionContext } from "../messageActions.tsx"
 import { editorKey } from "../messageDraft.ts"

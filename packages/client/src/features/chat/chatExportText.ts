@@ -1,4 +1,4 @@
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 // ⋯ Export's formats (chatExport.tsx): which files a chat's kind makes. The server writes them
 // (importer/chatExport.ts).
 import type { ChatView } from "./session.ts"

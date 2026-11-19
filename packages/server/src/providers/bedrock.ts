@@ -12,7 +12,7 @@
 // reference and Anthropic's Bedrock SDK): see ARCHITECTURE §6 "Anthropic on AWS Bedrock".
 import { createHash, createHmac } from "node:crypto"
 import { crc32 } from "node:zlib"
-import { awsRegionOf } from "@rp/shared/providerDefinitions.ts"
+import { awsRegionOf } from "@dreamspan/shared/providerDefinitions.ts"
 import { Effect } from "effect"
 import { defaultCacheRelease } from "./cacheStagger.ts"
 import { piCatalogs, withCatalog } from "./catalog.ts"

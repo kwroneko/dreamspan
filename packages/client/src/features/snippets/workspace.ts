@@ -3,11 +3,11 @@
 // typed saves as it's typed, with its edit history, and a revision is cut by Save. It outlives its
 // panel. Text sent from an editor goes, in one click, only to a snippet open on screen (`target`);
 // otherwise the sender chooses one from a menu (owner, 2026-11-02).
-import type { BinItem } from "@rp/shared/bin.ts"
-import type { ChatId } from "@rp/shared/chat.ts"
-import { textField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
-import type { Snippet } from "@rp/shared/snippetsApi.ts"
+import type { BinItem } from "@dreamspan/shared/bin.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import type { Snippet } from "@dreamspan/shared/snippetsApi.ts"
 import { showToast } from "../../ui/Toast.tsx"
 import { browserEnv } from "../editor/backup.ts"
 import type { Caller } from "../editor/caller.ts"
@@ -63,7 +63,7 @@ export class SnippetWorkspace {
     }
   }
   private get recentKey() {
-    return `rp.snippetRecent.${this.user}`
+    return `dreamspan.snippetRecent.${this.user}`
   }
   private readRecent(): ReadonlyArray<RefId> {
     try {

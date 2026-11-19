@@ -13,8 +13,8 @@ const own = { name: "proofread", description: "Checks spelling.", instructions: 
 
 describe("card skills", () => {
   it("reads references and own skills, and skips what it can't use", () => {
-    expect(cardSkillList({ rp_harness: { skills: [own, { use: "cards" }] } })).toHaveLength(2)
-    expect(cardSkillList({ rp_harness: { skills: "no" } })).toEqual([])
+    expect(cardSkillList({ dreamspan: { skills: [own, { use: "cards" }] } })).toHaveLength(2)
+    expect(cardSkillList({ dreamspan: { skills: "no" } })).toEqual([])
     expect(cardSkillList(undefined)).toEqual([])
     expect(readCardSkill({ use: "cards" })).toEqual({ use: "cards" })
     expect(readCardSkill(own)).toEqual(own)

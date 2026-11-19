@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { Effect, Exit, Scope } from "effect"
-import { NewVersion } from "@rp/shared/chat.ts"
+import { NewVersion } from "@dreamspan/shared/chat.ts"
 import * as Database from "../src/db/Database.ts"
 import { StateModules } from "../src/db/stateModules.ts"
 import { cardDoc } from "./support/docs.ts"

@@ -1,9 +1,9 @@
 // How a chat of each kind looks in the client (spec/WORKSHOP.md §2.1, §2.5): its badge, its accent
 // and which registered chat controls it leaves out or adds. The kind's behaviour (planner, summaries,
-// merges, export) is the shared profile (`@rp/shared/chatKinds.ts`); this is only its look, so a
+// merges, export) is the shared profile (`@dreamspan/shared/chatKinds.ts`); this is only its look, so a
 // plugin's kind brings its own by registering both. A kind without a look looks like a story chat.
 import { useSyncExternalStore, type CSSProperties } from "react"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { makeRegistry } from "../../registry.ts"
 
 export interface ChatKindLook {

@@ -2,8 +2,8 @@
 // (`agent.request_cap`): what reaches the provider, with the scripted mock provider.
 import { assert, describe, it } from "@effect/vitest"
 import { Type } from "@earendil-works/pi-ai"
-import type { VersionId } from "@rp/shared/chat.ts"
-import { agentInstructionsPrompt } from "@rp/shared/presetOrder.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
+import { agentInstructionsPrompt } from "@dreamspan/shared/presetOrder.ts"
 import { Effect } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import { agentInstructions } from "../src/agent/modes.ts"

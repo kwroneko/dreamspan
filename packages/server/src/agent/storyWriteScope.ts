@@ -1,7 +1,7 @@
 // Story writes use the same validated position as story reads. A side workshop never
 // falls back to a story's last write, including when opened in its own browser tab.
 import { Effect } from "effect"
-import type { Chat, StoryAt } from "@rp/shared/chat.ts"
+import type { Chat, StoryAt } from "@dreamspan/shared/chat.ts"
 import { attachedStory } from "./storyReadScope.ts"
 import { storyContext } from "./tools/history.ts"
 import { ToolInputRefused, type ToolContext } from "./tools.ts"
@@ -10,7 +10,7 @@ export type WriteChat = Chat & {
   readonly storyTarget?: StoryAt
   readonly upTo?: number
   readonly branchLabel?: string
-  readonly branchNaming?: import("@rp/shared/branchNaming.ts").BranchNaming
+  readonly branchNaming?: import("@dreamspan/shared/branchNaming.ts").BranchNaming
 }
 export const storyWriteChat = Effect.fnUntraced(function* (ctx: ToolContext, chat: Chat) {
   const attached = yield* attachedStory(ctx)

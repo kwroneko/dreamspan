@@ -1,10 +1,10 @@
 // Macro expansion by source, for the assembler (DESIGN §5.6; ARCHITECTURE §10, §15).
-import type { CardFields, ChatMessage, MacroContext } from "@rp/shared/macros/context.ts"
-import { expand, type TextOrigin } from "@rp/shared/macros/expand.ts"
-import type { VariableEffect } from "@rp/shared/macros/variables.ts"
+import type { CardFields, ChatMessage, MacroContext } from "@dreamspan/shared/macros/context.ts"
+import { expand, type TextOrigin } from "@dreamspan/shared/macros/expand.ts"
+import type { VariableEffect } from "@dreamspan/shared/macros/variables.ts"
 import type { Assembly } from "./pipeline.ts"
 import { noteCard, type CardInput, type HistoryEntry, type Source, type NoteInput } from "./types.ts"
-import { readReplaceTarget, targetCard } from "@rp/shared/docs/note.ts"
+import { readReplaceTarget, targetCard } from "@dreamspan/shared/docs/note.ts"
 
 /** Macros that read this generation's speaker or direction (conservatively, by name). */
 const PER_TURN = /\{\{[^}]*\b(?:speaker|direction)\b/i

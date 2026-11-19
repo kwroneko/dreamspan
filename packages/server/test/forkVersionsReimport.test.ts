@@ -1,8 +1,8 @@
 // ST re-import changes only the recorded fork selection and retains shared suffix slots.
 import { assert, layer } from "@effect/vitest"
-import { foldState } from "@rp/shared/state.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
-import type { ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { serverLayer, testConfig } from "./support/config.ts"

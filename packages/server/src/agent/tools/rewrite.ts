@@ -3,12 +3,12 @@ import { storyWriteChat, type WriteChat } from "../storyWriteScope.ts"
 import { attachedStory, checkStoryReadScope } from "../storyReadScope.ts"
 import { storyTools } from "./history.ts"
 import { prepareHistory } from "../../historyPreparation.ts"
-import { foldState } from "@rp/shared/state.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 // Workshop history tools. Target text is prepared on the server, never returned by a rewrite.
 import { Type, validateToolArguments } from "@earendil-works/pi-ai"
 import { Effect } from "effect"
-import type { Chat } from "@rp/shared/chat.ts"
-import type { HistoryCursor, HistoryEdit, HistoryHit } from "@rp/shared/historyApi.ts"
+import type { Chat } from "@dreamspan/shared/chat.ts"
+import type { HistoryCursor, HistoryEdit, HistoryHit } from "@dreamspan/shared/historyApi.ts"
 import type { RolloutTool, ToolContext, ToolOutput } from "../tools.ts"
 import { ToolInputRefused } from "../tools.ts"
 import { workshopLimits } from "../../workshopLimits.ts"
@@ -96,14 +96,14 @@ interface Prepared {
   readonly expected: string
   readonly edits: ReadonlyArray<HistoryEdit>
   readonly labels: ReadonlyArray<string>
-  readonly refs?: ReadonlyArray<{ refId: import("@rp/shared/library.ts").RefId; rowVersion: number }>
+  readonly refs?: ReadonlyArray<{ refId: import("@dreamspan/shared/library.ts").RefId; rowVersion: number }>
   readonly previews?: ReadonlyArray<{ field: string; before: string; after: string }>
   readonly includeSwipes: boolean
   readonly summariesIncluded: boolean
   readonly notes?: ReadonlyArray<{
-    refId: import("@rp/shared/library.ts").RefId
+    refId: import("@dreamspan/shared/library.ts").RefId
     expectedRowVersion: number
-    parent: import("@rp/shared/library.ts").RevisionId
+    parent: import("@dreamspan/shared/library.ts").RevisionId
     text: string
     before: string
     name: string
@@ -314,7 +314,7 @@ const instructions = (ctx: ToolContext, args: InstructionsArgs) =>
           const previous = old?.ref
             ? (yield* ctx.reader.OpenEditor({
                 userId: ctx.userId,
-                refId: old.ref as import("@rp/shared/library.ts").RefId
+                refId: old.ref as import("@dreamspan/shared/library.ts").RefId
               })).ref.label
             : "Account default"
           previews.push({ field: "Prompt preset", before: previous, after: found?.ref.label ?? "Account default" })
@@ -741,9 +741,9 @@ export const historyRenameTool: RolloutTool<{
 const SEARCH_STORY = "Beside a story, search it with search_story: it reads the story where the user's tab shows it."
 
 export const historySearchTool: RolloutTool<{
-  chatId: import("@rp/shared/chat.ts").ChatId
-  forkId: import("@rp/shared/chat.ts").ForkId
-  search: import("@rp/shared/historyApi.ts").HistorySearch
+  chatId: import("@dreamspan/shared/chat.ts").ChatId
+  forkId: import("@dreamspan/shared/chat.ts").ForkId
+  search: import("@dreamspan/shared/historyApi.ts").HistorySearch
   cursor?: typeof HistoryCursor.Type
 }> = {
   source: import.meta.url,

@@ -4,14 +4,14 @@
 // be turned off. A changed prefix shows whatever the TTL (DESIGN: even with none known); nothing
 // shows when what would be re-sent rounds to 0. Other parts of the chat add notes about what a
 // pending change will cost (`cacheNotes`: the insertion editor's re-read), shown in its popover.
-import type { CacheWarmth } from "@rp/shared/inspectorApi.ts"
+import type { CacheWarmth } from "@dreamspan/shared/inspectorApi.ts"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { chipClass } from "./nextReplyStrip.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
-const COUNTDOWN_KEY = "rp.cacheCountdown"
+const COUNTDOWN_KEY = "dreamspan.cacheCountdown"
 
 const countdownOn = () => {
   try {

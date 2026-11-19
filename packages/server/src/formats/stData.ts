@@ -4,19 +4,19 @@
 // public source (`personas.js`, `world-info.js`, `authors-note.js`, `extensions/memory`,
 // `extensions/regex`, `global.d.ts`). Only what the importer maps is read; the rest of
 // `settings.json` is dropped unread.
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
-import { MAX_GLOBAL_SCRIPTS } from "@rp/shared/regexScripts.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
+import { MAX_GLOBAL_SCRIPTS } from "@dreamspan/shared/regexScripts.ts"
 import { readRegex } from "./preset.ts"
 import { stIdTime } from "./sourceTime.ts"
 import { parseStCreatedAt } from "./stCreatedAt.ts"
-import { type ReplySectionSettings } from "@rp/shared/replySections.ts"
-import { CARD_SCHEMA_VERSION, type CardDoc } from "@rp/shared/docs/card.ts"
-import type { ReportBuilder } from "@rp/shared/importReport.ts"
+import { type ReplySectionSettings } from "@dreamspan/shared/replySections.ts"
+import { CARD_SCHEMA_VERSION, type CardDoc } from "@dreamspan/shared/docs/card.ts"
+import type { ReportBuilder } from "@dreamspan/shared/importReport.ts"
 import { Predicate } from "effect"
-import type { LoreRole } from "@rp/shared/docs/lorebook.ts"
+import type { LoreRole } from "@dreamspan/shared/docs/lorebook.ts"
 import { authorNoteFrom, bounded as boundedTo, type StAuthorNote } from "./stChat.ts"
 import { defaultLimits, fail, parseJson } from "./safety.ts"
-import { ST_REPLY_ORDERS } from "@rp/shared/naturalOrder.ts"
+import { ST_REPLY_ORDERS } from "@dreamspan/shared/naturalOrder.ts"
 
 const MiB = 1024 * 1024
 

@@ -1,9 +1,9 @@
 // Pure shell projections. Both worker reads and the shared materialization use these.
-import { branchMatches } from "@rp/shared/branchNaming.ts"
-import type { CastCard, EntityId } from "@rp/shared/chat.ts"
-import { CHAT_FILTERS, type ChatBrowse, type ChatFilterCounts } from "@rp/shared/chatBrowse.ts"
-import { ShellFork, type ShellCard, type ShellForksView, type ShellSection } from "@rp/shared/chatSetupApi.ts"
-import type { SplitChatLink } from "@rp/shared/splitChat.ts"
+import { branchMatches } from "@dreamspan/shared/branchNaming.ts"
+import type { CastCard, EntityId } from "@dreamspan/shared/chat.ts"
+import { CHAT_FILTERS, type ChatBrowse, type ChatFilterCounts } from "@dreamspan/shared/chatBrowse.ts"
+import { ShellFork, type ShellCard, type ShellForksView, type ShellSection } from "@dreamspan/shared/chatSetupApi.ts"
+import type { SplitChatLink } from "@dreamspan/shared/splitChat.ts"
 import type { ChatSummaries } from "./forkSummaries.ts"
 import type { ShellSnapshotRead } from "./ops.ts"
 

@@ -1,12 +1,12 @@
 // What the connection screens read. Writes name the same keys to make these stale.
-import { providerBaseUrl } from "@rp/shared/providerDefinitions.ts"
+import { providerBaseUrl } from "@dreamspan/shared/providerDefinitions.ts"
 import {
   type Connection,
   type ConnectionId,
   originOf,
   type ProviderInfo,
   type ProviderKindInfo
-} from "@rp/shared/providers.ts"
+} from "@dreamspan/shared/providers.ts"
 import { allOf } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { defaultsAtom } from "../pickers/defaults.ts"

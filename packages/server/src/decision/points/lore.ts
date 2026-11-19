@@ -4,7 +4,7 @@
 // (`decision_hint`) is asked about over the recent messages; the ones it answers yes go in.
 // Without a model, the keywords alone decide (today's behaviour). The admitted entries are frozen
 // in the reply's snapshot (`decisionAssembly`), so a rebuild of the context is exact.
-import type { DecisionQuestion } from "@rp/shared/decisions.ts"
+import type { DecisionQuestion } from "@dreamspan/shared/decisions.ts"
 import type { DecisionPoint } from "../engine.ts"
 
 /** At most this many entries are asked about per reply; the highest-ordered first. */

@@ -1,7 +1,7 @@
 // The workshop's Files tab (spec/FILES-AND-ENVIRONMENT.md §8.1): the file manager in the chat's
 // side panel, and on a phone in its sheet, opening at the branch's working folder. A file opened
 // here shows in the tab; Open as a tab puts it in a frame of its own where frames fit.
-import { FILES_TOP } from "@rp/shared/files.ts"
+import { FILES_TOP } from "@dreamspan/shared/files.ts"
 import { useState, type ReactNode } from "react"
 import type { PanelProps } from "../chat/panels.tsx"
 import type { ChatSession, ChatView } from "../chat/session.ts"

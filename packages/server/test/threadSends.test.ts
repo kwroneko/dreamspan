@@ -5,10 +5,10 @@
 // No one in one thread; Stop and a failure in one thread leave the other's reply be; a swipe of one
 // thread's reply stays there; the copies link to each other; refusals. Synthetic data only.
 import { assert, describe, it } from "@effect/vitest"
-import { type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { foldState } from "@rp/shared/state.ts"
-import type { SendTarget } from "@rp/shared/threadsApi.ts"
+import { type EntityId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
+import type { SendTarget } from "@dreamspan/shared/threadsApi.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"

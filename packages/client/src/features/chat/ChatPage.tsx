@@ -20,7 +20,7 @@ import { useIsPanelTab } from "./panels.tsx"
 // A chat (DESIGN §10.1): a URL per chat and per message, the path in a virtualized list
 // anchored at the bottom, and the composer. Nothing here locks while replies generate.
 import { RegistryContext } from "@effect/atom-react"
-import type { ChatId, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
 import { useLocation, useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
 import { observeElementOffset, useVirtualizer, type Virtualizer } from "@tanstack/react-virtual"
 import {

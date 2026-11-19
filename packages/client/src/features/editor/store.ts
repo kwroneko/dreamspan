@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import { checkCardNames } from "./checkCardNames.ts"
-import { cardNames } from "@rp/shared/cardNames.ts"
+import { cardNames } from "@dreamspan/shared/cardNames.ts"
 // One ref being edited (ARCHITECTURE.md §14): its saved document, and a draft per field the
 // user changed, saved to the server as they type. Components subscribe to one field each,
 // so typing in a 50 KB description re-renders that field only.
@@ -20,14 +20,22 @@ import {
   parseField,
   textField,
   valueField
-} from "@rp/shared/editing.ts"
-import type { PresetLorebook, PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
-import { presetOrder } from "@rp/shared/presetOrder.ts"
-import { arrange, type HeldChanges, heldText, NO_HELD, parseHeld, splitOrder, withHeld } from "@rp/shared/presetHeld.ts"
+} from "@dreamspan/shared/editing.ts"
+import type { PresetLorebook, PresetPrompt, PromptOrderEntry } from "@dreamspan/shared/docs/preset.ts"
+import { presetOrder } from "@dreamspan/shared/presetOrder.ts"
+import {
+  arrange,
+  type HeldChanges,
+  heldText,
+  NO_HELD,
+  parseHeld,
+  splitOrder,
+  withHeld
+} from "@dreamspan/shared/presetHeld.ts"
 import { stateChanges, trackOpenEditor } from "./openEditors.ts"
-import { type Draft, deletedSince, entityDraftTarget } from "@rp/shared/drafts.ts"
-import type { ChatNotePosition, EditorSnapshot } from "@rp/shared/editorApi.ts"
-import type { Doc, RefId, RevisionId } from "@rp/shared/library.ts"
+import { type Draft, deletedSince, entityDraftTarget } from "@dreamspan/shared/drafts.ts"
+import type { ChatNotePosition, EditorSnapshot } from "@dreamspan/shared/editorApi.ts"
+import type { Doc, RefId, RevisionId } from "@dreamspan/shared/library.ts"
 import { useEffect, useMemo, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
 import { browserEnv, type Copy, copiesOf, dropCopy, keepCopy, makeCopy, type PageEnv, pendingOf } from "./backup.ts"
@@ -132,7 +140,7 @@ export class EditorStore {
   private readonly subscribers = new Map<string, (listener: () => void) => () => void>()
   /**
    * The head with the value drafts applied, and a preset's held changes shown
-   * (@rp/shared/presetHeld.ts): what fields read when they have no draft of their own.
+   * (@dreamspan/shared/presetHeld.ts): what fields read when they have no draft of their own.
    */
   private valueDoc: Doc = {}
   /** The same without the held changes: what the next reply uses. */
@@ -1182,7 +1190,7 @@ export const useWorkingDoc = (store: EditorStore) => {
 export const useDirty = (store: EditorStore, field: string) =>
   useSyncExternalStore(store.subscribe(field), () => store.isDirty(field))
 
-/** A preset's held changes as JSON, "" when there are none (@rp/shared/presetHeld.ts). */
+/** A preset's held changes as JSON, "" when there are none (@dreamspan/shared/presetHeld.ts). */
 export const useHeld = (store: EditorStore) =>
   useSyncExternalStore(store.subscribe(STRUCTURE, HELD_FIELD), () => heldText(store.held()))
 

@@ -1,14 +1,14 @@
 import { toolData } from "../toolData.ts"
-import { builtinCopyStem } from "@rp/shared/builtinParts.ts"
+import { builtinCopyStem } from "@dreamspan/shared/builtinParts.ts"
 // Workshop plugin tools: registered by the host, never generic RPC exposures. Loading grants no authority.
 import { randomUUID } from "node:crypto"
 import { Type, type TSchema } from "@earendil-works/pi-ai"
 import { Effect, Semaphore } from "effect"
-import type { User } from "@rp/shared/domain.ts"
-import type { PluginDetails, PluginReport } from "@rp/shared/plugins.ts"
-import { PluginRejected } from "@rp/shared/plugins.ts"
-import { pluginConsent, pluginAccessGrows } from "@rp/shared/pluginConsent.ts"
-import type { RolloutEffect, RolloutEffectRecord } from "@rp/shared/workshopApi.ts"
+import type { User } from "@dreamspan/shared/domain.ts"
+import type { PluginDetails, PluginReport } from "@dreamspan/shared/plugins.ts"
+import { PluginRejected } from "@dreamspan/shared/plugins.ts"
+import { pluginConsent, pluginAccessGrows } from "@dreamspan/shared/pluginConsent.ts"
+import type { RolloutEffect, RolloutEffectRecord } from "@dreamspan/shared/workshopApi.ts"
 import type { Reader, Writer } from "../../db/Database.ts"
 import type { PluginHost } from "../../plugins/Host.ts"
 import { repoTask } from "../../plugins/repoTask.ts"
@@ -411,7 +411,7 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
           target: Target = { scope: server ? "instance" : "user", id: String(args.id) },
           owner = ownerOf(actor, target)
         const files = {
-          "rp-plugin.json": JSON.stringify(
+          "dreamspan-plugin.json": JSON.stringify(
             {
               id: target.id,
               name: args.name,
@@ -429,8 +429,8 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
             2
           ),
           [server ? "src/server.ts" : "src/client.tsx"]: server
-            ? 'import { Effect, type Activate } from "@rp/plugin-api/server"\nexport const activate: Activate = () => Effect.void\n'
-            : 'import { type Activate } from "@rp/plugin-api/client"\nexport const activate: Activate = () => {}\n',
+            ? 'import { Effect, type Activate } from "@dreamspan/plugin-api/server"\nexport const activate: Activate = () => Effect.void\n'
+            : 'import { type Activate } from "@dreamspan/plugin-api/client"\nexport const activate: Activate = () => {}\n',
           "test/plugin.test.ts":
             'import test from "node:test"\nimport assert from "node:assert/strict"\ntest("plugin fixture", () => assert.equal(1 + 1, 2))\n'
         }

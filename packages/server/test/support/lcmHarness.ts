@@ -2,8 +2,8 @@
 // fallback), and the summarizer's own `runJob` so a test drives jobs one at a time.
 import type { ServerResponse } from "node:http"
 import { it } from "@effect/vitest"
-import { NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Context, Effect, Scope } from "effect"
 import { ChatHub } from "../../src/chat/ChatHub.ts"
 import { SummaryChecks } from "../../src/lcm/OutputChecks.ts"

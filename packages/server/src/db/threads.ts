@@ -8,8 +8,8 @@
 //    fork or made from it, at any depth); otherwise in the continuing member (F's thread).
 // The shell's fork summaries compute it with each fork's walk (db/forkSummaries.ts), where
 // the path is already in hand, and store the pairs; reads derive the rest.
-import { uuidv7 } from "@rp/shared/id.ts"
-import type { ThreadPlace } from "@rp/shared/threads.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import type { ThreadPlace } from "@dreamspan/shared/threads.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { effectiveOverride, nextSeq, writeOverride } from "./forkState.ts"

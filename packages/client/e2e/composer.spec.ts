@@ -4,8 +4,8 @@
 // Then the races: a request held on its way to the server while the user goes on, each time
 // text has to stay where it was typed (ARCHITECTURE §3.10).
 import { expect, type Page, test } from "@playwright/test"
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { Effect } from "effect"
 import { typeInto } from "./support/composer.ts"
 import { messageMenu } from "./support/message.ts"
@@ -398,7 +398,7 @@ test("closing while a send is out keeps what was typed after it", async ({ page 
   await page.evaluate(
     () =>
       new Promise<void>((resolve) => {
-        const request = indexedDB.open("rp-editor-copies", 1)
+        const request = indexedDB.open("dreamspan-editor-copies", 1)
         request.onsuccess = () => {
           const transaction = request.result.transaction("copies", "readwrite")
           transaction.objectStore("copies").clear()
@@ -427,7 +427,7 @@ test("a copy this browser kept of another chat's composer is saved when a compos
   await page.evaluate(
     (copy) =>
       new Promise<void>((resolve) => {
-        const request = indexedDB.open("rp-editor-copies", 1)
+        const request = indexedDB.open("dreamspan-editor-copies", 1)
         request.onupgradeneeded = () => {
           const store = request.result.createObjectStore("copies", { keyPath: "key" })
           store.createIndex("userId", "userId")

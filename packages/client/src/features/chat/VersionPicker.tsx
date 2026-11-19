@@ -8,7 +8,7 @@
 import { positionOf } from "./position.ts"
 import { Atom } from "effect/reactivity"
 import { useAtomValue } from "@effect/atom-react"
-import type { PathEntry, Version } from "@rp/shared/chat.ts"
+import type { PathEntry, Version } from "@dreamspan/shared/chat.ts"
 import { type ReactNode, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"

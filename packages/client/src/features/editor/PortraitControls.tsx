@@ -3,7 +3,7 @@
 // opens the Picture dialog (the cutout chooser), which adjusts the cutout and replaces the
 // picture, a new one going straight to choosing its cutout. The image is stored whole; the cutout goes with the avatar's own action
 // (`POST /library/avatar?crop=`) or SetCardAvatarCrop, never through a draft.
-import { avatarCropOf, type AvatarCrop, cropKey } from "@rp/shared/media.ts"
+import { avatarCropOf, type AvatarCrop, cropKey } from "@dreamspan/shared/media.ts"
 import { Effect } from "effect"
 import { type DragEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"

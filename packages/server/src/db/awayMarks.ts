@@ -3,7 +3,7 @@
 // fold order, where it was written and who set it: the scene check (`source: "decision"`), a
 // character's own reply (`set_presence`, written by a rollout), or the user. The client keeps
 // only the changes (left, back) and offers Undo on the scene check's (writer `CorrectPresence`).
-import type { AwayMark } from "@rp/shared/contextsApi.ts"
+import type { AwayMark } from "@dreamspan/shared/contextsApi.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps } from "./ops.ts"

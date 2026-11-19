@@ -2,8 +2,8 @@
 // is the user's own and keeps nothing from use, a preset's last-modified and last-used times,
 // and models' last use.
 import { assert, describe, it } from "@effect/vitest"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { client, testConfig, withServer } from "./support/config.ts"

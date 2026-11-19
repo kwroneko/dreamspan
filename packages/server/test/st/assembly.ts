@@ -2,10 +2,10 @@
 // chat, each preset and each generation type, the request ST sends and the one we build for
 // the settings ST had in force must be equal, apart from the documented differences.
 import type { Browser } from "@playwright/test"
-import type { CardDoc } from "@rp/shared/docs/card.ts"
-import type { NoteDoc } from "@rp/shared/docs/note.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import type { NoteDoc } from "@dreamspan/shared/docs/note.ts"
 import { Effect } from "effect"
-import { ReportBuilder } from "@rp/shared/importReport.ts"
+import { ReportBuilder } from "@dreamspan/shared/importReport.ts"
 import { parseStChatPart } from "../../src/formats/stChat.ts"
 import { parseStSettings } from "../../src/formats/stData.ts"
 import { authorNotePlace, chatStateChange } from "../../src/importer/stMapping.ts"

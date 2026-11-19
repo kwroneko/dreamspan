@@ -25,8 +25,8 @@ vi.mock("undici", async (importOriginal) => {
 // chat, then started and replied to, sends exactly the previewed messages. Synthetic data and
 // a mock provider only.
 import { assert, describe, it } from "@effect/vitest"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect, Schedule } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"

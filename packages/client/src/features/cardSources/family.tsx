@@ -2,7 +2,7 @@
 // forked from or listed as before, its versions and its forks, as the source lists them. Each
 // can be inspected or tried in a draft chat without adding it; the user's own are marked and
 // open their card. Shown on a source card's page and, on request, in a card's Sources.
-import type { RemoteRelative } from "@rp/shared/cardSources.ts"
+import type { RemoteRelative } from "@dreamspan/shared/cardSources.ts"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"

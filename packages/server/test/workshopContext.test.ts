@@ -4,9 +4,9 @@ import { toolData } from "../src/agent/toolData.ts"
 // is rebuilt, read_run shows them again, and the history tools never see later messages.
 // Synthetic cards and a scripted provider only.
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { Chat, VersionId } from "@rp/shared/chat.ts"
-import type { ModelOverrides } from "@rp/shared/providers.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { Chat, VersionId } from "@dreamspan/shared/chat.ts"
+import type { ModelOverrides } from "@dreamspan/shared/providers.ts"
 import { Effect, Stream } from "effect"
 import { Reader } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"

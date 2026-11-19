@@ -1,5 +1,5 @@
-import { CastCard, type EntityId } from "@rp/shared/chat.ts"
-import { CardForChat } from "@rp/shared/chatSetupApi.ts"
+import { CastCard, type EntityId } from "@dreamspan/shared/chat.ts"
+import { CardForChat } from "@dreamspan/shared/chatSetupApi.ts"
 import { Effect } from "effect"
 import { expect, it } from "vitest"
 import type { AppClient } from "../src/rpc.ts"

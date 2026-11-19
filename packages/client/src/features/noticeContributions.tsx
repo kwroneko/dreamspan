@@ -1,4 +1,4 @@
-import type { Notice } from "@rp/shared/noticeApi.ts"
+import type { Notice } from "@dreamspan/shared/noticeApi.ts"
 import { type ComponentType, useSyncExternalStore } from "react"
 import { makeRegistry } from "../registry.ts"
 

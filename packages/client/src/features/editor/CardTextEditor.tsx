@@ -1,5 +1,5 @@
 import { useSearchHighlights } from "./searchHighlights.ts"
-import { type FieldPath, getAt } from "@rp/shared/editing.ts"
+import { type FieldPath, getAt } from "@dreamspan/shared/editing.ts"
 import { type ReactNode, useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"

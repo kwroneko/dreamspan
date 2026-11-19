@@ -3,7 +3,7 @@
 // model's last-N limit count nothing. In-memory fixtures; synthetic cards.
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
-import type { CardDoc } from "@rp/shared/docs/card.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { tokensOf } from "../src/assembler/st.ts"

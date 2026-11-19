@@ -744,7 +744,7 @@ Design: [CHAT-MERGE.md](CHAT-MERGE.md).
   - **Superseded** (owner, 2026-11-03; §4.2): the proposed `card.field.set` field patches on top of the bound card revision. Earlier rationale: avoid pinning a whole revision per swipe and keep upstream fixes arriving. The replacement is a note tied to the edited field, with the note's existing chat-state semantics.
   - **State that changes over the story belongs in notes or card modules, not the description.** A costume is a card-owned note at depth, not an edit to the top of the prompt. Card modules get the same placement options notes have (§5.2), so a card can carry several of them at depth.
   - **An "agent may edit" flag on each note, card module and card field.** It travels with the card, and a chat can override it with a state event. It's off by default. Making an item editable that's placed near the top of the context shows a warning, since each edit there rewrites the cached prefix (§5.5).
-  - **ST's Character's Note** is one `depth_prompt` per card (`data.extensions.depth_prompt`: prompt, depth, role). The importer maps it to a card-owned note at that depth and role. Export writes one note there, and the others go in `extensions.rp_harness`, which ST ignores but which round-trips.
+  - **ST's Character's Note** is one `depth_prompt` per card (`data.extensions.depth_prompt`: prompt, depth, role). The importer maps it to a card-owned note at that depth and role. Export writes one note there, and the others go in `extensions.dreamspan`, which ST ignores but which round-trips.
 
 ---
 
@@ -1733,6 +1733,7 @@ Implementation: fork independence unit 8 (ARCHITECTURE §3.13) builds message/sw
 
 ## 12. Later / meta
 
+- **[D] Name: Dreamspan** (owner, 2026-11-19): display form "Dreamspan", code form `dreamspan` (packages `@dreamspan/*`). Replaces the working name rp-harness; persisted identifiers were renamed outright, with no fallbacks, since no deployment held data to keep. The candidates checked before are in DESKTOP.md Appendix A.
 - **[L]** Agent-driven configuration: the agent edits or imports presets, sets up chats and modes, writes plugins.
 - **[L]** Plugin system, and the harness extending itself from within.
 - **[L]** Template-bound interactive UI (§10.2).

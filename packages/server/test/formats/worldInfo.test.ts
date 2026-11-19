@@ -1,4 +1,4 @@
-import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
+import { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { cardToJson } from "../../src/formats/cardExport.ts"
@@ -6,7 +6,7 @@ import { importCard } from "../../src/formats/cardImport.ts"
 import { defaultLimits } from "../../src/formats/safety.ts"
 import { exportLorebook, importLorebook } from "../../src/formats/worldInfo.ts"
 import { mapLorebookFilters } from "../../src/formats/lorebookFilters.ts"
-import { characterFilterPasses } from "@rp/shared/lorebookFilters.ts"
+import { characterFilterPasses } from "@dreamspan/shared/lorebookFilters.ts"
 import { failure, json, run, stCardV2, worldInfo } from "./support.ts"
 
 /** Every key and value of `expected` is in `actual`. */
@@ -73,7 +73,7 @@ describe("World Info import", () => {
       delay_until_recursion: 2,
       character_filter: { is_exclude: true, names: ["Wren.png"], tags: ["t1"] },
       decision_hint: "Is anyone at the harbor?",
-      extensions: { "some-plugin": { x: 1 }, rp_harness: { other: 2 } },
+      extensions: { "some-plugin": { x: 1 }, dreamspan: { other: 2 } },
       unknown_fields: { someNewStField: "kept" }
     })
   })
@@ -214,7 +214,7 @@ describe("character book and World Info", () => {
         delay: 4,
         match_persona_description: true,
         ignore_budget: true,
-        rp_harness: { decision_hint: "Is anyone at the harbor?", other: 2 }
+        dreamspan: { decision_hint: "Is anyone at the harbor?", other: 2 }
       }
     })
   })

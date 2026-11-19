@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatId, ForkId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { client, posted, testConfig, withServer } from "./support/config.ts"
 
@@ -8,7 +8,7 @@ describe("split chat groups", () => {
     Effect.gen(function* () {
       const api = yield* client()
       const chat = yield* api.CreateChat({ title: "Split fixture" })
-      const send = (forkId: ForkId, parentSlotId: import("@rp/shared/chat.ts").SlotId | null, content: string) =>
+      const send = (forkId: ForkId, parentSlotId: import("@dreamspan/shared/chat.ts").SlotId | null, content: string) =>
         posted(api.SendMessage({ chatId: chat.id, forkId, parentSlotId, content, branch: false }))
       const root = yield* send(chat.currentForkId!, null, "Shared opening")
       const original = yield* send(chat.currentForkId!, root.entry.slotId, "Original continuation")
@@ -116,7 +116,7 @@ describe("split chat groups", () => {
 const deleteFixture = (api: Effect.Success<ReturnType<typeof client>>) =>
   Effect.gen(function* () {
     const chat = yield* api.CreateChat({ title: "Delete groups" })
-    const send = (forkId: ForkId, parentSlotId: import("@rp/shared/chat.ts").SlotId | null, content: string) =>
+    const send = (forkId: ForkId, parentSlotId: import("@dreamspan/shared/chat.ts").SlotId | null, content: string) =>
       posted(api.SendMessage({ chatId: chat.id, forkId, parentSlotId, branch: false, content }))
     const shared = yield* send(chat.currentForkId!, null, "Shared opening")
     yield* send(chat.currentForkId!, shared.entry.slotId, "Original ending")

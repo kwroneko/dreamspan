@@ -309,7 +309,7 @@ export const smoke = async (base: string, container: string, password: string) =
       requireThat((yield* api.ListPlugins()).length === 0, "fresh image unexpectedly has plugins")
       pass("no-plugins startup")
       const pluginFiles = (id: string, broken: boolean) => ({
-        "rp-plugin.json": JSON.stringify({
+        "dreamspan-plugin.json": JSON.stringify({
           id,
           name: "Synthetic image plugin",
           api: 1,
@@ -324,7 +324,7 @@ export const smoke = async (base: string, container: string, password: string) =
         }),
         "index.ts": broken
           ? 'throw new Error("synthetic broken plugin");'
-          : 'import {Effect, type Activate} from "@rp/plugin-api/server"; export const activate: Activate = () => Effect.void;'
+          : 'import {Effect, type Activate} from "@dreamspan/plugin-api/server"; export const activate: Activate = () => Effect.void;'
       })
       for (const broken of [false, true]) {
         const id = broken ? "image-broken" : "image-tiny"
@@ -377,7 +377,7 @@ export const smoke = async (base: string, container: string, password: string) =
         const id = broken ? "image-client-broken" : "image-client"
         const source = broken
           ? 'throw new Error("synthetic client import"); export const activate = () => undefined;'
-          : 'import {type Activate} from "@rp/plugin-api/client"; export const activate: Activate = host => { host.registries.appBanners!.register({id:"image.client",order:0,component:()=> <p>Synthetic client works</p>}) };'
+          : 'import {type Activate} from "@dreamspan/plugin-api/client"; export const activate: Activate = host => { host.registries.appBanners!.register({id:"image.client",order:0,component:()=> <p>Synthetic client works</p>}) };'
         const commit = yield* api.CreatePlugin({
           scope: "instance",
           id,
@@ -488,7 +488,7 @@ export const smoke = async (base: string, container: string, password: string) =
     if (Exit.isFailure(result)) throw Cause.squash(result.cause)
     for (const setting of ["FAKE_CARD_SOURCE", "FAKE_SAVED_MEDIA"]) {
       step = `negative launch ${setting}`
-      const name = `rp-image-smoke-${randomUUID()}`
+      const name = `dreamspan-image-smoke-${randomUUID()}`
       names.add(name)
       const dir = mkdtempSync(join(tmpdir(), "rp-image-smoke-negative-"))
       chmodSync(dir, 0o777)

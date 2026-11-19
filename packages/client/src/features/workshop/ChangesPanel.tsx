@@ -3,8 +3,8 @@
 // reply with "Undo all of this reply". Read in pages of 50 (`ListRolloutEffects`): the first again
 // whenever a change is undone anywhere or the newest reply settles.
 import { syncClientPlugins } from "../../pluginLifecycle.ts"
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { UndoAllReport } from "@rp/shared/workshopApi.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { UndoAllReport } from "@dreamspan/shared/workshopApi.ts"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { useEffect, useRef, useState } from "react"

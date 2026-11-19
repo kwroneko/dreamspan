@@ -1,14 +1,14 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
-import { cardNames } from "@rp/shared/cardNames.ts"
+import { cardNames } from "@dreamspan/shared/cardNames.ts"
 import { Effect } from "effect"
 import { checkCardNames } from "./checkCardNames.ts"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 // Compare immutable revisions with their first parent or the live working document. A fork's
 // History runs on through the revisions it was forked from, as a git branch's log does (owner,
 // 2026-11-06), with where it was forked marked between.
-import { type Doc, Revision, type RevisionEntry as InheritedFrom } from "@rp/shared/library.ts"
-import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
+import { type Doc, Revision, type RevisionEntry as InheritedFrom } from "@dreamspan/shared/library.ts"
+import type { PresetPrompt, PromptOrderEntry } from "@dreamspan/shared/docs/preset.ts"
 import { Link } from "@tanstack/react-router"
 import { readableChatTitle } from "../chat/chatTitle.ts"
 import { ReadableDiff, readableLines } from "../../ui/ReadableDiff.tsx"

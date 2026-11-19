@@ -5,7 +5,7 @@
 // (2027-04-01). Dated snapshots aren't listed on the pricing page, so they aren't here.
 // Regional processing (data residency) costs 10% more for models released on or after
 // 2026-03-05; the app can't tell a data-residency project, so that isn't priced.
-import type { Price } from "@rp/shared/providers.ts"
+import type { Price } from "@dreamspan/shared/providers.ts"
 import type { PriceEntry, PriceTable } from "./types.ts"
 
 const source = "https://developers.openai.com/api/docs/pricing"

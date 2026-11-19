@@ -5,7 +5,7 @@
 // shown: it lists the workshops with a branch going with it and shows that branch
 // (spec/WORKSHOP-BRANCHES.md §8.1). The assistant reads the story through its story tools, where
 // the server places each reply (the paired story branch); nothing said here is in the story's context.
-import type { Chat, ChatId, ForkId, PathEntry } from "@rp/shared/chat.ts"
+import type { Chat, ChatId, ForkId, PathEntry } from "@dreamspan/shared/chat.ts"
 import { RegistryContext, useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult, Atom } from "effect/reactivity"
@@ -46,7 +46,7 @@ import { useOpenBesideThis } from "./storyLink.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { PendingSideChat } from "./PendingWorkshop.tsx"
 import { pairedWith, useWorkshopBranches } from "./workshopBranches.tsx"
-import type { WorkshopBranch } from "@rp/shared/workshopApi.ts"
+import type { WorkshopBranch } from "@dreamspan/shared/workshopApi.ts"
 import {
   chooseSideChat,
   NEW_SIDE_CHAT,

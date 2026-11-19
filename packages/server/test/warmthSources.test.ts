@@ -1,6 +1,6 @@
-import type { ChatId, EntityId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId } from "@dreamspan/shared/chat.ts"
 import type { ContextSnapshot, Source, NoteInput } from "../src/assembler/types.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { assembleFixture, type AssemblyFixture } from "./support/assemblySources.ts"

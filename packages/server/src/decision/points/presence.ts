@@ -7,10 +7,10 @@
 // reply's version, so a swipe takes them back. Without a model nothing changes. The user's own
 // away mark, and the agent's `set_presence`, are never overridden: only presence this point set
 // itself is changed back. A narrator is never asked about (§6: never in or out of the scene).
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { DecisionQuestion } from "@rp/shared/decisions.ts"
-import { awayAt } from "@rp/shared/knowledge.ts"
-import { foldState, type StoredStateEventData } from "@rp/shared/state.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { DecisionQuestion } from "@dreamspan/shared/decisions.ts"
+import { awayAt } from "@dreamspan/shared/knowledge.ts"
+import { foldState, type StoredStateEventData } from "@dreamspan/shared/state.ts"
 
 type StoredEvent = typeof StoredStateEventData.Type
 import { Effect } from "effect"

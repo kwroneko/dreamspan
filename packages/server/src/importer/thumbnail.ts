@@ -6,7 +6,14 @@ import { readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Effect } from "effect"
 import { isMediaPath, isSourceCachePath } from "../db/media.ts"
-import { type AvatarCrop, picturePixels, cropKey, cropPixels, defaultCrop, MEDIA_WIDTHS } from "@rp/shared/media.ts"
+import {
+  type AvatarCrop,
+  picturePixels,
+  cropKey,
+  cropPixels,
+  defaultCrop,
+  MEDIA_WIDTHS
+} from "@dreamspan/shared/media.ts"
 import { ThumbnailFailed } from "./ops.ts"
 
 sharp.concurrency(1)

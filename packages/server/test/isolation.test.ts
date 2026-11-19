@@ -1,5 +1,5 @@
 import { docHash } from "../src/db/documents.ts"
-import type { Summary } from "@rp/shared/lcm.ts"
+import type { Summary } from "@dreamspan/shared/lcm.ts"
 import { completeFixture, fixtureSql, summaryJob } from "./support/lcmFixtures.ts"
 // The isolation matrix (spec/WORKFLOW.md §3, DESIGN §11): every RPC in AppApi has an
 // entry, and the suite fails on an RPC without one or an entry without its RPC. A probe
@@ -9,20 +9,27 @@ import { completeFixture, fixtureSql, summaryJob } from "./support/lcmFixtures.t
 // except for admin-only RPCs, where admins may.
 import { readFileSync } from "node:fs"
 import { assert, describe, it, layer } from "@effect/vitest"
-import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
-import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
-import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
-import type { User } from "@rp/shared/domain.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import type { ConnectionSettings, ConnectionId, CredentialId, ModelId } from "@rp/shared/providers.ts"
-import type { RefId, RevisionId } from "@rp/shared/library.ts"
-import { textField, valueField } from "@rp/shared/editing.ts"
-import type { LlmRequestId } from "@rp/shared/usage.ts"
-import type { McpConnectionId } from "@rp/shared/mcp.ts"
+import { AppApi, type AppRpcs } from "@dreamspan/shared/api.ts"
+import { BUILTIN_PRESET_LABEL } from "@dreamspan/shared/generation.ts"
+import {
+  type ChatId,
+  type EntityId,
+  type ForkId,
+  NewVersion,
+  type SlotId,
+  type VersionId
+} from "@dreamspan/shared/chat.ts"
+import type { User } from "@dreamspan/shared/domain.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import type { ConnectionSettings, ConnectionId, CredentialId, ModelId } from "@dreamspan/shared/providers.ts"
+import type { RefId, RevisionId } from "@dreamspan/shared/library.ts"
+import { textField, valueField } from "@dreamspan/shared/editing.ts"
+import type { LlmRequestId } from "@dreamspan/shared/usage.ts"
+import type { McpConnectionId } from "@dreamspan/shared/mcp.ts"
 import { Context, Effect, Fiber, Layer, Option, Stream } from "effect"
 import type { Rpc } from "effect/rpc"
 import { Reader, Writer } from "../src/db/Database.ts"
-import type { Notice } from "@rp/shared/noticeApi.ts"
+import type { Notice } from "@dreamspan/shared/noticeApi.ts"
 import { Notices } from "../src/chat/Notices.ts"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { png, textChunk } from "./formats/support.ts"

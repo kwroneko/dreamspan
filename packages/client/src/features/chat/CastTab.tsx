@@ -13,8 +13,8 @@ import { useChatCards } from "./chatCards.ts"
 // persona, remove them. Under them, Add characters (CastAdd.tsx, a `castSections` entry).
 // Changes to who's here are state events at the leaf shown, so they apply from the latest
 // message on, on this branch.
-import type { CastCard } from "@rp/shared/chat.ts"
-import type { CastChange, ChatCard } from "@rp/shared/chatSetupApi.ts"
+import type { CastCard } from "@dreamspan/shared/chat.ts"
+import type { CastChange, ChatCard } from "@dreamspan/shared/chatSetupApi.ts"
 import { AsyncResult } from "effect/reactivity"
 import { useMemo, useState, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"

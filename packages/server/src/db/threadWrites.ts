@@ -4,11 +4,11 @@
 // composer, and, started at an earlier message, the played stretch's correction (§5.2 step 5,
 // [D] 2026-11-12): the characters moved to another thread count as not there for the messages F
 // shows after S, in F and branches made from it later only. Rename and Undo (a bin item).
-import type { EntityId, ForkId } from "@rp/shared/chat.ts"
-import { cleanName } from "@rp/shared/chatName.ts"
-import { composerKey } from "@rp/shared/drafts.ts"
-import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
-import { ThreadsRefused } from "@rp/shared/threads.ts"
+import type { EntityId, ForkId } from "@dreamspan/shared/chat.ts"
+import { cleanName } from "@dreamspan/shared/chatName.ts"
+import { composerKey } from "@dreamspan/shared/drafts.ts"
+import { type FoldableEvent, foldState } from "@dreamspan/shared/state.ts"
+import { ThreadsRefused } from "@dreamspan/shared/threads.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { identitiesOf } from "../assembler/knowledge.ts"

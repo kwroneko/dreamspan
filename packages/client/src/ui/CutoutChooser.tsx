@@ -3,7 +3,14 @@
 // keyboard, with live message, cast and tile previews. The image is never altered:
 // what's saved is the box, as fractions of the image. The editor feature registers it as
 // `portrait.cutout-chooser` (portraitParts.ts), so a plugin can replace it.
-import { type AvatarCrop, cropPixels, defaultCrop, PORTRAIT_RATIO, snapCrop, WHOLE_PICTURE } from "@rp/shared/media.ts"
+import {
+  type AvatarCrop,
+  cropPixels,
+  defaultCrop,
+  PORTRAIT_RATIO,
+  snapCrop,
+  WHOLE_PICTURE
+} from "@dreamspan/shared/media.ts"
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, useRef, useState } from "react"
 import { Segmented } from "./Segmented.tsx"
 import { Button } from "./Button.tsx"

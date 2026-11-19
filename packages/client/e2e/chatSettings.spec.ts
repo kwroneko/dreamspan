@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { stCardV2 } from "../../server/test/formats/support.ts"
 import { openPanel } from "./support/panel.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -18,7 +18,7 @@ for (const width of [1440, 390])
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const card = stCardV2()
       const imported = await page.request.post(`${server().url}/library/import?name=synthetic.json`, {

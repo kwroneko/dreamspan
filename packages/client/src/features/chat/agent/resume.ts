@@ -1,8 +1,8 @@
 // Carrying on an agent reply (spec/AGENTIC.md §4.2, §4.4, §5.2, §5.3), apart from React so it's
 // tested on its own: when a reply offers Resume, and what a step's edit in the run inspector
 // sends, with the arguments of a tool call checked against the tool's frozen schema first.
-import type { StepEdit, TranscriptEntry, TurnPart } from "@rp/shared/agent.ts"
-import type { Version } from "@rp/shared/chat.ts"
+import type { StepEdit, TranscriptEntry, TurnPart } from "@dreamspan/shared/agent.ts"
+import type { Version } from "@dreamspan/shared/chat.ts"
 
 const RESUMABLE = new Set<Version["status"]>(["stopped", "failed", "interrupted"])
 

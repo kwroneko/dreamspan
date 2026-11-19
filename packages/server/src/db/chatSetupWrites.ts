@@ -1,4 +1,4 @@
-import { composerKey, Draft } from "@rp/shared/drafts.ts"
+import { composerKey, Draft } from "@dreamspan/shared/drafts.ts"
 import { composerImages } from "./composerImages.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
 import { makeShellWriteHandlers } from "./shellWrites.ts"
@@ -20,10 +20,10 @@ import {
   type QueuedMessage,
   type SlotId,
   type VersionId
-} from "@rp/shared/chat.ts"
-import { ThreadsRefused } from "@rp/shared/threads.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+} from "@dreamspan/shared/chat.ts"
+import { ThreadsRefused } from "@dreamspan/shared/threads.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
@@ -35,14 +35,14 @@ import { LeafMoved, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
 import { chatQueue, ownedQueued, type QueuedRow, toQueued } from "./queueRows.ts"
 import { type ChatRow, rewriteColumns, toVersion, toChat } from "./rows.ts"
 import { separateThreads } from "./threads.ts"
-import type { StoredRewrite } from "@rp/shared/regexScripts.ts"
+import type { StoredRewrite } from "@dreamspan/shared/regexScripts.ts"
 import { transaction as runTransaction } from "./tx.ts"
 import { checkAutoTurn, claimAutoTurn } from "./autoGuard.ts"
 
 const userMessage = (
   content: string,
   speakerEntityId: EntityId | null,
-  images?: import("@rp/shared/chat.ts").MessageImages,
+  images?: import("@dreamspan/shared/chat.ts").MessageImages,
   rewrite?: StoredRewrite
 ) =>
   new NewVersion({

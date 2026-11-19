@@ -1,11 +1,11 @@
 // One replacing note per target, including off notes. Run inside the writer's transaction so
 // two clients cannot both claim a target. Resolve branch bindings and card swaps as assembly does.
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import { readReplaceTarget, targetCard } from "@rp/shared/docs/note.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
-import type { Doc } from "@rp/shared/library.ts"
-import { type FoldableEvent, foldState, swappedCard } from "@rp/shared/state.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import { readReplaceTarget, targetCard } from "@dreamspan/shared/docs/note.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { ChatNotePosition } from "@dreamspan/shared/editorApi.ts"
+import type { Doc } from "@dreamspan/shared/library.ts"
+import { type FoldableEvent, foldState, swappedCard } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { displayEndOf } from "./displayPath.ts"

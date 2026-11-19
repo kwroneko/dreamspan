@@ -5,7 +5,7 @@
 // editor and the side panel's book, at 1440 and 390. Synthetic books and chat only.
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -105,7 +105,7 @@ for (const theme of ["light", "dark"] as const)
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const ref = await upload(page, `Coast ${width} ${theme}`)
       await page.goto(`${server().url}/library/${ref.id}`)
@@ -120,7 +120,7 @@ for (const theme of ["light", "dark"] as const)
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: width < 600 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const label = `Tides ${width} ${theme}`
       const ref = await upload(page, label)

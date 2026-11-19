@@ -1,6 +1,6 @@
 // "HTML in older messages sent to the model" (spec/HTML-MESSAGES.md §3.6): as written by
 // default, as ST sends it; or, from N messages back, text only or text without panels.
-import { DEFAULT_HTML_DEPTH, type HtmlDepth } from "@rp/shared/state.ts"
+import { DEFAULT_HTML_DEPTH, type HtmlDepth } from "@dreamspan/shared/state.ts"
 import { useState, useSyncExternalStore } from "react"
 import { Field, Fieldset } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"

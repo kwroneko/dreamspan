@@ -9,10 +9,10 @@
 //
 // The import itself is StImports: this drives it as the client did (parts, `restart`,
 // deferred branches again, then on their own), through the same `file` and its handlers.
-import type { ChatId, EntityId } from "@rp/shared/chat.ts"
-import type { User } from "@rp/shared/domain.ts"
-import { NotFound, ServerError } from "@rp/shared/errors.ts"
-import { classifyStPath, findStRoots } from "@rp/shared/stFolder.ts"
+import type { ChatId, EntityId } from "@dreamspan/shared/chat.ts"
+import type { User } from "@dreamspan/shared/domain.ts"
+import { NotFound, ServerError } from "@dreamspan/shared/errors.ts"
+import { classifyStPath, findStRoots } from "@dreamspan/shared/stFolder.ts"
 import {
   StCount,
   StFileResult,
@@ -24,16 +24,16 @@ import {
   StImportReport,
   type StImportStatus,
   StNotSent
-} from "@rp/shared/stImportApi.ts"
-import { type StPlanned, stPlan, stSendRounds } from "@rp/shared/stPlan.ts"
-import type { StFolderEntry, StPlanChoice } from "@rp/shared/stImportApi.ts"
+} from "@dreamspan/shared/stImportApi.ts"
+import { type StPlanned, stPlan, stSendRounds } from "@dreamspan/shared/stPlan.ts"
+import type { StFolderEntry, StPlanChoice } from "@dreamspan/shared/stImportApi.ts"
 import { Cause, Context, Effect, Exit, Layer, Option, Schedule, Schema, Semaphore, type Types } from "effect"
 import { Notices } from "../chat/Notices.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { readStFolderFile, scanStFolder, statStFolderFile } from "./stFolderDisk.ts"
 import { StImports } from "./StImports.ts"
 import { StImportPlans, stFolderPlanFiles } from "./StImportPlans.ts"
-import type { StImportPlanChanged } from "@rp/shared/stReimportPlan.ts"
+import type { StImportPlanChanged } from "@dreamspan/shared/stReimportPlan.ts"
 import { visibleReport } from "./stReport.ts"
 
 /** Progress is written, and the user's tabs told, at most this often per job. */

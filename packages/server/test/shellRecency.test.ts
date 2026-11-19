@@ -2,7 +2,7 @@
 // forks, branching included, so the chat the user just branched stays on top instead of
 // dropping to the branch point's date. Lists of chats show each chat once, by its current
 // fork, with its chat's name and how many branches it has; a chat's own lists stay per fork.
-import type { Chat } from "@rp/shared/chat.ts"
+import type { Chat } from "@dreamspan/shared/chat.ts"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"

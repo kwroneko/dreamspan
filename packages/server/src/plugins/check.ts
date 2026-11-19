@@ -3,7 +3,7 @@ import { readFile, readdir, rename, rm, lstat } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Schema } from "effect"
-import { type PluginReport, PluginManifest } from "@rp/shared/plugins.ts"
+import { type PluginReport, PluginManifest } from "@dreamspan/shared/plugins.ts"
 import { runPluginChild } from "./process.ts"
 import { confined, pluginFolder } from "./repo.ts"
 
@@ -121,7 +121,7 @@ export const checkPlugin = async (
 }
 export const readBuild = async (dataDir: string, owner: string, id: string, commit: string) => {
   const folder = await confined(dataDir, buildFolder(dataDir, owner, id, commit))
-  const file = join(folder, "rp-plugin.json")
+  const file = join(folder, "dreamspan-plugin.json")
   const info = await lstat(file)
   if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size > 524288)
     throw new Error("Invalid manifest")

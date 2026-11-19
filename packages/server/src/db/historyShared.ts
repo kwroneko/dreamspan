@@ -1,9 +1,9 @@
-import { NotFound } from "@rp/shared/errors.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { effectiveOverride, replacedIn, eventApplies } from "./forkState.ts"
 import { onForkPath } from "./forks.ts"
-import type { HistoryEdit } from "@rp/shared/historyApi.ts"
+import type { HistoryEdit } from "@dreamspan/shared/historyApi.ts"
 
 export const historyFork = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,

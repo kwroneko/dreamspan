@@ -8,10 +8,10 @@ import { build } from "rolldown"
 import { snapshot } from "./repo.ts"
 import { runPluginChild } from "./process.ts"
 import { checkNetworkFilter } from "./checkNetwork.ts"
-import { CLIENT_PLUGIN_SURFACES } from "@rp/shared/pluginClient.ts"
-import type { PluginReport } from "@rp/shared/plugins.ts"
+import { CLIENT_PLUGIN_SURFACES } from "@dreamspan/shared/pluginClient.ts"
+import type { PluginReport } from "@dreamspan/shared/plugins.ts"
 import { rewriteImports } from "./importPolicy.ts"
-import { builtinReplacement } from "@rp/shared/builtinParts.ts"
+import { builtinReplacement } from "@dreamspan/shared/builtinParts.ts"
 
 const [dataDir, owner, id, commit, folder, appStamp, previous, expectedReport, sourceMode, actorRole] =
   process.argv.slice(2) as [string, string, string, string, string, string, string, string, string, string]
@@ -157,10 +157,10 @@ try {
       typeRoots: [join(root, "node_modules/@types")],
       jsx: ts.JsxEmit.ReactJSX,
       paths: {
-        "@rp/plugin-api/server": [api("server")],
-        "@rp/plugin-api/worker": [api("worker")],
-        "@rp/plugin-api/client": [api("client")],
-        "@rp/plugin-api/display": [api("display")],
+        "@dreamspan/plugin-api/server": [api("server")],
+        "@dreamspan/plugin-api/worker": [api("worker")],
+        "@dreamspan/plugin-api/client": [api("client")],
+        "@dreamspan/plugin-api/display": [api("display")],
         react: [join(root, "node_modules/@types/react/index.d.ts")],
         "react/jsx-runtime": [join(root, "node_modules/@types/react/jsx-runtime.d.ts")]
       }
@@ -176,10 +176,10 @@ try {
           !value.startsWith("./") &&
           !value.startsWith("../") &&
           ![
-            "@rp/plugin-api/server",
-            "@rp/plugin-api/worker",
-            "@rp/plugin-api/client",
-            "@rp/plugin-api/display",
+            "@dreamspan/plugin-api/server",
+            "@dreamspan/plugin-api/worker",
+            "@dreamspan/plugin-api/client",
+            "@dreamspan/plugin-api/display",
             "react",
             "react/jsx-runtime",
             ...(test ? ["node:test", "node:assert/strict"] : [])
@@ -236,15 +236,16 @@ try {
             resolveId(source, importer) {
               if (importer === "\0rolldown/runtime.js" && source === "node:module")
                 return { id: source, external: true }
-              if (side === "client" && source === "@rp/plugin-api/display")
+              if (side === "client" && source === "@dreamspan/plugin-api/display")
                 return { id: "/plugin-display.mjs", external: true }
               if (
                 side === "client" &&
-                ["@rp/plugin-api/client", "react", "react/jsx-runtime", "react/jsx-dev-runtime"].includes(source)
+                ["@dreamspan/plugin-api/client", "react", "react/jsx-runtime", "react/jsx-dev-runtime"].includes(source)
               )
                 return { id: "/plugin-host.mjs", external: true }
-              if (source === `@rp/plugin-api/${side}`) return { id: pathToFileURL(api(side)).href, external: true }
-              if (source.startsWith("@rp/plugin-api/")) throw new Error("Wrong API entry")
+              if (source === `@dreamspan/plugin-api/${side}`)
+                return { id: pathToFileURL(api(side)).href, external: true }
+              if (source.startsWith("@dreamspan/plugin-api/")) throw new Error("Wrong API entry")
               if (importer && !source.startsWith(".") && !source.startsWith("/"))
                 throw new Error("Plugin dependency must be vendored")
               return null
@@ -297,8 +298,10 @@ try {
                   (source === "node:module" && importer === "\0rolldown/runtime.js")
                 )
                   return { id: source, external: true }
-                if (source === "@rp/plugin-api/server") return { id: pathToFileURL(api("server")).href, external: true }
-                if (source === "@rp/plugin-api/worker") return { id: pathToFileURL(api("worker")).href, external: true }
+                if (source === "@dreamspan/plugin-api/server")
+                  return { id: pathToFileURL(api("server")).href, external: true }
+                if (source === "@dreamspan/plugin-api/worker")
+                  return { id: pathToFileURL(api("worker")).href, external: true }
                 if (importer && !source.startsWith(".") && !source.startsWith("/"))
                   throw new Error("Test dependency must be vendored")
                 return null

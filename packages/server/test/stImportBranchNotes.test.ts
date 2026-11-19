@@ -4,7 +4,7 @@
 // own on, the others off, one of them missing the paragraphs added later.
 import { DatabaseSync } from "node:sqlite"
 import { assert, layer } from "@effect/vitest"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

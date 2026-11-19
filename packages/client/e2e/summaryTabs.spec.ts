@@ -5,8 +5,8 @@
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import type { SendResult } from "@rp/shared/chatApi.ts"
-import type { SlotId } from "@rp/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
@@ -50,7 +50,7 @@ for (const width of [1440, 390])
       await admin((api) => api.SetDisplayPrefs({ prefs: { timeline: "originals" } }))
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await page.goto(`${server().url}/chats/${chat.id}?slot=${chat.entries[6]!.slotId}`)
       await expect(page.getByTestId("lcm-boundary")).toBeVisible()

@@ -3,7 +3,7 @@
 // library entry over the chat's column with `editor` and `focus` in the URL; when a view is
 // registered under that `focus`, it's shown in place of the library editor, so a plugin can
 // add, replace or disable one.
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import type { ComponentType, ReactNode } from "react"
 import { makeRegistry } from "../../registry.ts"
 import type { CastView } from "../chat/cast.ts"

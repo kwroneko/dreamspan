@@ -2,8 +2,8 @@
 // model and what its provider documents) and records findings; a test fails at its end if
 // any check failed, after all of them have run.
 import { assert, it } from "@effect/vitest"
-import type { LlmRequest } from "@rp/shared/usage.ts"
-import type { Model } from "@rp/shared/providers.ts"
+import type { LlmRequest } from "@dreamspan/shared/usage.ts"
+import type { Model } from "@dreamspan/shared/providers.ts"
 import { Effect, type Scope } from "effect"
 import type { HttpServer } from "effect/http"
 import type { Reader, Writer } from "../../../src/db/Database.ts"

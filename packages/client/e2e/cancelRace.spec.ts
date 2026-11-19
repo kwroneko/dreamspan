@@ -2,8 +2,8 @@
 // edit stays open with it, and its browser copy stays until the server has it (DESIGN §6.2),
 // even when the saves after the cancel fail.
 import { expect, test, type Page } from "@playwright/test"
-import type { SlotId } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { Effect } from "effect"
 import type { Copy } from "../src/features/editor/backup.ts"
 import { messageMenu } from "./support/message.ts"
@@ -19,7 +19,7 @@ const copies = (page: Page) =>
   page.evaluate(
     () =>
       new Promise<Array<Copy>>((resolve) => {
-        const open = indexedDB.open("rp-editor-copies", 1)
+        const open = indexedDB.open("dreamspan-editor-copies", 1)
         open.onsuccess = () => {
           const db = open.result
           const all = db.transaction("copies").objectStore("copies").getAll()

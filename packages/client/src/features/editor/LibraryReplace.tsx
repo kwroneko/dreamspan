@@ -16,8 +16,8 @@ import {
   type LibraryReplaceKind,
   type LibraryReplaceResult,
   type LibrarySearch
-} from "@rp/shared/libraryReplace.ts"
-import { libraryReplaceKinds } from "@rp/shared/libraryText.ts"
+} from "@dreamspan/shared/libraryReplace.ts"
+import { libraryReplaceKinds } from "@dreamspan/shared/libraryText.ts"
 import { Link } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type FormEvent, useState } from "react"

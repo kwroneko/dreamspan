@@ -1,8 +1,8 @@
 // What each user hears about wherever they are in the app (DESIGN §10.1): a reply that
 // finished in any of their chats. Every open tab of the user subscribes; nobody else's
 // notices ever reach it.
-import type { UserId } from "@rp/shared/domain.ts"
-import type { Notice } from "@rp/shared/noticeApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { Notice } from "@dreamspan/shared/noticeApi.ts"
 import { type Cause, Context, Effect, Layer, Queue, type Scope } from "effect"
 
 /** Batches a tab may lag behind; overflow requests a draft refresh and keeps the newest notice. */

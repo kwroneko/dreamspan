@@ -2,7 +2,7 @@
 import { SectionLine } from "../../ui/SectionLine.tsx"
 
 export type Reuse = "every" | "until"
-type Reason = import("@rp/shared/inspectorApi.ts").PresetContext["cacheAfter"][number]["reason"] | "end"
+type Reason = import("@dreamspan/shared/inspectorApi.ts").PresetContext["cacheAfter"][number]["reason"] | "end"
 
 const REUSE_TITLE = "Reused between replies"
 

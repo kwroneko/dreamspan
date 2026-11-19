@@ -1,6 +1,6 @@
 // What a model list shows, in which order: a text filter, then by name (connection · model, A to
 // Z) or by when each last wrote a reply for the user, latest first and never-used last.
-import type { DisplayPrefs } from "@rp/shared/chatApi.ts"
+import type { DisplayPrefs } from "@dreamspan/shared/chatApi.ts"
 import { formatAgo as ago } from "../characters/data.ts"
 import type { ModelChoice } from "../chat/modelChoices.ts"
 import { exactTime, fold } from "./presetList.ts"

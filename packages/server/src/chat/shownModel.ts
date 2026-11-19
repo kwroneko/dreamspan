@@ -2,12 +2,12 @@
 // stands after the reply, so a model chosen while a stopped or failed reply is the last one
 // applies when that reply is resumed, continued or given a new version. A generation's own
 // assembly reads the state before the reply, which leaves such a choice out.
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
-import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
+import { type FoldableEvent, foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
-import type { GenerationDefaults } from "@rp/shared/generation.ts"
+import type { GenerationDefaults } from "@dreamspan/shared/generation.ts"
 
 export interface ShownModel {
   readonly connection: ConnectionId

@@ -4,7 +4,7 @@
 // tab's form is models.spec.ts's). Every card here is made up.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { saveButton } from "./support/saveRevision.ts"

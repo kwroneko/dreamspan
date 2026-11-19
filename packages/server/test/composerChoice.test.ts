@@ -2,9 +2,9 @@
 // with its draft, so it moves to the next tip with it, goes along when a branch starts,
 // and is published to every tab of the chat. Cross-user access is in the isolation matrix.
 import { assert, describe, it } from "@effect/vitest"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect, Stream } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { client, outcome, posted, takenFrom, testConfig, typeInto, withServer } from "./support/config.ts"

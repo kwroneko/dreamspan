@@ -4,7 +4,7 @@
 // live fork's summary and outline read from one pass over its chat equals the one walked alone,
 // and so do its path and event rows (`shellSlotsQuery`, `shellEventsQuery`).
 import { assert, it } from "@effect/vitest"
-import { type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
+import { type ForkId, NewVersion, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Worker } from "node:worker_threads"
 import { databaseFile } from "../src/db/connection.ts"

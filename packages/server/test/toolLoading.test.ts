@@ -4,7 +4,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { writeFileSync } from "node:fs"
 import { normalizeContext, type Api, type Message, type Model, type Tool } from "@earendil-works/pi-ai"
-import { foldState } from "@rp/shared/state.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import {
   cardSkills,
@@ -71,7 +71,7 @@ describe("built-in skills come with every workshop, whatever its card", () => {
       const own = cardSkills(
         {
           extensions: {
-            rp_harness: {
+            dreamspan: {
               skills: [{ name: "proofread", description: "Checks spelling.", instructions: "List typos.", tools: [] }]
             }
           }
@@ -119,7 +119,7 @@ describe("built-in skills come with every workshop, whatever its card", () => {
       const own = cardSkills(
         {
           extensions: {
-            rp_harness: {
+            dreamspan: {
               skills: [
                 {
                   name: "proofread",
@@ -368,7 +368,7 @@ describe("card skills", () => {
   it("reads references and the card's own skills, ignoring anything else", () => {
     const doc = {
       extensions: {
-        rp_harness: {
+        dreamspan: {
           skills: [
             { use: "cards" },
             { use: "Not A Name" },

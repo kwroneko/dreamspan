@@ -1,7 +1,7 @@
 // Every delete says so in a toast, with Undo and a way to the bin (DESIGN §6.2), so deleting
 // needs no confirmation anywhere but inside the bin.
 import { RegistryContext } from "@effect/atom-react"
-import type { BinItem } from "@rp/shared/bin.ts"
+import type { BinItem } from "@dreamspan/shared/bin.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { Context, Effect } from "effect"
 import { AtomRegistry, Reactivity } from "effect/reactivity"

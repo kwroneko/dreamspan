@@ -5,7 +5,7 @@ import { useCardNameCheck } from "./cardNameCheck.ts"
 import { checkCardNames } from "./checkCardNames.ts"
 // A card from scratch: the three standard names, then the editor for the rest. New persona is
 // the same form and flow; its card is made in the persona folder (owner, 2026-11-07).
-import type { LibraryRef, RefId } from "@rp/shared/library.ts"
+import type { LibraryRef, RefId } from "@dreamspan/shared/library.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"

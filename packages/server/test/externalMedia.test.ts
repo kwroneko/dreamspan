@@ -14,7 +14,7 @@ import { makeExternalFetcher } from "../src/net/externalMedia.ts"
 // Consent, authentication and cache isolation through real sockets and worker transactions.
 import { assert, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
-import { DEFAULT_EXTERNAL_MEDIA } from "@rp/shared/externalMedia.ts"
+import { DEFAULT_EXTERNAL_MEDIA } from "@dreamspan/shared/externalMedia.ts"
 import { ExternalMedia } from "../src/api/externalMedia.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"

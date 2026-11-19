@@ -1,7 +1,7 @@
 // Lenient reading of fields from an untrusted object. A missing or null field takes its
 // default quietly, as ST does; a field of the wrong type takes it too, with a warning in the
 // import report, so one bad field never costs the whole file.
-import type { ReportBuilder } from "@rp/shared/importReport.ts"
+import type { ReportBuilder } from "@dreamspan/shared/importReport.ts"
 import { Predicate } from "effect"
 import type { Path } from "./safety.ts"
 

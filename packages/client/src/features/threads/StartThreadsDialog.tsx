@@ -3,8 +3,8 @@
 // (it goes on as the first thread), each with a name, who's in it and who the user writes as
 // there; at an earlier message, what happens to the messages after it ([D] owner, 2026-11-12).
 // Afterwards the user stays where they were; the toast opens the new thread or undoes it.
-import type { CastCard, EntityId, ForkId, PathEntry } from "@rp/shared/chat.ts"
-import type { Cast } from "@rp/shared/chatSetupApi.ts"
+import type { CastCard, EntityId, ForkId, PathEntry } from "@dreamspan/shared/chat.ts"
+import type { Cast } from "@dreamspan/shared/chatSetupApi.ts"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"

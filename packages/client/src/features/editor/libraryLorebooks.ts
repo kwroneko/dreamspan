@@ -5,7 +5,7 @@ import { libraryListAtom } from "../library/queries.ts"
 // minutes after the last tab reading them goes, shown at once in the next chat and read again behind.
 import { useAtomValue } from "@effect/atom-react"
 import { useAtomRevalidated } from "../../actions.tsx"
-import type { LibraryRef } from "@rp/shared/library.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
 
 const lorebooksAtom = libraryListAtom("lorebook")

@@ -5,8 +5,8 @@
 // provider the user didn't turn it on for). Shown only once a decision is on somewhere, or
 // while this chat still has one off.
 import { useAtomValue } from "@effect/atom-react"
-import type { Cast } from "@rp/shared/chatSetupApi.ts"
-import type { ConnectionDecisions, DecisionPointInfo } from "@rp/shared/decisions.ts"
+import type { Cast } from "@dreamspan/shared/chatSetupApi.ts"
+import type { ConnectionDecisions, DecisionPointInfo } from "@dreamspan/shared/decisions.ts"
 import { Link } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { useState, useSyncExternalStore } from "react"

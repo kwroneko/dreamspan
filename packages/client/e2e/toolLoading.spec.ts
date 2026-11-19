@@ -8,7 +8,7 @@ import type { AddressInfo } from "node:net"
 import { resolve } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -157,7 +157,7 @@ for (const transport of ["native", "dispatcher"] as const)
         test.setTimeout(120_000)
         await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
         await page.emulateMedia({ colorScheme: theme })
-        await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+        await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
         await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
         const run = await admin((api) =>
           Effect.gen(function* () {

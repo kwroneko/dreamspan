@@ -10,7 +10,7 @@
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test, type TestInfo } from "@playwright/test"
-import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { messageMenu } from "./support/message.ts"
@@ -153,7 +153,7 @@ const versions = (message: Locator) => message.getByRole("group", { name: "Versi
 const open = async (page: Page, width: number, theme: "light" | "dark", url: string) => {
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
   await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-  await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+  await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(url)
 }

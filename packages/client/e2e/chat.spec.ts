@@ -3,8 +3,8 @@
 // sees the chat; and every chat screen at phone and desktop width, light and dark.
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import type { Chat, SlotId } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
+import type { Chat, SlotId } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { Effect } from "effect"
 import { messageMenu, showActions } from "./support/message.ts"
 import { expectFlashedThenUnmarked, recordFlashes } from "./support/flashes.ts"

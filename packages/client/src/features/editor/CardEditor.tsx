@@ -6,9 +6,9 @@ import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // card's own book, Notes the card's notes, Extra its regex scripts and the sections plugins
 // add (`cardEditorSections`). Each tab is registered (`cardTabs.ts`). Card modules are card
 // notes (§5.0).
-import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
-import { parseField, valueField, type FieldPath } from "@rp/shared/editing.ts"
-import type { NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
+import type { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
+import { parseField, valueField, type FieldPath } from "@dreamspan/shared/editing.ts"
+import type { NoteEntry, SharedNote } from "@dreamspan/shared/editorApi.ts"
 import {
   type ReactNode,
   useCallback,

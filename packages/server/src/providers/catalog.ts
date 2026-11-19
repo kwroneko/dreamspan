@@ -2,7 +2,7 @@
 // (spec/PROVIDERS.md §3.1). A kind's catalog loads on first use, so a server that never
 // uses a provider never holds its catalog in memory.
 import type { Api, Model } from "@earendil-works/pi-ai"
-import type { ModelUpstream } from "@rp/shared/providers.ts"
+import type { ModelUpstream } from "@dreamspan/shared/providers.ts"
 import { Effect } from "effect"
 import { documentedCachePolicy } from "./cachePolicy.ts"
 import type { ListedModel } from "./modelLists.ts"

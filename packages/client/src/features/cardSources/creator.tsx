@@ -2,7 +2,7 @@
 // by <creator>"): the source's browsing view with its creator filter set, so the URL holds it
 // (a reload or a second tab shows the same view) and every filter and sort still applies. Above
 // the results, the creator's public profile as the source gives it, and Not by this creator.
-import type { RemoteCreator } from "@rp/shared/cardSources.ts"
+import type { RemoteCreator } from "@dreamspan/shared/cardSources.ts"
 import { useEffect, useState } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"

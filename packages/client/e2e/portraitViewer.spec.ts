@@ -8,7 +8,7 @@
 // touch events). VIEWER_SHOTS=<dir> saves screenshots. Every card here is made up.
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { cardFieldsTab } from "./support/cardEditor.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"

@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import { lcmTest, lcmHarness } from "./support/lcmHarness.ts"
 import { importStFolder } from "./support/stUpload.ts"
 import { card, encode, header, jsonl, message } from "./support/stFolder.ts"
-import type { SummaryId } from "@rp/shared/lcm.ts"
+import type { SummaryId } from "@dreamspan/shared/lcm.ts"
 import { outcome } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 

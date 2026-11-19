@@ -11,9 +11,9 @@ import {
   McpServerInfo,
   McpTool,
   McpToolChoices
-} from "@rp/shared/mcp.ts"
-import { PluginId, PluginPins, PluginData, PluginRejected } from "@rp/shared/plugins.ts"
-import { ExternalMediaPrefs, ExternalMediaTarget } from "@rp/shared/externalMedia.ts"
+} from "@dreamspan/shared/mcp.ts"
+import { PluginId, PluginPins, PluginData, PluginRejected } from "@dreamspan/shared/plugins.ts"
+import { ExternalMediaPrefs, ExternalMediaTarget } from "@dreamspan/shared/externalMedia.ts"
 import {
   MediaApprovalHost,
   MediaChoice,
@@ -22,8 +22,8 @@ import {
   MediaKind,
   SavedMediaLookup,
   SavedMediaStatus
-} from "@rp/shared/savedMedia.ts"
-import { MessageCursor, MessageQuery, MessageSearchPage } from "@rp/shared/messageSearch.ts"
+} from "@dreamspan/shared/savedMedia.ts"
+import { MessageCursor, MessageQuery, MessageSearchPage } from "@dreamspan/shared/messageSearch.ts"
 import {
   LibraryChoice,
   LibraryEdit,
@@ -33,7 +33,7 @@ import {
   LibrarySearch,
   LibrarySkipped,
   LibraryUndoResult
-} from "@rp/shared/libraryReplace.ts"
+} from "@dreamspan/shared/libraryReplace.ts"
 import {
   ApprovalAnswer,
   ApprovalRefused,
@@ -50,20 +50,20 @@ import {
   WorkshopPresetChoice,
   WorkshopBranch,
   WorkshopStory
-} from "@rp/shared/workshopApi.ts"
-import { ApprovalPrompt } from "@rp/shared/agent.ts"
-import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
-import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
-import { MoveToOwnTurnNoteFields, EditRefused, LibraryLabel } from "@rp/shared/editorApi.ts"
-import { AssetChange, CardGallery } from "@rp/shared/gallery.ts"
-import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "@rp/shared/forkMerge.ts"
-import { StArrival } from "@rp/shared/stImportApi.ts"
-import { ReplySections } from "@rp/shared/replySections.ts"
-import { BinLimits, BinLimitChange } from "@rp/shared/bin.ts"
-import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
-import { Snippet, SnippetContext, CreateSnippetFields, SnippetScopeFields } from "@rp/shared/snippetsApi.ts"
-import { historyReadRpcs, historyWriteRpcs, HistoryRejected, HistoryEdit } from "@rp/shared/historyApi.ts"
-import { InsertBody, InsertRefused, MoveRefused, MoveStep } from "@rp/shared/messagesApi.ts"
+} from "@dreamspan/shared/workshopApi.ts"
+import { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
+import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@dreamspan/shared/cardArchive.ts"
+import { SetSplitChatFields, SplitChats } from "@dreamspan/shared/splitChat.ts"
+import { MoveToOwnTurnNoteFields, EditRefused, LibraryLabel } from "@dreamspan/shared/editorApi.ts"
+import { AssetChange, CardGallery } from "@dreamspan/shared/gallery.ts"
+import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "@dreamspan/shared/forkMerge.ts"
+import { StArrival } from "@dreamspan/shared/stImportApi.ts"
+import { ReplySections } from "@dreamspan/shared/replySections.ts"
+import { BinLimits, BinLimitChange } from "@dreamspan/shared/bin.ts"
+import { CostSettings, CostRules } from "@dreamspan/shared/costFormulas.ts"
+import { Snippet, SnippetContext, CreateSnippetFields, SnippetScopeFields } from "@dreamspan/shared/snippetsApi.ts"
+import { historyReadRpcs, historyWriteRpcs, HistoryRejected, HistoryEdit } from "@dreamspan/shared/historyApi.ts"
+import { InsertBody, InsertRefused, MoveRefused, MoveStep } from "@dreamspan/shared/messagesApi.ts"
 import {
   JoinThreadsInput,
   MergeChanged,
@@ -73,10 +73,10 @@ import {
   ChatMergePreview,
   MergeRefused,
   MergeRequest
-} from "@rp/shared/mergeApi.ts"
+} from "@dreamspan/shared/mergeApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
-import { AwayMark, StateMarks } from "@rp/shared/contextsApi.ts"
-import { StartedThreads, ThreadName, ThreadSet, ThreadStarts, ThreadsRefused } from "@rp/shared/threads.ts"
+import { AwayMark, StateMarks } from "@dreamspan/shared/contextsApi.ts"
+import { StartedThreads, ThreadName, ThreadSet, ThreadStarts, ThreadsRefused } from "@dreamspan/shared/threads.ts"
 import {
   RoleProjectionOption,
   ShellCards,
@@ -84,8 +84,8 @@ import {
   ShellForks,
   ShellForksView,
   ShellLibrary
-} from "@rp/shared/chatSetupApi.ts"
-import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
+} from "@dreamspan/shared/chatSetupApi.ts"
+import { LcmSettingsChange, ModelChoice } from "@dreamspan/shared/lcmSettings.ts"
 import {
   LcmCoverage,
   LcmState,
@@ -104,7 +104,7 @@ import {
   EnableChoice,
   LcmSettingsInvalid,
   LcmSettingsView
-} from "@rp/shared/lcm.ts"
+} from "@dreamspan/shared/lcm.ts"
 // Storage operations, executed inside the database worker threads (ARCHITECTURE.md §3).
 // Each write operation runs as one synchronous transaction inside the writer worker,
 // so a transaction can never span an await or a network call.
@@ -125,9 +125,16 @@ import {
   SlotId,
   Version,
   VersionId
-} from "@rp/shared/chat.ts"
-import { ContextIssue, StoryAt, StoryAtField, ThinkingPart, VersionError, VersionStatus } from "@rp/shared/chat.ts"
-import { RecentRemote, SourcePrefs } from "@rp/shared/cardSources.ts"
+} from "@dreamspan/shared/chat.ts"
+import {
+  ContextIssue,
+  StoryAt,
+  StoryAtField,
+  ThinkingPart,
+  VersionError,
+  VersionStatus
+} from "@dreamspan/shared/chat.ts"
+import { RecentRemote, SourcePrefs } from "@dreamspan/shared/cardSources.ts"
 import {
   ForkPreview,
   ForkNoteSelection,
@@ -141,8 +148,8 @@ import {
   NotAmendable,
   PathRange,
   PathWindow
-} from "@rp/shared/chatApi.ts"
-import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
+} from "@dreamspan/shared/chatApi.ts"
+import { User, UserAccount, UserId, UserRole } from "@dreamspan/shared/domain.ts"
 import {
   BinBranch,
   BinChanged,
@@ -152,7 +159,7 @@ import {
   DeletedSlots,
   RecoveredText,
   RestoredItems
-} from "@rp/shared/bin.ts"
+} from "@dreamspan/shared/bin.ts"
 import {
   EditingOrigin,
   ObservedDeletion,
@@ -161,17 +168,24 @@ import {
   DraftKey,
   DraftRestore,
   DraftState
-} from "@rp/shared/drafts.ts"
+} from "@dreamspan/shared/drafts.ts"
 import {
   ComposerImage,
   ComposerImageIds,
   ComposerImageKey,
   SetComposerImageFields,
   ComposerChoice
-} from "@rp/shared/composerApi.ts"
-import { AccountRejected, AutoRefused, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
-import { StImportJob } from "@rp/shared/stImportApi.ts"
-import { StImportPlanChanged, StPlanCounts, StPlanMessage } from "@rp/shared/stReimportPlan.ts"
+} from "@dreamspan/shared/composerApi.ts"
+import {
+  AccountRejected,
+  AutoRefused,
+  LeafMoved,
+  ModelKeyTaken,
+  NotFound,
+  StaleWrite
+} from "@dreamspan/shared/errors.ts"
+import { StImportJob } from "@dreamspan/shared/stImportApi.ts"
+import { StImportPlanChanged, StPlanCounts, StPlanMessage } from "@dreamspan/shared/stReimportPlan.ts"
 import {
   CardFamily,
   Doc,
@@ -182,9 +196,9 @@ import {
   RefId,
   Revision,
   RevisionId
-} from "@rp/shared/library.ts"
-import { LibraryImport } from "@rp/shared/libraryImport.ts"
-import { CardReplaceSource } from "@rp/shared/cardReplace.ts"
+} from "@dreamspan/shared/library.ts"
+import { LibraryImport } from "@dreamspan/shared/libraryImport.ts"
+import { CardReplaceSource } from "@dreamspan/shared/cardReplace.ts"
 import {
   ChatNotePosition,
   EditConflict,
@@ -192,8 +206,8 @@ import {
   InvalidDocument,
   NoteEntry,
   SharedNote
-} from "@rp/shared/editorApi.ts"
-import { NoteDoc, ReplaceTarget } from "@rp/shared/docs/note.ts"
+} from "@dreamspan/shared/editorApi.ts"
+import { NoteDoc, ReplaceTarget } from "@dreamspan/shared/docs/note.ts"
 import {
   Connection,
   ConnectionId,
@@ -209,15 +223,15 @@ import {
   PriceFeed,
   ProviderKind,
   ProxyMode
-} from "@rp/shared/providers.ts"
-import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@rp/shared/generation.ts"
-import { DraftChatPreview, NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
-import { ActivityCursor, ActivityPage, NotResumable, RolloutStep, RunTranscript } from "@rp/shared/agent.ts"
-import { SubagentRun } from "@rp/shared/agentApi.ts"
-import { SubagentRow } from "@rp/shared/agent.ts"
-import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
-import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
-import { ConnectionDecisions, DecisionPointSetting } from "@rp/shared/decisions.ts"
+} from "@dreamspan/shared/providers.ts"
+import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@dreamspan/shared/generation.ts"
+import { DraftChatPreview, NextContext, RunContext, VersionMetrics } from "@dreamspan/shared/inspectorApi.ts"
+import { ActivityCursor, ActivityPage, NotResumable, RolloutStep, RunTranscript } from "@dreamspan/shared/agent.ts"
+import { SubagentRun } from "@dreamspan/shared/agentApi.ts"
+import { SubagentRow } from "@dreamspan/shared/agent.ts"
+import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@dreamspan/shared/regexScripts.ts"
+import { FoldableEvent, StateEventData, StoredStateEventData } from "@dreamspan/shared/state.ts"
+import { ConnectionDecisions, DecisionPointSetting } from "@dreamspan/shared/decisions.ts"
 import {
   Cost,
   LlmRequest,
@@ -228,11 +242,11 @@ import {
   RequestStatus,
   TokenCounts,
   UsageSource
-} from "@rp/shared/usage.ts"
-import { AvatarCrop } from "@rp/shared/media.ts"
+} from "@dreamspan/shared/usage.ts"
+import { AvatarCrop } from "@dreamspan/shared/media.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { CastCard, ChatSummary, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
+import { CastCard, ChatSummary, FrozenMacros, QueuedMessage } from "@dreamspan/shared/chat.ts"
 import {
   CardForChat,
   CardPromptUse,
@@ -242,7 +256,7 @@ import {
   FirstTurn,
   LinkedNote,
   LorebookPreset
-} from "@rp/shared/chatSetupApi.ts"
+} from "@dreamspan/shared/chatSetupApi.ts"
 import { AssemblyFailed } from "../assembler/types.ts"
 
 const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
@@ -265,7 +279,7 @@ export class StorageError extends Schema.TaggedError<StorageError>()("StorageErr
 }) {}
 
 // Shared with the client, so the tags reach the UI unchanged.
-export { LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
+export { LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@dreamspan/shared/errors.ts"
 
 /** The largest path window one GetPath returns. */
 const MAX_PATH_WINDOW = 1000
@@ -3494,7 +3508,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
   // --- The card and preset editors (editorWrites.ts). Drafts save through SaveDraft.
   /**
    * The ref's head with the named drafts applied, validated against the kind's schema and
-   * committed as one revision, the drafts ended with it (@rp/shared/editing.ts).
+   * committed as one revision, the drafts ended with it (@dreamspan/shared/editing.ts).
    */
   Rpc.make("CommitEditorDrafts", {
     payload: {
@@ -4795,7 +4809,7 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
-   * A card as "Import a new version…" previews it (@rp/shared/cardReplace.ts): its head, the
+   * A card as "Import a new version…" previews it (@dreamspan/shared/cardReplace.ts): its head, the
    * text of its first note, its picture's hash, and how many chats follow it or keep a fixed
    * revision. Anything but the user's own card is NotFound.
    */

@@ -5,9 +5,9 @@
 // row there; without one, the base column. Fork labels (db/forkLabels.ts, spec/FORK-COST.md)
 // index that as a step function, so each lookup is one index probe, whatever G's depth or the
 // chat's number of forks, and making a fork copies nothing.
-import { stateKeys } from "@rp/shared/state.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import { NotFound } from "@rp/shared/errors.ts"
+import { stateKeys } from "@dreamspan/shared/state.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
 import { Context, Effect } from "effect"
 import type { SqlClient, Statement } from "effect/sql"
 import { forkThrough } from "./forks.ts"

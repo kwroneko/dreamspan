@@ -2,8 +2,8 @@
 // edited as every library field is: typing is live and keeps an edit history, and a revision is
 // cut only by Save (or a reply that uses changed text). Synthetic text only.
 import { assert, describe, it } from "@effect/vitest"
-import { textField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { Reader } from "../src/db/Database.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"

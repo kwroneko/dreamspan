@@ -2,7 +2,7 @@
 // messages, 300 forks and 20 swipes on the newest. Each read stays bounded in what it returns
 // and in how long it takes, and never reaches past the message being written.
 import { assert, it } from "@effect/vitest"
-import type { SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { historyTools } from "../src/agent/tools/history.ts"
 import { runTools } from "../src/agent/tools/runs.ts"

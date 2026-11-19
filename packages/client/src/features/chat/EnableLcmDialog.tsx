@@ -3,8 +3,8 @@
 // messages it covers and summarizing from scratch, and either way sees what it will cost before
 // anything is spent. Enabling generates nothing; the next reply or "Summarize now" begins.
 import { useEffect, useState, useSyncExternalStore } from "react"
-import type { Cast } from "@rp/shared/chatSetupApi.ts"
-import type { BackfillEstimate, EnableChoice, LcmEnableOffer } from "@rp/shared/lcm.ts"
+import type { Cast } from "@dreamspan/shared/chatSetupApi.ts"
+import type { BackfillEstimate, EnableChoice, LcmEnableOffer } from "@dreamspan/shared/lcm.ts"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { RadioGroup } from "../../ui/Choice.tsx"

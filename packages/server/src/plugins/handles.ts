@@ -1,10 +1,10 @@
 import { notesContextV1, notesReadContextV1 } from "../agent/tools/notes.ts"
 import { historyContextV1 } from "../agent/tools/history.ts"
 import { adaptMacroV1 } from "./macroAdapter.ts"
-import type { MacroEntry } from "@rp/shared/macros/registry.ts"
+import type { MacroEntry } from "@dreamspan/shared/macros/registry.ts"
 import { Effect, Predicate, Scope, Schema, Context, Fiber } from "effect"
-import type { PluginManifest } from "@rp/shared/plugins.ts"
-import { builtinReplacement } from "@rp/shared/builtinParts.ts"
+import type { PluginManifest } from "@dreamspan/shared/plugins.ts"
+import { builtinReplacement } from "@dreamspan/shared/builtinParts.ts"
 import { presenceContext } from "../agent/tools/presenceAdapter.ts"
 import type { ToolContext } from "../agent/tools.ts"
 export interface RegistrationRegistry {

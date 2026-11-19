@@ -1,7 +1,7 @@
 // Synthetic cards: a persona locked to a character (DESIGN §2.2, owner 2026-11-18) is stored per
 // account and character card, reads as none once it can't be played, and never changes a chat.
 import { assert, describe, it } from "@effect/vitest"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"

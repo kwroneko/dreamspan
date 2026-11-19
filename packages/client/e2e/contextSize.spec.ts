@@ -1,7 +1,7 @@
 // A model's context size is never a silent guess (owner report 2026-10-31): the model list says
 // where each window comes from and marks an assumed one; a budget refusal sits in the composer's
 // column, names its numbers' sources and opens the model's settings at the field. Synthetic data.
-import { CHAT_WIDTH } from "@rp/shared/chatApi.ts"
+import { CHAT_WIDTH } from "@dreamspan/shared/chatApi.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { mkdirSync } from "node:fs"
@@ -40,7 +40,7 @@ const themes = async (page: import("@playwright/test").Page, each: (width: numbe
     for (const theme of ["light", "dark"] as const) {
       await page.setViewportSize({ width, height: 960 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.evaluate((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.evaluate((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await page.reload()
       await each(width, theme)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)

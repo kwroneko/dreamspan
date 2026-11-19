@@ -1,6 +1,6 @@
-import type { LorebookDoc, LorebookEntry, SelectiveLogic } from "@rp/shared/docs/lorebook.ts"
+import type { LorebookDoc, LorebookEntry, SelectiveLogic } from "@dreamspan/shared/docs/lorebook.ts"
 import { loreEntryKey } from "./loreTiming.ts"
-import { characterFilterPasses } from "@rp/shared/lorebookFilters.ts"
+import { characterFilterPasses } from "@dreamspan/shared/lorebookFilters.ts"
 import { compileLinear, makeRegexDeadline } from "./regex.ts"
 
 interface Book {

@@ -1,7 +1,7 @@
 // The lorebook entry form's default sections and settings (lorebookSettings.ts): what one
 // entry's settings show, and what "Edit N entries" can change on several at once.
-import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
-import { TRIGGERS } from "@rp/shared/presetConditions.ts"
+import type { LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
+import { TRIGGERS } from "@dreamspan/shared/presetConditions.ts"
 import { NumberField, TextField, TriggersField } from "./controls.tsx"
 import { emptyEntry } from "./lorebookDefaults.ts"
 import { CharacterFilter, DelayUntilRecursion, Keys } from "./LorebookEntryDetails.tsx"

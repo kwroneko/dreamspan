@@ -16,7 +16,7 @@ export interface ImageDraftEntry {
 }
 const database = () =>
   new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open("rp.message-images", 1)
+    const request = indexedDB.open("dreamspan.message-images", 1)
     request.onupgradeneeded = () => request.result.createObjectStore("images", { keyPath: "id" })
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)

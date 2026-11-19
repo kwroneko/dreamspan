@@ -2,7 +2,7 @@ import { Effect } from "effect"
 import { fixtureSql } from "../../../server/test/support/lcmFixtures.ts"
 import { asUser } from "./rpc.ts"
 import { ADMIN, type TestServer } from "./server.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 
 /** Entirely synthetic, also used for the review preview. */
 export const seedCardArchive = (server: TestServer, forkFamily = false) =>

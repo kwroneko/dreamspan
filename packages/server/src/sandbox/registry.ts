@@ -2,7 +2,7 @@
 // entry per platform mechanism. The app picks the first available one for its platform unless
 // the instance names one; a missing sandbox is shown, never skipped, and commands are then not
 // offered. `linux-bwrap` is the only built-in so far; macOS and Windows register here later.
-import { makeRegistry } from "@rp/shared/registry.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { linuxBwrap } from "./linuxBwrap.ts"
 
 /** A host folder seen inside the sandbox at `target`. */

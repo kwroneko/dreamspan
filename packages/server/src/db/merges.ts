@@ -4,11 +4,11 @@ import { chatAllows } from "./chatKindPolicy.ts"
 // write (the writer, again inside its transaction), so the write merges exactly what was
 // previewed or refuses with the new preview.
 import { createHash } from "node:crypto"
-import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import { NewVersion } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import { awayAt } from "@rp/shared/knowledge.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import { NewVersion } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import { awayAt } from "@dreamspan/shared/knowledge.ts"
 import {
   fillMergeTemplate,
   MERGE_JOIN_DEFAULT,
@@ -21,8 +21,8 @@ import {
   type MergeRequest,
   type MergeTimelines,
   type MergeView
-} from "@rp/shared/mergeApi.ts"
-import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
+} from "@dreamspan/shared/mergeApi.ts"
+import { type FoldableEvent, foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { viewedJoin } from "../assembler/mergeKnowledge.ts"

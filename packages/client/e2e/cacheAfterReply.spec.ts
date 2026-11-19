@@ -2,7 +2,7 @@
 // estimate until the reply ends (CacheWarmth.hold), so the chip says it waits for the reply
 // instead of showing the last estimate as current, then shows the one that follows.
 import { join } from "node:path"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { type FakeProvider, REPLY, startProvider } from "./support/provider.ts"

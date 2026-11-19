@@ -1,4 +1,4 @@
-import { decimalSizeValue, SIZE_UNITS } from "@rp/shared/byteSize.ts"
+import { decimalSizeValue, SIZE_UNITS } from "@dreamspan/shared/byteSize.ts"
 
 export type SizeUnit = keyof typeof SIZE_UNITS
 

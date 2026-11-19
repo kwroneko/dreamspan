@@ -4,8 +4,8 @@ import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 // chats (`/groups/$chatId`); a group is the chats with the same name and characters
 // (`ChatGroup`), worked out on the server.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import type { Chat, ChatId } from "@rp/shared/chat.ts"
-import type { ChatGroup } from "@rp/shared/chatSetupApi.ts"
+import type { Chat, ChatId } from "@dreamspan/shared/chat.ts"
+import type { ChatGroup } from "@dreamspan/shared/chatSetupApi.ts"
 import { Link, useNavigate, useParams } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { useMemo, useState } from "react"

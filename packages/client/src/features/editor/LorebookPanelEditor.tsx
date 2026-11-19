@@ -15,8 +15,8 @@ import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
 // document (`[]` for a library lorebook, `["character_book"]` for a card's own). Its entries
 // are the table's compact headers (LorebookTable `panel`), each opening to its text and keys,
 // its settings a level further down. What's typed is used as it's typed; Save cuts a revision.
-import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
-import type { FieldPath } from "@rp/shared/editing.ts"
+import type { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
 import { useEffect, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { InlineRename } from "../../ui/InlineRename.tsx"
@@ -68,7 +68,7 @@ export function LorebookPanelEditor(props: ComponentProps<typeof LorebookPanelBo
   const workspace = usePresetWorkspace()
   const call = useCaller()
   const userId = useSession().user.id
-  const select = (ref: import("@rp/shared/library.ts").RefId) =>
+  const select = (ref: import("@dreamspan/shared/library.ts").RefId) =>
     setSelected(workspace?.store(ref) ?? new EditorStore(ref, userId, call))
   const store = selected ?? props.store
   return (

@@ -3,8 +3,8 @@
 // one entry (LorebookEntryDetails: accordions in the side panel, two open columns in the large
 // editor) and many at once ("Edit N entries", LorebookMassEdit), where each setting has a
 // checkbox to change it on every selected entry. The defaults are in lorebookSettingsDefaults.tsx.
-import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
-import type { FieldPath } from "@rp/shared/editing.ts"
+import type { LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
 import type { ComponentType, ReactNode } from "react"
 import { makeRegistry } from "../../registry.ts"
 import { emptyEntry } from "./lorebookDefaults.ts"

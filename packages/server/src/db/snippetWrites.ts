@@ -1,6 +1,6 @@
 // Snippets' writes: making one, and moving it between "This chat" and "All chats". Its text is
 // edited as any library field is (drafts, `CommitEditorDrafts`), not here.
-import { newSharedNote } from "@rp/shared/editing.ts"
+import { newSharedNote } from "@dreamspan/shared/editing.ts"
 import type { WriteOps } from "./ops.ts"
 import { NotFound, RefOperationRefused } from "./ops.ts"
 import { Effect } from "effect"

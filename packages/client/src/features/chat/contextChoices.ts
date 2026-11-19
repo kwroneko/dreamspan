@@ -1,7 +1,7 @@
 // The Context setting's choices (ContextSetting.tsx), apart from the component so it's tested
 // without a browser: the chat's view (absent: one shared context), the installed views in their
 // order, and a view the chat names that isn't installed, which the server treats as separate.
-import type { Cast } from "@rp/shared/chatSetupApi.ts"
+import type { Cast } from "@dreamspan/shared/chatSetupApi.ts"
 
 /** The built-in default (`assembler/knowledge.ts`): absent state is one shared context. */
 const SHARED_VIEW = "shared"

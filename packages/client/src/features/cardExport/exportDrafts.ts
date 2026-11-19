@@ -1,8 +1,8 @@
 // Read every revision and draft that an export can take. A failed read must stop the export:
 // otherwise a working HTTP download could silently bypass a failed draft check over RPC.
-import { HELD_FIELD } from "@rp/shared/editing.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import { HELD_FIELD } from "@dreamspan/shared/editing.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import type { Caller, CallResult } from "../editor/caller.ts"
 import { openEditorStore } from "../editor/openEditors.ts"
 import { EditorStore } from "../editor/store.ts"

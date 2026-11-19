@@ -6,9 +6,9 @@
 import { PAIRS_8K } from "./support/lcmHarness.ts"
 import type { ServerResponse } from "node:http"
 import { assert } from "@effect/vitest"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { LlmRequest } from "@rp/shared/usage.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { LlmRequest } from "@dreamspan/shared/usage.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { importStPreset } from "../src/formats/preset.ts"
@@ -57,7 +57,7 @@ const cachingProvider = () => {
 /** Dollars per million tokens for the test model, through the built-in formula. */
 // Accuracy is measured to completion under a deliberately generous, explicitly approved
 // allowance. Hard admission uses a byte bound, so the normal forecast can hold sooner.
-const testAllowance = (e: import("@rp/shared/lcm.ts").BackfillEstimate) => ({
+const testAllowance = (e: import("@dreamspan/shared/lcm.ts").BackfillEstimate) => ({
   ...e,
   uncachedInput: e.uncachedInput * 10,
   cost: e.cost ? { ...e.cost, amount: e.cost.amount * 10 } : null

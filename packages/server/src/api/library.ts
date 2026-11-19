@@ -1,7 +1,7 @@
 // Client RPC handlers for the library (ARCHITECTURE.md §11). Storage enforces ownership:
 // every read is the authenticated user's own.
-import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import { ServerError } from "@rp/shared/errors.ts"
+import { type AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
+import { ServerError } from "@dreamspan/shared/errors.ts"
 import { Effect } from "effect"
 import { Formats } from "../importer/Formats.ts"
 import { Reader } from "../db/Database.ts"

@@ -4,7 +4,7 @@ import { makeShellEpoch } from "./shellEpoch.ts"
 import { ActiveStateModules } from "./stateModules.ts"
 import { shownIn, shownInSql, slotDeletedIn, slotDeletedInSql } from "./forkState.ts"
 import { pathPieces, positionOf, slotPlace } from "./displayPath.ts"
-import type { SplitChatLink } from "@rp/shared/splitChat.ts"
+import type { SplitChatLink } from "@dreamspan/shared/splitChat.ts"
 import {
   type ShellState,
   type Fork,
@@ -19,7 +19,7 @@ import {
 } from "./shellViews.ts"
 import { splitChatMarkers, splitGroups } from "./splitChats.ts"
 import { NotFound } from "./ops.ts"
-import type { ForkId } from "@rp/shared/chat.ts"
+import type { ForkId } from "@dreamspan/shared/chat.ts"
 // The shell's library: cards, forks and who is in each. Runs in a reader worker. Each fork's
 // walk is kept in `fork_summaries` (db/forkSummaries.ts); a read computes only the chats whose
 // summaries are stale and returns them for the caller to store, so its cost is the cards and
@@ -29,11 +29,11 @@ import type { ForkId } from "@rp/shared/chat.ts"
 // worker keeps the last computation while the database hasn't changed (`PRAGMA data_version`
 // moves with every commit of another connection, and the writer is one), so a screen's
 // several reads cost one.
-import { CastCard, type ChatId, type EntityId, type SlotId } from "@rp/shared/chat.ts"
-import { chatName } from "@rp/shared/chatName.ts"
-import { CardUsage, ShellCard } from "@rp/shared/chatSetupApi.ts"
-import type { RefId, RevisionId } from "@rp/shared/library.ts"
-import { importState } from "@rp/shared/stImportApi.ts"
+import { CastCard, type ChatId, type EntityId, type SlotId } from "@dreamspan/shared/chat.ts"
+import { chatName } from "@dreamspan/shared/chatName.ts"
+import { CardUsage, ShellCard } from "@dreamspan/shared/chatSetupApi.ts"
+import type { RefId, RevisionId } from "@dreamspan/shared/library.ts"
+import { importState } from "@dreamspan/shared/stImportApi.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import {

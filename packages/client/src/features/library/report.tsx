@@ -1,8 +1,8 @@
 // An import's report. Its messages quote the file, so they're shown as plain text, never
 // as Markdown or HTML (ARCHITECTURE.md §9): React renders strings as text.
-import type { ImportIssueLevel } from "@rp/shared/importReport.ts"
-import type { MergeOutcome } from "@rp/shared/library.ts"
-import type { ImportResult, LibraryImport } from "@rp/shared/libraryImport.ts"
+import type { ImportIssueLevel } from "@dreamspan/shared/importReport.ts"
+import type { MergeOutcome } from "@dreamspan/shared/library.ts"
+import type { ImportResult, LibraryImport } from "@dreamspan/shared/libraryImport.ts"
 import { Badge } from "../../ui/Surface.tsx"
 
 const OUTCOMES: Record<MergeOutcome, string> = {

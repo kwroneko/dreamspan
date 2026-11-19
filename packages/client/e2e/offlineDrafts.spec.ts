@@ -2,7 +2,7 @@ import { expectTextBox } from "./support/textbox.ts"
 // Real shutdowns and persistent profiles: no injected copies or simulated RPC failures.
 import { expect, test, type BrowserContext, type Page } from "@playwright/test"
 import { Effect } from "effect"
-import { textField } from "@rp/shared/editing.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { NOTHING_TO_SAVE, expectSaveState, saveButton, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, startServer, withAdmin } from "./support/server.ts"
@@ -16,7 +16,7 @@ const browserCopy = (page: Page) =>
   page.evaluate(
     () =>
       new Promise<Array<{ content: string; at: number }>>((done, fail) => {
-        const opening = indexedDB.open("rp-editor-copies", 1)
+        const opening = indexedDB.open("dreamspan-editor-copies", 1)
         opening.onerror = () => fail(opening.error)
         opening.onsuccess = () => {
           const db = opening.result

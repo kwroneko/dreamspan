@@ -2,8 +2,8 @@
 // each with its user-facing label, explanation and example and the choices it offers, and ONE
 // registered table of defaults. A workshop's own choice (a grant, db/workshopGrants.ts) overrides
 // its default. Plugins add, replace or disable entries in either registry.
-import type { CapabilityMode, WorkshopCapability } from "@rp/shared/workshopApi.ts"
-import { makeRegistry } from "@rp/shared/registry.ts"
+import type { CapabilityMode, WorkshopCapability } from "@dreamspan/shared/workshopApi.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
 
 export interface CapabilityEntry {
   readonly id: string

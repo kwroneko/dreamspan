@@ -6,7 +6,7 @@ import { existsSync, rmSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
-import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
+import { AppApi, type AppRpcs } from "@dreamspan/shared/api.ts"
 import { Effect, Layer } from "effect"
 import { RpcClient, RpcSerialization, type RpcGroup } from "effect/rpc"
 import { Socket } from "effect/socket"
@@ -94,7 +94,7 @@ describe("shutdown", () => {
       assert.deepStrictEqual(outcome, { code: 0, signal: null })
       assert.strictEqual(await closed, 1001)
       // A clean close of the database checkpoints and removes the WAL.
-      assert.isFalse(existsSync(join(running.dataDir, "rp-harness.db-wal")))
+      assert.isFalse(existsSync(join(running.dataDir, "dreamspan.db-wal")))
     } finally {
       await cleanUp(running)
     }
@@ -126,7 +126,7 @@ describe("shutdown", () => {
         Effect.scoped
       )
       await Effect.runPromise(burst)
-      const db = new DatabaseSync(join(running.dataDir, "rp-harness.db"))
+      const db = new DatabaseSync(join(running.dataDir, "dreamspan.db"))
       const { n } = db.prepare("SELECT count(*) AS n FROM credentials").get() as { n: number }
       db.close()
       assert.isAbove(acknowledged, 0)

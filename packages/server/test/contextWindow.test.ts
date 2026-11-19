@@ -3,9 +3,9 @@
 // learned from the provider's error, the provider's list, a catalog matched by id, then an
 // assumption shown as one. Synthetic lists and error bodies only.
 import { assert, describe, it } from "@effect/vitest"
-import type { UserId } from "@rp/shared/domain.ts"
-import { ASSUMED_CONTEXT } from "@rp/shared/modelSettings.ts"
-import { type ConnectionSettings, type ModelId, type ProviderKind, resolveModel } from "@rp/shared/providers.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { ASSUMED_CONTEXT } from "@dreamspan/shared/modelSettings.ts"
+import { type ConnectionSettings, type ModelId, type ProviderKind, resolveModel } from "@dreamspan/shared/providers.ts"
 import { Effect, Layer, Stream } from "effect"
 import { budgetOrigins } from "../src/assembler/budget.ts"
 import * as Database from "../src/db/Database.ts"

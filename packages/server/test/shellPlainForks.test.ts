@@ -1,7 +1,7 @@
 // A parent's later choices cannot affect forks made before them. Treating those forks
 // as overridden made a single old-message edit re-read every shared swipe-heavy prefix.
 import { assert, it } from "@effect/vitest"
-import { NewVersion } from "@rp/shared/chat.ts"
+import { NewVersion } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { Generator } from "../src/chat/Generator.ts"

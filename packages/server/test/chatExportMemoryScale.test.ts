@@ -3,7 +3,7 @@
 // total selected text grows to about 1.5 GiB. No real chats, SQLite or provider calls.
 import { expect, it } from "vitest"
 import { Effect } from "effect"
-import type { Chat, Fork, SlotId } from "@rp/shared/chat.ts"
+import type { Chat, Fork, SlotId } from "@dreamspan/shared/chat.ts"
 import { chatFiles, type ReaderService } from "../src/importer/chatExport.ts"
 
 it("bounds selected-message memory while streaming a 1.5 GiB transcript", async () => {

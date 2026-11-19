@@ -3,7 +3,7 @@
 // edit; the raw text is kept and can be restored; approval gates the preset's and card's lists.
 // The mock provider stands in for the model. Synthetic text only.
 import { assert, it } from "@effect/vitest"
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
 import { Effect, Layer } from "effect"
 import { regexToSt } from "../src/formats/preset.ts"
 import * as Builtins from "../src/providers/builtins.ts"

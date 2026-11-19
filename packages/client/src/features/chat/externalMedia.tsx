@@ -1,8 +1,12 @@
 // Account consent plus overrides. These controls are registered in the existing Interface
 // and chat settings surfaces; the message note offers the two scoped Allow actions.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import { DEFAULT_EXTERNAL_MEDIA, externalMediaAllowed, type ExternalMediaTarget } from "@rp/shared/externalMedia.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
+import {
+  DEFAULT_EXTERNAL_MEDIA,
+  externalMediaAllowed,
+  type ExternalMediaTarget
+} from "@dreamspan/shared/externalMedia.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react"
 import { useAction, ErrorAlert } from "../../actions.tsx"
@@ -20,7 +24,7 @@ import type { ChatSurfaceProps } from "./presentation.tsx"
 const channel =
   typeof window === "undefined" || typeof BroadcastChannel === "undefined"
     ? null
-    : new BroadcastChannel("rp.externalMedia")
+    : new BroadcastChannel("dreamspan.externalMedia")
 const prefsFor = Atom.family((_userId: string) =>
   AppClient.query("GetExternalMediaPrefs", {}, { reactivityKeys: ["externalMedia"] })
 )

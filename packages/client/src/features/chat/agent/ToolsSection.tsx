@@ -1,7 +1,7 @@
 // Tools and instructions are independent of card layout; the allowed list survives switching off.
 import { useState, useSyncExternalStore } from "react"
-import type { CastChange } from "@rp/shared/chatSetupApi.ts"
-import { DEFAULT_REQUEST_CAP, MAX_REQUEST_CAP } from "@rp/shared/state.ts"
+import type { CastChange } from "@dreamspan/shared/chatSetupApi.ts"
+import { DEFAULT_REQUEST_CAP, MAX_REQUEST_CAP } from "@dreamspan/shared/state.ts"
 import { Checkbox, RadioGroup, Switch } from "../../../ui/Choice.tsx"
 import { Field, Fieldset, Input } from "../../../ui/Field.tsx"
 import type { ChatSession } from "../session.ts"

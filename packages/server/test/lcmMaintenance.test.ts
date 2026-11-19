@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import type { Summary } from "@rp/shared/lcm.ts"
+import type { Summary } from "@dreamspan/shared/lcm.ts"
 import { type Candidate, type MaintenanceInput, planMaintenance } from "../src/lcm/maintenance.ts"
 
 // The planner's choices over hand-built summaries: no database, no provider.

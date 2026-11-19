@@ -2,9 +2,9 @@
 // where a change opens, what's still undoable, which replies warn before a new version, how the
 // warning settles, and that a waiting call keeps the steps in sight.
 import { describe, expect, it, vi } from "vitest"
-import type { RolloutStep } from "@rp/shared/agent.ts"
-import type { VersionId } from "@rp/shared/chat.ts"
-import type { RolloutEffect } from "@rp/shared/workshopApi.ts"
+import type { RolloutStep } from "@dreamspan/shared/agent.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
+import type { RolloutEffect } from "@dreamspan/shared/workshopApi.ts"
 import { waitsForUser } from "../src/features/chat/agent/stepActions.ts"
 import { statusText } from "../src/features/chat/agent/steps.ts"
 import { guardReply, replyGuards, type ReplyGuardRequest } from "../src/features/chat/replyGuards.ts"

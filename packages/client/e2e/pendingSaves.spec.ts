@@ -1,7 +1,7 @@
 import { replaceEditorText } from "./support/textbox.ts"
 import { expectTextBox } from "./support/textbox.ts"
 import { expect, type Page, test } from "@playwright/test"
-import { textField } from "@rp/shared/editing.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { Effect } from "effect"
 import { readFile } from "node:fs/promises"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
@@ -31,7 +31,7 @@ const copies = (page: Page) =>
   page.evaluate(
     () =>
       new Promise<Array<StoredCopy>>((resolve) => {
-        const request = indexedDB.open("rp-editor-copies", 1)
+        const request = indexedDB.open("dreamspan-editor-copies", 1)
         request.onsuccess = () => {
           const db = request.result
           const all = db.transaction("copies").objectStore("copies").getAll()

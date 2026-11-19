@@ -1,5 +1,5 @@
-import { uuidv7 } from "@rp/shared/id.ts"
-import type { Summary } from "@rp/shared/lcm.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import type { Summary } from "@dreamspan/shared/lcm.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 

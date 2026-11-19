@@ -15,18 +15,18 @@ import {
   type PresetSamplers,
   type PromptOrderEntry,
   type UtilityPrompts
-} from "@rp/shared/docs/preset.ts"
-import { type ImportReport, ReportBuilder, shownList, shownText } from "@rp/shared/importReport.ts"
+} from "@dreamspan/shared/docs/preset.ts"
+import { type ImportReport, ReportBuilder, shownList, shownText } from "@dreamspan/shared/importReport.ts"
 import { Schema } from "effect"
-import { newestMessage, ownTurnNotes, presetOrder, sentOutsideTheOrder } from "@rp/shared/presetOrder.ts"
+import { newestMessage, ownTurnNotes, presetOrder, sentOutsideTheOrder } from "@dreamspan/shared/presetOrder.ts"
 import {
   conditionOf,
   fromSpeaker,
   gatesNeverMeet,
   triggersWithCondition,
   withEndOfRequest
-} from "@rp/shared/presetConditions.ts"
-import { CONTINUE_NUDGE, endOfRequestText, GROUP_NUDGE, IMPERSONATION_PROMPT } from "@rp/shared/endOfRequest.ts"
+} from "@dreamspan/shared/presetConditions.ts"
+import { CONTINUE_NUDGE, endOfRequestText, GROUP_NUDGE, IMPERSONATION_PROMPT } from "@dreamspan/shared/endOfRequest.ts"
 import { defaultLimits, FormatError, parseJson } from "./safety.ts"
 
 const ST_PRESET_FORMAT = "st-chat-completion-preset"

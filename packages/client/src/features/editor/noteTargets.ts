@@ -8,11 +8,11 @@ import {
   type ReplaceTarget,
   readReplaceTarget,
   targetCard
-} from "@rp/shared/docs/note.ts"
-import type { FieldPath } from "@rp/shared/editing.ts"
-import { endOfRequestText } from "@rp/shared/endOfRequest.ts"
-import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
-import { presetOrder } from "@rp/shared/presetOrder.ts"
+} from "@dreamspan/shared/docs/note.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
+import { endOfRequestText } from "@dreamspan/shared/endOfRequest.ts"
+import type { PresetPrompt, PromptOrderEntry } from "@dreamspan/shared/docs/preset.ts"
+import { presetOrder } from "@dreamspan/shared/presetOrder.ts"
 import { createContext, useContext } from "react"
 import { promptLabel } from "./promptLabel.ts"
 

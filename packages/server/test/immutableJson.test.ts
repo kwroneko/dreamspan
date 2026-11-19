@@ -1,10 +1,10 @@
 import { RpcSerialization } from "effect/rpc"
-import { AppApi } from "@rp/shared/api.ts"
-import { ShellLibrary } from "@rp/shared/chatSetupApi.ts"
-import { TransportApi, transportJson } from "@rp/shared/transportApi.ts"
+import { AppApi } from "@dreamspan/shared/api.ts"
+import { ShellLibrary } from "@dreamspan/shared/chatSetupApi.ts"
+import { TransportApi, transportJson } from "@dreamspan/shared/transportApi.ts"
 import { describe, it, assert } from "@effect/vitest"
 import { Schema } from "effect"
-import { immutableJson } from "@rp/shared/immutableJson.ts"
+import { immutableJson } from "@dreamspan/shared/immutableJson.ts"
 
 class ReadModel extends Schema.Class<ReadModel>("ImmutableReadModelTest")({
   rows: Schema.Array(Schema.Struct({ name: Schema.String }))

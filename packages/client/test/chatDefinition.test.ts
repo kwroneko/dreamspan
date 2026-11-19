@@ -3,9 +3,9 @@
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { expect, it } from "vitest"
-import type { EntityId } from "@rp/shared/chat.ts"
-import { CardDefinition, ChatCard } from "@rp/shared/chatSetupApi.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { CardDefinition, ChatCard } from "@dreamspan/shared/chatSetupApi.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { ChatDefinition } from "../src/features/chat/ChatDefinition.tsx"
 
 it("shows the version the chat reads, its empty fields named in one line", () => {

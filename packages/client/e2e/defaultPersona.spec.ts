@@ -1,7 +1,7 @@
 // Synthetic personas only: the account default starts new chats; a pending/chat selection
 // stays local. Menus, badges and the same single/group pending flow at both widths.
 import { expect, test, type Page } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { openPanel, closePanel } from "./support/panel.ts"
@@ -40,7 +40,7 @@ for (const width of [1440, 390]) {
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     // Neither old browser memory nor the first persona is a default.
     await page.goto(server().url)
-    await page.evaluate((id) => localStorage.setItem("rp.lastPersona", id), a.entityId)
+    await page.evaluate((id) => localStorage.setItem("dreamspan.lastPersona", id), a.entityId)
     await page.goto(`${server().url}/cards/${character.entityId}/chat`)
     await openPanel(page, "Cast")
     await expect(playing(page, "No persona")).toBeVisible()

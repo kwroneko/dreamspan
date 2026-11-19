@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import { AppApi } from "@rp/shared/api.ts"
+import { AppApi } from "@dreamspan/shared/api.ts"
 import { Effect } from "effect"
 import { builtinOperationExposures, exposedCastChanges } from "../src/agent/exposures/builtins.ts"
 import { operationExclusions, unclassifiedOperations } from "../src/agent/exposures/exclusions.ts"

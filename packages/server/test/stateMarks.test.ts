@@ -3,8 +3,8 @@
 // they name; per branch, inherited up to the fork point; and display only: reading them, or
 // hiding a kind of marker, changes no request.
 import { assert, describe, it } from "@effect/vitest"
-import { type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { type EntityId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { Writer } from "../src/db/Database.ts"
@@ -392,7 +392,7 @@ describe("the timeline's change markers' read", () => {
           (m) => Effect.promise(() => m.close())
         )
         const api = yield* client()
-        const events: Array<import("@rp/shared/chatApi.ts").ChatEvent> = []
+        const events: Array<import("@dreamspan/shared/chatApi.ts").ChatEvent> = []
         const { chat, version } = yield* generateReply(api, {
           connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
           model: {},

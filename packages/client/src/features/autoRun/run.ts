@@ -3,7 +3,7 @@
 // it and is driven from there: each turn is the same request the composer's Generate button makes, started only
 // after the one before it finished and only while everything is as the run left it. Anything
 // else ends it. This file is the run's state and its one rule (`stepOf`); AutoRun.tsx drives it.
-import type { EntityId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { EntityId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 
 /** Why a run ended. */
 export type AutoStop =

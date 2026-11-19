@@ -1,13 +1,13 @@
-// Parallel threads in one chat (@rp/shared/threadsApi.ts; spec/THREADS.md §5, TH2). `StartThreads`
+// Parallel threads in one chat (@dreamspan/shared/threadsApi.ts; spec/THREADS.md §5, TH2). `StartThreads`
 // dispatches through the registered command `thread.start`, so a plugin can replace it and the
 // in-app agent starts threads the same way. Every handler acts as the authenticated user;
 // storage enforces ownership, so another user's ids are NotFound.
-import { CurrentUser } from "@rp/shared/api.ts"
-import type { ChatId, ForkId, PathEntry } from "@rp/shared/chat.ts"
-import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
-import { LeafMoved, StaleWrite } from "@rp/shared/errors.ts"
-import type { RefId } from "@rp/shared/library.ts"
-import { ThreadsRefused } from "@rp/shared/threads.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import type { ChatId, ForkId, PathEntry } from "@dreamspan/shared/chat.ts"
+import { GenerationUnavailable } from "@dreamspan/shared/chatApi.ts"
+import { LeafMoved, StaleWrite } from "@dreamspan/shared/errors.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import { ThreadsRefused } from "@dreamspan/shared/threads.ts"
 import {
   type SendToThreadsInput,
   SendToThreadsInput as SendInput,
@@ -16,7 +16,7 @@ import {
   StartThreadsInput as StartInput,
   type ThreadCopy,
   ThreadsStarted
-} from "@rp/shared/threadsApi.ts"
+} from "@dreamspan/shared/threadsApi.ts"
 import { Effect, Option } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"

@@ -1,6 +1,6 @@
-import type { Draft } from "@rp/shared/drafts.ts"
+import type { Draft } from "@dreamspan/shared/drafts.ts"
 import { useSidePanelPlace } from "../workbench/tab.tsx"
-import { greetingPick } from "@rp/shared/greetings.ts"
+import { greetingPick } from "@dreamspan/shared/greetings.ts"
 import { useUserDraft, UserDraftNotices, UserDraftStatus, UserDraftUndo } from "../editor/userDraft.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { StripRow } from "./nextReplyStrip.tsx"
@@ -24,11 +24,11 @@ import {
 // group-chats.js: the group's members in order, a member without a greeting skipped), each
 // greeting with its card's alternates to pick from; the reply comes from the character
 // picked, and the chat is titled with the group's name, so it's one of the group's chats.
-import type { CastCard, ChatId, EntityId } from "@rp/shared/chat.ts"
-import type { CardForChat, ChatGroup } from "@rp/shared/chatSetupApi.ts"
-import { remoteOf } from "@rp/shared/cardSources.ts"
+import type { CastCard, ChatId, EntityId } from "@dreamspan/shared/chat.ts"
+import type { CardForChat, ChatGroup } from "@dreamspan/shared/chatSetupApi.ts"
+import { remoteOf } from "@dreamspan/shared/cardSources.ts"
 import { showAdopted } from "../cardSources/remote.ts"
-import type { FrozenValues } from "@rp/shared/macros/expand.ts"
+import type { FrozenValues } from "@dreamspan/shared/macros/expand.ts"
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { Effect, Option } from "effect"
 import {

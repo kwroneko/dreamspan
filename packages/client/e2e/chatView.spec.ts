@@ -3,8 +3,8 @@
 // (stepped through, or picked from a list), its actions on hover, in its menu, or after a
 // tap on a phone, and writing a version of one's own.
 import { expect, type Page, test } from "@playwright/test"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { Effect } from "effect"
 import { messageMenu, showActions } from "./support/message.ts"
 import { asUser } from "./support/rpc.ts"

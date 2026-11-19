@@ -2,7 +2,7 @@
 // model, fitted to every wire's limits and fixed while the server's name is; whether it can be
 // used; and the catalog revision it was first listed in.
 import { createHash } from "node:crypto"
-import { MCP_SCHEMA_LIMIT, MCP_TOOL_NAME_LIMIT, type McpServerInfo, type McpTool } from "@rp/shared/mcp.ts"
+import { MCP_SCHEMA_LIMIT, MCP_TOOL_NAME_LIMIT, type McpServerInfo, type McpTool } from "@dreamspan/shared/mcp.ts"
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)

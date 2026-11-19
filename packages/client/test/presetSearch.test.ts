@@ -1,8 +1,8 @@
 import { writePresetOrder } from "../src/features/editor/presetDraft.ts"
-import { mainPrompt } from "@rp/shared/presetOrder.ts"
+import { mainPrompt } from "@dreamspan/shared/presetOrder.ts"
 import { describe, expect, it } from "vitest"
 import { searchTexts } from "../src/features/editor/searchCore.ts"
-import { presetOrder, newestMessage } from "@rp/shared/presetOrder.ts"
+import { presetOrder, newestMessage } from "@dreamspan/shared/presetOrder.ts"
 const search = (changes: Partial<Parameters<typeof searchTexts>[0]> = {}) =>
   searchTexts({
     texts: ["Aria aria ARIA Ariadne", "aria waits"],

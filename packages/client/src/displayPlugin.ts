@@ -1,4 +1,4 @@
-import type { ClientPlugin } from "@rp/shared/pluginClient.ts"
+import type { ClientPlugin } from "@dreamspan/shared/pluginClient.ts"
 import { PERF, perf } from "./features/chat/perf.ts"
 
 export const DISPLAY_PLUGIN_DEADLINE_MS = 50

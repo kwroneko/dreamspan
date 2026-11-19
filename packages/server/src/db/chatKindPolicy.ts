@@ -1,7 +1,7 @@
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { NotFound } from "@rp/shared/errors.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
 
 /** Callers establish ownership before using this internal policy lookup. Unknown kinds fail closed. */
 export const chatAllows = (sql: SqlClient.SqlClient, chatId: string, feature: "allowsSummaries" | "allowsMerge") =>

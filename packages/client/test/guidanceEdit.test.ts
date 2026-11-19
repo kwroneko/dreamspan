@@ -1,6 +1,6 @@
 // Guidance on swipes (DESIGN §2.2, owner 2026-10-29): what a new version and Continue are
 // asked with, the guidance editor, its "New version…" and "New version with guidance…" entry points, and the bar.
-import type { ChatId, EntityId, ForkId, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, ForkId, PathEntry, SlotId, Version, VersionId } from "@dreamspan/shared/chat.ts"
 import { AtomRegistry } from "effect/reactivity"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"

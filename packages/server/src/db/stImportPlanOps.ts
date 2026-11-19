@@ -3,8 +3,8 @@
 // everything it adds already chosen. The writer's transaction applies it as it stands, after
 // confirming the chat is as the plan's snapshot read it (its stamp): it matches nothing,
 // looks nothing up per message and parses no message text.
-import type { SlotId } from "@rp/shared/chat.ts"
-import type { StPlanCounts } from "@rp/shared/stReimportPlan.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import type { StPlanCounts } from "@dreamspan/shared/stReimportPlan.ts"
 import type { RecordPayload } from "./stImportPlace.ts"
 
 /** A version a matched slot gains: message `m`'s version `v` of the batch, as `id`. */

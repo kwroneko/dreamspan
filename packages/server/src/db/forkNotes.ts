@@ -1,12 +1,12 @@
 // Human note inheritance is a comparison of two projections of the same source fork.
 // Both the reader's preview and the writer's atomic validation use this query.
-import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { ForkNote, ForkPreview } from "@rp/shared/chatApi.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { ForkNote, ForkPreview } from "@dreamspan/shared/chatApi.ts"
 import type { ForkRow } from "./rows.ts"
 import { previewForkWorkshops } from "./workshopForks.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { Doc } from "@rp/shared/library.ts"
-import { FoldableEvent, foldState, noteSwitches } from "@rp/shared/state.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { Doc } from "@dreamspan/shared/library.ts"
+import { FoldableEvent, foldState, noteSwitches } from "@dreamspan/shared/state.ts"
 import { Effect, Predicate, Schema } from "effect"
 import type { SqlClient } from "effect/sql"
 import { displayEndOf } from "./displayPath.ts"
@@ -14,8 +14,8 @@ import { onForkPath } from "./forks.ts"
 import { NotFound } from "./ops.ts"
 import { stateEventRowsThrough } from "./stateRead.ts"
 import { sharedNote } from "./sharedNotes.ts"
-import { entityDraftTarget } from "@rp/shared/drafts.ts"
-import { textField } from "@rp/shared/editing.ts"
+import { entityDraftTarget } from "@dreamspan/shared/drafts.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 
 const decodeEvent = Schema.decodeUnknownSync(FoldableEvent)
 const CONTENT = textField(["content"])

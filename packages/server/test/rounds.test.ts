@@ -3,7 +3,7 @@
 // failed reply) holds the rest for Continue round; any turn added at the fork's tip ends it.
 // The generator here only ends when the test says so, so every ordering is the test's.
 import { assert, describe, it } from "@effect/vitest"
-import type { Chat, EntityId, PathEntry, VersionId } from "@rp/shared/chat.ts"
+import type { Chat, EntityId, PathEntry, VersionId } from "@dreamspan/shared/chat.ts"
 import { Deferred, Effect, Layer, Option, Stream } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { GenerationFailed, Generator } from "../src/chat/Generator.ts"
@@ -343,7 +343,7 @@ describe("rounds", () => {
     Effect.gen(function* () {
       const api = yield* client()
       const { chat, sent, mira, tobin, describe } = yield* setup(api)
-      const events: Array<import("@rp/shared/chatApi.ts").ChatEvent> = []
+      const events: Array<import("@dreamspan/shared/chatApi.ts").ChatEvent> = []
       yield* api.SubscribeChat({ chatId: chat.id }).pipe(
         Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
         Effect.forkScoped

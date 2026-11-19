@@ -1,5 +1,5 @@
 // What the MCP server screens read (spec/MCP.md §13.1). Writes name "mcp" to make these stale.
-import type { McpCall, McpConnectionId, McpConnectionSummary } from "@rp/shared/mcp.ts"
+import type { McpCall, McpConnectionId, McpConnectionSummary } from "@dreamspan/shared/mcp.ts"
 import { AppClient } from "../../rpc.ts"
 
 export const mcpConnectionsAtom = AppClient.query("ListMcpConnections", undefined, { reactivityKeys: ["mcp"] })

@@ -3,7 +3,7 @@
 // cursor) are positions, and its inputs may skip inserted slots, which makes it stale there, not
 // inconsistent. A fork that shows none has no pieces here, and every LCM read in it runs the
 // structural code that predates insertions.
-import type { Summary } from "@rp/shared/lcm.ts"
+import type { Summary } from "@dreamspan/shared/lcm.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { viewAt } from "./forkState.ts"

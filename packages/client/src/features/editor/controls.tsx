@@ -4,7 +4,7 @@ import { useSearchHighlights } from "./searchHighlights.ts"
 // Form controls bound to an editor's fields: each reads its own field from the store and
 // writes it as a draft, so every change is on the server within a second, with its history.
 import { EditHistory, type Loaded } from "../../ui/EditHistory.tsx"
-import { type FieldPath, parseField, textField, valueField } from "@rp/shared/editing.ts"
+import { type FieldPath, parseField, textField, valueField } from "@dreamspan/shared/editing.ts"
 import { Link } from "@tanstack/react-router"
 import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Button, buttonClass } from "../../ui/Button.tsx"

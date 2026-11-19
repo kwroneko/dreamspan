@@ -1,21 +1,21 @@
 import { importStPreset } from "../formats/preset.ts"
 // Library documents back out as files (ARCHITECTURE.md §11.4), in the format worker: a
 // large lorebook takes as long to write as to read.
-import { CardDoc } from "@rp/shared/docs/card.ts"
-import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
-import { NoteDoc } from "@rp/shared/docs/note.ts"
-import { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
+import { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
+import { NoteDoc } from "@dreamspan/shared/docs/note.ts"
+import { LegacyPresetDoc as PresetDoc } from "@dreamspan/shared/docs/preset.ts"
 import { Context, Effect, Layer, Option, Predicate, Schema } from "effect"
 import { exportCardCharx, exportCardJson, exportCardPng } from "../formats/cardExport.ts"
 import { exportPromptPreset } from "../formats/presetSettings.ts"
 import { exportLorebook } from "../formats/worldInfo.ts"
 import { OUR_EXTENSION } from "../formats/lorebook.ts"
-import type { ExportFormatInfo } from "@rp/shared/libraryImport.ts"
+import type { ExportFormatInfo } from "@dreamspan/shared/libraryImport.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { type ExportInput, ExportRefused } from "./ops.ts"
 import { describeImage } from "./images.ts"
 import { renderPicture } from "./thumbnail.ts"
-import { avatarCropOf, snapCrop, WHOLE_PICTURE } from "@rp/shared/media.ts"
+import { avatarCropOf, snapCrop, WHOLE_PICTURE } from "@dreamspan/shared/media.ts"
 
 /** A 1×1 PNG for a card without an avatar, since a PNG card needs an image to live in. */
 const PLACEHOLDER_PNG = Buffer.from(
@@ -44,7 +44,7 @@ const decode =
 /**
  * The card with its notes (DESIGN §4.1a): ST's Character's Note from the card's first note,
  * if it's exportable and in-chat; every other exportable note in our extension namespace
- * (`extensions.rp_harness.notes`), which ST ignores and an import reads back. Private notes
+ * (`extensions.dreamspan.notes`), which ST ignores and an import reads back. Private notes
  * never leave; a linked note goes as its shared note's text, which the caller put in it.
  * Conditions stay behind: they name cards by this library's ids.
  */
@@ -117,7 +117,7 @@ export class Exporters extends Context.Service<Exporters, Registry<Exporter>>()(
 
 /**
  * The avatar's chosen cutout (ARCHITECTURE.md §14.5c) in our namespace
- * (`extensions.rp_harness.avatar_crop`), which ST ignores, with the image's size, so an import
+ * (`extensions.dreamspan.avatar_crop`), which ST ignores, with the image's size, so an import
  * applies it only to the image it was chosen on (ST's own crop makes another). Only in a file
  * that holds the image; the image itself goes whole.
  */

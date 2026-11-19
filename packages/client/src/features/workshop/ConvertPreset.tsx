@@ -1,8 +1,8 @@
 // "Convert to workshop" on a preset (spec/WORKSHOP-CONTEXT.md §4.4): a new workshop preset made
 // from this one's saved version. The story pieces are listed to keep, drop or reword; the
 // workshop pieces are added. The original never changes.
-import type { PresetDoc } from "@rp/shared/docs/preset.ts"
-import { type ConversionChoice, conversionItems, workshopPieces } from "@rp/shared/workshopPreset.ts"
+import type { PresetDoc } from "@dreamspan/shared/docs/preset.ts"
+import { type ConversionChoice, conversionItems, workshopPieces } from "@dreamspan/shared/workshopPreset.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { type FormEvent, useMemo } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"

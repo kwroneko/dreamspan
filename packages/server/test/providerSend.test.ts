@@ -7,7 +7,7 @@
 // providers only.
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { eventually, finished } from "./support/generation.ts"
 import { sizedPng } from "./formats/support.ts"

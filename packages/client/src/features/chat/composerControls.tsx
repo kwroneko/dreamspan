@@ -8,15 +8,15 @@
 // - `actions`: the row's last buttons, at its right end (guidance, generate, send);
 // - `strip`: the next-reply strip, one row of small chips (nextReplyStrip.tsx) under the box.
 // A control may name its placement per context (`compact`: a phone), to move rather than vanish.
-import type { EntityId, PathEntry, MessageImages } from "@rp/shared/chat.ts"
-import type { AvatarCrop } from "@rp/shared/media.ts"
+import type { EntityId, PathEntry, MessageImages } from "@dreamspan/shared/chat.ts"
+import type { AvatarCrop } from "@dreamspan/shared/media.ts"
 import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { useSyncExternalStore } from "react"
 import { makeRegistry } from "../../registry.ts"
 import { kindHides } from "./kindLooks.ts"
 import type { ReplyChoice } from "./ReplyFrom.tsx"
 import type { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
-import type { Draft } from "@rp/shared/drafts.ts"
+import type { Draft } from "@dreamspan/shared/drafts.ts"
 import type { ComposerSource } from "./composerDraft.ts"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 

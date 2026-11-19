@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test"
-import type { RefId } from "@rp/shared/library.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"

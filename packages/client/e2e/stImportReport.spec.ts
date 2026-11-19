@@ -29,7 +29,7 @@ const shoot = async (page: Page, name: string, ready: () => Promise<void> = asyn
     for (const theme of ["light", "dark"] as const) {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.evaluate((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.evaluate((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await page.reload()
       await ready()
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)

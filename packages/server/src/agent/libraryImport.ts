@@ -1,8 +1,8 @@
 // The workshop's file import (spec/WORKSHOP.md §3.2): the library page's own steps, a file parsed
 // in a format worker and stored by the writer's `ImportFile`, for text the assistant was given.
 // Nothing is fetched and nothing is sent anywhere: the text is read, and one new entry is saved.
-import { CurrentUser } from "@rp/shared/api.ts"
-import { HistoryRejected } from "@rp/shared/historyApi.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import { HistoryRejected } from "@dreamspan/shared/historyApi.ts"
 import { Effect, Schema } from "effect"
 import { makeCommand, type Command } from "../commands.ts"
 import { Writer } from "../db/Database.ts"

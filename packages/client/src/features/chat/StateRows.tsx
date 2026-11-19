@@ -4,7 +4,7 @@
 // means on hover and a link to where it's set. Lighter than the away rows and the merged chat's
 // row: no rule, no face, small muted type. A `messageStream` entry, so a plugin can replace or
 // remove it; the kinds are `stateMarkerKinds`, each with a switch in the Interface settings.
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import { useParams } from "@tanstack/react-router"
 import { useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"

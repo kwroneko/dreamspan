@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import type { LcmState } from "@rp/shared/lcm.ts"
+import type { LcmState } from "@dreamspan/shared/lcm.ts"
 import { countsOf, failureText, healthOf, sameWork, userTextKept } from "../src/features/chat/lcm.ts"
 
 test("a terminal summary and its failed job count as one failed range", () => {

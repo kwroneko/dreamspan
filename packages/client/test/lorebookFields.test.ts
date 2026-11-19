@@ -1,5 +1,5 @@
 import { expect, it } from "vitest"
-import { applyDrafts, getAt, textField, valueField } from "@rp/shared/editing.ts"
+import { applyDrafts, getAt, textField, valueField } from "@dreamspan/shared/editing.ts"
 import { editorTextFields, searchable } from "../src/features/editor/fields.ts"
 import { emptyBook, emptyEntry } from "../src/features/editor/lorebookDefaults.ts"
 import { entryMatches, lorebookFields, standaloneLorebookFields } from "../src/features/editor/lorebookFields.ts"

@@ -11,8 +11,8 @@
 // Only entity ids are kept: names, avatars and the fork's display name are the read's, so a
 // card's rename or bin never invalidates one.
 // Readers and the writer (at the end of an ST chat import) share the computation.
-import type { EntityId } from "@rp/shared/chat.ts"
-import { branchOwned, foldState, type FoldableEvent } from "@rp/shared/state.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { branchOwned, foldState, type FoldableEvent } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 import { pathPieces } from "./displayPath.ts"
@@ -27,7 +27,7 @@ import { FORK_SUMMARY_FORMAT, settleSummaries, summaryValidSql } from "./summary
 import { slotHumanAuthorsSql, slotParticipantsSql } from "./participation.ts"
 import { placesOf, threadCandidates } from "./threads.ts"
 import { ActiveStateModules } from "./stateModules.ts"
-import type { ThreadPlace } from "@rp/shared/threads.ts"
+import type { ThreadPlace } from "@dreamspan/shared/threads.ts"
 import type { PreviewMacro } from "./previewText.ts"
 
 export { FORK_SUMMARY_FORMAT, summaryValidSql }

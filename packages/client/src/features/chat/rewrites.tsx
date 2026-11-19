@@ -1,9 +1,9 @@
 // What regex scripts did to a message when it was written (Version.rewrite): a note in its
 // header, the scripts that changed it or were skipped under it, and "Show the original text",
 // which reads the text from before them (RawVersionText) and can restore it (RestoreRawText).
-import type { PathEntry } from "@rp/shared/chat.ts"
-import type { RawText, ScriptRef } from "@rp/shared/regexScripts.ts"
-import { sectionsDisplay } from "@rp/shared/replySections.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
+import type { RawText, ScriptRef } from "@dreamspan/shared/regexScripts.ts"
+import { sectionsDisplay } from "@dreamspan/shared/replySections.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"

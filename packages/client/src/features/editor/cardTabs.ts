@@ -3,7 +3,7 @@
 // editor (a wide page). Each tab is a registered part: a plugin can add one, replace one or
 // disable one, as with every other slot (spec/PLUGINS.md §8). The built-ins register in
 // `index.tsx`: Definition, Greetings, Metadata, Lorebook, Notes and Extra.
-import type { FieldPath } from "@rp/shared/editing.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
 import type { ComponentType } from "react"
 import { makeRegistry } from "../../registry.ts"
 import type { Caller } from "./caller.ts"

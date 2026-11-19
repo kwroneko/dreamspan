@@ -5,8 +5,8 @@ import { Effect } from "effect"
 import { readerConnection } from "../../src/db/connection.ts"
 import { makeShellReadHandlers } from "../../src/db/shellReads.ts"
 import { makeThreadReadHandlers } from "../../src/db/threadReads.ts"
-import type { ChatId, ForkId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 
 const { file, userId, otherUserId, chatId, forkId } = workerData as {
   file: string

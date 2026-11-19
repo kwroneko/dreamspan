@@ -7,9 +7,9 @@ import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // branch. It shows at once and is confirmed in the background, put back with a message if it
 // fails. A preset's book is switched in the preset, for every chat using it.
 import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
-import type { PresetLorebook } from "@rp/shared/docs/preset.ts"
-import type { CastChange } from "@rp/shared/chatSetupApi.ts"
-import type { LibraryRef, RefId } from "@rp/shared/library.ts"
+import type { PresetLorebook } from "@dreamspan/shared/docs/preset.ts"
+import type { CastChange } from "@dreamspan/shared/chatSetupApi.ts"
+import type { LibraryRef, RefId } from "@dreamspan/shared/library.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useRef, useState } from "react"
 import { Button } from "../../ui/Button.tsx"

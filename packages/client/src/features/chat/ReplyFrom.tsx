@@ -4,7 +4,7 @@ import { cardChoiceLabel } from "./CardVersion.tsx"
 // you send gets no reply, until you choose otherwise; DESIGN §2.3) or one of the cast for one
 // reply, after which Auto or No one is back. Beside it, ▶ makes them reply at once, as ST's force
 // talk does. The chip stays disabled with no one to choose; ▶, with fewer than two.
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Icon } from "../../ui/Icon.tsx"
 import { listNames, nameOf, type NextInTurn, useCast } from "./cast.ts"
 import { ChipText, ChoiceChip } from "./nextReplyStrip.tsx"

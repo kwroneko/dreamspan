@@ -1,4 +1,4 @@
-import type { EntityId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { EntityId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { describe, expect, it } from "vitest"
 import {
   type AutoRun,

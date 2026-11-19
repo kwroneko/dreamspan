@@ -8,7 +8,7 @@ import { Effect, Layer, Predicate, Schema } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { StorageError } from "./ops.ts"
 
-export const databaseFile = (dataDir: string) => join(dataDir, "rp-harness.db")
+export const databaseFile = (dataDir: string) => join(dataDir, "dreamspan.db")
 
 /** The writer's connection: WAL, full durability, foreign keys. The only read-write connection. */
 export const writerConnection = (filename: string) =>
@@ -86,7 +86,7 @@ export class InstanceLocked extends Schema.TaggedError<InstanceLocked>()("Instan
   dataDir: Schema.String
 }) {
   override get message() {
-    return `Another rp-harness process is already using ${this.dataDir}. Only one instance may open a data directory.`
+    return `Another Dreamspan process is already using ${this.dataDir}. Only one instance may open a data directory.`
   }
 }
 

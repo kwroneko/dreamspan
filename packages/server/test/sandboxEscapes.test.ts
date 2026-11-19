@@ -536,9 +536,9 @@ describe("the Linux sandbox's start and filters", () => {
   it("removes run folders only of servers that are gone", async () => {
     const root = tempDir("run-folders")
     // A process id that can't be running: above the kernel's largest.
-    const dead = join(root, "rp-sbx-99999999-abcdef")
-    const mine = join(root, `rp-sbx-${process.pid}-abcdef`)
-    const unrelated = join(root, "rp-sbx-something-else")
+    const dead = join(root, "dreamspan-sbx-99999999-abcdef")
+    const mine = join(root, `dreamspan-sbx-${process.pid}-abcdef`)
+    const unrelated = join(root, "dreamspan-sbx-something-else")
     for (const dir of [dead, mine, unrelated]) mkdirSync(join(dir, "rp"), { recursive: true })
     expect(await sweepRunFolders(root)).toBe(1)
     expect(existsSync(dead)).toBe(false)
@@ -651,7 +651,7 @@ sandboxed("the Linux sandbox when the server dies", () => {
     const server = spawn(process.execPath, [script], {
       stdio: "ignore",
       cwd: import.meta.dirname,
-      env: { ...process.env, RP_SANDBOX_RUNTIME: dir }
+      env: { ...process.env, DREAMSPAN_SANDBOX_RUNTIME: dir }
     })
     try {
       const deadline = Date.now() + 15_000

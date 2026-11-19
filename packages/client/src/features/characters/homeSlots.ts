@@ -1,7 +1,7 @@
 import type { CardBrowse } from "./cardBrowse.tsx"
 import { defineSlot } from "../../slots.tsx"
 import type { ShellLibrary } from "./shellData.tsx"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 
 /** Above the home screen's characters: getting started, announcements. */
 export const homeIntro = defineSlot<{ data: ShellLibrary }>("home.intro")

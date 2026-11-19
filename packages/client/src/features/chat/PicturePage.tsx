@@ -4,7 +4,7 @@
 // splits and comes back after a reload as any tab does. The viewer is the column's
 // (`PortraitView`): its zoom, Fit and 100%, the wheel, a drag and a pinch.
 import { useSearch } from "@tanstack/react-router"
-import { cropKey, parseCropKey } from "@rp/shared/media.ts"
+import { cropKey, parseCropKey } from "@dreamspan/shared/media.ts"
 import { useTitle } from "../shell.tsx"
 import { type Portrait, PortraitView } from "../../ui/Portrait.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"

@@ -5,7 +5,7 @@
 // audit on the dialog, the row and the chip's hover. A fake chat model on loopback; every card
 // is made up.
 import { expect, type Page, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { expectLayout, layoutAudit } from "./support/layoutAudit.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"

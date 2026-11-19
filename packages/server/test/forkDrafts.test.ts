@@ -3,10 +3,10 @@
 // back in its edit history. Forking from an earlier message after a saved change, the note's
 // "As it is now" takes the text and "As it was then" leaves it. Synthetic text only.
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
-import { canonicalJson, textField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { ChatNotePosition } from "@dreamspan/shared/editorApi.ts"
+import { canonicalJson, textField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { client, posted, testConfig, withServer } from "./support/config.ts"
 

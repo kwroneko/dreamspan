@@ -1,4 +1,4 @@
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
@@ -9,9 +9,9 @@ import { chatSettingSections, summarySettingFields } from "./presentation.tsx"
 // collapsed. Each section is registered (`chatSettingSections`), so a plugin can add or replace one.
 // A change is a state event at the leaf shown, so from there on, on this branch.
 // The context assembler reads them; this only writes them.
-import type { CastChange } from "@rp/shared/chatSetupApi.ts"
-import { BUILTIN_SUMMARY_INSTRUCTION, type LcmSettingsChange, resolveLcm } from "@rp/shared/lcmSettings.ts"
-import type { LcmSettingsView } from "@rp/shared/lcm.ts"
+import type { CastChange } from "@dreamspan/shared/chatSetupApi.ts"
+import { BUILTIN_SUMMARY_INSTRUCTION, type LcmSettingsChange, resolveLcm } from "@dreamspan/shared/lcmSettings.ts"
+import type { LcmSettingsView } from "@dreamspan/shared/lcm.ts"
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react"
 import { useAction } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"

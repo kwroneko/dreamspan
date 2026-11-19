@@ -3,8 +3,8 @@
 // (Summarizer.beforeReply); the user chatting meanwhile in another fork whose path holds the
 // message must not give the swipe that fork's choices (here its greeting).
 import { assert, describe, it } from "@effect/vitest"
-import { type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Deferred, Effect, Layer } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { Summarizer } from "../src/lcm/Summarizer.ts"

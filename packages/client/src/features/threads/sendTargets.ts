@@ -3,9 +3,9 @@
 // stay until changed, so a run of messages to both threads needs them once. A send goes to each
 // ticked thread's fork the link opens (`openForkId`), with the reply that thread's own Next asks
 // for, planned from that thread's cast, tip and composer exactly as its own composer would.
-import type { ChatId, EntityId, ForkId } from "@rp/shared/chat.ts"
-import type { ThreadInfo, ThreadSet } from "@rp/shared/threads.ts"
-import type { SendTarget } from "@rp/shared/threadsApi.ts"
+import type { ChatId, EntityId, ForkId } from "@dreamspan/shared/chat.ts"
+import type { ThreadInfo, ThreadSet } from "@dreamspan/shared/threads.ts"
+import type { SendTarget } from "@dreamspan/shared/threadsApi.ts"
 import { useSyncExternalStore } from "react"
 import { defaultSpeaker, replyFaces } from "../chat/cast.ts"
 import type { PlannedSend } from "../chat/composerControls.tsx"

@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
-import { WORKSHOP_SUMMARY_INSTRUCTION } from "@rp/shared/workshopLcm.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
+import { WORKSHOP_SUMMARY_INSTRUCTION } from "@dreamspan/shared/workshopLcm.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect, Option, Stream } from "effect"
 import { SummaryChecks } from "../lcm/OutputChecks.ts"
 import type { AssembledRequest, ModelInput } from "../assembler/types.ts"
@@ -28,7 +28,7 @@ interface RunCompactorInput {
   readonly prefix: AssembledRequest
   readonly messages: ReadonlyArray<AgentMessage>
   readonly tools: ReadonlyArray<FrozenTool>
-  readonly leafSlotId: import("@rp/shared/chat.ts").SlotId | null
+  readonly leafSlotId: import("@dreamspan/shared/chat.ts").SlotId | null
   readonly reserve: number
   readonly recentPrefix?: number | undefined
 }
@@ -87,9 +87,9 @@ export const workshopCompactor: RunCompactor = {
       if (!latest && settings.changes !== "[]" && prefix.messages.some((m) => m.content.includes("<summary "))) {
         const note = "[Saved Undo records override summary notes]\n" + settings.changes
         const at = messages.findIndex(
-          (m) => m.role === "rpHarness" && m.content.startsWith("[Saved Undo records override summary notes]")
+          (m) => m.role === "rpApp" && m.content.startsWith("[Saved Undo records override summary notes]")
         )
-        const entry: AgentMessage = { role: "rpHarness", content: note, timestamp: 0 }
+        const entry: AgentMessage = { role: "rpApp", content: note, timestamp: 0 }
         if (at < 0) messages.push(entry)
         else messages[at] = entry
       }

@@ -2,7 +2,7 @@
 // session (messageDraft.ts, target `Insert`), which outlives this: Cancel closes the editor and
 // keeps the draft, so opening it again at the same message finds the text; a draft with text
 // read as the chat opens (a reload, another tab) opens its editor again, unless cancelled here.
-import type { MessageDraftTarget } from "@rp/shared/chatApi.ts"
+import type { MessageDraftTarget } from "@dreamspan/shared/chatApi.ts"
 import { useSyncExternalStore } from "react"
 import { editorKey, type MessageEditorKey } from "../messageDraft.ts"
 import type { ChatSession } from "../session.ts"

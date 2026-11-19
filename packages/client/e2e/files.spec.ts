@@ -41,7 +41,7 @@ test.describe("files", () => {
         )
         await page.setViewportSize({ width, height: phone ? 844 : 900 })
         await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-        await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+        await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
         await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
         const files = await seed(page, server().url)
         const scope = phone ? '[role="dialog"]' : 'aside[aria-label="Chat panel"]'
@@ -190,7 +190,7 @@ test.describe("files", () => {
         )
         await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
         await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-        await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+        await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
         await apiLogin(page.request, server(), handle, password)
         const files = filesOf(page.request, server().url)
         await files.put("/files/small.txt", "A synthetic note.")

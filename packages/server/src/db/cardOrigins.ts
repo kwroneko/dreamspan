@@ -13,17 +13,17 @@
 // Check for a newer version report, `TakeRemoteVersion` what Review and merge or Replace took,
 // and `AdoptRemoteVersionAsCard` adds the newer file as a card of its own and takes it, in one
 // transaction. `CardOrigin` reads a card's row for its editor.
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { NotFound } from "@rp/shared/errors.ts"
-import type { RefId } from "@rp/shared/library.ts"
-import type { LibraryImport } from "@rp/shared/libraryImport.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import type { LibraryImport } from "@dreamspan/shared/libraryImport.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
-import { DraftKey } from "@rp/shared/drafts.ts"
+import { DraftKey } from "@dreamspan/shared/drafts.ts"
 import type { ReadOps, RefChange, RefOperationRefused, StartChatResult, StorageError, WriteOps } from "./ops.ts"
-import type { EditConflict, InvalidDocument } from "@rp/shared/editorApi.ts"
-import type { StaleWrite } from "@rp/shared/errors.ts"
+import type { EditConflict, InvalidDocument } from "@dreamspan/shared/editorApi.ts"
+import type { StaleWrite } from "@dreamspan/shared/errors.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { query, transaction } from "./tx.ts"
 

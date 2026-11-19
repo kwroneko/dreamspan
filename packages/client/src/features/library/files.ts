@@ -1,7 +1,7 @@
 // Files to and from the library: plain HTTP, since RPC messages are JSON (ARCHITECTURE.md
 // §11.4). The session cookie goes with each request, as with the WebSocket.
-import type { RefId } from "@rp/shared/library.ts"
-import { type ExportFormat, ImportResult } from "@rp/shared/libraryImport.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import { type ExportFormat, ImportResult } from "@dreamspan/shared/libraryImport.ts"
 import { Schema } from "effect"
 
 export type UploadOutcome<A = ImportResult> =

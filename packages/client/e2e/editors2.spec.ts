@@ -7,9 +7,9 @@ import { switchAll } from "./support/lorebook.ts"
 import { mkdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
-import { HELD_FIELD, textField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { HELD_FIELD, textField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { NOTHING_TO_SAVE, UNSAVED, expectSaveState } from "./support/saveRevision.ts"
@@ -68,7 +68,7 @@ for (const width of [1440, 390])
       test.setTimeout(150_000)
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const name = `Ione ${width} ${theme}`
       const ref = await importCard(page, name)
@@ -130,7 +130,7 @@ for (const width of [1440, 390])
       test.setTimeout(150_000)
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const name = `Export Cast ${width} ${theme}`
       const ref = await importCard(page, name)
@@ -468,7 +468,7 @@ for (const width of [1440, 390])
       test.setTimeout(150_000)
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
 
       // A book's Disable all: unsaved, no Undo of its own; Revert takes it back.
@@ -524,7 +524,7 @@ for (const width of [1440, 390])
       test.setTimeout(90_000)
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const settings = (name: string, baseUrl: string) => ({
         name,

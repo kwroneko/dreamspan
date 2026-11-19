@@ -3,12 +3,12 @@
 // editors over the chat, its side panel and its notes know which chat they're in. Outside a
 // chat (the library's editors) there's none, and nothing here shows.
 import { useAtomValue } from "@effect/atom-react"
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
-import type { ChatNote } from "@rp/shared/chatSetupApi.ts"
-import type { NoteReplacementView } from "@rp/shared/inspectorApi.ts"
-import type { RefId } from "@rp/shared/library.ts"
-import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { ChatNotePosition } from "@dreamspan/shared/editorApi.ts"
+import type { ChatNote } from "@dreamspan/shared/chatSetupApi.ts"
+import type { NoteReplacementView } from "@dreamspan/shared/inspectorApi.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import type { PresetPrompt, PromptOrderEntry } from "@dreamspan/shared/docs/preset.ts"
 import { AsyncResult } from "effect/reactivity"
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useSyncExternalStore } from "react"
 import { AppClient } from "../../rpc.ts"

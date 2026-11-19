@@ -4,7 +4,7 @@
 // sent back only as the preset says, resumed by Continue after a cutoff inside it, and put
 // back into the text by "Show as reply text".
 import { assert, describe, it } from "@effect/vitest"
-import { originalReply } from "@rp/shared/replySections.ts"
+import { originalReply } from "@dreamspan/shared/replySections.ts"
 import { Effect } from "effect"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"

@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
-import { CastCard, type EntityId, type PathEntry } from "@rp/shared/chat.ts"
-import { Cast } from "@rp/shared/chatSetupApi.ts"
+import { CastCard, type EntityId, type PathEntry } from "@dreamspan/shared/chat.ts"
+import { Cast } from "@dreamspan/shared/chatSetupApi.ts"
 import { Effect } from "effect"
 import { AUTO_POLICY, nextInTurn, planReply, replyPolicies } from "../src/features/chat/replyPolicy.ts"
 

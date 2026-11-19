@@ -2,7 +2,7 @@
 // shown and the file open in it. `/files` itself, with the place in its search, since the server's
 // file routes (`/files/raw`, `/files/upload`) share that prefix and a folder named "raw" must
 // never be taken for one.
-import { FILES_TOP, normalizePath } from "@rp/shared/files.ts"
+import { FILES_TOP, normalizePath } from "@dreamspan/shared/files.ts"
 
 export const FILES_PAGE = "/files"
 

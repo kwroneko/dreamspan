@@ -1,7 +1,7 @@
 // A chat not sent yet shows its context size and its first request (DESIGN §2.1): the strip's
 // Context chip, its popover, and View request's dialog (`request=first` in the URL), built as
 // the box changes. The model's provider gets nothing until the send. Synthetic data only.
-import type { GenerationDefaults } from "@rp/shared/generation.ts"
+import type { GenerationDefaults } from "@dreamspan/shared/generation.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { type FakeProvider, startProvider } from "./provider.ts"

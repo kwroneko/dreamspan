@@ -4,7 +4,7 @@
 // with its edit controls (the UI audit's §8). Every card here is made up.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"

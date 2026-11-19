@@ -1,7 +1,7 @@
 // A group's members as one picture: two side by side, three as two above one centred (every
 // face whole, the same size, and no empty slot), four or more in a 2×2 grid with "+N" on the
 // last for the rest.
-import type { ChatGroup } from "@rp/shared/chatSetupApi.ts"
+import type { ChatGroup } from "@dreamspan/shared/chatSetupApi.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 
 export function GroupFaces({ members }: { members: ChatGroup["members"] }) {

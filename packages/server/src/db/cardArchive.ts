@@ -1,8 +1,8 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { cardArchiveCriteria, type ArchiveCriteria } from "@rp/shared/cardArchive.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import { cardArchiveCriteria, type ArchiveCriteria } from "@dreamspan/shared/cardArchive.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { readFavourites } from "./cardFavourites.ts"
 
 /** Shared with the query-plan regression; no documents or message text. */

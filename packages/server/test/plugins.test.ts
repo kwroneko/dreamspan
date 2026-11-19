@@ -2,8 +2,8 @@ import { expect, describe, it } from "vitest"
 import { Effect, Exit, Schema, Scope } from "effect"
 import { writeFile, symlink, link, mkdir, readFile, truncate } from "node:fs/promises"
 import { join } from "node:path"
-import { makeRegistry } from "@rp/shared/registry.ts"
-import { PluginManifest } from "@rp/shared/plugins.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
+import { PluginManifest } from "@dreamspan/shared/plugins.ts"
 import { declaredHandles, pluginArguments } from "../src/plugins/handles.ts"
 import { commitFiles, diskFiles, limits, pluginFolder, saveFiles, snapshot, validPath } from "../src/plugins/repo.ts"
 import { tempDir } from "./support/tempDir.ts"
@@ -32,7 +32,7 @@ describe("plugin source confinement", () => {
     const dir = tempDir("plugin-git"),
       folder = pluginFolder(dir, "", "tiny")
     const files = {
-      "rp-plugin.json": JSON.stringify(manifest()),
+      "dreamspan-plugin.json": JSON.stringify(manifest()),
       "index.ts": "export const activate = () => undefined",
       "package.json": JSON.stringify({
         scripts: { install: "touch SHOULD_NOT_EXIST", prepare: "touch SHOULD_NOT_EXIST" }

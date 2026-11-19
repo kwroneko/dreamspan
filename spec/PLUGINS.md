@@ -228,7 +228,7 @@ The rule that protects the main objective: a registry is added when a core featu
 ## 8. What has to shape the code now [P]
 
 - **The provider layer becomes registries:**
-  - `providerKinds` (today a static record in `@rp/shared/providers.ts`) and the wire API map in `Providers.ts` become a provider-kind registry
+  - `providerKinds` (today a static record in `@dreamspan/shared/providers.ts`) and the wire API map in `Providers.ts` become a provider-kind registry
   - the Anthropic breakpoints and the usage capture become a registered request transform and a registered response observer
   - the kind column stays a string, validated against the registry when a connection is used, not by a closed literal list
 
@@ -239,7 +239,7 @@ The rule that protects the main objective: a registry is added when a core featu
 - **The client renders through slot registries** (message view, panels, composer actions). `src/ui/` stays the single import path for components.
   - **Routes too.** The route and slot registries were built with the first real screens, the settings and login pages, so they're shaped by real use.
   - **Built** (2026-10-11, ARCHITECTURE.md §5): both registries, with the login and settings screens as their first users and `connection.sections` as the first slot.
-- **Namespaced chat state keys,** before the first extension needs them (`@rp/shared/state.ts` is a closed union today).
+- **Namespaced chat state keys,** before the first extension needs them (`@dreamspan/shared/state.ts` is a closed union today).
   - **Ids inside values must be declared.** The writer checks every id in a core key's value against the acting user (ARCHITECTURE §3.8). A plugin key (`<plugin-id>/<key>`) must therefore register, with its value schema, which fields hold entity, ref, revision or connection ids, so the same check covers it. Any other field is treated as free-form data: a plugin that reads an id from one must check ownership itself.
 
   **Built** (2026-10-28, ARCHITECTURE.md §3.8): `registerStateKey` registers a plugin key (`<plugin-id>/<key>`) with its schema, id declaration (checked by `stateKeyProblems`), positional or branch scope and optional reducer; the fold keeps its value in `ChatState.plugin`. **Built** (S5, 2026-10-28): trusted `db/stateModules.ts` module registrations run on the server and in request scopes in both writer and reader workers, including bundled workers. The plugin installer and consent UI remain later work.

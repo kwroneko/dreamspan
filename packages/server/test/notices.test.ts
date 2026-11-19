@@ -1,9 +1,9 @@
 // Notices over a real server (DESIGN §10.1): a reply that ends on its own is news to every
 // open tab of its user, and to nobody else; one the user stopped isn't.
 import { assert, describe, it } from "@effect/vitest"
-import type { Notice } from "@rp/shared/noticeApi.ts"
+import type { Notice } from "@dreamspan/shared/noticeApi.ts"
 import { Effect, Queue, Stream } from "effect"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Notices } from "../src/chat/Notices.ts"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { client, login, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"

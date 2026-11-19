@@ -1,6 +1,6 @@
-import type { ExportFormatInfo } from "@rp/shared/libraryImport.ts"
+import type { ExportFormatInfo } from "@dreamspan/shared/libraryImport.ts"
 import * as StParsers from "./stParserRegistry.ts"
-import type { StSettingsImport } from "@rp/shared/modelSettings.ts"
+import type { StSettingsImport } from "@dreamspan/shared/modelSettings.ts"
 // Main-thread access to the format workers (ARCHITECTURE.md §11.3). The pool is the
 // database readers' (db/readerPool.ts): a worker is busy until it answers, a crashed one
 // fails only the request it was running and is respawned, and requests beyond the pool's
@@ -10,9 +10,9 @@ import type { Worker } from "node:worker_threads"
 import { RpcClientError } from "effect/rpc"
 import { bundleEntry, WorkerBundleDir, workerThreads } from "../db/Database.ts"
 import * as ReaderPool from "../db/readerPool.ts"
-import type { ImportReport } from "@rp/shared/importReport.ts"
-import type { EntityKind } from "@rp/shared/library.ts"
-import type { Placement } from "@rp/shared/docs/note.ts"
+import type { ImportReport } from "@dreamspan/shared/importReport.ts"
+import type { EntityKind } from "@dreamspan/shared/library.ts"
+import type { Placement } from "@dreamspan/shared/docs/note.ts"
 import type { AuthorNoteLore } from "../formats/lorebook.ts"
 import {
   type ExportInput,
@@ -29,8 +29,8 @@ import {
 } from "./ops.ts"
 import type { ThumbnailFailed, ThumbnailResult } from "./ops.ts"
 import type { LocalEncoding } from "./tokenizer.ts"
-import type { AvatarCrop } from "@rp/shared/media.ts"
-import type { MEDIA_WIDTHS } from "@rp/shared/media.ts"
+import type { AvatarCrop } from "@dreamspan/shared/media.ts"
+import type { MEDIA_WIDTHS } from "@dreamspan/shared/media.ts"
 
 /**
  * The format worker failed while it had the file: it crashed, ran out of memory, ran past

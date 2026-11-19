@@ -7,7 +7,7 @@ import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./layoutAudit.ts"
 import { closePanel, openPanel } from "./panel.ts"
 import { loginCookie, withCookie, type Client } from "./rpc.ts"
@@ -88,9 +88,9 @@ export function workshopChatTests() {
           const title = `Tidy up ${width} ${theme}`
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await page.addInitScript(() => {
-            localStorage.setItem("rp.notifications.system", "on")
+            localStorage.setItem("dreamspan.notifications.system", "on")
             const notices: Array<{ title: string; body: string | undefined }> = []
             Object.assign(window, { workshopNotices: notices })
             Object.defineProperty(window, "Notification", {
@@ -217,7 +217,7 @@ export function workshopChatTests() {
           // The workshop: its badge, its accent, its greeting, the chip in place of who replies.
           const main = page.locator("[data-chat-main]")
           await expect(page.locator('[data-chat-kind="workshop"]').first()).toBeVisible()
-          await expect(page).toHaveTitle(`Workshop · ${title} · rp-harness`)
+          await expect(page).toHaveTitle(`Workshop · ${title} · Dreamspan`)
           await expect(main.locator('[data-kind-badge="workshop"]').first()).toBeVisible()
           await expect(page.getByTestId("composer")).toBeVisible()
           const workshopAccent = await accentOf(page)

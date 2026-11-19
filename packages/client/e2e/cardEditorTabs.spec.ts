@@ -8,8 +8,8 @@ import { mkdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { asUser } from "./support/rpc.ts"
 import { saveButton } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -105,7 +105,7 @@ for (const width of [1440, 390])
     test(`the character tab holds every field in tabs, at ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const name = `Mio ${width} ${theme}`
       const { ref, chat } = await seed(page, name, {
         extensions: { chub: { full_path: "synthetic/mio-harbour", id: 1 }, talkativeness: 0.8 },
@@ -280,7 +280,7 @@ for (const width of [1440, 390])
     test(`the full editor has the same names, tabs and actions, at ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const name = `Ren ${width} ${theme}`
       const { ref } = await seed(page, name)
       await page.goto(`${server().url}/library/${ref.id}`)

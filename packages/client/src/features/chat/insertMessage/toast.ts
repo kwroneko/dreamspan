@@ -1,4 +1,4 @@
-import type { ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { showToast } from "../../../ui/Toast.tsx"
 import type { ChatSession } from "../session.ts"
 

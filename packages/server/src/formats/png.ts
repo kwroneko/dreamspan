@@ -1,6 +1,6 @@
 // PNG chunks: enough to find a card's text chunks and to write new ones. A card PNG carries
 // its card as base64 JSON in `tEXt` chunks: `chara` (V2) and `ccv3` (V3).
-import { formatByteSize } from "@rp/shared/byteSize.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import { crc32 } from "node:zlib"
 import { fail, type Limits } from "./safety.ts"
 

@@ -1,7 +1,7 @@
 // The Files quota in the file manager (spec/FILES-AND-ENVIRONMENT.md §1.2): the usage line under
 // the toolbar, and the check before an upload that it fits in the room left.
-import { formatByteSize } from "@rp/shared/byteSize.ts"
-import type { FilesUsage } from "@rp/shared/filesQuotaApi.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
+import type { FilesUsage } from "@dreamspan/shared/filesQuotaApi.ts"
 
 /** Past this share of the quota the usage line turns to a warning. */
 const WARN_SHARE = 0.9

@@ -5,8 +5,8 @@
 // once the chat has its own choice for a box, Reset beside it goes back to that setting. Shown
 // with the Tools list, for a mode that uses tools.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import type { AgentPermissions } from "@rp/shared/agentApi.ts"
-import type { CastChange } from "@rp/shared/chatSetupApi.ts"
+import type { AgentPermissions } from "@dreamspan/shared/agentApi.ts"
+import type { CastChange } from "@dreamspan/shared/chatSetupApi.ts"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useMemo, useState, useSyncExternalStore } from "react"
 import { AppClient } from "../../../rpc.ts"

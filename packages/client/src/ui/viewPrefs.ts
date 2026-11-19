@@ -1,7 +1,7 @@
 // Account-owned viewer choices. Each account has its own query, including when users
 // sign out and back in in the same tab. Writes patch one choice in the writer transaction.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import { DEFAULT_DISPLAY_PREFS, type DisplayPrefsChange } from "@rp/shared/chatApi.ts"
+import { DEFAULT_DISPLAY_PREFS, type DisplayPrefsChange } from "@dreamspan/shared/chatApi.ts"
 import { useEffect, useSyncExternalStore } from "react"
 import { Effect } from "effect"
 import { AsyncResult, Atom } from "effect/reactivity"
@@ -13,7 +13,7 @@ import { PreferenceWrites } from "./preferenceWrites.ts"
 const channel =
   typeof window === "undefined" || typeof BroadcastChannel === "undefined"
     ? null
-    : new BroadcastChannel("rp.displayPrefs")
+    : new BroadcastChannel("dreamspan.displayPrefs")
 
 const writesFor = Atom.family((_userId: string) => Atom.make(new PreferenceWrites()))
 const prefsFor = Atom.family((userId: string) =>

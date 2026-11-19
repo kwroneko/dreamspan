@@ -1,7 +1,7 @@
 import { StateField } from "@codemirror/state"
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view"
-import { highlightMacros, type MacroToken } from "@rp/shared/macros/highlight.ts"
-import { parse, type Node } from "@rp/shared/macros/parse.ts"
+import { highlightMacros, type MacroToken } from "@dreamspan/shared/macros/highlight.ts"
+import { parse, type Node } from "@dreamspan/shared/macros/parse.ts"
 import { macroRegistry } from "../macros.ts"
 
 interface Parsed {

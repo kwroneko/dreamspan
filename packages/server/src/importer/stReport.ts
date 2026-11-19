@@ -3,9 +3,9 @@
 // hidden-run offers and the link choices, each bounded. Nothing a user needs lives only here.
 // Every issue is kept, up to a bound no real folder reaches (a few per file); the client shows
 // the same issue on many files as one entry listing them all.
-import type { ChatId } from "@rp/shared/chat.ts"
-import { type ImportReport } from "@rp/shared/importReport.ts"
-import { StCount, type StHiddenRun, StImportReport, StIssue, type StLinkChoice } from "@rp/shared/stImportApi.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import { type ImportReport } from "@dreamspan/shared/importReport.ts"
+import { StCount, type StHiddenRun, StImportReport, StIssue, type StLinkChoice } from "@dreamspan/shared/stImportApi.ts"
 
 /** Issues a report keeps: one or two per file for a folder of ten thousand. */
 const MAX_ISSUES = 20_000

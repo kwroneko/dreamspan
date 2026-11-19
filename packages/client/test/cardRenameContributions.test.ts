@@ -1,5 +1,5 @@
 import { expect, it } from "vitest"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { register } from "../src/features/cardRename/index.tsx"
 import { cardSavedContribution, cardSavedContributions } from "../src/features/editor/cardSaved.ts"
 import { cardContributions } from "../src/features/cardForks/surfaces.tsx"

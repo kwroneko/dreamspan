@@ -1,17 +1,17 @@
 import type { LoreReceipt, LoreTimingState } from "./loreTiming.ts"
 import type { SummaryPrefix } from "../lcm/prefix.ts"
 // The assembler's data, all plain JSON (DATA-MODEL §7.1; ARCHITECTURE §15).
-import type { ContextDisplay, ContextMessage, ContextSource, SourceActivation } from "@rp/shared/inspectorApi.ts"
-import { ContextBudget } from "@rp/shared/inspectorApi.ts"
-import type { ContextIssue } from "@rp/shared/chat.ts"
-import type { FrozenValues } from "@rp/shared/macros/expand.ts"
-import type { VariableEffect } from "@rp/shared/macros/variables.ts"
-import type { CardDoc } from "@rp/shared/docs/card.ts"
-import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
+import type { ContextDisplay, ContextMessage, ContextSource, SourceActivation } from "@dreamspan/shared/inspectorApi.ts"
+import { ContextBudget } from "@dreamspan/shared/inspectorApi.ts"
+import type { ContextIssue } from "@dreamspan/shared/chat.ts"
+import type { FrozenValues } from "@dreamspan/shared/macros/expand.ts"
+import type { VariableEffect } from "@dreamspan/shared/macros/variables.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import type { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
 import type { matchLorebooks } from "./lorebook.ts"
-import { type NoteDoc, type ReplaceableCardField, replacesInPlace } from "@rp/shared/docs/note.ts"
-import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/docs/preset.ts"
-import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
+import { type NoteDoc, type ReplaceableCardField, replacesInPlace } from "@dreamspan/shared/docs/note.ts"
+import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@dreamspan/shared/docs/preset.ts"
+import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
@@ -118,7 +118,7 @@ export interface Piece {
   /** The pieces whose text this one holds, such as the fields in a card's labelled block. */
   readonly parts?: ReadonlyArray<number>
   /** The prompt regex scripts that changed its text, in the order they ran (the inspector shows them). */
-  scripts?: ReadonlyArray<import("@rp/shared/regexScripts.ts").ScriptRef>
+  scripts?: ReadonlyArray<import("@dreamspan/shared/regexScripts.ts").ScriptRef>
 }
 
 /** A message of the assembled request, provider-neutral: Chat Completions' shape. */
@@ -132,7 +132,7 @@ export interface RequestImage {
   readonly width?: number | null
   readonly height?: number | null
   /** What the image costs this request's model (`image-tokens` stage); counted in `tokensOf`. */
-  readonly estimate?: import("@rp/shared/imageTokens.ts").ImageEstimate
+  readonly estimate?: import("@dreamspan/shared/imageTokens.ts").ImageEstimate
 }
 
 export interface RequestMessage {
@@ -144,7 +144,7 @@ export interface RequestMessage {
 }
 
 /**
- * Sampler values as the preset sets them, in ST's names (`@rp/shared/docs/preset.ts`).
+ * Sampler values as the preset sets them, in ST's names (`@dreamspan/shared/docs/preset.ts`).
  * Mapping them to a provider's parameters is the provider request's job (`wire.ts`).
  */
 interface Samplers {
@@ -203,7 +203,7 @@ export interface SnapshotInputs {
   readonly preset: { readonly ref: string | null; readonly revision: string | null; readonly scope: PresetScope }
   readonly cards: ReadonlyArray<{ readonly entity: string; readonly ref: string | null; readonly revision: string }>
   /** Who of `cards` was away or a narrator (spec/CHARACTER-CONTEXT.md §9.1); absent when neither. */
-  readonly presence?: import("@rp/shared/knowledge.ts").VersionPresence
+  readonly presence?: import("@dreamspan/shared/knowledge.ts").VersionPresence
   /** A separate context's viewer (`knowledge` stage), whose knowledge the agent's read tools keep to; absent: none. */
   readonly viewer?: string
   /** The viewer's identities through card replacements (`Knowledge.aliases`); absent: only `viewer`. */
@@ -376,9 +376,9 @@ export interface ContextSnapshot {
    */
   readonly sendNudge?: string
   /** The preset's reply-section setting a reply is parsed with; absent for summaries. */
-  readonly replySections?: import("@rp/shared/replySections.ts").ReplySectionSettings
+  readonly replySections?: import("@dreamspan/shared/replySections.ts").ReplySectionSettings
   /** What `{{summary}}` filled in, for the preset editor and the Notes tab. */
-  readonly summaryFill?: import("@rp/shared/inspectorApi.ts").SummaryFill
+  readonly summaryFill?: import("@dreamspan/shared/inspectorApi.ts").SummaryFill
   readonly historyStart?: HistoryStart
   readonly historyMove?: "initial" | "maximum" | "budget" | "restore" | "unchanged"
   readonly historyBudget?: number
@@ -399,9 +399,9 @@ export interface ContextSnapshot {
     readonly workshopTranscript?: ReadonlyArray<RequestMessage>
     readonly id: string
     readonly clipTokens: number
-    readonly inputs: ReadonlyArray<import("@rp/shared/lcm.ts").Summary["inputs"][number]>
+    readonly inputs: ReadonlyArray<import("@dreamspan/shared/lcm.ts").Summary["inputs"][number]>
     /** A condensation's parts, each at the revision the request rendered. */
-    readonly children?: ReadonlyArray<import("@rp/shared/lcm.ts").Summary["children"][number]>
+    readonly children?: ReadonlyArray<import("@dreamspan/shared/lcm.ts").Summary["children"][number]>
     readonly tail: string
     readonly style: string
     /** False: sent without the preset, the instruction and messages only (DESIGN §8); absent is with it. */
@@ -466,7 +466,7 @@ export interface ContextSnapshot {
   /** Enabled preset prompts their condition left out this turn; absent in older snapshots. */
   readonly skippedPrompts?: ReadonlyArray<Source>
   /** The path's images the request leaves out and why (`images` stage); absent in older snapshots. */
-  readonly imagesLeftOut?: import("@rp/shared/inspectorApi.ts").ImagesLeftOut
+  readonly imagesLeftOut?: import("@dreamspan/shared/inspectorApi.ts").ImagesLeftOut
   /** What the sources read, by id and revision, so the context can be read again exactly. */
   readonly wire?: WireContext
   readonly sources?: SourcePins
@@ -486,7 +486,7 @@ interface FailedSummaryRange {
 
 export interface SummaryLayer {
   readonly failures?: ReadonlyArray<FailedSummaryRange>
-  readonly summaries: ReadonlyArray<import("@rp/shared/lcm.ts").Summary>
+  readonly summaries: ReadonlyArray<import("@dreamspan/shared/lcm.ts").Summary>
   readonly cursor: string | null
   readonly cursorDepth: number
 }
@@ -497,7 +497,7 @@ export interface SourcePins {
   /** The image token counts and calibration the assembly read (absent before they were pinned). */
   readonly imageTokenFacts?: import("./pipeline.ts").ImageTokenFacts | undefined
   /** The account's summarization defaults as the assembly read them (absent before they were pinned). */
-  readonly lcmDefaults?: import("@rp/shared/lcmSettings.ts").LcmDefaults | null | undefined
+  readonly lcmDefaults?: import("@dreamspan/shared/lcmSettings.ts").LcmDefaults | null | undefined
   readonly lcm?: {
     readonly failures?: ReadonlyArray<FailedSummaryRange>
     readonly cursor: string | null
@@ -506,7 +506,7 @@ export interface SourcePins {
       readonly id: string
       readonly revision: string
       readonly fresh: boolean
-      readonly status: import("@rp/shared/lcm.ts").Summary["status"]
+      readonly status: import("@dreamspan/shared/lcm.ts").Summary["status"]
     }>
   }
   readonly target: Target
@@ -523,7 +523,7 @@ export interface SourcePins {
     readonly found: ReadonlyArray<{ readonly entity: string; readonly ref: string | null; readonly revision: string }>
   }>
   /** The account's global regex scripts as read; absent in snapshots from before them (none). */
-  readonly globalRegex?: ReadonlyArray<import("@rp/shared/docs/regexScript.ts").RegexScript>
+  readonly globalRegex?: ReadonlyArray<import("@dreamspan/shared/docs/regexScript.ts").RegexScript>
   readonly lorebooks?: ReadonlyArray<{
     readonly key: string
     readonly found: ReadonlyArray<{
@@ -597,7 +597,7 @@ export interface Generation {
   readonly request: AssembledRequest
   readonly model: ModelInput | null
   /** How the reply's leading tagged sections are parsed (spec/REPLY-SECTIONS.md); absent: not at all. */
-  readonly replySections?: import("@rp/shared/replySections.ts").ReplySectionSettings
+  readonly replySections?: import("@dreamspan/shared/replySections.ts").ReplySectionSettings
   /** The chat variables the preset's and cards' macros wrote, in order: `null` deletes one. */
   readonly variables: ReadonlyArray<{ readonly name: string; readonly value: string | number | null }>
   /** What the user should know about the context, kept on its rollout for the version to show. */
@@ -740,9 +740,9 @@ export interface HistoryEntry {
    * The reply's leading tagged sections, as they came (spec/REPLY-SECTIONS.md): not part of
    * `content`; sent before it, in their tags, only where the preset sends sections back.
    */
-  readonly replySections?: import("@rp/shared/replySections.ts").ReplySections
+  readonly replySections?: import("@dreamspan/shared/replySections.ts").ReplySections
   /** The version's thinking the user hid from the model here (SetThinkingHidden): never sent. */
-  readonly thinkingHidden?: ReadonlyArray<import("@rp/shared/chat.ts").ThinkingPart>
+  readonly thinkingHidden?: ReadonlyArray<import("@dreamspan/shared/chat.ts").ThinkingPart>
   readonly macroMode: "template" | "verbatim"
   readonly frozen: FrozenValues | null
   /** Whether a template's variable writes are recorded already, as state events of its version. */
@@ -856,18 +856,18 @@ export interface ModelInput {
   readonly continueUnavailable?: string | undefined
   readonly toolLoading?: "auto" | "every" | "dispatcher"
   readonly cacheBreakpoints: "auto" | "explicit" | "none"
-  readonly cacheLayout?: import("@rp/shared/providers.ts").CacheLayout
+  readonly cacheLayout?: import("@dreamspan/shared/providers.ts").CacheLayout
   /** The context window when some source reported it. */
   readonly context: number | null
   /** Where `context` came from, and the catalog entry when a catalog gave it; absent on older snapshots. */
-  readonly contextSource?: import("@rp/shared/providers.ts").FieldSource
+  readonly contextSource?: import("@dreamspan/shared/providers.ts").FieldSource
   readonly contextCatalog?: string
   /** A reported output ceiling; absent on older snapshots. */
   readonly vision?: boolean
   readonly maxImages?: number
   readonly maxOutput?: number | null
   /** The model's own generation settings; absent on older snapshots. */
-  readonly settings?: import("@rp/shared/modelSettings.ts").ModelSettings
+  readonly settings?: import("@dreamspan/shared/modelSettings.ts").ModelSettings
   /** The connection's one-way preset override (DESIGN §9). */
   readonly presetOverride: string | null
 }

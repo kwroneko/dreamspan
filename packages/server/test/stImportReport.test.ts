@@ -3,7 +3,7 @@
 // chats where something did, each issue linked to its chat, a chat's start from its first
 // message, and a group's reply strategy. Everything here is synthetic.
 import { assert, layer } from "@effect/vitest"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Reader } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

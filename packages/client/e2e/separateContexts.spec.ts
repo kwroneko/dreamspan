@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http"
 import type { AddressInfo } from "node:net"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, SlotId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"
 import { level1 } from "./support/summaries.ts"
@@ -126,7 +126,7 @@ const threeCharacters = () =>
 const look = async (page: Page, width: number, theme: "light" | "dark") => {
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
   await page.emulateMedia({ colorScheme: theme })
-  await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+  await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
 }
 

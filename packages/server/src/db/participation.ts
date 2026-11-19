@@ -1,8 +1,8 @@
 // Historical membership belongs to authored versions, not to the mutable cast. These
 // helpers run inside the caller's worker transaction; the schema indexes their snapshots.
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
-import { presenceOf, type VersionPresence } from "@rp/shared/knowledge.ts"
-import { foldState, type FoldableEvent } from "@rp/shared/state.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
+import { presenceOf, type VersionPresence } from "@dreamspan/shared/knowledge.ts"
+import { foldState, type FoldableEvent } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { displayThrough, slotAtPosition } from "./displayPath.ts"

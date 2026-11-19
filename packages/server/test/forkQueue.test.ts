@@ -2,8 +2,8 @@
 // made at that reply while it generates). When it ends, each fork's message posts in that
 // fork with a reply of its own, never in the fork that queued first.
 import { assert, describe, it } from "@effect/vitest"
-import { type ForkId, NewVersion } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { type ForkId, NewVersion } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { Reader, Writer } from "../src/db/Database.ts"

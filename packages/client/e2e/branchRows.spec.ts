@@ -55,7 +55,7 @@ for (const theme of ["light", "dark"] as const)
       await page.setViewportSize({ width: size === "phone" ? 390 : 1440, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await page.goto(`${server().url}/chats/${data.chat.id}?fork=${data.selected.id}&side=chats&forks=${data.chat.id}`)
       if (size === "phone") await page.getByRole("button", { name: "Chats and menu" }).click()
       if (size === "minimum") {

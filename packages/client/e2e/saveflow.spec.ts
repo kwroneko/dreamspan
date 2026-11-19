@@ -3,8 +3,8 @@ import { mkdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import { textField, valueField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import { textField, valueField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"
@@ -102,7 +102,7 @@ for (const width of audit ? [390, 1024, 1440] : [1440])
         test(`${kind} ${large ? "large" : "panel"}: fixed save cluster (${width} ${theme})`, async ({ page }, info) => {
           test.setTimeout(180_000)
           await page.setViewportSize({ width, height: 1000 })
-          await page.addInitScript((theme) => localStorage.setItem("rp.theme", theme), theme)
+          await page.addInitScript((theme) => localStorage.setItem("dreamspan.theme", theme), theme)
           const data = await seed(page, `${kind}-${large}-${width}-${theme}`)
           const tabName =
             kind === "card"

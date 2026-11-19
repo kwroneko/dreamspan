@@ -56,7 +56,7 @@
   - *Accidental damage.* File-tool changes have Undo, and changes made by commands have Restore from versions (§7). A wall wouldn't stop a command in the working folder from damaging that folder either.
   - *Other users.* Separating accounts is a different matter, and it stays required. It is enforced by mounts: an account's sandbox contains only its own tree and the folders shared with it (§3.6). The file tools check the same ownership in the app.
   - If a real need appears later, a folder flag such as "The assistant can't see this" could be added as a mount exclusion. It is not proposed now.
-- **Where it's stored.** The working folder is a branch-owned state key, `workshop.folder { path, inode }`, registered in `@rp/shared/state.ts` and written as a state event at the branch's current position, like the This chat settings (DESIGN §3.4). This follows the existing rules:
+- **Where it's stored.** The working folder is a branch-owned state key, `workshop.folder { path, inode }`, registered in `@dreamspan/shared/state.ts` and written as a state event at the branch's current position, like the This chat settings (DESIGN §3.4). This follows the existing rules:
   - A reply uses the folder in effect before it (causal order).
   - A new branch inherits the folder as of its fork point.
   - Changing it on one branch never changes another (DESIGN §3.2 [D]).
@@ -103,7 +103,7 @@ What the sandbox has to do (owner [D]):
 
 | | Linux (desktop, native server, inside the server's container) | macOS | Windows |
 |---|---|---|---|
-| **Mechanism** | bubblewrap: new user, mount, PID, IPC and network namespaces; a seccomp filter. Driven by `@anthropic-ai/sandbox-runtime` (`SandboxManager.wrapWithSandbox`) | Seatbelt (`sandbox-exec` with a generated profile), through the same library | **AppContainer** (a process token with an AppContainer SID and chosen capabilities) inside a **job object**, launched by a small native helper the app ships (`rp-sandbox-win.exe`) |
+| **Mechanism** | bubblewrap: new user, mount, PID, IPC and network namespaces; a seccomp filter. Driven by `@anthropic-ai/sandbox-runtime` (`SandboxManager.wrapWithSandbox`) | Seatbelt (`sandbox-exec` with a generated profile), through the same library | **AppContainer** (a process token with an AppContainer SID and chosen capabilities) inside a **job object**, launched by a small native helper the app ships (`dreamspan-sandbox-win.exe`) |
 | **Files it can reach** | Only what is bound in: the account's Files at `/files`, the home folder at `/home/user`, the toolchain and system directories read-only, `/app-source` read-only. App data isn't there at all | Seatbelt rules: write only the Files folder, home folder and temp; reads denied for the app's data folder, the user's home (except those), keychains and `.ssh` | Only objects whose ACLs grant the AppContainer SID or "all application packages". System folders are readable that way; the user's profile is not. The app adds ACEs for the account's Files, home and toolchain folders. The user owns those folders, so no administrator is needed |
 | **Network** | No network namespace route out; traffic goes through the app's proxy over Unix sockets bound into the sandbox | The profile allows only the proxy's localhost port | The `internetClient` capability without `privateNetworkClientServer`: public internet, no LAN. Loopback is denied to AppContainers by default |
 | **Limits** | Timeouts and process-group kill; `prlimit` for file size and open files. On the server, the container's own cgroup caps everything together | Timeouts and process-group kill; no per-process memory limit | Job object: memory, active processes, CPU rate, kill-on-close for the whole tree |
@@ -351,7 +351,7 @@ The owner [D]: a file-management UI "can't slow down or block it or anything els
 | Unit | What | Depends on |
 |---|---|---|
 | **M1** | `macos-seatbelt` through sandbox-runtime; the macOS toolchain manifest and first-run fetch | A2, a desktop build |
-| **W0** | Windows spike: AppContainer plus job object through `rp-sandbox-win.exe`; Node, Python, uv, MinGit's `git`, BusyBox `sh` and ripgrep running inside; `internetClient` without LAN; ACEs on the Files, home and toolchain folders; no administrator anywhere. Its result picks AppContainer or the one-prompt fallback (§3.2) | A desktop build |
+| **W0** | Windows spike: AppContainer plus job object through `dreamspan-sandbox-win.exe`; Node, Python, uv, MinGit's `git`, BusyBox `sh` and ripgrep running inside; `internetClient` without LAN; ACEs on the Files, home and toolchain folders; no administrator anywhere. Its result picks AppContainer or the one-prompt fallback (§3.2) | A desktop build |
 | **W1** | `windows-appcontainer` (or the fallback) and the Windows toolchain | W0 |
 | **D1** | Desktop host folders and unsandboxed mode (§3.7), the system folder dialog, the Linux `.deb` AppArmor profile | M1 or W1 |
 

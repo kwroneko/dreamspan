@@ -1,6 +1,6 @@
-// The request inspector's RPC (@rp/shared/inspectorApi.ts): a version's context as it was
+// The request inspector's RPC (@dreamspan/shared/inspectorApi.ts): a version's context as it was
 // sent, read from its rollout's snapshot. Storage checks the version is the caller's.
-import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
+import { type AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
 import { Effect } from "effect"
 import { Reader } from "../db/Database.ts"
 import { internal } from "./internal.ts"

@@ -3,8 +3,8 @@
 // but ST never saved, as Chub's downloads leave them. Every file is made up.
 import { DatabaseSync } from "node:sqlite"
 import { assert, layer } from "@effect/vitest"
-import type { ChatId } from "@rp/shared/chat.ts"
-import { foldState } from "@rp/shared/state.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import { Reader } from "../src/db/Database.ts"

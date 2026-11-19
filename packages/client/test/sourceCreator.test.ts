@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest"
-import { emptySourceQuery } from "@rp/shared/cardSources.ts"
+import { emptySourceQuery } from "@dreamspan/shared/cardSources.ts"
 import type { SourceBrowse } from "../src/features/cardSources/browse.tsx"
 import { hideCreator, showCreator } from "../src/features/cardSources/creator.tsx"
 

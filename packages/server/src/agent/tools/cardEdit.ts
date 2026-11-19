@@ -5,9 +5,9 @@ import { savedToolResult } from "../toolData.ts"
 // note at the tail, which later edits revise cheaply. Both are this call's effects, attached to
 // the reply, so a swipe takes the change back.
 import { Type } from "@earendil-works/pi-ai"
-import type { EntityId } from "@rp/shared/chat.ts"
-import { NOTE_SCHEMA_VERSION, REPLACEABLE_CARD_FIELDS, type ReplaceableCardField } from "@rp/shared/docs/note.ts"
-import { permissionKey } from "@rp/shared/state.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { NOTE_SCHEMA_VERSION, REPLACEABLE_CARD_FIELDS, type ReplaceableCardField } from "@dreamspan/shared/docs/note.ts"
+import { permissionKey } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { currentText, replaceEffects, replacing } from "../noteTargets.ts"
 import type { RolloutTool } from "../tools.ts"

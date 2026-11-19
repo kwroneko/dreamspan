@@ -2,7 +2,7 @@
 // format workers that parsed them, so a library of hundreds of new cards shows its grid
 // from files on disk instead of making each thumbnail while the browser waits.
 import { Effect } from "effect"
-import type { AvatarCrop } from "@rp/shared/media.ts"
+import type { AvatarCrop } from "@dreamspan/shared/media.ts"
 import { mediaPath } from "../db/media.ts"
 import type { Formats } from "./Formats.ts"
 

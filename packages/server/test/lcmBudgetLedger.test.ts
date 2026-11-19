@@ -1,6 +1,6 @@
 import { assert } from "@effect/vitest"
-import { uuidv7 } from "@rp/shared/id.ts"
-import type { LlmRequestId } from "@rp/shared/usage.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import type { LlmRequestId } from "@dreamspan/shared/usage.ts"
 import { Effect } from "effect"
 import { lcmHarness, lcmTest } from "./support/lcmHarness.ts"
 import { summaryJob } from "./support/lcmFixtures.ts"

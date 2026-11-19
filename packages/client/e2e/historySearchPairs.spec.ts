@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { Effect, Schema } from "effect"
-import { SummaryId } from "@rp/shared/lcm.ts"
+import { SummaryId } from "@dreamspan/shared/lcm.ts"
 import { level1 } from "./support/summaries.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
@@ -17,7 +17,7 @@ for (const width of [390, 1024, 1440])
     test(`independent search boxes reveal, remove and replace each scope at ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const [name, ...value] = cookie.split("=")
       await page.context().addCookies([{ name: name!, value: value.join("="), url: server().url }])
       const { chat, entry } = await withCookie(server(), cookie, (api) =>

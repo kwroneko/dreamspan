@@ -3,9 +3,9 @@
 // markers list what it offers, and a card's own skill text reaches the model only once the user
 // allows it. Requests keep one byte-identical prefix throughout.
 import { assert, it } from "@effect/vitest"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import { valueField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import { valueField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect, Stream } from "effect"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
@@ -90,7 +90,7 @@ for (const mode of ["every", "auto", "dispatcher"] as const) {
       const chat = yield* api.CreateWorkshop({})
       const user = yield* api.Whoami()
       const { Writer } = yield* Effect.promise(() => import("../src/db/Database.ts"))
-      const { newCardDoc } = yield* Effect.promise(() => import("@rp/shared/editing.ts"))
+      const { newCardDoc } = yield* Effect.promise(() => import("@dreamspan/shared/editing.ts"))
       const helper = yield* (yield* Writer).CreateEntity({
         userId: user.id,
         kind: "card",
@@ -102,7 +102,7 @@ for (const mode of ["every", "auto", "dispatcher"] as const) {
         doc: {
           ...newCardDoc("Synthetic helper"),
           extensions: {
-            rp_harness: {
+            dreamspan: {
               skills: [
                 { name: "proofread", description: untrusted, instructions: secret, tools: ["read_card"] },
                 { use: "cards" }

@@ -2,8 +2,8 @@
 // fields a provider needs, and the advanced section with each setting it sets up, shown at the
 // provider's default until the user changes it, and how it counts tokens. A connection stores
 // only the changes.
-import { awsRegionOf, providerChanges } from "@rp/shared/providerDefinitions.ts"
-import { DEFAULT_IDLE_TIMEOUT_S, type ProviderInfo, type ProviderSettings } from "@rp/shared/providers.ts"
+import { awsRegionOf, providerChanges } from "@dreamspan/shared/providerDefinitions.ts"
+import { DEFAULT_IDLE_TIMEOUT_S, type ProviderInfo, type ProviderSettings } from "@dreamspan/shared/providers.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Field, Fieldset, formText, Input, SecretInput } from "../../ui/Field.tsx"

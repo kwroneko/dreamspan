@@ -3,9 +3,9 @@
 // None, or read by `{{summary}}` in the preset it used), and sent only by its switch. Enabling
 // summaries switches it off in the same step, for both choices.
 import { assert } from "@effect/vitest"
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
-import type { SummaryId } from "@rp/shared/lcm.ts"
+import type { SummaryId } from "@dreamspan/shared/lcm.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { serverPort } from "./support/config.ts"
 import { png, textChunk } from "./formats/support.ts"

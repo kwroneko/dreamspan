@@ -2,9 +2,9 @@ import { contextExcludedIn } from "./lcmVisibility.ts"
 // The ST summary an imported chat carries (ARCHITECTURE §13) as LCM can adopt it (spec/LCM.md
 // §2.7): the note's text on the path shown, and the run of messages hidden from the first
 // message that it covers. Shared by the offer (a read) and the adoption (the write).
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { shownIn, viewAt } from "./forkState.ts"
-import { NoteDoc } from "@rp/shared/docs/note.ts"
+import { NoteDoc } from "@dreamspan/shared/docs/note.ts"
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/sql"
 import { makeLibraryQueries } from "./library.ts"

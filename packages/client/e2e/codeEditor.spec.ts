@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { expect, test, type Page } from "@playwright/test"
-import { textField } from "@rp/shared/editing.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { Effect } from "effect"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { asUser } from "./support/rpc.ts"

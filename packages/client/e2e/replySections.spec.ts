@@ -5,7 +5,7 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, test, type Locator } from "@playwright/test"
-import { originalReply, sectionsDisplay } from "@rp/shared/replySections.ts"
+import { originalReply, sectionsDisplay } from "@dreamspan/shared/replySections.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -27,7 +27,7 @@ for (const width of [1440, 390])
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const shot = async (name: string) => {
         if (shots) {
@@ -184,7 +184,7 @@ for (const width of [390, 1024, 1440])
     test(`thinking settings layout at ${width} ${theme}`, async ({ page }, info) => {
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const preset = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         api.CreatePreset({ label: `Thinking layout ${width} ${theme}` })

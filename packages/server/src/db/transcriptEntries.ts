@@ -1,6 +1,6 @@
 // An agent run's transcript after its request, as the run inspector lists it (agentReads.ts, subagents.ts).
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { TranscriptEntry, TurnPart } from "@rp/shared/agent.ts"
+import type { TranscriptEntry, TurnPart } from "@dreamspan/shared/agent.ts"
 import type { PlacedStep } from "../agent/steps.ts"
 
 const textOf = (content: unknown) =>
@@ -80,7 +80,7 @@ export const transcriptEntries = (
       return [{ role: "app", text: m.message.content + (m.message.images?.length ? " [image]" : "") }]
     }
     const other = m as { readonly role: string; readonly content?: unknown }
-    if (other.role === "rpHarness" || other.role === "user") {
+    if (other.role === "rpApp" || other.role === "user") {
       const nudge = (m as { readonly nudge?: unknown }).nudge
       return [{ role: "app", text: textOf(other.content), ...(typeof nudge === "number" ? { nudge } : {}) }]
     }

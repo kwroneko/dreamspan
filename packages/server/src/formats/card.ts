@@ -3,8 +3,8 @@
 // `name` means V1. The specs: github.com/malfoyslastname/character-card-spec-v2 and
 // github.com/kwaroran/character-card-spec-v3.
 import { parseStCreatedAt } from "./stCreatedAt.ts"
-import { CARD_SCHEMA_VERSION, CardAsset, type CardDoc } from "@rp/shared/docs/card.ts"
-import type { ReportBuilder } from "@rp/shared/importReport.ts"
+import { CARD_SCHEMA_VERSION, CardAsset, type CardDoc } from "@dreamspan/shared/docs/card.ts"
+import type { ReportBuilder } from "@dreamspan/shared/importReport.ts"
 import { Predicate, Schema } from "effect"
 import { Fields, isFiniteNumber } from "./fields.ts"
 import { lorebookFromCharacterBook } from "./lorebook.ts"
@@ -75,7 +75,7 @@ const isLanguageMap = (value: unknown): value is Record<string, string> =>
 
 const fromData = (data: Record<string, unknown>, path: Path, limits: Limits, issues: ReportBuilder): CardDoc => {
   const fields = new Fields(data, path, issues)
-  // Notes an export put in `extensions.rp_harness` stay there: the importer makes them card notes.
+  // Notes an export put in `extensions.dreamspan` stay there: the importer makes them card notes.
   // ST's scoped regex scripts become the card's `regex`, as data; the file's approval, if any,
   // is never read (DESIGN §11).
   const { regex_scripts, ...extensions } = fields.object("extensions")

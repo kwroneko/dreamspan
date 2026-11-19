@@ -1,12 +1,12 @@
 // What an ST chat file means here (DATA-MODEL §14, ARCHITECTURE.md §13): which card it's
 // with, who spoke, and the chat state its metadata maps to, as events against what an
 // earlier import made of it. Pure: the import (StImports.ts) does the storing.
-import type { EntityId, SlotId } from "@rp/shared/chat.ts"
-import { cleanName } from "@rp/shared/chatName.ts"
-import { noteDepth, type NoteDoc } from "@rp/shared/docs/note.ts"
-import { shownText } from "@rp/shared/importReport.ts"
-import type { RefId } from "@rp/shared/library.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
+import type { EntityId, SlotId } from "@dreamspan/shared/chat.ts"
+import { cleanName } from "@dreamspan/shared/chatName.ts"
+import { noteDepth, type NoteDoc } from "@dreamspan/shared/docs/note.ts"
+import { shownText } from "@dreamspan/shared/importReport.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import type { StateEventData } from "@dreamspan/shared/state.ts"
 import { createHash } from "node:crypto"
 import type { StImportNote } from "../db/ops.ts"
 import { stStateHash } from "../db/stImportProgress.ts"

@@ -6,7 +6,7 @@ import { expectTextBox } from "./support/textbox.ts"
 // streamed so far when it's copied, and, on a phone, the start of why it isn't sent when a
 // tap reveals its actions.
 import { expect, type Page, test } from "@playwright/test"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { card, header, jsonl, message } from "../../server/test/support/stFolder.ts"
 import { type Copy, makeCopy } from "../src/features/editor/backup.ts"
@@ -113,7 +113,7 @@ const copies = (page: Page) =>
   page.evaluate(
     () =>
       new Promise<Array<Copy>>((resolve) => {
-        const request = indexedDB.open("rp-editor-copies", 1)
+        const request = indexedDB.open("dreamspan-editor-copies", 1)
         request.onupgradeneeded = () => {
           const store = request.result.createObjectStore("copies", { keyPath: "key" })
           store.createIndex("userId", "userId")
@@ -315,7 +315,7 @@ test("a replay from this browser that goes over text saved elsewhere says so unt
   await page.evaluate(
     (copy) =>
       new Promise<void>((resolve) => {
-        const request = indexedDB.open("rp-editor-copies", 1)
+        const request = indexedDB.open("dreamspan-editor-copies", 1)
         request.onsuccess = () => {
           const db = request.result
           const transaction = db.transaction("copies", "readwrite")
@@ -487,7 +487,7 @@ for (const width of [1440, 390])
     test(`a long message's editor footer stays in view at ${width} ${theme}`, async ({ page }, info) => {
       await page.setViewportSize({ width, height: 844 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const long = Array.from({ length: 40 }, (_, i) => `Paragraph ${i}. ${"A long synthetic turn. ".repeat(8)}`).join(
         "\n\n"
       )

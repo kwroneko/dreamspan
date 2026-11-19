@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { UserId } from "@rp/shared/domain.ts"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { activeRunSummaries, summarySafeText } from "../agent/compaction.ts"

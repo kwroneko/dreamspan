@@ -1,12 +1,12 @@
-import { TransportApi, type TransportRpcs } from "@rp/shared/transportApi.ts"
+import { TransportApi, type TransportRpcs } from "@dreamspan/shared/transportApi.ts"
 import { installCardSourceCommands } from "./agent/cardSourceCommands.ts"
 import { pluginRoutes } from "./plugins/serve.ts"
 import { PluginHost } from "./plugins/Host.ts"
 import { WorkshopFiles } from "./files/WorkshopFiles.ts"
 import { makePluginHandlers } from "./api/plugins.ts"
-import { AuthenticatedPluginApi } from "@rp/shared/api.ts"
+import { AuthenticatedPluginApi } from "@dreamspan/shared/api.ts"
 import { ExternalMedia, externalMediaRoute, makeExternalMediaHandlers } from "./api/externalMedia.ts"
-import { AuthenticatedExternalMediaApi, AuthenticatedSavedMediaApi } from "@rp/shared/api.ts"
+import { AuthenticatedExternalMediaApi, AuthenticatedSavedMediaApi } from "@dreamspan/shared/api.ts"
 import { makeSavedMediaHandlers, SavedMedia, savedMediaRoute } from "./api/savedMedia.ts"
 import { operationWriter, installOperationRuntime } from "./agent/operations.ts"
 import { installLibraryImport } from "./agent/libraryImport.ts"
@@ -29,7 +29,7 @@ import {
   AuthenticatedMessageSelectionApi,
   AuthenticatedChatContextsApi,
   AuthenticatedChatThreadsApi
-} from "@rp/shared/api.ts"
+} from "@dreamspan/shared/api.ts"
 import { makeAgentHandlers } from "./api/agent.ts"
 import { makeMergeHandlers } from "./api/merges.ts"
 import { makeSplitChatHandlers } from "./api/splitChats.ts"
@@ -72,7 +72,7 @@ import {
   AuthenticatedShellUpdatesApi,
   CurrentUser,
   Health
-} from "@rp/shared/api.ts"
+} from "@dreamspan/shared/api.ts"
 import { ByteSize, Context, Effect, Layer, Option, Predicate, Schema } from "effect"
 import {
   Headers,
@@ -124,7 +124,7 @@ import { EventLoopMonitor } from "./eventLoop.ts"
 import * as Formats from "./importer/Formats.ts"
 import * as ImportRoutes from "./importer/routes.ts"
 import { filesRoutes } from "./files/routes.ts"
-import { FILES_ROUTES } from "@rp/shared/files.ts"
+import { FILES_ROUTES } from "@dreamspan/shared/files.ts"
 import { MediaHolds } from "./importer/MediaHolds.ts"
 import { StImportJobs } from "./importer/StImportJobs.ts"
 import { StImportPlans } from "./importer/StImportPlans.ts"

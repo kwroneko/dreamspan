@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import { BinLimits, defaultBinLimits } from "@rp/shared/bin.ts"
+import { BinLimits, defaultBinLimits } from "@dreamspan/shared/bin.ts"
 import { Effect, Schema } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { client, testConfig, withServer } from "./support/config.ts"

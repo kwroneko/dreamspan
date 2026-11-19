@@ -10,8 +10,8 @@
 //
 // Both parts are registered (the field in `messageEditorThinking`, Add thinking among the
 // editor's tools), so a plugin can replace or remove either.
-import type { PathEntry, Version } from "@rp/shared/chat.ts"
-import { editableThinking, thinkingInSections } from "@rp/shared/replySections.ts"
+import type { PathEntry, Version } from "@dreamspan/shared/chat.ts"
+import { editableThinking, thinkingInSections } from "@dreamspan/shared/replySections.ts"
 import { useCallback, useEffect, useSyncExternalStore } from "react"
 import { defineSlot, SlotOutlet } from "../../slots.tsx"
 import { AboutHint } from "../../ui/AboutHint.tsx"

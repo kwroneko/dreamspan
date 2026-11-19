@@ -12,9 +12,9 @@
 // Each kind is an entry of `stateMarkerKinds` (spec/PLUGINS.md §8) with the state keys it reads,
 // its own fold over them and the changes between two folded states, so a plugin adds a kind for
 // its own keys, or replaces or disables one of these; the Interface settings list a switch per kind.
-import type { ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { StateMarkEvent, StateMarks } from "@rp/shared/contextsApi.ts"
-import { type ChatState, DEFAULT_REQUEST_CAP, foldState } from "@rp/shared/state.ts"
+import type { ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { StateMarkEvent, StateMarks } from "@dreamspan/shared/contextsApi.ts"
+import { type ChatState, DEFAULT_REQUEST_CAP, foldState } from "@dreamspan/shared/state.ts"
 import { makeRegistry } from "../../registry.ts"
 import type { ChatSession } from "./session.ts"
 

@@ -1,6 +1,6 @@
 // How RPC handlers report failures the client can't act on: storage and worker failures are
 // logged here and become ServerError, without internals; every other error keeps its tag.
-import { ServerError } from "@rp/shared/errors.ts"
+import { ServerError } from "@dreamspan/shared/errors.ts"
 import { Effect } from "effect"
 import { RpcClientError } from "effect/rpc"
 import { StorageError } from "../db/ops.ts"

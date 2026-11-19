@@ -37,7 +37,7 @@ for (const width of [1440, 390])
         await page.setViewportSize({ width, height: 1000 })
         await page.emulateMedia({ colorScheme: theme })
         await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
-        await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+        await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
         const panel =
           width === 390
             ? page.locator('[data-layout-overlay="Mobile navigation drawer covers the page"]')

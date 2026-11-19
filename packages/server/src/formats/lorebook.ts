@@ -10,14 +10,14 @@ import {
   type LoreRole,
   PlacementOverride,
   type SelectiveLogic
-} from "@rp/shared/docs/lorebook.ts"
-import type { ReportBuilder } from "@rp/shared/importReport.ts"
+} from "@dreamspan/shared/docs/lorebook.ts"
+import type { ReportBuilder } from "@dreamspan/shared/importReport.ts"
 import { Predicate, Schema } from "effect"
 import { enumByIndex, Fields, hasKeys, isFiniteNumber, isSafeInt, present } from "./fields.ts"
 import { fail, type Limits, type Path } from "./safety.ts"
 
 /** Our namespace in `extensions`, for what a standard card or lorebook has no field for. */
-export const OUR_EXTENSION = "rp_harness"
+export const OUR_EXTENSION = "dreamspan"
 
 /** A position in ST's files: ours, or before or after ST's author's note, which an import places. */
 type StPosition = LorePosition | "an_top" | "an_bottom"
@@ -99,7 +99,7 @@ const ST_EXTENSION_KEYS = new Set([
 
 const isPlacement = Schema.is(PlacementOverride)
 
-/** Our own entry fields, kept in `extensions.rp_harness` by the standard formats. */
+/** Our own entry fields, kept in `extensions.dreamspan` by the standard formats. */
 export const ourEntryFields = (extensions: Record<string, unknown>, path: Path, issues: ReportBuilder) => {
   const ours = extensions[OUR_EXTENSION]
   if (!Predicate.isObject(ours)) return {}

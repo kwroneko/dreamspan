@@ -5,8 +5,8 @@
 // stImportPlanReads.ts) runs it in a reader worker with writes that only count, so the plan a
 // user is shown is the matcher's own decision, not a second implementation of it. Every read
 // here is a plain query; every change goes through `PlaceWrites`.
-import type { SlotId } from "@rp/shared/chat.ts"
-import { ReplySections } from "@rp/shared/replySections.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import { ReplySections } from "@dreamspan/shared/replySections.ts"
 import { createHash } from "node:crypto"
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/sql"

@@ -6,7 +6,7 @@
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
@@ -151,7 +151,7 @@ for (const width of [1440, 390]) {
     test(`round controls and Cast stay usable at ${width}px in ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const chatId = await groupChat(`Round ${width} ${theme}`)
       const shoot = async (state: string) => {
         const dir = process.env.RP_SCREENS
@@ -242,7 +242,7 @@ for (const width of [1440, 1024, 390]) {
     test(`reply settings wrap to the available panel width at ${width}px in ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const chatId = await groupChat(`Reply layout ${width} ${theme}`)
       await page.goto(`${server().url}/chats/${chatId}`)
       const cast = await openPanel(page, "Cast")

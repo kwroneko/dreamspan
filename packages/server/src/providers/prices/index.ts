@@ -1,7 +1,7 @@
 // The built-in price table (spec/PRICES.md §3.2): pi-ai's catalog plus our own supplement, one
 // file per provider. A supplement entry replaces pi-ai's price for its (provider, model) whole,
 // never field by field.
-import type { Price } from "@rp/shared/providers.ts"
+import type { Price } from "@dreamspan/shared/providers.ts"
 import { createHash } from "node:crypto"
 import { anthropicPrices } from "./anthropic.ts"
 import { bedrockEntry, bedrockPrices } from "./bedrock.ts"

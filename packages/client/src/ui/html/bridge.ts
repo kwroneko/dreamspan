@@ -12,21 +12,21 @@ const MAX_BRIDGE_URL = 4096
 // Generated privately by the bootstrap before any panel script runs. A token-bearing
 // action can only come through its helpers, which check the frame's own native activation.
 const Token = Schema.String.check(Schema.isMinLength(32), Schema.isMaxLength(32))
-const Ready = Schema.Struct({ type: Schema.Literal("rp:ready"), token: Token })
-const Height = Schema.Struct({ type: Schema.Literal("rp:height"), height: Schema.Finite })
+const Ready = Schema.Struct({ type: Schema.Literal("dreamspan:ready"), token: Token })
+const Height = Schema.Struct({ type: Schema.Literal("dreamspan:height"), height: Schema.Finite })
 const Open = Schema.Struct({
-  type: Schema.Literal("rp:open"),
+  type: Schema.Literal("dreamspan:open"),
   token: Token,
   url: Schema.String.check(Schema.isMaxLength(MAX_BRIDGE_URL))
 })
 const Copy = Schema.Struct({
-  type: Schema.Literal("rp:copy"),
+  type: Schema.Literal("dreamspan:copy"),
   token: Token,
   text: Schema.String.check(Schema.isMaxLength(MAX_BRIDGE_COPY))
 })
 // A trusted press in the frame: the user meant to give it focus (DocumentFrame.tsx takes focus
 // back from a frame that grabs it on its own, so typing meant for the app never reaches it).
-const Focus = Schema.Struct({ type: Schema.Literal("rp:focus"), token: Token })
+const Focus = Schema.Struct({ type: Schema.Literal("dreamspan:focus"), token: Token })
 const BridgeMessage = Schema.Union([Ready, Height, Open, Copy, Focus])
 export type BridgeMessage = typeof BridgeMessage.Type
 

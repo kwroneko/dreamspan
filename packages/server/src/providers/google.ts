@@ -30,7 +30,7 @@ import { getPiUserAgent } from "@earendil-works/pi-ai/utils/pi-user-agent"
 import { sanitizeSurrogates } from "@earendil-works/pi-ai/utils/sanitize-unicode"
 import { Schema } from "effect"
 import { googleRequest } from "./googleRequest.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 
 const Part = Schema.Struct({
   text: Schema.optionalKey(Schema.String),

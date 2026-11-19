@@ -1,5 +1,5 @@
-import { canonicalJson } from "@rp/shared/editing.ts"
-import type { ForkNote, ForkNoteSelection, ForkPreview, ForkWorkshop } from "@rp/shared/chatApi.ts"
+import { canonicalJson } from "@dreamspan/shared/editing.ts"
+import type { ForkNote, ForkNoteSelection, ForkPreview, ForkWorkshop } from "@dreamspan/shared/chatApi.ts"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import type { AppError } from "../../errors.ts"

@@ -1,28 +1,28 @@
 import { PluginHost } from "../plugins/Host.ts"
 import { WorkshopFiles } from "../files/WorkshopFiles.ts"
 import { FILE_UNDO_ON_HOST } from "../db/workshopEffects.ts"
-import { EffectUndoRefused } from "@rp/shared/workshopApi.ts"
-import { CurrentUser } from "@rp/shared/api.ts"
-import type { ChatId, ForkId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import {
   type CapabilityMode,
   GrantRefused,
   type RolloutEffect,
   type WorkshopApi,
   type WorkshopCapability
-} from "@rp/shared/workshopApi.ts"
+} from "@dreamspan/shared/workshopApi.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"
 import { ExecutionRegistry, toolForKind } from "../execution.ts"
 import { MCP_CAPABILITY } from "../agent/capabilities.ts"
 import { mcpHostOf } from "../agent/tools/mcp.ts"
-import { type ChatState, foldState } from "@rp/shared/state.ts"
+import { type ChatState, foldState } from "@dreamspan/shared/state.ts"
 import { capabilityView, SIDE_STORY_READ_MODE } from "../agent/capabilities.ts"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
-import { NotFound } from "@rp/shared/errors.ts"
-import type { McpConnection } from "@rp/shared/mcp.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
+import type { McpConnection } from "@dreamspan/shared/mcp.ts"
 import { cancelCapability, deliverAnswer } from "../agent/approvals.ts"
 import { CARD_SKILLS } from "../agent/tools/loading.ts"
 import { matchPatterns } from "../agent/toolLoading.ts"
@@ -80,7 +80,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
     }
   }
   const undo = (
-    actor: import("@rp/shared/domain.ts").User,
+    actor: import("@dreamspan/shared/domain.ts").User,
     input: { rolloutId: string; toolCallId: string; seq: number }
   ) =>
     writer.UndoRolloutEffect({ ...input, userId: actor.id }).pipe(

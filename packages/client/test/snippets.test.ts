@@ -3,9 +3,9 @@
 // them), so these cover the workspace's own calls. Synthetic text only.
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
-import type { Snippet } from "@rp/shared/snippetsApi.ts"
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { Snippet } from "@dreamspan/shared/snippetsApi.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { SnippetWorkspace } from "../src/features/snippets/workspace.ts"
 import type { Caller } from "../src/features/editor/caller.ts"
 

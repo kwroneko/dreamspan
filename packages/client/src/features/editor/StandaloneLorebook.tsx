@@ -1,6 +1,6 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
-import type { LorebookPreset } from "@rp/shared/chatSetupApi.ts"
-import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
+import type { LorebookPreset } from "@dreamspan/shared/chatSetupApi.ts"
+import type { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { Card } from "../../ui/Surface.tsx"

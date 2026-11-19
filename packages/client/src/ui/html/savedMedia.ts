@@ -2,7 +2,7 @@
 // account has a copy of. Rendering is synchronous, so this answers from what it knows and asks
 // the server in batches about the rest; each answer that changes something bumps the revision,
 // which re-renders the messages that read it. Card text is never rewritten.
-import { mediaKey, savedMediaPath, type SavedMediaLookup } from "@rp/shared/savedMedia.ts"
+import { mediaKey, savedMediaPath, type SavedMediaLookup } from "@dreamspan/shared/savedMedia.ts"
 
 export type SavedMediaAnswer =
   | { readonly kind: "saved"; readonly path: string }

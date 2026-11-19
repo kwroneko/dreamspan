@@ -1,7 +1,7 @@
 // The periodic save under the owner's data shape, with three replies stalled at once.
 // Synthetic rows only; the generator never contacts a provider. Slow by its Scale suffix.
 import { assert, it } from "@effect/vitest"
-import type { Chat, SlotId } from "@rp/shared/chat.ts"
+import type { Chat, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect, Layer, Option, Stream } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { Reader, Writer } from "../src/db/Database.ts"

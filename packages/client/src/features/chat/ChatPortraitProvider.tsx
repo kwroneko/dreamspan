@@ -58,7 +58,7 @@ export function ChatPortraitProvider({
     const refresh = async () => {
       const result = await call((client) =>
         Effect.forEach(refs ? refs.split(",") : [], (refId) =>
-          client("GetCardGallery", { refId: refId as import("@rp/shared/library.ts").RefId }).pipe(
+          client("GetCardGallery", { refId: refId as import("@dreamspan/shared/library.ts").RefId }).pipe(
             Effect.map((value) => galleryPortraits(refId, value)),
             Effect.orElseSucceed(() => [])
           )

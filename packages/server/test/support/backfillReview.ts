@@ -5,9 +5,9 @@
 // against the usage ledger. Cross-user probes are in isolation.test.ts.
 import type { ServerResponse } from "node:http"
 import { assert } from "@effect/vitest"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { LlmRequest } from "@rp/shared/usage.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { LlmRequest } from "@dreamspan/shared/usage.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../../src/db/Database.ts"
 import { importStPreset } from "../../src/formats/preset.ts"

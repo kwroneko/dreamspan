@@ -5,7 +5,7 @@
 // replace or remove it. The shell read reloads after a change, so every list, filter and
 // badge follows.
 import { useAtomValue } from "@effect/atom-react"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { AsyncResult } from "effect/reactivity"
 import { useState } from "react"
 import { useAction } from "../../actions.tsx"

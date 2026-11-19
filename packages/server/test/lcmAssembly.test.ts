@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { ASSEMBLER_VERSION, type ContextSnapshot } from "../src/assembler/types.ts"
-import { NewVersion } from "@rp/shared/chat.ts"
+import { NewVersion } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import type { AppendResult } from "../src/db/ops.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
@@ -230,7 +230,7 @@ it.live(
         greeting: null
       })
       const entries: Array<AppendResult> = []
-      let tip: import("@rp/shared/chat.ts").SlotId | null = null
+      let tip: import("@dreamspan/shared/chat.ts").SlotId | null = null
       for (const content of ["a", "b", "c", "target"]) {
         const entry: import("../src/db/ops.ts").AppendResult = yield* writer.AppendMessage({
           userId: user.id,

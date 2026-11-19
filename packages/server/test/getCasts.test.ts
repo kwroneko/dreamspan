@@ -2,7 +2,7 @@
 // cast GetCast reads there, with the cards read once for the positions that bind them alike.
 // The chat's messages display with their own positions' casts; a page of them asked one each.
 import { assert, describe, it } from "@effect/vitest"
-import type { SlotId } from "@rp/shared/chat.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

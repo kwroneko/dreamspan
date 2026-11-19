@@ -2,8 +2,8 @@
 // connection whose user didn't turn it on.
 import type { Context as PiContext } from "@earendil-works/pi-ai"
 import { assert, describe, it } from "@effect/vitest"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { ConnectionSettings, ModelId } from "@rp/shared/providers.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { ConnectionSettings, ModelId } from "@dreamspan/shared/providers.ts"
 import { Effect, Layer, Stream } from "effect"
 import * as Database from "../src/db/Database.ts"
 import * as Network from "../src/net/Network.ts"

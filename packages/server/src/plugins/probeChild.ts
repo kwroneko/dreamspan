@@ -2,7 +2,7 @@
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { Effect } from "effect"
-import type { PluginManifest } from "@rp/shared/plugins.ts"
+import type { PluginManifest } from "@dreamspan/shared/plugins.ts"
 const [folder, encoded] = process.argv.slice(2) as [string, string]
 const manifest = JSON.parse(encoded) as PluginManifest
 const ids = new Set<string>()

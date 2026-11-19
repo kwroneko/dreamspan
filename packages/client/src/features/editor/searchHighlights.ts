@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react"
-import type { FieldPath } from "@rp/shared/editing.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
 import type { EditorStore } from "./store.ts"
 import type { SearchMatch } from "./searchNavigation.ts"
 

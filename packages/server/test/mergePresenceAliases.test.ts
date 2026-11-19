@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import { NewVersion, type EntityId } from "@rp/shared/chat.ts"
+import { NewVersion, type EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { runMergeStory, sentText } from "./support/mergeOrigin.ts"
 

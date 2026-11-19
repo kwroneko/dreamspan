@@ -2,8 +2,8 @@
 // four views. Name (A–Z), Last modified and Last used list the presets that aren't archived;
 // Archived lists only the archived ones, the most recently archived first. Pure, so the picker,
 // the library and the tests share it.
-import type { PresetSort } from "@rp/shared/chatApi.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
+import type { PresetSort } from "@dreamspan/shared/chatApi.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { formatAgo as ago } from "../characters/data.ts"
 
 export type PresetView = PresetSort | "archived"

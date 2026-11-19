@@ -1,7 +1,7 @@
 // Only synthetic rectangle glyphs, through the real renderer and production CSP.
 import { expect, test } from "@playwright/test"
-import type { SendResult } from "@rp/shared/chatApi.ts"
-import type { SlotId } from "@rp/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { NARROW_WOFF2, WIDE_WOFF2 } from "../test/fixtures/cardFonts.ts"
 import { asUser } from "./support/rpc.ts"

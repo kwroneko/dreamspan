@@ -23,13 +23,13 @@
 // confirms is held to it file by file (`StImports`, `StImportCommitChat`): a file whose chat
 // moved off its stamp, or whose bytes aren't the ones read here (`stBytesHash`), isn't
 // imported, and the report says so.
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { User } from "@rp/shared/domain.ts"
-import { NotFound } from "@rp/shared/errors.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import { classifyStPath, stParentPath } from "@rp/shared/stFolder.ts"
-import type { StFolderEntry } from "@rp/shared/stImportApi.ts"
-import { orderStBranches, stPlan, stSendRounds } from "@rp/shared/stPlan.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { User } from "@dreamspan/shared/domain.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import { classifyStPath, stParentPath } from "@dreamspan/shared/stFolder.ts"
+import type { StFolderEntry } from "@dreamspan/shared/stImportApi.ts"
+import { orderStBranches, stPlan, stSendRounds } from "@dreamspan/shared/stPlan.ts"
 import {
   emptyPlanCounts,
   PLAN_MESSAGES_HELD,
@@ -41,7 +41,7 @@ import {
   StPlanFile,
   type StPlanMessage,
   type StPlanTarget
-} from "@rp/shared/stReimportPlan.ts"
+} from "@dreamspan/shared/stReimportPlan.ts"
 import { Context, Effect, Fiber, Layer, Schedule, Semaphore } from "effect"
 import { Reader } from "../db/Database.ts"
 import type { OverlaySlot, OverlayVersion, PlaceOverlay } from "../db/stImportPlace.ts"

@@ -1,4 +1,4 @@
-import type { CastCard, EntityId, ForkId, PathEntry, QueuedMessage, SlotId } from "@rp/shared/chat.ts"
+import type { CastCard, EntityId, ForkId, PathEntry, QueuedMessage, SlotId } from "@dreamspan/shared/chat.ts"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"

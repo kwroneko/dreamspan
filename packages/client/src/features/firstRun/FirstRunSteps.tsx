@@ -2,8 +2,8 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 // The home screen's getting-started steps: connect a model, import characters, start a chat.
 // Each is ticked once done, and the steps stay until all three are, so a library imported
 // before any model was connected still says what's missing.
-import type { GenerationDefaults } from "@rp/shared/generation.ts"
-import { type Model, resolveModel } from "@rp/shared/providers.ts"
+import type { GenerationDefaults } from "@dreamspan/shared/generation.ts"
+import { type Model, resolveModel } from "@dreamspan/shared/providers.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { Link } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"

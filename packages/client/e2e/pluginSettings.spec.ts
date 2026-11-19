@@ -78,10 +78,10 @@ for (const width of [1440, 390])
       await shot(page, info, "detail-on")
       const updated = {
         ...plain(id),
-        "server.ts": 'import { Effect } from "@rp/plugin-api/server"; export const activate = () => Effect.void'
+        "server.ts": 'import { Effect } from "@dreamspan/plugin-api/server"; export const activate = () => Effect.void'
       }
-      updated["rp-plugin.json"] = JSON.stringify({
-        ...JSON.parse(updated["rp-plugin.json"]),
+      updated["dreamspan-plugin.json"] = JSON.stringify({
+        ...JSON.parse(updated["dreamspan-plugin.json"]),
         server: "server.ts",
         network: false
       })
@@ -190,7 +190,10 @@ test("bad versions show their check report and stale tabs cannot apply a second 
   expect((await admin((api) => api.GetPlugin({ scope: "instance", id }))).pin).toBeNull()
   await page.getByRole("button", { name: "Not now", exact: true }).click()
   const renamed = plain(id)
-  renamed["rp-plugin.json"] = JSON.stringify({ ...JSON.parse(renamed["rp-plugin.json"]), name: "Updated display name" })
+  renamed["dreamspan-plugin.json"] = JSON.stringify({
+    ...JSON.parse(renamed["dreamspan-plugin.json"]),
+    name: "Updated display name"
+  })
   const next = await admin((api) => api.CommitPlugin({ scope: "instance", id, files: renamed, message: "Fixed" }))
   await page.reload()
   await turnOn(page)
@@ -210,8 +213,8 @@ test("bad versions show their check report and stale tabs cannot apply a second 
 
 test("non-admin views and own data controls at both widths and themes", async ({ page, context }, info) => {
   const serverFiles = plain("admin-server")
-  serverFiles["rp-plugin.json"] = JSON.stringify({
-    ...JSON.parse(serverFiles["rp-plugin.json"]),
+  serverFiles["dreamspan-plugin.json"] = JSON.stringify({
+    ...JSON.parse(serverFiles["dreamspan-plugin.json"]),
     server: "client.tsx",
     client: null
   })
@@ -287,8 +290,8 @@ test("fifty plugins and long names and descriptions fit without clipping", async
   for (let index = 0; index < 50; index++) {
     const id = `layout-${index}`,
       files = plain(id)
-    files["rp-plugin.json"] = JSON.stringify({
-      ...JSON.parse(files["rp-plugin.json"]),
+    files["dreamspan-plugin.json"] = JSON.stringify({
+      ...JSON.parse(files["dreamspan-plugin.json"]),
       name: "LongSyntheticName".repeat(7)
     })
     await admin((api) => api.CreatePlugin({ scope: "instance", id, files }))
@@ -327,7 +330,7 @@ test("local enable syncs routes, explains reload and retains the composer draft"
   const id = "settings-live"
   const files = pluginFiles(
     id,
-    `import { type Activate } from "@rp/plugin-api/client"; export const activate: Activate = host => { host.registries.routes!.register({ id: "settings-live.page", path: "/extensions/settings-live", component: () => <p>Synthetic extension page</p> }); };`,
+    `import { type Activate } from "@dreamspan/plugin-api/client"; export const activate: Activate = host => { host.registries.routes!.register({ id: "settings-live.page", path: "/extensions/settings-live", component: () => <p>Synthetic extension page</p> }); };`,
     ["routes"]
   )
   await admin((api) => api.CreatePlugin({ scope: "instance", id, files }))
@@ -396,9 +399,9 @@ test("a changed working version after opening consent is refused", async ({ page
   await turnOn(page)
   await expect(page.getByRole("dialog")).toContainText(`Version ${commit.slice(0, 8)}`)
   await writeFile(
-    join(server().dataDir, "plugins/instance", id, "rp-plugin.json"),
+    join(server().dataDir, "plugins/instance", id, "dreamspan-plugin.json"),
     JSON.stringify({
-      ...JSON.parse(files["rp-plugin.json"]),
+      ...JSON.parse(files["dreamspan-plugin.json"]),
       server: "server.ts",
       network: true
     })

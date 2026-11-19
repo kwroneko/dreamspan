@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import { expect, it } from "vitest"
-import { valueField, applyDrafts } from "@rp/shared/editing.ts"
+import { valueField, applyDrafts } from "@dreamspan/shared/editing.ts"
 import type { Caller } from "../src/features/editor/caller.ts"
 import { EditorStore } from "../src/features/editor/store.ts"
 

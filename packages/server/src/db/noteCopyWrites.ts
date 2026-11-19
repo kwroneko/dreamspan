@@ -2,10 +2,10 @@
 // it at its latest message, bound in another branch of the chat at that one's latest message,
 // as the user's explicit act. Nothing spreads by itself (DESIGN §4 [D] 2026-11-01): this is the
 // one way a note's text goes from a thread to another. One writer transaction.
-import type { EntityId, SlotId } from "@rp/shared/chat.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import { EditRefused } from "@rp/shared/editorApi.ts"
-import type { RevisionId } from "@rp/shared/library.ts"
+import type { EntityId, SlotId } from "@dreamspan/shared/chat.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import { EditRefused } from "@dreamspan/shared/editorApi.ts"
+import type { RevisionId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"

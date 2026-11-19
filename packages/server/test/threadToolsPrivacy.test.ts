@@ -2,7 +2,7 @@
 // §11.1, review-threads5): every assertion is on the tool result text the model would get.
 // Mira at the Lantern, Wren at the docks, Pell under the pier. Synthetic data only.
 import { assert, describe, it } from "@effect/vitest"
-import { type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import { type EntityId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { type ContextSnapshot, generationOf } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"

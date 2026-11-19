@@ -2,9 +2,9 @@ import { inSummaryFork, rerunRequests, summaryChoices } from "./lcmFork.ts"
 import { effectiveOverride, eventApplies, inFork, viewAt } from "./forkState.ts"
 // What the summary UI reads (ARCHITECTURE §16): the layer in use with the failures and
 // unfinished work on the path, a window of coverage for the rail, and a summary's revisions.
-import type { UserId } from "@rp/shared/domain.ts"
-import type { LcmJob, LcmSummary, Summary } from "@rp/shared/lcm.ts"
-import { LcmCoverage, LcmState } from "@rp/shared/lcm.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { LcmJob, LcmSummary, Summary } from "@dreamspan/shared/lcm.ts"
+import { LcmCoverage, LcmState } from "@dreamspan/shared/lcm.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { lineageValidator, selectSummaryLayer } from "./lcmLayer.ts"
@@ -17,7 +17,7 @@ import { query } from "./tx.ts"
 import { lcmPath } from "./lcmPath.ts"
 import { activeRunSummaries } from "../agent/compaction.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { shownIn } from "./forkState.ts"
 import {
   audienceIds,

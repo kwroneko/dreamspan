@@ -1,5 +1,5 @@
 import { assert } from "@effect/vitest"
-import type { SlotId, Version } from "@rp/shared/chat.ts"
+import type { SlotId, Version } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { eventually } from "./support/generation.ts"

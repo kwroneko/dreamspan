@@ -1,10 +1,10 @@
 import { lcmServer } from "./support/lcmHarness.ts"
 import { assert, describe, it } from "@effect/vitest"
-import { type ChatId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { type ChatId, type ForkId, NewVersion, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
-import type { Summary } from "@rp/shared/lcm.ts"
+import type { Summary } from "@dreamspan/shared/lcm.ts"
 import { client, outcome, testConfig } from "./support/config.ts"
 import { completeFixture, fixtureSql, summaryJob } from "./support/lcmFixtures.ts"
 const config = testConfig()

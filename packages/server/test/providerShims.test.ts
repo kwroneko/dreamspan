@@ -2,7 +2,7 @@
 // nothing after its prefill (F12), and catalog facts for models added by id or listed with their own fields (F1, F2).
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { pinnedRoute, resolveModel, routedUpstream } from "@rp/shared/providers.ts"
+import { pinnedRoute, resolveModel, routedUpstream } from "@dreamspan/shared/providers.ts"
 import { prefillUnavailable } from "../src/assembler/prefill.ts"
 import { applyShims, builtinShims, providerRules, shimmedUpstream } from "../src/providers/shims.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

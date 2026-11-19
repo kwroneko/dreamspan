@@ -2,7 +2,7 @@ import { Tooltip } from "./Tooltip.tsx"
 // A card's avatar: its image when it has one, else its initials on a tint picked from its
 // id, so the same card always looks the same. A stack shows a chat's cast together.
 
-import type { AvatarCrop } from "@rp/shared/media.ts"
+import type { AvatarCrop } from "@dreamspan/shared/media.ts"
 import { type ComponentProps, type CSSProperties, useState } from "react"
 import { carryOnDrag, PICTURE_DRAG } from "./appDrags.ts"
 import { PortraitFrame, usePortraitViewer } from "./Portrait.tsx"

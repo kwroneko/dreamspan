@@ -6,7 +6,7 @@
 //   npx vitest run --project server-slow packages/server/test/mergeOriginScale.test.ts
 import { appendFileSync } from "node:fs"
 import { assert, it } from "@effect/vitest"
-import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { testConfig } from "./support/config.ts"

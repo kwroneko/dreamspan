@@ -5,7 +5,7 @@
 // Every card and chat here is made up. SCREENSHOT_DIR keeps the screenshots; the browser is
 // launched with its scrollbars shown (headless Chromium hides them by default).
 import { join } from "node:path"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { showActions } from "./support/message.ts"
@@ -114,7 +114,7 @@ for (const theme of ["light", "dark"] as const)
   test(`controls show the pointer and message actions look alike on both sides (${theme})`, async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.emulateMedia({ colorScheme: theme })
-    await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+    await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chatId}`)
     const mine = page.getByRole("article", { name: "Your message", exact: true }).first()
@@ -223,7 +223,7 @@ for (const theme of ["light", "dark"] as const)
   }) => {
     await page.setViewportSize({ width: 1440, height: 700 })
     await page.emulateMedia({ colorScheme: theme })
-    await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+    await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/settings/chats`)
     await expect(page.getByRole("main")).toBeVisible()

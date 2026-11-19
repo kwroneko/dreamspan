@@ -1,8 +1,8 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 // The per-field conflict picker (DESIGN §4): for each field both sides changed, keep one
 // side, or edit the text into what it should be.
-import { type FieldPath, withValues } from "@rp/shared/editing.ts"
-import type { Doc } from "@rp/shared/library.ts"
+import { type FieldPath, withValues } from "@dreamspan/shared/editing.ts"
+import type { Doc } from "@dreamspan/shared/library.ts"
 import { useId } from "react"
 import { RadioGroup } from "../../ui/Choice.tsx"
 import { Field, Textarea } from "../../ui/Field.tsx"

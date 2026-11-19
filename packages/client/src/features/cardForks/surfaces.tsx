@@ -4,7 +4,7 @@ import { Tooltip, iconButtonClass } from "../../ui/Tooltip.tsx"
 import { useEditorState } from "../editor/store.ts"
 // Card extension points shared by library, editor and character surfaces.
 import { useState, useSyncExternalStore, type ComponentType } from "react"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import type { EditorStore } from "../editor/store.ts"
 import { makeRegistry } from "../../registry.ts"
 

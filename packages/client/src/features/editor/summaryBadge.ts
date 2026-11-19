@@ -1,4 +1,4 @@
-import type { PresetContext } from "@rp/shared/inspectorApi.ts"
+import type { PresetContext } from "@dreamspan/shared/inspectorApi.ts"
 
 /** What `{{summary}}` fills in for the chat in context: ST's summary note, never the summaries (DESIGN §8). */
 export const summaryBadge = (fill: NonNullable<PresetContext["summary"]>) =>

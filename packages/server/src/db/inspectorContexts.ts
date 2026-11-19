@@ -3,8 +3,8 @@
 // out because it wasn't present for them; a narrator's reply, that it saw the whole chat. Read
 // from the context snapshot alone (`inputs.viewer`, `inputs.presence`, the `knowers` pins), so an
 // old reply shows what it was built from, not what the chat says now.
-import type { SlotId } from "@rp/shared/chat.ts"
-import type { SeparateContext } from "@rp/shared/inspectorApi.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import type { SeparateContext } from "@dreamspan/shared/inspectorApi.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { ContextSnapshot } from "../assembler/types.ts"

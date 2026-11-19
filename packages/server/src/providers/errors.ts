@@ -4,9 +4,9 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai"
 import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow"
 import { isRetryableAssistantError } from "@earendil-works/pi-ai/utils/retry"
-import { ProviderError, type ProviderErrorReason } from "@rp/shared/errors.ts"
+import { ProviderError, type ProviderErrorReason } from "@dreamspan/shared/errors.ts"
 
-export { ProviderError, ProviderErrorReason } from "@rp/shared/errors.ts"
+export { ProviderError, ProviderErrorReason } from "@dreamspan/shared/errors.ts"
 
 export const providerError = (
   reason: ProviderErrorReason,

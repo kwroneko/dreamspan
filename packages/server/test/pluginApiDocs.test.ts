@@ -12,7 +12,7 @@ for (const doc of pluginDocumentation)
       side = doc.side === "common" ? "server" : doc.side
     const entry = side === "client" ? "client.tsx" : side + ".ts"
     const files = {
-      "rp-plugin.json": JSON.stringify({
+      "dreamspan-plugin.json": JSON.stringify({
         id: "example",
         name: "Example",
         api: 1,
@@ -60,7 +60,7 @@ for (const [name, change] of [
   it(`refuses a display plugin that also carries ${name}`, async () => {
     const dir = tempDir("plugin-display-mixed")
     const files = {
-      "rp-plugin.json": JSON.stringify({
+      "dreamspan-plugin.json": JSON.stringify({
         id: "example",
         name: "Example",
         api: 1,
@@ -73,7 +73,7 @@ for (const [name, change] of [
         network: false,
         ...change
       }),
-      "client.tsx": `import type {Activate} from "@rp/plugin-api/client"\nexport const activate:Activate=()=>{}`,
+      "client.tsx": `import type {Activate} from "@dreamspan/plugin-api/client"\nexport const activate:Activate=()=>{}`,
       "server.ts": `export const activate=()=>{}`,
       "worker.ts": `export const activate=()=>{}`
     }

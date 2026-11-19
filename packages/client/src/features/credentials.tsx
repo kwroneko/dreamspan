@@ -2,8 +2,8 @@ import { useUserDraft, UserDraftStatus } from "./editor/userDraft.tsx"
 // Saved keys (ARCHITECTURE §3.12). A key goes in and never comes out, and it's sent only
 // to the origins the user confirmed. Every origin is confirmed by the user, one by one:
 // the server can't tell a stolen session's choices from the user's.
-import type { Connection, Credential } from "@rp/shared/providers.ts"
-import { originOf } from "@rp/shared/providers.ts"
+import type { Connection, Credential } from "@dreamspan/shared/providers.ts"
+import { originOf } from "@dreamspan/shared/providers.ts"
 import { type FormEvent, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../actions.tsx"
 import { routes } from "../routes.tsx"

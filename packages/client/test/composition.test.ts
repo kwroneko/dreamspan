@@ -1,8 +1,8 @@
 // The composition scratchpad (DESIGN §3.1): text added to the end of your own version of a
 // message, from the bar over the version shown or from a snippet's editor, as registered,
 // replaceable text actions; the draft of two views of one chat kept the same.
-import type { SlotId } from "@rp/shared/chat.ts"
-import { Draft, DraftKey } from "@rp/shared/drafts.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import { Draft, DraftKey } from "@dreamspan/shared/drafts.ts"
 import { Effect } from "effect"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { registerCompositionActions } from "../src/features/chat/compositionActions.tsx"

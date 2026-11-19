@@ -6,7 +6,7 @@ import { test, expect } from "@playwright/test"
 import { createServer } from "node:http"
 import type { AddressInfo } from "node:net"
 import { Effect } from "effect"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { withCookie, loginCookie } from "./support/rpc.ts"
 
@@ -70,7 +70,7 @@ test.afterAll(async () => {
 })
 
 const files = {
-  "rp-plugin.json": JSON.stringify({
+  "dreamspan-plugin.json": JSON.stringify({
     id: "display-everything",
     name: "Every display rule",
     api: 1,
@@ -87,7 +87,7 @@ const files = {
     network: false,
     base: null
   }),
-  "client.tsx": `import type { Activate } from "@rp/plugin-api/client"
+  "client.tsx": `import type { Activate } from "@dreamspan/plugin-api/client"
 export const activate: Activate = host => {
   host.registries.displayTransforms!.register({ api: 1, id: "display.macros", order: 10,
     transform: input => ({ text: input.text + " [display only]", issues: [] }) })
@@ -148,7 +148,7 @@ for (const transport of ["every", "native", "dispatcher"] as const)
         const commit = yield* api.CreatePlugin({
           scope: "user",
           id,
-          files: { ...files, "rp-plugin.json": files["rp-plugin.json"].replace("display-everything", id) }
+          files: { ...files, "dreamspan-plugin.json": files["dreamspan-plugin.json"].replace("display-everything", id) }
         })
         const report = yield* api.CheckPlugin({ scope: "user", id, commit })
         return { story, sent: sent.entry, workshop, asked: asked.entry, commit, report }

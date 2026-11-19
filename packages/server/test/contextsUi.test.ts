@@ -1,9 +1,9 @@
 // The reads and changes the client's separate-context controls use (spec/CHARACTER-CONTEXT.md
 // §9.2 units CU1–CU5): the Context setting, as the cast reports it and as This chat changes it.
 import { assert, describe, it } from "@effect/vitest"
-import { type EntityId, type ForkId, NewVersion } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { foldState } from "@rp/shared/state.ts"
+import { type EntityId, type ForkId, NewVersion } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
