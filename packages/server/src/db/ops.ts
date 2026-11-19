@@ -3954,12 +3954,19 @@ export class WriteOpsLibrary extends RpcGroup.make(
       type: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,40}$/)),
       connectionId: ConnectionId,
       modelId: ModelId,
-      snapshot: Schema.String
+      snapshot: Schema.String,
+      /** The most a run may start (`subagents.limits` `perRun`, §6.2); absent: `SUBAGENTS_PER_RUN`. */
+      perRun: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 64 }))),
+      /** What the run's subagents may cost together; reached, no more start (`spent`). */
+      runCost: Schema.optionalKey(Schema.Number)
     },
     success: Schema.Union([
       Schema.Struct({ rolloutId: Schema.String, handle: Schema.String, existing: Schema.Boolean }),
-      /** `limit`: the run has started as many as it may; `not_running`: it has ended. */
-      Schema.Struct({ refused: Schema.Literals(["limit", "not_running", "nested"]) })
+      /**
+       * `limit`: the run has started as many as it may; `spent`: its subagents have spent what
+       * they may together; `not_running`: it has ended.
+       */
+      Schema.Struct({ refused: Schema.Literals(["limit", "spent", "not_running", "nested"]) })
     ]),
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -5828,6 +5835,22 @@ export class ReadOps extends RpcGroup.make(
     },
     success: Schema.String,
     error: Schema.Union([NotFound, StorageError, AssemblyFailed])
+  }),
+  /**
+   * What a subagent has spent (§6.2): its requests, tokens and priced cost, and what its run's
+   * subagents have cost together (`unpriced`: requests the ledger couldn't price).
+   */
+  Rpc.make("SubagentSpend", {
+    payload: { userId: UserId, rolloutId: Schema.String },
+    success: Schema.Struct({
+      requests: Schema.Int,
+      tokens: Schema.Int,
+      cost: Schema.Number,
+      unpriced: Schema.Int,
+      runCost: Schema.Number,
+      runUnpriced: Schema.Int
+    }),
+    error: Schema.Union([NotFound, StorageError])
   }),
   /** A subagent of the reply `versionId`'s run: its rollout status, for its Stop (subagentReads.ts). */
   Rpc.make("SubagentStatus", {

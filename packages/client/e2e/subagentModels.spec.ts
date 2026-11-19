@@ -1,7 +1,7 @@
-// The subagent model chip and Settings → Assistant tools (spec/SUBAGENTS.md SA2): beside the
+// The subagent model chip and Settings → Assistant tools (spec/SUBAGENTS.md SA2, SA3): beside the
 // model chip in a pending and a saved workshop; a multiselect whose changes go to the account
 // while unlocked and to the chat once locked; its footer opens the settings page, where a model's
-// name and note are saved. Layout audit on the popover and the page at 1440 and 390, light
+// name and the limits are saved. Layout audit on the popover and the page at 1440 and 390, light
 // and dark. Synthetic data and a loopback provider only; nothing is generated.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -137,6 +137,20 @@ for (const width of [1440, 390])
         note: "Quick lookups."
       })
 
+      const limits = page.locator("[data-subagent-limits]")
+      await limits.getByLabel("Running at once in your account", { exact: true }).fill("3")
+      await limits.getByLabel("Tokens", { exact: true }).fill("lots")
+      await limits.getByRole("button", { name: "Save" }).click()
+      await expect(limits.getByRole("alert")).toContainText("Tokens: enter a number")
+      await limits.getByLabel("Tokens", { exact: true }).fill("")
+      await limits.getByRole("button", { name: "Save" }).click()
+      await expect(limits.getByRole("status").filter({ hasText: "Saved." })).toBeVisible()
+      expect(await admin((api) => Effect.map(api.GetSubagentSettings({}), (s) => s.limits))).toEqual({
+        accountConcurrent: 3
+      })
       await expectLayout(page, info, `assistant-tools-${width}-${scheme}`)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+
+      await limits.getByRole("button", { name: "Use the defaults" }).click()
+      await expect.poll(() => admin((api) => Effect.map(api.GetSubagentSettings({}), (s) => s.limits))).toEqual({})
     })

@@ -116,7 +116,32 @@ export const makeSubagentSettingReadHandlers = Effect.gen(function* () {
         }
         const at: SubagentModelsAt = { entries, limits: resolveLimits(limits) }
         return JSON.stringify(at)
-      }).pipe(query("SubagentModelsAt"))
+      }).pipe(query("SubagentModelsAt")),
+
+    SubagentSpend: ({ userId, rolloutId }) =>
+      Effect.gen(function* () {
+        const [child] = yield* sql<{ spawned_by_rollout_id: string | null }>`
+          SELECT r.spawned_by_rollout_id FROM rollouts r JOIN chats c ON c.id = r.chat_id
+          WHERE r.id = ${rolloutId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+        if (!child?.spawned_by_rollout_id) return yield* new NotFound({ entity: "subagent", id: rolloutId })
+        const [own] = yield* sql<{ requests: number; tokens: number | null; cost: number | null; unpriced: number }>`
+          SELECT count(*) AS requests,
+            sum(coalesce(input_uncached, 0) + coalesce(cache_read, 0) + coalesce(cache_write, 0) + coalesce(output, 0)) AS tokens,
+            sum(cost) AS cost, sum(CASE WHEN cost IS NULL THEN 1 ELSE 0 END) AS unpriced
+          FROM llm_requests WHERE rollout_id = ${rolloutId} AND status <> 'running'`
+        const [run] = yield* sql<{ cost: number | null; unpriced: number | null }>`
+          SELECT sum(q.cost) AS cost, sum(CASE WHEN q.cost IS NULL THEN 1 ELSE 0 END) AS unpriced
+          FROM rollouts r JOIN llm_requests q ON q.rollout_id = r.id
+          WHERE r.spawned_by_rollout_id = ${child.spawned_by_rollout_id} AND q.status <> 'running'`
+        return {
+          requests: own?.requests ?? 0,
+          tokens: own?.tokens ?? 0,
+          cost: own?.cost ?? 0,
+          unpriced: own?.unpriced ?? 0,
+          runCost: run?.cost ?? 0,
+          runUnpriced: run?.unpriced ?? 0
+        }
+      }).pipe(query("SubagentSpend"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })
 

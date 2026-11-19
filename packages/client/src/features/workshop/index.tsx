@@ -20,7 +20,7 @@ import { CapabilityChip } from "./CapabilityChip.tsx"
 import { CHANGES } from "./effects.ts"
 import { CAPABILITY_CHIP, SUBAGENT_MODELS_CHIP, workshopLook } from "./kinds.ts"
 import { SavedSubagentModelsChip } from "./SubagentModelsChip.tsx"
-import { SubagentModelsSection } from "./SubagentSettings.tsx"
+import { SubagentLimitsSection, SubagentModelsSection } from "./SubagentSettings.tsx"
 import { assistantToolsSections } from "../assistantTools/index.tsx"
 import { askBeforeReply } from "./regenerateWarning.ts"
 import { SIDE_CHAT_TAB, TALK_ABOUT } from "./sideChat.ts"
@@ -94,8 +94,9 @@ export const register = () => [
   // A story preset made into a workshop one (spec/WORKSHOP-CONTEXT.md §4.4), in the large and side-panel editors.
   editorActions.register({ id: "workshop.convert-preset", order: 20, component: convert(false) }),
   panelEditorActions.register({ id: "workshop.convert-preset", order: 30, component: convert(true) }),
-  // Settings → Assistant tools: the subagents' models (spec/SUBAGENTS.md §5.1).
+  // Settings → Assistant tools: the subagents' models and limits (spec/SUBAGENTS.md §5.1, §6.2).
   assistantToolsSections.register({ id: "subagent-models", order: 10, component: SubagentModelsSection }),
+  assistantToolsSections.register({ id: "subagent-limits", order: 20, component: SubagentLimitsSection }),
   // Beside the model chip, while subagents are allowed here (spec/SUBAGENTS.md §5.1a).
   composerControls.register({
     id: SUBAGENT_MODELS_CHIP,

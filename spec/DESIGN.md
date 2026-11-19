@@ -1175,7 +1175,7 @@ All owner statements below are from 2026-11-17 unless dated otherwise, relayed b
 
 ### 7.10 Subagents
 
-All owner statements below are from 2026-11-17, relayed by the coordinator. The design is [SUBAGENTS.md](SUBAGENTS.md) (proposed, subagentspec). It promotes nothing beyond these entries. SA1–SA2 are built (ARCHITECTURE §16, "Subagents", "Subagent models").
+All owner statements below are from 2026-11-17, relayed by the coordinator. The design is [SUBAGENTS.md](SUBAGENTS.md) (proposed, subagentspec). It promotes nothing beyond these entries. SA1–SA3 are built (ARCHITECTURE §16, "Subagents", "Subagent models", "Subagent limits").
 
 - **[D]** "Another thing we haven't designed yet, is subagents."
 - **[D]** "reference-harness never got subagents, because every session already starts from a single message, in parallel with others, within the same chat."
@@ -1187,7 +1187,8 @@ All owner statements below are from 2026-11-17, relayed by the coordinator. The 
 
 - **[P]** (subagents23, SA2) The chip's entries are "Same as this chat's model", "This chat's summary model" (alias `fast`) and models the user picks; only Same is picked by default ([D] above). Same can be unticked. The summary entry is offered whenever it resolves to a model other than the chat's, summaries on or not, since picking it is the consent. Picks that resolve to a model already listed are listed once. Decision (`system-one`) connections are never offered.
 - **[P]** (subagents23, SA2) The chip's lock is a positional state event `subagents.models { picks }` (like the model binding): locked, the chat keeps its own picks from that message on; unlocked, it follows the account's picks. The picks are checked when a subagent starts, not when written, and the list is read again at each `agent` call, so a model unpicked mid-reply is refused.
-- **[P]** (subagents23, SA2) The account's aliases and notes are on Settings → Assistant tools (a new page in the Tools group, its sections a slot). Per-model effort is not built.
+- **[P]** (subagents23, SA2) The account's aliases, notes and per-model limits are on Settings → Assistant tools (a new page in the Tools group, its sections a slot), with the limits below them. Per-model effort is not built.
+- **[P]** (subagents23, SA3) Workshop defaults per subagent: 30 requests, 400,000 tokens, $0.50, 15 minutes; per reply: 16 subagents, all together 4× one's cost limit, 4 running at once; 8 at once per account. Past a running count a subagent waits as "Queued", first come first served, the reply's count first, then the account's. A subagent stopped at a limit is stored as stopped with the error "Stopped at its limit." and shown with status `limit`; no schema change.
 
 ## 8. LCM (hierarchical summarization)
 

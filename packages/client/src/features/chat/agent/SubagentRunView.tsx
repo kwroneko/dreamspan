@@ -17,10 +17,12 @@ import { Steps, Tools } from "./RunSteps.tsx"
 import { subagentFacts } from "./SubagentPanel.tsx"
 
 const ended = {
+  queued: "Queued",
   running: "Working",
   waiting: "Waiting for you",
   done: "Done",
   stopped: "Stopped",
+  limit: "Stopped at its limit",
   failed: "Failed"
 }
 
@@ -71,7 +73,7 @@ export function SubagentRunView({
                     ? `The reply's own: ${run.row.model}`
                     : `${run.row.alias}: ${run.row.model}`}
                 </dd>
-                {run.error && (
+                {run.error && run.row.status !== "limit" && (
                   <>
                     <dt className="text-muted">Error</dt>
                     <dd className="text-danger [overflow-wrap:anywhere]">{run.error}</dd>

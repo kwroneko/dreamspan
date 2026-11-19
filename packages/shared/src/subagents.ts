@@ -69,7 +69,7 @@ export type SubagentLimits = typeof SubagentLimits.Type
 export type ResolvedLimits = Required<SubagentLimits>
 
 /** The defaults (§6.2, §6.3), for a workshop subagent. */
-const DEFAULT_LIMITS: ResolvedLimits = {
+export const DEFAULT_LIMITS: ResolvedLimits = {
   requests: 30,
   tokens: 400_000,
   cost: 0.5,
@@ -157,6 +157,9 @@ export const SubagentSettings = Schema.Struct({
   limits: SubagentLimits
 })
 export type SubagentSettings = typeof SubagentSettings.Type
+
+/** A subagent's rollout error when it stopped at one of its limits (§6.2): its row says so. */
+export const LIMIT_STOP = "Stopped at its limit."
 
 /** A change the settings page can't save as it is: two models with one alias, say. */
 export class SubagentSettingsRejected extends Schema.TaggedError<SubagentSettingsRejected>()(

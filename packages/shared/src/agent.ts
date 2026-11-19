@@ -105,7 +105,8 @@ export const ChildStep = Schema.Union([ThoughtStep, Schema.Struct(ToolStepFields
 export type ChildStep = typeof ChildStep.Type
 
 /** How a subagent stands: `waiting` while one of its calls asks the user first. */
-export const SubagentStatus = Schema.Literals(["running", "waiting", "done", "stopped", "failed"])
+/** `queued`: waiting for a free place (spec/SUBAGENTS.md §6.3); `limit`: stopped at one of its limits (§6.2). */
+export const SubagentStatus = Schema.Literals(["queued", "running", "waiting", "done", "stopped", "limit", "failed"])
 export type SubagentStatus = typeof SubagentStatus.Type
 
 /**
