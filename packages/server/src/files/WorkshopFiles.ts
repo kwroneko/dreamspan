@@ -15,6 +15,7 @@ import { ExecutionRegistry } from "../execution.ts"
 import { MediaHolds } from "../importer/MediaHolds.ts"
 import { DISK_RESERVE_BYTES, FILE_TOOLS, makeFileTools } from "../agent/tools/files.ts"
 import { COMMANDS_UNSANDBOXED } from "../agent/capabilities.ts"
+import { settleOrphanedCopies } from "../agent/subagents.ts"
 import { makeAddressSet } from "../net/addressSet.ts"
 import { parsePublicOrigins } from "../net/exposure.ts"
 import { commandSandboxes } from "../sandbox/registry.ts"
@@ -178,6 +179,14 @@ export class WorkshopFiles extends Context.Service<
       })
       for (const tool of files.tools) yield* execution.rolloutTools.register(tool)
       yield* execution.subagentWorkspaces.register(files.workspaces)
+      // Subagents' copies the app left unsettled when it stopped mid-run (spec/SUBAGENTS.md
+      // §3.3): settled now, then checked again every hour.
+      const startedAt = Date.now()
+      yield* settleOrphanedCopies({ reader, writer }, files.workspaces, startedAt).pipe(
+        Effect.catchCause((cause) => Effect.logWarning("settling subagents' copies failed", cause)),
+        Effect.repeat(Schedule.spaced(Duration.hours(1))),
+        Effect.forkScoped
+      )
       // Background commands end with the app.
       yield* Effect.addFinalizer(() => Effect.sync(() => files.stopAll()))
       // Running commands checked again every few seconds, whatever took their grants away; ended

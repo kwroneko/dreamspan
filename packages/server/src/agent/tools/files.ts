@@ -70,6 +70,7 @@ import {
   resolveMode,
   type CapabilityRegistries
 } from "../capabilities.ts"
+import { forkStart } from "../messages.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
 
 /** Where subagents' isolated copies go, under /files (spec/SUBAGENTS.md §3.3). */
@@ -79,15 +80,31 @@ const COPIES = ".subagents"
  * Subagents' working folders (spec/SUBAGENTS.md §3.3), as the files host provides them: the
  * reply's folder now, and isolated copies made, made again and removed when unchanged.
  */
+/**
+ * Asks the user whether a copy may be made (spec/SUBAGENTS.md §3.3): where Change your files or
+ * Run commands is Ask first. It names what's copied, where to, and whether on a new git branch.
+ */
+export type ApproveCopy = (copy: {
+  readonly path: string
+  readonly from: string
+  readonly branch?: string
+  readonly again?: boolean
+}) => Effect.Effect<boolean>
+
 export interface SubagentWorkspaces {
   readonly id: string
   readonly folderOf: (ctx: ToolContext) => Effect.Effect<string, unknown>
   readonly makeCopy: (
     ctx: ToolContext,
     name: string,
-    from: string
+    from: string,
+    approve?: ApproveCopy
   ) => Effect.Effect<{ readonly copy: SubagentCopyRecord; readonly start: string }, unknown>
-  readonly ensureCopy: (ctx: ToolContext, copy: SubagentCopyRecord) => Effect.Effect<SubagentCopyRecord, unknown>
+  readonly ensureCopy: (
+    ctx: ToolContext,
+    copy: SubagentCopyRecord,
+    approve?: ApproveCopy
+  ) => Effect.Effect<SubagentCopyRecord, unknown>
   /** Whether the copy stays (it has changes, or couldn't be checked). */
   readonly finishCopy: (userId: string, copy: SubagentCopyRecord) => Effect.Effect<boolean>
 }
@@ -442,11 +459,17 @@ export const makeFileTools = (deps: FileToolDeps) => {
       const kept = ctx.cache.get(CWD_KEY)
       if (typeof kept === "string") return kept
       const transcript = ctx.transcript?.() ?? []
-      for (let i = transcript.length - 1; i >= 0; i--) {
+      // Only this run's own commands: before a fork's task is its parent's conversation, whose
+      // last `cd` is the reply's folder, never a subagent's (spec/SUBAGENTS.md §2.3, §3.3).
+      const own = forkStart(transcript)
+      const root = ctx.workspace?.root
+      for (let i = transcript.length - 1; i >= own; i--) {
         const message = transcript[i] as { role?: string; toolName?: string; content?: unknown }
         if (message.role !== "toolResult" || message.toolName !== "bash" || !Array.isArray(message.content)) continue
         const text = message.content.map((part: { text?: string }) => part.text ?? "").join("")
         const found = [...text.matchAll(CWD_LINE)].at(-1)?.[1]
+        // A subagent in a copy starts in its copy: a folder outside it found here isn't where it works.
+        if (found && root !== undefined && found !== root && !found.startsWith(`${root}/`)) break
         if (found) {
           ctx.cache.set(CWD_KEY, found)
           return found
@@ -1909,8 +1932,28 @@ export const makeFileTools = (deps: FileToolDeps) => {
   // --- subagents' working folders (spec/SUBAGENTS.md §3.3). Copies are made, checked and removed
   // by commands in the sandbox, seeing the account's Files as commands do, so the app never walks
   // a tree a command could have planted links in; the app only checks, with the no-follow walk,
-  // that the copy it hands the subagent is a folder of the user's Files. Hooks don't run.
-  const GIT = "git -c core.hooksPath=/dev/null -c core.fsmonitor=false"
+  // that the copy it hands the subagent is a folder of the user's Files. Nothing a repository's
+  // settings name runs: no hooks, no fsmonitor, no submodules, no automatic gc, and no filter
+  // drivers (`safe_git`: every driver the repository's settings name is emptied, and the system
+  // and global settings aren't read), so checkout and status only copy and compare bytes.
+  const GIT =
+    "git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c submodule.recurse=false -c gc.auto=0 -c maintenance.auto=false"
+  /** Defines `safe_git <folder>`: run once per script before git touches that folder's repository. */
+  const SAFE_GIT = [
+    "export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null",
+    "safe_git() {",
+    `  drivers=$(${GIT} -C "$1" config --name-only --get-regexp '^filter[.]' 2>/dev/null | sed 's/^filter[.]//; s/[.][^.]*$//' | sort -u)`,
+    "  n=0",
+    "  while IFS= read -r d; do",
+    '    [ -n "$d" ] || continue',
+    '    for k in smudge clean process; do eval "export GIT_CONFIG_KEY_$n=\\"filter.\\$d.\\$k\\" GIT_CONFIG_VALUE_$n="; n=$((n + 1)); done',
+    '    eval "export GIT_CONFIG_KEY_$n=\\"filter.\\$d.required\\" GIT_CONFIG_VALUE_$n=false"; n=$((n + 1))',
+    "  done <<EOF",
+    "$drivers",
+    "EOF",
+    "  export GIT_CONFIG_COUNT=$n",
+    "}"
+  ].join("\n")
 
   /**
    * Runs one of the copies' scripts in the sandbox: its output lines; a failure says why. It is a
@@ -1970,8 +2013,11 @@ export const makeFileTools = (deps: FileToolDeps) => {
       return yield* currentDir(ctx, env)
     })
 
-  /** Whether the workshop lets the app make a copy: its files and commands aren't Off. */
-  const copiesAllowed = (ctx: ToolContext) =>
+  /**
+   * Whether the workshop lets the app make a copy: its files and commands aren't Off. Where
+   * either is Ask first, making it asks the user (`approve`), saying what's copied and where.
+   */
+  const copyMode = (ctx: ToolContext) =>
     Effect.gen(function* () {
       const grants = new Map(
         (yield* deps.reader.WorkshopGrants({ userId: ctx.userId, chatId: ctx.chatId, now: Date.now() })).map((g) => [
@@ -1979,11 +2025,20 @@ export const makeFileTools = (deps: FileToolDeps) => {
           g.mode
         ])
       )
-      for (const capability of ["files", "commands"])
-        if (resolveMode(deps.registries, grants, capability, "outside") === "off")
-          return yield* Effect.fail(
-            new ToolInputRefused("Copies need Change your files and Run commands, and one of them is off here.")
-          )
+      const modes = ["files", "commands"].map((capability) =>
+        resolveMode(deps.registries, grants, capability, "outside")
+      )
+      if (modes.includes("off"))
+        return yield* Effect.fail(
+          new ToolInputRefused("Copies need Change your files and Run commands, and one of them is off here.")
+        )
+      return modes.every((mode) => mode === "allow") ? ("allow" as const) : ("ask" as const)
+    })
+  const allowedCopy = (mode: "allow" | "ask", approve: ApproveCopy | undefined, copy: Parameters<ApproveCopy>[0]) =>
+    Effect.gen(function* () {
+      if (mode === "allow") return
+      if (!approve || !(yield* approve(copy)))
+        return yield* Effect.fail(new ToolInputRefused("The user didn't allow making the copy."))
     })
 
   /** The copy made: checked to be a folder of the user's Files, and its bytes measured. */
@@ -1996,15 +2051,21 @@ export const makeFileTools = (deps: FileToolDeps) => {
       return copy
     })
 
+  /** A git repository's files at a commit, in bytes: what a worktree of it takes. */
+  const treeBytes = (rev: string) =>
+    `${GIT} -C "$top" ls-tree -r -l ${rev} | awk '{ if ($4 ~ /^[0-9]+$/) s += $4 } END { print s + 0 }'`
+
   /**
    * A copy of `from` for a subagent at /files/.subagents/<name>: a git worktree on the new branch
    * subagent/<name> when `from` is in a repository with a commit, else a file copy (the copies
-   * folder left out). Within the Files quota, checked before it's made.
+   * folder left out). Within the Files quota, checked before it's made; under Ask first, only
+   * once the user allows it. A branch of that name that's already there is the user's: refused,
+   * never touched.
    */
-  const makeCopy = (ctx: ToolContext, name: string, from: string) =>
+  const makeCopy = (ctx: ToolContext, name: string, from: string, approve?: ApproveCopy) =>
     Effect.gen(function* () {
       if (!/^[a-z0-9][a-z0-9_-]{0,80}$/.test(name)) return yield* Effect.fail(new ToolInputRefused("Bad copy name."))
-      yield* copiesAllowed(ctx)
+      const mode = yield* copyMode(ctx)
       const env = accountEnv(deps, ctx.userId)
       yield* attempt(() => prepareAccount(env))
       const source = yield* folderAt(env, from)
@@ -2013,12 +2074,15 @@ export const makeFileTools = (deps: FileToolDeps) => {
       const probe = yield* copyScript(
         env,
         [
-          `from=${q(source)}; dest=${q(path)}`,
+          SAFE_GIT,
+          `from=${q(source)}; dest=${q(path)}; branch=${q(branch)}`,
           `if [ -L ${q(`${FILES_MOUNT}/${COPIES}`)} ]; then echo link; exit 0; fi`,
           `if [ -e "$dest" ] || [ -L "$dest" ]; then echo taken; exit 0; fi`,
           `if top=$(${GIT} -C "$from" rev-parse --show-toplevel 2>/dev/null) && base=$(${GIT} -C "$from" rev-parse --verify -q HEAD); then`,
+          `  safe_git "$top"`,
+          `  if ${GIT} -C "$top" rev-parse --verify -q "refs/heads/$branch" >/dev/null; then echo taken; exit 0; fi`,
           `  echo git; echo "$top"; echo "p:$(${GIT} -C "$from" rev-parse --show-prefix)"; echo "$base"`,
-          `  ${GIT} -C "$top" ls-tree -r -l HEAD | awk '{ if ($4 ~ /^[0-9]+$/) s += $4 } END { print s + 0 }'`,
+          `  ${treeBytes("HEAD")}`,
           `else echo files; du -sb --exclude=${COPIES} "$from" | cut -f1; fi`
         ].join("\n"),
         120_000,
@@ -2029,7 +2093,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
         return yield* Effect.fail(
           new ToolInputRefused(
             kind === "taken"
-              ? `${path} is already there.`
+              ? `${path} or its branch ${branch} is already there.`
               : kind === "link"
                 ? `${FILES_MOUNT}/${COPIES} is a link, so no copy goes there. Remove the link, then try again.`
                 : "The copy couldn't be made."
@@ -2045,16 +2109,31 @@ export const makeFileTools = (deps: FileToolDeps) => {
         )
       if (deps.quota && Number.isFinite(bytes))
         yield* deps.quota.check(env.userId, bytes, "copy a folder for a subagent")
+      yield* allowedCopy(mode, approve, { path, from: source, ...(isGit ? { branch } : {}) })
       const made = yield* copyScript(
         env,
         isGit
-          ? `mkdir -p ${q(`${FILES_MOUNT}/${COPIES}`)} && ${GIT} -C ${q(top)} worktree add --quiet -b ${q(branch)} ${q(path)} ${q(base)}`
+          ? [
+              SAFE_GIT,
+              `top=${q(top)}; branch=${q(branch)}`,
+              `safe_git "$top"`,
+              // Made only now, so a branch made meanwhile is never taken over (or removed below).
+              `if ${GIT} -C "$top" rev-parse --verify -q "refs/heads/$branch" >/dev/null; then echo taken; exit 1; fi`,
+              `mkdir -p ${q(`${FILES_MOUNT}/${COPIES}`)} && ${GIT} -C "$top" worktree add --quiet -b "$branch" ${q(path)} ${q(base)}`
+            ].join("\n")
           : `mkdir -p ${q(path)} && tar -C ${q(source)} --exclude=./${COPIES} -cf - . | tar -C ${q(path)} -xf -`,
         600_000,
         ctx.chatId
       )
       if (!made.ok) {
-        yield* removeCopy(env, { path, from: source, kind: isGit ? "git" : "files", ...(isGit ? { top, branch } : {}) })
+        // The branch goes only where this made it: one that was there before is the user's.
+        const ours = !made.lines.includes("taken")
+        yield* removeCopy(env, {
+          path,
+          from: source,
+          kind: isGit ? "git" : "files",
+          ...(isGit ? { top, ...(ours ? { branch } : {}) } : {})
+        })
         return yield* Effect.fail(new ToolInputRefused("The copy couldn't be made."))
       }
       const copy: SubagentCopyRecord = isGit
@@ -2066,14 +2145,15 @@ export const makeFileTools = (deps: FileToolDeps) => {
       return { copy, start: start.replace(/\/$/, "") }
     })
 
-  /** Removes a copy outright (a git worktree with its branch), in the sandbox; true when it's gone. */
+  /** Removes a copy outright (a worktree, and its branch where the record names one), in the sandbox; true when it's gone. */
   const removeCopy = (env: AccountEnv, copy: SubagentCopyRecord) =>
     copyScript(
       env,
       [
+        SAFE_GIT,
         `dest=${q(copy.path)}`,
-        copy.kind === "git" && copy.top && copy.branch
-          ? `${GIT} -C ${q(copy.top)} worktree remove --force "$dest" 2>/dev/null; ${GIT} -C ${q(copy.top)} worktree prune; ${GIT} -C ${q(copy.top)} branch -D -q ${q(copy.branch)} 2>/dev/null`
+        copy.kind === "git" && copy.top
+          ? `safe_git ${q(copy.top)}; ${GIT} -C ${q(copy.top)} worktree remove --force "$dest" 2>/dev/null; ${GIT} -C ${q(copy.top)} worktree prune${copy.branch ? `; ${GIT} -C ${q(copy.top)} branch -D -q ${q(copy.branch)} 2>/dev/null` : ""}`
           : "",
         `rm -rf -- "$dest"; rmdir ${q(`${FILES_MOUNT}/${COPIES}`)} 2>/dev/null; [ ! -e "$dest" ] && echo removed`
       ].join("\n"),
@@ -2082,9 +2162,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
     ).pipe(Effect.map((out) => out.lines.includes("removed")))
 
   /**
-   * At a subagent's end: a copy with no changes is removed (a worktree whose status is clean and
-   * whose branch didn't move; a file copy the same as its source); one with changes stays.
-   * Returns whether it stays. A copy that can't be checked stays.
+   * At a subagent's end: a copy with no changes is removed (a worktree whose status, ignored
+   * files included, is clean and whose branch didn't move; a file copy the same as its source);
+   * one with changes stays. Returns whether it stays. A copy that can't be checked stays.
    */
   const finishCopy = (userId: string, copy: SubagentCopyRecord) =>
     Effect.gen(function* () {
@@ -2092,10 +2172,12 @@ export const makeFileTools = (deps: FileToolDeps) => {
       const check = yield* copyScript(
         env,
         [
+          SAFE_GIT,
           `dest=${q(copy.path)}`,
           `if [ ! -d "$dest" ] || [ -L "$dest" ]; then echo gone; exit 0; fi`,
           copy.kind === "git"
-            ? `st=$(${GIT} -C "$dest" status --porcelain --untracked-files=all) || { echo changed; exit 0; }\nhead=$(${GIT} -C "$dest" rev-parse HEAD) || { echo changed; exit 0; }\nif [ -z "$st" ] && [ "$head" = ${q(copy.base ?? "")} ]; then echo same; else echo changed; fi`
+            ? // Ignored files count: a fresh worktree has none, so any is the subagent's output.
+              `safe_git "$dest"\nst=$(${GIT} -C "$dest" status --porcelain --untracked-files=all --ignored) || { echo changed; exit 0; }\nhead=$(${GIT} -C "$dest" rev-parse HEAD) || { echo changed; exit 0; }\nif [ -z "$st" ] && [ "$head" = ${q(copy.base ?? "")} ]; then echo same; else echo changed; fi`
             : `if diff -rq --no-dereference -x ${COPIES} ${q(copy.from)} "$dest" >/dev/null 2>&1; then echo same; else echo changed; fi`
         ].join("\n"),
         300_000,
@@ -2110,9 +2192,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
 
   /**
    * A copy for a run that carries a subagent on: the same folder when it's still there, else made
-   * again at the same place (a worktree on its branch when that's still there, keeping its commits).
+   * again at the same place (a worktree on its branch when that's still there, keeping its commits),
+   * within the quota and, under Ask first, once the user allows it.
    */
-  const ensureCopy = (ctx: ToolContext, copy: SubagentCopyRecord) =>
+  const ensureCopy = (ctx: ToolContext, copy: SubagentCopyRecord, approve?: ApproveCopy) =>
     Effect.gen(function* () {
       const env = accountEnv(deps, ctx.userId)
       yield* attempt(() => prepareAccount(env))
@@ -2121,15 +2204,34 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const { kept: _kept, ...rest } = copy
         return rest
       }
-      yield* copiesAllowed(ctx)
       if (copy.kind === "files" || !copy.top || !copy.branch) {
         const name = copy.path.slice(`${FILES_MOUNT}/${COPIES}/`.length)
-        return (yield* makeCopy(ctx, name, copy.from)).copy
+        return (yield* makeCopy(ctx, name, copy.from, approve)).copy
       }
+      const mode = yield* copyMode(ctx)
+      // What it takes: its branch's files where the branch is still there, else its base's.
+      const size = yield* copyScript(
+        env,
+        [
+          SAFE_GIT,
+          `top=${q(copy.top)}; branch=${q(copy.branch)}`,
+          `safe_git "$top"`,
+          `if ${GIT} -C "$top" rev-parse --verify -q "refs/heads/$branch" >/dev/null; then ${treeBytes('"refs/heads/$branch"')}; else ${treeBytes(q(copy.base ?? "HEAD"))}; fi`
+        ].join("\n"),
+        120_000,
+        ctx.chatId
+      )
+      const bytes = Number(size.lines.find((line) => line !== ""))
+      if (!size.ok || !Number.isFinite(bytes))
+        return yield* Effect.fail(new ToolInputRefused("The copy couldn't be made again."))
+      if (deps.quota) yield* deps.quota.check(env.userId, bytes, "copy a folder for a subagent")
+      yield* allowedCopy(mode, approve, { path: copy.path, from: copy.from, branch: copy.branch, again: true })
       const made = yield* copyScript(
         env,
         [
+          SAFE_GIT,
           `top=${q(copy.top)}; dest=${q(copy.path)}; branch=${q(copy.branch)}`,
+          `safe_git "$top"`,
           `mkdir -p ${q(`${FILES_MOUNT}/${COPIES}`)} && ${GIT} -C "$top" worktree prune || exit 1`,
           `if ${GIT} -C "$top" rev-parse --verify -q "refs/heads/$branch" >/dev/null; then ${GIT} -C "$top" worktree add --quiet "$dest" "$branch" || exit 1; echo kept`,
           `else ${GIT} -C "$top" worktree add --quiet -b "$branch" "$dest" ${q(copy.base ?? "HEAD")} || exit 1; echo made; fi`

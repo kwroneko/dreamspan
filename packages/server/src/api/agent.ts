@@ -46,7 +46,8 @@ import { Generator } from "../chat/Generator.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../execution.ts"
 import { internal } from "./internal.ts"
-import { mayUse, NEVER, stopSubagent, typesFor } from "../agent/subagents.ts"
+import { mayUse, stopSubagent, typesFor } from "../agent/subagents.ts"
+import { checkTypeEdit, subagentToolCatalog as toolCatalog } from "../agent/subagentTypeEdits.ts"
 import { rowProblems, SAME, SubagentSettingsRejected, type SubagentTypeEdit } from "@dreamspan/shared/subagents.ts"
 
 /** What a resume needs of the stopped run's frozen snapshot. */
@@ -414,16 +415,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
 
   const registry = yield* ExecutionRegistry
   /** The tools a subagent type may be given (§10): what a workshop offers, less what no subagent gets. */
-  const subagentToolCatalog = () => {
-    const plan = registry.orchestrationModes.get("workshop")?.plan({ state: foldState([]), kind: "workshop" })
-    const seen = new Set<string>()
-    return (plan?.tools ?? []).flatMap((id) => {
-      const tool = toolForKind(registry, "workshop", id)
-      if (!tool || NEVER.has(tool.id) || seen.has(tool.id)) return []
-      seen.add(tool.id)
-      return [tool]
-    })
-  }
+  const subagentToolCatalog = () => toolCatalog(registry)
   return {
     GetRolloutSteps: ({ versionId }) =>
       Effect.flatMap(CurrentUser, (user) => reader.RolloutSteps({ userId: user.id, versionId })).pipe(
@@ -596,57 +588,11 @@ export const makeAgentHandlers = Effect.gen(function* () {
         if (edit !== null) {
           const reject = (message: string) => new SubagentSettingsRejected({ message })
           if (edit.id !== id) return yield* reject("A type keeps its id.")
-          const catalog = subagentToolCatalog()
-          const unknown = (edit.tools ?? []).filter((tool) => !catalog.some((c) => c.id === tool))
-          if (unknown.length) return yield* reject(`Not a tool workshops offer: ${unknown.join(", ")}.`)
-          const base = registry.subagentTypes.get(id)
-          if (base && !base.kinds.includes("workshop"))
-            return yield* reject("That subagent has its own settings, in each chat's Tools.")
-          if (base) {
-            // A change to a built-in or plugin type keeps only what differs from it.
-            const baseTools = catalog.filter((tool) => mayUse(base, tool)).map((tool) => tool.id)
-            const sameTools =
-              edit.tools === undefined ||
-              (edit.tools.length === baseTools.length && edit.tools.every((tool) => baseTools.includes(tool)))
-            const differs = <K extends "label" | "explanation" | "description" | "instructions" | "defaultAlias">(
-              key: K
-            ) => (edit[key] !== undefined && edit[key] !== (base[key] ?? "") ? { [key]: edit[key] } : {})
-            const change: SubagentTypeEdit = {
-              id,
-              ...differs("label"),
-              ...differs("explanation"),
-              ...differs("description"),
-              ...differs("instructions"),
-              ...differs("defaultAlias"),
-              ...(edit.effort !== undefined && edit.effort !== (base.effort ?? null) ? { effort: edit.effort } : {}),
-              ...(edit.context !== undefined && edit.context !== (base.context ?? "task")
-                ? { context: edit.context }
-                : {}),
-              ...(edit.isolation !== undefined && edit.isolation !== (base.isolation ?? "none")
-                ? { isolation: edit.isolation }
-                : {}),
-              ...(sameTools ? {} : { tools: [...new Set(edit.tools)] }),
-              ...(edit.off ? { off: true } : {})
-            }
-            stored = Object.keys(change).length > 1 ? change : null
-          } else {
-            if (!edit.label?.trim() || !edit.instructions?.trim())
-              return yield* reject("A type needs a name and instructions.")
-            stored = {
-              id,
-              label: edit.label.trim(),
-              ...(edit.explanation?.trim() ? { explanation: edit.explanation.trim() } : {}),
-              description: edit.description?.trim() ?? "",
-              instructions: edit.instructions,
-              tools: [...new Set(edit.tools ?? [])],
-              defaultAlias: edit.defaultAlias ?? SAME,
-              ...(edit.effort ? { effort: edit.effort } : {}),
-              context: edit.context ?? "task",
-              ...(edit.isolation && edit.isolation !== "none" ? { isolation: edit.isolation } : {})
-            }
-            if (!current.some((e) => e.id === id) && rest.length >= 32)
-              return yield* reject("You have as many subagent types as you may.")
-          }
+          const checked = checkTypeEdit(registry.subagentTypes.list(), subagentToolCatalog(), edit)
+          if ("rejected" in checked) return yield* reject(checked.rejected)
+          stored = checked.stored
+          if (stored && !registry.subagentTypes.get(id) && !current.some((e) => e.id === id) && rest.length >= 32)
+            return yield* reject("You have as many subagent types as you may.")
         }
         const at = current.findIndex((e) => e.id === id)
         const types =

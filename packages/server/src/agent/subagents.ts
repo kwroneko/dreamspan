@@ -45,7 +45,7 @@ import { askUser, makePermit, offeredByGrants } from "./approvals.ts"
 import { loadingWireFor } from "./loadingPlan.ts"
 import { Mailbox } from "./mailbox.ts"
 import { codeType, generalType, researchType } from "./subagentTypesPart.ts"
-import { FILE_TOOLS } from "./tools/files.ts"
+import { FILE_TOOLS, type ApproveCopy, type SubagentWorkspaces } from "./tools/files.ts"
 import { forkStart } from "./messages.ts"
 import { planResume } from "./resume.ts"
 import { runAgent, type AgentRun } from "./session.ts"
@@ -471,6 +471,10 @@ const chosenEntry = (entries: ReadonlyArray<SubagentModelEntry>, type: SubagentT
     ? entries.find((e) => e.alias === alias)
     : (entries.find((e) => e.alias === type?.defaultAlias) ?? entries.find((e) => e.pick === SAME) ?? entries[0])
 
+/** Whether a fork can run here (§2.3): the chat's own model is picked for subagents. Unknown: offered. */
+const forkable = (entries: ReadonlyArray<SubagentModelEntry> | undefined) =>
+  entries === undefined || entries.some((e) => e.pick === SAME)
+
 /** The allowed models as the assistant reads them (§5.1): "fast: model-key. Its note." */
 const modelLines = (entries: ReadonlyArray<SubagentModelEntry>) =>
   entries.map((e) => `- ${e.alias}: ${e.name}.${e.note.trim() ? ` ${e.note.trim()}` : ""}`).join("\n")
@@ -484,7 +488,12 @@ const description = (
   [
     "Hands one task to a subagent: a helper that works on its own, in a fresh context, and returns a report. Use it for searches or reading that would take many calls (looking through many cards, chats or files), or to keep long material out of your own context. Don't use it for a single lookup you can do yourself.",
     "The subagent sees only what you write in `task`, not this conversation: say exactly what to do and what to report. It has the tools its type lists, never more than yours, and it can't start subagents of its own. You wait for its report, which comes back as this call's result.",
-    'With `context: "fork"` it sees this conversation as it is now, then its task: use that when the task needs what was said here. A fork runs on your own model (`same`) and starts from what you were just sent, so it costs little to start.',
+    // A fork runs only on `same` (§2.3): where it isn't picked, a fork is never offered.
+    ...(forkable(entries)
+      ? [
+          'With `context: "fork"` it sees this conversation as it is now, then its task: use that when the task needs what was said here. A fork runs on your own model (`same`) and starts from what you were just sent, so it costs little to start.'
+        ]
+      : []),
     ...(background
       ? [
           "With `background: true` the call returns at once and you carry on; its report reaches you later as a message, and you can tell the user what you're waiting for. Start several in the background to work in parallel. Your reply doesn't end while they run: when you've said what you have so far, end your turn and their reports come to you.",
@@ -526,12 +535,16 @@ const parametersFor = (
         description: `The model it runs on, by name from the list above${entries?.length ? `: ${entries.map((e) => e.alias).join(", ")}` : ""}. Absent: its type's default.`
       })
     ),
-    context: Type.Optional(
-      Type.Union([Type.Literal("task"), Type.Literal("fork")], {
-        description:
-          "What it sees: task (only what you write in `task`) or fork (this conversation, then the task; your own model only). Absent: its type's default."
-      })
-    ),
+    ...(forkable(entries)
+      ? {
+          context: Type.Optional(
+            Type.Union([Type.Literal("task"), Type.Literal("fork")], {
+              description:
+                "What it sees: task (only what you write in `task`) or fork (this conversation, then the task; your own model only). Absent: its type's default."
+            })
+          )
+        }
+      : {}),
     ...(background
       ? {
           background: Type.Optional(
@@ -708,20 +721,26 @@ const reason = (error: unknown) =>
  * host or the file tools aren't here; the reply's folder; or its own copy, made now. A string
  * refuses the call.
  */
-const placeFor = (ctx: ToolContext, type: SubagentType, tools: ReadonlyArray<RolloutTool<never>>, copy?: boolean) =>
+const placeFor = (
+  ctx: ToolContext,
+  host: Host,
+  type: SubagentType,
+  tools: ReadonlyArray<RolloutTool<never>>,
+  copy?: boolean
+) =>
   Effect.gen(function* () {
     if (!type.isolation) {
       return copy === true ? `A ${type.id} subagent doesn't work on files, so it gets no copy.` : null
     }
     const places = yield* workspacesHere()
-    const wantsCopy = copy ?? type.isolation === "copy"
+    const wantsCopy = wantsCopyOf(type, copy)
     if (!places || !tools.some((t) => (FILE_TOOLS as ReadonlyArray<string>).includes(t.id)))
       return wantsCopy ? "Copies need your file tools, which this reply doesn't have." : null
     const from = yield* places.folderOf(ctx).pipe(Effect.result)
     if (Result.isFailure(from)) return `The app couldn't find your working folder: ${reason(from.failure)}`
     if (!wantsCopy) return { start: from.success } satisfies SubagentWorkspaceRecord
     const made = yield* places
-      .makeCopy(ctx, `${type.id}-${uuidv7().replace(/-/g, "").slice(-6)}`, from.success)
+      .makeCopy(ctx, `${type.id}-${uuidv7().replace(/-/g, "").slice(-6)}`, from.success, approveCopy(ctx, host))
       .pipe(Effect.result)
     if (Result.isFailure(made)) return `No copy was made: ${reason(made.failure)}`
     return {
@@ -730,6 +749,39 @@ const placeFor = (ctx: ToolContext, type: SubagentType, tools: ReadonlyArray<Rol
       copy: made.success.copy
     } satisfies SubagentWorkspaceRecord
   })
+
+/** Whether a call gets its own copy (§3.3): its `copy`, else its type's default. */
+const wantsCopyOf = (type: Pick<SubagentType, "isolation">, copy: boolean | undefined) =>
+  type.isolation !== undefined && (copy ?? type.isolation === "copy")
+
+/**
+ * Under Ask first (Change your files or Run commands, §3.3), making a copy asks on the call's
+ * step, saying what's copied, where to, and on which new branch.
+ */
+const approveCopy =
+  (ctx: ToolContext, host: Host): ApproveCopy =>
+  (copy) =>
+    askUser(
+      { reader: ctx.reader, writer: host.run.writer, userId: ctx.userId, chatId: ctx.chatId, rolloutId: ctx.rolloutId },
+      {
+        toolCallId: ctx.toolCallId,
+        key: "copy",
+        capability: "files",
+        prompt: {
+          capabilityLabel: "Change your files",
+          title: copy.again ? "Make a subagent's copy again" : "Make a copy for a subagent",
+          rows: [
+            { label: "Copies", value: copy.from },
+            { label: "Into", value: copy.path },
+            ...(copy.branch
+              ? [{ label: "Branch", value: copy.again ? copy.branch : `${copy.branch} (a new git branch)` }]
+              : [])
+          ],
+          uncertain: false
+        },
+        onWaiting: host.wait
+      }
+    ).pipe(Effect.map((answer) => answer.allow))
 
 /** A copy made for a subagent that didn't start: removed, since nothing worked in it. */
 const dropCopy = (userId: string, copy: SubagentCopyRecord) =>
@@ -743,12 +795,12 @@ const dropCopy = (userId: string, copy: SubagentCopyRecord) =>
  * made again at the same place if it was removed meanwhile, recorded on the new run. A string:
  * the copy can't be had, and the run doesn't start.
  */
-const placeAgain = (ctx: ToolContext, workspace: SubagentWorkspaceRecord | undefined) =>
+const placeAgain = (ctx: ToolContext, host: Host, workspace: SubagentWorkspaceRecord | undefined) =>
   Effect.gen(function* () {
     if (!workspace?.copy) return workspace
     const places = yield* workspacesHere()
     if (!places) return "Its copy can't be used here."
-    const copy = yield* places.ensureCopy(ctx, workspace.copy).pipe(Effect.result)
+    const copy = yield* places.ensureCopy(ctx, workspace.copy, approveCopy(ctx, host)).pipe(Effect.result)
     if (Result.isFailure(copy)) return `Its copy can't be used: ${reason(copy.failure)}`
     return { ...workspace, copy: copy.success } satisfies SubagentWorkspaceRecord
   })
@@ -757,10 +809,16 @@ const placeAgain = (ctx: ToolContext, workspace: SubagentWorkspaceRecord | undef
  * What became of a subagent's copy at its run's end (§3.3), as the run's `COPY_CALL` receipt; a
  * kept copy is also a change of the run's, listed in Changes under its handle.
  */
-const recordCopy = (ctx: ToolContext, rolloutId: string, copy: SubagentCopyRecord, kept: boolean) =>
-  ctx.writer
+const recordCopy = (
+  writer: ToolContext["writer"],
+  userId: ToolContext["userId"],
+  rolloutId: string,
+  copy: SubagentCopyRecord,
+  kept: boolean
+) =>
+  writer
     .RecordRolloutEffects({
-      userId: ctx.userId,
+      userId,
       rolloutId,
       toolCallId: COPY_CALL,
       result: JSON.stringify({ kept }),
@@ -778,6 +836,34 @@ const recordCopy = (ctx: ToolContext, rolloutId: string, copy: SubagentCopyRecor
         : []
     })
     .pipe(Effect.catchCause((cause) => Effect.logWarning(`recording subagent ${rolloutId}'s copy failed`, cause)))
+
+/**
+ * Copies whose run never settled them (§3.3): the app stopped while their subagent ran, so
+ * neither its end nor its stop removed or kept them. Each is settled now as at a run's end:
+ * removed when unchanged, else kept with its row in Changes. `before`: only runs started before
+ * this (the app's start), none of which can be running here.
+ */
+export const settleOrphanedCopies = (
+  deps: { readonly reader: ToolContext["reader"]; readonly writer: ToolContext["writer"] },
+  workspaces: Pick<SubagentWorkspaces, "finishCopy">,
+  before: number
+) =>
+  Effect.gen(function* () {
+    let settled = 0
+    for (const orphan of yield* deps.reader.OrphanedSubagentCopies({ before })) {
+      if (running.has(orphan.rolloutId)) continue
+      let copy: SubagentCopyRecord
+      try {
+        copy = JSON.parse(orphan.copy) as SubagentCopyRecord
+      } catch {
+        continue
+      }
+      const kept = yield* workspaces.finishCopy(orphan.userId, copy)
+      yield* recordCopy(deps.writer, orphan.userId, orphan.rolloutId, copy, kept)
+      settled++
+    }
+    return settled
+  })
 
 const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutput> =>
   Effect.gen(function* () {
@@ -845,10 +931,29 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
     // Never more than the parent: the type's tools among those the parent was offered, less the
     // capabilities turned off now (§6.1). Ask first stays Ask first: the child's permit asks.
     const { tools, frozen } = yield* childTools(ctx, host, (tool) => mayUse(type, tool), !fork)
+    // A copy costs time and room: never made for a call the reply's count or spend would refuse.
+    if (wantsCopyOf(type, args.copy)) {
+      const room = yield* reader
+        .SubagentStartRoom({
+          userId,
+          parentRolloutId: ctx.rolloutId,
+          perRun: limits.perRun,
+          runCost
+        })
+        .pipe(Effect.option)
+      if (Option.isSome(room) && room.value !== null) return refuse(startRefused(room.value))
+    }
     // Where it works on files (§3.3): the reply's folder, or its own copy of it, made now.
-    const placed = yield* placeFor(ctx, type, tools, args.copy)
+    const placed = yield* placeFor(ctx, host, type, tools, args.copy)
     if (typeof placed === "string") return refuse(placed)
     const workspace = placed ?? undefined
+    // A copy made for it goes again, whatever ends this call (a refusal, a stop), unless its run
+    // takes it over and settles it.
+    let handed = false
+    if (workspace?.copy) {
+      const copy = workspace.copy
+      yield* Effect.addFinalizer(() => (handed ? Effect.void : dropCopy(userId, copy)))
+    }
     const date = new Date().toISOString().slice(0, 10)
     // A fork's request is the reply's own, sent with the reply's tool definitions (§2.3).
     const request: AssembledRequest = fork
@@ -888,7 +993,8 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
       ...(effort ? { effort } : {}),
       instructions: type.instructions,
       context,
-      ...(forkWire ? { fork: { wireTools: forkWire.wireTools, offered: forkWire.offered } } : {}),
+      // All of its wire, so a resumed or continued fork places its breakpoints as this run does.
+      ...(forkWire ? { fork: forkWire } : {}),
       spawnedBy: ctx.rolloutId,
       callId: ctx.toolCallId,
       versionId: ctx.versionId,
@@ -915,20 +1021,8 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
         runCost
       })
       .pipe(Effect.option)
-    // Not started (or started already by this call): a copy made for it goes again.
-    if (workspace?.copy && (Option.isNone(begun) || "refused" in begun.value || begun.value.existing))
-      yield* dropCopy(userId, workspace.copy)
     if (Option.isNone(begun)) return refuse("The subagent couldn't be started.")
-    if ("refused" in begun.value)
-      return refuse(
-        begun.value.refused === "limit"
-          ? "This reply has started as many subagents as it may. Do the rest yourself."
-          : begun.value.refused === "spent"
-            ? "This reply's subagents have spent what they may together. Do the rest yourself."
-            : begun.value.refused === "nested"
-              ? "A subagent can't start subagents of its own."
-              : "This reply has ended."
-      )
+    if ("refused" in begun.value) return refuse(startRefused(begun.value.refused))
     // Another call of this run already started one under this id: never a run with no row of its own.
     if (begun.value.existing) return refuse(REUSED)
     const handle = begun.value.handle
@@ -975,6 +1069,8 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
           }
         : {})
     }
+    // From here its run settles its copy (§3.3), when it ends or is stopped.
+    handed = true
     if (!background) return yield* runChild(ctx, host, start)
     // In the background (§3.2): the call returns now, and the report reaches the reply later.
     host.background!(
@@ -983,6 +1079,16 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
     )
     return started(start.row)
   }).pipe(Effect.scoped)
+
+/** Why a reply can't start another subagent, as the assistant reads it. */
+const startRefused = (refused: "limit" | "spent" | "nested" | "not_running") =>
+  refused === "limit"
+    ? "This reply has started as many subagents as it may. Do the rest yourself."
+    : refused === "spent"
+      ? "This reply's subagents have spent what they may together. Do the rest yourself."
+      : refused === "nested"
+        ? "A subagent can't start subagents of its own."
+        : "This reply has ended."
 
 /** Whether the run carries this call on from the run it resumes (its seed transcript holds it). */
 const carried = (host: Host, toolCallId: string) =>
@@ -1003,6 +1109,9 @@ const forkSeed = (messages: ReadonlyArray<AgentMessage>, callId: string): Readon
   return seed.some((m) => m.role === "rpRequest") ? seed : null
 }
 
+/** Whether a message is a fork's task (`forkTask`). */
+const isForkTask = (m: AgentMessage) => m.role === "rpApp" && (m as { fork?: unknown }).fork === true
+
 /** A fork's task, after the reply's conversation: where its own run starts (`forkStart`). */
 const forkTask = (instructions: string, task: string): AgentMessage => ({
   role: "rpApp",
@@ -1011,11 +1120,17 @@ const forkTask = (instructions: string, task: string): AgentMessage => ({
   timestamp: Date.now()
 })
 
-/** A fork's wire from its snapshot, for its resume or continuation (§2.3, §8). */
-const forkOf = (snapshot: ChildSnapshot): ForkWire | undefined =>
-  snapshot.subagent?.context === "fork" && snapshot.subagent.fork
-    ? { wireTools: snapshot.subagent.fork.wireTools, offered: snapshot.subagent.fork.offered }
-    : undefined
+/** A fork's wire from its snapshot, for its resume or continuation (§2.3, §8): its tools and cache layout. */
+export const forkOf = (snapshot: ChildSnapshot): ForkWire | undefined => {
+  const fork = snapshot.subagent?.context === "fork" ? snapshot.subagent.fork : undefined
+  if (!fork) return undefined
+  return {
+    wireTools: fork.wireTools,
+    offered: fork.offered,
+    ...(fork.checkpoints?.length ? { checkpoints: fork.checkpoints } : {}),
+    ...(fork.recentPrefix !== undefined ? { recentPrefix: fork.recentPrefix } : {})
+  }
+}
 
 /** A child's generation: its own request at the parent's position (§2.3), what the reply could read. */
 const childGeneration = (
@@ -1051,7 +1166,10 @@ interface ChildSnapshot {
   readonly request?: AssembledRequest
   readonly inputs?: { readonly leafSlotId?: Generation["leafSlotId"]; readonly model?: Generation["model"] }
   readonly agent?: { readonly tools?: ReadonlyArray<FrozenTool> }
-  readonly subagent?: Pick<SubagentSnapshot, "caps" | "type" | "context" | "fork" | "workspace">
+  readonly subagent?: Pick<
+    SubagentSnapshot,
+    "caps" | "type" | "context" | "fork" | "workspace" | "instructions" | "task"
+  >
 }
 
 /**
@@ -1152,12 +1270,30 @@ const carryOn = (
           )
       }
       // From its start again: a fork from its task, after the reply's conversation.
-      plan = { ...plan, transcript: plan.transcript.slice(0, forkStart(plan.transcript) + 1) }
+      const kept = plan.transcript.slice(0, forkStart(plan.transcript) + 1)
+      if (snapshot.subagent?.context === "fork" && !kept.some(isForkTask)) {
+        // Nothing of it was saved (it stopped before its first turn): its request is the reply's
+        // own, so its start is rebuilt as it was, the reply's conversation before this call and
+        // then its task (§2.3). Never the reply's request alone, which it would answer as the reply.
+        const seed = forkSeed(ctx.transcript?.() ?? [], ctx.toolCallId)
+        const { task, instructions, workspace: place } = snapshot.subagent
+        if (seed === null || !task || !instructions)
+          return yield* answer(
+            "not_resumed",
+            (prior.partial ?? "").slice(0, REPORT_CHARS),
+            `${NOT_RESUMED} Its conversation couldn't be found again.`,
+            true
+          )
+        plan = {
+          ...plan,
+          transcript: [...seed, forkTask(instructions, place ? `${workspaceLine(place)}\n\n${task}` : task)]
+        }
+      } else plan = { ...plan, transcript: kept }
     }
     const unread = undelivered(ctx.transcript?.() ?? [], prior.handle, plan.transcript)
     const fork = forkOf(snapshot)
     // Where it worked (§3.3): its copy, made again if it was removed meanwhile.
-    const workspace = yield* placeAgain(ctx, snapshot.subagent?.workspace)
+    const workspace = yield* placeAgain(ctx, host, snapshot.subagent?.workspace)
     if (typeof workspace === "string")
       return yield* answer(
         "not_resumed",
@@ -1165,6 +1301,12 @@ const carryOn = (
         `${NOT_RESUMED} ${workspace}`,
         true
       )
+    // Its copy, if made again, goes again unless the run carrying it on takes it over (§3.3).
+    let dropOnExit = workspace?.copy !== undefined
+    if (workspace?.copy) {
+      const copy = workspace.copy
+      yield* Effect.addFinalizer(() => (dropOnExit ? dropCopy(userId, copy) : Effect.void))
+    }
     // Its tools now: what it was given, among the resumed reply's and the grants now (§6.1).
     const given = new Set((snapshot.agent?.tools ?? []).map((t) => t.name))
     const { tools, frozen } = yield* childTools(ctx, host, (t) => given.has(t.id), !fork)
@@ -1189,13 +1331,11 @@ const carryOn = (
       .pipe(Effect.option)
     if (Option.isNone(resumed) || "refused" in resumed.value || resumed.value.existing) {
       // A copy made again for it goes again unchanged; one a child of it uses stays.
-      if (
-        workspace?.copy &&
-        (Option.isNone(resumed) || ("refused" in resumed.value && resumed.value.refused !== "running"))
-      )
-        yield* dropCopy(userId, workspace.copy)
+      if (Option.isSome(resumed) && !("refused" in resumed.value && resumed.value.refused !== "running"))
+        dropOnExit = false
       return refuse("The subagent couldn't be carried on. Call agent again if you still need the task done.")
     }
+    dropOnExit = false
     return yield* runChild(ctx, host, {
       rolloutId: resumed.value.rolloutId,
       handle: prior.handle,
@@ -1242,8 +1382,21 @@ const receiptOf = (ctx: ToolContext, text: string, isError: boolean) =>
     .pipe(Effect.catchCause((cause) => Effect.logWarning(`saving subagent ${ctx.toolCallId}'s receipt failed`, cause)))
 
 /** Runs a child to its end and returns its report as the call's result. */
-const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effect<ToolOutput, never, Scope.Scope> =>
-  Effect.gen(function* () {
+const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effect<ToolOutput, never, Scope.Scope> => {
+  /**
+   * What became of its copy (§3.3): settled once, when it ends, and also when it's stopped with
+   * the reply (an unchanged copy is removed; a changed one gets its "Kept" row in Changes).
+   */
+  let copyKept: boolean | undefined
+  const settleCopy = Effect.gen(function* () {
+    const copy = start.workspace?.copy
+    if (!copy || copyKept !== undefined) return
+    const places = yield* workspacesHere()
+    const kept = places ? yield* places.finishCopy(ctx.userId, copy) : true
+    copyKept = kept
+    yield* recordCopy(ctx.writer, ctx.userId, start.rolloutId, copy, kept)
+  }).pipe(Effect.catchCause((cause) => Effect.logWarning(`settling subagent ${start.rolloutId}'s copy failed`, cause)))
+  return Effect.gen(function* () {
     const { userId, chatId, reader } = ctx
     const { input, run } = host
     const { rolloutId, handle, generation, tools, frozen } = start
@@ -1321,6 +1474,8 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
       subagent: {
         writeNow: WRITE_REPORT,
         beforeNextRequest: (signal) => limitCheck(signal),
+        // Between summary requests too: one request can summarize in many (§6.2).
+        beforeSummary: (signal) => limitCheck(signal, false).then(() => !atLimit),
         stopping: () => atLimit,
         onProgress: progress,
         ...(start.workspace
@@ -1391,7 +1546,8 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
         elapsed: () => used + (since === null ? 0 : Date.now() - since)
       }
     })()
-    const limitCheck = (signal?: AbortSignal) =>
+    /** At a limit, stops it; `warn`: at 80% of one, the one-time wrap-up note to send. */
+    const limitCheck = (signal?: AbortSignal, warn = true) =>
       runPromise(
         Effect.gen(function* () {
           const spend = yield* reader.SubagentSpend({ userId, rolloutId }).pipe(Effect.option)
@@ -1408,7 +1564,7 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
             stopAtLimit()
             return undefined
           }
-          if (!warned && Math.max(...shares, s.requests / caps.requests) >= 0.8) {
+          if (warn && !warned && Math.max(...shares, s.requests / caps.requests) >= 0.8) {
             warned = true
             return WRAP_UP
           }
@@ -1497,12 +1653,17 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
     const exit = yield* Fiber.await(forked).pipe(
       Effect.onInterrupt(() => Fiber.interrupt(forked)),
       Effect.ensuring(
-        Effect.sync(() => {
-          mailbox.close()
-          running.delete(rolloutId)
-          // Closed and saved: a message that came too late carries it on instead (§4).
-          Deferred.doneUnsafe(done, Effect.void)
-        })
+        Effect.sync(() => mailbox.close()).pipe(
+          // Its copy is settled before a message can carry it on in it.
+          Effect.andThen(settleCopy),
+          Effect.ensuring(
+            Effect.sync(() => {
+              running.delete(rolloutId)
+              // Closed and saved: a message that came too late carries it on instead (§4).
+              Deferred.doneUnsafe(done, Effect.void)
+            })
+          )
+        )
       )
     )
     const status = Exit.isSuccess(exit)
@@ -1515,13 +1676,11 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
     // Its copy (§3.3): removed when it has no changes, else kept for the user and the reply.
     let copyNote = ""
     if (start.workspace?.copy) {
-      const places = yield* workspacesHere()
-      const kept = places ? yield* places.finishCopy(userId, start.workspace.copy) : true
       const copy = start.workspace.copy
-      yield* recordCopy(ctx, rolloutId, copy, kept)
-      copyNote = kept
-        ? `Its copy, with its changes: ${copy.path}${copy.branch ? ` (branch ${copy.branch})` : ""}. Nothing was merged back.`
-        : "Its copy had no changes and was removed."
+      copyNote =
+        copyKept !== false
+          ? `Its copy, with its changes: ${copy.path}${copy.branch ? ` (branch ${copy.branch})` : ""}. Nothing was merged back.`
+          : "Its copy had no changes and was removed."
     }
     const error = Exit.isFailure(exit)
       ? Option.getOrUndefined(
@@ -1561,7 +1720,8 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
     const isError = status === "failed"
     yield* receiptOf(ctx, text, isError)
     return { text, dataOnly: true as const, ...(isError ? { isError } : {}), subagent: row }
-  })
+  }).pipe(Effect.ensuring(settleCopy))
+}
 
 /** App-owned mechanical metadata, outside the quoted report (ARCHITECTURE §16 boundaries). */
 const frame = (value: Readonly<Record<string, string | number | null>>) =>
@@ -1612,16 +1772,29 @@ export const agentTool: RolloutTool<AgentArgs> = {
       const registered = Option.isSome(registry) ? registry.value.subagentTypes.list() : builtinSubagentTypes
       const type = typesFor(registered, at?.types).find((t) => t.id === args.type)
       const alias = typeof args.model === "string" && args.model.trim() ? args.model.trim().toLowerCase() : undefined
-      const entry = at ? chosenEntry(at.entries, type, alias) : undefined
       const fork = (args.context ?? type?.context) === "fork"
+      // As the call will run (runSubagent): a fork naming no model runs on the chat's own.
+      const entry = at
+        ? fork && alias === undefined
+          ? at.entries.find((e) => e.pick === SAME)
+          : chosenEntry(at.entries, type, alias)
+        : undefined
       const effort = entry && !fork ? effectiveEffort(type?.effort, entry.effort, entry.efforts) : null
       return {
         title: `Start a subagent: ${type?.label ?? args.type}`,
         rows: [
           { label: "Task", value: String(args.task ?? "") },
           ...(args.name ? [{ label: "Name", value: String(args.name) }] : []),
-          ...((args.context ?? type?.context) === "fork"
-            ? [{ label: "Sees", value: "This conversation, then the task" }]
+          ...(fork ? [{ label: "Sees", value: "This conversation, then the task" }] : []),
+          ...(type?.isolation
+            ? [
+                {
+                  label: "Works in",
+                  value: wantsCopyOf(type, typeof args.copy === "boolean" ? args.copy : undefined)
+                    ? "Its own copy of your working folder"
+                    : "Your working folder"
+                }
+              ]
             : []),
           {
             label: "Model",
@@ -1981,8 +2154,14 @@ const continueChild = (
     // Its tools as it was given them, among the reply's and the grants now (§6.1); its limits as
     // they applied, counted from this run on, and the reply's places and spend now (§6.2, §6.3).
     const fork = forkOf(snapshot)
-    const workspace = yield* placeAgain(ctx, snapshot.subagent?.workspace)
+    const workspace = yield* placeAgain(ctx, host, snapshot.subagent?.workspace)
     if (typeof workspace === "string") return refuse(`${prior.handle} can't be carried on. ${workspace}`)
+    // Its copy, if made again, goes again unless the run carrying it on takes it over (§3.3).
+    let dropOnExit = workspace?.copy !== undefined
+    if (workspace?.copy) {
+      const copy = workspace.copy
+      yield* Effect.addFinalizer(() => (dropOnExit ? dropCopy(userId, copy) : Effect.void))
+    }
     const given = new Set((snapshot.agent?.tools ?? []).map((t) => t.name))
     const { tools, frozen } = yield* childTools(ctx, host, (t) => given.has(t.id), !fork)
     const now = at.limits
@@ -2006,11 +2185,8 @@ const continueChild = (
       })
       .pipe(Effect.option)
     // Not carried on: a copy made again for it goes again unchanged; one a running child uses stays.
-    if (
-      workspace?.copy &&
-      (Option.isNone(continued) || ("refused" in continued.value && continued.value.refused !== "running"))
-    )
-      yield* dropCopy(userId, workspace.copy)
+    if (Option.isSome(continued) && !("refused" in continued.value && continued.value.refused !== "running"))
+      dropOnExit = false
     if (Option.isNone(continued)) return refuse(`${prior.handle} couldn't be carried on. Try again.`)
     if ("refused" in continued.value)
       return refuse(
@@ -2055,6 +2231,7 @@ const continueChild = (
       ...(fork ? { fork } : {}),
       ...(workspace ? { workspace } : {})
     }
+    dropOnExit = false
     if (!background) return yield* runChild(ctx, host, start)
     host.background!(
       ctx.toolCallId,

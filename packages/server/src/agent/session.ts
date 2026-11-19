@@ -117,6 +117,11 @@ export interface AgentRun {
      */
     readonly beforeNextRequest?: (signal?: AbortSignal) => Promise<string | undefined>
     /**
+     * Asked before each of its summary requests (§6.2): whether its limits leave room for one.
+     * At a limit it stops the run itself. Summary requests also count toward its turn cap.
+     */
+    readonly beforeSummary?: (signal?: AbortSignal) => Promise<boolean>
+    /**
      * It's being stopped at a limit: nothing more is taken from its mailbox, so a message that
      * came meanwhile stays undelivered and its sender is told (spec/SUBAGENTS.md §4).
      */
@@ -1153,7 +1158,20 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                     : null
                 ).concat(sends ? [sendTool as unknown as FrozenTool] : []),
                 reserve: generation.request.samplers.max_tokens,
-                leafSlotId: generation.leafSlotId as import("@dreamspan/shared/chat.ts").SlotId | null
+                leafSlotId: generation.leafSlotId as import("@dreamspan/shared/chat.ts").SlotId | null,
+                // A subagent's summary requests count toward its request cap, leaving this
+                // request and its report's, and its limits are checked before each (§6.2).
+                ...(run.subagent
+                  ? {
+                      beforeSummary: () =>
+                        Effect.promise(async () => {
+                          if (requests + 2 >= cap) return false
+                          if (run.subagent?.beforeSummary && !(await run.subagent.beforeSummary(signal))) return false
+                          requests++
+                          return true
+                        })
+                    }
+                  : {})
               }),
               { signal }
             )
