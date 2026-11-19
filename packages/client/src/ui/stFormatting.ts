@@ -17,13 +17,66 @@ export function fixMarkdownMapped(text: string): { text: string; offsets: Array<
   }
 }
 
+/**
+ * Fenced blocks (``` or ~~~, any info string, unterminated ones run to the end) and inline code spans
+ * are code, not prose: the display fixes must not touch them (an html panel's `postMessage(x, '*')`).
+ */
+function codeRanges(text: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = []
+  let fence: { char: string; size: number; from: number } | null = null
+  let lineStart = 0
+  let prose = 0 // start of the prose since the last fence, scanned for inline code
+  const inline = (from: number, to: number) => {
+    const part = text.slice(from, to)
+    for (const match of part.matchAll(/(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g))
+      ranges.push([from + match.index, from + match.index + match[0].length])
+  }
+  while (lineStart <= text.length) {
+    const next = text.indexOf("\n", lineStart)
+    const end = next === -1 ? text.length : next
+    const line = text.slice(lineStart, end)
+    if (fence) {
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)
+      if (close && close[1]![0] === fence.char && close[1]!.length >= fence.size) {
+        ranges.push([fence.from, end])
+        fence = null
+        prose = end
+      }
+    } else {
+      const open = /^ {0,3}(`{3,}|~{3,})/.exec(line)
+      if (open) {
+        inline(prose, lineStart)
+        fence = { char: open[1]![0]!, size: open[1]!.length, from: lineStart }
+      }
+    }
+    if (next === -1) break
+    lineStart = next + 1
+  }
+  if (fence) ranges.push([fence.from, text.length])
+  else inline(prose, text.length)
+  return ranges
+}
+
+/** Same length and newlines, code replaced by a neutral character. */
+function maskCode(text: string): string {
+  const ranges = codeRanges(text)
+  if (!ranges.length) return text
+  let out = ""
+  let at = 0
+  for (const [from, to] of ranges) {
+    out += text.slice(at, from) + text.slice(from, to).replace(/[^\n]/g, "\u0000")
+    at = to
+  }
+  return out + text.slice(at)
+}
+
 /** Formatting's copy map as contiguous runs, without allocating an offset for every character. */
 export function fixMarkdownRuns(text: string): { text: string; runs: Array<SourceRun> } {
-  const matches = [...text.matchAll(/([*_]{1,2})([\s\S]*?)\1/gm)]
-  let fixed = text
+  const masked = maskCode(text)
+  const matches = [...masked.matchAll(/([*_]{1,2})([\s\S]*?)\1/gm)]
   const removed = new Set<number>()
-  for (const match of matches.reverse()) {
-    const replacement = match[0].replace(
+  for (const match of matches) {
+    match[0].replace(
       /(\*|_)([\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]+)|([\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]+)(\*|_)/g,
       (whole: string, left: string | undefined, _a: string, _b: string, right: string | undefined, at: number) => {
         for (let i = 0; i < whole.length; i++)
@@ -31,9 +84,10 @@ export function fixMarkdownRuns(text: string): { text: string; runs: Array<Sourc
         return left ?? right ?? ""
       }
     )
-    if (replacement !== match[0])
-      fixed = fixed.slice(0, match.index) + replacement + fixed.slice(match.index + match[0].length)
   }
+  let fixed = ""
+  for (let i = 0; i < text.length; i++) if (!removed.has(i)) fixed += text[i]
+  const fixedMasked = maskCode(fixed).split("\n")
   const original: SourceRun[] = []
   let source = 0
   let at = 0
@@ -73,7 +127,7 @@ export function fixMarkdownRuns(text: string): { text: string; runs: Array<Sourc
     .map((line, index) => {
       let result = line
       for (const char of ["*", '"']) {
-        if (line.split(char).length % 2 === 0) result = line.trimEnd() + char
+        if (fixedMasked[index]!.split(char).length % 2 === 0) result = line.trimEnd() + char
       }
       const closed = result !== line
       const length = closed ? line.trimEnd().length : line.length

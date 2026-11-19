@@ -42,6 +42,7 @@ const greeting = [
   "  try { r.cookie = typeof document.cookie === 'string' ? 'read' : 'blocked' } catch { r.cookie = 'blocked' }",
   "  try { top.location.href = 'https://example.com/away'; r.top = 'tried' } catch { r.top = 'blocked' }",
   "  try { r.popup = window.open('https://example.com/popup') ? 'opened' : 'blocked' } catch { r.popup = 'blocked' }",
+  "  r.star = ['a', '*'][1] + \"\\\"\".length", // odd '*' and '"' on one line: display fixes must not touch panel code
   "  document.getElementById('results').textContent = JSON.stringify(r)",
   "  document.body.dataset.ran = 'yes'",
   "})()",
@@ -126,7 +127,8 @@ for (const width of [1440, 390])
         sessionStorage: "blocked",
         cookie: "blocked",
         top: expect.stringMatching(/^(blocked|tried)$/) as unknown as string,
-        popup: "blocked"
+        popup: "blocked",
+        star: "*1"
       })
       expect(new URL(page.url()).pathname).toBe(`/chats/${started.chat.id}`)
       expect(elsewhere).toEqual([])
