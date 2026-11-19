@@ -20,7 +20,7 @@ const ownedCard = (sql: SqlClient.SqlClient, userId: UserId, entityId: EntityId,
   )
 
 /** The locked persona's id as stored, whether or not it can still be played. */
-export const storedPersonaLock = (sql: SqlClient.SqlClient, userId: UserId, entityId: EntityId) =>
+const storedPersonaLock = (sql: SqlClient.SqlClient, userId: UserId, entityId: EntityId) =>
   sql<{ persona_entity_id: string }>`SELECT persona_entity_id FROM persona_locks
     WHERE owner_user_id = ${userId} AND character_entity_id = ${entityId}`.pipe(
     Effect.map(([row]) => (row ? (row.persona_entity_id as EntityId) : null))
