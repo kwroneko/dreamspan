@@ -18,6 +18,7 @@ interface ShareRow {
   readonly created_at: number
   readonly inode: number | null
   readonly device: number | null
+  readonly birth_ms: number | null
   readonly suspended_at: number | null
   readonly handle: string
   readonly display_name: string
@@ -34,6 +35,7 @@ const toShare = (row: ShareRow) => ({
   displayName: row.display_name,
   inode: row.inode,
   device: row.device,
+  birthMs: row.birth_ms,
   suspendedAt: row.suspended_at
 })
 
@@ -72,7 +74,7 @@ export const makeFileShareWriteHandlers = Effect.gen(function* () {
       ([row]) => (row ? toShare(row) : null)
     )
   return {
-    InviteToFolder: ({ userId, path, inode, device, handle, mode }) =>
+    InviteToFolder: ({ userId, path, inode, device, birthMs, handle, mode }) =>
       Effect.gen(function* () {
         // The account the name is now, if enabled. An account named so later never gets it.
         const [grantee] = yield* sql<{ id: string }>`SELECT id FROM users
@@ -81,7 +83,8 @@ export const makeFileShareWriteHandlers = Effect.gen(function* () {
           // Already accepted: the mode changes. (The owner knows that account: it accepted.)
           const [held] = yield* sql<{ id: string }>`UPDATE file_shares SET mode = ${mode}
             WHERE owner_user_id = ${userId} AND path = ${path} AND grantee_user_id = ${grantee.id}
-              AND suspended_at IS NULL AND inode = ${inode} AND device = ${device} RETURNING id`
+              AND suspended_at IS NULL AND inode = ${inode} AND device = ${device}
+              AND birth_ms IS ${birthMs} RETURNING id`
           if (held) return { share: (yield* ownShare(userId, { id: held.id }))! }
         }
         yield* sql`INSERT INTO file_share_invitations ${sql.insert({
@@ -90,29 +93,40 @@ export const makeFileShareWriteHandlers = Effect.gen(function* () {
           path,
           inode,
           device,
+          birth_ms: birthMs,
           handle,
           grantee_user_id: grantee?.id ?? null,
           mode,
           created_at: Date.now()
         })} ON CONFLICT (owner_user_id, path, handle) DO UPDATE SET mode = excluded.mode,
-          inode = excluded.inode, device = excluded.device`
+          inode = excluded.inode, device = excluded.device, birth_ms = excluded.birth_ms, declined_at = NULL`
         const [row] = yield* sql<InvitationRow>`SELECT i.*, i.handle AS display_name FROM file_share_invitations i
           WHERE i.owner_user_id = ${userId} AND i.path = ${path} AND i.handle = ${handle}`
         return { invitation: toInvitation(row!) }
       }).pipe(transaction(sql, "InviteToFolder")),
     AnswerShareInvitation: ({ userId, invitationId, accept }) =>
       Effect.gen(function* () {
+        if (!accept) {
+          // Declined: it stays in the owner's list as Invited, like one to a name with no account
+          // (the owner can't tell the two apart), and only stops showing for this account.
+          const declined = yield* sql<{ id: string }>`UPDATE file_share_invitations SET declined_at = ${Date.now()}
+            WHERE id = ${invitationId} AND grantee_user_id = ${userId} AND declined_at IS NULL
+              AND owner_user_id IN (SELECT id FROM users WHERE disabled_at IS NULL) RETURNING id`
+          if (declined.length === 0) return yield* new NotFound({ entity: "invitation", id: invitationId })
+          return null
+        }
         const [invitation] = yield* sql<{
           owner_user_id: string
           path: string
           inode: number | null
           device: number | null
+          birth_ms: number | null
           mode: "view" | "edit"
         }>`DELETE FROM file_share_invitations WHERE id = ${invitationId} AND grantee_user_id = ${userId}
+          AND declined_at IS NULL
           AND owner_user_id IN (SELECT id FROM users WHERE disabled_at IS NULL)
-          RETURNING owner_user_id, path, inode, device, mode`
+          RETURNING owner_user_id, path, inode, device, birth_ms, mode`
         if (!invitation) return yield* new NotFound({ entity: "invitation", id: invitationId })
-        if (!accept) return null
         // The share starts now, on the folder the invitation was made on.
         yield* sql`INSERT INTO file_shares ${sql.insert({
           id: uuidv7(),
@@ -120,21 +134,24 @@ export const makeFileShareWriteHandlers = Effect.gen(function* () {
           path: invitation.path,
           inode: invitation.inode,
           device: invitation.device,
+          birth_ms: invitation.birth_ms,
           grantee_user_id: userId,
           mode: invitation.mode,
           created_at: Date.now(),
           suspended_at: null
         })} ON CONFLICT (owner_user_id, path, grantee_user_id) DO UPDATE SET mode = excluded.mode,
-          inode = excluded.inode, device = excluded.device, created_at = excluded.created_at, suspended_at = NULL`
+          inode = excluded.inode, device = excluded.device, birth_ms = excluded.birth_ms, created_at = excluded.created_at, suspended_at = NULL`
         const [row] = yield* sql<ShareRow>`SELECT s.*, u.handle, u.display_name FROM file_shares s
           JOIN users u ON u.id = s.owner_user_id
           WHERE s.owner_user_id = ${invitation.owner_user_id} AND s.path = ${invitation.path}
             AND s.grantee_user_id = ${userId}`
         return toShare(row!)
       }).pipe(transaction(sql, "AnswerShareInvitation")),
-    RebindFolderShare: ({ userId, shareId, inode, device }) =>
+    RebindFolderShare: ({ userId, shareId, inode, device, birthMs }) =>
       Effect.gen(function* () {
-        const done = yield* sql<{ id: string }>`UPDATE file_shares SET inode = ${inode}, device = ${device},
+        const done = yield* sql<{
+          id: string
+        }>`UPDATE file_shares SET inode = ${inode}, device = ${device}, birth_ms = ${birthMs},
           suspended_at = NULL, created_at = ${Date.now()}
           WHERE id = ${shareId} AND owner_user_id = ${userId} RETURNING id`
         if (done.length === 0) return yield* new NotFound({ entity: "share", id: shareId })
@@ -172,7 +189,7 @@ export const makeFileShareReadHandlers = Effect.gen(function* () {
       sql<InvitationRow>`SELECT i.id, i.owner_user_id, i.path, i.mode, i.created_at, i.grantee_user_id, u.handle,
         u.display_name
         FROM file_share_invitations i JOIN users u ON u.id = i.owner_user_id
-        WHERE i.grantee_user_id = ${userId} AND u.disabled_at IS NULL ORDER BY i.created_at, i.id`.pipe(
+        WHERE i.grantee_user_id = ${userId} AND i.declined_at IS NULL AND u.disabled_at IS NULL ORDER BY i.created_at, i.id`.pipe(
         Effect.map((rows) => rows.map(toInvitation)),
         query("ShareInvitationsReceived")
       ),

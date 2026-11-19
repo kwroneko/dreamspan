@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from "n
 import { join } from "node:path"
 import { Effect } from "effect"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 
 const as = (handle: string) => {
   const call = (path: string, init: RequestInit = {}) =>
@@ -489,6 +490,15 @@ describe("shared folders", () => {
       yield* ash.json("/files/invitation", { invitationId: offer.id, accept: false })
       assert.isUndefined((yield* ash.listing("/files")).invitations)
       assert.strictEqual(yield* statusOf(ash.list("/files/Shared/wren/A")), 404)
+      // The owner sees what they'd see for a name no account has: still Invited, until withdrawn.
+      const afterDecline = yield* wren.read<Array<FolderShare>>(yield* wren.call("/files/shares?path=%2Ffiles%2FA"))
+      assert.deepStrictEqual(
+        afterDecline.map(({ handle, status }) => [handle, status]),
+        [["ash", "invited"]]
+      )
+      // It can't be answered again, and the owner can still withdraw it.
+      assert.strictEqual(yield* statusOf(ash.json("/files/invitation", { invitationId: offer.id, accept: true })), 404)
+      assert.strictEqual(yield* statusOf(wren.json("/files/unshare", { shareId: afterDecline[0]!.id })), 200)
       assert.deepStrictEqual(
         yield* wren.read<Array<FolderShare>>(yield* wren.call("/files/shares?path=%2Ffiles%2FA")),
         []
@@ -564,4 +574,37 @@ describe("shared folders", () => {
       assert.strictEqual((item!.origin.by as { handle: string } | undefined)?.handle, "ash")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ authMode: "proxy" }))))
   )
+
+  it.live("a share is bound to its folder's birth time too, so a reused inode number never inherits it", () => {
+    const config = testConfig({ authMode: "proxy" })
+    return Effect.gen(function* () {
+      const wren = as("wren")
+      const ash = as("ash")
+      yield* ash.listing("/files")
+      yield* wren.upload("/files/A/a.txt", "A.")
+      yield* shareAccepted(wren, ash, "/files/A", "ash", "edit")
+      const [row] = (yield* fixtureSql(config.dataDir, [{ sql: "SELECT birth_ms FROM file_shares" }]))[0]!
+      // Where the filesystem gives a birth time, it's recorded (Node reports 0 where it doesn't).
+      const recorded = row!.birth_ms as number | null
+      if (recorded === null) return
+      assert.isAbove(recorded, 0)
+      assert.strictEqual(yield* ash.text("/files/Shared/wren/A/a.txt"), "A.")
+      // The folder at the path is born at another time, as a recreated one with the same inode
+      // number would be: not the shared folder.
+      yield* fixtureSql(config.dataDir, [{ sql: "UPDATE file_shares SET birth_ms = birth_ms - 5000" }])
+      assert.strictEqual(yield* statusOf(ash.list("/files/Shared/wren/A")), 404)
+      assert.strictEqual(yield* statusOf(ash.upload("/files/Shared/wren/A/new.txt", "x")), 404)
+      // Without a recorded birth time (a filesystem with none), the inode and device decide.
+      yield* fixtureSql(config.dataDir, [{ sql: "UPDATE file_shares SET birth_ms = NULL" }])
+      assert.strictEqual(yield* ash.text("/files/Shared/wren/A/a.txt"), "A.")
+      // Sharing it again binds the folder as it is now, birth time included.
+      yield* fixtureSql(config.dataDir, [{ sql: "UPDATE file_shares SET birth_ms = 1" }])
+      assert.strictEqual(yield* statusOf(ash.list("/files/Shared/wren/A")), 404)
+      const top = yield* wren.listing("/files")
+      yield* wren.json("/files/share/again", { shareId: top.unavailableShares![0]!.id })
+      assert.strictEqual(yield* ash.text("/files/Shared/wren/A/a.txt"), "A.")
+      const [after] = (yield* fixtureSql(config.dataDir, [{ sql: "SELECT birth_ms FROM file_shares" }]))[0]!
+      assert.strictEqual(after!.birth_ms, recorded)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
 })

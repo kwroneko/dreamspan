@@ -1109,7 +1109,10 @@ export const layer = Layer.unwrap(
         Effect.option
       )
       if (Option.isNone(input)) return jsonError(400, "expected drafts")
-      let recovered = 0
+      // Everything is checked first and then saved in one transaction: a batch is saved whole or not at all.
+      type Entry = Parameters<typeof writer.SaveDraftBatch>[0]["entries"][number]
+      const entries: Array<Entry> = []
+      const userDraftAt = new Set<number>()
       for (const draft of input.value.drafts) {
         if (parseField(draft.field) === null) return jsonError(400, "that isn't a field of a document")
         // A card on a card source before it's added (spec/CARD-SOURCES.md §4.3): its fields'
@@ -1123,8 +1126,8 @@ export const layer = Layer.unwrap(
                 sourceId: from.sourceId,
                 items: [{ remoteId: from.remoteId, sha256: null }]
               })
-        const saved = yield* writer.SaveDraft({
-          userId: user.id,
+        entries.push({
+          _tag: "draft",
           key:
             from !== null && held === undefined
               ? new DraftKey({
@@ -1143,22 +1146,20 @@ export const layer = Layer.unwrap(
           expectedSession: draft.expectedSession,
           baseRevision: from !== null ? null : draft.baseRevisionId
         })
-        recovered += saved.recovered
       }
       for (const { ownerId, targetId, field, ...save } of input.value.userDrafts ?? []) {
         if (ownerId !== user.id) return jsonError(404, "there is no such draft owner")
-        const draft = yield* writer.SaveDraft({
-          userId: user.id,
-          key: { targetKind: "user_field", targetId, field },
+        userDraftAt.add(entries.length)
+        entries.push({
+          _tag: "draft",
+          key: new DraftKey({ targetKind: "user_field", targetId, field }),
           ...save,
           baseRevision: null
         })
-        notices.publish(user.id, { _tag: "UserDraftChanged", draft })
-        recovered += draft.recovered
       }
       for (const summary of input.value.summaries ?? []) {
-        const saved = yield* writer.SaveDraft({
-          userId: user.id,
+        entries.push({
+          _tag: "draft",
           key: new DraftKey({ targetKind: "summary_edit", targetId: summary.summaryId, field: summary.forkId ?? "" }),
           draftId: summary.draftId,
           ...(summary.observedDeletion === undefined ? {} : { observedDeletion: summary.observedDeletion }),
@@ -1167,11 +1168,10 @@ export const layer = Layer.unwrap(
           expectedSession: summary.expectedSession,
           baseRevision: summary.baseRevisionId
         })
-        recovered += saved.recovered
       }
       for (const message of input.value.messages ?? []) {
-        const saved = yield* writer.SaveDraft({
-          userId: user.id,
+        entries.push({
+          _tag: "draft",
           key: messageDraftKey(message.target),
           draftId: message.draftId,
           ...(message.observedDeletion === undefined ? {} : { observedDeletion: message.observedDeletion }),
@@ -1181,7 +1181,6 @@ export const layer = Layer.unwrap(
           expectedSession: message.expectedSession,
           baseRevision: message.target._tag === "Queue" ? String(message.target.rowVersion) : null
         })
-        recovered += saved.recovered
       }
       for (const { path, baseSha256, ...save } of input.value.files ?? []) {
         const full = yield* Effect.try({
@@ -1189,18 +1188,18 @@ export const layer = Layer.unwrap(
           catch: () => new NotFound({ entity: "file", id: path })
         })
         if (full !== path || full === FILES_TOP) return jsonError(404, "there's no such file")
-        const saved = yield* writer.SaveDraft({
-          userId: user.id,
-          key: fileDraftKey(full),
-          ...save,
-          baseRevision: baseSha256
-        })
-        recovered += saved.recovered
+        entries.push({ _tag: "draft", key: fileDraftKey(full), ...save, baseRevision: baseSha256 })
       }
       for (const composer of input.value.composers ?? []) {
-        const saved = yield* writer.SaveComposer({ userId: user.id, ...composer })
-        recovered += Math.max(saved.draft?.recovered ?? 0, saved.recovered ? 1 : 0)
+        entries.push({ _tag: "composer", ...composer })
       }
+      const saved = entries.length === 0 ? [] : yield* writer.SaveDraftBatch({ userId: user.id, entries })
+      let recovered = 0
+      saved.forEach((result, at) => {
+        recovered += result.recovered
+        if (userDraftAt.has(at) && result.draft)
+          notices.publish(user.id, { _tag: "UserDraftChanged", draft: result.draft })
+      })
       return HttpServerResponse.empty({ status: 204, headers: { "x-drafts-recovered": String(recovered) } })
     }).pipe(
       Effect.catchTags({

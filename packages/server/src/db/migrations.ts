@@ -10,6 +10,7 @@ import { personaLocksMigration } from "./migrationPersonaLocks.ts"
 import { contractRecordsMigration } from "./migrationContractRecords.ts"
 import { attachmentPathsMigration } from "./migrationAttachmentPaths.ts"
 import { shareInvitationsMigration } from "./migrationShareInvitations.ts"
+import { shareBirthMigration } from "./migrationShareBirth.ts"
 import { rebuildTable, type OutsideStep } from "./tableRebuild.ts"
 
 /**
@@ -44,7 +45,9 @@ export const migrationDefinitions = {
   // spec/FILES-AND-ENVIRONMENT.md §6.1: where a workshop's attachment draft was saved in Files.
   "0008_attachment_paths": { statements: attachmentPathsMigration },
   // spec/FILES-AND-ENVIRONMENT.md §1.4: shares bound to their folder, and accepted before they reach anyone.
-  "0009_share_invitations": { statements: shareInvitationsMigration }
+  "0009_share_invitations": { statements: shareInvitationsMigration },
+  // spec/FILES-AND-ENVIRONMENT.md §1.4: a share also bound to its folder's birth time; declined invitations kept for the owner's view.
+  "0010_share_birth": { statements: shareBirthMigration }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 
 const runAll = (statements: ReadonlyArray<string>) =>

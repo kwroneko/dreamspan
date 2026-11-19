@@ -474,6 +474,33 @@ const CloseLlmRequest = Schema.Struct({
 
 // --- Library import
 /** A folder shared by its owner with another account (fileShares.ts); `handle` names the other side. */
+/** What `SaveDraft` saves, and each `draft` entry of `SaveDraftBatch`. */
+const SaveDraftFields = {
+  key: DraftKey,
+  /** The draft the text was typed into, if the client had one: another draft at the key is a conflict. */
+  draftId: Schema.NullOr(Schema.String),
+  content: Schema.String,
+  seed: Schema.optionalKey(Schema.Boolean),
+  editingFrom: Schema.optionalKey(EditingOrigin),
+  observedDeletion: Schema.optionalKey(ObservedDeletion),
+  images: Schema.optionalKey(MessageImages),
+  /** The draft as last seen: null if none was. */
+  expectedRowVersion: Schema.NullOr(Schema.Int),
+  expectedSession: Schema.NullOr(Schema.Int),
+  baseRevision: Schema.NullOr(Schema.String)
+}
+
+/** What `SaveComposer` saves, and each `composer` entry of `SaveDraftBatch`. */
+const SaveComposerFields = {
+  chatId: ChatId,
+  draftId: Schema.String,
+  rowVersion: Schema.Int,
+  session: Schema.Int,
+  next: Schema.Boolean,
+  operationId: Schema.String,
+  content: Schema.String
+}
+
 const FileShare = Schema.Struct({
   id: Schema.String,
   ownerUserId: Schema.String,
@@ -488,6 +515,8 @@ const FileShare = Schema.Struct({
   /** The folder it was made on (§1.4): a share resolves only while its path holds that folder. */
   inode: Schema.NullOr(Schema.Number),
   device: Schema.NullOr(Schema.Number),
+  /** Its birth time (statx btime), when the filesystem gives one: with the inode, the folder's identity. */
+  birthMs: Schema.NullOr(Schema.Number),
   /** The folder went to the bin: unavailable until its owner shares it again. */
   suspendedAt: Schema.NullOr(Schema.Number)
 })
@@ -1466,22 +1495,27 @@ const WriteOpsChatOwn = RpcGroup.make(
    * entry (DESIGN §6.2).
    */
   Rpc.make("SaveDraft", {
+    payload: { userId: UserId, ...SaveDraftFields },
+    success: Draft,
+    error: Schema.Union([NotFound, DraftTooLarge, StorageError])
+  }),
+  /**
+   * The drafts a page sends as it closes, all in one transaction: every one is saved, or, when
+   * one fails, none is. Each entry is what `SaveDraft` or `SaveComposer` would have saved; the
+   * answers come in the same order (`recovered`: how many texts were put back, `draft`: the
+   * saved draft of a `draft` entry).
+   */
+  Rpc.make("SaveDraftBatch", {
     payload: {
       userId: UserId,
-      key: DraftKey,
-      /** The draft the text was typed into, if the client had one: another draft at the key is a conflict. */
-      draftId: Schema.NullOr(Schema.String),
-      content: Schema.String,
-      seed: Schema.optionalKey(Schema.Boolean),
-      editingFrom: Schema.optionalKey(EditingOrigin),
-      observedDeletion: Schema.optionalKey(ObservedDeletion),
-      images: Schema.optionalKey(MessageImages),
-      /** The draft as last seen: null if none was. */
-      expectedRowVersion: Schema.NullOr(Schema.Int),
-      expectedSession: Schema.NullOr(Schema.Int),
-      baseRevision: Schema.NullOr(Schema.String)
+      entries: Schema.Array(
+        Schema.Union([
+          Schema.Struct({ _tag: Schema.Literal("draft"), ...SaveDraftFields }),
+          Schema.Struct({ _tag: Schema.Literal("composer"), ...SaveComposerFields })
+        ])
+      )
     },
-    success: Draft,
+    success: Schema.Array(Schema.Struct({ draft: Schema.NullOr(Draft), recovered: Schema.Int })),
     error: Schema.Union([NotFound, DraftTooLarge, StorageError])
   }),
   /**
@@ -1530,16 +1564,7 @@ const WriteOpsChatOwn = RpcGroup.make(
    * texts if the draft's session ended or the draft is gone.
    */
   Rpc.make("SaveComposer", {
-    payload: {
-      userId: UserId,
-      chatId: ChatId,
-      draftId: Schema.String,
-      rowVersion: Schema.Int,
-      session: Schema.Int,
-      next: Schema.Boolean,
-      operationId: Schema.String,
-      content: Schema.String
-    },
+    payload: { userId: UserId, ...SaveComposerFields },
     success: Schema.Struct({ draft: Schema.NullOr(Draft), recovered: Schema.Boolean }),
     error: Schema.Union([NotFound, DraftTooLarge, StorageError])
   }),
@@ -2959,6 +2984,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       path: Schema.String.check(Schema.isMaxLength(4096)),
       inode: Schema.Number,
       device: Schema.Number,
+      birthMs: Schema.NullOr(Schema.Number),
       handle: Schema.String.check(Schema.isMaxLength(128)),
       mode: Schema.Literals(["view", "edit"])
     },
@@ -2976,7 +3002,13 @@ const WriteOpsLibraryOwn = RpcGroup.make(
    * moved away by a command, or restored from the bin). Its versions from before stay out of reach.
    */
   Rpc.make("RebindFolderShare", {
-    payload: { userId: UserId, shareId: Schema.String, inode: Schema.Number, device: Schema.Number },
+    payload: {
+      userId: UserId,
+      shareId: Schema.String,
+      inode: Schema.Number,
+      device: Schema.Number,
+      birthMs: Schema.NullOr(Schema.Number)
+    },
     success: FileShare,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -6164,6 +6196,7 @@ const ReadOpsOwn = RpcGroup.make(
         path: Schema.String,
         inode: Schema.NullOr(Schema.Number),
         device: Schema.NullOr(Schema.Number),
+        birthMs: Schema.NullOr(Schema.Number),
         suspendedAt: Schema.NullOr(Schema.Number),
         createdAt: Schema.Number,
         mode: Schema.Literals(["view", "edit"])

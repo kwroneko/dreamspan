@@ -1124,7 +1124,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
           }
         }
         mounts.push({ source: "", target, writable, fd: dir.fd })
-        bound.push({ id: share.id, mode: writable ? "edit" : "view", inode: share.inode! })
+        bound.push({ id: share.id, mode: writable ? "edit" : "view", inode: share.inode!, birthMs: share.birthMs })
         if (writable)
           places.push({
             root: ownerRoot,
@@ -1313,6 +1313,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     readonly id: string
     readonly mode: "view" | "edit"
     readonly inode: number
+    readonly birthMs: number | null
   }
   interface Live {
     readonly userId: string
@@ -1391,7 +1392,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
         if (current)
           for (const bound of entry.shares) {
             const now = current.find(({ share }) => share.id === bound.id)
-            if (!now || now.share.inode !== bound.inode) return "a folder it used is no longer shared with the account"
+            if (!now || now.share.inode !== bound.inode || now.share.birthMs !== bound.birthMs)
+              return "a folder it used is no longer shared with the account"
             if (bound.mode === "edit" && now.share.mode !== "edit")
               return "a folder it changed is no longer shared with the account to edit"
           }

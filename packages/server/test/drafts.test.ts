@@ -426,4 +426,30 @@ describe("drafts", () => {
       }).pipe(Effect.provide(database())),
     60_000
   )
+
+  it.live("a batch of drafts saved on leaving is saved whole, or not at all", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, composer, chat } = yield* setup()
+      const entry = (content: string, key = composer()) => ({
+        _tag: "draft" as const,
+        draftId: null,
+        expectedSession: null,
+        key,
+        content,
+        expectedRowVersion: null,
+        baseRevision: null
+      })
+      // The second entry names a chat that isn't there: nothing of the batch is kept.
+      const missing = composerKey("no-such-chat" as never, chat.currentForkId)
+      const failed = yield* writer
+        .SaveDraftBatch({ userId, entries: [entry("First"), entry("Second", missing)] })
+        .pipe(Effect.flip)
+      assert.strictEqual(failed._tag, "NotFound")
+      assert.isNull(yield* reader.GetDraft({ userId, key: composer() }))
+      // A batch that holds together is saved, in order.
+      const saved = yield* writer.SaveDraftBatch({ userId, entries: [entry("First")] })
+      assert.strictEqual(saved.length, 1)
+      assert.strictEqual((yield* reader.GetDraft({ userId, key: composer() }))?.content, "First")
+    }).pipe(Effect.provide(database()))
+  )
 })

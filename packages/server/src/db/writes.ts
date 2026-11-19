@@ -157,6 +157,57 @@ export const makeWriteHandlers = (bin: Bin) =>
     const draftTarget = (userId: UserId, key: DraftKey) =>
       found(Effect.orDie(draftTargets[key.targetKind](userId, key)), key.targetKind, key.targetId)
 
+    /** The bodies of SaveDraft and SaveComposer: one transaction each, or all in SaveDraftBatch. */
+    const saveDraft = ({
+      userId,
+      key,
+      draftId,
+      content,
+      images,
+      expectedRowVersion,
+      expectedSession,
+      baseRevision,
+      observedDeletion,
+      seed,
+      editingFrom
+    }: Parameters<WriteHandlers["SaveDraft"]>[0]) =>
+      Effect.gen(function* () {
+        if (images !== undefined) yield* checkImages(userId, images)
+        return yield* drafts.save({
+          userId,
+          key,
+          draftId,
+          content,
+          base: expectedRowVersion === null ? null : { rowVersion: expectedRowVersion, session: expectedSession },
+          baseRevision,
+          checkTarget: draftTarget(userId, key),
+          observedDeletion,
+          seed,
+          editingFrom,
+          images
+        })
+      })
+    const saveComposer = ({
+      userId,
+      chatId,
+      draftId,
+      rowVersion,
+      session,
+      next,
+      operationId,
+      content
+    }: Parameters<WriteHandlers["SaveComposer"]>[0]) =>
+      Effect.gen(function* () {
+        yield* found(
+          Effect.orDie(
+            sql<{ n: number }>`SELECT count(*) AS n FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}`
+          ),
+          "chat",
+          chatId
+        )
+        return yield* drafts.saveComposer(userId, chatId, { draftId, rowVersion, session, next, operationId }, content)
+      })
+
     /** A position for state events: the user's chat, and a live slot of it unless it's the start. */
     const ownedPosition = (userId: UserId, chatId: ChatId, slotId: SlotId | null) =>
       Effect.gen(function* () {
@@ -240,35 +291,28 @@ export const makeWriteHandlers = (bin: Bin) =>
           return toChat(row!)
         }).pipe(transaction("CreateChat")),
 
-      SaveDraft: ({
-        userId,
-        key,
-        draftId,
-        content,
-        images,
-        expectedRowVersion,
-        expectedSession,
-        baseRevision,
-        observedDeletion,
-        seed,
-        editingFrom
-      }) =>
+      SaveDraft: (payload) => saveDraft(payload).pipe(transaction("SaveDraft")),
+
+      SaveDraftBatch: ({ userId, entries }) =>
         Effect.gen(function* () {
-          if (images !== undefined) yield* checkImages(userId, images)
-          return yield* drafts.save({
-            userId,
-            key,
-            draftId,
-            content,
-            base: expectedRowVersion === null ? null : { rowVersion: expectedRowVersion, session: expectedSession },
-            baseRevision,
-            checkTarget: draftTarget(userId, key),
-            observedDeletion,
-            seed,
-            editingFrom,
-            images
-          })
-        }).pipe(transaction("SaveDraft")),
+          const done: Array<{
+            draft: Effect.Success<ReturnType<typeof saveDraft>> | null
+            recovered: number
+          }> = []
+          for (const entry of entries) {
+            if (entry._tag === "draft") {
+              const draft = yield* saveDraft({ ...entry, userId })
+              done.push({ draft, recovered: draft.recovered })
+            } else {
+              const saved = yield* saveComposer({ ...entry, userId })
+              done.push({
+                draft: saved.draft,
+                recovered: Math.max(saved.draft?.recovered ?? 0, saved.recovered ? 1 : 0)
+              })
+            }
+          }
+          return done
+        }).pipe(transaction("SaveDraftBatch")),
 
       OpenComposer: ({ userId, chatId, forkId, copyFrom }) =>
         Effect.gen(function* () {
@@ -309,22 +353,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           .pipe(transaction("SetComposerChoice")),
 
       // Into a chat of the user's, live or in the bin: text typed as it was deleted is kept too.
-      SaveComposer: ({ userId, chatId, draftId, rowVersion, session, next, operationId, content }) =>
-        Effect.gen(function* () {
-          yield* found(
-            Effect.orDie(
-              sql<{ n: number }>`SELECT count(*) AS n FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}`
-            ),
-            "chat",
-            chatId
-          )
-          return yield* drafts.saveComposer(
-            userId,
-            chatId,
-            { draftId, rowVersion, session, next, operationId },
-            content
-          )
-        }).pipe(transaction("SaveComposer")),
+      SaveComposer: (payload) => saveComposer(payload).pipe(transaction("SaveComposer")),
 
       RestoreComposer: ({ userId, chatId, draftId, seq, expectedRowVersion, content }) =>
         drafts

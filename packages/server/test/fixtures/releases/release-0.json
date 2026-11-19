@@ -10,7 +10,8 @@
     "0006_persona_locks": "4b493b3cd5e259f1d93beec91675307117dc750f9e2c6c15e41c79cf988adae8",
     "0007_contract_records": "3216bbb24ba72d906af44f376d79c9182660de49217843ad2959e5f3eeb164e4",
     "0008_attachment_paths": "a269d7401bebea0e6c86b0c9cd63de3cabb549d7a6c416bcc5b4325d59243615",
-    "0009_share_invitations": "b70a23d8eb33716b36fd93dc604f90620b6095e0bcf80b89787d84adac247376"
+    "0009_share_invitations": "b70a23d8eb33716b36fd93dc604f90620b6095e0bcf80b89787d84adac247376",
+    "0010_share_birth": "0e5cbf65c91ee1c786b4f87c745ab8d23e557cb978e8585061029b8c2d14a7ec"
   },
   "schema": [
     {
@@ -1421,13 +1422,13 @@
       "type": "table",
       "name": "file_share_invitations",
       "tbl_name": "file_share_invitations",
-      "sql": "CREATE TABLE file_share_invitations ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, path TEXT NOT NULL CHECK (length(path) BETWEEN 1 AND 4096), inode INTEGER, device INTEGER, handle TEXT NOT NULL CHECK (length(handle) BETWEEN 1 AND 128), grantee_user_id TEXT REFERENCES users(id) ON DELETE CASCADE, mode TEXT NOT NULL CHECK (mode IN ('view', 'edit')), created_at INTEGER NOT NULL, UNIQUE (owner_user_id, path, handle) ) STRICT"
+      "sql": "CREATE TABLE file_share_invitations ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, path TEXT NOT NULL CHECK (length(path) BETWEEN 1 AND 4096), inode INTEGER, device INTEGER, handle TEXT NOT NULL CHECK (length(handle) BETWEEN 1 AND 128), grantee_user_id TEXT REFERENCES users(id) ON DELETE CASCADE, mode TEXT NOT NULL CHECK (mode IN ('view', 'edit')), created_at INTEGER NOT NULL, birth_ms REAL, declined_at INTEGER, UNIQUE (owner_user_id, path, handle) ) STRICT"
     },
     {
       "type": "table",
       "name": "file_shares",
       "tbl_name": "file_shares",
-      "sql": "CREATE TABLE file_shares ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, path TEXT NOT NULL CHECK (length(path) BETWEEN 1 AND 4096), inode INTEGER, grantee_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, mode TEXT NOT NULL CHECK (mode IN ('view', 'edit')), created_at INTEGER NOT NULL, device INTEGER, suspended_at INTEGER, UNIQUE (owner_user_id, path, grantee_user_id) ) STRICT"
+      "sql": "CREATE TABLE file_shares ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, path TEXT NOT NULL CHECK (length(path) BETWEEN 1 AND 4096), inode INTEGER, grantee_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, mode TEXT NOT NULL CHECK (mode IN ('view', 'edit')), created_at INTEGER NOT NULL, device INTEGER, suspended_at INTEGER, birth_ms REAL, UNIQUE (owner_user_id, path, grantee_user_id) ) STRICT"
     },
     {
       "type": "table",
