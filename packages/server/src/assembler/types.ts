@@ -315,6 +315,8 @@ export interface AgentAssembly {
   /** Card-swap: the preset's card places hold only the speaker's card (DESIGN §5.2). */
   readonly speakerCardOnly: boolean
   readonly workshop?: boolean
+  /** A workshop turn's tail lines (agent/turnNotes.ts), sent after its instructions, verbatim. */
+  readonly turnNotes?: ReadonlyArray<string>
   readonly stepSummaries?: Readonly<Record<string, string>>
   /** "model": the reply reserve is the model's max output within a quarter of the context. */
   readonly response?: "model"

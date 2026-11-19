@@ -6,14 +6,14 @@
 import { join } from "node:path"
 import { Context, Duration, Effect, Layer, Schedule } from "effect"
 import type { User, UserId } from "@dreamspan/shared/domain.ts"
-import { foldersShowing } from "@dreamspan/shared/files.ts"
+import { FILES_TOP, foldersShowing } from "@dreamspan/shared/files.ts"
 import { Notices } from "../chat/Notices.ts"
 import type { RolloutEffect } from "@dreamspan/shared/workshopApi.ts"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { ExecutionRegistry } from "../execution.ts"
 import { MediaHolds } from "../importer/MediaHolds.ts"
-import { makeFileTools } from "../agent/tools/files.ts"
+import { FILE_TOOLS, makeFileTools } from "../agent/tools/files.ts"
 import { makeAddressSet } from "../net/addressSet.ts"
 import { parsePublicOrigins } from "../net/exposure.ts"
 import { commandSandboxes } from "../sandbox/registry.ts"
@@ -101,6 +101,22 @@ export class WorkshopFiles extends Context.Service<
         onChanged: changed
       })
       for (const tool of files.tools) yield* execution.rolloutTools.register(tool)
+      // The turn's tail says where commands start (§2.1), when the turn offers the file tools.
+      yield* execution.turnNotes.register({
+        id: "files.workingFolder",
+        line: ({ userId, state, offered }) =>
+          Effect.gen(function* () {
+            if (!offered.some((id) => (FILE_TOOLS as ReadonlyArray<string>).includes(id))) return null
+            const stored = state.workshopFolder
+            if (!stored) return `Working folder: ${FILES_TOP}`
+            const now = yield* Effect.promise(() =>
+              locateFolder(accountEnv(dirs, userId).filesRoot, stored).catch(() => null)
+            )
+            return now
+              ? `Working folder: ${now}`
+              : `Working folder: ${FILES_TOP} (${stored.path} wasn't found, so commands start at the top of the files)`
+          })
+      })
 
       // Commands may not reach the server's own public addresses: those named, and those its
       // public origins' hosts resolve to (behind NAT neither is on an interface).

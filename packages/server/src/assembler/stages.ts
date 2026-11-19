@@ -2798,11 +2798,18 @@ const workshopInstructionsStage = sync("workshop-instructions", (assembly) => {
     const env = need(assembly, "macros")
     const piece = env.piece("workshop:instructions", { kind: "assembler", what: "Workshop instructions" }, raw)
     const text = env.text(piece)
-    if (!text.trim()) return end
+    // The turn's own lines (the working folder, spec/FILES-AND-ENVIRONMENT.md §2.1), verbatim:
+    // a folder's name is never a macro. In the tail, so a change keeps the cached prefix.
+    const notes = (assembly.request.agent!.turnNotes ?? []).map((line, i) => ({
+      text: line,
+      piece: env.verbatim(`workshop:turn-note:${i}`, { kind: "assembler", what: "Turn note" }, line)
+    }))
+    const own = [...(text.trim() ? [{ text, piece }] : []), ...notes]
+    if (own.length === 0) return end
     return {
       role: "user",
-      content: [end?.content, text].filter(Boolean).join("\n"),
-      pieces: [...(end?.pieces ?? []), piece],
+      content: [end?.content, ...own.map((o) => o.text)].filter(Boolean).join("\n"),
+      pieces: [...(end?.pieces ?? []), ...own.map((o) => o.piece)],
       kind: "volatile"
     }
   }

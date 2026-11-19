@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util"
 import { admitsEffect, outsideEffect } from "../agent/effects.ts"
 import { toolForKind } from "../execution.ts"
 import { DEFAULT_MAX_IMAGES } from "../assembler/images.ts"
@@ -429,6 +430,14 @@ export const layer = Layer.effect(
           const markerSkills = agentic
             ? skillMarkerInput(execution, chat.kind, yield* offerableTools({ reader, userId }, tools))
             : undefined
+          // A workshop turn's tail lines (agent/turnNotes.ts), such as its working folder.
+          const turnNotes = plan.assembly?.workshop
+            ? (yield* Effect.forEach(execution.turnNotes.list(), (note) =>
+                note
+                  .line({ userId, chatId, kind: chat.kind, state, offered: tools.map((t) => t.id) })
+                  .pipe(Effect.orElseSucceed(() => null))
+              )).filter((line): line is string => typeof line === "string" && line.trim() !== "")
+            : []
           const assemblyNow = Date.now()
           const assembleWith = (admitted?: { readonly stamp: string; readonly lore: ReadonlyArray<LoreAdmission> }) =>
             reader
@@ -455,6 +464,7 @@ export const layer = Layer.effect(
                           ) ?? "",
                         speakerCardOnly: plan.assembly?.speakerCardOnly ?? false,
                         ...(plan.assembly?.workshop ? { workshop: true } : {}),
+                        ...(turnNotes.length ? { turnNotes } : {}),
                         ...(plan.assembly?.response ? { response: plan.assembly.response } : {}),
                         ...(stepSummaries ? { stepSummaries } : {}),
                         ...(markerSkills ? { skills: markerSkills } : {})
@@ -622,6 +632,23 @@ export const layer = Layer.effect(
                 if (imageIds.size && snapshot.inputs.model?.vision === false) message.content += " [image]"
                 return { role: "rpUser", message, timestamp: entry.version.createdAt }
               })
+              // A workshop's tail lines (the working folder, agent/turnNotes.ts) are told again
+              // only on a turn after they changed: with the new user turn, after the cached prefix.
+              const notes = snapshot.agentAssembly?.turnNotes ?? []
+              if (notes.length && !isDeepStrictEqual(prior.snapshot.agentAssembly?.turnNotes ?? [], notes)) {
+                const last = additions.at(-1)
+                if (last?.role === "rpUser")
+                  additions[additions.length - 1] = {
+                    ...last,
+                    message: { ...last.message, content: `${last.message.content}\n${notes.join("\n")}` }
+                  }
+                else
+                  additions.push({
+                    role: "rpUser",
+                    message: { role: "user", content: notes.join("\n") },
+                    timestamp: Date.now()
+                  })
+              }
               seed = [...prior.transcript, ...additions]
               const budget = snapshot.contextBudget
               const countSeed = (transcript: ReadonlyArray<AgentMessage>) =>

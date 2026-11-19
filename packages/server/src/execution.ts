@@ -22,6 +22,7 @@ import { setPresence } from "./agent/tools/presence.ts"
 import { agentTool, messageAgentTool, storyHelperTool } from "./agent/subagents.ts"
 import { defaultMode, type OrchestrationMode } from "./agent/modes.ts"
 import type { RolloutTool } from "./agent/tools.ts"
+import type { TurnNote } from "./agent/turnNotes.ts"
 import {
   builtinToolLoadingProfiles,
   builtinToolLoadingWires,
@@ -82,6 +83,8 @@ export class ExecutionRegistry extends Context.Service<
     readonly skills: Registry<Skill>
     /** `tool_search` and `load_skill`: offered only in runs that defer a tool. */
     readonly toolLoaders: Registry<RolloutTool<never>>
+    /** Lines a workshop turn adds at its tail, in order (agent/turnNotes.ts). */
+    readonly turnNotes: Registry<TurnNote>
   }
 >()("rp/ExecutionRegistry") {
   static readonly layer = Layer.effect(
@@ -208,7 +211,8 @@ export class ExecutionRegistry extends Context.Service<
         toolLoadingProfiles,
         toolLoadingWires,
         skills,
-        toolLoaders
+        toolLoaders,
+        turnNotes: makeRegistry<TurnNote>()
       }
     })
   )
