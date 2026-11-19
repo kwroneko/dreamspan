@@ -14,6 +14,18 @@ export const makeMcpHandlers = Effect.gen(function* () {
   const writer = yield* Writer
   const mcp = yield* McpConnections
   const userId = Effect.map(CurrentUser, (user) => user.id)
+  /**
+   * A local program runs code on the server (spec/MCP.md §2.2): only an admin adds or changes
+   * one, only where the instance allows it. Database triggers refuse non-admins too.
+   */
+  const localProgramGate = (transport: string) =>
+    Effect.gen(function* () {
+      const user = yield* CurrentUser
+      if (transport !== "stdio") return user
+      const gate = yield* mcp.localProgramsFor(user.role)
+      if (!gate.allowed) return yield* new McpRefused({ message: gate.reason ?? "Local programs can't run here." })
+      return user
+    })
   return {
     ListMcpConnections: () =>
       Effect.flatMap(userId, (id) => reader.ListMcpConnections({ userId: id })).pipe(internal("ListMcpConnections")),
@@ -35,13 +47,29 @@ export const makeMcpHandlers = Effect.gen(function* () {
         internal("GetMcpConnection")
       ),
     CreateMcpConnection: ({ settings, apiKey, credentialId }) =>
-      Effect.flatMap(userId, (id) =>
-        mcp.create({ userId: id, settings, apiKey: apiKey ?? null, credentialId: credentialId ?? null })
-      ).pipe(internal("CreateMcpConnection")),
+      Effect.gen(function* () {
+        const user = yield* localProgramGate(settings.transport)
+        return yield* mcp.create({
+          userId: user.id,
+          settings,
+          apiKey: apiKey ?? null,
+          credentialId: credentialId ?? null
+        })
+      }).pipe(internal("CreateMcpConnection")),
     UpdateMcpConnection: ({ connectionId, settings, expectedRowVersion }) =>
-      Effect.flatMap(userId, (id) => mcp.update(id, connectionId, settings, expectedRowVersion)).pipe(
-        internal("UpdateMcpConnection")
-      ),
+      Effect.gen(function* () {
+        const user = yield* localProgramGate(settings.transport)
+        return yield* mcp.update(user.id, connectionId, settings, expectedRowVersion)
+      }).pipe(internal("UpdateMcpConnection")),
+    SetMcpEnvironment: ({ connectionId, env, expectedRowVersion }) =>
+      Effect.gen(function* () {
+        const user = yield* localProgramGate("stdio")
+        return yield* mcp.setEnvironment(user.id, connectionId, env, expectedRowVersion)
+      }).pipe(internal("SetMcpEnvironment")),
+    GetMcpLocalPrograms: () =>
+      Effect.flatMap(CurrentUser, (user) => mcp.localProgramsFor(user.role)).pipe(internal("GetMcpLocalPrograms")),
+    GetMcpProgramOutput: ({ connectionId }) =>
+      Effect.flatMap(userId, (id) => mcp.programOutput(id, connectionId)).pipe(internal("GetMcpProgramOutput")),
     SetMcpKey: ({ connectionId, apiKey, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) => mcp.setKey(id, connectionId, apiKey, expectedRowVersion)).pipe(
         internal("SetMcpKey")

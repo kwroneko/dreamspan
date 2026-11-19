@@ -2,7 +2,7 @@
 // transaction. Secrets arrive encrypted; the main thread's MCP client does the network work
 // between these.
 import type { UserId } from "@dreamspan/shared/domain.ts"
-import { mcpKeyFor } from "@dreamspan/shared/mcp.ts"
+import { mcpKeyFor, type McpConnectionSettings } from "@dreamspan/shared/mcp.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeMcpQueries, toMcpConnection } from "./mcpRows.ts"
@@ -56,6 +56,15 @@ export const ensureSharedUses = (sql: SqlClient.SqlClient, userId: UserId, at: n
       })}`
     }
   })
+
+/** Where a connection's calls go: an address, or a local program's argument list (no shell). */
+const reach = (settings: McpConnectionSettings) =>
+  settings.transport === "stdio"
+    ? {
+        url: null,
+        command_json: JSON.stringify([settings.program?.command ?? "", ...(settings.program?.args ?? [])])
+      }
+    : { url: settings.url, command_json: null }
 
 /** A stored error line: at most what the column holds. */
 const errorLine = (text: string) => (text.length > 1000 ? `${text.slice(0, 999)}…` : text)
@@ -134,7 +143,7 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
           key,
           about: settings.about,
           transport: settings.transport,
-          url: settings.url,
+          ...reach(settings),
           credential_id: credentialId,
           timeout_s: settings.timeoutS,
           created_at: at,
@@ -153,17 +162,39 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const row = yield* mine(userId, connectionId)
         yield* expectVersion(connectionId, row.row_version, expectedRowVersion)
+        const next = reach(settings)
+        const local = settings.transport === "stdio"
+        const switched = (row.transport === "stdio") !== local
         const sending =
-          row.url !== settings.url || row.transport !== settings.transport || row.timeout_s !== settings.timeoutS
+          row.url !== next.url ||
+          row.command_json !== next.command_json ||
+          row.transport !== settings.transport ||
+          row.timeout_s !== settings.timeoutS
+        // Switching between a remote server and a local program drops what only the other uses:
+        // a key, headers and a route, or the program's environment.
+        const dropped = !switched
+          ? {}
+          : local
+            ? {
+                credential_id: null,
+                headers_enc: null,
+                header_names_json: "[]",
+                headers_origin: null,
+                proxy_mode: "inherit",
+                proxy_url_enc: null
+              }
+            : { env_enc: null, env_names_json: "[]" }
         yield* sql`UPDATE mcp_connections SET ${sql.update({
           name: settings.name,
           about: settings.about,
           transport: settings.transport,
-          url: settings.url,
+          ...next,
+          ...dropped,
           timeout_s: settings.timeoutS,
           updated_at: at
         })}, row_version = row_version + 1, cache_revision = cache_revision + ${sending ? 1 : 0}
           WHERE id = ${connectionId}`
+        if (switched && local) yield* dropOwnedKey(row.credential_id)
         return yield* reload(userId, connectionId)
       }).pipe(transaction(sql, "UpdateMcpConnection")),
 
@@ -201,6 +232,19 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
         )
         return yield* reload(userId, connectionId)
       }).pipe(transaction(sql, "SetMcpHeaders")),
+
+    SetMcpEnvironment: ({ userId, connectionId, expectedRowVersion, env, at }) =>
+      Effect.gen(function* () {
+        const row = yield* mine(userId, connectionId)
+        yield* expectVersion(connectionId, row.row_version, expectedRowVersion)
+        // A trigger refuses this for anyone but an admin, and for a remote server (a CHECK).
+        yield* changeSending(
+          connectionId,
+          { env_enc: env?.enc ?? null, env_names_json: JSON.stringify(env?.names ?? []) },
+          at
+        )
+        return yield* reload(userId, connectionId)
+      }).pipe(transaction(sql, "SetMcpEnvironment")),
 
     SetMcpProxy: ({ userId, connectionId, mode, urlEnc, at }) =>
       Effect.gen(function* () {

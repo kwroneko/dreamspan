@@ -117,7 +117,15 @@ const AppConfigFromEnv = Config.all({
    * §6.1). A security setting, so it's configurable only here, outside the app: no RPC,
    * setting or agent tool can change it (owner, 2026-10-11).
    */
-  keyHostBinding: Config.Boolean(serverEnvironment.KEY_HOST_BINDING).pipe(Config.withDefault(true))
+  keyHostBinding: Config.Boolean(serverEnvironment.KEY_HOST_BINDING).pipe(Config.withDefault(true)),
+  /**
+   * `on` lets admins add MCP servers that are local programs (spec/MCP.md §2.2), run in the
+   * command sandbox. A security setting, so only here, outside the app; default off.
+   */
+  mcpLocalPrograms: Config.String(serverEnvironment.MCP_LOCAL_PROGRAMS).pipe(
+    Config.withDefault("off"),
+    Config.map((value) => value === "on")
+  )
 })
 
 export type AppConfigShape = Config.Success<typeof AppConfigFromEnv>

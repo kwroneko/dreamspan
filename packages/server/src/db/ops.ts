@@ -830,6 +830,18 @@ const McpWriteOps = RpcGroup.make(
     success: McpConnection,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
+  /** A local program's environment (spec/MCP.md §2.2): encrypted values and their names. */
+  Rpc.make("SetMcpEnvironment", {
+    payload: {
+      userId: UserId,
+      connectionId: McpConnectionId,
+      expectedRowVersion: Schema.Int,
+      env: Schema.NullOr(Schema.Struct({ enc: Schema.Uint8Array, names: Schema.Array(Schema.String) })),
+      at: Schema.Number
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
   Rpc.make("SetMcpProxy", {
     payload: {
       userId: UserId,
@@ -977,7 +989,9 @@ export const McpResolved = Schema.Struct({
   proxyUrlEnc: Schema.NullOr(Schema.Uint8Array),
   ownerRole: Schema.Literals(["admin", "user"]),
   /** The calling user's own sign-in with the server, still encrypted. */
-  oauthEnc: Schema.NullOr(Schema.Uint8Array)
+  oauthEnc: Schema.NullOr(Schema.Uint8Array),
+  /** A local program's environment variables, still encrypted. */
+  envEnc: Schema.NullOr(Schema.Uint8Array)
 })
 
 const McpReadOps = RpcGroup.make(

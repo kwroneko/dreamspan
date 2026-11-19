@@ -1116,6 +1116,21 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor) =>
       refused(actor.api.FinishMcpSignIn({ state: "someone-elses-state", code: "x", error: null }), "McpRefused")
   },
+  // Local programs are an admin's, where the instance allows them (mcpLocal.test.ts); here the
+  // switch is off, so everyone is refused before anything is read.
+  SetMcpEnvironment: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.SetMcpEnvironment({ connectionId: owner.mcpConnectionId, env: { A: "b" }, expectedRowVersion: 1 }),
+        "McpRefused"
+      )
+  },
+  GetMcpLocalPrograms: {
+    probe: (actor) => Effect.map(actor.api.GetMcpLocalPrograms(), (gate) => assert.isFalse(gate.allowed))
+  },
+  GetMcpProgramOutput: {
+    probe: (actor, owner) => refused(actor.api.GetMcpProgramOutput({ connectionId: owner.mcpConnectionId }), "NotFound")
+  },
   // Sharing is the owner's (an admin's); another user's server is NotFound, and only an admin
   // shares at all (mcpSharing.test.ts).
   SetMcpShare: {

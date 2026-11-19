@@ -55,6 +55,7 @@ import { describeRoute, proxyUrlProblem } from "../net/route.ts"
 import { credentialBinding, requestSecrets } from "../providers/Providers.ts"
 import { Secrets } from "../secrets.ts"
 import { buildCatalog, serverInfoOf } from "./catalog.ts"
+import { LOCAL_PROGRAMS_OFF, makeProgramStarter, PROGRAM_LIMITS, ProgramEnded, ProgramTransport } from "./stdio.ts"
 import {
   finishSignIn as finishFlow,
   type PendingSignIn,
@@ -72,11 +73,15 @@ const headersBinding = (connectionId: string) => `mcp:${connectionId}:headers`
 const proxyBinding = (connectionId: string) => `mcp:${connectionId}:proxy_url`
 /** A user's own sign-in with a connection (spec/MCP.md §2.4). */
 const oauthBinding = (connectionId: string, userId: string) => `mcp:${connectionId}:${userId}:oauth`
+const envBinding = (connectionId: string) => `mcp:${connectionId}:env`
 
 /** Everything a request to a server needs, secrets decrypted. Lives for one piece of work. */
 export interface McpPrepared {
   readonly connection: McpConnection
-  readonly url: URL
+  /** A remote server's address; null for a local program. */
+  readonly url: URL | null
+  /** A local program: its argument list and its own variables, decrypted; null for a remote server. */
+  readonly program: { readonly argv: ReadonlyArray<string>; readonly env: Readonly<Record<string, string>> } | null
   /** The custom headers, with the key as `Authorization: Bearer`. */
   readonly headers: Readonly<Record<string, string>>
   readonly network: RequestNetwork
@@ -88,6 +93,8 @@ export interface McpPrepared {
 
 /** A client connected to one server, with what it has sent and received so far. */
 interface McpSession {
+  /** A local program's transport, which knows when it ended; null for a remote server. */
+  readonly program: ProgramTransport | null
   readonly client: Client
   readonly counts: { sent: number; received: number }
   readonly protocolVersion: () => string
@@ -156,6 +163,24 @@ export interface McpConnectionsShape {
     attribution: McpAttribution,
     transport?: RemoteMcpTransport
   ) => Effect.Effect<McpSession, McpRequestFailed | NotFound | StorageFailure, Scope.Scope>
+  /** `MCP_LOCAL_PROGRAMS=on`: local programs may run here. */
+  readonly localPrograms: boolean
+  /** Whether a user with this role may add local programs here, and if not, why. */
+  readonly localProgramsFor: (
+    role: "admin" | "user"
+  ) => Effect.Effect<{ readonly allowed: boolean; readonly reason: string | null }>
+  /** A local program's environment (admins: the RPC checks); its kept clients close. */
+  readonly setEnvironment: (
+    userId: UserId,
+    connectionId: McpConnectionId,
+    env: Readonly<Record<string, string>> | null,
+    expectedRowVersion: number
+  ) => Effect.Effect<McpConnection, McpFailure>
+  /** The caller's own process of a local program: whether it runs, and its last stderr. */
+  readonly programOutput: (
+    userId: UserId,
+    connectionId: McpConnectionId
+  ) => Effect.Effect<{ readonly running: boolean; readonly output: string }, NotFound | StorageFailure>
   /**
    * One `tools/call` (spec/MCP.md §7): a client opened for it (its `initialize` in the ledger),
    * the call recorded before it's sent, and closed after. Stop (interrupting the effect) and the
@@ -257,7 +282,8 @@ export class McpConnections extends Context.Service<McpConnections, McpConnectio
 /** A request to a server that failed, with what the ledger and the user are told. */
 export class McpRequestFailed extends Error {
   override readonly name = "McpRequestFailed"
-  readonly status: "error" | "failed" | "timeout" | "cancelled"
+  /** `interrupted`: a local program ended while the request waited on it. */
+  readonly status: "error" | "failed" | "timeout" | "cancelled" | "interrupted"
   /** The server refused the key or headers: the other transport needn't be tried. */
   readonly auth: boolean
   /**
@@ -345,9 +371,17 @@ const failureOf = (
   name: string,
   timeoutS: number,
   aborted: boolean,
-  scrub: (text: string) => string
+  scrub: (text: string) => string,
+  program: ProgramTransport | null
 ): McpRequestFailed => {
   if (aborted) return new McpRequestFailed("cancelled", "Stopped before the server answered.", false)
+  // A local program that ended under a request: it may have done it before it stopped.
+  if (program !== null && (program.ended !== null || error instanceof ProgramEnded))
+    return new McpRequestFailed(
+      "interrupted",
+      `${name} stopped while it ran: ${(program.ended ?? (error as Error)).message}.`,
+      false
+    )
   if (error instanceof McpError && error.code === ErrorCode.RequestTimeout)
     return new McpRequestFailed("timeout", `${name} didn't answer within ${timeoutS} s.`, false)
   const code = httpCode(error)
@@ -386,6 +420,26 @@ export const layer = Layer.effect(
         const url = settings.url.trim()
         if (name === "" || name.length > 100) return yield* refused("Give the server a name of at most 100 characters.")
         if (settings.about.length > 1000) return yield* refused("Keep what it's for under 1,000 characters.")
+        if (
+          !Number.isInteger(settings.timeoutS) ||
+          settings.timeoutS < MCP_TIMEOUT_MIN_S ||
+          settings.timeoutS > MCP_TIMEOUT_MAX_S
+        )
+          return yield* refused(`Choose a timeout from ${MCP_TIMEOUT_MIN_S} to ${MCP_TIMEOUT_MAX_S} seconds.`)
+        if (settings.transport === "stdio") {
+          const command = settings.program?.command.trim() ?? ""
+          const args = settings.program?.args ?? []
+          if (command === "" || command.length > PROGRAM_LIMITS.command || command.includes("\0"))
+            return yield* refused("Enter the program to run, such as npx.")
+          if (
+            args.length > PROGRAM_LIMITS.arguments ||
+            args.some((arg) => arg.length > PROGRAM_LIMITS.argument || arg.includes("\0"))
+          )
+            return yield* refused(
+              `Give at most ${PROGRAM_LIMITS.arguments} arguments of at most ${PROGRAM_LIMITS.argument.toLocaleString("en")} characters.`
+            )
+          return { ...settings, name, url: "", program: { command, args: [...args] }, about: settings.about.trim() }
+        }
         const origin = originOf(url)
         if (origin === null || !/^https?:$/.test(new URL(url).protocol) || url.length > 2048)
           return yield* refused("Enter the server's full address, such as https://example.com/mcp.")
@@ -395,7 +449,8 @@ export const layer = Layer.effect(
           settings.timeoutS > MCP_TIMEOUT_MAX_S
         )
           return yield* refused(`Choose a timeout from ${MCP_TIMEOUT_MIN_S} to ${MCP_TIMEOUT_MAX_S} seconds.`)
-        return { ...settings, name, url, about: settings.about.trim() }
+        const { program: _program, ...remote } = settings
+        return { ...remote, name, url, about: settings.about.trim() }
       })
 
     /** A key as typed: whitespace dropped, nothing left means none. */
@@ -530,8 +585,7 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const resolved: typeof McpResolved.Type = yield* reader.ResolveMcpConnection({ userId, connectionId })
         const connection = resolved.connection
-        if (connection.transport === "stdio" || connection.url === null)
-          return yield* refused(`${connection.name} is a local program, which this server doesn't run.`)
+        if (connection.transport === "stdio" || connection.url === null) return yield* prepareProgram(resolved)
         const url = new URL(connection.url)
         const origin = url.origin
         const inventory = requestSecrets()
@@ -594,6 +648,7 @@ export const layer = Layer.effect(
         return {
           connection,
           url,
+          program: null,
           headers,
           network: requestNetwork,
           scrub: inventory.scrub,
@@ -604,6 +659,45 @@ export const layer = Layer.effect(
 
     const prepare: McpConnectionsShape["prepare"] = (userId, connectionId) => prepareWith(userId, connectionId, true)
 
+    // Local programs (spec/MCP.md §2.2): run in the command sandbox, only where the instance
+    // allows them and only while their owner is an admin.
+    const programs = makeProgramStarter({ dataDir: config.dataDir, sandboxId: config.commandSandbox })
+    const localProgramsFor: McpConnectionsShape["localProgramsFor"] = (role) =>
+      Effect.promise(async () => {
+        if (!config.mcpLocalPrograms) return { allowed: false, reason: LOCAL_PROGRAMS_OFF }
+        if (role !== "admin") return { allowed: false, reason: "Only an admin can add a local program." }
+        const reason = await programs.unavailable()
+        return { allowed: reason === null, reason }
+      })
+    const prepareProgram = (resolved: typeof McpResolved.Type) =>
+      Effect.gen(function* () {
+        const connection = resolved.connection
+        if (!config.mcpLocalPrograms) return yield* refused(LOCAL_PROGRAMS_OFF)
+        if (resolved.ownerRole !== "admin")
+          return yield* refused(`${connection.name} is a local program, which only an admin's server runs.`)
+        if (connection.program === null || connection.program.command === "")
+          return yield* refused(`${connection.name} has no program to run.`)
+        const inventory = requestSecrets()
+        const envJson =
+          resolved.envEnc === null
+            ? null
+            : yield* secrets
+                .decrypt(resolved.envEnc, envBinding(connection.id))
+                .pipe(Effect.mapError((error) => new McpRefused({ message: error.message })))
+        const env = envJson === null ? {} : (JSON.parse(envJson) as Record<string, string>)
+        for (const value of Object.values(env)) inventory.add(value)
+        return {
+          connection,
+          url: null,
+          program: { argv: [connection.program.command, ...connection.program.args], env },
+          headers: {},
+          // Unused: the program reaches the internet through the sandbox's own proxy.
+          network: network.prepare({ mode: "inherit" }, inventory.add),
+          scrub: inventory.scrub,
+          signIn: ""
+        } satisfies McpPrepared
+      })
+
     /** Runs one request with its ledger row: opened before anything is sent, closed once after. */
     const recorded = <A>(
       userId: UserId,
@@ -613,7 +707,9 @@ export const layer = Layer.effect(
       attribution: McpAttribution,
       send: (signal: AbortSignal, timeoutMs: number) => Promise<A>,
       /** The longest the request may take in all (a call reporting progress); else the timeout. */
-      totalMs?: number
+      totalMs?: number,
+      /** A local program's transport, to tell a request it ended under. */
+      program: ProgramTransport | null = null
     ) =>
       Effect.gen(function* () {
         const connection = prepared.connection
@@ -654,7 +750,7 @@ export const layer = Layer.effect(
             signal.addEventListener("abort", () => (aborted = true))
             return send(signal, timeoutMs)
           },
-          catch: (error) => failureOf(error, connection.name, connection.timeoutS, aborted, prepared.scrub)
+          catch: (error) => failureOf(error, connection.name, connection.timeoutS, aborted, prepared.scrub, program)
         }).pipe(
           // The SSE transport's start has no timeout of its own.
           Effect.timeoutOrElse({
@@ -686,19 +782,31 @@ export const layer = Layer.effect(
         const options = { fetch, requestInit: { headers: { ...prepared.headers } } }
         const kind = which ?? (connection.transport === "sse" ? "sse" : "streamable-http")
         const counts = { sent: 0, received: 0 }
+        const local = prepared.program
+        const program =
+          local === null
+            ? null
+            : new ProgramTransport(
+                () => programs.start({ connectionId: connection.id, userId, argv: local.argv, env: local.env }),
+                programs.outputOf(connection.id, userId)
+              )
+        const url = prepared.url
+        if (program === null && url === null) return yield* Effect.die(new Error("no address"))
         const transport = new CountingTransport(
-          kind === "sse"
-            ? new SSEClientTransport(prepared.url, options)
-            : new StreamableHTTPClientTransport(prepared.url, {
-                ...options,
-                // A dropped stream isn't reopened behind the app's back: the call reports it.
-                reconnectionOptions: {
-                  maxRetries: 0,
-                  initialReconnectionDelay: 1000,
-                  maxReconnectionDelay: 1000,
-                  reconnectionDelayGrowFactor: 1
-                }
-              }),
+          program !== null
+            ? program
+            : kind === "sse"
+              ? new SSEClientTransport(url!, options)
+              : new StreamableHTTPClientTransport(url!, {
+                  ...options,
+                  // A dropped stream isn't reopened behind the app's back: the call reports it.
+                  reconnectionOptions: {
+                    maxRetries: 0,
+                    initialReconnectionDelay: 1000,
+                    maxReconnectionDelay: 1000,
+                    reconnectionDelayGrowFactor: 1
+                  }
+                }),
           counts
         )
         const client = new Client(MCP_CLIENT_INFO, { capabilities: {} })
@@ -712,8 +820,15 @@ export const layer = Layer.effect(
           throw new McpError(ErrorCode.MethodNotFound, `${request.method} isn't supported`)
         }
         yield* Effect.acquireRelease(
-          recorded(userId, prepared, counts, { method: "initialize", tool: null }, attribution, (signal, timeout) =>
-            client.connect(transport, { signal, timeout })
+          recorded(
+            userId,
+            prepared,
+            counts,
+            { method: "initialize", tool: null },
+            attribution,
+            (signal, timeout) => client.connect(transport, { signal, timeout }),
+            undefined,
+            program
           ),
           // A cancellation being sent goes first. Closing aborts the client's streams; a server that
           // never lets go doesn't hold the caller.
@@ -725,6 +840,7 @@ export const layer = Layer.effect(
             ).pipe(Effect.timeout("5 seconds"), Effect.ignore)
         )
         return {
+          program,
           client,
           counts,
           protocolVersion: () => transport.protocolVersion,
@@ -733,7 +849,7 @@ export const layer = Layer.effect(
       })
 
     const request: McpConnectionsShape["request"] = (userId, prepared, session, { method, tool, attribution, send }) =>
-      recorded(userId, prepared, session.counts, { method, tool }, attribution, send)
+      recorded(userId, prepared, session.counts, { method, tool }, attribution, send, undefined, session.program)
 
     // The kept clients (spec/MCP.md §7.1): one per (connection, user), opened by the first call
     // that needs one and closed after 5 idle minutes, when the connection's `cache_revision`
@@ -894,7 +1010,8 @@ export const layer = Layer.effect(
                     })
                 }
               ),
-            MCP_CALL_MAX_MS
+            MCP_CALL_MAX_MS,
+            session.program
           )
         /** One attempt on a kept client, released after; `stale` asks for a fresh one. */
         const attempt = (number: number, stale?: Pooled) =>
@@ -908,7 +1025,11 @@ export const layer = Layer.effect(
             if (outcome._tag === "Success") return { _tag: "Done", result: outcome.success } as const
             const failure = outcome.failure
             // A dropped connection leaves the session in doubt: the next call opens another.
-            if (failure instanceof McpRequestFailed && failure.status === "failed") entry.dead = true
+            if (
+              failure instanceof McpRequestFailed &&
+              (failure.status === "failed" || failure.status === "interrupted")
+            )
+              entry.dead = true
             return { _tag: "Sent", failure, entry } as const
           })
         const first = yield* attempt(attribution.attempt)
@@ -1080,7 +1201,10 @@ export const layer = Layer.effect(
         // The user picks the transport; when it fails, Check sees whether the other one answers.
         const other: RemoteMcpTransport = transport === "sse" ? "streamable-http" : "sse"
         const probe =
-          listed.failure.auth || listed.failure.status === "timeout" || listed.failure.status === "cancelled"
+          before.transport === "stdio" ||
+          listed.failure.auth ||
+          listed.failure.status === "timeout" ||
+          listed.failure.status === "cancelled"
             ? false
             : yield* Effect.scoped(open(userId, prepared.success, CHECK, other)).pipe(
                 Effect.as(true),
@@ -1105,6 +1229,8 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const valid = yield* checked(settings)
         const key = typedKey(apiKey)
+        if (valid.transport === "stdio" && (key !== null || credentialId !== null))
+          return yield* refused("A local program takes no key: give it environment variables instead.")
         const connectionId = uuidv7() as McpConnectionId
         yield* writer.CreateMcpConnection({
           userId,
@@ -1129,7 +1255,11 @@ export const layer = Layer.effect(
           at: Date.now()
         })
         if (connection.cacheRevision !== before.cacheRevision) yield* closeKept(connectionId)
-        if (before.url === connection.url && before.transport === connection.transport)
+        if (
+          before.url === connection.url &&
+          before.transport === connection.transport &&
+          JSON.stringify(before.program) === JSON.stringify(connection.program)
+        )
           return { connection, check: null }
         return yield* check(userId, connectionId)
       })
@@ -1231,12 +1361,14 @@ export const layer = Layer.effect(
         const problem = appOriginProblem(appOrigin)
         if (problem !== null) return yield* refused(problem)
         const prepared = yield* prepareWith(userId, connectionId, false)
+        const url = prepared.url
+        if (url === null) return yield* refused(`${prepared.connection.name} is a local program: it has no sign-in.`)
         const resolved = yield* reader.ResolveMcpConnection({ userId, connectionId })
         // An earlier sign-in's registration is used again when it was for the same address.
         const previous = resolved.oauthEnc === null ? null : yield* readSignIn(connectionId, userId, resolved.oauthEnc)
         const redirectUri = `${appOrigin}${MCP_OAUTH_CALLBACK}`
         const started = yield* signInStep(userId, prepared, prepared.network, (fetchFn) =>
-          startFlow(fetchFn, prepared.url, redirectUri, previous)
+          startFlow(fetchFn, url, redirectUri, previous)
         )
         // The page is opened by the browser: only a web address.
         if (!/^https?:$/.test(started.authorizationUrl.protocol))
@@ -1247,7 +1379,7 @@ export const layer = Layer.effect(
           userId,
           connectionId,
           cacheRevision: prepared.connection.cacheRevision,
-          origin: prepared.url.origin,
+          origin: url.origin,
           pending: started.pending,
           until: now + SIGN_IN_PENDING_MS
         })
@@ -1267,10 +1399,11 @@ export const layer = Layer.effect(
         const name = prepared.connection.name
         if (error !== null) return yield* refused(`${name} didn't sign you in: ${prepared.scrub(error).slice(0, 200)}`)
         if (code === null || code === "") return yield* refused(`${name} didn't sign you in.`)
-        if (prepared.connection.cacheRevision !== entry.cacheRevision || prepared.url.origin !== entry.origin)
+        const url = prepared.url
+        if (prepared.connection.cacheRevision !== entry.cacheRevision || url === null || url.origin !== entry.origin)
           return yield* refused(`${name}'s address changed while you were signing in. Start again.`)
         const stored = yield* signInStep(userId, prepared, prepared.network, (fetchFn) =>
-          finishFlow(fetchFn, prepared.url, entry.pending, code, Date.now())
+          finishFlow(fetchFn, url, entry.pending, code, Date.now())
         )
         yield* writer.SetMcpOAuth({
           userId,
@@ -1293,7 +1426,48 @@ export const layer = Layer.effect(
         .SetMcpOAuth({ userId, connectionId, oauth: null, at: Date.now() })
         .pipe(Effect.tap(() => closeKeptFor(connectionId, userId)))
 
+    const setEnvironment: McpConnectionsShape["setEnvironment"] = (userId, connectionId, env, expectedRowVersion) =>
+      Effect.gen(function* () {
+        const connection = yield* reader.GetMcpConnection({ userId, connectionId })
+        if (connection.transport !== "stdio") return yield* refused("Only a local program has environment variables.")
+        const entries = Object.entries(env ?? {}).map(([name, value]) => [name.trim(), value] as const)
+        for (const [name, value] of entries) {
+          if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name))
+            return yield* refused(`"${name}" isn't a valid variable name.`)
+          // These are the sandbox's own; a program gets the server's PATH and its own HOME.
+          if (["PATH", "HOME", "LANG"].includes(name)) return yield* refused(`${name} is set by the app.`)
+          if (value.includes("\0") || value.length > 32_768)
+            return yield* refused(`${name}'s value is too long or invalid.`)
+        }
+        if (entries.length > 64) return yield* refused("Give at most 64 variables.")
+        return yield* writer
+          .SetMcpEnvironment({
+            userId,
+            connectionId,
+            expectedRowVersion,
+            env:
+              entries.length === 0
+                ? null
+                : {
+                    enc: secrets.encrypt(JSON.stringify(Object.fromEntries(entries)), envBinding(connectionId)),
+                    names: entries.map(([name]) => name)
+                  },
+            at: Date.now()
+          })
+          .pipe(Effect.tap(() => closeKept(connectionId)))
+      })
+
+    const programOutput: McpConnectionsShape["programOutput"] = (userId, connectionId) =>
+      Effect.map(reader.GetMcpConnection({ userId, connectionId }), () => {
+        const ring = programs.outputOf(connectionId, userId)
+        return { running: ring.running, output: ring.text() }
+      })
+
     return McpConnections.of({
+      localPrograms: config.mcpLocalPrograms,
+      localProgramsFor,
+      setEnvironment,
+      programOutput,
       startSignIn,
       finishSignIn,
       signOut,

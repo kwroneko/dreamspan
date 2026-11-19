@@ -1,5 +1,5 @@
 // Settings → MCP servers: the list, and the form for a new server (spec/MCP.md §13.1).
-import { MCP_TIMEOUT_DEFAULT_S, type McpConnectionSettings, type RemoteMcpTransport } from "@dreamspan/shared/mcp.ts"
+import { MCP_TIMEOUT_DEFAULT_S, type McpConnectionSettings, type McpTransport } from "@dreamspan/shared/mcp.ts"
 import { originOf } from "@dreamspan/shared/providers.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
@@ -10,7 +10,7 @@ import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useTitle } from "../shell.tsx"
-import { credentialsAtom, mcpConnectionsAtom, mcpHost, mcpStatus } from "./data.ts"
+import { credentialsAtom, localProgramsAtom, mcpConnectionsAtom, mcpHost, mcpStatus } from "./data.ts"
 
 export function McpServersPage() {
   useTitle("MCP servers")
@@ -70,9 +70,34 @@ export function McpServersPage() {
   )
 }
 
-/** The transports a user picks from, with what each is for. */
-export const transportItems: ReadonlyArray<{
-  readonly value: RemoteMcpTransport
+/** What a local program is, on its choice and its form. */
+const LOCAL_PROGRAM_NOTE =
+  "Runs a program on this server, in a sandbox that sees only its own folder and the internet. Only add programs you trust."
+
+/**
+ * The transports a user picks from, with what each is for. A local program is listed for
+ * everyone, disabled with the reason where the user can't add one.
+ */
+export const transportItems = (local: {
+  readonly allowed: boolean
+  readonly reason: string | null
+}): ReadonlyArray<{
+  readonly value: McpTransport
+  readonly label: string
+  readonly description: string
+  readonly disabled?: boolean
+}> => [
+  ...remoteTransportItems,
+  {
+    value: "stdio",
+    label: "Local program",
+    description: local.allowed ? LOCAL_PROGRAM_NOTE : (local.reason ?? "Not available here."),
+    disabled: !local.allowed
+  }
+]
+
+const remoteTransportItems: ReadonlyArray<{
+  readonly value: McpTransport
   readonly label: string
   readonly description: string
 }> = [
@@ -98,6 +123,16 @@ export const parseTimeout = (text: string): { value: number; problem: string | n
     : { value: MCP_TIMEOUT_DEFAULT_S, problem: "Enter a whole number of seconds from 5 to 1800." }
 }
 
+/** Arguments as typed, one per line; blank lines dropped. */
+export const parseArguments = (text: string) =>
+  text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+
+/** The program's problem, or null. */
+export const programProblem = (command: string) => (command.trim() === "" ? "Enter the program to run." : null)
+
 /** The address's problem, or null. */
 export const addressProblem = (url: string) => {
   const trimmed = url.trim()
@@ -106,19 +141,29 @@ export const addressProblem = (url: string) => {
   return origin === null || !/^https?:/.test(trimmed) ? "Enter a full address, such as https://example.com/mcp." : null
 }
 
-function NewServerForm({ hasSavedKeys }: { hasSavedKeys: boolean }) {
+function NewServerForm({
+  hasSavedKeys,
+  local
+}: {
+  hasSavedKeys: boolean
+  local: { readonly allowed: boolean; readonly reason: string | null }
+}) {
   const navigate = useNavigate()
   const action = useAction()
   const [name, setName] = useState("")
   const [about, setAbout] = useState("")
-  const [transport, setTransport] = useState<RemoteMcpTransport>("streamable-http")
+  const [transport, setTransport] = useState<McpTransport>("streamable-http")
   const [url, setUrl] = useState("")
+  const [command, setCommand] = useState("")
+  const [args, setArgs] = useState("")
   const [submitted, setSubmitted] = useState(false)
-  const origin = originOf(url.trim())
+  const program = transport === "stdio"
+  const origin = program ? null : originOf(url.trim())
   const host = origin === null ? null : new URL(origin).host
   const problems = {
-    name: name.trim() === "" && host === null ? "Give the server a name." : null,
-    url: addressProblem(url)
+    name: name.trim() === "" && (program ? command.trim() === "" : host === null) ? "Give the server a name." : null,
+    url: program ? null : addressProblem(url),
+    command: program ? programProblem(command) : null
   }
   const shown = (problem: string | null) => (submitted ? problem : null)
 
@@ -126,12 +171,13 @@ function NewServerForm({ hasSavedKeys }: { hasSavedKeys: boolean }) {
     event.preventDefault()
     setSubmitted(true)
     if (Object.values(problems).some((problem) => problem !== null)) return focusFirstInvalid(event.currentTarget)
-    const apiKey = formText(event.currentTarget, "apiKey")
+    const apiKey = program ? "" : formText(event.currentTarget, "apiKey")
     const settings: McpConnectionSettings = {
-      name: name.trim() || host!,
+      name: name.trim() || (program ? command.trim() : host!),
       about: about.trim(),
       transport,
-      url: url.trim(),
+      url: program ? "" : url.trim(),
+      ...(program ? { program: { command: command.trim(), args: parseArguments(args) } } : {}),
       timeoutS: MCP_TIMEOUT_DEFAULT_S
     }
     const result = await action.run(
@@ -153,33 +199,45 @@ function NewServerForm({ hasSavedKeys }: { hasSavedKeys: boolean }) {
           <Textarea value={about} onChange={(event) => setAbout(event.currentTarget.value)} rows={2} />
         </Field>
         <Field label="Transport" about="How the app talks to the server. Most servers speak Streamable HTTP.">
-          <Select items={transportItems} value={transport} onValueChange={setTransport} />
+          <Select items={transportItems(local)} value={transport} onValueChange={setTransport} />
         </Field>
-        <Field
-          label="Address"
-          about="The server’s full address, as its documentation gives it."
-          error={shown(problems.url)}
-        >
-          <Input
-            value={url}
-            onValueChange={setUrl}
-            placeholder="https://example.com/mcp"
-            inputMode="url"
-            autoCapitalize="none"
-            spellCheck={false}
+        {program ? (
+          <ProgramFields
+            command={command}
+            onCommandChange={setCommand}
+            args={args}
+            onArgsChange={setArgs}
+            error={shown(problems.command)}
           />
-        </Field>
-        <Field
-          label="Bearer token"
-          about="A key the server gave you, if it needs one. It's never shown again."
-          description={
-            origin
-              ? `Optional. Sent only to ${origin}.${hasSavedKeys ? " A saved key can be chosen on the next page." : ""}`
-              : "Optional."
-          }
-        >
-          <SecretInput name="apiKey" />
-        </Field>
+        ) : (
+          <>
+            <Field
+              label="Address"
+              about="The server’s full address, as its documentation gives it."
+              error={shown(problems.url)}
+            >
+              <Input
+                value={url}
+                onValueChange={setUrl}
+                placeholder="https://example.com/mcp"
+                inputMode="url"
+                autoCapitalize="none"
+                spellCheck={false}
+              />
+            </Field>
+            <Field
+              label="Bearer token"
+              about="A key the server gave you, if it needs one. It's never shown again."
+              description={
+                origin
+                  ? `Optional. Sent only to ${origin}.${hasSavedKeys ? " A saved key can be chosen on the next page." : ""}`
+                  : "Optional."
+              }
+            >
+              <SecretInput name="apiKey" />
+            </Field>
+          </>
+        )}
         <ErrorAlert error={action.error} title="Not added" />
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
@@ -201,11 +259,59 @@ function NewServerForm({ hasSavedKeys }: { hasSavedKeys: boolean }) {
   )
 }
 
+/** A local program's Program and Arguments fields (spec/MCP.md §13.1). */
+export function ProgramFields({
+  command,
+  onCommandChange,
+  args,
+  onArgsChange,
+  error
+}: {
+  command: string
+  onCommandChange: (command: string) => void
+  args: string
+  onArgsChange: (args: string) => void
+  error: string | null
+}) {
+  return (
+    <>
+      <Field label="Program" about={LOCAL_PROGRAM_NOTE} description="Such as npx, node or python3." error={error}>
+        <Input
+          value={command}
+          onValueChange={onCommandChange}
+          placeholder="npx"
+          autoCapitalize="none"
+          spellCheck={false}
+        />
+      </Field>
+      <Field
+        label="Arguments"
+        about="Passed to the program as they are, never through a shell."
+        description="One per line."
+      >
+        <Textarea
+          value={args}
+          onChange={(event) => onArgsChange(event.currentTarget.value)}
+          rows={3}
+          autoCapitalize="none"
+          spellCheck={false}
+          placeholder={"-y\n@example/mcp-server"}
+          className="font-mono"
+        />
+      </Field>
+    </>
+  )
+}
+
 export function NewMcpServerPage() {
   useTitle("Add an MCP server")
   return (
     <AsyncView atom={credentialsAtom}>
-      {(credentials) => <NewServerForm hasSavedKeys={credentials.length > 0} />}
+      {(credentials) => (
+        <AsyncView atom={localProgramsAtom}>
+          {(local) => <NewServerForm hasSavedKeys={credentials.length > 0} local={local} />}
+        </AsyncView>
+      )}
     </AsyncView>
   )
 }

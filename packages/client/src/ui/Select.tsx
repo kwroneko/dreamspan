@@ -11,6 +11,8 @@ export interface SelectItem<Value> {
   readonly description?: string | undefined
   /** A line before it: it starts a different kind of choice (a card source after the filters). */
   readonly separatorBefore?: boolean
+  /** Listed but not choosable; its description says why. */
+  readonly disabled?: boolean
 }
 
 function SelectOption<Value>({ item }: { item: SelectItem<Value> }) {
@@ -18,8 +20,9 @@ function SelectOption<Value>({ item }: { item: SelectItem<Value> }) {
   return (
     <BaseSelect.Item
       value={item.value}
+      disabled={item.disabled ?? false}
       {...explanation.describedBy}
-      className="grid grid-cols-[1rem_1fr] items-center gap-x-2 rounded-sm py-1.5 pr-4 pl-2 text-sm outline-none select-none data-highlighted:bg-surface-raised"
+      className="grid grid-cols-[1rem_1fr] items-center gap-x-2 rounded-sm py-1.5 pr-4 pl-2 text-sm outline-none select-none data-disabled:opacity-60 data-highlighted:bg-surface-raised"
     >
       <BaseSelect.ItemIndicator className="col-start-1 row-start-1 text-accent">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">

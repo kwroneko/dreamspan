@@ -10,6 +10,9 @@ export const mcpConnectionAtom = (connectionId: McpConnectionId) =>
 export const mcpCallsAtom = (connectionId: McpConnectionId) =>
   AppClient.query("ListMcpCalls", { connectionId, before: null }, { reactivityKeys: ["mcp"] })
 
+/** Whether this user may add local programs here, and why not (spec/MCP.md §2.2). */
+export const localProgramsAtom = AppClient.query("GetMcpLocalPrograms", undefined, { reactivityKeys: ["mcp"] })
+
 export const credentialsAtom = AppClient.query("ListCredentials", undefined, { reactivityKeys: ["credentials"] })
 
 /** The server's host as people read it: "api.example.com", or the address when it isn't a URL. */

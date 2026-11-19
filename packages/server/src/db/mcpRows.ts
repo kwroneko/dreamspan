@@ -50,6 +50,8 @@ export interface McpConnectionRow {
   readonly use_offered_key: string
   readonly use_oauth_origin: string | null
   readonly use_oauth_expires_at: number | null
+  readonly command_json: string | null
+  readonly env_names_json: string
   readonly share_scope: "private" | "all" | "chosen"
   readonly owner_name: string
   /** 1 when the reading user owns it. */
@@ -68,7 +70,7 @@ const columns = `m.id, m.owner_user_id, m.name, m.key, m.about, m.transport, m.u
   u.stories AS use_stories, u.workshops AS use_workshops, u.tools_json AS use_tools_json,
   u.reviewed_revision AS use_reviewed_revision, u.offered_key AS use_offered_key,
   u.oauth_origin AS use_oauth_origin, u.oauth_expires_at AS use_oauth_expires_at,
-  m.share_scope, ow.display_name AS owner_name, (m.owner_user_id = u.user_id) AS is_owner`
+  m.command_json, m.env_names_json, m.share_scope, ow.display_name AS owner_name, (m.owner_user_id = u.user_id) AS is_owner`
 
 /** What only full reads carry: the catalog, whom it's shared with, and others' calls. */
 const fullColumns = `m.tools_json,
@@ -90,6 +92,12 @@ const from = `mcp_connections m
   JOIN users ow ON ow.id = m.owner_user_id
   LEFT JOIN credentials cr ON cr.id = m.credential_id
   WHERE m.deleted_at IS NULL AND m.purged_at IS NULL AND ${mcpVisibleSql}`
+
+/** A local program's stored argument list as the program and its arguments. */
+const programOf = (json: string) => {
+  const [command = "", ...args] = JSON.parse(json) as Array<string>
+  return { command, args }
+}
 
 /** A shared connection's address as others see it: its origin, never the path or query. */
 const originOnly = (url: string | null) => {
@@ -119,6 +127,8 @@ const fields = (row: McpConnectionRow, reveal: boolean) => {
     headerNames: mine ? (JSON.parse(row.header_names_json) as Array<string>) : [],
     headersOrigin: mine ? row.headers_origin : null,
     proxyMode: mine ? row.proxy_mode : ("inherit" as const),
+    program: mine && row.command_json !== null ? programOf(row.command_json) : null,
+    envNames: mine ? (JSON.parse(row.env_names_json) as Array<string>) : [],
     timeoutS: row.timeout_s,
     loading: row.loading,
     useInstructions: row.use_instructions === 1,
@@ -217,10 +227,13 @@ export const makeMcpQueries = (sql: SqlClient.SqlClient) => {
           : Effect.fail(new NotFound({ entity: "mcp_connection", id: connectionId }))
       )
     )
-  /** The live remote connections a user can use, with their catalogs, in creation order. */
+  /**
+   * The live connections a user can use, with their catalogs, in creation order. Local programs
+   * included: where the instance doesn't run them, the agent's offer leaves them out.
+   */
   const catalogs = (userId: UserId) =>
     sql.unsafe<McpConnectionRow>(
-      `SELECT ${columns}, ${fullColumns} FROM ${from} AND m.transport <> 'stdio' ORDER BY m.created_at, m.id`,
+      `SELECT ${columns}, ${fullColumns} FROM ${from} ORDER BY m.created_at, m.id`,
       users(userId)
     )
   return { list, owned, mine, catalogs }

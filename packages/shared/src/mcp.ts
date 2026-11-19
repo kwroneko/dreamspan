@@ -9,8 +9,9 @@ import { CredentialId, ProxyMode } from "./providers.ts"
 export const McpConnectionId = idSchema("McpConnectionId", "mcp_connection")
 export type McpConnectionId = typeof McpConnectionId.Type
 
-/** "stdio" exists in storage for local programs (M6); nothing creates one yet. */
-const McpTransport = Schema.Literals(["streamable-http", "sse", "stdio"])
+/** Remote servers, or a local program ("stdio": admins only, where the instance allows it). */
+export const McpTransport = Schema.Literals(["streamable-http", "sse", "stdio"])
+export type McpTransport = typeof McpTransport.Type
 /** The transports a remote server is reached by. */
 export const RemoteMcpTransport = Schema.Literals(["streamable-http", "sse"])
 export type RemoteMcpTransport = typeof RemoteMcpTransport.Type
@@ -124,6 +125,10 @@ const connectionFields = {
   /** The origin the header values were set for; null without headers. */
   headersOrigin: Schema.NullOr(Schema.String),
   proxyMode: ProxyMode,
+  /** A local program and its arguments (spec/MCP.md §2.2); null for a remote server or a shared one. */
+  program: Schema.NullOr(Schema.Struct({ command: Schema.String, args: Schema.Array(Schema.String) })),
+  /** A local program's environment variable names only: values are never shown again. */
+  envNames: Schema.Array(Schema.String),
   timeoutS: Schema.Int,
   loading: McpLoading,
   useInstructions: Schema.Boolean,
@@ -158,8 +163,11 @@ export class McpConnection extends Schema.Class<McpConnection>("McpConnection")(
 export const McpConnectionSettings = Schema.Struct({
   name: Schema.String,
   about: Schema.String,
-  transport: RemoteMcpTransport,
+  transport: McpTransport,
+  /** A remote server's address; ignored for a local program. */
   url: Schema.String,
+  /** A local program: what to run, as an argument list, never through a shell. */
+  program: Schema.optionalKey(Schema.Struct({ command: Schema.String, args: Schema.Array(Schema.String) })),
   timeoutS: Schema.Int
 })
 export type McpConnectionSettings = typeof McpConnectionSettings.Type

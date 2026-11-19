@@ -14,7 +14,7 @@ import {
   mcpOfferedToolName,
   mcpToolIsNew,
   type McpTool,
-  type RemoteMcpTransport
+  type McpTransport
 } from "@dreamspan/shared/mcp.ts"
 import { Link, useNavigate, useParams } from "@tanstack/react-router"
 import { type FormEvent, useId, useState } from "react"
@@ -37,13 +37,14 @@ import {
   callStatusLabels,
   credentialsAtom,
   durationLabel,
+  localProgramsAtom,
   mcpCallsAtom,
   mcpConnectionAtom,
   mcpHost,
   mcpStatus,
   transportLabels
 } from "./data.ts"
-import { addressProblem, parseTimeout, transportItems } from "./list.tsx"
+import { addressProblem, parseArguments, parseTimeout, ProgramFields, programProblem, transportItems } from "./list.tsx"
 import { SignInWithServer } from "./signIn.tsx"
 
 export interface McpSectionProps {
@@ -99,16 +100,20 @@ function CheckResult({ connection, check }: { connection: McpConnection; check: 
 interface ServerDraft {
   readonly name: string
   readonly about: string
-  readonly transport: RemoteMcpTransport
+  readonly transport: McpTransport
   readonly url: string
+  readonly command: string
+  readonly args: string
   readonly timeoutS: string
 }
 
 const draftOf = (connection: McpConnection): ServerDraft => ({
   name: connection.name,
   about: connection.about,
-  transport: connection.transport === "sse" ? "sse" : "streamable-http",
+  transport: connection.transport,
   url: connection.url ?? "",
+  command: connection.program?.command ?? "",
+  args: connection.program?.args.join("\n") ?? "",
   timeoutS: String(connection.timeoutS)
 })
 
@@ -150,9 +155,11 @@ function OwnServer({ connection }: McpSectionProps) {
   const values = draft ?? draftOf(connection)
   const edit = (change: Partial<ServerDraft>) => setDraft({ ...values, ...change })
   const timeout = parseTimeout(values.timeoutS)
+  const program = values.transport === "stdio"
   const problems = {
     name: values.name.trim() === "" ? "Give the server a name." : null,
-    url: addressProblem(values.url),
+    url: program ? null : addressProblem(values.url),
+    command: program ? programProblem(values.command) : null,
     timeoutS: timeout.problem
   }
   const shown = (problem: string | null) => (submitted ? problem : null)
@@ -171,7 +178,8 @@ function OwnServer({ connection }: McpSectionProps) {
             name: values.name.trim(),
             about: values.about.trim(),
             transport: values.transport,
-            url: values.url.trim(),
+            url: program ? "" : values.url.trim(),
+            ...(program ? { program: { command: values.command.trim(), args: parseArguments(values.args) } } : {}),
             timeoutS: timeout.value
           }
         }),
@@ -204,21 +212,39 @@ function OwnServer({ connection }: McpSectionProps) {
           <Textarea value={values.about} onChange={(event) => edit({ about: event.currentTarget.value })} rows={2} />
         </Field>
         <Field label="Transport" about="How the app talks to the server. Most servers speak Streamable HTTP.">
-          <Select items={transportItems} value={values.transport} onValueChange={(transport) => edit({ transport })} />
+          <AsyncView atom={localProgramsAtom}>
+            {(local) => (
+              <Select
+                items={transportItems(local)}
+                value={values.transport}
+                onValueChange={(transport) => edit({ transport })}
+              />
+            )}
+          </AsyncView>
         </Field>
-        <Field
-          label="Address"
-          about="The server’s full address. A key or headers set for another address must be entered again."
-          error={shown(problems.url)}
-        >
-          <Input
-            value={values.url}
-            onValueChange={(url) => edit({ url })}
-            inputMode="url"
-            autoCapitalize="none"
-            spellCheck={false}
+        {program ? (
+          <ProgramFields
+            command={values.command}
+            onCommandChange={(command) => edit({ command })}
+            args={values.args}
+            onArgsChange={(args) => edit({ args })}
+            error={shown(problems.command)}
           />
-        </Field>
+        ) : (
+          <Field
+            label="Address"
+            about="The server’s full address. A key or headers set for another address must be entered again."
+            error={shown(problems.url)}
+          >
+            <Input
+              value={values.url}
+              onValueChange={(url) => edit({ url })}
+              inputMode="url"
+              autoCapitalize="none"
+              spellCheck={false}
+            />
+          </Field>
+        )}
         <Field
           label="Timeout (seconds)"
           about="How long a request may wait for the server before it counts as failed. Progress the server reports restarts the wait."
@@ -373,19 +399,22 @@ interface HeaderRow {
   readonly filled: boolean
 }
 
+/** Names shown, values write-only: a remote server's request headers, or a local program's environment. */
 function HeadersDialog({
   connection,
+  env = false,
   onOpenChange
 }: {
   connection: McpConnection
+  env?: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const names = env ? connection.envNames : connection.headerNames
+  const word = env ? "variable" : "header"
   const action = useAction()
   const origin = connection.url === null ? null : originOf(connection.url)
   const [rows, setRows] = useState<ReadonlyArray<HeaderRow>>(() =>
-    connection.headerNames.length > 0
-      ? connection.headerNames.map((name, id) => ({ id, name, filled: false }))
-      : [{ id: 0, name: "", filled: false }]
+    names.length > 0 ? names.map((name, id) => ({ id, name, filled: false })) : [{ id: 0, name: "", filled: false }]
   )
   const update = (id: number, change: Partial<HeaderRow>) =>
     setRows(rows.map((row) => (row.id === id ? { ...row, ...change } : row)))
@@ -399,7 +428,17 @@ function HeadersDialog({
         : Object.fromEntries(named.map((row) => [row.name.trim(), formText(form, `value-${row.id}`)]))
     const result = await action.run(
       (client) =>
-        client("SetMcpHeaders", { connectionId: connection.id, headers, expectedRowVersion: connection.rowVersion }),
+        env
+          ? client("SetMcpEnvironment", {
+              connectionId: connection.id,
+              env: headers,
+              expectedRowVersion: connection.rowVersion
+            })
+          : client("SetMcpHeaders", {
+              connectionId: connection.id,
+              headers,
+              expectedRowVersion: connection.rowVersion
+            }),
       ["mcp"]
     )
     if (result.ok) onOpenChange(false)
@@ -408,8 +447,12 @@ function HeadersDialog({
     <Dialog
       open
       onOpenChange={onOpenChange}
-      title="Request headers"
-      description={`These replace all current headers. Values often hold secrets, so they're never shown again${origin ? `, and they're sent only to ${origin}` : ""}.`}
+      title={env ? "Environment variables" : "Request headers"}
+      description={
+        env
+          ? "These replace all current variables. Values often hold secrets, so they're never shown again. Only this program gets them."
+          : `These replace all current headers. Values often hold secrets, so they're never shown again${origin ? `, and they're sent only to ${origin}` : ""}.`
+      }
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
         <div aria-hidden="true" className="grid grid-cols-[1fr_1fr_2.25rem] gap-2 text-sm font-medium">
@@ -418,7 +461,13 @@ function HeadersDialog({
         </div>
         {rows.map((row, index) => (
           <div key={row.id} className="-mt-2 grid grid-cols-[1fr_1fr_2.25rem] items-end gap-2">
-            <Field label={<span className="sr-only">Header {index + 1} name</span>}>
+            <Field
+              label={
+                <span className="sr-only">
+                  {env ? "Variable" : "Header"} {index + 1} name
+                </span>
+              }
+            >
               <Input
                 value={row.name}
                 onValueChange={(name) => update(row.id, { name })}
@@ -426,13 +475,19 @@ function HeadersDialog({
                 spellCheck={false}
               />
             </Field>
-            <Field label={<span className="sr-only">Header {index + 1} value</span>}>
+            <Field
+              label={
+                <span className="sr-only">
+                  {env ? "Variable" : "Header"} {index + 1} value
+                </span>
+              }
+            >
               <SecretInput name={`value-${row.id}`} onEmptyChange={(empty) => update(row.id, { filled: !empty })} />
             </Field>
             <Button
-              hint="Removes this request header."
+              hint={env ? "Removes this variable." : "Removes this request header."}
               variant="ghost"
-              aria-label={`Remove header ${index + 1}`}
+              aria-label={`Remove ${word} ${index + 1}`}
               onClick={() => setRows(rows.filter((other) => other.id !== row.id))}
             >
               ✕
@@ -441,13 +496,13 @@ function HeadersDialog({
         ))}
         <div>
           <Button
-            hint="Adds an empty request header."
+            hint={env ? "Adds an empty variable." : "Adds an empty request header."}
             variant="ghost"
             onClick={() =>
               setRows([...rows, { id: Math.max(-1, ...rows.map((row) => row.id)) + 1, name: "", filled: false }])
             }
           >
-            Add a header
+            Add a {word}
           </Button>
         </div>
         <ErrorAlert error={action.error} />
@@ -456,13 +511,13 @@ function HeadersDialog({
             Cancel
           </Button>
           <Button
-            hint="Saves the request headers."
+            hint={env ? "Saves the program's environment variables." : "Saves the request headers."}
             type="submit"
             variant="primary"
             pending={action.pending}
             disabled={named.some((row) => !row.filled)}
           >
-            {named.length === 0 ? "Remove all headers" : "Save headers"}
+            {named.length === 0 ? `Remove all ${word}s` : `Save ${word}s`}
           </Button>
         </DialogActions>
       </form>
@@ -472,6 +527,7 @@ function HeadersDialog({
 
 export function SignInSection(props: McpSectionProps) {
   const { connection } = props
+  if (connection.transport === "stdio") return connection.owned ? <EnvironmentCard {...props} /> : null
   if (connection.owned) return <OwnSignIn {...props} />
   if (connection.url === null) return null
   return (
@@ -481,6 +537,64 @@ export function SignInSection(props: McpSectionProps) {
         about="Your own sign-in with the server, if it asks for one. The admin's key and headers stay theirs and are never shown."
       />
       <SignInWithServer connection={connection} />
+    </Card>
+  )
+}
+
+/** A local program's own variables (spec/MCP.md §13.1, Environment): names visible, values write-only. */
+function EnvironmentCard({ connection }: McpSectionProps) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Card>
+      <CardHeader
+        title="Environment"
+        about="Variables the program gets, such as its own keys. The app sets PATH, HOME and LANG; nothing else of the server's is passed on."
+        description={connection.envNames.length === 0 ? "No variables." : connection.envNames.join(", ")}
+        actions={
+          <Button hint="Opens the environment variable editor." onClick={() => setOpen(true)}>
+            {connection.envNames.length > 0 ? "Replace variables" : "Add variables"}
+          </Button>
+        }
+      />
+      {open && <HeadersDialog connection={connection} env onOpenChange={setOpen} />}
+    </Card>
+  )
+}
+
+/** What the user's own copy of a local program wrote to its error output lately. */
+export function ProgramOutputSection({ connection }: McpSectionProps) {
+  if (connection.transport !== "stdio") return null
+  return <ProgramOutput connection={connection} />
+}
+
+function ProgramOutput({ connection }: { connection: McpConnection }) {
+  const [shown, setShown] = useState<{ running: boolean; output: string } | null>(null)
+  const read = useAction()
+  const load = async () => {
+    const result = await read.run((client) => client("GetMcpProgramOutput", { connectionId: connection.id }), [])
+    if (result.ok) setShown(result.value)
+  }
+  return (
+    <Card>
+      <CardHeader
+        title="Program output"
+        about="What your copy of the program wrote to its error output lately (the last 64 KB). It's where a program says why it stopped."
+        description={shown === null ? undefined : shown.running ? "Running now." : "Not running."}
+        actions={
+          <Button hint="Shows what the program wrote lately." pending={read.pending} onClick={() => void load()}>
+            {shown === null ? "Show" : "Refresh"}
+          </Button>
+        }
+      />
+      <ErrorAlert error={read.error} title="Not loaded" />
+      {shown !== null && (
+        <pre
+          className="max-h-80 overflow-auto rounded-md border border-border bg-surface-raised p-3 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]"
+          data-mcp-program-output
+        >
+          {shown.output === "" ? "Nothing yet." : shown.output}
+        </pre>
+      )}
     </Card>
   )
 }
@@ -881,7 +995,8 @@ function OwnLoading({ connection }: McpSectionProps) {
 }
 
 export function RouteSection(props: McpSectionProps) {
-  return props.connection.owned ? <OwnRoute {...props} /> : null
+  // A local program reaches the internet through the sandbox's own proxy.
+  return props.connection.owned && props.connection.transport !== "stdio" ? <OwnRoute {...props} /> : null
 }
 
 function OwnRoute({ connection }: McpSectionProps) {
@@ -1096,7 +1211,9 @@ function ServerView(props: McpSectionProps) {
         </CenterHeaderContent>
         <p className="text-sm text-muted [overflow-wrap:anywhere]">
           {connection.owned
-            ? `${transportLabels[connection.transport]} · ${connection.url ?? "Local program"}`
+            ? connection.program !== null
+              ? `${transportLabels[connection.transport]} · ${[connection.program.command, ...connection.program.args].join(" ")}`
+              : `${transportLabels[connection.transport]} · ${connection.url ?? ""}`
             : `Shared by ${connection.ownerName ?? "an admin"} · ${mcpHost(connection)}`}
         </p>
       </div>

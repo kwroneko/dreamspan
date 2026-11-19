@@ -89,6 +89,30 @@ export class McpApi extends RpcGroup.make(
     success: McpConnection,
     error: Schema.Union([McpRefused, NotFound, StaleWrite, ServerError])
   }),
+  /**
+   * A local program's environment variables (an admin's; replaces them all; null for none).
+   * Values are encrypted and never shown again.
+   */
+  Rpc.make("SetMcpEnvironment", {
+    payload: {
+      connectionId: McpConnectionId,
+      env: Schema.NullOr(Schema.Record(Schema.String, Schema.String)),
+      expectedRowVersion: Schema.Int
+    },
+    success: McpConnection,
+    error: Schema.Union([McpRefused, NotFound, StaleWrite, ServerError])
+  }),
+  /** Whether this user may add local programs here, and if not, why (spec/MCP.md §2.2). */
+  Rpc.make("GetMcpLocalPrograms", {
+    success: Schema.Struct({ allowed: Schema.Boolean, reason: Schema.NullOr(Schema.String) }),
+    error: ServerError
+  }),
+  /** What a local program wrote to stderr lately (the last 64 KiB), for the caller's own process. */
+  Rpc.make("GetMcpProgramOutput", {
+    payload: { connectionId: McpConnectionId },
+    success: Schema.Struct({ running: Schema.Boolean, output: Schema.String }),
+    error: Schema.Union([NotFound, ServerError])
+  }),
   Rpc.make("SetMcpProxy", {
     payload: { connectionId: McpConnectionId, mode: ProxyMode, url: Schema.NullOr(Schema.String) },
     success: McpConnection,
