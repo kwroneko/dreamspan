@@ -161,14 +161,6 @@ export const makeFileShareReadHandlers = Effect.gen(function* () {
         Effect.map((rows) => rows.map(toShare)),
         query("SharedByMe")
       ),
-    // The owner's name is theirs (`handle`); a disabled owner's folders aren't offered.
-    SharesWithMe: ({ userId }) =>
-      sql<ShareRow>`SELECT s.*, u.handle, u.display_name FROM file_shares s
-        JOIN users u ON u.id = s.owner_user_id
-        WHERE s.grantee_user_id = ${userId} AND u.disabled_at IS NULL ORDER BY u.handle, s.path`.pipe(
-        Effect.map((rows) => rows.map(toShare)),
-        query("SharesWithMe")
-      ),
     // Under the name typed, whether or not it named an account: the owner learns nothing from it.
     ShareInvitationsSent: ({ userId }) =>
       sql<InvitationRow>`SELECT i.*, i.handle AS display_name FROM file_share_invitations i

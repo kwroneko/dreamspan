@@ -47,6 +47,9 @@ interface Share {
   ownerHandle: string
   path: string
   inode: number | null
+  device: number | null
+  suspendedAt: number | null
+  createdAt: number
   mode: "view" | "edit"
 }
 
@@ -133,7 +136,17 @@ const world = (
       Effect.succeed(
         state.shares
           .filter((s) => s.grantee === userId && !state.disabled.has(s.ownerId))
-          .map(({ id, ownerId, ownerHandle, path, inode, mode }) => ({ id, ownerId, ownerHandle, path, inode, mode }))
+          .map(({ id, ownerId, ownerHandle, path, inode, device, suspendedAt, createdAt, mode }) => ({
+            id,
+            ownerId,
+            ownerHandle,
+            path,
+            inode,
+            device,
+            suspendedAt,
+            createdAt,
+            mode
+          }))
       ),
     GetPasswordHash: ({ userId }: { userId: string }) =>
       Effect.succeed(state.disabled.has(userId) ? null : { user: user(userId), passwordHash: null })
@@ -244,6 +257,9 @@ const world = (
       ownerHandle: "mara",
       path: `/files/${path}`,
       inode: (await stat(join(root("mara"), path))).ino,
+      device: (await stat(join(root("mara"), path))).dev,
+      suspendedAt: null,
+      createdAt: Date.now(),
       mode
     }
     state.shares.push(entry)
@@ -393,6 +409,21 @@ it.live.skipIf(!commands)(
       const shared = yield* Effect.promise(() => w.share("view"))
       const read = yield* w.run("ben", "read_file", { path: "/files/Shared/mara/notes/a.txt" })
       assert.include(read.text, "first")
+      // Gone to the bin (and maybe back): the share is suspended until Mara shares it again (files4bfix).
+      shared.suspendedAt = Date.now()
+      const suspended = yield* w.run("ben", "read_file", { path: "/files/Shared/mara/notes/a.txt" })
+      assert.isTrue(suspended.isError)
+      const suspendedCommand = yield* w.run("ben", "bash", {
+        command: "cat /files/Shared/mara/notes/a.txt 2>&1 || true"
+      })
+      assert.notInclude(suspendedCommand.text.split("Output")[1] ?? "", "first\n")
+      // Recorded on another device: not the folder that was shared.
+      shared.suspendedAt = null
+      const device = shared.device
+      shared.device = (device ?? 0) + 1
+      assert.isTrue((yield* w.run("ben", "read_file", { path: "/files/Shared/mara/notes/a.txt" })).isError)
+      shared.device = device
+      assert.include((yield* w.run("ben", "read_file", { path: "/files/Shared/mara/notes/a.txt" })).text, "first")
       // Mara moves it and makes another folder of that name: neither the file tools nor commands see it.
       yield* Effect.promise(async () => {
         await rename(join(w.root("mara"), "notes"), join(w.root("mara"), "notes-old"))

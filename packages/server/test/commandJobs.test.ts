@@ -119,15 +119,15 @@ it.live.skipIf(!commands)(
         await mkdir(join(owner, "notes"), { recursive: true })
         await writeFile(join(owner, "notes/hello.txt"), "hello from mara\n")
       })
-      // A share is bound to its folder's inode (files/sharedFolders.ts).
-      const notesInode = (yield* Effect.promise(() => stat(join(owner, "notes")))).ino
+      // A share is bound to its folder's inode and device (files/sharedFolders.ts).
+      const notesInfo = yield* Effect.promise(() => stat(join(owner, "notes")))
       yield* fixtureSql(config.dataDir, [
         {
           sql: "INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('owner-mara', 'mara', 'Mara', 'user', 1)"
         },
         {
-          sql: "INSERT INTO file_shares (id, owner_user_id, path, inode, grantee_user_id, mode, created_at) VALUES ('share-1', 'owner-mara', '/files/notes', ?, ?, 'view', 1)",
-          params: [notesInode, me.id]
+          sql: "INSERT INTO file_shares (id, owner_user_id, path, inode, device, grantee_user_id, mode, created_at) VALUES ('share-1', 'owner-mara', '/files/notes', ?, ?, ?, 'view', 1)",
+          params: [notesInfo.ino, notesInfo.dev, me.id]
         }
       ])
       const chat = yield* api.CreateWorkshop({ title: "Jobs" })

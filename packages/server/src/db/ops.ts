@@ -6107,12 +6107,6 @@ const ReadOpsOwn = RpcGroup.make(
     success: Schema.Array(FileShare),
     error: StorageError
   }),
-  /** The folders other enabled accounts share with this one, each with its owner's handle. */
-  Rpc.make("SharesWithMe", {
-    payload: { userId: UserId },
-    success: Schema.Array(FileShare),
-    error: StorageError
-  }),
   /** Invitations the owner sent that aren't answered yet, each under the name typed. */
   Rpc.make("ShareInvitationsSent", {
     payload: { userId: UserId },
@@ -6155,7 +6149,11 @@ const ReadOpsOwn = RpcGroup.make(
     success: Schema.Array(Schema.String),
     error: StorageError
   }),
-  /** Folders other accounts shared with this one, by owner handle and path (fileVersions.ts). */
+  /**
+   * Folders other enabled accounts shared with this one and it accepted (§1.4), by owner handle
+   * and path (fileVersions.ts): what the Files routes, the file tools and commands all resolve
+   * (files/sharedFolders.ts), with the folder's identity and when the share started.
+   */
   Rpc.make("FileSharesGrantedTo", {
     payload: { userId: UserId },
     success: Schema.Array(
@@ -6165,6 +6163,9 @@ const ReadOpsOwn = RpcGroup.make(
         ownerHandle: Schema.String,
         path: Schema.String,
         inode: Schema.NullOr(Schema.Number),
+        device: Schema.NullOr(Schema.Number),
+        suspendedAt: Schema.NullOr(Schema.Number),
+        createdAt: Schema.Number,
         mode: Schema.Literals(["view", "edit"])
       })
     ),

@@ -1,7 +1,8 @@
-// Folders other accounts share with this one (spec/FILES-AND-ENVIRONMENT.md §1.4), as the file
-// tools and commands see them at /files/Shared/<owner>/<folder>: the one place that says whether
-// a share still names its folder and what each is called, so the app's Files routes and the
-// assistant's tools agree.
+// Folders other accounts share with this one (spec/FILES-AND-ENVIRONMENT.md §1.4), as the Files
+// routes, the file tools and commands see them at /files/Shared/<owner>/<folder>: the one place
+// that says whether a share still names its folder and what each is called, so they all agree.
+// A share here is an accepted one (`file_shares`; invitations live apart until accepted), owned
+// and granted by account id; only its owner's handle names the folder above it.
 import type { Stats } from "node:fs"
 import { statPath } from "./safePath.ts"
 import { folderShareRefusal } from "./pluginCopies.ts"
@@ -12,6 +13,10 @@ export interface ShareOfFolder {
   /** The folder's path in its owner's Files (/files/…). */
   readonly path: string
   readonly inode: number | null
+  /** The device the folder was on when shared: with the inode, the folder's identity. */
+  readonly device: number | null
+  /** The folder went to the bin: the share stays off until its owner shares it again. */
+  readonly suspendedAt: number | null
 }
 
 /** The owner's segment under Shared: its handle, when that can be a path component; null otherwise. */
@@ -19,15 +24,24 @@ const ownerSegment = (handle: string) =>
   /^[A-Za-z0-9_.-]{1,64}$/.test(handle) && !/^\.+$/.test(handle) ? handle : null
 
 /**
- * Whether a share's folder is the one it was shared as: a folder with the recorded inode. A
- * share with none recorded never resolves. Shares of the whole Files, or of anything holding or
- * inside the server plugins' working copies, never resolve either (`folderShareRefusal`).
+ * Whether a share's folder is the one it was shared as: a folder with the recorded inode and
+ * device, not in the bin since. A share with no identity recorded never resolves. Shares of the
+ * whole Files, or of anything holding or inside the server plugins' working copies, never
+ * resolve either (`folderShareRefusal`). An unavailable share keeps its name (`shareMountNames`)
+ * but is mounted nowhere.
  */
-export const isSharedFolder = (share: ShareOfFolder, segments: ReadonlyArray<string>, info: Stats | null) =>
+export const isSharedFolder = (
+  share: Pick<ShareOfFolder, "inode" | "device" | "suspendedAt">,
+  segments: ReadonlyArray<string>,
+  info: Stats | null
+) =>
   info !== null &&
   info.isDirectory() &&
+  share.suspendedAt === null &&
   share.inode !== null &&
+  share.device !== null &&
   share.inode === info.ino &&
+  share.device === info.dev &&
   folderShareRefusal(segments) === null
 
 /**

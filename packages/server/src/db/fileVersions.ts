@@ -216,8 +216,18 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
     // Folders other accounts shared with this one (§1.4), for its commands' binds (A5). Shares
     // from a disabled account don't count.
     FileSharesGrantedTo: ({ userId }) =>
-      sql<{ id: string; owner_user_id: string; handle: string; path: string; inode: number | null; mode: string }>`
-        SELECT s.id, s.owner_user_id, u.handle, s.path, s.inode, s.mode
+      sql<{
+        id: string
+        owner_user_id: string
+        handle: string
+        path: string
+        inode: number | null
+        device: number | null
+        suspended_at: number | null
+        created_at: number
+        mode: string
+      }>`
+        SELECT s.id, s.owner_user_id, u.handle, s.path, s.inode, s.device, s.suspended_at, s.created_at, s.mode
         FROM file_shares s JOIN users u ON u.id = s.owner_user_id
         WHERE s.grantee_user_id = ${userId} AND u.disabled_at IS NULL
         ORDER BY u.handle, s.path`.pipe(
@@ -228,6 +238,9 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
             ownerHandle: row.handle,
             path: row.path,
             inode: row.inode,
+            device: row.device,
+            suspendedAt: row.suspended_at,
+            createdAt: row.created_at,
             mode: row.mode === "edit" ? ("edit" as const) : ("view" as const)
           }))
         ),
