@@ -10,7 +10,14 @@
 // refuses one whose stamp moved, and works out the documents the writer stores
 // (libraryReplaceWrites.ts), so the writer's transaction does no matching.
 import type { UserId } from "@dreamspan/shared/domain.ts"
-import { canonicalJson, applyDrafts, type FieldPath, isHeldField, textField, withValues } from "@dreamspan/shared/editing.ts"
+import {
+  canonicalJson,
+  applyDrafts,
+  type FieldPath,
+  isHeldField,
+  textField,
+  withValues
+} from "@dreamspan/shared/editing.ts"
 import type { Doc } from "@dreamspan/shared/library.ts"
 import {
   AROUND,

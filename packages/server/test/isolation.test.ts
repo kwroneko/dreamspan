@@ -11,7 +11,14 @@ import { readFileSync } from "node:fs"
 import { assert, describe, it, layer } from "@effect/vitest"
 import { AppApi, type AppRpcs } from "@dreamspan/shared/api.ts"
 import { BUILTIN_PRESET_LABEL } from "@dreamspan/shared/generation.ts"
-import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
+import {
+  type ChatId,
+  type EntityId,
+  type ForkId,
+  NewVersion,
+  type SlotId,
+  type VersionId
+} from "@dreamspan/shared/chat.ts"
 import type { User } from "@dreamspan/shared/domain.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import type { ConnectionSettings, ConnectionId, CredentialId, ModelId } from "@dreamspan/shared/providers.ts"

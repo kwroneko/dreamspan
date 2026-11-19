@@ -179,7 +179,11 @@ const systemdScope: CgroupLimiter = {
     const probe = spawnSync(
       systemdRun,
       [
-        ...scopeArgs({ memoryBytes: 64 * 2 ** 20, processes: 16 }, `dreamspan-probe-${randomBytes(6).toString("hex")}`, true),
+        ...scopeArgs(
+          { memoryBytes: 64 * 2 ** 20, processes: 16 },
+          `dreamspan-probe-${randomBytes(6).toString("hex")}`,
+          true
+        ),
         "/bin/sh",
         "-c",
         'd=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); cat "$d/memory.max" "$d/pids.max"'

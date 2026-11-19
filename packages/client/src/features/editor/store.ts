@@ -23,7 +23,15 @@ import {
 } from "@dreamspan/shared/editing.ts"
 import type { PresetLorebook, PresetPrompt, PromptOrderEntry } from "@dreamspan/shared/docs/preset.ts"
 import { presetOrder } from "@dreamspan/shared/presetOrder.ts"
-import { arrange, type HeldChanges, heldText, NO_HELD, parseHeld, splitOrder, withHeld } from "@dreamspan/shared/presetHeld.ts"
+import {
+  arrange,
+  type HeldChanges,
+  heldText,
+  NO_HELD,
+  parseHeld,
+  splitOrder,
+  withHeld
+} from "@dreamspan/shared/presetHeld.ts"
 import { stateChanges, trackOpenEditor } from "./openEditors.ts"
 import { type Draft, deletedSince, entityDraftTarget } from "@dreamspan/shared/drafts.ts"
 import type { ChatNotePosition, EditorSnapshot } from "@dreamspan/shared/editorApi.ts"

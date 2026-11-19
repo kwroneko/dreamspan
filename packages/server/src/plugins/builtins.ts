@@ -176,7 +176,9 @@ export const missingBuiltinAdapter = (id: string): string => {
 }
 
 /** Keep every supported identity inside the existing tool-result budget. */
-export const builtinCopyListing = (parts: ReadonlyArray<typeof import("@dreamspan/shared/plugins.ts").BuiltinPart.Type>) =>
+export const builtinCopyListing = (
+  parts: ReadonlyArray<typeof import("@dreamspan/shared/plugins.ts").BuiltinPart.Type>
+) =>
   [...new Set(parts.map((p) => p.registry))].flatMap((registry) =>
     [true, false].flatMap((copyable) => {
       const group = parts.filter((p) => p.registry === registry && p.copyable === copyable)

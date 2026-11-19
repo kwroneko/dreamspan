@@ -5,7 +5,14 @@
 // message; refusals; Duplicate.
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
-import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
+import {
+  type ChatId,
+  type EntityId,
+  type ForkId,
+  NewVersion,
+  type SlotId,
+  type VersionId
+} from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect, Exit } from "effect"
 import { SqlClient } from "effect/sql"

@@ -1,5 +1,11 @@
 import { LegacyPresetDoc as PresetDoc } from "@dreamspan/shared/docs/preset.ts"
-import { conditionOf, editedDoc, presetWarnings, triggersFor, withEndOfRequest } from "@dreamspan/shared/presetConditions.ts"
+import {
+  conditionOf,
+  editedDoc,
+  presetWarnings,
+  triggersFor,
+  withEndOfRequest
+} from "@dreamspan/shared/presetConditions.ts"
 import { CONTINUE_TEXT, DIRECTION_TEXT, endOfRequestText, TURN_TEXT } from "@dreamspan/shared/endOfRequest.ts"
 import { Schema } from "effect"
 import { readFileSync } from "node:fs"

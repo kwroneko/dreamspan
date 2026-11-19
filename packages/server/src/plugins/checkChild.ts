@@ -243,7 +243,8 @@ try {
                 ["@dreamspan/plugin-api/client", "react", "react/jsx-runtime", "react/jsx-dev-runtime"].includes(source)
               )
                 return { id: "/plugin-host.mjs", external: true }
-              if (source === `@dreamspan/plugin-api/${side}`) return { id: pathToFileURL(api(side)).href, external: true }
+              if (source === `@dreamspan/plugin-api/${side}`)
+                return { id: pathToFileURL(api(side)).href, external: true }
               if (source.startsWith("@dreamspan/plugin-api/")) throw new Error("Wrong API entry")
               if (importer && !source.startsWith(".") && !source.startsWith("/"))
                 throw new Error("Plugin dependency must be vendored")
@@ -297,8 +298,10 @@ try {
                   (source === "node:module" && importer === "\0rolldown/runtime.js")
                 )
                   return { id: source, external: true }
-                if (source === "@dreamspan/plugin-api/server") return { id: pathToFileURL(api("server")).href, external: true }
-                if (source === "@dreamspan/plugin-api/worker") return { id: pathToFileURL(api("worker")).href, external: true }
+                if (source === "@dreamspan/plugin-api/server")
+                  return { id: pathToFileURL(api("server")).href, external: true }
+                if (source === "@dreamspan/plugin-api/worker")
+                  return { id: pathToFileURL(api("worker")).href, external: true }
                 if (importer && !source.startsWith(".") && !source.startsWith("/"))
                   throw new Error("Test dependency must be vendored")
                 return null

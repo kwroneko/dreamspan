@@ -55,7 +55,10 @@ export interface OperationExposure {
   readonly describe?: (
     payload: Record<string, unknown>,
     ctx: ToolContext
-  ) => Effect.Effect<Pick<import("@dreamspan/shared/agent.ts").ApprovalPrompt, "title" | "rows" | "changes"> | null, unknown>
+  ) => Effect.Effect<
+    Pick<import("@dreamspan/shared/agent.ts").ApprovalPrompt, "title" | "rows" | "changes"> | null,
+    unknown
+  >
   readonly render?: (result: unknown, args: Record<string, unknown>) => string
   readonly effects?: (result: unknown, args: Record<string, unknown>) => ReadonlyArray<RolloutEffectRecord>
   readonly summarize?: (args: Record<string, unknown>) => string

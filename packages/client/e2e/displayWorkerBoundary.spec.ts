@@ -349,7 +349,11 @@ export const activate: Activate = host => {
         scope: "user",
         id: "rival-display",
         files: {
-          "dreamspan-plugin.json": manifest("rival-display", ["displayTransforms"], ["displayTransforms:display.macros"]),
+          "dreamspan-plugin.json": manifest(
+            "rival-display",
+            ["displayTransforms"],
+            ["displayTransforms:display.macros"]
+          ),
           "client.tsx": source("[rival]")["client.tsx"]
         }
       })

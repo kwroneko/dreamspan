@@ -41,4 +41,11 @@ export type { VarScope } from "@dreamspan/shared/macros/variables.ts"
 export { normalize } from "@dreamspan/shared/macros/variables.ts"
 export { ELSE_MARKER, isFalse, trimScoped } from "@dreamspan/shared/macros/expand.ts"
 export { stringHash } from "@dreamspan/shared/macros/hash.ts"
-export { atOffset, formatMoment, humanize, inZone, MAX_FORMAT_GROWTH, parseMoment } from "@dreamspan/shared/macros/time.ts"
+export {
+  atOffset,
+  formatMoment,
+  humanize,
+  inZone,
+  MAX_FORMAT_GROWTH,
+  parseMoment
+} from "@dreamspan/shared/macros/time.ts"

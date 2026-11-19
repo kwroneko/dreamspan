@@ -238,7 +238,11 @@ it(
           yield* Effect.promise(() =>
             writeFile(
               join(pluginFolder(config.dataDir, "", target.id), "dreamspan-plugin.json"),
-              JSON.stringify({ ...JSON.parse(committed["dreamspan-plugin.json"]), name: "Uncommitted", server: "server.ts" })
+              JSON.stringify({
+                ...JSON.parse(committed["dreamspan-plugin.json"]),
+                name: "Uncommitted",
+                server: "server.ts"
+              })
             )
           )
           const detail = yield* api.GetPlugin(target)

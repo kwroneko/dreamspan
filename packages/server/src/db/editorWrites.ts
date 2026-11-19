@@ -5,7 +5,12 @@ import { makeSnippetWrites } from "./snippetWrites.ts"
 // The editors' write handlers (ARCHITECTURE.md "Editing the library"). They run in the
 // writer worker, each as one transaction, through the library's own steps (libraryWrites.ts),
 // so every change flows on to the refs that follow the edited one.
-import { OWN_TURN_FRAMING, ownTurnSelectionError, cutOwnTurnText, NOTE_SCHEMA_VERSION } from "@dreamspan/shared/docs/note.ts"
+import {
+  OWN_TURN_FRAMING,
+  ownTurnSelectionError,
+  cutOwnTurnText,
+  NOTE_SCHEMA_VERSION
+} from "@dreamspan/shared/docs/note.ts"
 import { DraftKey, entityDraftTarget } from "@dreamspan/shared/drafts.ts"
 import {
   applyDrafts,

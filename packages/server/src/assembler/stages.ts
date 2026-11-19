@@ -17,7 +17,12 @@ import {
   presetOrder,
   withMain
 } from "@dreamspan/shared/presetOrder.ts"
-import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type PresetPrompt, type PromptCondition } from "@dreamspan/shared/docs/preset.ts"
+import {
+  CARD_JOIN_PREFIX,
+  CARD_JOIN_SUFFIX,
+  type PresetPrompt,
+  type PromptCondition
+} from "@dreamspan/shared/docs/preset.ts"
 import { conditionOf, triggersFor } from "@dreamspan/shared/presetConditions.ts"
 import {
   CONTINUE_NUDGE,

@@ -88,7 +88,9 @@ interface SourceImage {
 export interface CardSourcesShape {
   /** The adapters. A plugin adds, replaces or disables one for the length of a scope (PLUGINS §6). */
   readonly registry: Registry<CardSourceAdapter>
-  readonly list: (user: User) => Effect.Effect<typeof import("@dreamspan/shared/cardSources.ts").SourceList.Type, ServerError>
+  readonly list: (
+    user: User
+  ) => Effect.Effect<typeof import("@dreamspan/shared/cardSources.ts").SourceList.Type, ServerError>
   readonly setEnabled: (user: User, sourceId: string, enabled: boolean) => Effect.Effect<void, NotFound | ServerError>
   readonly setAdminDisabled: (
     user: User,

@@ -451,7 +451,10 @@ describe("v1 as card sources", () => {
       const c = archive.cards[0]!
       const identity = `${c.site}/${c.creator}`
       const cases: ReadonlyArray<
-        readonly [Record<string, import("@dreamspan/shared/cardSources.ts").SourceFilterValue>, (slug: string) => boolean]
+        readonly [
+          Record<string, import("@dreamspan/shared/cardSources.ts").SourceFilterValue>,
+          (slug: string) => boolean
+        ]
       > = [
         [{ fields: ["name"] }, () => true],
         [{ kind: "character_lorebook" }, (slug) => archive.cards.find((x) => x.slug === slug)!.hasLorebook],

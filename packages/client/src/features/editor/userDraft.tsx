@@ -1,5 +1,10 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
-import { mapEditingOrigin, editingOrigin, reconcileDeletedFields, reconcileForm } from "@dreamspan/shared/draftDeletions.ts"
+import {
+  mapEditingOrigin,
+  editingOrigin,
+  reconcileDeletedFields,
+  reconcileForm
+} from "@dreamspan/shared/draftDeletions.ts"
 // Private non-secret text drafts. Explicit Save stays separate from saving the draft.
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import type { UserId } from "@dreamspan/shared/domain.ts"

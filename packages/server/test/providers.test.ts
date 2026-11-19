@@ -2,7 +2,12 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
-import { type ConnectionId, type ConnectionSettings, type CredentialId, resolveModel } from "@dreamspan/shared/providers.ts"
+import {
+  type ConnectionId,
+  type ConnectionSettings,
+  type CredentialId,
+  resolveModel
+} from "@dreamspan/shared/providers.ts"
 import { type LlmRequest, type LlmRequestId, unknownCounts } from "@dreamspan/shared/usage.ts"
 import { Effect, Exit } from "effect"
 import * as Database from "../src/db/Database.ts"

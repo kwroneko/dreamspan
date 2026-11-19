@@ -12,7 +12,10 @@ const token = "a".repeat(32)
 describe("the bridge", () => {
   it("takes its five message types, each by its schema", () => {
     expect(parseBridgeMessage({ type: "dreamspan:ready", token })).toEqual({ type: "dreamspan:ready", token })
-    expect(parseBridgeMessage({ type: "dreamspan:height", height: 120 })).toEqual({ type: "dreamspan:height", height: 120 })
+    expect(parseBridgeMessage({ type: "dreamspan:height", height: 120 })).toEqual({
+      type: "dreamspan:height",
+      height: 120
+    })
     expect(parseBridgeMessage({ type: "dreamspan:open", token, url: "https://example.com/" })).toEqual({
       type: "dreamspan:open",
       token,
@@ -52,7 +55,10 @@ describe("the bridge", () => {
   })
 
   it("keeps nothing but the fields of the type", () => {
-    expect(parseBridgeMessage({ type: "dreamspan:ready", token, extra: "secret" })).toEqual({ type: "dreamspan:ready", token })
+    expect(parseBridgeMessage({ type: "dreamspan:ready", token, extra: "secret" })).toEqual({
+      type: "dreamspan:ready",
+      token
+    })
   })
 
   it("opens http(s) links only", () => {

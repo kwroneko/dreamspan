@@ -1,7 +1,11 @@
 // Account consent plus overrides. These controls are registered in the existing Interface
 // and chat settings surfaces; the message note offers the two scoped Allow actions.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import { DEFAULT_EXTERNAL_MEDIA, externalMediaAllowed, type ExternalMediaTarget } from "@dreamspan/shared/externalMedia.ts"
+import {
+  DEFAULT_EXTERNAL_MEDIA,
+  externalMediaAllowed,
+  type ExternalMediaTarget
+} from "@dreamspan/shared/externalMedia.ts"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react"

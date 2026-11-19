@@ -56,7 +56,10 @@ import {
 import type { StBatchPlan } from "../db/stImportPlanOps.ts"
 import type { StateEventData } from "@dreamspan/shared/state.ts"
 import { stBytesHash, type StPlanExpect, type StPlanExpectFile, stPartsHash } from "./stPlanExpect.ts"
-import { ST_CHANGED_SINCE_CHECK as CHANGED_SINCE_CHECK, ST_UNPLANNED_CHAT_MESSAGE } from "@dreamspan/shared/stReimportPlan.ts"
+import {
+  ST_CHANGED_SINCE_CHECK as CHANGED_SINCE_CHECK,
+  ST_UNPLANNED_CHAT_MESSAGE
+} from "@dreamspan/shared/stReimportPlan.ts"
 import {
   type CardInfo,
   chatStateChange,

@@ -190,7 +190,10 @@ test("bad versions show their check report and stale tabs cannot apply a second 
   expect((await admin((api) => api.GetPlugin({ scope: "instance", id }))).pin).toBeNull()
   await page.getByRole("button", { name: "Not now", exact: true }).click()
   const renamed = plain(id)
-  renamed["dreamspan-plugin.json"] = JSON.stringify({ ...JSON.parse(renamed["dreamspan-plugin.json"]), name: "Updated display name" })
+  renamed["dreamspan-plugin.json"] = JSON.stringify({
+    ...JSON.parse(renamed["dreamspan-plugin.json"]),
+    name: "Updated display name"
+  })
   const next = await admin((api) => api.CommitPlugin({ scope: "instance", id, files: renamed, message: "Fixed" }))
   await page.reload()
   await turnOn(page)

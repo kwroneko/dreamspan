@@ -820,7 +820,10 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
         }),
       after: (result, _args, ctx) =>
         Effect.gen(function* () {
-          const reply = result as { _tag: string; entry?: { version: { id: import("@dreamspan/shared/chat.ts").VersionId } } }
+          const reply = result as {
+            _tag: string
+            entry?: { version: { id: import("@dreamspan/shared/chat.ts").VersionId } }
+          }
           if (!reply.entry) return { text: "The reply could not be started without queueing it.", isError: true }
           let version = yield* ctx.reader.GetVersion({ userId: ctx.userId, versionId: reply.entry.version.id })
           while (version.status === "generating") {

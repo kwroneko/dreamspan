@@ -14,9 +14,10 @@ import type { ChatSession, ChatView } from "./session.ts"
 
 export const chatCardActions = defineSlot<ChatCardActionProps>("chat.card-actions")
 /** Navigation immediately after Write as in a cast member's menu. */
-export const castMemberNavigation = defineSlot<{ session: ChatSession; card: import("@dreamspan/shared/chat.ts").CastCard }>(
-  "chat.cast-member-navigation"
-)
+export const castMemberNavigation = defineSlot<{
+  session: ChatSession
+  card: import("@dreamspan/shared/chat.ts").CastCard
+}>("chat.cast-member-navigation")
 export function ChatCardActions(props: ChatCardActionProps) {
   return <SlotOutlet slot={chatCardActions} props={props} />
 }
@@ -25,9 +26,9 @@ export const chatSettingSections = defineSlot<{ session: ChatSession }>("chat.se
  * Sections of the request inspector after the context and what it left out (ContextPage.tsx): an
  * agent reply's tools and steps (agent/RunSteps.tsx), the run behind the request.
  */
-export const runInspectorSections = defineSlot<{ readonly run: import("@dreamspan/shared/inspectorApi.ts").RunContext }>(
-  "inspector.run-sections"
-)
+export const runInspectorSections = defineSlot<{
+  readonly run: import("@dreamspan/shared/inspectorApi.ts").RunContext
+}>("inspector.run-sections")
 /** Sections of the Cast tab under the cast itself: Add characters (CastAdd.tsx). */
 export const castSections = defineSlot<{ session: ChatSession }>("chat.cast-sections")
 /** The same sections in a chat not made yet: who answers first, Add characters. */
@@ -189,8 +190,11 @@ export const chatRowAbout = defineSlot<{
 export const pendingChatHeaderActions =
   defineSlot<import("./ChatHeader.tsx").PendingHeaderActionProps>("chat.pending-header-actions")
 export const messagePreviews = defineSlot<{ entry: PathEntry; session: ChatSession }>("message.previews")
-export const summaryPreviews = defineSlot<{ summary: import("@dreamspan/shared/lcm.ts").LcmSummary; session: ChatSession }>(
-  "summary.previews"
-)
+export const summaryPreviews = defineSlot<{
+  summary: import("@dreamspan/shared/lcm.ts").LcmSummary
+  session: ChatSession
+}>("summary.previews")
 
-export const queuedPreviews = defineSlot<{ queued: import("@dreamspan/shared/chat.ts").QueuedMessage }>("chat.queued-previews")
+export const queuedPreviews = defineSlot<{ queued: import("@dreamspan/shared/chat.ts").QueuedMessage }>(
+  "chat.queued-previews"
+)

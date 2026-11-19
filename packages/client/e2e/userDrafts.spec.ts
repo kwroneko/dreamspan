@@ -406,7 +406,10 @@ test("creation and rename forms keep non-secret text without copying a typed key
     .toBe("committed")
   const refId = new URL(page.url()).pathname.split("/").at(-1)!
   const ref = await api((client) =>
-    Effect.map(client.OpenEditor({ refId: refId as import("@dreamspan/shared/library.ts").RefId }), (opened) => opened.ref)
+    Effect.map(
+      client.OpenEditor({ refId: refId as import("@dreamspan/shared/library.ts").RefId }),
+      (opened) => opened.ref
+    )
   )
   // A lone chat renames in place (Enter renames, Escape keeps the name); the rename dialog,
   // and its draft, is for a chat in a group of several: two chats with the same two characters.

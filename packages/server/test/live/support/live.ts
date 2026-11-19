@@ -24,7 +24,14 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { deflateSync } from "node:zlib"
-import { NewVersion, type Chat, type EntityId, type SlotId, type Version, type VersionId } from "@dreamspan/shared/chat.ts"
+import {
+  NewVersion,
+  type Chat,
+  type EntityId,
+  type SlotId,
+  type Version,
+  type VersionId
+} from "@dreamspan/shared/chat.ts"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"

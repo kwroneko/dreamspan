@@ -6,7 +6,12 @@ import { createHash } from "node:crypto"
 // ends (ARCHITECTURE.md §13), and each part is read on its own: lines are separate JSON
 // documents, each under the shared JSON caps. Pure: no database, no files.
 import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
-import { editableThinking, originalReply, type ReplySections, sectionsDisplay } from "@dreamspan/shared/replySections.ts"
+import {
+  editableThinking,
+  originalReply,
+  type ReplySections,
+  sectionsDisplay
+} from "@dreamspan/shared/replySections.ts"
 import { ReportBuilder, shownText } from "@dreamspan/shared/importReport.ts"
 import { Predicate } from "effect"
 import { defaultLimits, fail, type Limits, parseJson } from "./safety.ts"

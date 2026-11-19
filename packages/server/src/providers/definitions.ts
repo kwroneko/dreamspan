@@ -3,7 +3,11 @@
 import { Context, Effect, Layer, Schema } from "effect"
 import { RpcClient } from "effect/rpc"
 import type { Headers } from "effect/http"
-import { builtinProviders, type ProviderDefinition, type ProviderResolution } from "@dreamspan/shared/providerDefinitions.ts"
+import {
+  builtinProviders,
+  type ProviderDefinition,
+  type ProviderResolution
+} from "@dreamspan/shared/providerDefinitions.ts"
 import { ProviderSettings } from "@dreamspan/shared/providers.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 
