@@ -1,4 +1,4 @@
-// 0007_attachment_paths (files3; spec/FILES-AND-ENVIRONMENT.md §6.1): a workshop's attachment
+// 0008_attachment_paths (files3; spec/FILES-AND-ENVIRONMENT.md §6.1): a workshop's attachment
 // draft keeps where its file was saved in Files, as the message's attachment does
 // (`version_attachments.path`, 0002_files), and an amended message's history keeps its
 // attachments' kind, name and path with the set, so restoring an earlier text restores its files
