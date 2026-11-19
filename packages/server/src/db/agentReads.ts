@@ -38,6 +38,7 @@ import { query } from "./tx.ts"
 import { transcriptEntries } from "./transcriptEntries.ts"
 import { withSubagents } from "./subagents.ts"
 import { workshopDefaultsOf } from "./workshopDefaults.ts"
+import { contractAttempts, underSendContract } from "../agent/contract.ts"
 import { knowsSql, readKnowers } from "./knowers.ts"
 import { threadStretches } from "./threadStretches.ts"
 import { foldState } from "@dreamspan/shared/state.ts"
@@ -48,6 +49,13 @@ import { AssemblySources } from "../assembler/pipeline.ts"
 import { inFork } from "./forkState.ts"
 import { withAssemblyModules } from "../assembler/modules.ts"
 import type { McpCallRow } from "./mcpRows.ts"
+
+/** The names a request's context used (`AssembledRequest.names`), for the contract's records. */
+const contextNames = (json: string | null): Array<string> => {
+  if (json === null) return []
+  const names = JSON.parse(json) as { user?: string; char?: string; group?: ReadonlyArray<string> }
+  return [...new Set([names.user ?? "", names.char ?? "", ...(names.group ?? [])].filter((n) => n.trim() !== ""))]
+}
 
 /** At most this many full-text matches in the chat, SearchChat starts from them. */
 const FEW = 2000
@@ -730,10 +738,12 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           readonly turn_cap: number | null
           readonly rollout_id: string
           readonly model: string | null
+          readonly names: string | null
         }>`
           SELECT p.transcript_json AS transcript, json_extract(p.context_snapshot_json, '$.agent.tools') AS tools,
             json_extract(p.context_snapshot_json, '$.agent.turnCap') AS turn_cap, r.id AS rollout_id,
-            json_extract(p.context_snapshot_json, '$.inputs.model') AS model
+            json_extract(p.context_snapshot_json, '$.inputs.model') AS model,
+            json_extract(p.context_snapshot_json, '$.request.names') AS names
           FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           JOIN rollouts r ON r.id = v.rollout_id LEFT JOIN rollout_payloads p ON p.rollout_id = r.id
           WHERE v.id = ${versionId} AND c.owner_user_id = ${userId}
@@ -807,7 +817,21 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
               : {})
           })),
           entries: transcriptEntries(messages, tools.length, turnCap, placedSteps(messages, tools, true, versionId)),
-          cut: cutSpans(messages, branches, tools.length, turnCap)
+          cut: cutSpans(messages, branches, tools.length, turnCap),
+          // The run's attempts at the send tool's contract (spec/REPLY-CONTRACT.md §3.6).
+          ...(underSendContract(messages)
+            ? {
+                contract: contractAttempts(
+                  messages,
+                  branches.map((b) => ({
+                    reason: b.reason,
+                    forkIndex: b.fork_index,
+                    messages: JSON.parse(b.messages_json) as ReadonlyArray<AgentMessage>
+                  })),
+                  { names: contextNames(row.names), toolNames: tools.map((t) => t.name) }
+                )
+              }
+            : {})
         }
       }).pipe(query("RolloutTranscript")),
     ListActivity: ({ userId, chatId, before, limit }) =>

@@ -1,5 +1,6 @@
 // SillyTavern 1.19's chat-completion prompt building, function by function (ARCHITECTURE §15,
 // "The one assembly path"; each function names the ST one it follows).
+import { speakerLabel } from "./contextMarkup.ts"
 import type { LegacyPresetDoc as PresetDoc } from "@dreamspan/shared/docs/preset.ts"
 import { budgetTokens, type ImageEstimate } from "@dreamspan/shared/imageTokens.ts"
 import { AssemblyFailed, type RequestImage, type Role } from "./types.ts"
@@ -197,7 +198,7 @@ export const parseExampleBlock = (
   let inBot = false
   const add = (name: string, as: "example_user" | "example_assistant") => {
     let content = current.join("\n").replace(`${name}:`, "").trim()
-    if (prefixNames) content = `${name}: ${content}`
+    if (prefixNames) content = speakerLabel(name, content)
     result.push({ name: as, content })
     current = []
   }
@@ -488,14 +489,14 @@ const mergeMessages = (
     let { content, role } = original
     if (role === "system" && original.name === "example_assistant") {
       if (names.char && !content.startsWith(`${names.char}: `) && !startsWithGroupName(content)) {
-        content = `${names.char}: ${content}`
+        content = speakerLabel(names.char, content)
       }
     }
     if (role === "system" && original.name === "example_user") {
-      if (names.user && !content.startsWith(`${names.user}: `)) content = `${names.user}: ${content}`
+      if (names.user && !content.startsWith(`${names.user}: `)) content = speakerLabel(names.user, content)
     }
     if (original.name && role !== "system" && !content.startsWith(`${original.name}: `)) {
-      content = `${original.name}: ${content}`
+      content = speakerLabel(original.name, content)
     }
     if (single) {
       if (
@@ -504,9 +505,10 @@ const mergeMessages = (
         !content.startsWith(`${names.char}: `) &&
         !startsWithGroupName(content)
       ) {
-        content = `${names.char}: ${content}`
+        content = speakerLabel(names.char, content)
       }
-      if (role === "user" && names.user && !content.startsWith(`${names.user}: `)) content = `${names.user}: ${content}`
+      if (role === "user" && names.user && !content.startsWith(`${names.user}: `))
+        content = speakerLabel(names.user, content)
       role = "user"
     }
     const { name: _name, ...rest } = original

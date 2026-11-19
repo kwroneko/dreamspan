@@ -6,6 +6,7 @@ import { gapLinesStage } from "./gapLines.ts"
 import { budgetTokens } from "@dreamspan/shared/imageTokens.ts"
 import { replySectionsOf, sectionsPrefix } from "@dreamspan/shared/replySections.ts"
 import { modelName } from "@dreamspan/shared/cardNames.ts"
+import { nameBlock, speakerLabel } from "./contextMarkup.ts"
 import { DEFAULT_RESPONSE, withModelSettings } from "@dreamspan/shared/modelSettings.ts"
 import { fitPair, resolveLcm, summaryMacroPrompts } from "@dreamspan/shared/lcmSettings.ts"
 import {
@@ -1330,7 +1331,7 @@ const chatLine = (
     return { role: "system", content: text, pieces, kind: scripted.volatile ? "volatile" : "history" }
   const named = (prefix: boolean): ChatLine => ({
     role: projected.role,
-    content: prefix ? `${projected.name}: ${text}` : text,
+    content: prefix ? speakerLabel(projected.name, text) : text,
     ...images,
     pieces,
     // A depth-bounded regex script changes it as the chat grows: it isn't part of the stable prefix.
@@ -1630,7 +1631,7 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
         : noteText(assembly, note, owner)
     if (text && owner && note.doc.placement.mode === "section" && note.doc.placement.section === "own_turn") {
       const name = modelName(owner.doc)
-      const wrapped = text.text ? `<${name}>\n${text.text}\n</${name}>` : ""
+      const wrapped = text.text ? nameBlock(name, text.text) : ""
       return {
         text: wrapped,
         piece: env.verbatim(`own-turn:${note.entity}`, noteSource(assembly, note), wrapped, [text.piece])
@@ -2104,7 +2105,7 @@ const composeStage = sync("compose", (assembly) => {
     cast.type === "normal" && sendIfEmpty?.text
       ? {
           role: "user" as const,
-          content: doc.names_behavior === "content" ? `${names.user}: ${sendIfEmpty.text}` : sendIfEmpty.text,
+          content: doc.names_behavior === "content" ? speakerLabel(names.user, sendIfEmpty.text) : sendIfEmpty.text,
           ...(doc.names_behavior === "completion" ? { name: sanitizeName(names.user) } : {}),
           pieces: [sendIfEmpty.piece],
           kind: "volatile" as const

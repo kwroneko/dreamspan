@@ -12,7 +12,17 @@
 // version of the message, which the chat then shows being written. What a resume or an edit cut
 // from the run it carried on shows folded where it was cut. Step edits use server-kept drafts;
 // the URL records which editor is open, so reloading restores both the editor and its text.
-import type { CutSpan, McpCallLine, OfferedTool, StepEdit, TranscriptEntry, TurnPart } from "@dreamspan/shared/agent.ts"
+import type {
+  ContractAttempt,
+  ContractFailure,
+  ContractRecord,
+  CutSpan,
+  McpCallLine,
+  OfferedTool,
+  StepEdit,
+  TranscriptEntry,
+  TurnPart
+} from "@dreamspan/shared/agent.ts"
 import type { ForkId, VersionId } from "@dreamspan/shared/chat.ts"
 import type { InspectorUsage, RunContext } from "@dreamspan/shared/inspectorApi.ts"
 import { displayToolData } from "@dreamspan/shared/toolData.ts"
@@ -257,6 +267,74 @@ export function Tools({
         tools={unused}
         note={(tool) => `${tool.label}${size(tool)}`}
       />
+    </section>
+  )
+}
+
+const FAILURE_WORDS: Record<ContractFailure, string> = {
+  invalid_tool_call: "Its send was refused",
+  textual_tool_call: "Wrote a tool call as text",
+  context_mimicry: "Copied the chat's own markup",
+  text_only: "Wrote text without sending it",
+  empty: "Wrote nothing"
+}
+
+const ENDING_WORDS = {
+  sent: "Sent the reply",
+  passed: "Stayed silent",
+  written: "Wrote the reply when asked to write it now"
+} as const
+
+const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`)
+
+/** The run's outcome in a sentence: how its reply was given, and how often the app asked. */
+const contractSummary = (record: ContractRecord) => {
+  const asked = times(record.nudges)
+  switch (record.outcome) {
+    case "clean":
+      return record.attempts.at(-1)?.ending === "passed" ? "Stayed silent at once." : "Sent at once."
+    case "recovered":
+      return `Sent after the app asked ${asked}.`
+    case "gave_up":
+      return `Stayed silent after the app asked ${asked}.`
+    case "exhausted":
+      return `Never sent, though the app asked ${asked}.`
+    default:
+      return record.nudges > 0 ? `Not finished; the app asked ${asked}.` : "Not finished."
+  }
+}
+
+const attemptWords = (attempt: ContractAttempt) =>
+  [
+    ...(attempt.ending === "failed" ? attempt.failures.map((f) => FAILURE_WORDS[f]) : [ENDING_WORDS[attempt.ending]]),
+    ...(attempt.cut ? ["cut when this reply was resumed"] : [])
+  ].join(" · ")
+
+/**
+ * How the run met the send tool's contract (spec/REPLY-CONTRACT.md §3.6): each time it ended a
+ * turn, and why that wasn't the reply. A run that sent at once shows the sentence alone.
+ */
+function ReplyAttempts({ record }: { record: ContractRecord }) {
+  const listed = record.attempts.length > 1 || record.attempts.some((a) => a.ending === "failed")
+  return (
+    <section aria-label="Reply attempts" className="flex flex-col gap-2">
+      <h2 className="text-base font-semibold">Reply attempts</h2>
+      <p className="text-sm text-muted">
+        {contractSummary(record)} Only a send_message call gives the reply; the app asks again when a turn ends without
+        one.
+      </p>
+      {listed && (
+        <ol className="flex flex-col gap-1 text-sm">
+          {record.attempts.map((attempt, i) => (
+            <li key={i} data-ending={attempt.ending} className="flex gap-2">
+              <span className="w-5 shrink-0 text-right text-muted tabular-nums">{i + 1}.</span>
+              <span className={attempt.ending === "failed" ? "text-text" : "text-success"}>
+                {attemptWords(attempt)}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
     </section>
   )
 }
@@ -680,13 +758,15 @@ function Transcript({
   tools,
   entries,
   cut,
-  mcpCalls
+  mcpCalls,
+  contract
 }: {
   run: RunContext
   tools: ReadonlyArray<OfferedTool>
   entries: ReadonlyArray<TranscriptEntry>
   cut: ReadonlyArray<CutSpan>
   mcpCalls: ReadonlyArray<McpCallLine>
+  contract?: ContractRecord | undefined
 }) {
   const editing = useStepEditing(run, tools)
   const facts = useMemo<McpFacts>(() => {
@@ -702,6 +782,7 @@ function Transcript({
   return (
     <McpFactsContext.Provider value={facts}>
       {tools.length > 0 && <Tools tools={tools} entries={entries} />}
+      {contract && contract.attempts.length > 0 && <ReplyAttempts record={contract} />}
       {outside && (
         <p role="alert" className="text-sm text-danger">
           {editing.error}
@@ -734,6 +815,7 @@ export function RunSteps({ run }: { run: RunContext }) {
       entries={transcript.entries}
       cut={transcript.cut}
       mcpCalls={transcript.mcpCalls ?? []}
+      contract={transcript.contract}
     />
   )
 }
