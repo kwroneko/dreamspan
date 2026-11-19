@@ -510,7 +510,8 @@ const RequestGuard = HttpRouter.middleware(
               (path === FRAME_PANEL ||
                 path === "/media/external" ||
                 path.startsWith("/media/saved/") ||
-                path === FILES_ROUTES.raw) &&
+                path === FILES_ROUTES.raw ||
+                path === FILES_ROUTES.attachment) &&
               response.headers["content-security-policy"] !== undefined
                 ? response
                 : HttpServerResponse.setHeader(response, "content-security-policy", policy)

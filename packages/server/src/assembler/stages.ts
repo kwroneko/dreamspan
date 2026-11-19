@@ -60,6 +60,7 @@ import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
 import { cachePrefixDigests, placeBreakpoints, summaryLevelOf } from "./breakpoints.ts"
 import { DEFAULT_MAX_IMAGES, imagesStage, messageImagesOf } from "./images.ts"
+import { attachmentLines } from "./attachments.ts"
 import { cardBlock, personaBlock } from "./layouts.ts"
 import { cardFieldKey, replacementFor, replacementsStage } from "./replacements.ts"
 import { cardFields, makeMacroEnvironment, type MacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
@@ -2787,6 +2788,35 @@ const endOfRequestStage = sync("end-of-request", (assembly) => {
   }
 })
 
+/**
+ * A message's attachments saved in Files (spec/FILES-AND-ENVIRONMENT.md §6.1): their
+ * `<attachment>` lines after its text, in its message piece, so a carried turn sends them too.
+ * A summary request reads them as well, so a summary can keep the paths.
+ */
+const attachmentsStage = sync("attachments", (assembly) => {
+  const env = need(assembly, "macros")
+  const scripted = new Map(need(assembly, "scripted"))
+  let changed = false
+  assembly.resolved = need(assembly, "resolved").map(({ entry, piece }) => {
+    if (!entry.attachments?.length) return { entry, piece }
+    const lines = attachmentLines(entry.attachments, assembly.model?.vision).join("\n")
+    const previous = scripted.get(entry.versionId)
+    if (previous)
+      scripted.set(entry.versionId, { ...previous, text: previous.text ? `${previous.text}\n${lines}` : lines })
+    changed = true
+    const text = env.text(piece)
+    return {
+      entry,
+      piece: env.verbatim(
+        `attachments:${entry.versionId}`,
+        { kind: "message", slot: entry.slotId, version: entry.versionId },
+        text && text !== "[Image]" ? `${text}\n${lines}` : lines
+      )
+    }
+  })
+  if (changed) assembly.scripted = scripted
+})
+
 /** Workshop text has its own registered stage and inspector piece, after end-of-request. */
 const workshopInstructionsStage = sync("workshop-instructions", (assembly) => {
   if (!assembly.request.agent?.workshop || assembly.request.summarizing) return
@@ -2798,11 +2828,18 @@ const workshopInstructionsStage = sync("workshop-instructions", (assembly) => {
     const env = need(assembly, "macros")
     const piece = env.piece("workshop:instructions", { kind: "assembler", what: "Workshop instructions" }, raw)
     const text = env.text(piece)
-    if (!text.trim()) return end
+    // The turn's own lines (the working folder, spec/FILES-AND-ENVIRONMENT.md §2.1), verbatim:
+    // a folder's name is never a macro. In the tail, so a change keeps the cached prefix.
+    const notes = (assembly.request.agent!.turnNotes ?? []).map((line, i) => ({
+      text: line,
+      piece: env.verbatim(`workshop:turn-note:${i}`, { kind: "assembler", what: "Turn note" }, line)
+    }))
+    const own = [...(text.trim() ? [{ text, piece }] : []), ...notes]
+    if (own.length === 0) return end
     return {
       role: "user",
-      content: [end?.content, text].filter(Boolean).join("\n"),
-      pieces: [...(end?.pieces ?? []), piece],
+      content: [end?.content, ...own.map((o) => o.text)].filter(Boolean).join("\n"),
+      pieces: [...(end?.pieces ?? []), ...own.map((o) => o.piece)],
       kind: "volatile"
     }
   }
@@ -3099,6 +3136,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
     })
     assembly.scripted = scripted
   }),
+  attachmentsStage,
   imageTokensStage,
   rolesStage,
   mergeLayoutStage,

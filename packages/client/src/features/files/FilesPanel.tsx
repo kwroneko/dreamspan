@@ -6,6 +6,7 @@ import { useState, type ReactNode } from "react"
 import type { PanelProps } from "../chat/panels.tsx"
 import type { ChatSession, ChatView } from "../chat/session.ts"
 import { openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
+import { requestAttach } from "../chat/fileAttachments.ts"
 import { FileBrowser, type WorkingFolder } from "./FileBrowser.tsx"
 import { filesHref } from "./href.ts"
 import { useFilesSource } from "./source.ts"
@@ -16,7 +17,7 @@ export function FilesPanel({ session, view }: Pick<PanelProps, "session" | "view
   // Keyed by the source, so a source registered later starts its hook afresh.
   return working ? (
     <WithWorkingFolder key={working.id} source={working} session={session} view={view}>
-      {(folder) => <Files working={folder} />}
+      {(folder) => <Files working={folder} onAttach={(path) => requestAttach(session.chatId, path)} />}
     </WithWorkingFolder>
   ) : (
     <Files working={null} />
@@ -38,7 +39,7 @@ function WithWorkingFolder({
   return children(useWorkingFolder(session, view))
 }
 
-function Files({ working }: { working: WorkingFolder | null }) {
+function Files({ working, onAttach }: { working: WorkingFolder | null; onAttach?: (path: string) => void }) {
   const source = useFilesSource()
   const [chosen, setChosen] = useState<string | null>(null)
   const [opened, setOpened] = useState<string | null>(null)
@@ -56,6 +57,7 @@ function Files({ working }: { working: WorkingFolder | null }) {
       opened={opened}
       onOpened={setOpened}
       working={working}
+      {...(working && onAttach ? { onAttach } : {})}
       tabHref={filesHref}
       {...(beside ? { onOpenTab: (at: string, file: string | null) => openBeside(filesHref(at, file)) } : {})}
     />

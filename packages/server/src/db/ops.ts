@@ -5558,6 +5558,8 @@ const ReadOpsOwn = RpcGroup.make(
           instructions: Schema.String,
           speakerCardOnly: Schema.Boolean,
           workshop: Schema.optionalKey(Schema.Boolean),
+          /** A workshop turn's tail lines (agent/turnNotes.ts), after its instructions. */
+          turnNotes: Schema.optionalKey(Schema.Array(Schema.String)),
           stepSummaries: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
           response: Schema.optionalKey(Schema.Literals(["model"])),
           /** The run's skills for the preset's skill markers (spec/WORKSHOP-CONTEXT.md §4.2). */

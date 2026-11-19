@@ -8,6 +8,7 @@ import { subagentSchema } from "./subagentSchema.ts"
 import { workshopBranchesMigration } from "./migrationWorkshopBranches.ts"
 import { personaLocksMigration } from "./migrationPersonaLocks.ts"
 import { contractRecordsMigration } from "./migrationContractRecords.ts"
+import { attachmentPathsMigration } from "./migrationAttachmentPaths.ts"
 import { rebuildTable, type OutsideStep } from "./tableRebuild.ts"
 
 /**
@@ -38,7 +39,9 @@ export const migrationDefinitions = {
   // DESIGN §2.2 (owner, 2026-11-18): the persona a character's new single chats start with.
   "0006_persona_locks": { statements: personaLocksMigration },
   // spec/REPLY-CONTRACT.md §3.6: how each agent story reply met the send tool's contract.
-  "0007_contract_records": { statements: contractRecordsMigration }
+  "0007_contract_records": { statements: contractRecordsMigration },
+  // spec/FILES-AND-ENVIRONMENT.md §6.1: where a workshop's attachment draft was saved in Files.
+  "0008_attachment_paths": { statements: attachmentPathsMigration }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 
 const runAll = (statements: ReadonlyArray<string>) =>

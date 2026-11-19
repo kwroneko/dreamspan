@@ -37,6 +37,7 @@ import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 import { DraftTooLarge, NotFound, StaleWrite } from "./ops.ts"
 import { makeLibraryQueries } from "./library.ts"
+import { attachmentJson } from "./rows.ts"
 
 interface DraftRow {
   readonly id: string
@@ -153,7 +154,15 @@ const formChange = (before: string, after: string) => {
 }
 
 const imageJson = (images: MessageImages) =>
-  JSON.stringify(images.map((image) => ({ mediaId: image.mediaId, altText: image.altText ?? "" })))
+  JSON.stringify(
+    images.map((image) => ({
+      mediaId: image.mediaId,
+      altText: image.altText ?? "",
+      ...(image.kind ? { kind: image.kind } : {}),
+      ...(image.name !== undefined ? { name: image.name } : {}),
+      ...(image.path !== undefined ? { path: image.path } : {})
+    }))
+  )
 const imageFields = (json: string | null) => (json === null ? {} : { images: JSON.parse(json) as MessageImages })
 
 const toDraft = (row: DraftRow, recovered = 0, displaced: DraftDisplacement | null = null) =>
@@ -329,9 +338,10 @@ export const makeDraftStore = (
     readonly field?: string
   }) =>
     key.targetKind === "version_edit" && key.field !== EDIT_THINKING_FIELD
-      ? sql<{ media_id: string; alt_text: string | null }>`
-          SELECT media_id, alt_text FROM version_attachments WHERE version_id = ${key.targetId} ORDER BY ordinal`.pipe(
-          Effect.map((rows) => imageJson(rows.map((row) => ({ mediaId: row.media_id, altText: row.alt_text ?? "" }))))
+      ? sql<{ attachment: string }>`
+          SELECT ${sql.literal(attachmentJson("a"))} AS attachment FROM version_attachments a
+          WHERE a.version_id = ${key.targetId} ORDER BY a.ordinal`.pipe(
+          Effect.map((rows) => imageJson(rows.map((row) => JSON.parse(row.attachment) as MessageImages[number])))
         )
       : Effect.succeed(null)
 

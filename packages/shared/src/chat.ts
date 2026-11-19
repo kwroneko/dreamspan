@@ -157,14 +157,26 @@ export const ContextIssue = Schema.Struct({
 })
 export type ContextIssue = typeof ContextIssue.Type
 
-/** Ordered, version-owned image references. Bytes are uploaded separately. */
+/**
+ * Ordered, version-owned attachments: images, and in workshops files of any type
+ * (spec/FILES-AND-ENVIRONMENT.md §6.1). Bytes are uploaded separately. An attachment saved in
+ * Files has its `name` and `path` there; `kind: "file"` marks one that isn't an image, which is
+ * never sent as an image (`imagesOnly`).
+ */
 export const MessageImages = Schema.Array(
   Schema.Struct({
     mediaId: Schema.String,
-    altText: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000)))
+    altText: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000))),
+    kind: Schema.optionalKey(Schema.Literals(["file"])),
+    name: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(255))),
+    path: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096)))
   })
 ).check(Schema.isMaxLength(32))
 export type MessageImages = typeof MessageImages.Type
+
+/** The images of a set of attachments, leaving out files of other types. */
+export const imagesOnly = <A extends { readonly kind?: "file" }>(attachments: ReadonlyArray<A>): ReadonlyArray<A> =>
+  attachments.filter((a) => a.kind !== "file")
 
 /**
  * How a version was generated, as the app it was imported from recorded it (SillyTavern's

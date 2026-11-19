@@ -113,9 +113,9 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
                 CASE WHEN ${effective(sql, fork)} THEN (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) ELSE 0 END AS amend_count,
                 coalesce(v.status = 'generating', 0) AS generating,
                 CASE WHEN ${effective(sql, fork)} THEN (SELECT json_group_array(a.media_id) FROM (SELECT media_id FROM version_attachments
-                  WHERE version_id = v.id AND NOT ${imageExcludedIn(sql, fork, `(${originalSql("v")})`, "media_id")} ORDER BY ordinal) a) END AS images_json,
+                  WHERE version_id = v.id AND kind <> 'file' AND NOT ${imageExcludedIn(sql, fork, `(${originalSql("v")})`, "media_id")} ORDER BY ordinal) a) END AS images_json,
                 CASE WHEN ${effective(sql, fork)} THEN (SELECT json_group_array(a.media_id) FROM (SELECT media_id FROM version_attachments
-                  WHERE version_id = v.id AND ${imageExcludedIn(sql, fork, `(${originalSql("v")})`, "media_id")} ORDER BY ordinal) a) END AS withheld_json,
+                  WHERE version_id = v.id AND kind <> 'file' AND ${imageExcludedIn(sql, fork, `(${originalSql("v")})`, "media_id")} ORDER BY ordinal) a) END AS withheld_json,
                 CASE WHEN ${effective(sql, fork)} THEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) ELSE 0 END AS attached
               FROM chain c JOIN slots s ON s.id = c.id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
               ORDER BY c.depth DESC`

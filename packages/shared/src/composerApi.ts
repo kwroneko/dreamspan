@@ -59,7 +59,11 @@ export const ComposerImage = Schema.Struct({
   id: Schema.String,
   mediaId: Schema.NullOr(Schema.String),
   altText: Schema.String,
-  status: Schema.Literals(["active", "sent", "removed"])
+  status: Schema.Literals(["active", "sent", "removed"]),
+  /** A workshop's attachment saved in Files (§6.1): `file` for one that isn't an image, its name and path. */
+  kind: Schema.optionalKey(Schema.Literals(["file"])),
+  name: Schema.optionalKey(Schema.String),
+  path: Schema.optionalKey(Schema.String)
 })
 export type ComposerImage = typeof ComposerImage.Type
 export const ComposerImageKey = { chatId: ChatId, draftId: Schema.String }
@@ -70,7 +74,10 @@ export const SetComposerImageFields = {
   ...ComposerImageKey,
   id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
   mediaId: Schema.NullOr(Schema.String),
-  altText: Schema.String.check(Schema.isMaxLength(2000))
+  altText: Schema.String.check(Schema.isMaxLength(2000)),
+  kind: Schema.optionalKey(Schema.Literals(["file"])),
+  name: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255))),
+  path: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)))
 }
 
 export class ComposerApi extends RpcGroup.make(

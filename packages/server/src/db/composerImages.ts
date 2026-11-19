@@ -5,6 +5,28 @@ import type { MessageImages } from "@dreamspan/shared/chat.ts"
 import type { ComposerImage } from "@dreamspan/shared/composerApi.ts"
 import { NotFound, StorageError } from "./ops.ts"
 
+/** The row as the API gives it: a workshop's attachment adds its kind, name and path (§6.1). */
+interface Row {
+  readonly position: number
+  readonly id: string
+  readonly mediaId: string | null
+  readonly altText: string
+  readonly status: ComposerImage["status"]
+  readonly kind: string
+  readonly name: string | null
+  readonly path: string | null
+}
+const columns = "rowid AS position, id, media_id AS mediaId, alt_text AS altText, status, kind, name, path"
+const toImage = ({ kind, name, path, ...row }: Row): ComposerImage => ({
+  ...row,
+  ...(kind === "file" ? { kind: "file" as const } : {}),
+  ...(name !== null ? { name } : {}),
+  ...(path !== null ? { path } : {})
+})
+
+/** What an attachment's file may be: any type for a file, else a PNG, JPEG, GIF or WebP image. */
+const IMAGE_MIMES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const
+
 export const composerImages = (sql: SqlClient.SqlClient) => {
   const owned = (userId: UserId, chatId: string, draftId: string) =>
     Effect.gen(function* () {
@@ -16,18 +38,33 @@ export const composerImages = (sql: SqlClient.SqlClient) => {
   const read = (userId: UserId, chatId: string, draftId: string, ids: readonly string[]) =>
     Effect.gen(function* () {
       yield* owned(userId, chatId, draftId)
-      return yield* sql<ComposerImage>`SELECT rowid AS position, id, media_id AS mediaId, alt_text AS altText, status
+      const rows = yield* sql<Row>`SELECT ${sql.literal(columns)}
       FROM composer_images WHERE draft_id=${draftId} AND (status='active' OR id IN ${sql.in(ids)}) ORDER BY rowid`
+      return rows.map(toImage)
     })
-  const set = (userId: UserId, chatId: string, draftId: string, id: string, mediaId: string | null, altText: string) =>
+  const set = (
+    userId: UserId,
+    chatId: string,
+    draftId: string,
+    id: string,
+    mediaId: string | null,
+    altText: string,
+    file: { readonly kind?: "file"; readonly name?: string; readonly path?: string } = {}
+  ) =>
     Effect.gen(function* () {
       yield* owned(userId, chatId, draftId)
       const [existing] = yield* sql<{ draft_id: string }>`SELECT draft_id FROM composer_images WHERE id=${id}`
       if (existing && existing.draft_id !== draftId) return yield* new NotFound({ entity: "composer image", id })
       if (mediaId !== null && !existing) {
-        const [media] = yield* sql`SELECT m.id FROM media_assets m JOIN media_refs r ON r.media_id=m.id
-        WHERE m.id=${mediaId} AND r.owner_user_id=${userId} AND m.mime IN ('image/png','image/jpeg','image/gif','image/webp')`
-        if (!media) return yield* new NotFound({ entity: "image", id: mediaId })
+        // A file of any type only where its chat is a workshop (§6.1); a story's are images.
+        const [media] =
+          file.kind === "file"
+            ? yield* sql`SELECT m.id FROM media_assets m JOIN media_refs r ON r.media_id=m.id
+            JOIN chats c ON c.id=${chatId} AND c.kind='workshop'
+            WHERE m.id=${mediaId} AND r.owner_user_id=${userId}`
+            : yield* sql`SELECT m.id FROM media_assets m JOIN media_refs r ON r.media_id=m.id
+            WHERE m.id=${mediaId} AND r.owner_user_id=${userId} AND m.mime IN ${sql.in(IMAGE_MIMES)}`
+        if (!media) return yield* new NotFound({ entity: file.kind === "file" ? "file" : "image", id: mediaId })
         const [count] = yield* sql<{
           n: number
         }>`SELECT count(*) AS n FROM composer_images WHERE draft_id=${draftId} AND status='active'`
@@ -35,15 +72,15 @@ export const composerImages = (sql: SqlClient.SqlClient) => {
           return yield* new StorageError({
             reason: "constraint",
             operation: "SetComposerImage",
-            message: "A message can hold at most 32 images."
+            message: "A message can hold at most 32 attachments."
           })
       }
-      yield* sql`INSERT INTO composer_images (id,draft_id,media_id,alt_text,status)
-      VALUES (${id},${draftId},${mediaId},${altText},${mediaId === null ? "removed" : "active"}) ON CONFLICT(id) DO NOTHING`
+      yield* sql`INSERT INTO composer_images (id,draft_id,media_id,alt_text,status,kind,name,path)
+      VALUES (${id},${draftId},${mediaId},${altText},${mediaId === null ? "removed" : "active"},
+        ${file.kind ?? "image"},${file.name ?? null},${file.path ?? null}) ON CONFLICT(id) DO NOTHING`
       if (mediaId === null) yield* sql`UPDATE composer_images SET status='removed' WHERE id=${id} AND status='active'`
-      const [row] =
-        yield* sql<ComposerImage>`SELECT rowid AS position, id, media_id AS mediaId, alt_text AS altText, status FROM composer_images WHERE id=${id}`
-      return row!
+      const [row] = yield* sql<Row>`SELECT ${sql.literal(columns)} FROM composer_images WHERE id=${id}`
+      return toImage(row!)
     })
   const consume = (
     userId: UserId,

@@ -29,6 +29,7 @@ import {
   type VersionRow
 } from "./rows.ts"
 import { checkStateReferences, withoutPurged } from "./stateRefs.ts"
+import { attachmentJson } from "./rows.ts"
 import { recordStoryAt } from "./workshopPairing.ts"
 import type { WorkshopChoice } from "./workshopForks.ts"
 
@@ -83,17 +84,29 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
           source
         )
 
-  const checkImages = (userId: string, images: import("@dreamspan/shared/chat.ts").MessageImages) =>
+  /**
+   * Each attachment is the owner's stored media: an image a PNG, JPEG, GIF or WebP; a file of
+   * any type, attached only in a workshop (spec/FILES-AND-ENVIRONMENT.md §6.1).
+   */
+  const checkImages = (userId: string, images: import("@dreamspan/shared/chat.ts").MessageImages, chatId?: string) =>
     Effect.forEach(
       images,
       (image) =>
-        found(
-          sql`SELECT count(*) AS n FROM media_refs r JOIN media_assets m ON m.id=r.media_id
-        WHERE r.owner_user_id=${userId} AND r.media_id=${image.mediaId}
-          AND m.mime IN ('image/png', 'image/jpeg', 'image/gif', 'image/webp')`,
-          "media",
-          image.mediaId
-        ),
+        image.kind === "file"
+          ? found(
+              sql`SELECT count(*) AS n FROM media_refs r JOIN media_assets m ON m.id=r.media_id
+              WHERE r.owner_user_id=${userId} AND r.media_id=${image.mediaId}
+                AND (${chatId ?? null} IS NULL OR EXISTS (SELECT 1 FROM chats c WHERE c.id=${chatId ?? null} AND c.kind='workshop'))`,
+              "media",
+              image.mediaId
+            )
+          : found(
+              sql`SELECT count(*) AS n FROM media_refs r JOIN media_assets m ON m.id=r.media_id
+              WHERE r.owner_user_id=${userId} AND r.media_id=${image.mediaId}
+                AND m.mime IN ('image/png', 'image/jpeg', 'image/gif', 'image/webp')`,
+              "media",
+              image.mediaId
+            ),
       { discard: true }
     )
 
@@ -139,19 +152,22 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
       if (version.images !== undefined) {
         const [chat] = yield* sql<{
           owner: string
-        }>`SELECT c.owner_user_id AS owner FROM slots s JOIN chats c ON c.id=s.chat_id WHERE s.id=${slotId}`
+          id: string
+        }>`SELECT c.owner_user_id AS owner, c.id FROM slots s JOIN chats c ON c.id=s.chat_id WHERE s.id=${slotId}`
         if (!chat && !owner) return yield* new NotFound({ entity: "slot", id: slotId })
-        yield* checkImages(chat?.owner ?? owner!, version.images)
+        yield* checkImages(chat?.owner ?? owner!, version.images, chat?.id)
         for (const [ordinal, image] of version.images.entries())
-          yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text)
-            VALUES (${inserted.id}, ${ordinal}, ${image.mediaId}, 'image', ${image.altText ?? null})`
+          yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text, name, path)
+            VALUES (${inserted.id}, ${ordinal}, ${image.mediaId}, ${image.kind ?? "image"}, ${image.altText ?? null},
+              ${image.name ?? null}, ${image.path ?? null})`
       } else if (version.sourceVersionId) {
-        yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text)
-          SELECT ${inserted.id}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id=${version.sourceVersionId}`
+        yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text, name, path)
+          SELECT ${inserted.id}, ordinal, media_id, kind, alt_text, name, path FROM version_attachments WHERE version_id=${version.sourceVersionId}`
       }
       if (version.images !== undefined || version.sourceVersionId) {
-        const [attachments] = yield* sql<{ images_json: string }>`SELECT json_group_array(json_object(
-          'mediaId', a.media_id, 'altText', coalesce(a.alt_text, ''))) AS images_json
+        const [attachments] = yield* sql<{
+          images_json: string
+        }>`SELECT json_group_array(${sql.literal(attachmentJson("a"))}) AS images_json
           FROM (SELECT * FROM version_attachments WHERE version_id=${inserted.id} ORDER BY ordinal) a`
         return { ...inserted, images_json: attachments!.images_json }
       }

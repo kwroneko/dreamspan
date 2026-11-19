@@ -161,6 +161,7 @@ test.describe("files", () => {
         await expect(menu.getByRole("menuitem")).toHaveText([
           /^Open/,
           /^Download/,
+          /^Attach to message/,
           /^Copy path/,
           /^Rename/,
           /^Move to…/,
