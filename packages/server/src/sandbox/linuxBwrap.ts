@@ -314,7 +314,7 @@ export const seccompFilter = (arch: NodeJS.Architecture = process.arch): Buffer 
 }
 
 /** The arguments to bubblewrap for one command, given its runtime folder. */
-const bwrapArgs = (spec: RunSpec | SpawnSpec, runDir: string) => {
+const bwrapArgs = (spec: RunSpec | SpawnSpec, runDir: string, mountFds: ReadonlyMap<number, number> = new Map()) => {
   const args = [
     "--unshare-user",
     "--unshare-pid",
@@ -360,7 +360,12 @@ const bwrapArgs = (spec: RunSpec | SpawnSpec, runDir: string) => {
     join(runDir, "rp"),
     RUNTIME
   ]
-  for (const mount of spec.mounts) args.push(mount.writable ? "--bind" : "--ro-bind", mount.source, mount.target)
+  for (const [index, mount] of spec.mounts.entries()) {
+    const fd = mountFds.get(index)
+    if (mount.empty) args.push("--size", String(2 ** 20), "--tmpfs", mount.target)
+    else if (fd !== undefined) args.push(mount.writable ? "--bind-fd" : "--ro-bind-fd", String(fd), mount.target)
+    else args.push(mount.writable ? "--bind" : "--ro-bind", mount.source, mount.target)
+  }
   args.push("--remount-ro", "/", "--chdir", "/", "--clearenv")
   const env = { ...spec.env, ...proxyEnv(spec.network) }
   for (const [key, value] of Object.entries(env)) args.push("--setenv", key, value)
@@ -661,10 +666,18 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
       filterFile = await open(join(runDir, "seccomp.bpf"), "r")
     }
     const argsFd = filterFile ? 4 : 3
+    // Folders bound by descriptor follow the arguments' descriptor, in mount order.
+    const mountFds = new Map<number, number>()
+    const passed: Array<number> = []
+    for (const [index, mount] of spec.mounts.entries())
+      if (mount.fd !== undefined && !mount.empty) {
+        mountFds.set(index, argsFd + 1 + passed.length)
+        passed.push(mount.fd)
+      }
     // Options only: bubblewrap takes the command itself from its command line.
     const args = await argsFile(runDir, [
       ...(filterFile ? ["--seccomp", "3"] : []),
-      ...bwrapArgs(spec, runDir),
+      ...bwrapArgs(spec, runDir, mountFds),
       "--setenv",
       "RP_END",
       marker
@@ -678,7 +691,7 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
     const child = (() => {
       try {
         return spawn(start.file, start.args, {
-          stdio: ["ignore", "pipe", "pipe", ...(filterFile ? [filterFile.fd] : []), args.fd],
+          stdio: ["ignore", "pipe", "pipe", ...(filterFile ? [filterFile.fd] : []), args.fd, ...passed],
           detached: true,
           env: { ...group?.env }
         })
@@ -697,6 +710,7 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
     let outputCapped = false
     const take = (chunk: Buffer) => {
       if (outputCapped) return
+      spec.onOutput?.(chunk)
       total += chunk.length
       if (headBytes < KEEP_HEAD) {
         const part = chunk.subarray(0, KEEP_HEAD - headBytes)
@@ -774,7 +788,9 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
     const ended = group ? await group.finish().catch(() => ({ memoryCapped: false })) : { memoryCapped: false }
     group = null
     const memoryCapped = ended.memoryCapped && !timedOut && !outputCapped && !diskLow && !signal.aborted
+    const networkBytes = proxy?.bytes?.()
     return {
+      ...(networkBytes ? { networkBytes } : {}),
       exitCode: timedOut || outputCapped || diskLow || memoryCapped || signal.aborted ? null : exitCode,
       timedOut,
       outputCapped,

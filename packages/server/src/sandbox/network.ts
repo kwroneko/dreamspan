@@ -72,6 +72,8 @@ export const reachableAddresses = async (host: string, resolve: Resolve = defaul
 
 export interface SandboxProxy {
   readonly socketPath: string
+  /** Bytes carried both ways for the command so far (for the account's usage display). */
+  readonly bytes?: () => number
   /** Stops accepting and cuts every connection still open. */
   readonly close: () => Promise<void>
 }
@@ -106,9 +108,19 @@ const openPublicProxy = async (socketPath: string, resolve: Resolve = defaultRes
     sockets.add(socket)
     socket.once("close", () => sockets.delete(socket))
   }
+  // What the command's side of each connection carried: counted, never logged.
+  const clients = new Set<Socket>()
+  let closedBytes = 0
   const server = createServer()
   server.maxConnections = PROXY_MAX_CONNECTIONS
-  server.on("connection", track)
+  server.on("connection", (socket: Socket) => {
+    track(socket)
+    clients.add(socket)
+    socket.once("close", () => {
+      clients.delete(socket)
+      closedBytes += socket.bytesRead + socket.bytesWritten
+    })
+  })
   server.on("connect", (req: IncomingMessage, client: Socket, head: Buffer) => {
     client.on("error", () => client.destroy())
     const target = /^(\[[^\]]+\]|[^:]+):(\d{1,5})$/.exec(req.url ?? "")
@@ -197,6 +209,7 @@ const openPublicProxy = async (socketPath: string, resolve: Resolve = defaultRes
   })
   return {
     socketPath,
+    bytes: () => [...clients].reduce((sum, socket) => sum + socket.bytesRead + socket.bytesWritten, closedBytes),
     close: () =>
       new Promise<void>((done) => {
         for (const socket of sockets) socket.destroy()

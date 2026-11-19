@@ -9,6 +9,8 @@ import type { SandboxMount } from "../sandbox/registry.ts"
 
 export const FILES_MOUNT = "/files"
 export const HOME_MOUNT = "/home/user"
+/** Where folders other accounts shared with this one appear (§1.4). */
+export const SHARED_MOUNT = "/files/Shared"
 /** The app's own source for the running version, read-only (§3.6, files/appSource.ts). */
 const APP_SOURCE_MOUNT = "/app-source"
 
@@ -17,6 +19,8 @@ export interface ToolRoot {
   readonly mount: string
   readonly hostRoot: string
   readonly writable: boolean
+  /** The folder's components below `hostRoot` (a folder shared from another account's Files). */
+  readonly base?: ReadonlyArray<string>
 }
 
 export interface AccountEnv {
@@ -76,7 +80,7 @@ export const resolveToolPath = (input: string, cwd: string, roots: ReadonlyArray
     throw new FilePathRefused(
       `${full} is outside your files (${roots.map((r) => r.mount).join(", ")}). Use bash for other places.`
     )
-  return { full, root, segments: segmentsOf(full.slice(root.mount.length)) }
+  return { full, root, segments: [...(root.base ?? []), ...segmentsOf(full.slice(root.mount.length))] }
 }
 
 /**

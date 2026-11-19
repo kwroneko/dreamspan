@@ -256,7 +256,7 @@ test.describe("files", () => {
         await check("page-text", "main")
       })
 
-  // The storage line on the Files page, and an upload that doesn't fit refused before it starts.
+  // The storage line on the Files page, its details and Reset, and an upload that doesn't fit refused before it starts.
   for (const width of [1440, 390])
     for (const theme of ["light", "dark"] as const)
       test(`storage usage and a refused upload at ${width} ${theme}`, async ({ page }, info) => {
@@ -282,6 +282,20 @@ test.describe("files", () => {
         await expect(line).toHaveText(/^.+ of 64 KB used$/)
         await expect(line).not.toHaveAttribute("data-warn")
         if (audit) await expectLayout(page, info, `files-usage-${width}-${theme}`, { scope: "main" })
+        // The line opens what makes it up, and Reset the home folder.
+        await line.click()
+        const details = page.locator("[data-files-usage-details]")
+        await expect(details.getByText("Earlier versions")).toBeVisible()
+        await expect(details.getByText("Assistant's home folder")).toBeVisible()
+        await expect(page.getByText(/^Commands used .+ of internet since/)).toBeVisible()
+        if (audit) await expectLayout(page, info, `files-usage-details-${width}-${theme}`)
+        await page.getByRole("button", { name: "Reset the home folder" }).click()
+        const confirm = page.getByRole("alertdialog")
+        await expect(confirm.getByText("Reset the assistant's home folder?")).toBeVisible()
+        await confirm.getByRole("button", { name: "Reset" }).click()
+        await expect(confirm).toBeHidden()
+        await page.keyboard.press("Escape")
+        await expect(details).toBeHidden()
 
         await browser.getByLabel("Files to upload").setInputFiles({
           name: "big.bin",

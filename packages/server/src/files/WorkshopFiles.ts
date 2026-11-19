@@ -24,6 +24,7 @@ import { BIN_FOLDER, makeFilesBin, type FilesBin } from "./bin.ts"
 import { makeFilesQuota, parseByteSize, type FilesQuota } from "./quota.ts"
 import { prepareAppSource } from "./appSource.ts"
 import { makePluginCopies } from "./pluginCopies.ts"
+import { makeCommandOutputs } from "./commandOutput.ts"
 
 export class WorkshopFiles extends Context.Service<
   WorkshopFiles,
@@ -43,6 +44,10 @@ export class WorkshopFiles extends Context.Service<
     readonly changed: (userId: string, paths: ReadonlyArray<string>, all?: boolean) => void
     /** A folder of the account's Files with its inode, for `workshop.folder` (§2.1); fails when it isn't one. */
     readonly folderAt: (userId: string, path: string) => Effect.Effect<{ path: string; inode: number | null }, unknown>
+    /** Empties the account's home folder for commands; fails with FilePathRefused while a command runs. */
+    readonly resetHome: (userId: string) => Effect.Effect<void, unknown>
+    /** Bytes the account's commands moved over the internet since the server started. */
+    readonly networkUse: (userId: string) => { readonly bytes: number; readonly since: number }
     /** Where a stored working folder is now (workingFolder.ts `locateFolder`); null when it's gone. */
     readonly locateFolder: (
       userId: string,
@@ -111,8 +116,14 @@ export class WorkshopFiles extends Context.Service<
             return null
           }
         ))
+      // Commands' whole output (§5.1), and what they moved over the internet (§3.5, counted only).
+      const outputs = makeCommandOutputs(config.dataDir)
+      const networkSince = Date.now()
+      const network = new Map<string, number>()
       const files = makeFileTools({
         appSource,
+        outputs,
+        onNetwork: (userId, bytes) => network.set(userId, (network.get(userId) ?? 0) + bytes),
         dataDir: config.dataDir,
         ...dirs,
         reader,
@@ -126,6 +137,8 @@ export class WorkshopFiles extends Context.Service<
       })
       for (const tool of files.tools) yield* execution.rolloutTools.register(tool)
       yield* execution.subagentWorkspaces.register(files.workspaces)
+      // Background commands end with the app.
+      yield* Effect.addFinalizer(() => Effect.sync(() => files.stopAll()))
       // Plugin working copies in Files (§5.3), for the plugin tools.
       yield* execution.pluginWorkingCopies.register(
         makePluginCopies({
@@ -189,6 +202,11 @@ export class WorkshopFiles extends Context.Service<
         Effect.repeat(Schedule.spaced(Duration.millis(quota.intervals.retentionMs))),
         Effect.forkScoped
       )
+      // Kept command output older than a day.
+      yield* Effect.promise(() => outputs.prune()).pipe(
+        Effect.repeat(Schedule.spaced(Duration.millis(quota.intervals.retentionMs))),
+        Effect.forkScoped
+      )
       // The content of bin items that went (emptied, purged, or evicted past the bin's limits).
       yield* bin.sweep().pipe(
         Effect.tap((bytes) =>
@@ -216,6 +234,9 @@ export class WorkshopFiles extends Context.Service<
             await prepareAccount(env)
             return folderAt(env.filesRoot, path)
           }),
+        resetHome: (userId) =>
+          files.resetHome(userId).pipe(Effect.tap(() => quota.measure(userId).pipe(Effect.asVoid))),
+        networkUse: (userId) => ({ bytes: network.get(userId) ?? 0, since: networkSince }),
         locateFolder: locate
       }
     })

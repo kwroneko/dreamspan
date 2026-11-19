@@ -834,6 +834,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     adminOnly: (actor, owner) =>
       refused(actor.api.SetFilesQuota({ userId: owner.user.id, quotaBytes: 2 ** 40 }), "Forbidden")
   },
+  ResetCommandHome: { createOnly: "takes no target: it empties only the caller's own home folder for commands" },
   PreviewStSettings: { global: "pure preview of the supplied file; no stored user data is read or changed" },
   ListExportFormats: { global: "the instance's worker exporter registry, with no user documents" },
   ListProviderKinds: { global: "the instance's provider registry, the same for every user" },

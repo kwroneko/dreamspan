@@ -1190,6 +1190,7 @@ All owner statements below are from 2026-11-17 unless dated otherwise, relayed b
 - **[P]** (files3, 2026-11-19) The working-folder tail note on carried workshop turns: with the run carried over, the note goes with the new user message only on a turn after the folder changed.
 - **[P]** (files4a, 2026-11-19) `/app-source`: copied on first use rather than at startup, text files only, named by a hash of what it holds; every account's commands and file tools read it (as the spec says), while the admin-only `app_source` tool stays as it was.
 - **[P]** (files4a, 2026-11-19) Plugin working copies: an instance plugin's copy is `/files/Plugins/Server/<id>` in the admin's Files. The copy follows every change to the plugin's repository (writes and edits too, not only commits, rollbacks and Undo), keeping any uncommitted copy change it replaces as a version and saying so. Committing from the copy leaves out `node_modules` as well as `.git`, and is refused while the repository has edits from `plugin_write` that aren't committed.
+- **[P]** (files4a, 2026-11-19) Background commands and shared folders: `bash_stop` stops a command at once (no TERM grace), background commands end when the app restarts, and the file tools only read folders shared with the account (`/files/Shared/<owner>/<folder>`); a command changes a folder shared to edit. Internet use from commands is counted per account in memory since the server's start and shown in the Files usage popover, not limited.
 
 ### 7.10 Subagents
 

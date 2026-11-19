@@ -10,6 +10,13 @@ export interface SandboxMount {
   readonly source: string
   readonly target: string
   readonly writable: boolean
+  /**
+   * An open descriptor of the folder (in this process), bound in place of `source`: a folder
+   * found by the no-follow walk, so a link swapped in for it after the check is never followed.
+   */
+  readonly fd?: number
+  /** An empty, small, memory-backed folder at `target` (`source` unused), to hold other mounts. */
+  readonly empty?: boolean
 }
 
 export interface RunLimits {
@@ -49,6 +56,8 @@ export interface RunSpec {
   readonly env: Readonly<Record<string, string>>
   readonly network: "public" | "none"
   readonly limits: RunLimits
+  /** Each chunk of output (stdout and stderr together) as it comes, for keeping the whole output. */
+  readonly onOutput?: (chunk: Buffer) => void
 }
 
 export interface RunResult {
@@ -68,6 +77,8 @@ export interface RunResult {
   /** The shell's directory when the command ended; null when it didn't say. */
   readonly cwd: string | null
   readonly durationMs: number
+  /** Bytes the command sent and received over the internet, where the sandbox counts them. */
+  readonly networkBytes?: number
 }
 
 /**

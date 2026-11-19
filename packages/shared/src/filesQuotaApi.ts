@@ -19,9 +19,18 @@ export const FilesUsage = Schema.Struct({
   /** The account is over its quota: new writes, uploads and commands are refused. */
   over: Schema.Boolean,
   /** The measurement stopped at its limits, so the real usage is higher. */
-  partial: Schema.Boolean
+  partial: Schema.Boolean,
+  /** Bytes the account's commands sent and received over the internet since `networkSince` (not counted in the quota). */
+  networkBytes: Schema.Number,
+  /** When the count above began: the server's start. */
+  networkSince: Schema.Number
 })
 export type FilesUsage = typeof FilesUsage.Type
+
+/** The home folder can't be reset now (a command of the account is running). */
+export class HomeResetRefused extends Schema.TaggedError<HomeResetRefused>()("HomeResetRefused", {
+  message: Schema.String
+}) {}
 
 export class FilesQuotaApi extends RpcGroup.make(
   /** Your own usage; an admin may name another account. `fresh` measures again now. */
@@ -38,5 +47,14 @@ export class FilesQuotaApi extends RpcGroup.make(
     },
     success: FilesUsage,
     error: Schema.Union([Forbidden, NotFound, ServerError])
+  }),
+  /**
+   * Empties your own home folder for commands (spec/FILES-AND-ENVIRONMENT.md §3.6 Reset): what
+   * commands installed and their settings. Your files stay. Refused while a command runs.
+   */
+  Rpc.make("ResetCommandHome", {
+    payload: {},
+    success: FilesUsage,
+    error: Schema.Union([HomeResetRefused, ServerError])
   })
 ) {}
