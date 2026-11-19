@@ -37,6 +37,10 @@ const statusTone = {
 export const subagentFacts = (row: SubagentRow) =>
   [stepsText(row.count, row.ms), ...(row.cost ? [formatCost(row.cost)] : [])].join(" · ")
 
+/** Its model as the row names it: "Same model · key", or the alias the assistant chose and the key. */
+const subagentModel = (row: SubagentRow) =>
+  row.alias === "same" ? `Same model · ${row.model}` : `${row.alias} · ${row.model}`
+
 export function SubagentPanel({ step, version, session }: StepActionProps) {
   const row = step.subagent
   const [open, setOpen] = useState(false)
@@ -67,7 +71,7 @@ export function SubagentPanel({ step, version, session }: StepActionProps) {
               <span className="text-muted"> · {row.typeLabel}</span>
               {row.name && <span className="text-text"> · {row.name}</span>}
               <span className="block text-muted">
-                Same model · {row.model} · {subagentFacts(row)}
+                {subagentModel(row)} · {subagentFacts(row)}
               </span>
             </span>
           </button>

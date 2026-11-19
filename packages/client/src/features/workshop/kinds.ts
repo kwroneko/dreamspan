@@ -5,6 +5,8 @@ import { FILES_TAB } from "../files/ids.ts"
 
 const WORKSHOP_KIND = "workshop"
 export const CAPABILITY_CHIP = "workshop.capabilities"
+/** The subagent model chip beside the model chip (spec/SUBAGENTS.md §5.1a). */
+export const SUBAGENT_MODELS_CHIP = "workshop.subagent-models"
 
 export const workshopLook: ChatKindLook = {
   id: WORKSHOP_KIND,
@@ -22,6 +24,6 @@ export const workshopLook: ChatKindLook = {
     "chat.new-with-cast"
   ],
   // The capability chip, the Changes tab and the step rows’ Undo and Open (§2.5, §3.6), and the
-  // Files tab (spec/FILES-AND-ENVIRONMENT.md §8.1).
-  shows: [CAPABILITY_CHIP, "workshop.changes", FILES_TAB]
+  // Files tab (spec/FILES-AND-ENVIRONMENT.md §8.1), and the subagent model chip (spec/SUBAGENTS.md §5.1a).
+  shows: [CAPABILITY_CHIP, SUBAGENT_MODELS_CHIP, "workshop.changes", FILES_TAB]
 }

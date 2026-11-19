@@ -46,6 +46,7 @@ import { seedChat } from "../chat/session.ts"
 import { PresetPickerPopover } from "../pickers/PresetPicker.tsx"
 import { BUILTIN, type PresetSelection, usePresetSelection } from "../pickers/presetSelection.ts"
 import { PendingCapabilityChip } from "./CapabilityChip.tsx"
+import { PendingSubagentModelsChip } from "./SubagentModelsChip.tsx"
 import type { PendingGrants } from "./capabilities.ts"
 import { pendingWorkshopCopy, SIDE_CHATS_KEY } from "./sideChat.ts"
 import { workshopDefaultsAtom } from "./workshopPersona.tsx"
@@ -445,6 +446,7 @@ export function PendingWorkshop({
           <ErrorAlert error={action.error} />
           <StripRow scroll={compact}>
             <ModelChip session={null} view={view} onSettings={() => {}} />
+            <PendingSubagentModelsChip attachTo={attachTo} grants={grants} />
             <PendingPresetChip selection={preset} />
             <PendingCapabilityChip attachTo={attachTo} grants={grants} onGrants={setGrants} />
           </StripRow>

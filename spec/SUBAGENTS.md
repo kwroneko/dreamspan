@@ -1,6 +1,6 @@
 # Subagents
 
-**Status**: Proposed, 2026-11-17 (job `subagentspec`, design only). **SA1 built (subagents1, 2026-11-17), for workshops with option 1: see ARCHITECTURE §16, "Subagents"; its parts here are obsolete as a proposal.** SA2–SA7 are still proposed. The owner's statements are in DESIGN §7.10, marked **[D]**, and are quoted here where they apply. Everything else is **[P]** unless it cites a **[D]**. It is written as deltas from reference-harness `latest` (`9b385944`: ARCHITECTURE §8 "Agent Sessions", §8d, §8i, "Session types"; `src/tools/delegate.ts`, `src/tools/spawn-session.ts`) and from the built agent machinery (ARCHITECTURE §16 "Agent rollouts", "Workshop result boundaries and recovery", "Workshop transcript summaries"; AGENTIC §3–§5, §12; WORKSHOP §2–§3; MCP; FILES-AND-ENVIRONMENT). Claude Code's subagents (public docs, `code.claude.com/docs/en/sub-agents`, read 2026-11-17) are the UX reference.
+**Status**: Proposed, 2026-11-17 (job `subagentspec`, design only). **SA1 built (subagents1, 2026-11-17), for workshops with option 1: see ARCHITECTURE §16, "Subagents"; its parts here are obsolete as a proposal.** **SA2 (the model list and the subagent model chip, §5) built (subagents23, 2026-11-19): see ARCHITECTURE §16, "Subagent models"; §5 is obsolete as a proposal, and where the build differs, DESIGN §7.10 records it as [P].** SA3–SA7 are still proposed. The owner's statements are in DESIGN §7.10, marked **[D]**, and are quoted here where they apply. Everything else is **[P]** unless it cites a **[D]**. It is written as deltas from reference-harness `latest` (`9b385944`: ARCHITECTURE §8 "Agent Sessions", §8d, §8i, "Session types"; `src/tools/delegate.ts`, `src/tools/spawn-session.ts`) and from the built agent machinery (ARCHITECTURE §16 "Agent rollouts", "Workshop result boundaries and recovery", "Workshop transcript summaries"; AGENTIC §3–§5, §12; WORKSHOP §2–§3; MCP; FILES-AND-ENVIRONMENT). Claude Code's subagents (public docs, `code.claude.com/docs/en/sub-agents`, read 2026-11-17) are the UX reference.
 
 The owner's statements this design starts from:
 
@@ -152,6 +152,8 @@ Owner [D]: "Claude code can also message its agents continuously."
 - **The user** messages a child through the parent ("tell the researcher to also check Bedrock"), or opens it as a thread later (§14). No separate composer for children: one place to type, as now.
 
 ## 5. Choosing a model
+
+*Obsolete as a proposal: built in SA2 (ARCHITECTURE §16, "Subagent models"). Differences from the text below: the per-chat override is the chip's lock (the chat keeps its own picks, `subagents.models { picks }`), not per-alias on/off; per-row effort isn't built; `fast` is offered once the user picks it (the chip's default is Same alone, DESIGN §7.10 [D]).*
 
 Owner [D]: "the agent needs to be able to choose a different model for subagents if needed, but I am not sure if we want every single added model to be available."
 

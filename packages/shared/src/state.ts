@@ -87,6 +87,18 @@ export const StateEventData = Schema.Union([
   /** The scope's `preset.binding` or `model.binding` taken off: it follows the default again. */
   event("preset.unbind", Schema.Struct({})),
   event("model.unbind", Schema.Struct({})),
+  /**
+   * The models this chat's subagents may use, locked for this chat (spec/SUBAGENTS.md §5.1a): the
+   * subagent model chip's picks (`same`, `summary`, `<connection> <model>`); null follows the
+   * account's again, as `model.unbind` does for the model chip. Ids here are checked at use, by the
+   * owner's own connections.
+   */
+  event(
+    "subagents.models",
+    Schema.Struct({
+      picks: Schema.NullOr(Schema.Array(Schema.String.check(Schema.isMaxLength(300))).check(Schema.isMaxLength(32)))
+    })
+  ),
   event("layout.cards", Schema.Literals(["concat", "swap_tail"])),
   /** An open id: the built-ins are `by_writer`, `alternate` and `perspective`; a plugin registers others (resolved at use). */
   event("roles.projection", Schema.String),
@@ -278,6 +290,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   },
   "preset.unbind": { ids: {} },
   "model.unbind": { ids: {} },
+  "subagents.models": { ids: {} },
   "layout.cards": { ids: {} },
   "roles.projection": { ids: {} },
   "merge.layout": { ids: {} },
@@ -528,6 +541,8 @@ export interface ChatState {
   readonly sendPresence?: "optional" | "required"
   /** `agent.request_cap`: the most model requests an agent reply makes; absent: `DEFAULT_REQUEST_CAP`. */
   readonly requestCap?: number
+  /** `subagents.models`: the subagent models this chat keeps; absent: the account's. */
+  readonly subagentModels?: ReadonlyArray<string>
   /** `decision.points`: the decision points turned off here; absent (no event) or empty: none. */
   readonly decisionsOff?: ReadonlyArray<string>
   /** `agent.permission`s by `permissionKey`: on or off, over the note's or card's own. */
@@ -738,6 +753,10 @@ const applyCore = (
     case "agent.request_cap": {
       const { requestCap: _was, ...rest } = state
       return data.value.cap === null ? rest : { ...rest, requestCap: data.value.cap }
+    }
+    case "subagents.models": {
+      const { subagentModels: _was, ...rest } = state
+      return data.value.picks === null ? rest : { ...rest, subagentModels: data.value.picks }
     }
     case "decision.points": {
       const { decisionsOff: _was, ...rest } = state

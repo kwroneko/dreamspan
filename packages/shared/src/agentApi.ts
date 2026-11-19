@@ -17,6 +17,14 @@ import { ChatId, EntityId, ForkId, PathEntry, SlotId, VersionId } from "./chat.t
 import { GenerationUnavailable } from "./chatApi.ts"
 import { REPLACEABLE_CARD_FIELDS } from "./docs/note.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
+import {
+  SubagentLimits,
+  SubagentModelRow,
+  SubagentPick,
+  SubagentPicks,
+  SubagentSettings,
+  SubagentSettingsRejected
+} from "./subagents.ts"
 
 /**
  * One thing agent replies may or may not change in a chat (spec/AGENTIC.md §4.3): `on` is what
@@ -140,6 +148,22 @@ export class AgentApi extends RpcGroup.make(
     payload: { versionId: VersionId, rolloutId: Schema.String },
     success: Schema.Struct({ stopped: Schema.Boolean }),
     error: Schema.Union([NotFound, ServerError])
+  }),
+  /** The account's subagent models and limits (spec/SUBAGENTS.md §5.1, §6.2), defaults filled in. */
+  Rpc.make("GetSubagentSettings", { payload: {}, success: SubagentSettings, error: ServerError }),
+  /**
+   * Changes the account's subagent settings: `picks`, the models every chat's subagents may use
+   * unless the chat is locked to its own (the subagent model chip's account choice); `rows`, models'
+   * aliases, notes and limits (each row given replaces that model's); `limits`, null for the defaults.
+   */
+  Rpc.make("ChangeSubagentSettings", {
+    payload: {
+      picks: Schema.optionalKey(SubagentPicks),
+      rows: Schema.optionalKey(Schema.Record(SubagentPick, SubagentModelRow)),
+      limits: Schema.optionalKey(Schema.NullOr(SubagentLimits))
+    },
+    success: Schema.Void,
+    error: Schema.Union([SubagentSettingsRejected, ServerError])
   }),
   /** What agent replies may change in the chat at the position the chat's settings show (`slotId`). */
   Rpc.make("GetAgentPermissions", {

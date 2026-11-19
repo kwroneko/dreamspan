@@ -229,6 +229,13 @@ import { DraftChatPreview, NextContext, RunContext, VersionMetrics } from "@drea
 import { ActivityCursor, ActivityPage, NotResumable, RolloutStep, RunTranscript } from "@dreamspan/shared/agent.ts"
 import { SubagentRun } from "@dreamspan/shared/agentApi.ts"
 import { SubagentRow } from "@dreamspan/shared/agent.ts"
+import {
+  SubagentLimits,
+  SubagentModelRow,
+  SubagentPick,
+  SubagentPicks,
+  SubagentSettings
+} from "@dreamspan/shared/subagents.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@dreamspan/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@dreamspan/shared/state.ts"
 import { ConnectionDecisions, DecisionPointSetting } from "@dreamspan/shared/decisions.ts"
@@ -3956,6 +3963,21 @@ export class WriteOpsLibrary extends RpcGroup.make(
     ]),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * The account's subagent settings (spec/SUBAGENTS.md §5.1, §6.2): `models` replaces the picks
+   * and the rows given (the rows whole), `limits` the limits (null: back to the defaults).
+   * Never an agent's write: they're consent and spend, which only the user changes (§10).
+   */
+  Rpc.make("ChangeSubagentSettings", {
+    payload: {
+      userId: UserId,
+      picks: Schema.optionalKey(SubagentPicks),
+      rows: Schema.optionalKey(Schema.Record(SubagentPick, SubagentModelRow)),
+      limits: Schema.optionalKey(Schema.NullOr(SubagentLimits))
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
   Rpc.make("SaveRolloutTranscript", {
     payload: { userId: UserId, rolloutId: Schema.String, transcript: Schema.String, steps: Schema.Int },
     success: Schema.Void,
@@ -5784,6 +5806,28 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, versionId: VersionId, rolloutId: Schema.String },
     success: SubagentRun,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The account's subagent models and limits, defaults filled in (subagentSettings.ts). */
+  Rpc.make("SubagentSettings", {
+    payload: { userId: UserId },
+    success: SubagentSettings,
+    error: StorageError
+  }),
+  /**
+   * The models a chat's subagents may use at `leafSlotId` (spec/SUBAGENTS.md §5.1), as JSON: the
+   * chat's picks (its lock) or the account's, each resolved to one of the user's models with its
+   * alias and note, `same` first as the chat's own model; picks that resolve to nothing, to a
+   * decision connection, or to a model already listed are left out. And the limits.
+   */
+  Rpc.make("SubagentModelsAt", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: Schema.NullOr(SlotId)
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, StorageError, AssemblyFailed])
   }),
   /** A subagent of the reply `versionId`'s run: its rollout status, for its Stop (subagentReads.ts). */
   Rpc.make("SubagentStatus", {

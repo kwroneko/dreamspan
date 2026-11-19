@@ -37,6 +37,7 @@ import type { OutputContract } from "../agent/modes.ts"
 import {
   type FrozenTool,
   frozenTool,
+  offeredFor,
   type RolloutTool,
   noReplyDefinition,
   sendMessageDefinition,
@@ -528,13 +529,23 @@ export const layer = Layer.effect(
                   Effect.catch(serverFailure("StoryReadStamp"))
                 )) ?? null
             }
+          // Definitions that depend on this chat at the run's position (the agent tool's models).
+          const runTools = agentic
+            ? yield* offeredFor(tools, {
+                reader,
+                userId,
+                chatId,
+                forkId: forkId ?? null,
+                leafSlotId: generation.leafSlotId as SlotId | null
+              })
+            : tools
           // Dynamic tool loading (spec/TOOL-LOADING.md): what's sent from the start, what's loaded later.
           const { offer, cardSkills } = agentic
             ? yield* planToolLoading(
                 { execution, reader, userId },
                 {
                   kind: chat.kind,
-                  tools,
+                  tools: runTools,
                   model: generation.model,
                   // Each server is a skill: its index line is the user's own "What it's for". Its
                   // "Send its tools" decides, in both kinds, whether its tools wait for loading.
@@ -546,7 +557,7 @@ export const layer = Layer.effect(
                     : []
                 }
               )
-            : { offer: { tools, deferred: new Set<string>() }, cardSkills: [] }
+            : { offer: { tools: runTools, deferred: new Set<string>() }, cardSkills: [] }
           const contractTools =
             plan.contract === "final_text"
               ? []
@@ -722,7 +733,7 @@ export const layer = Layer.effect(
           }
           const rolloutId = uuidv7()
           if (agentic) {
-            const prepared = yield* prepareToolSnapshots(tools, {
+            const prepared = yield* prepareToolSnapshots(runTools, {
               userId,
               chatId,
               slotId,

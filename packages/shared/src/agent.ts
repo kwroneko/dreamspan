@@ -122,7 +122,7 @@ export const SubagentRow = Schema.Struct({
   /** The short label the parent gave it, if any. */
   name: Schema.optionalKey(Schema.String),
   task: Schema.String,
-  /** The allowed-list alias it ran on (`same` until the model list exists), and that model's name. */
+  /** The allowed-list alias it ran on (spec/SUBAGENTS.md §5.1), and that model's name. */
   alias: Schema.String,
   model: Schema.String,
   status: SubagentStatus,

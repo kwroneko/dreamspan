@@ -39,6 +39,7 @@ import * as status from "./status.tsx"
 import * as workbench from "./workbench/index.tsx"
 import * as threads from "./threads/index.tsx"
 import * as workshop from "./workshop/index.tsx"
+import * as assistantTools from "./assistantTools/index.tsx"
 import * as files from "./files/index.tsx"
 
 export const registerFeatures = () => {
@@ -60,6 +61,7 @@ export const registerFeatures = () => {
   library.register()
   editor.register()
   chat.register()
+  assistantTools.register()
   workshop.register()
   files.register()
   noteOverrides.register()

@@ -71,6 +71,21 @@ export interface ToolContext {
   readonly subagentHost?: SubagentHost
 }
 
+/** Where a new run starts, for a tool's `offerFor`: reads at the run's position only. */
+export interface OfferContext {
+  readonly reader: Reader["Service"]
+  readonly userId: UserId
+  readonly chatId: ChatId
+  readonly forkId: ForkId | null
+  readonly leafSlotId: SlotId | null
+}
+
+/** The tools a new run offers, each as its `offerFor` makes it for this chat (absent: as registered). */
+export const offeredFor = (tools: ReadonlyArray<RolloutTool<never>>, context: OfferContext) =>
+  Effect.forEach(tools, (tool) => (tool.offerFor ? tool.offerFor(context) : Effect.succeed(tool))).pipe(
+    Effect.map((offered) => offered.flatMap((tool) => (tool ? [tool] : [])))
+  )
+
 /** What the `agent` tool needs of the run whose call starts a subagent (agent/subagents.ts). */
 interface SubagentHost {
   readonly input: import("./session.ts").AgentStrategyInput
@@ -143,6 +158,13 @@ export interface RolloutTool<A = never> {
   /** Model-facing, with its usage guidance: when to call it and when not to. */
   readonly description: string
   readonly parameters: TSchema
+  /**
+   * A definition that depends on the chat where a new run starts (the `agent` tool's model list,
+   * spec/SUBAGENTS.md §5.1): what this run offers in its place, frozen with the run like any
+   * definition; null leaves the tool out of this run. Absent: the tool as registered. Resume and
+   * step edits offer the frozen definition, never this again.
+   */
+  readonly offerFor?: (context: OfferContext) => Effect.Effect<RolloutTool<never> | null>
   /** The step's one-line title from its arguments: “lighthouse”. */
   readonly summarize?: (args: A) => string
   /** Optional state frozen before a result is returned; shared keys prepare once per run.
