@@ -17,7 +17,7 @@ import type { Tool } from "@earendil-works/pi-ai"
 // that made no message, from the usage ledger.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
-import type { ActivityCursor, ActivityRow, CutSpan } from "@dreamspan/shared/agent.ts"
+import type { ActivityCursor, ActivityRow, ContractOutcome, ContractRecord, CutSpan } from "@dreamspan/shared/agent.ts"
 import type { ChatId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
@@ -49,6 +49,18 @@ import { AssemblySources } from "../assembler/pipeline.ts"
 import { inFork } from "./forkState.ts"
 import { withAssemblyModules } from "../assembler/modules.ts"
 import type { McpCallRow } from "./mcpRows.ts"
+
+/**
+ * The outcome the run's end recorded, over the transcript's own: only the run knows it was
+ * stopped, failed or capped. A run Resume carried on has its record cleared; stopped, it says so.
+ */
+const recordedOutcome = (
+  record: ContractRecord,
+  row: { readonly status: string; readonly outcome: ContractOutcome | null }
+): ContractRecord => ({
+  ...record,
+  outcome: row.outcome ?? (row.status === "stopped" ? "stopped" : record.outcome)
+})
 
 /** The names a request's context used (`AssembledRequest.names`), for the contract's records. */
 const contextNames = (json: string | null): Array<string> => {
@@ -739,8 +751,11 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           readonly rollout_id: string
           readonly model: string | null
           readonly names: string | null
+          readonly status: string
+          readonly outcome: ContractOutcome | null
         }>`
           SELECT p.transcript_json AS transcript, json_extract(p.context_snapshot_json, '$.agent.tools') AS tools,
+            r.status, r.contract_outcome AS outcome,
             json_extract(p.context_snapshot_json, '$.agent.turnCap') AS turn_cap, r.id AS rollout_id,
             json_extract(p.context_snapshot_json, '$.inputs.model') AS model,
             json_extract(p.context_snapshot_json, '$.request.names') AS names
@@ -821,21 +836,24 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           // The run's attempts at the send tool's contract (spec/REPLY-CONTRACT.md §3.6).
           ...(underSendContract(messages)
             ? {
-                contract: contractAttempts(
-                  messages,
-                  branches.map((b) => ({
-                    reason: b.reason,
-                    forkIndex: b.fork_index,
-                    messages: JSON.parse(b.messages_json) as ReadonlyArray<AgentMessage>
-                  })),
-                  { names: contextNames(row.names), toolNames: tools.map((t) => t.name) }
+                contract: recordedOutcome(
+                  contractAttempts(
+                    messages,
+                    branches.map((b) => ({
+                      reason: b.reason,
+                      forkIndex: b.fork_index,
+                      messages: JSON.parse(b.messages_json) as ReadonlyArray<AgentMessage>
+                    })),
+                    { names: contextNames(row.names), toolNames: tools.map((t) => t.name) }
+                  ),
+                  row
                 )
               }
             : {})
         }
       }).pipe(query("RolloutTranscript")),
-    // Every reply that reached an outcome (rollouts_contract), per model; a resumed reply counts
-    // once, in the run that carried it on (StartResumedVersion clears the one it resumed).
+    // Every reply whose run ended (rollouts_contract), per model; a resumed reply counts once, as
+    // the run that carried it on ended (StartResumedVersion clears the one it resumed).
     ModelBehaviour: ({ userId }) =>
       sql<{
         readonly connection_id: string
@@ -847,12 +865,16 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         readonly recovered: number
         readonly gave_up: number
         readonly exhausted: number
+        readonly stopped: number
+        readonly failed: number
+        readonly capped: number
         readonly nudges: number
       }>`
         SELECT r.connection_id, k.name AS connection_name, r.model_id, m.model_key, count(*) AS replies,
           sum(r.contract_nudges > 0) AS nudged, sum(r.contract_outcome = 'recovered') AS recovered,
           sum(r.contract_outcome = 'gave_up') AS gave_up, sum(r.contract_outcome = 'exhausted') AS exhausted,
-          coalesce(sum(r.contract_nudges), 0) AS nudges
+          sum(r.contract_outcome = 'stopped') AS stopped, sum(r.contract_outcome = 'failed') AS failed,
+          sum(r.contract_outcome = 'capped') AS capped, coalesce(sum(r.contract_nudges), 0) AS nudges
         FROM rollouts r JOIN chats c ON c.id = r.chat_id JOIN models m ON m.id = r.model_id
           JOIN connections k ON k.id = r.connection_id
         WHERE r.contract_outcome IS NOT NULL AND c.owner_user_id = ${userId} AND k.owner_user_id = ${userId}
@@ -868,6 +890,9 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
             recovered: r.recovered,
             gaveUp: r.gave_up,
             exhausted: r.exhausted,
+            stopped: r.stopped,
+            failed: r.failed,
+            capped: r.capped,
             nudges: r.nudges
           }))
         ),

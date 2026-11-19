@@ -3,7 +3,7 @@
 // the refusal judge chosen and "Also check replies that were never sent" turned on in Settings →
 // Chats, the judge reads that text and the failed reply says it was found a refusal; the run
 // inspector lists the four attempts and why each wasn't the reply; Settings → Models → Reply
-// behaviour counts the reply as never sent. A scripted loopback provider; every card is made up.
+// behaviour counts the reply as never sent, each figure explained on hover. A scripted loopback provider; every card is made up.
 // At 1440 and 390, light and dark, with the layout audit on each surface.
 import { createServer } from "node:http"
 import type { AddressInfo } from "node:net"
@@ -173,7 +173,18 @@ for (const width of [1440, 390])
       await page.goto(`${server().url}/settings/model-behaviour`)
       const row = page.getByRole("listitem").filter({ hasText: "Synthetic agent" })
       await expect(row).toBeVisible()
-      await expect(row.getByRole("definition").last()).toContainText("(100%)")
+      const figure = (label: string) =>
+        row
+          .locator("div")
+          .filter({ has: page.getByText(label, { exact: true }) })
+          .getByRole("definition")
+      await expect(figure("Never sent")).toContainText("(100%)")
+      await expect(figure("Stopped")).toHaveText("0 (0%)")
+      // Each figure says what it counts on hover.
+      await row.getByRole("button", { name: "About Stopped", exact: true }).hover()
+      const explained = page.getByText(/Replies stopped before they were sent/)
+      await expect(explained.last()).toBeVisible()
       await page.mouse.move(0, 0)
+      await expect(explained).toHaveCount(1)
       await expectLayout(page, info, `model-behaviour-${width}-${colorScheme}`)
     })

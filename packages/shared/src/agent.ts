@@ -317,9 +317,13 @@ export type ContractAttempt = typeof ContractAttempt.Type
 /**
  * How a run met the send tool's contract: `clean` (the first ending was the reply or a pass),
  * `recovered` (sent after nudges), `gave_up` (passed after nudges), `exhausted` (the nudges ran
- * out); null while the run hasn't ended in one (it's running, or it stopped or failed).
+ * out). A run that ended without a reply for another reason: `stopped` (the user, or the app,
+ * stopped it), `failed` (a provider or app error), `capped` (its last request, the request cap's,
+ * gave no reply). Null while the run hasn't ended; the transcript alone never says `stopped`,
+ * `failed` or `capped`, which only the run's own end records (`runOutcome`).
  */
-export const ContractOutcome = Schema.Literals(["clean", "recovered", "gave_up", "exhausted"])
+const CONTRACT_OUTCOMES = ["clean", "recovered", "gave_up", "exhausted", "stopped", "failed", "capped"] as const
+export const ContractOutcome = Schema.Literals(CONTRACT_OUTCOMES)
 export type ContractOutcome = typeof ContractOutcome.Type
 
 export const ContractRecord = Schema.Struct({
@@ -332,8 +336,9 @@ export type ContractRecord = typeof ContractRecord.Type
 
 /**
  * How one model's story replies under the send tool met its contract (spec/REPLY-CONTRACT.md
- * §3.6, milestone 4), over every reply that reached an outcome: how many the app had to ask to
- * send, how many then sent, passed after asking, or never sent.
+ * §3.6, milestone 4), over every reply whose run ended: how many the app had to ask to send, how
+ * many then sent, passed after asking, or never sent, and how many were stopped, failed or ran
+ * out of requests first.
  */
 export const ModelBehaviour = Schema.Struct({
   connectionId: Schema.String,
@@ -345,6 +350,12 @@ export const ModelBehaviour = Schema.Struct({
   recovered: Schema.Int,
   gaveUp: Schema.Int,
   exhausted: Schema.Int,
+  /** Stopped before a reply (by the user, or the app shutting down). */
+  stopped: Schema.Int,
+  /** Ended by a provider or app error before a reply. */
+  failed: Schema.Int,
+  /** Reached the request cap without a reply. */
+  capped: Schema.Int,
   /** The asks to send, all of them. */
   nudges: Schema.Int
 })
