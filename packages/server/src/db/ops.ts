@@ -262,6 +262,7 @@ import {
 import { AvatarCrop } from "@dreamspan/shared/media.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
+import { mergeOps } from "./opsOf.ts"
 import { CastCard, ChatSummary, FrozenMacros, QueuedMessage } from "@dreamspan/shared/chat.ts"
 import {
   CardForChat,
@@ -1050,7 +1051,7 @@ const McpReadOps = RpcGroup.make(
   })
 )
 
-export class WriteOpsChat extends RpcGroup.make(
+const WriteOpsChatOwn = RpcGroup.make(
   /**
    * Merges another chat's fork into `forkId` below `at` (spec/CHAT-MERGE.md §8): recomputes the
    * preview and refuses with the new one when its digest changed (`MergeChanged`), then writes
@@ -2309,9 +2310,11 @@ export class WriteOpsChat extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   })
-).merge(McpWriteOps) {}
+)
 
-export class WriteOpsLibrary extends RpcGroup.make(
+export class WriteOpsChat extends mergeOps(WriteOpsChatOwn, McpWriteOps) {}
+
+const WriteOpsLibraryOwn = RpcGroup.make(
   Rpc.make("SetPluginPins", {
     payload: { userId: UserId, owner: Schema.String, value: PluginPins, revision: Schema.Int },
     success: Schema.Void,
@@ -4294,12 +4297,14 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Struct({ slotId: SlotId, fork: Fork, chat: Chat }),
     error: Schema.Union([NotFound, StorageError])
   })
-).merge(SavedMediaWriteOps) {}
+)
+
+export class WriteOpsLibrary extends mergeOps(WriteOpsLibraryOwn, SavedMediaWriteOps) {}
 
 /** Every write operation. Database.ts types the writer's client from the two halves. */
-export class WriteOps extends WriteOpsChat.merge(WriteOpsLibrary) {}
+export class WriteOps extends mergeOps(WriteOpsChat, WriteOpsLibrary) {}
 
-export class ReadOps extends RpcGroup.make(
+const ReadOpsOwn = RpcGroup.make(
   Rpc.make("GetPluginPins", {
     payload: { userId: UserId, owner: Schema.String },
     success: Schema.Struct({ value: PluginPins, revision: Schema.Int }),
@@ -6260,4 +6265,6 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.Array(ThreadSet),
     error: Schema.Union([NotFound, StorageError])
   })
-).merge(McpReadOps) {}
+)
+
+export class ReadOps extends mergeOps(ReadOpsOwn, McpReadOps) {}
