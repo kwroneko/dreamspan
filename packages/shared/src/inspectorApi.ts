@@ -200,7 +200,15 @@ export const RequestFigures = Schema.Struct({
   cacheWrite: Schema.NullOr(Schema.Int),
   cacheWriteLong: Schema.NullOr(Schema.Int),
   /** The ledger's cost with its currency and the formula that priced it (`reported`, `builtin`, `user:…`). */
-  cost: Schema.NullOr(Schema.Struct({ amount: Schema.Number, currency: Schema.String, formula: Schema.String })),
+  cost: Schema.NullOr(
+    Schema.Struct({
+      amount: Schema.Number,
+      currency: Schema.String,
+      formula: Schema.String,
+      /** Per million tokens, when the price named a rate for reasoning apart from output. */
+      reasoningRate: Schema.optionalKey(Schema.Number)
+    })
+  ),
   /** What the provider said it charged, when it said (USD). */
   reportedCost: Schema.NullOr(Schema.Number)
 })
@@ -239,6 +247,8 @@ export const VersionMetrics = Schema.Struct({
   costs: Schema.Array(CostAmount),
   /** Ended requests with no cost: `costs` leaves them out. */
   costUnknown: Schema.Int,
+  /** The separate reasoning rates (per million tokens) the costs were priced with, each once; empty when reasoning was priced as output. */
+  reasoningRates: Schema.Array(CostAmount),
   /** The formulas that priced them, each once, in the order first seen. */
   costSources: Schema.Array(Schema.String),
   /** Some cost came from counts the app estimated (a provider-reported cost never does). */
@@ -297,12 +307,15 @@ const total = (requests: ReadonlyArray<RequestFigures>, of: (r: RequestFigures) 
 const costsOf = (ended: ReadonlyArray<RequestFigures>) => {
   const costs = new Map<string, number>()
   const sources = new Set<string>()
+  const reasoningRates = new Map<string, number>()
   let reported: number | null = null
   let reportedRequests = 0
   for (const r of ended) {
     if (r.cost !== null) {
       costs.set(r.cost.currency, (costs.get(r.cost.currency) ?? 0) + r.cost.amount)
       sources.add(r.cost.formula)
+      if (r.cost.reasoningRate !== undefined && !reasoningRates.has(`${r.cost.currency} ${r.cost.reasoningRate}`))
+        reasoningRates.set(`${r.cost.currency} ${r.cost.reasoningRate}`, r.cost.reasoningRate)
     }
     if (r.reportedCost !== null) {
       reported = (reported ?? 0) + r.reportedCost
@@ -313,6 +326,7 @@ const costsOf = (ended: ReadonlyArray<RequestFigures>) => {
     costs: [...costs].map(([currency, amount]) => ({ amount, currency })),
     costUnknown: ended.filter((r) => r.cost === null).length,
     costSources: [...sources],
+    reasoningRates: [...reasoningRates].map(([key, amount]) => ({ amount, currency: key.split(" ")[0]! })),
     costEstimated: ended.some((r) => r.cost !== null && r.cost.formula !== "reported" && r.usageSource === "estimated"),
     reportedCost: reported,
     reportedRequests

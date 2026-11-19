@@ -233,15 +233,20 @@ export const pricedCost = (counts: TokenCounts, price: Price): { amount: number;
     read: chosen.cacheRead ?? 0,
     write: chosen.cacheWrite ?? 0,
     writeLong: chosen.cacheWriteLong ?? chosen.input * 2,
-    output: chosen.output
+    output: chosen.output,
+    // Only when the price names a rate of its own; absent, reasoning is priced as output.
+    ...(chosen.reasoning === undefined ? {} : { reasoning: chosen.reasoning })
   }
+  // `reasoning` counts the part of `output` spent thinking, so it never exceeds it.
+  const thinking = rates.reasoning === undefined ? 0 : Math.min(counts.reasoning ?? 0, output)
   return {
     amount:
       (inputUncached * rates.input +
         read * rates.read +
         (write - long) * rates.write +
         long * rates.writeLong +
-        output * rates.output) /
+        (output - thinking) * rates.output +
+        thinking * (rates.reasoning ?? rates.output)) /
         1e6 +
       (price.perRequest ?? 0),
     rates
@@ -254,7 +259,7 @@ const priceBound = (price: Price, inputTokens: number, outputTokens: number) => 
   const input = Math.max(
     ...rates.flatMap((r) => [r.input, r.cacheRead ?? 0, r.cacheWrite ?? 0, r.cacheWriteLong ?? r.input * 2])
   )
-  const output = Math.max(...rates.map((r) => r.output))
+  const output = Math.max(...rates.flatMap((r) => [r.output, r.reasoning ?? 0]))
   return {
     amount: (inputTokens * input + outputTokens * output) / 1e6 + (price.perRequest ?? 0),
     currency: price.currency ?? "USD"

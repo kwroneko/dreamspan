@@ -92,6 +92,46 @@ describe("the price list format", () => {
     })
   })
 
+  it("reads a separate reasoning rate for a model, a tier and a route; absent leaves it unset", () => {
+    const list = parsePriceList({
+      object: "list",
+      unit: "USD per 1M tokens",
+      data: [
+        {
+          id: "m",
+          input: 1,
+          output: 10,
+          reasoning: 4,
+          tiers: [
+            { input_above: 1000, input: 2 },
+            { input_above: 2000, reasoning: 6 }
+          ],
+          routes: [
+            { target: "a", output: 12 },
+            { target: "b", reasoning: 5 }
+          ]
+        },
+        { id: "plain", input: 1, output: 2 },
+        { id: "bad", input: 1, output: 2, reasoning: -1 },
+        { id: "free", input: 1, output: 2, reasoning: 0 }
+      ]
+    })!
+    const m = list.models.get("m")!
+    assert.strictEqual(m.price!.reasoning, 4)
+    // A tier keeps the base reasoning rate unless it names its own.
+    assert.deepStrictEqual(
+      m.price!.tiers!.map((t) => t.reasoning),
+      [4, 6]
+    )
+    assert.deepStrictEqual(
+      m.routes!.map((r) => r.price!.reasoning),
+      [4, 5]
+    )
+    assert.notProperty(list.models.get("plain")!.price!, "reasoning")
+    assert.notProperty(list.models.get("bad")!.price!, "reasoning")
+    assert.strictEqual(list.models.get("free")!.price!.reasoning, 0)
+  })
+
   it("treats null, negative, non-finite and absurd rates as unknown, never zero; zero is free", () => {
     const list = parsePriceList({
       object: "list",
@@ -327,6 +367,58 @@ describe("routes (PRICES §4.4, §5.2)", () => {
     const bound = formula.upperBound!({ inputTokens: 1_000_000, outputTokens: 0, price: null, sources } as never)
     // The dearest route's dearest input rate: route A's long cache writes, unknown, count at twice its input.
     assert.deepStrictEqual(bound, { amount: 8, currency: "USD" })
+  })
+})
+
+describe("the endpoint formula and reasoning tokens", () => {
+  const priceWith = (reasoning?: number) =>
+    costOf(
+      builtinCostFormulas,
+      { kind: "openai-chat", api: "openai-completions", model: "m" },
+      {
+        counts: {
+          ...unknownCounts,
+          inputUncached: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cacheWriteLong: 0,
+          output: 1_000_000,
+          reasoning: 250_000
+        },
+        capture: emptyCapture(),
+        price: null,
+        sources: {
+          endpoint: {
+            price: { input: 1, output: 8, ...(reasoning === undefined ? {} : { reasoning }) },
+            fetchedAt: 300
+          },
+          list: null,
+          builtin: null
+        }
+      }
+    )!
+  it("keeps the reasoning rate beside the cost, and falls back to output without one", () => {
+    const own = priceWith(2)
+    assert.closeTo(own.amount, 6 + 0.5, 1e-9)
+    assert.strictEqual(own.rates!.reasoning, 2)
+    const plain = priceWith()
+    assert.closeTo(plain.amount, 8, 1e-9)
+    assert.notProperty(plain.rates!, "reasoning")
+  })
+  it("bounds a request by the dearer of output and reasoning rates", () => {
+    const formula = builtinCostFormulas.find((f) => f.id === "endpoint")!
+    const sources = {
+      endpoint: { price: { input: 1, output: 2, reasoning: 9 }, fetchedAt: 1 },
+      list: null,
+      builtin: null
+    }
+    assert.deepStrictEqual(
+      formula.upperBound!({ inputTokens: 0, outputTokens: 1_000_000, price: null, sources } as never),
+      {
+        amount: 9,
+        currency: "USD"
+      }
+    )
   })
 })
 

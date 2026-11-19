@@ -5,6 +5,7 @@
 // or hidden, at 1440 and 390, light and dark, both Message spacing modes, solo and group. Its
 // switch in the Interface settings, with its hover explanation. Synthetic ST files only.
 import { expect, type Locator, type Page, test } from "@playwright/test"
+import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
 import { Effect } from "effect"
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
@@ -354,5 +355,98 @@ test("the cost never adds a line at any phone width, with a long connection name
         expect(Math.abs(row! - hidden![w]![i]![0]!), `${density} ${width}: message ${i} height`).toBeLessThan(0.5)
         expect(Math.abs(headRow! - hidden![w]![i]![1]!), `${density} ${width}: header ${i} height`).toBeLessThan(0.5)
       }
+  }
+})
+
+// A price list that names its own rate for reasoning tokens (spec/PRICES.md §4.2): the part of the
+// reply's output the provider reports as reasoning is priced at it, the rest at the output rate,
+// and the cost details say so. Without the field (a model the list prices alone) they don't.
+test("a reasoning rate from the server's prices shows in the cost details", async ({ page }) => {
+  const priced = await startProvider({
+    models: [
+      { id: "think-a", name: "think-a", context_length: 32768 },
+      { id: "think-b", name: "think-b", context_length: 32768 }
+    ],
+    // 4 of the 6 output tokens are reasoning; 20 uncached input and 100 cache read.
+    reasoningTokens: 4,
+    prices: {
+      object: "list",
+      unit: "USD per 1M tokens",
+      data: [
+        { id: "think-a", input: 1, output: 10, cache_read: 0.5, reasoning: 4 },
+        { id: "think-b", input: 1, output: 10, cache_read: 0.5 }
+      ]
+    }
+  })
+  try {
+    const models_: Record<string, { connection: ConnectionId; model: ModelId }> = {}
+    const made = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        const connection = yield* api.CreateConnection({
+          kind: "openai-chat",
+          settings: {
+            name: "Reasoning rates",
+            baseUrl: priced.baseUrl,
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null,
+            providerSettings: { priceEndpoint: true }
+          },
+          apiKey: "sk-msgcost-test-key"
+        })
+        yield* api.RefreshModels({ connectionId: connection.id })
+        const models = yield* api.ListModels({ connectionId: connection.id, includeHidden: false })
+        const chats: Record<string, string> = {}
+        for (const key of ["think-a", "think-b"]) {
+          const model = models.find((m) => m.key === key)!
+          models_[key] = { connection: connection.id, model: model.id }
+          const chat = yield* api.CreateChat({ title: `Rate ${key}` })
+          const sent = yield* api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: null,
+            branch: false,
+            content: "Is the bridge still standing?"
+          })
+          if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
+          chats[key] = chat.id
+        }
+        return { chats, models: models_ }
+      })
+    )
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await setDetails({ chatDensity: "comfortable", messageDetails: { "message.cost": true } })
+    await page.setViewportSize({ width: 1440, height: 900 })
+    for (const [key, cost, reasoningRow] of [
+      // (20 + 100 * 0.5 + 2 * 10 + 4 * 4) / 1e6, then (20 + 50 + 6 * 10) / 1e6.
+      ["think-a", "$0.00011", "$4.00 per million tokens (its own rate, not the output rate)"],
+      ["think-b", "$0.00013", null]
+    ] as const) {
+      // A reply uses the default model when it's asked for.
+      await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        api.SetGenerationDefaults({ defaults: { model: made.models[key]!, preset: null } })
+      )
+      await page.goto(`${server().url}/chats/${made.chats[key]}`)
+      await page
+        .getByRole("button", { name: /^(Reply$|Generate(?! another))/ })
+        .last()
+        .click()
+      const reply = lastReply(page)
+      await expect(reply).toContainText(REPLY)
+      await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
+      await expect(costOf(reply)).toHaveText(cost)
+      await costOf(reply).click()
+      const panel = page.getByRole("dialog", { name: "Generation" })
+      await expect(panel).toBeVisible()
+      await expect(panel.locator("dt", { hasText: "Priced by" }).locator("+ dd")).toContainText(
+        "this server's price list"
+      )
+      const row = panel.locator("dt", { hasText: "Reasoning priced at" })
+      if (reasoningRow === null) await expect(row).toHaveCount(0)
+      else await expect(row.locator("+ dd")).toHaveText(reasoningRow)
+      await page.keyboard.press("Escape")
+    }
+  } finally {
+    await priced.stop()
   }
 })

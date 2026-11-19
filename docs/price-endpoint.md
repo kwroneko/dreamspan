@@ -84,7 +84,7 @@ GET {base}/v1/prices
 | `input`, `output` | model, tier, route | Rates for uncached input and for output. |
 | `cache_read` | model, tier, route | Rate for cache reads. |
 | `cache_write` | model, tier, route | A number (one rate for every cache lifetime) or an object by lifetime: `"5m"`, `"1h"`, or any `"<n>s"`/`"<n>m"`/`"<n>h"`. |
-| `reasoning` | model, tier, route | Rate for reasoning tokens, when it differs from `output`. Absent: `output`. |
+| `reasoning` | model, tier, route | Rate for reasoning tokens, when it differs from `output`. Absent: `output`. Reasoning tokens are part of the output count, so the client prices the reasoning part of a response's output at this rate and the rest at `output`; it does this only when the provider reports reasoning tokens separately. |
 | `per_request` | model, tier, route | A flat price per request, in `currency` (not per million). |
 | `tiers` | model, route | Long-context tiers: when total input (uncached + cache read + cache write) is above `input_above`, the whole request is billed at that tier's rates. A rate missing from a tier keeps the base rate. |
 | `routes` | model | Where the server may send the model and what each route costs (below). |

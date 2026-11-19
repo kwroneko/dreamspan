@@ -242,6 +242,35 @@ describe("the built-in table", () => {
       for (const model of ["constructor", "__proto__", "toString"]) assert.isNull(at({ provider }, model))
   })
 
+  it("prices reasoning tokens at their own rate when the price has one, else as output", () => {
+    const counts = { ...unknownCounts, inputUncached: 1_000, cacheRead: 0, cacheWrite: 0, cacheWriteLong: 0 }
+    const base = { input: 1, output: 10 }
+    // 600 of 1,000 output tokens were reasoning.
+    const thinking = { ...counts, output: 1_000, reasoning: 600 }
+    assert.closeTo(priceCost(thinking, { ...base, reasoning: 4 })!, (1_000 + 400 * 10 + 600 * 4) / 1e6, 1e-12)
+    // No separate rate, or no reasoning count: output's rate for all of it.
+    assert.closeTo(priceCost(thinking, base)!, (1_000 + 1_000 * 10) / 1e6, 1e-12)
+    assert.closeTo(
+      priceCost({ ...thinking, reasoning: null }, { ...base, reasoning: 4 })!,
+      (1_000 + 10_000) / 1e6,
+      1e-12
+    )
+    // A count above the output (a provider quirk) never prices more tokens than were output; free reasoning is free.
+    assert.closeTo(
+      priceCost({ ...thinking, reasoning: 5_000 }, { ...base, reasoning: 4 })!,
+      (1_000 + 4_000) / 1e6,
+      1e-12
+    )
+    assert.closeTo(priceCost(thinking, { ...base, reasoning: 0 })!, (1_000 + 4_000) / 1e6, 1e-12)
+    // A tier's own reasoning rate applies to a request over its size.
+    const tiered = {
+      ...base,
+      reasoning: 4,
+      tiers: [{ inputTokensAbove: 500, input: 2, output: 20, reasoning: 8 }]
+    }
+    assert.closeTo(priceCost(thinking, tiered)!, (2_000 + 400 * 20 + 600 * 8) / 1e6, 1e-12)
+  })
+
   it("prices long writes, tiers and per-request charges", () => {
     const counts = {
       ...unknownCounts,

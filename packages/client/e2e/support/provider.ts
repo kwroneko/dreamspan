@@ -49,6 +49,8 @@ export const startProvider = async (
     /** Streamed instead of REPLY. */ reply?: string
     /** The charge the usage reports, as OpenRouter's `usage.cost` does; none by default. */
     usageCost?: number
+    /** Of the 6 output tokens, how many the usage reports as reasoning (`completion_tokens_details`). */
+    reasoningTokens?: number
     models?: ReadonlyArray<{
       id: string
       name: string
@@ -89,6 +91,9 @@ export const startProvider = async (
             prompt_tokens: 120,
             completion_tokens: output,
             prompt_tokens_details: { cached_tokens: 100 },
+            ...(options.reasoningTokens === undefined
+              ? {}
+              : { completion_tokens_details: { reasoning_tokens: options.reasoningTokens } }),
             ...(options.usageCost === undefined ? {} : { cost: options.usageCost })
           }
         })

@@ -479,6 +479,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           cost: number | null
           cost_currency: string | null
           cost_formula: string | null
+          reasoning_rate: number | null
           reported_cost: number | null
         }>`
           WITH RECURSIVE chain(root, id) AS (
@@ -492,7 +493,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           )
           SELECT chain.root, q.status, q.started_at, q.first_token_at, q.ended_at, q.output, q.reasoning, q.usage_source,
             q.input_uncached, q.cache_read, q.cache_write, q.cache_write_long, q.cost, q.cost_currency, q.cost_formula,
-            q.reported_cost
+            json_extract(q.cost_rates_json, '$.reasoning') AS reasoning_rate, q.reported_cost
           FROM chain JOIN llm_requests q INDEXED BY llm_requests_version ON q.version_id = chain.id
           WHERE q.purpose IN ('generation', 'workshop') AND q.owner_user_id = ${userId}
           ORDER BY chain.root, q.started_at, q.id`
@@ -515,7 +516,12 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
             cost:
               row.cost === null
                 ? null
-                : { amount: row.cost, currency: row.cost_currency ?? "", formula: row.cost_formula ?? "" },
+                : {
+                    amount: row.cost,
+                    currency: row.cost_currency ?? "",
+                    formula: row.cost_formula ?? "",
+                    ...(row.reasoning_rate === null ? {} : { reasoningRate: row.reasoning_rate })
+                  },
             reportedCost: row.reported_cost
           })
           byVersion.set(row.root, list)

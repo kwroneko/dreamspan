@@ -2081,7 +2081,8 @@ const WriteOpsChatOwn = RpcGroup.make(
             read: Schema.Number,
             write: Schema.Number,
             writeLong: Schema.Number,
-            output: Schema.Number
+            output: Schema.Number,
+            reasoning: Schema.optionalKey(Schema.Number)
           })
         })
       ).check(Schema.isMaxLength(1000))

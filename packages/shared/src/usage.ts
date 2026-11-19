@@ -52,7 +52,8 @@ export type UsageSource = typeof UsageSource.Type
 
 /**
  * The rates a cost was priced with, per million tokens, as the formula applied them (the
- * request's tier included): uncached input, cache reads, short and long cache writes, output.
+ * request's tier included): uncached input, cache reads, short and long cache writes, output,
+ * and reasoning when the price named its own rate for it.
  * A snapshot kept beside the formula's id, so a later recalculation knows what it replaces.
  * A provider-reported charge has none.
  */
@@ -61,7 +62,9 @@ export const PricedRates = Schema.Struct({
   read: Schema.Number,
   write: Schema.Number,
   writeLong: Schema.Number,
-  output: Schema.Number
+  output: Schema.Number,
+  /** The rate reasoning tokens were priced at, when the price had one apart from `output`. */
+  reasoning: Schema.optionalKey(Schema.Number)
 })
 export type PricedRates = typeof PricedRates.Type
 
