@@ -2,13 +2,16 @@
 // together: a process that left the command's process group (`setsid prog &`) still ends with the
 // command, when it's stopped and when it ends by itself, in a cgroup or scope where the host has
 // one and in a PID namespace where it doesn't. Without either, it says why (the file tools then
-// refuse background commands without a sandbox).
+// refuse background commands without a sandbox). When the cgroup can't be opened for a command,
+// its PID namespace is used instead; with neither, a command that must be held is refused.
 import { readdirSync, readFileSync } from "node:fs"
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { makeNoSandbox, noSandbox } from "../src/sandbox/none.ts"
+import type { CgroupLimiter } from "../src/sandbox/cgroupLimits.ts"
 import type { CommandSandbox, RunSpec } from "../src/sandbox/registry.ts"
+import { CommandRefused } from "../src/sandbox/refused.ts"
 
 const alive = (marker: string) =>
   readdirSync("/proc")
@@ -81,6 +84,45 @@ it.live.skipIf(!linux)("says why when nothing can hold commands together", () =>
       const contained = await makeNoSandbox(makeRegistry([])).containment!()
       assert.isFalse(contained.ok)
       if (!contained.ok) assert.include(contained.reason, "can't be held together")
+    } finally {
+      process.env.PATH = path
+    }
+  })
+)
+
+/** A limiter that says it works but can't open a group (a transient failure). */
+const broken: CgroupLimiter = {
+  id: "broken",
+  explanation: "fails to open",
+  available: async () => ({ ok: true }),
+  open: () => Promise.reject(new Error("no group"))
+}
+
+it.live.skipIf(!linux)(
+  "falls back to a PID namespace when a command's cgroup can't be opened",
+  () => escapes(makeNoSandbox(makeRegistry([broken]))),
+  60_000
+)
+
+it.live.skipIf(!linux)("refuses a command that must be held when neither a cgroup nor a namespace can be had", () =>
+  Effect.promise(async () => {
+    const sandbox = makeNoSandbox(makeRegistry([broken]))
+    const path = process.env.PATH
+    process.env.PATH = "/nonexistent"
+    try {
+      // containment() still says a cgroup is there; the failure is this command's.
+      assert.isTrue((await sandbox.containment!()).ok)
+      const refused = await sandbox
+        .run({ ...spec("echo ran"), requireContainment: true }, new AbortController().signal)
+        .then(
+          () => null,
+          (error: unknown) => error
+        )
+      assert.instanceOf(refused, CommandRefused)
+      assert.include((refused as Error).message, "can't be held together")
+      // A foreground command still runs, with its process group only.
+      const ran = await sandbox.run(spec("echo ran"), new AbortController().signal)
+      assert.include(ran.head, "ran")
     } finally {
       process.env.PATH = path
     }

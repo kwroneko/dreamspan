@@ -5,6 +5,7 @@
 // Refused whatever the configuration says: "/", system folders, the sandbox's own places,
 // anything that contains or is inside the app's data, its Files or its own code, and anything that
 // contains the temporary folder the sandbox keeps its run folders in.
+import { realpathSync } from "node:fs"
 import { lstat, readdir, realpath } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, isAbsolute, normalize } from "node:path"
@@ -71,7 +72,8 @@ const appPlaces = (places: ReadonlyArray<string>) => ({
 /**
  * The app's own places a host folder may not overlap: its data, Files and code, the client it
  * serves, and the folders holding its secret files (the key that encrypts connection secrets,
- * the first admin's password) wherever they are configured.
+ * the first admin's password) wherever they are configured: the folder named, and the folder of
+ * the file it really is when the name is a link (a Docker secret, say).
  */
 export const appPlacesOf = (app: {
   readonly dataDir: string
@@ -84,7 +86,17 @@ export const appPlacesOf = (app: {
   app.filesDir,
   app.appRoot,
   ...(app.clientDist?.trim() ? [app.clientDist.trim()] : []),
-  ...app.secretFiles.flatMap((file) => (file?.trim() ? [dirname(file.trim())] : []))
+  ...app.secretFiles.flatMap((file) => {
+    if (!file?.trim()) return []
+    const named = file.trim()
+    let real: string | null = null
+    try {
+      real = realpathSync(named)
+    } catch {
+      // Not there (yet): its named folder is refused all the same.
+    }
+    return [...new Set([dirname(named), ...(real ? [dirname(real)] : [])])]
+  })
 ]
 
 export const makeHostFolders = (

@@ -59,6 +59,11 @@ export interface RunSpec {
   readonly limits: RunLimits
   /** Each chunk of output (stdout and stderr together) as it comes, for keeping the whole output. */
   readonly onOutput?: (chunk: Buffer) => void
+  /**
+   * An unsandboxed sandbox (`none`) refuses to start it (`CommandRefused`, sandbox/refused.ts)
+   * when nothing can hold its processes together for this run; set for background commands.
+   */
+  readonly requireContainment?: boolean
 }
 
 export interface RunResult {

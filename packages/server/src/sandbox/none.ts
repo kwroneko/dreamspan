@@ -3,8 +3,10 @@
 // the timeout or the app's end reaches every one of them, even those that left its process group
 // (`setsid prog &`): in a cgroup or systemd scope of its own (sandbox/cgroupLimits.ts, which also
 // caps its memory and processes), else in a PID namespace of its own (`unshare`), whose processes
-// the kernel ends with its first. Without either, only the process group is killed, and the file
-// tools refuse background commands without a sandbox (`containment`). Registered like the others,
+// the kernel ends with its first. When the cgroup can't be opened for one command, its PID
+// namespace is tried next. Without either, only the process group is killed: the file tools refuse
+// background commands without a sandbox (`containment`), and a command that asks to be held
+// (`RunSpec.requireContainment`, a background one) is refused here when neither could be had. Registered like the others,
 // so it's visible and replaceable, but flagged `unsandboxed`: selectSandbox never picks it, and
 // the file tools use it only for an admin, with ALLOW_UNSANDBOXED_COMMANDS, in a workshop whose
 // owner turned the sandbox off after the consent. The sandbox's paths (/files, /home/user, the
@@ -16,6 +18,7 @@ import { existsSync } from "node:fs"
 import { delimiter, join } from "node:path"
 import { bwrapLimiters, selectLimiter, type CgroupLimiter, type CommandCgroup } from "./cgroupLimits.ts"
 import type { CommandSandbox, RunResult, RunSpec } from "./registry.ts"
+import { CommandRefused } from "./refused.ts"
 
 type Containment =
   | { readonly kind: "cgroup"; readonly limiter: CgroupLimiter }
@@ -26,8 +29,25 @@ const UNSHARE_ARGS = ["--user", "--map-current-user", "--pid", "--fork", "--kill
 /** The cgroup limiters `none` may use (the bwrap sandbox's, by default). */
 type Limiters = { readonly list: () => ReadonlyArray<CgroupLimiter> }
 
+/** A PID namespace's `unshare`, where it works here (null: why not), checked again each minute. */
+const pidNamespaceOf = () => {
+  let chosen: { readonly at: number; readonly value: { unshare: string } | { none: string } } | null = null
+  return (): { unshare: string } | { none: string } => {
+    if (chosen && Date.now() - chosen.at < 60_000) return chosen.value
+    const unshare = (process.env.PATH ?? "/usr/bin:/bin")
+      .split(delimiter)
+      .map((dir) => join(dir, "unshare"))
+      .find((candidate) => existsSync(candidate))
+    const probe = unshare ? spawnSync(unshare, [...UNSHARE_ARGS, "/bin/sh", "-c", "exit 0"], { timeout: 10_000 }) : null
+    const value =
+      unshare && probe?.status === 0 ? { unshare } : { none: unshare ? "unshare refused" : "unshare isn't installed" }
+    chosen = { at: Date.now(), value }
+    return value
+  }
+}
+
 /** How commands are held together here, checked again each minute (like the limiter itself). */
-const containmentOf = (limiters: Limiters) => {
+const containmentOf = (limiters: Limiters, pidNamespace: ReturnType<typeof pidNamespaceOf>) => {
   let chosen: { readonly at: number; readonly value: Containment } | null = null
   return async (): Promise<Containment> => {
     if (chosen && Date.now() - chosen.at < 60_000) return chosen.value
@@ -35,19 +55,13 @@ const containmentOf = (limiters: Limiters) => {
     const limiter = await selectLimiter(limiters)
     if (!("none" in limiter)) value = { kind: "cgroup", limiter }
     else {
-      const unshare = (process.env.PATH ?? "/usr/bin:/bin")
-        .split(delimiter)
-        .map((dir) => join(dir, "unshare"))
-        .find((candidate) => existsSync(candidate))
-      const probe = unshare
-        ? spawnSync(unshare, [...UNSHARE_ARGS, "/bin/sh", "-c", "exit 0"], { timeout: 10_000 })
-        : null
+      const namespace = pidNamespace()
       value =
-        unshare && probe?.status === 0
-          ? { kind: "pidns", unshare }
+        "unshare" in namespace
+          ? { kind: "pidns", unshare: namespace.unshare }
           : {
               kind: "none",
-              reason: `Commands without a sandbox can't be held together here: no cgroup (${limiter.none}) and no PID namespace (${unshare ? "unshare refused" : "unshare isn't installed"}).`
+              reason: `Commands without a sandbox can't be held together here: no cgroup (${limiter.none}) and no PID namespace (${namespace.none}).`
             }
     }
     chosen = { at: Date.now(), value }
@@ -76,7 +90,7 @@ const hostPathOf = (spec: Pick<RunSpec, "mounts">, path: string) =>
   )
 
 const runWith =
-  (selectContainment: () => Promise<Containment>) =>
+  (selectContainment: () => Promise<Containment>, pidNamespace: ReturnType<typeof pidNamespaceOf>) =>
   async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> => {
     const started = Date.now()
     const marker = `__rp_cwd_${randomBytes(12).toString("hex")}__`
@@ -109,9 +123,24 @@ const runWith =
         Object.assign(env, group.env)
       }
     }
-    if (!group && containment.kind === "pidns") {
-      args = [...UNSHARE_ARGS, file, ...args]
-      file = containment.unshare
+    // No cgroup for this command (none here, or this one couldn't be opened): its own PID
+    // namespace, else only its process group, which a command that must be held refuses.
+    if (!group) {
+      const namespace =
+        containment.kind === "pidns"
+          ? { unshare: containment.unshare }
+          : containment.kind === "cgroup"
+            ? pidNamespace()
+            : { none: containment.reason }
+      if ("unshare" in namespace) {
+        args = [...UNSHARE_ARGS, file, ...args]
+        file = namespace.unshare
+      } else if (spec.requireContainment)
+        throw new CommandRefused(
+          containment.kind === "none"
+            ? containment.reason
+            : `This command's processes can't be held together right now: its cgroup couldn't be opened and there's no PID namespace (${namespace.none}).`
+        )
     }
     const child = spawn(file, args, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -212,7 +241,8 @@ const runWith =
 
 /** The `none` sandbox, holding commands together with `limiters`' cgroups, else a PID namespace. */
 export const makeNoSandbox = (limiters: Limiters = bwrapLimiters): CommandSandbox => {
-  const selectContainment = containmentOf(limiters)
+  const pidNamespace = pidNamespaceOf()
+  const selectContainment = containmentOf(limiters, pidNamespace)
   return {
     id: "none",
     label: "No sandbox",
@@ -227,7 +257,7 @@ export const makeNoSandbox = (limiters: Limiters = bwrapLimiters): CommandSandbo
         ? { ok: false, reason: containment.reason }
         : { ok: true, how: containment.kind === "cgroup" ? containment.limiter.id : "pid-namespace" }
     },
-    run: runWith(selectContainment)
+    run: runWith(selectContainment, pidNamespace)
   }
 }
 

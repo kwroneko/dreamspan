@@ -79,6 +79,29 @@ it.live("refuses the folders holding the app's secret files, wherever they are",
   })
 )
 
+it.live("refuses the folder a secret file really is in, when its name is a link", () =>
+  Effect.promise(async () => {
+    const root = tempDir("hostsecretlink")
+    await mkdir(join(root, "run/secrets"), { recursive: true })
+    await mkdir(join(root, "keys/real"), { recursive: true })
+    await mkdir(join(root, "keys/other"), { recursive: true })
+    await writeFile(join(root, "keys/real/secret.key"), "k")
+    await symlink(join(root, "keys/real/secret.key"), join(root, "run/secrets/secret.key"))
+    const places = appPlacesOf({
+      dataDir: tempDir("hostsecretlink-data"),
+      filesDir: tempDir("hostsecretlink-files"),
+      appRoot: tempDir("hostsecretlink-app"),
+      secretFiles: [join(root, "run/secrets/secret.key")]
+    })
+    // The link's own folder and the target's are both refused, and anything around them.
+    const folders = makeHostFolders(
+      [join(root, "run/secrets"), join(root, "keys/real"), join(root, "keys"), join(root, "keys/other")],
+      places
+    )
+    assert.deepStrictEqual(await folders.roots(), [join(root, "keys/other")])
+  })
+)
+
 interface Body {
   messages: Array<{ role: string; content?: string }>
 }
