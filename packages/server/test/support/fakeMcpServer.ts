@@ -39,7 +39,15 @@ export interface FakeMcpState {
    * What `tools/call` answers; absent: the tool's name and arguments as text. `signal` aborts
    * when the client cancels the call.
    */
-  call: ((name: string, args: Record<string, unknown>, signal: AbortSignal) => Promise<Record<string, unknown>>) | null
+  call:
+    | ((
+        name: string,
+        args: Record<string, unknown>,
+        signal: AbortSignal,
+        /** Reports progress to the client, when it asked for it. */
+        progress: (progress: number, total?: number, message?: string) => Promise<void>
+      ) => Promise<Record<string, unknown>>)
+    | null
 }
 
 export interface FakeMcpServer {
@@ -51,6 +59,10 @@ export interface FakeMcpServer {
   /** The JSON-RPC methods received, in order. */
   readonly methods: () => ReadonlyArray<string>
   readonly reset: () => void
+  /** The server forgets every Streamable HTTP session, as after a restart: their ids get 404. */
+  readonly dropSessions: () => void
+  /** Sends `notifications/tools/list_changed` on every open session. */
+  readonly toolsChanged: () => Promise<void>
   readonly close: () => Promise<void>
 }
 
@@ -84,6 +96,7 @@ export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): P
     ...initial
   }
   const recorded: Array<FakeMcpRequest> = []
+  const servers = new Set<Server>()
 
   const mcpServer = () => {
     const server = new Server(
@@ -103,13 +116,32 @@ export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): P
     })
     server.setRequestHandler(CallToolRequestSchema, async (request, extra) =>
       state.call
-        ? ((await state.call(request.params.name, request.params.arguments ?? {}, extra.signal)) as never)
+        ? ((await state.call(
+            request.params.name,
+            request.params.arguments ?? {},
+            extra.signal,
+            async (progress, total, message) => {
+              const token = request.params._meta?.progressToken
+              if (token === undefined) return
+              await extra.sendNotification({
+                method: "notifications/progress",
+                params: {
+                  progressToken: token,
+                  progress,
+                  ...(total === undefined ? {} : { total }),
+                  ...(message === undefined ? {} : { message })
+                }
+              })
+            }
+          )) as never)
         : {
             content: [
               { type: "text", text: `${request.params.name} ${JSON.stringify(request.params.arguments ?? {})}` }
             ]
           }
     )
+    servers.add(server)
+    server.onclose = () => void servers.delete(server)
     return server
   }
 
@@ -198,6 +230,10 @@ export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): P
     requests: () => recorded,
     methods: () => recorded.flatMap((entry) => entry.methods),
     reset: () => void recorded.splice(0),
+    dropSessions: () => streamable.clear(),
+    toolsChanged: async () => {
+      for (const server of servers) await server.sendToolListChanged().catch(() => undefined)
+    },
     close: async () => {
       for (const transport of streamable.values()) await transport.close().catch(() => undefined)
       for (const transport of sse.values()) await transport.close().catch(() => undefined)

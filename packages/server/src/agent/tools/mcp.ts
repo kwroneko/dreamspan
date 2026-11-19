@@ -9,8 +9,9 @@
 // with `read_result`, which reads only the run's own transcript.
 //
 // Deltas from reference-harness (`src/mcp/`, `src/agent/dynamic-tools.ts`): no annotation-based effect
-// classes (one class, `mcp`, enabled is the consent); a client opened per call rather than a pool;
-// a call is never retried behind the model's back.
+// classes (one class, `mcp`, enabled is the consent); clients kept per (connection, user) rather
+// than a process-wide pool; a call is sent again only when the server proved it refused it
+// unprocessed (spec/MCP.md §7.2), never on a message match.
 import { Type } from "@earendil-works/pi-ai"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { MCP_DESCRIPTION_LIMIT, type McpConnection, mcpToolAllowed, type McpTool } from "@dreamspan/shared/mcp.ts"

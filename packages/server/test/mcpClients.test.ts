@@ -1,0 +1,178 @@
+// MCP clients kept per (connection, user) and the reconnect rule (spec/MCP.md §7.1, §7.2): a
+// second call reuses the first's client, an edit or a delete closes it, an idle one closes on
+// its own, and a session the server lost reconnects once, sending the call again only when the
+// server's answer proves it refused the call unprocessed. Never a third-party server.
+import { assert, describe, it } from "@effect/vitest"
+import type { McpConnectionSettings } from "@dreamspan/shared/mcp.ts"
+import { Effect } from "effect"
+import { McpConnections, mcpClientTiming } from "../src/mcp/McpConnections.ts"
+import { client, serverLayer, testConfig } from "./support/config.ts"
+import { fakeTool, startFakeMcpServer } from "./support/fakeMcpServer.ts"
+
+const fake = (initial: Parameters<typeof startFakeMcpServer>[0] = {}) =>
+  Effect.acquireRelease(
+    Effect.promise(() => startFakeMcpServer(initial)),
+    (server) => Effect.promise(() => server.close())
+  )
+
+const settings = (url: string, overrides: Partial<McpConnectionSettings> = {}): McpConnectionSettings => ({
+  name: "Kept",
+  about: "",
+  transport: "streamable-http",
+  url,
+  timeoutS: 5,
+  ...overrides
+})
+
+const attribution = (attempt = 1) =>
+  ({ purpose: "workshop", chatId: null, rolloutId: null, toolCallId: null, attempt }) as const
+
+/** Sets up a connection and returns a caller of its `echo` tool through the service. */
+const setup = (initial: Parameters<typeof startFakeMcpServer>[0] = {}) =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const me = yield* api.GetSession()
+    const server = yield* fake({ tools: [fakeTool("echo")], ...initial })
+    const created = yield* api.CreateMcpConnection({ settings: settings(server.streamableUrl) })
+    assert.isTrue(created.check.ok, created.check.detail)
+    const mcp = yield* McpConnections
+    const call = (text: string, attempt = 1) =>
+      mcp.call({
+        userId: me.user.id,
+        connectionId: created.connection.id,
+        tool: "echo",
+        args: { text },
+        attribution: attribution(attempt)
+      })
+    const ledger = () =>
+      api
+        .ListMcpCalls({ connectionId: created.connection.id, before: null })
+        .pipe(Effect.map((rows) => rows.filter((row) => row.purpose !== "check").reverse()))
+    server.reset()
+    return { api, server, mcp, call, ledger, connection: created.connection }
+  })
+
+const sentMethods = (methods: ReadonlyArray<string>) => methods.filter((m) => m !== "notifications/initialized")
+
+describe("kept MCP clients", () => {
+  it.live("a second call reuses the first's client; an edit closes it and the next call opens another", () =>
+    Effect.gen(function* () {
+      const { api, server, mcp, call, ledger, connection } = yield* setup()
+      const one = yield* call("one")
+      const two = yield* call("two")
+      assert.strictEqual(one._tag, "Result")
+      assert.strictEqual(two._tag, "Result")
+      assert.deepStrictEqual(sentMethods(server.methods()), ["initialize", "tools/call", "tools/call"])
+      assert.strictEqual(mcp.kept(), 1)
+      assert.deepStrictEqual(
+        (yield* ledger()).map((row) => [row.method, row.status]),
+        [
+          ["initialize", "complete"],
+          ["tools/call", "complete"],
+          ["tools/call", "complete"]
+        ]
+      )
+
+      // An edit of how calls are sent (the timeout) closes the kept client at once.
+      yield* api.UpdateMcpConnection({
+        connectionId: connection.id,
+        settings: settings(connection.url!, { timeoutS: 6 }),
+        expectedRowVersion: connection.rowVersion
+      })
+      assert.strictEqual(mcp.kept(), 0)
+      server.reset()
+      yield* call("three")
+      assert.deepStrictEqual(sentMethods(server.methods()), ["initialize", "tools/call"])
+
+      // Deleting it closes it too, and a later call sends nothing.
+      yield* api.DeleteMcpConnection({ connectionId: connection.id })
+      assert.strictEqual(mcp.kept(), 0)
+      server.reset()
+      const gone = yield* call("four")
+      assert.strictEqual(gone._tag, "Failed")
+      assert.lengthOf(server.requests(), 0)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("an idle client closes on its own", () =>
+    Effect.gen(function* () {
+      const before = mcpClientTiming.idleMs
+      mcpClientTiming.idleMs = 200
+      yield* Effect.addFinalizer(() => Effect.sync(() => (mcpClientTiming.idleMs = before)))
+      const { server, mcp, call } = yield* setup()
+      yield* call("one")
+      assert.strictEqual(mcp.kept(), 1)
+      yield* Effect.sleep("600 millis")
+      assert.strictEqual(mcp.kept(), 0)
+      server.reset()
+      yield* call("two")
+      assert.deepStrictEqual(sentMethods(server.methods()), ["initialize", "tools/call"])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("a lost session reconnects once and the call goes again, as its own ledger row", () =>
+    Effect.gen(function* () {
+      let ran = 0
+      const { server, call, ledger } = yield* setup({
+        call: async (name, args) => {
+          ran += 1
+          return { content: [{ type: "text", text: `${name} ${JSON.stringify(args)}` }] }
+        }
+      })
+      yield* call("one")
+      server.dropSessions()
+      const again = yield* call("two")
+      assert.strictEqual(again._tag, "Result")
+      // The 404 was refused unprocessed: the tool ran once for each call, never twice.
+      assert.strictEqual(ran, 2)
+      const rows = (yield* ledger()).map((row) => [row.method, row.status, row.attempt])
+      assert.deepStrictEqual(rows, [
+        ["initialize", "complete", 1],
+        ["tools/call", "complete", 1],
+        ["tools/call", "failed", 1],
+        ["initialize", "complete", 1],
+        ["tools/call", "complete", 2]
+      ])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("concurrent callers on a lost session share one reconnect", () =>
+    Effect.gen(function* () {
+      const { server, call } = yield* setup()
+      yield* call("one")
+      server.dropSessions()
+      server.reset()
+      const both = yield* Effect.all([call("a"), call("b")], { concurrency: 2 })
+      assert.isTrue(both.every((outcome) => outcome._tag === "Result"))
+      assert.strictEqual(sentMethods(server.methods()).filter((m) => m === "initialize").length, 1)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("a failure that doesn't prove the call unprocessed is never retried", () =>
+    Effect.gen(function* () {
+      const { server, call, ledger } = yield* setup()
+      yield* call("one")
+      // The server fails the call with a status that says nothing about the session.
+      server.state.failStatus = 502
+      const failed = yield* call("two")
+      assert.strictEqual(failed._tag, "Failed")
+      if (failed._tag === "Failed") {
+        assert.isTrue(failed.sent)
+        assert.strictEqual(failed.status, "failed")
+      }
+      const calls = (yield* ledger()).filter((row) => row.method === "tools/call")
+      assert.deepStrictEqual(
+        calls.map((row) => [row.status, row.attempt]),
+        [
+          ["complete", 1],
+          ["failed", 1]
+        ]
+      )
+      // The session is in doubt: the next call opens a fresh client.
+      server.state.failStatus = null
+      server.reset()
+      yield* call("three")
+      assert.deepStrictEqual(sentMethods(server.methods()), ["initialize", "tools/call"])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+})
