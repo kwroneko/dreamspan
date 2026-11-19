@@ -709,7 +709,7 @@ describe("reply contract", () => {
         n === 0 ? plain(res, "") : sse(res, toolCall("send_message", { message: "Sent words." }))
       )
       const api = yield* client()
-      const { version } = yield* generateReply(api, {
+      const { version, events } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
         state: TOOLS_ON
@@ -719,6 +719,30 @@ describe("reply contract", () => {
         { kind: "text", text: "", asked: true }
       ])
       assert.strictEqual(version.steps?.count, 1)
+      // The inspector shows it as an empty text step; it can't be changed, only carried on from.
+      const run = yield* api.GetRunTranscript({ versionId: version.id })
+      assert.deepInclude(
+        run.entries.flatMap((e) => (e.role === "assistant" ? e.parts : [])),
+        { type: "text", text: "", step: 0 }
+      )
+      const me = yield* api.Whoami()
+      const slot = yield* (yield* Reader).GetSlot({ userId: me.id, slotId: version.slotId })
+      const edited = yield* Effect.flip(
+        api.ResumeFromStep({
+          versionId: version.id,
+          step: 0,
+          edit: { kind: "text", text: "Words after all." },
+          expectedRowVersion: slot.entry.rowVersion
+        })
+      )
+      assert.strictEqual(edited._tag, "NotResumable")
+      const resumed = yield* api.ResumeFromStep({
+        versionId: version.id,
+        step: 0,
+        expectedRowVersion: slot.entry.rowVersion
+      })
+      yield* eventually(() => finished(events, resumed.version.id) !== undefined)
+      assert.strictEqual(finished(events, resumed.version.id)!.content, "Sent words.")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
