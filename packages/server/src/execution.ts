@@ -29,6 +29,7 @@ import {
 import { defaultMode, type OrchestrationMode } from "./agent/modes.ts"
 import type { RolloutTool } from "./agent/tools.ts"
 import type { TurnNote } from "./agent/turnNotes.ts"
+import type { PluginWorkingCopy } from "./agent/pluginWorkingCopies.ts"
 import {
   builtinToolLoadingProfiles,
   builtinToolLoadingWires,
@@ -96,6 +97,8 @@ export class ExecutionRegistry extends Context.Service<
     readonly subagentTypes: Registry<SubagentType>
     /** Subagents' working folders and isolated copies (spec/SUBAGENTS.md §3.3): the files host's. */
     readonly subagentWorkspaces: Registry<SubagentWorkspaces>
+    /** Where plugin repositories get a working copy the agent's commands can change (agent/pluginWorkingCopies.ts); the first is used. */
+    readonly pluginWorkingCopies: Registry<PluginWorkingCopy>
   }
 >()("rp/ExecutionRegistry") {
   static readonly layer = Layer.effect(
@@ -232,7 +235,8 @@ export class ExecutionRegistry extends Context.Service<
         toolLoaders,
         turnNotes: makeRegistry<TurnNote>(),
         subagentTypes,
-        subagentWorkspaces: makeRegistry<SubagentWorkspaces>()
+        subagentWorkspaces: makeRegistry<SubagentWorkspaces>(),
+        pluginWorkingCopies: makeRegistry<PluginWorkingCopy>()
       }
     })
   )

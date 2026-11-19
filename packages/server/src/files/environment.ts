@@ -9,6 +9,15 @@ import type { SandboxMount } from "../sandbox/registry.ts"
 
 export const FILES_MOUNT = "/files"
 export const HOME_MOUNT = "/home/user"
+/** The app's own source for the running version, read-only (§3.6, files/appSource.ts). */
+const APP_SOURCE_MOUNT = "/app-source"
+
+/** A folder the file tools reach: its path for the agent, where it is on the host, and whether they may change it. */
+export interface ToolRoot {
+  readonly mount: string
+  readonly hostRoot: string
+  readonly writable: boolean
+}
 
 export interface AccountEnv {
   readonly userId: string
@@ -32,10 +41,43 @@ export const prepareAccount = async (env: AccountEnv) => {
   await mkdir(env.home, { recursive: true, mode: 0o700 })
 }
 
-export const accountMounts = (env: AccountEnv): ReadonlyArray<SandboxMount> => [
+/** What a command's sandbox binds: the account's Files and home, and the app's source read-only when it's ready. */
+export const accountMounts = (env: AccountEnv, appSource: string | null = null): ReadonlyArray<SandboxMount> => [
   { source: env.filesRoot, target: FILES_MOUNT, writable: true },
-  { source: env.home, target: HOME_MOUNT, writable: true }
+  { source: env.home, target: HOME_MOUNT, writable: true },
+  ...(appSource ? [{ source: appSource, target: APP_SOURCE_MOUNT, writable: false }] : [])
 ]
+
+/** The folders the file tools reach for this account: its Files, then the app's source (read-only). */
+export const toolRoots = (env: AccountEnv, appSource: string | null = null): ReadonlyArray<ToolRoot> => [
+  { mount: FILES_MOUNT, hostRoot: env.filesRoot, writable: true },
+  ...(appSource ? [{ mount: APP_SOURCE_MOUNT, hostRoot: appSource, writable: false }] : [])
+]
+
+const within = (path: string, mount: string) => path === mount || path.startsWith(`${mount}/`)
+
+/**
+ * A file tool's path, relative to the run's directory or absolute, in one of `roots` (the
+ * deepest that holds it), with its components below that root. `..` is resolved by name first,
+ * so it can never climb out of a root; links are then refused component by component by the
+ * walk (safePath.ts). A run's directory outside every root (a command's `cd /tmp`) resolves
+ * relative paths from the first root.
+ */
+export const resolveToolPath = (input: string, cwd: string, roots: ReadonlyArray<ToolRoot>) => {
+  const raw = input.trim()
+  if (raw.startsWith("~"))
+    throw new FilePathRefused("The file tools work in your files (/files). Use bash for your home folder.")
+  const deepest = (path: string) =>
+    roots.filter((root) => within(path, root.mount)).sort((a, b) => b.mount.length - a.mount.length)[0]
+  const base = deepest(cwd) ? cwd : roots[0]!.mount
+  const full = posix.resolve(base, raw === "" ? "." : raw)
+  const root = deepest(full)
+  if (!root)
+    throw new FilePathRefused(
+      `${full} is outside your files (${roots.map((r) => r.mount).join(", ")}). Use bash for other places.`
+    )
+  return { full, root, segments: segmentsOf(full.slice(root.mount.length)) }
+}
 
 /**
  * A file tool's path, relative to the run's directory or absolute, as a path under /files and
@@ -43,14 +85,8 @@ export const accountMounts = (env: AccountEnv): ReadonlyArray<SandboxMount> => [
  * are then refused component by component by the walk (safePath.ts).
  */
 export const resolveFilesPath = (input: string, cwd: string) => {
-  const raw = input.trim()
-  if (raw.startsWith("~"))
-    throw new FilePathRefused("The file tools work in your files (/files). Use bash for your home folder.")
-  const base = cwd === FILES_MOUNT || cwd.startsWith(`${FILES_MOUNT}/`) ? cwd : FILES_MOUNT
-  const full = posix.resolve(base, raw === "" ? "." : raw)
-  if (full !== FILES_MOUNT && !full.startsWith(`${FILES_MOUNT}/`))
-    throw new FilePathRefused(`${full} is outside your files (/files). Use bash for other places.`)
-  return { full, segments: segmentsOf(full.slice(FILES_MOUNT.length)) }
+  const { full, segments } = resolveToolPath(input, cwd, [{ mount: FILES_MOUNT, hostRoot: "", writable: true }])
+  return { full, segments }
 }
 
 /** What a scan records of one entry: enough to tell a change (§7.2). */

@@ -35,8 +35,11 @@ import {
   HOME_MOUNT,
   prepareAccount,
   resolveFilesPath,
+  resolveToolPath,
   scanTree,
-  type AccountEnv
+  toolRoots,
+  type AccountEnv,
+  type ToolRoot
 } from "../../files/environment.ts"
 import { selectSandbox, type CommandSandbox, type RunLimits } from "../../sandbox/registry.ts"
 import { QuotaExceeded, type FilesQuota } from "../../files/quota.ts"
@@ -112,6 +115,8 @@ export interface FileToolDeps {
   readonly limits?: FileToolLimits
   /** The account's files changed (paths under /files), for open file managers; `all`: maybe any. */
   readonly onChanged?: (userId: string, paths: ReadonlyArray<string>, all?: boolean) => void
+  /** The read-only copy of the app's source (files/appSource.ts), made on first use; null: none. */
+  readonly appSource?: () => Promise<string | null>
 }
 
 const READ_MAX_BYTES = 10 * 2 ** 20
@@ -202,6 +207,19 @@ export const makeFileTools = (deps: FileToolDeps) => {
 
   const attempt = <A>(f: (signal: AbortSignal) => Promise<A>) => Effect.tryPromise({ try: f, catch: (error) => error })
 
+  /** The app's source copy, when there is one (made on first use); never fails a tool. */
+  const appSourceOf = () =>
+    deps.appSource ? Effect.promise(() => deps.appSource!().catch(() => null)) : Effect.succeed(null)
+  const rootsOf = (env: AccountEnv) => Effect.map(appSourceOf(), (source) => toolRoots(env, source))
+  /** A path the file tools may change: in a writable root (the app's source is read-only). */
+  const writablePath = (input: string, cwd: string, roots: ReadonlyArray<ToolRoot>) => {
+    const resolved = resolveToolPath(input, cwd, roots)
+    if (!resolved.root.writable)
+      throw new FilePathRefused(`${resolved.root.mount} is read-only. Write your changes under ${FILES_MOUNT}.`)
+    if (resolved.root.mount !== FILES_MOUNT) throw new FilePathRefused(`${resolved.full} can't be changed here.`)
+    return resolved
+  }
+
   /** The capability's standing, checked again at the call; the account; its folders made. */
   const proof = (ctx: ToolContext, capability: string) =>
     Effect.gen(function* () {
@@ -230,11 +248,27 @@ export const makeFileTools = (deps: FileToolDeps) => {
       return full
     })
 
-  /** A file tool's path; a subagent working in a copy stays inside it (spec/SUBAGENTS.md §3.3). */
-  const resolveIn = (ctx: ToolContext, input: string, cwd: string) => {
-    const resolved = resolveFilesPath(input, cwd)
+  /**
+   * A file tool's path, by the same roots as the workshop's (spec/SUBAGENTS.md §3.3): a subagent
+   * working in a copy writes only inside it, and of the account's own Files reads only it; the
+   * other roots (the app's source, folders shared with the account, a host folder) it reads as
+   * the workshop does.
+   */
+  const resolveIn = (
+    ctx: ToolContext,
+    input: string,
+    cwd: string,
+    roots: ReadonlyArray<ToolRoot>,
+    write = false
+  ) => {
+    const resolved = write ? writablePath(input, cwd, roots) : resolveToolPath(input, cwd, roots)
     const root = ctx.workspace?.root
-    if (root !== undefined && resolved.full !== root && !resolved.full.startsWith(`${root}/`))
+    if (
+      root !== undefined &&
+      (write || resolved.root.mount === FILES_MOUNT) &&
+      resolved.full !== root &&
+      !resolved.full.startsWith(`${root}/`)
+    )
       throw new FilePathRefused(`${resolved.full} is outside your copy (${root}). Work on the files there.`)
     return resolved
   }
@@ -290,7 +324,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
 
   /** Stores bytes as a file version: the media file first, then its row, held from the sweep. */
   const keepVersion = (
-    ctx: ToolContext | null,
+    ctx: { readonly rolloutId: string; readonly toolCallId: string } | null,
     userId: string,
     path: string,
     content: { readonly bytes: Uint8Array; readonly inode: number | null } | null,
@@ -352,7 +386,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     storyRead: "account",
     titleField: "path",
     description:
-      "Read a file in your files (/files), with line numbers. Paths are absolute (/files/...) or relative to the working directory. offset and limit are lines (default: the first 2000). Images come back as images when the model can see them; other binary files are described. Read a file before you change it with write_file or edit_file.",
+      "Read a file in your files (/files), or in the app's source (/app-source, read-only), with line numbers. Paths are absolute (/files/...) or relative to the working directory. offset and limit are lines (default: the first 2000). Images come back as images when the model can see them; other binary files are described. Read a file before you change it with write_file or edit_file.",
     parameters: Type.Object(
       {
         path: Type.String({ maxLength: 4096 }),
@@ -365,9 +399,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
     execute: wrap("files", (ctx, args, env) =>
       Effect.gen(function* () {
         const cwd = yield* currentDir(ctx, env)
-        const { full, segments } = resolveIn(ctx, String(args.path), cwd)
+        const { full, root, segments } = resolveIn(ctx, String(args.path), cwd, yield* rootsOf(env))
         const { bytes, info, truncated } = yield* attempt(() =>
-          readRegularFile(env.filesRoot, segments, READ_MAX_BYTES)
+          readRegularFile(root.hostRoot, segments, READ_MAX_BYTES)
         )
         if (!truncated) ctx.cache.set(readKey(full), sha256(bytes))
         const extension = posix.extname(full).toLowerCase()
@@ -417,7 +451,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     storyRead: "account",
     titleField: "path",
     description:
-      "List a folder in your files (/files): names, kinds, sizes and times, folders first. depth goes into subfolders (default 1, at most 6); glob filters by path relative to the folder (for example **/*.md). At most 500 entries. Links are shown, not followed.",
+      "List a folder in your files (/files) or the app's source (/app-source): names, kinds, sizes and times, folders first. depth goes into subfolders (default 1, at most 6); glob filters by path relative to the folder (for example **/*.md). At most 500 entries. Links are shown, not followed.",
     parameters: Type.Object(
       {
         path: Type.Optional(Type.String({ maxLength: 4096 })),
@@ -430,13 +464,13 @@ export const makeFileTools = (deps: FileToolDeps) => {
     execute: wrap("files", (ctx, args, env) =>
       Effect.gen(function* () {
         const cwd = yield* currentDir(ctx, env)
-        const { full, segments } = resolveIn(ctx, String(args.path ?? "."), cwd)
+        const { full, root, segments } = resolveIn(ctx, String(args.path ?? "."), cwd, yield* rootsOf(env))
         const depth = Number(args.depth ?? 1)
         const pattern = typeof args.glob === "string" ? globToRegExp(args.glob) : null
         const found: Array<{ path: string; entry: Entry }> = []
         let more = false
         const walk = async (below: ReadonlyArray<string>, level: number): Promise<void> => {
-          const listed = await listFolder(env.filesRoot, [...segments, ...below], LIST_MAX * 4)
+          const listed = await listFolder(root.hostRoot, [...segments, ...below], LIST_MAX * 4)
           more ||= listed.more
           const sorted = [...listed.entries].sort(
             (a, b) => Number(b.kind === "folder") - Number(a.kind === "folder") || a.name.localeCompare(b.name)
@@ -500,7 +534,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     storyRead: "account",
     titleField: "pattern",
     description:
-      "Search the text of your files (/files) with ripgrep: pattern is a regular expression. path narrows it to a folder or file, glob to file names (for example *.py), case: false ignores case, context adds lines around each match. At most 15000 characters.",
+      "Search the text of your files (/files) or the app's source (/app-source) with ripgrep: pattern is a regular expression. path narrows it to a folder or file, glob to file names (for example *.py), case: false ignores case, context adds lines around each match. At most 15000 characters.",
     parameters: Type.Object(
       {
         pattern: Type.String({ minLength: 1, maxLength: 1000 }),
@@ -515,9 +549,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
     execute: wrap("files", (ctx, args, env) =>
       Effect.gen(function* () {
         const cwd = yield* currentDir(ctx, env)
-        const { full, segments } = resolveIn(ctx, String(args.path ?? "."), cwd)
+        const { full, root, segments } = resolveIn(ctx, String(args.path ?? "."), cwd, yield* rootsOf(env))
         const pattern = String(args.pattern)
         const selected = yield* sandboxFor()
+        const source = yield* appSourceOf()
         if (typeof selected !== "string") {
           const command = [
             "rg --line-number --no-heading --color never --max-columns 500 --max-count 100",
@@ -533,7 +568,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
               {
                 command,
                 cwd: FILES_MOUNT,
-                mounts: accountMounts(env),
+                mounts: accountMounts(env, source),
                 env: commandEnv(),
                 network: "none",
                 limits: { ...limits.run, timeoutMs: 60_000 }
@@ -559,13 +594,13 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const needle = args.case === false ? pattern.toLowerCase() : pattern
         const matches: Array<string> = []
         const visit = async (below: ReadonlyArray<string>, budget: { files: number }): Promise<void> => {
-          const listed = await listFolder(env.filesRoot, [...segments, ...below], 2000).catch(() => null)
+          const listed = await listFolder(root.hostRoot, [...segments, ...below], 2000).catch(() => null)
           for (const entry of listed?.entries ?? []) {
             if (matches.length >= 30 || budget.files <= 0) return
             if (entry.kind === "folder") await visit([...below, entry.name], budget)
             else if (entry.kind === "file" && entry.size <= 2 ** 20) {
               budget.files--
-              const read = await readRegularFile(env.filesRoot, [...segments, ...below, entry.name], 2 ** 20).catch(
+              const read = await readRegularFile(root.hostRoot, [...segments, ...below, entry.name], 2 ** 20).catch(
                 () => null
               )
               if (!read || isBinary(read.bytes)) continue
@@ -579,9 +614,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
             }
           }
         }
-        const info = yield* attempt(() => statPath(env.filesRoot, segments))
+        const info = yield* attempt(() => statPath(root.hostRoot, segments))
         if (info?.isFile()) {
-          const read = yield* attempt(() => readRegularFile(env.filesRoot, segments, 2 ** 20))
+          const read = yield* attempt(() => readRegularFile(root.hostRoot, segments, 2 ** 20))
           read.bytes
             .toString("utf8")
             .split("\n")
@@ -669,7 +704,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     execute: wrap("files", (ctx, args, env) =>
       Effect.gen(function* () {
         const cwd = yield* currentDir(ctx, env)
-        const { full, segments } = resolveIn(ctx, String(args.path), cwd)
+        const { full, segments } = resolveIn(ctx, String(args.path), cwd, yield* rootsOf(env), true)
         const content = Buffer.from(String(args.content), "utf8")
         const done = yield* replaceFile(ctx, env, full, segments, () => content, "write")
         return {
@@ -722,7 +757,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
             : args.edits
         ) as ReadonlyArray<{ old_string: string; new_string: string; replace_all?: boolean }>
         const cwd = yield* currentDir(ctx, env)
-        const { full, segments } = resolveIn(ctx, String(args.path), cwd)
+        const { full, segments } = resolveIn(ctx, String(args.path), cwd, yield* rootsOf(env), true)
         let replaced = 0
         const done = yield* replaceFile(
           ctx,
@@ -807,7 +842,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     storyRead: "account",
     titleField: "description",
     description: [
-      "Run a bash command in a sandbox. It sees your files at /files (read and write), its own home folder at /home/user (kept between runs: pip install --user and npm install -g go there) and a private /tmp. Nothing else of the server is there.",
+      "Run a bash command in a sandbox. It sees your files at /files (read and write), its own home folder at /home/user (kept between runs: pip install --user and npm install -g go there) a private /tmp, and the app's source for this version at /app-source (read-only: SOURCE.md says what it holds). Nothing else of the server is there.",
       "Available: bash and the usual command-line tools, git, python3, node and npm, and rg where the server has them; no system package manager (apt) and no root.",
       "The working directory carries over between calls in this run (cd works); each new message starts in the working folder. timeout_ms defaults to 120000 (at most 600000); then the command and everything it started are stopped.",
       "Network: when Internet from commands is on, HTTP and HTTPS reach public internet addresses through a proxy (curl, git clone https://…, pip, npm work); this server, the local network and other machines can't be reached, and raw TCP, UDP and SSH don't work.",
@@ -849,6 +884,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
           typeof args.cwd === "string" && args.cwd.trim() !== "" ? posix.resolve(start, args.cwd.trim()) : start
         const timeoutMs = Math.min(Number(args.timeout_ms ?? limits.defaultTimeoutMs), limits.maxTimeoutMs)
         if (deps.quota) yield* deps.quota.check(env.userId, 0, "run commands")
+        const source = yield* appSourceOf()
         const run = Effect.gen(function* () {
           const before = yield* attempt(() => scanTree(env.filesRoot))
           const result = yield* attempt((signal) =>
@@ -856,7 +892,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
               {
                 command: String(args.command),
                 cwd,
-                mounts: accountMounts(env),
+                mounts: accountMounts(env, source),
                 env: commandEnv(),
                 network,
                 limits: { ...limits.run, timeoutMs }
@@ -1219,8 +1255,33 @@ export const makeFileTools = (deps: FileToolDeps) => {
     finishCopy
   }
 
+  /**
+   * A command of the app's own in the account's sandbox, offline and short (a new plugin working
+   * copy's `git init`); without a sandbox, nothing runs.
+   */
+  const runQuiet = async (userId: string, command: string, cwd: string) => {
+    const selected = await selectSandbox(deps.sandboxes, deps.sandboxId)
+    if (!("sandbox" in selected)) return null
+    const env = accountEnv(deps, userId)
+    await prepareAccount(env)
+    const source = deps.appSource ? await deps.appSource().catch(() => null) : null
+    return selected.sandbox.run(
+      {
+        command,
+        cwd,
+        mounts: accountMounts(env, source),
+        env: commandEnv(),
+        network: "none",
+        limits: { ...limits.run, timeoutMs: 60_000 }
+      },
+      AbortSignal.timeout(70_000)
+    )
+  }
+
   return {
     workspaces,
+    keepVersion,
+    runQuiet,
     tools: [readTool, listTool, searchTool, writeTool, editTool, bashTool] as unknown as ReadonlyArray<
       RolloutTool<never>
     >,

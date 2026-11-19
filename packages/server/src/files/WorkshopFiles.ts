@@ -22,6 +22,8 @@ import { accountEnv, prepareAccount } from "./environment.ts"
 import { folderAt, locateFolder } from "./workingFolder.ts"
 import { BIN_FOLDER, makeFilesBin, type FilesBin } from "./bin.ts"
 import { makeFilesQuota, parseByteSize, type FilesQuota } from "./quota.ts"
+import { prepareAppSource } from "./appSource.ts"
+import { makePluginCopies } from "./pluginCopies.ts"
 
 export class WorkshopFiles extends Context.Service<
   WorkshopFiles,
@@ -98,7 +100,19 @@ export class WorkshopFiles extends Context.Service<
         writer,
         quota
       })
+      // The app's source for /app-source (§3.6): copied on first use, once per version.
+      let sourceCopy: Promise<string | null> | null = null
+      const appSource = () =>
+        (sourceCopy ??= prepareAppSource(config.dataDir).then(
+          (copy) => copy.folder,
+          (error: unknown) => {
+            sourceCopy = null
+            Effect.runFork(Effect.logWarning(`copying the app's source for commands failed: ${String(error)}`))
+            return null
+          }
+        ))
       const files = makeFileTools({
+        appSource,
         dataDir: config.dataDir,
         ...dirs,
         reader,
@@ -112,6 +126,26 @@ export class WorkshopFiles extends Context.Service<
       })
       for (const tool of files.tools) yield* execution.rolloutTools.register(tool)
       yield* execution.subagentWorkspaces.register(files.workspaces)
+      // Plugin working copies in Files (§5.3), for the plugin tools.
+      yield* execution.pluginWorkingCopies.register(
+        makePluginCopies({
+          rootOf: async (userId) => {
+            const env = accountEnv(dirs, userId)
+            await prepareAccount(env)
+            return env.filesRoot
+          },
+          keepVersion: files.keepVersion,
+          wrote: quota.wrote,
+          onChanged: changed,
+          initGit: async (userId, folder) => {
+            await files.runQuiet(
+              userId,
+              "git init -q -b main && git add -A && git -c user.name=Assistant -c user.email=assistant@localhost commit -q -m 'Start the plugin'",
+              folder
+            )
+          }
+        })
+      )
       // The turn's tail says where commands start (§2.1), when the turn offers the file tools.
       yield* execution.turnNotes.register({
         id: "files.workingFolder",
