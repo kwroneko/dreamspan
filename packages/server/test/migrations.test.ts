@@ -621,3 +621,28 @@ describe("0008_attachment_paths", () => {
     }).pipe(Effect.provide(layer()))
   )
 })
+
+describe("released migrations", () => {
+  // A migration's SQL must never change once released, so it can't be built from helpers that
+  // later edits could change (review files23 finding 1). The baseline is exempt: it may still
+  // change while no deployment holds data.
+  it("are self-contained: no migration module imports anything", () => {
+    const dir = join(import.meta.dirname, "../src/db")
+    const modules = [
+      "migrationFiles.ts",
+      "subagentSchema.ts",
+      "migrationWorkshopBranches.ts",
+      "migrationPreviewMacro.ts",
+      "migrationPersonaLocks.ts",
+      "migrationAttachmentPaths.ts"
+    ]
+    for (const module of modules)
+      assert.deepStrictEqual(
+        readFileSync(join(dir, module), "utf8")
+          .split("\n")
+          .filter((line) => /^import\b/.test(line)),
+        [],
+        module
+      )
+  })
+})
