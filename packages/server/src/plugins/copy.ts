@@ -63,7 +63,7 @@ export const prepareBuiltinCopy = async (registry: string, id: string, pluginId:
     2
   )
   files["NOTICE.md"] =
-    "Editable copy of shipped rp-harness source. The project has no declared redistribution licence. No third-party implementation is copied; React and Effect remain installed API dependencies under their own licences.\n"
+    "Editable copy of shipped Dreamspan source. The project has no declared redistribution licence. No third-party implementation is copied; React and Effect remain installed API dependencies under their own licences.\n"
   files["dreamspan-plugin.json"] = JSON.stringify(
     {
       id: pluginId,

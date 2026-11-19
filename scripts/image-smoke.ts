@@ -488,7 +488,7 @@ export const smoke = async (base: string, container: string, password: string) =
     if (Exit.isFailure(result)) throw Cause.squash(result.cause)
     for (const setting of ["FAKE_CARD_SOURCE", "FAKE_SAVED_MEDIA"]) {
       step = `negative launch ${setting}`
-      const name = `rp-image-smoke-${randomUUID()}`
+      const name = `dreamspan-image-smoke-${randomUUID()}`
       names.add(name)
       const dir = mkdtempSync(join(tmpdir(), "rp-image-smoke-negative-"))
       chmodSync(dir, 0o777)

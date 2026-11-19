@@ -54,7 +54,7 @@ export const useTitle = (title: string) => {
   const focused = useTabFocused()
   useTabMeta(title)
   useEffect(() => {
-    if (focused) setPageTitle(`${title} · rp-harness`)
+    if (focused) setPageTitle(`${title} · Dreamspan`)
   }, [title, focused])
 }
 
@@ -146,7 +146,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       <div className="-mx-3 mb-1 flex h-shell-header shrink-0 items-center gap-1 border-b border-border px-5 py-2">
         <Tooltip label="Opens the home page.">
           <Link to="/" className="mr-auto truncate font-semibold" onClick={onNavigate}>
-            rp-harness
+            Dreamspan
           </Link>
         </Tooltip>
         <ImageControls />

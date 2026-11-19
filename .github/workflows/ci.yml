@@ -47,12 +47,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build --tag rp-harness:ci .
+      - run: docker build --tag dreamspan:ci .
       # The image listens on 0.0.0.0, so with no exposure settings it must refuse to start.
       - name: Refuse to start beyond loopback without exposure settings
         run: |
           code=0
-          timeout 60 docker run --name rp-harness-ci-unsafe rp-harness:ci > unsafe.log 2>&1 || code=$?
+          timeout 60 docker run --name dreamspan-ci-unsafe dreamspan:ci > unsafe.log 2>&1 || code=$?
           cat unsafe.log
           echo "exit: $code"
           [ "$code" -ne 0 ] && [ "$code" -ne 124 ] && grep -q UnsafeExposure unsafe.log
@@ -60,14 +60,14 @@ jobs:
       # that the health check follows it.
       - name: Run the image until it reports healthy
         run: |
-          docker run --detach --name rp-harness-ci --health-interval 2s -e ADMIN_PASSWORD=ci-admin-password -e PORT=3000 rp-harness:ci
+          docker run --detach --name dreamspan-ci --health-interval 2s -e ADMIN_PASSWORD=ci-admin-password -e PORT=3000 dreamspan:ci
           for _ in $(seq 60); do
-            status=$(docker inspect --format '{{.State.Health.Status}}' rp-harness-ci)
-            if [ "$status" = healthy ] || [ "$(docker inspect --format '{{.State.Running}}' rp-harness-ci)" != true ]; then break; fi
+            status=$(docker inspect --format '{{.State.Health.Status}}' dreamspan-ci)
+            if [ "$status" = healthy ] || [ "$(docker inspect --format '{{.State.Running}}' dreamspan-ci)" != true ]; then break; fi
             sleep 2
           done
-          docker logs rp-harness-ci
+          docker logs dreamspan-ci
           echo "health: $status"
           [ "$status" = healthy ]
       - if: always()
-        run: docker rm --force --volumes rp-harness-ci rp-harness-ci-unsafe || true
+        run: docker rm --force --volumes dreamspan-ci dreamspan-ci-unsafe || true

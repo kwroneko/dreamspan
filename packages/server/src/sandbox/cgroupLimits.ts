@@ -179,7 +179,7 @@ const systemdScope: CgroupLimiter = {
     const probe = spawnSync(
       systemdRun,
       [
-        ...scopeArgs({ memoryBytes: 64 * 2 ** 20, processes: 16 }, `rp-probe-${randomBytes(6).toString("hex")}`, true),
+        ...scopeArgs({ memoryBytes: 64 * 2 ** 20, processes: 16 }, `dreamspan-probe-${randomBytes(6).toString("hex")}`, true),
         "/bin/sh",
         "-c",
         'd=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); cat "$d/memory.max" "$d/pids.max"'
@@ -199,7 +199,7 @@ const systemdScope: CgroupLimiter = {
   open: async (limits) => {
     const systemdRun = findOnPath("systemd-run")
     if (!systemdRun) throw new Error("systemd-run isn't installed.")
-    const unit = `rp-cmd-${randomBytes(8).toString("hex")}`
+    const unit = `dreamspan-cmd-${randomBytes(8).toString("hex")}`
     const env = userBusEnv()
     return {
       env,

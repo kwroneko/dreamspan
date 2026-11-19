@@ -30,7 +30,7 @@ const unseen = new Map<ChatId, number>()
 const listeners = new Set<() => void>()
 /** The chat open in this tab, if any. */
 let open: ChatId | null = null
-let pageTitle = "rp-harness"
+let pageTitle = "Dreamspan"
 
 const total = () => [...unseen.values()].reduce((sum, n) => sum + n, 0)
 
@@ -150,7 +150,7 @@ export const useNotices = () => {
 // --- Settings
 
 function NotificationSettings() {
-  useEffect(() => setPageTitle("Notifications · rp-harness"), [])
+  useEffect(() => setPageTitle("Notifications · Dreamspan"), [])
   const [on, setOn] = useState(() => systemWanted() && canNotify() && Notification.permission === "granted")
   const [refused, setRefused] = useState(false)
   const toggle = async (next: boolean) => {

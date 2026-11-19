@@ -165,7 +165,7 @@ function LoginPage() {
   const retry = useAtomRefresh(sessionAtom)
   return (
     <CenteredPage>
-      <h1 className="text-xl font-semibold">Log in to rp-harness</h1>
+      <h1 className="text-xl font-semibold">Log in to Dreamspan</h1>
       {(search.recovered === "1" || search.recovered === 1) && <RecoveryNotice />}
       <Card>
         {AsyncResult.match(result, {

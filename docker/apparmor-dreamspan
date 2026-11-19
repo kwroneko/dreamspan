@@ -1,4 +1,4 @@
-# AppArmor profile for the rp-harness container (docker/README.md, "AppArmor").
+# AppArmor profile for the Dreamspan container (docker/README.md, "AppArmor").
 #
 # Docker's own `docker-default` (moby/profiles, apparmor/template.go, as Docker 29 generates
 # it), with one change: `deny mount` is replaced by what bubblewrap needs to build each
@@ -10,8 +10,8 @@
 # The kernel still checks every mount against the namespace's own capabilities: outside a user
 # namespace the server, without CAP_SYS_ADMIN, can't mount anything.
 #
-# Load on the Docker host:  sudo apparmor_parser -r -W docker/apparmor-rp-harness
-# Use in compose:           security_opt: ["apparmor=rp-harness", ...]
+# Load on the Docker host:  sudo apparmor_parser -r -W docker/apparmor-dreamspan
+# Use in compose:           security_opt: ["apparmor=dreamspan", ...]
 #
 # `userns,` is for AppArmor 4 (Ubuntu 23.10 and later restrict unprivileged user namespaces
 # to profiles that allow them). AppArmor 3 parsers (Debian 12) don't know the rule: delete
@@ -19,7 +19,7 @@
 
 #include <tunables/global>
 
-profile rp-harness flags=(attach_disconnected,mediate_deleted) {
+profile dreamspan flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
 
   network,
@@ -34,7 +34,7 @@ profile rp-harness flags=(attach_disconnected,mediate_deleted) {
   # dockerd may send signals to container processes (for "docker kill").
   signal (receive) peer=dockerd,
   # Container processes may send signals amongst themselves.
-  signal (send,receive) peer=rp-harness,
+  signal (send,receive) peer=dreamspan,
 
   # What docker-default denies and bubblewrap needs: its sandbox's mounts and root switch.
   mount,
@@ -60,5 +60,5 @@ profile rp-harness flags=(attach_disconnected,mediate_deleted) {
   deny /sys/kernel/security/** rwklx,
 
   # suppress ptrace denials when using 'docker ps' or using 'ps' inside a container
-  ptrace (trace,read,tracedby,readby) peer=rp-harness,
+  ptrace (trace,read,tracedby,readby) peer=dreamspan,
 }

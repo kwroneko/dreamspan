@@ -49,7 +49,7 @@ for (const width of [1440, 1024, 390])
         const measurements: Record<string, unknown> = { centre: await geometry(centre) }
         if (width >= 1024) {
           const left = page.getByRole("complementary").first()
-          const title = left.getByRole("link", { name: "rp-harness", exact: true })
+          const title = left.getByRole("link", { name: "Dreamspan", exact: true })
           const leftBar = title.locator("..")
           const tools = page.getByRole("tablist", { name: "Chat panel", exact: true })
           await expect(tools).toBeVisible()

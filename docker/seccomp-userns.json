@@ -1029,7 +1029,7 @@
     {
       "names": ["clone", "unshare", "mount", "umount2", "pivot_root", "sethostname"],
       "action": "SCMP_ACT_ALLOW",
-      "comment": "rp-harness: lets bubblewrap make the command sandbox (new user, mount, PID, IPC, UTS and network namespaces) without CAP_SYS_ADMIN (setns is not needed: tried without it). Everything else is Docker default."
+      "comment": "dreamspan: lets bubblewrap make the command sandbox (new user, mount, PID, IPC, UTS and network namespaces) without CAP_SYS_ADMIN (setns is not needed: tried without it). Everything else is Docker default."
     }
   ]
 }

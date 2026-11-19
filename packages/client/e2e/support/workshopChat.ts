@@ -217,7 +217,7 @@ export function workshopChatTests() {
           // The workshop: its badge, its accent, its greeting, the chip in place of who replies.
           const main = page.locator("[data-chat-main]")
           await expect(page.locator('[data-chat-kind="workshop"]').first()).toBeVisible()
-          await expect(page).toHaveTitle(`Workshop · ${title} · rp-harness`)
+          await expect(page).toHaveTitle(`Workshop · ${title} · Dreamspan`)
           await expect(main.locator('[data-kind-badge="workshop"]').first()).toBeVisible()
           await expect(page.getByTestId("composer")).toBeVisible()
           const workshopAccent = await accentOf(page)

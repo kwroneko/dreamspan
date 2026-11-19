@@ -86,7 +86,7 @@ export class InstanceLocked extends Schema.TaggedError<InstanceLocked>()("Instan
   dataDir: Schema.String
 }) {
   override get message() {
-    return `Another rp-harness process is already using ${this.dataDir}. Only one instance may open a data directory.`
+    return `Another Dreamspan process is already using ${this.dataDir}. Only one instance may open a data directory.`
   }
 }
 
