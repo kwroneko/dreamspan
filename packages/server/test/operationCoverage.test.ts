@@ -44,7 +44,10 @@ it.live("classifies every RPC and registered command; a new unclassified operati
       "StartStImportPlan",
       "GetStImportPlan",
       "GetStImportPlanMessages",
-      "CancelStImportPlan"
+      "CancelStImportPlan",
+      "ChangeSubagentSettings",
+      "ChangeSubagentType",
+      "ApplyCostRecompute"
     ]
     for (const tag of protectedTags) {
       if (!AppApi.requests.has(tag as never)) continue
