@@ -1,6 +1,6 @@
 // How code types itself from an operation group (ARCHITECTURE.md §3.2).
-import type { Effect, Layer, Scope } from "effect"
-import { type Rpc, RpcGroup } from "effect/rpc"
+import { Effect, type Layer, type Scope } from "effect"
+import { type Rpc, RpcGroup, type RpcSchema } from "effect/rpc"
 
 /** What every helper here takes: a group, read only through its `requests` map. */
 export interface OpsGroup {
@@ -40,7 +40,7 @@ export type HandlersOf<Group, Services = never> = {
   readonly [Current in OpsOf<Group> as Current["_tag"]]: Rpc.ToHandlerFn<Current, Services>
 }
 
-/** The services a handler set's effects need, read off each handler once (no streams, no middleware). */
+/** The services a handler set's effects need, read off each handler once. Streams and middleware are refused (`Unsupported`). */
 type ServicesOf<Handlers> = {
   readonly [K in keyof Handlers]: Handlers[K] extends (
     ...args: ReadonlyArray<never>
@@ -49,13 +49,52 @@ type ServicesOf<Handlers> = {
     : never
 }[keyof Handlers]
 
+/** The tags of operations `serveOps` can't type the services of: streaming ones and ones with middleware. */
+type Unsupported<Group> =
+  OpsOf<Group> extends infer R
+    ? R extends Rpc.Any
+      ? [Rpc.Middleware<R>] extends [never]
+        ? [Rpc.SuccessSchema<R>] extends [RpcSchema.Stream<infer _A, infer _E>]
+          ? R["_tag"]
+          : never
+        : R["_tag"]
+      : never
+    : never
+
+/** Intersected with the group: no effect when every operation is plain, else an error naming the tags. */
+type PlainOpsOnly<Group> = [Unsupported<Group>] extends [never]
+  ? unknown
+  : { readonly "serveOps takes no streaming or middleware operations; these do": Unsupported<Group> }
+
 /**
  * The layer serving `group` with handlers built by `build`: `RpcGroup.toLayer`, whose handler
  * inference (`HandlersServices`) is quadratic in the group's operations, typed in linear time.
- * Handlers for other groups' operations may come along; only the group's are registered.
+ * Handlers for other groups' operations may not come along: building fails, naming the tags,
+ * when a tag has no function handler or a handler has no operation. Groups with streaming or
+ * middleware operations are refused by type: their services would drop out of the requirements.
  */
 export const serveOps = <Group extends OpsGroup, Handlers extends HandlersOf<Group, unknown>, EX = never, RX = never>(
-  group: Group,
+  group: Group & PlainOpsOnly<Group>,
   build: Effect.Effect<Handlers, EX, RX>
 ): Layer.Layer<Rpc.ToHandler<OpsOf<Group>>, EX, Exclude<RX | ServicesOf<Handlers>, Scope.Scope>> =>
-  (group as unknown as RpcGroup.RpcGroup<Rpc.Any>).toLayer(build as never) as never
+  (group as unknown as RpcGroup.RpcGroup<Rpc.Any>).toLayer(
+    Effect.flatMap(build, (handlers) => {
+      const problem = handlerProblem(group.requests.keys(), handlers)
+      return problem === undefined ? Effect.succeed(handlers) : Effect.die(new Error(problem))
+    }) as never
+  ) as never
+
+/** What's wrong with `handlers` for a group's tags (missing or extra), or undefined. */
+export const handlerProblem = (tags: Iterable<string>, handlers: object): string | undefined => {
+  const wanted = new Set(tags)
+  const given = handlers as Record<string, unknown>
+  const missing = [...wanted].filter((tag) => typeof given[tag] !== "function")
+  const extra = Object.keys(given).filter((key) => !wanted.has(key))
+  if (missing.length === 0 && extra.length === 0) return undefined
+  return [
+    missing.length > 0 ? `missing handlers: ${missing.join(", ")}` : "",
+    extra.length > 0 ? `extra handlers: ${extra.join(", ")}` : ""
+  ]
+    .filter((part) => part !== "")
+    .join("; ")
+}
