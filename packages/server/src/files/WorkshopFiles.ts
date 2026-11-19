@@ -5,7 +5,9 @@
 // (sandbox/network.ts) and the sandbox's start (stale run folders, which cgroup limiter).
 import { join } from "node:path"
 import { Context, Duration, Effect, Layer, Schedule } from "effect"
-import type { User } from "@dreamspan/shared/domain.ts"
+import type { User, UserId } from "@dreamspan/shared/domain.ts"
+import { foldersShowing } from "@dreamspan/shared/files.ts"
+import { Notices } from "../chat/Notices.ts"
 import type { RolloutEffect } from "@dreamspan/shared/workshopApi.ts"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
@@ -17,6 +19,7 @@ import { parsePublicOrigins } from "../net/exposure.ts"
 import { commandSandboxes } from "../sandbox/registry.ts"
 import { setPublicAddresses } from "../sandbox/network.ts"
 import { accountEnv } from "./environment.ts"
+import { BIN_FOLDER, makeFilesBin, type FilesBin } from "./bin.ts"
 import { makeFilesQuota, parseByteSize, type FilesQuota } from "./quota.ts"
 
 export class WorkshopFiles extends Context.Service<
@@ -28,6 +31,13 @@ export class WorkshopFiles extends Context.Service<
     /** What the row adds where commands run with weaker limits; null: nothing. */
     readonly commandsNote: () => Effect.Effect<string | null>
     readonly quota: FilesQuota
+    /** Files and folders deleted in the app, until restored or emptied (§1.3). */
+    readonly bin: FilesBin
+    /**
+     * Tells the account's open file managers what changed (§8.1, live refresh): the paths
+     * changed, added or removed (`/files/…`); `all` when a command's scan couldn't list them all.
+     */
+    readonly changed: (userId: string, paths: ReadonlyArray<string>, all?: boolean) => void
   }
 >()("rp/files/WorkshopFiles") {
   static readonly layer = Layer.effect(
@@ -37,6 +47,7 @@ export class WorkshopFiles extends Context.Service<
       const execution = yield* ExecutionRegistry
       const holds = yield* MediaHolds
       const reader = yield* Reader
+      const notices = yield* Notices
       const writer = yield* Writer
       const defaultBytes = parseByteSize(config.filesQuota)
       if (defaultBytes === null)
@@ -53,8 +64,21 @@ export class WorkshopFiles extends Context.Service<
         defaultBytes,
         folders: (userId) => {
           const env = accountEnv(dirs, userId)
-          return { filesRoot: env.filesRoot, home: env.home }
+          return { filesRoot: env.filesRoot, home: env.home, bin: join(dirs.filesDir, BIN_FOLDER, userId) }
         }
+      })
+      const changed = (userId: string, paths: ReadonlyArray<string>, all = false) => {
+        const folders = new Set<string>()
+        for (const path of paths) for (const folder of foldersShowing(path)) folders.add(folder)
+        if (folders.size > 0 || all)
+          notices.publish(userId as UserId, { _tag: "FilesChanged", folders: [...folders], all })
+      }
+      const bin = makeFilesBin({
+        filesDir: dirs.filesDir,
+        rootOf: (userId) => accountEnv(dirs, userId).filesRoot,
+        reader,
+        writer,
+        quota
       })
       const files = makeFileTools({
         dataDir: config.dataDir,
@@ -65,7 +89,8 @@ export class WorkshopFiles extends Context.Service<
         sandboxes: commandSandboxes,
         ...(config.commandSandbox ? { sandboxId: config.commandSandbox } : {}),
         holding: holds.holding,
-        quota
+        quota,
+        onChanged: changed
       })
       for (const tool of files.tools) yield* execution.rolloutTools.register(tool)
 
@@ -97,6 +122,14 @@ export class WorkshopFiles extends Context.Service<
         Effect.repeat(Schedule.spaced(Duration.millis(quota.intervals.retentionMs))),
         Effect.forkScoped
       )
+      // The content of bin items that went (emptied, purged, or evicted past the bin's limits).
+      yield* bin.sweep().pipe(
+        Effect.tap((bytes) =>
+          bytes > 0 ? Effect.logInfo(`removed ${bytes} bytes of files gone from the bin`) : Effect.void
+        ),
+        Effect.repeat(Schedule.spaced(Duration.millis(quota.intervals.retentionMs))),
+        Effect.forkScoped
+      )
       yield* quota.remeasureActive.pipe(
         Effect.catchCause((cause) => Effect.logWarning("measuring Files usage failed", cause)),
         Effect.delay(Duration.millis(quota.intervals.measureMs)),
@@ -107,7 +140,9 @@ export class WorkshopFiles extends Context.Service<
         undoEffect: files.undoEffect,
         commandsUnavailable: files.commandsUnavailable,
         commandsNote: files.commandsNote,
-        quota
+        quota,
+        bin,
+        changed
       }
     })
   )

@@ -51,7 +51,9 @@ export const storageKinds = makeRegistry<StorageKind>([
       "card_asset",
       "threads",
       // An MCP server connection (spec/MCP.md §12).
-      "mcp_connection"
+      "mcp_connection",
+      // A file or folder of the account's Files (spec/FILES-AND-ENVIRONMENT.md §1.3).
+      "file"
     ]
   },
   {

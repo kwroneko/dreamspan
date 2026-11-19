@@ -30,10 +30,11 @@ import { AppConfig } from "../config.ts"
 import { Writer } from "../db/Database.ts"
 import { MediaHolds } from "../importer/MediaHolds.ts"
 import { storeMedia } from "../importer/mediaFiles.ts"
+import { zipStream, type ZipStreamEntry } from "../formats/zipStream.ts"
 import { WorkshopFiles } from "./WorkshopFiles.ts"
-import { measureTree } from "./quota.ts"
+import { BinContentGone } from "./bin.ts"
 import { accountEnv, prepareAccount, resolveFilesPath } from "./environment.ts"
-import { FilePathRefused, listFolder, openFolder, readRegularFile, removeTreeAt, statPath } from "./safePath.ts"
+import { FilePathRefused, listFolder, openFolder, readRegularFile, statPath } from "./safePath.ts"
 
 const { O_RDONLY, O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW, O_NONBLOCK } = constants
 
@@ -92,6 +93,26 @@ const extension = (name: string) => {
 
 const at = (dir: FileHandle, name: string) => `/proc/self/fd/${dir.fd}/${name}`
 
+/** Entries one folder download takes at most. */
+const ZIP_MAX_ENTRIES = 200_000
+
+/** A regular file's bytes as they're read, opened without following a link; anything else is skipped. */
+async function* regularFileChunks(root: string, segments: ReadonlyArray<string>): AsyncGenerator<Uint8Array> {
+  const dir = await openFolder(root, segments.slice(0, -1))
+  let file: FileHandle
+  try {
+    file = await open(at(dir, segments.at(-1)!), O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+  } finally {
+    await dir.close()
+  }
+  try {
+    if (!(await file.stat()).isFile()) return
+    for await (const chunk of file.createReadStream({ autoClose: false }) as AsyncIterable<Uint8Array>) yield chunk
+  } finally {
+    await file.close()
+  }
+}
+
 /** Reads and drops what's left of a refused body, up to REFUSED_DRAIN_BYTES and the idle limit. */
 const drain = (message: NodeJS.ReadableStream) =>
   new Promise<void>((done) => {
@@ -133,6 +154,9 @@ const answerOf = (error: unknown) => {
   const cause = unwrap(error)
   if (cause instanceof Answer) return Option.some(refuse(cause.status, cause.message))
   if (cause instanceof FilePathRefused) return Option.some(refuse(400, cause.message))
+  if (cause instanceof BinContentGone) return Option.some(refuse(410, cause.message))
+  if ((cause as { _tag?: unknown } | null)?._tag === "NotFound")
+    return Option.some(refuse(404, "That isn't in the bin any more."))
   const code = (cause as NodeJS.ErrnoException | null)?.code
   if (code === "ENOENT") return Option.some(refuse(404, "Not found. It may have been moved or deleted."))
   if (code === "EEXIST" || code === "ENOTEMPTY") return Option.some(refuse(409, "That name is taken."))
@@ -153,6 +177,7 @@ const answering = <R>(effect: Effect.Effect<HttpServerResponse.HttpServerRespons
   )
 
 const PathBody = Schema.Struct({ path: Schema.String.check(Schema.isMaxLength(4096)) })
+const RestoreBody = Schema.Struct({ binItemId: Schema.String.check(Schema.isMaxLength(64)) })
 const MoveBody = Schema.Struct({
   from: Schema.String.check(Schema.isMaxLength(4096)),
   to: Schema.String.check(Schema.isMaxLength(4096))
@@ -165,7 +190,7 @@ export const filesRoutes = Layer.unwrap(
     const writer = yield* Writer
     const holds = yield* MediaHolds
     // The account's Files quota (files/quota.ts): checked before an upload and as it streams.
-    const { quota } = yield* WorkshopFiles
+    const { quota, bin, changed } = yield* WorkshopFiles
     const dirs = {
       filesDir: config.filesDir || join(config.dataDir, "files"),
       homesDir: join(config.dataDir, "env-home")
@@ -245,8 +270,8 @@ export const filesRoutes = Layer.unwrap(
           })),
         more: listed.more,
         readOnly: false,
-        // The bin doesn't hold files yet (§1.3, bin kind `file`): deleting here asks first.
-        bin: false
+        // Deleting moves to the bin, with Undo (§1.3).
+        bin: true
       }
       return HttpServerResponse.jsonUnsafe(listing, { headers: { "cache-control": "no-store" } })
     })
@@ -321,6 +346,47 @@ export const filesRoutes = Layer.unwrap(
         status,
         contentType: inline ?? "application/octet-stream",
         headers: { ...headers, "content-length": String(length) }
+      })
+    })
+
+    /** A folder as one zip (§8.1), streamed as it's read: links and special files are left out. */
+    const zip = Effect.gen(function* () {
+      const query = yield* queryOf
+      const { root, segments } = yield* place(query.get("path") ?? FILES_TOP)
+      const info = yield* Effect.tryPromise(() => statPath(root, segments))
+      if (!info?.isDirectory()) return refuse(400, "That isn't a folder.")
+      const top = segments.at(-1) ?? "Files"
+      async function* entries(): AsyncGenerator<ZipStreamEntry> {
+        // Depth first, each folder opened by the no-follow walk; names sorted for a stable archive.
+        const queue: Array<ReadonlyArray<string>> = [[]]
+        let count = 0
+        while (queue.length) {
+          const below = queue.pop()!
+          const listed = await listFolder(root, [...segments, ...below], ZIP_MAX_ENTRIES)
+          const folders: Array<ReadonlyArray<string>> = []
+          for (const entry of listed.entries) {
+            if (entry.name.endsWith(".rp-tmp")) continue
+            if (++count > ZIP_MAX_ENTRIES) throw new Error("too many entries for one zip")
+            if (entry.kind === "folder") folders.push([...below, entry.name])
+            else if (entry.kind === "file")
+              yield {
+                name: [top, ...below, entry.name].join("/"),
+                chunks: regularFileChunks(root, [...segments, ...below, entry.name])
+              }
+          }
+          queue.push(...folders.reverse())
+        }
+      }
+      const body = Stream.fromAsyncIterable(zipStream(entries()), (error) => error).pipe(
+        Stream.tapError((error) => Effect.logWarning("a folder download stopped", error))
+      )
+      return HttpServerResponse.stream(body, {
+        contentType: "application/zip",
+        headers: {
+          "cache-control": "private, no-store",
+          "x-content-type-options": "nosniff",
+          "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(`${top}.zip`)}`
+        }
       })
     })
 
@@ -452,6 +518,7 @@ export const filesRoutes = Layer.unwrap(
             throw error
           }
         }).pipe(Effect.ensuring(Effect.sync(() => quota.wrote(userId, keptBytes))))
+        changed(userId, [`${parentPath}/${name}`])
         return HttpServerResponse.jsonUnsafe({ path: `${parentPath}/${name}`, outcome } satisfies UploadOutcome)
       }).pipe(Effect.ensuring(Effect.promise(() => dir.close())))
     })
@@ -467,6 +534,7 @@ export const filesRoutes = Layer.unwrap(
         Effect.ensuring(Effect.promise(() => dir.close()))
       )
       quota.wrote(userId, FOLDER_BYTES)
+      changed(userId, [full])
       return HttpServerResponse.jsonUnsafe({ path: full })
     })
 
@@ -488,6 +556,7 @@ export const filesRoutes = Layer.unwrap(
           const taken = yield* Effect.tryPromise(() => lstat(toName).catch(() => null))
           if (taken) return refuse(409, "That name is taken.")
           yield* Effect.tryPromise(() => rename(fromName, toName))
+          changed(from.userId, [from.full, to.full])
           return HttpServerResponse.jsonUnsafe({ path: to.full })
         }).pipe(Effect.ensuring(Effect.promise(() => target.close())))
       }).pipe(Effect.ensuring(Effect.promise(() => source.close())))
@@ -499,35 +568,29 @@ export const filesRoutes = Layer.unwrap(
       if (segments.length === 0) return refuse(400, "The top folder can't be deleted.")
       const info = yield* Effect.tryPromise(() => statPath(root, segments))
       if (!info) return refuse(404, "Not found. It may have been moved or deleted.")
-      // A kept version holds the file's bytes again, so only what no version keeps comes off.
-      const kept = info.isFile() ? yield* keepVersion(userId, root, segments, full, "delete") : 0
-      const frees = info.isDirectory()
-        ? (yield* Effect.tryPromise(() => measureTree(join(root, ...segments), undefined, undefined, true))).bytes
-        : info.isFile() && info.nlink === 1
-          ? Math.max(0, info.size - kept)
-          : 0
-      const freeToken = quota.freed(userId, frees)
-      // A hard-linked file's bytes stay, and so does the version of it.
-      if (info.isFile() && info.nlink > 1) quota.wrote(userId, kept)
-      const dir = yield* Effect.tryPromise(() => openFolder(root, segments.slice(0, -1)))
-      // A link or special file is removed itself, never what it points at. A folder is walked by
-      // descriptor (removeTreeAt), so a link swapped in for a subfolder mid-delete isn't followed.
-      yield* Effect.tryPromise(() =>
-        info.isDirectory() ? removeTreeAt(dir, segments.at(-1)!) : unlink(at(dir, segments.at(-1)!))
-      ).pipe(
-        Effect.tapError(() => Effect.sync(() => quota.unfreed(userId, freeToken))),
-        Effect.ensuring(Effect.promise(() => dir.close()))
-      )
-      return HttpServerResponse.jsonUnsafe({ binItemId: null })
+      // To the bin (§1.3): its bytes stay counted, under the bin, until it's emptied.
+      const item = yield* bin.toBin(userId, root, segments, full)
+      changed(userId, [full])
+      return HttpServerResponse.jsonUnsafe({ binItemId: item.id })
+    })
+
+    const restore = Effect.gen(function* () {
+      const body = yield* jsonBody(RestoreBody)
+      const { userId } = yield* place(FILES_TOP)
+      const { path } = yield* bin.restore(userId, body.binItemId)
+      changed(userId, [path])
+      return HttpServerResponse.jsonUnsafe({ path })
     })
 
     return Layer.mergeAll(
       HttpRouter.add("GET", FILES_ROUTES.list, authenticated(list)),
       HttpRouter.add("GET", FILES_ROUTES.raw, authenticated(raw)),
+      HttpRouter.add("GET", FILES_ROUTES.zip, authenticated(zip)),
       HttpRouter.add("POST", FILES_ROUTES.upload, authenticated(upload)),
       HttpRouter.add("POST", FILES_ROUTES.folder, authenticated(folder)),
       HttpRouter.add("POST", FILES_ROUTES.move, authenticated(move)),
-      HttpRouter.add("POST", FILES_ROUTES.delete, authenticated(remove))
+      HttpRouter.add("POST", FILES_ROUTES.delete, authenticated(remove)),
+      HttpRouter.add("POST", FILES_ROUTES.restore, authenticated(restore))
     )
   })
 )

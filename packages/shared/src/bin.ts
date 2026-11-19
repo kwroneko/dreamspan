@@ -64,7 +64,10 @@ const BinItemKind = Schema.Literals([
   "entity",
   "connection",
   "card_asset",
-  "mcp_connection"
+  "mcp_connection",
+  // A file or folder of the account's Files (spec/FILES-AND-ENVIRONMENT.md §1.3): its content
+  // waits on disk outside the tree; restoring and emptying it run on the files host.
+  "file"
 ])
 
 /** Something explicitly deleted: a chat, a message, a swipe, a branch, threads started together (their Undo), a library entity, a connection. */

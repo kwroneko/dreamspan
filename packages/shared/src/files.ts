@@ -24,7 +24,9 @@ export const FILES_ROUTES = {
   /** POST `{ path }`: to the bin when the listing said so, otherwise gone (`Deleted`). */
   delete: "/files/delete",
   /** POST `{ binItemId }`: a deleted file or folder put back (`Changed`). */
-  restore: "/files/restore"
+  restore: "/files/restore",
+  /** GET `?path=`: a folder and everything in it as one zip, streamed (links and special files left out). */
+  zip: "/files/zip"
 } as const
 
 /** What a name is: links and special files are listed with their kind and never opened (§1.1). */
@@ -100,6 +102,12 @@ export const crumbsOf = (path: string): ReadonlyArray<{ readonly name: string; r
     const at = `/${parts.slice(0, i + 1).join("/")}`
     return { name: nameOf(at), path: at }
   })
+}
+
+/** The folders whose listings show `path` or a folder on its way: its parent up to the top. */
+export const foldersShowing = (path: string): ReadonlyArray<string> => {
+  const crumbs = crumbsOf(parentOf(path)).map((crumb) => crumb.path)
+  return isTop(path) ? [] : crumbs
 }
 
 /** Whether `path` is `folder` or inside it. */

@@ -4,17 +4,21 @@
 import { type AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { ChatId } from "@dreamspan/shared/chat.ts"
-import { Effect } from "effect"
+import { NotFound, type ServerError } from "@dreamspan/shared/errors.ts"
+import { Cause, Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Reader, Writer } from "../db/Database.ts"
-import { internal } from "./internal.ts"
+import { WorkshopFiles } from "../files/WorkshopFiles.ts"
+import { BinContentGone } from "../files/bin.ts"
+import { internal, toServerError } from "./internal.ts"
 
 export const makeBinHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer
   const hub = yield* ChatHub
   const warmth = yield* CacheWarmth
+  const files = yield* WorkshopFiles
 
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
@@ -48,6 +52,21 @@ export const makeBinHandlers = Effect.gen(function* () {
     RestoreBinItem: ({ itemId }) =>
       Effect.gen(function* () {
         const id = yield* userId
+        // A file or folder is on disk: the files host moves it back and forgets the row.
+        const file = yield* reader.FileBinItem({ userId: id, itemId }).pipe(Effect.option)
+        if (file._tag === "Some")
+          return yield* files.bin.restore(id, itemId).pipe(
+            Effect.map((restored) => {
+              files.changed(id, [restored.path])
+              return restored.item
+            }),
+            // Its content gone from disk (the row went with it), or the row already gone: not found.
+            Effect.catch((error: unknown): Effect.Effect<never, NotFound | ServerError> =>
+              error instanceof NotFound || (Cause.isUnknownError(error) && error.cause instanceof BinContentGone)
+                ? Effect.fail(new NotFound({ entity: "bin item", id: itemId }))
+                : toServerError("RestoreBinItem")(error)
+            )
+          )
         const item = yield* writer.RestoreBinItem({ userId: id, itemId })
         if (item.kind === "message" || item.kind === "branch" || item.kind === "threads" || item.kind === "version") {
           const chatId = item.origin.chatId as ChatId
@@ -70,6 +89,8 @@ export const makeBinHandlers = Effect.gen(function* () {
           ...(expectedForkIds ? { expectedForkIds } : {})
         })
         yield* afterPurge(id, chatIds)
+        // A file's content goes from disk once its row has.
+        yield* files.bin.sweep(id)
       }).pipe(Effect.uninterruptible, internal("PurgeBinItem")),
 
     EmptyBin: ({ itemIds, expectedForkIds }) =>
@@ -77,6 +98,7 @@ export const makeBinHandlers = Effect.gen(function* () {
         const id = yield* userId
         const result = yield* writer.EmptyBin({ userId: id, itemIds, ...(expectedForkIds ? { expectedForkIds } : {}) })
         yield* afterPurge(id, result.chatIds)
+        yield* files.bin.sweep(id)
         return { purged: result.purged }
       }).pipe(Effect.uninterruptible, internal("EmptyBin")),
 

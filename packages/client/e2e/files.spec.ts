@@ -1,7 +1,9 @@
 // The file manager (spec/FILES-AND-ENVIRONMENT.md §8.1, track B1) in the browser: the workshop's
 // Files tab (beside the chat at 1440, the phone's sheet at 390) browses folders with the full path,
-// opens text and images, uploads files (with the batch's Keep both) and a folder, makes a folder,
-// renames from a row's ⋯ menu and deletes from its context menu; the Files page shows the folder
+// opens text and images, uploads files (with the batch's Keep both) and a folder, makes a folder and
+// a file, refreshes when a file is added elsewhere, renames from a row's ⋯ menu, moves with Move to…,
+// downloads a folder as a zip, deletes to the bin from its context menu with Undo, restores from the
+// bin page; the Files page shows the folder
 // tree beside the list and opens a file as a tab of its own. All against the real server and its
 // file routes (`files/routes.ts`), the files seeded and checked over the same HTTP routes. Light and
 // dark, layout audit under LAYOUT_AUDIT=1, screenshots under SCREENSHOT_DIR. Synthetic files only.
@@ -130,10 +132,40 @@ test.describe("files", () => {
         await expect(row("chapters")).toHaveCount(0)
         expect(await files.has("/files/thesis/chapters")).toBe(false)
 
+        // New file: an empty file under the name typed.
+        await panel.getByRole("button", { name: "New file" }).click()
+        const fileName = panel.getByLabel("Name of the new file")
+        await expect(fileName).toHaveValue("Untitled.txt")
+        await fileName.fill("todo.md")
+        await panel.getByRole("button", { name: "Make file" }).click()
+        await expect(row("todo.md")).toBeVisible()
+        expect(await files.text("/files/thesis/todo.md")).toBe("")
+
+        // Live refresh: a file added elsewhere (here over the routes, as another tab would) shows up
+        // without Refresh.
+        await files.put("/files/thesis/elsewhere.txt", "Synthetic, from elsewhere.")
+        await expect(row("elsewhere.txt")).toBeVisible()
+        // The toasts so far are dismissed, so none covers a row below.
+        const shown = page.locator("[data-toast]").filter({ visible: true })
+        for (let left = 8; left > 0 && (await shown.count()) > 0; left--)
+          await shown
+            .first()
+            .getByRole("button", { name: "Dismiss" })
+            .click({ timeout: 2000 })
+            .catch(() => undefined)
+        await expect(shown).toHaveCount(0, { timeout: 20_000 })
+
         // Rename from the row's ⋯ menu, every action listed there with its explanation.
         await row("draft.txt").getByRole("button", { name: "Actions for draft.txt" }).click()
         const menu = page.getByRole("menu", { name: "Actions for draft.txt" })
-        await expect(menu.getByRole("menuitem")).toHaveText([/^Open/, /^Download/, /^Copy path/, /^Rename/, /^Delete/])
+        await expect(menu.getByRole("menuitem")).toHaveText([
+          /^Open/,
+          /^Download/,
+          /^Copy path/,
+          /^Rename/,
+          /^Move to…/,
+          /^Delete/
+        ])
         await expect(menu.getByRole("menuitem").first()).toContainText("Shows the file here.")
         await check("menu", "body")
         await menu.getByRole("menuitem", { name: "Rename" }).click()
@@ -144,24 +176,72 @@ test.describe("files", () => {
         await expect(row("draft.txt")).toHaveCount(0)
         expect(await files.text("/files/thesis/final.txt")).toBe("Synthetic draft.")
 
-        // Delete from the context menu (a right click; a long press on a phone), asked first: the
-        // bin doesn't hold files yet.
-        if (phone) await row("final.txt").getByRole("button", { name: "Actions for final.txt" }).click()
-        else await open("final.txt").click({ button: "right" })
+        // Move to…: a folder picked from the tree; Undo moves it back.
+        await row("todo.md").getByRole("button", { name: "Actions for todo.md" }).click()
         await page
-          .getByRole("menu", { name: "Actions for final.txt" })
-          .getByRole("menuitem", { name: "Delete" })
+          .getByRole("menu", { name: "Actions for todo.md" })
+          .getByRole("menuitem", { name: "Move to…" })
           .click()
-        const confirm = page.getByRole("alertdialog", { name: "Delete “final.txt”?" })
-        await expect(confirm).toBeVisible()
-        await confirm.getByRole("button", { name: "Delete", exact: true }).click()
-        await expect(row("final.txt")).toHaveCount(0)
-        expect(await files.has("/files/thesis/final.txt")).toBe(false)
+        const mover = page.getByRole("dialog", { name: "Move “todo.md” to…" })
+        await expect(mover.getByRole("button", { name: "Move here" })).toBeDisabled()
+        await mover.getByRole("button", { name: "sources", exact: true }).click()
+        await expect(mover.getByText("/files/thesis/sources", { exact: true })).toBeVisible()
+        await check("move", '[role="dialog"]')
+        await mover.getByRole("button", { name: "Move here" }).click()
+        await expect(row("todo.md")).toHaveCount(0)
+        expect(await files.has("/files/thesis/sources/todo.md")).toBe(true)
+        await page
+          .locator("[data-toast]")
+          .filter({ hasText: "Moved “todo.md” to “sources”" })
+          .getByRole("button", { name: "Undo" })
+          .click()
+        await expect(row("todo.md")).toBeVisible()
+
+        // A folder downloads as one zip.
+        await row("sources").getByRole("button", { name: "Actions for sources" }).click()
+        const zipped = page.waitForEvent("download")
+        await page
+          .getByRole("menu", { name: "Actions for sources" })
+          .getByRole("menuitem", { name: "Download as zip" })
+          .click()
+        expect((await zipped).suggestedFilename()).toBe("sources.zip")
+
+        // Delete from the context menu (a right click; a long press on a phone): to the bin at once,
+        // with Undo.
+        const deleteFinal = async () => {
+          if (phone) await row("final.txt").getByRole("button", { name: "Actions for final.txt" }).click()
+          else await open("final.txt").click({ button: "right" })
+          await page
+            .getByRole("menu", { name: "Actions for final.txt" })
+            .getByRole("menuitem", { name: "Delete" })
+            .click()
+          await expect(row("final.txt")).toHaveCount(0)
+          expect(await files.has("/files/thesis/final.txt")).toBe(false)
+        }
+        await deleteFinal()
+        const binned = page.locator("[data-toast]").filter({ hasText: "“final.txt” moved to the bin." })
+        await expect(binned.getByRole("button", { name: "Open the bin" })).toBeVisible()
+        await binned.getByRole("button", { name: "Undo" }).click()
+        await expect(row("final.txt")).toBeVisible()
+        expect(await files.text("/files/thesis/final.txt")).toBe("Synthetic draft.")
+        await deleteFinal()
 
         // The breadcrumb goes back up.
         await panel.locator("[data-files-path]").getByRole("button", { name: "Files" }).click()
         await expect(panel.locator("[data-files-path]")).toHaveAttribute("data-files-path", "/files")
         await check("after")
+
+        // The bin lists it; Restore puts it back, and Open it shows its folder.
+        await page.goto(`${server().url}/bin`)
+        const item = page.getByRole("listitem", { name: "final.txt" })
+        await expect(item.getByText("File", { exact: true })).toBeVisible()
+        await expect(item.getByText("/files/thesis/final.txt")).toBeVisible()
+        await check("bin", "main")
+        await item.getByRole("button", { name: "Restore" }).click()
+        await expect(item.getByText("Restored.")).toBeVisible()
+        expect(await files.text("/files/thesis/final.txt")).toBe("Synthetic draft.")
+        await item.getByRole("link", { name: "Open it" }).click()
+        await expect(page).toHaveURL(/\/files\?path=%2Ffiles%2Fthesis$/)
 
         // The Files page: the tree beside the list where there's room; a file opens as its own tab.
         await page.goto(`${server().url}/files?path=/files/thesis`)

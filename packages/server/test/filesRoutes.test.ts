@@ -34,6 +34,9 @@ const list = (path: string) =>
 
 const body = (response: Response) => Effect.promise(() => response.text())
 
+/** The one account's folder under FILES_DIR (the bin's `.bin` sits beside it). */
+const accountOf = (filesDir: string) => readdirSync(filesDir).find((name) => name !== ".bin")!
+
 describe("file routes", () => {
   it.live("upload, list, read, rename, make folders and delete", () => {
     const config = testConfig()
@@ -62,7 +65,7 @@ describe("file routes", () => {
         top.entries.map((e) => [e.name, e.kind]),
         [["thesis", "folder"]]
       )
-      assert.strictEqual(top.bin, false)
+      assert.strictEqual(top.bin, true)
       const thesis = yield* list("/files/thesis")
       assert.deepStrictEqual(
         thesis.entries.map((e) => [e.name, e.size]),
@@ -109,10 +112,49 @@ describe("file routes", () => {
         ["old.md"]
       )
 
-      // Delete: a file, then a folder with what's in it.
+      // Delete: a file, then a folder with what's in it, each to the bin (§1.3).
       const gone = yield* json("/files/delete", { path: "/files/thesis/notes.md" })
-      assert.deepStrictEqual(yield* Effect.promise(() => gone.json()), { binItemId: null })
+      const { binItemId: fileItem } = (yield* Effect.promise(() => gone.json())) as { binItemId: string }
+      assert.isString(fileItem)
+      const folderGone = yield* json("/files/delete", { path: "/files/thesis" })
+      const { binItemId: folderItem } = (yield* Effect.promise(() => folderGone.json())) as { binItemId: string }
+      assert.deepStrictEqual(
+        (yield* list("/files")).entries.map((e) => e.name),
+        ["page.html"]
+      )
+      const api = yield* client()
+      const binned = yield* api.ListBin({ limit: 50, before: null })
+      assert.deepStrictEqual(
+        binned.map((item) => [item.kind, item.title, item.excerpt, item.origin.entryKind]),
+        [
+          ["file", "thesis", "/files/thesis", "folder"],
+          ["file", "notes.md", "/files/thesis/notes.md", "file"]
+        ]
+      )
+      // The bin's content is outside the tree commands see.
+      assert.isTrue(existsSync(join(config.dataDir, "files", ".bin")))
+      // Restore: the folder comes back at its path; the file then finds its folder there.
+      const back = yield* json("/files/restore", { binItemId: folderItem })
+      assert.deepStrictEqual(yield* Effect.promise(() => back.json()), { path: "/files/thesis" })
+      assert.deepStrictEqual(
+        (yield* list("/files/thesis")).entries.map((e) => e.name),
+        ["figures"]
+      )
+      // Its name taken by then: it comes back as "(restored)".
+      assert.strictEqual((yield* upload("/files/thesis/notes.md", "Newer notes.")).status, 200)
+      const second = yield* json("/files/restore", { binItemId: fileItem })
+      assert.deepStrictEqual(yield* Effect.promise(() => second.json()), { path: "/files/thesis/notes (restored).md" })
+      const restored = yield* call("/files/raw?path=%2Ffiles%2Fthesis%2Fnotes%20(restored).md")
+      assert.strictEqual(yield* body(restored), "Replaced notes.")
+      // Restoring twice: it isn't in the bin any more.
+      assert.strictEqual((yield* json("/files/restore", { binItemId: fileItem })).status, 404)
+      assert.deepStrictEqual(yield* api.ListBin({ limit: 50, before: null }), [])
+      // Delete again and empty the bin: the content goes from disk.
       assert.strictEqual((yield* json("/files/delete", { path: "/files/thesis" })).status, 200)
+      const items = yield* api.ListBin({ limit: 50, before: null })
+      assert.deepStrictEqual(yield* api.EmptyBin({ itemIds: items.map((item) => item.id) }), { purged: 1 })
+      const binDir = join(config.dataDir, "files", ".bin")
+      assert.deepStrictEqual(readdirSync(join(binDir, readdirSync(binDir)[0]!)), [])
       assert.deepStrictEqual(
         (yield* list("/files")).entries.map((e) => e.name),
         ["page.html"]
@@ -122,7 +164,7 @@ describe("file routes", () => {
 
       // A link planted by a command: listed as a link, never read through.
       const filesDir = join(config.dataDir, "files")
-      const account = join(filesDir, readdirSync(filesDir)[0]!)
+      const account = join(filesDir, accountOf(filesDir))
       writeFileSync(join(config.dataDir, "outside.txt"), "Not for the browser.")
       symlinkSync(join(config.dataDir, "outside.txt"), join(account, "leak.txt"))
       symlinkSync(config.dataDir, join(account, "data"))
@@ -145,7 +187,7 @@ describe("file routes", () => {
     return Effect.gen(function* () {
       yield* upload("/files/a.txt", "Synthetic.")
       const filesDir = join(config.dataDir, "files")
-      const account = join(filesDir, readdirSync(filesDir)[0]!)
+      const account = join(filesDir, accountOf(filesDir))
       // Traversal in every spelling: decoded once, resolved, refused or kept as a literal name inside.
       for (const path of ["/files/../..", "/files/%2e%2e/%2e%2e", "/etc/passwd", "/files/a\0b", "../files", "~/x"]) {
         const response = yield* call(`/files/raw?${new URLSearchParams({ path })}`)
@@ -179,6 +221,10 @@ describe("file routes", () => {
       assert.strictEqual((yield* json("/files/delete", { path: "/files/doomed" })).status, 200)
       assert.isTrue(existsSync(join(outside, "keep.txt")))
       assert.isFalse(existsSync(join(account, "doomed")))
+      // Emptying the bin removes the link in it, never what it points at.
+      const doomed = yield* (yield* client()).ListBin({ limit: 50, before: null })
+      yield* (yield* client()).EmptyBin({ itemIds: doomed.map((item) => item.id) })
+      assert.isTrue(existsSync(join(outside, "keep.txt")))
 
       // SVG and XML are attachments, never the app's own content.
       for (const name of ["x.svg", "x.xml", "x.xhtml", "x.htm"]) {
@@ -242,7 +288,7 @@ describe("file routes", () => {
       assert.strictEqual(declared.status, 507)
       assert.match(
         yield* body(declared),
-        /Your files use .* of .*\. Delete files you don't need to upload files again\./
+        /Your files use .* of .*\. Delete files you don't need and empty the bin to upload files again\./
       )
       // Streamed with no length: stopped once it runs out of room, answered (the rest of the
       // body is read and dropped, not a reset connection), and nothing is left behind.
@@ -262,20 +308,29 @@ describe("file routes", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 
-  it.live("deleting a folder gives its room back without a new walk; a deleted file's version still counts", () => {
+  it.live("the bin keeps counting a deleted folder; emptying it gives the room back without a new walk", () => {
     const config = testConfig({ filesQuota: "1M" })
     const bytes = (size: number) => "x".repeat(size)
     return Effect.gen(function* () {
+      const api = yield* client()
       assert.strictEqual((yield* upload("/files/a.bin", bytes(500_000))).status, 200)
       for (const name of ["x", "y", "z"])
         assert.strictEqual((yield* upload(`/files/dir/${name}.bin`, bytes(150_000))).status, 200)
       assert.strictEqual((yield* upload("/files/more.bin", bytes(200_000))).status, 507)
-      // A folder's files aren't versioned: all they hold comes off the figure at once.
+      // In the bin, its bytes still count (§1.2).
       assert.strictEqual((yield* json("/files/delete", { path: "/files/dir" })).status, 200)
+      assert.strictEqual((yield* upload("/files/b.bin", bytes(400_000))).status, 507)
+      const walked = yield* api.GetFilesUsage({ fresh: true })
+      assert.isAtLeast(walked.binBytes, 450_000)
+      // Emptied: the room comes back at once.
+      const before = yield* api.GetFilesUsage({})
+      const items = yield* api.ListBin({ limit: 50, before: null })
+      yield* api.EmptyBin({ itemIds: items.map((item) => item.id) })
+      assert.strictEqual((yield* api.GetFilesUsage({})).measuredAt, before.measuredAt)
       assert.strictEqual((yield* upload("/files/b.bin", bytes(400_000))).status, 200)
-      // A deleted file's kept version holds its bytes: no room comes back (and none is claimed).
-      assert.strictEqual((yield* json("/files/delete", { path: "/files/b.bin" })).status, 200)
-      assert.strictEqual((yield* upload("/files/c.bin", bytes(200_000))).status, 507)
+      // A large deleted file never pushes other deleted items out: its bytes aren't the bin's limit's.
+      assert.strictEqual((yield* json("/files/delete", { path: "/files/a.bin" })).status, 200)
+      assert.strictEqual((yield* api.ListBin({ limit: 50, before: null })).length, 1)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 
@@ -346,7 +401,7 @@ describe("file routes", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 
-  it.live("hard-linked files: a replace frees nothing, a delete keeps the version's bytes counted", () => {
+  it.live("hard-linked files: a replace frees nothing, a delete to the bin keeps the bytes counted", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const api = yield* client()
@@ -358,11 +413,11 @@ describe("file routes", () => {
       })
       assert.strictEqual((yield* upload("/files/warm.bin", "w")).status, 200)
       const filesDir = join(config.dataDir, "files")
-      const account = join(filesDir, readdirSync(filesDir)[0]!)
+      const account = join(filesDir, accountOf(filesDir))
       assert.strictEqual((yield* upload("/files/h.bin", "h".repeat(200_000))).status, 200)
       linkSync(join(account, "h.bin"), join(account, "h2.bin"))
       yield* walked
-      // The other link keeps the bytes; the version of what was deleted counts.
+      // The other link and the bin keep the bytes, counted once.
       assert.strictEqual((yield* json("/files/delete", { path: "/files/h.bin" })).status, 200)
       yield* agrees
       assert.strictEqual((yield* upload("/files/r.bin", "r".repeat(100_000))).status, 200)
@@ -374,23 +429,24 @@ describe("file routes", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 
-  it.live("a delete that fails gives its bytes back", () => {
+  it.live("a delete that fails leaves nothing in the bin and the figure as it was", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const api = yield* client()
       assert.strictEqual((yield* upload("/files/ro/sub/f.bin", "f".repeat(200_000))).status, 200)
       const filesDir = join(config.dataDir, "files")
-      const sub = join(filesDir, readdirSync(filesDir)[0]!, "ro", "sub")
+      const ro = join(filesDir, accountOf(filesDir), "ro")
       yield* api.GetFilesUsage({ fresh: true })
       const before = yield* api.GetFilesUsage({})
-      // A folder that can't be emptied: its parent is read-only.
-      chmodSync(sub, 0o555)
+      // A folder that can't be moved out: the folder holding it is read-only.
+      chmodSync(ro, 0o555)
       try {
-        const refused = yield* json("/files/delete", { path: "/files/ro" })
+        const refused = yield* json("/files/delete", { path: "/files/ro/sub" })
         assert.isAtLeast(refused.status, 400)
       } finally {
-        chmodSync(sub, 0o755)
+        chmodSync(ro, 0o755)
       }
+      assert.deepStrictEqual(yield* api.ListBin({ limit: 50, before: null }), [])
       const after = yield* api.GetFilesUsage({})
       assert.strictEqual(after.usedBytes, before.usedBytes)
       assert.strictEqual((yield* api.GetFilesUsage({ fresh: true })).usedBytes, before.usedBytes)

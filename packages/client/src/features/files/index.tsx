@@ -9,11 +9,14 @@ import { tabKinds } from "../workbench/kinds.ts"
 import { FilesPage } from "./FilesPage.tsx"
 import { FILES_PAGE } from "./href.ts"
 import { FILES_TAB } from "./ids.ts"
+import { userNoticeReceivers } from "../noticeContributions.tsx"
+import { filesNoticeReceiver } from "./live.ts"
 import { filesSources, httpFilesSource } from "./source.ts"
 import { registerViewers } from "./viewers.tsx"
 
 export const register = () => [
   filesSources.register(httpFilesSource),
+  userNoticeReceivers.register(filesNoticeReceiver),
   ...registerViewers(),
   chatPanels.register({
     id: FILES_TAB,
