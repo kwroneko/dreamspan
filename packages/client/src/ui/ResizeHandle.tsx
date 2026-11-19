@@ -7,6 +7,10 @@ import { holdLayoutWrites, useLayoutNumber, writeLayoutParam } from "../tabLayou
 import { removeColumn, setColumn, useColumnWidth } from "./columnLayout.ts"
 import { Tooltip } from "./Tooltip.tsx"
 
+/** The keys a grip acts on (and so holds the URL's writes for): its axis' arrows, Home and End. */
+export const actsOn = (key: string, vertical: boolean) =>
+  (vertical ? ["ArrowUp", "ArrowDown"] : ["ArrowLeft", "ArrowRight"]).includes(key) || key === "Home" || key === "End"
+
 /** Each column's param (registered as layout params by the shell). */
 export const WIDTH_PARAMS = { sidebar: "sbw", chat: "cpw", portrait: "ptw", presetOutline: "pow" } as const
 
@@ -183,7 +187,8 @@ export function ResizeHandle({
         onKeyUp={endKeys}
         onBlur={endKeys}
         onKeyDown={(event) => {
-          if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) holdKeys()
+          // Only the keys this grip acts on hold the URL's writes; another arrow key moves nothing.
+          if (actsOn(event.key, vertical)) holdKeys()
           const step = event.shiftKey ? 40 : 10
           if (event.key === less || event.key === more) {
             event.preventDefault()

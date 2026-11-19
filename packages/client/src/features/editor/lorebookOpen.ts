@@ -2,7 +2,7 @@
 // per view): in the URL's `<scope>:open` (owner, 2026-11-18: the URL is the tab's state), the
 // large editor's and the side panel's each their own, so each view restores its own expansion
 // on reload and no other browser tab follows it.
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { usePlaceValue } from "../../usePlaceParam.ts"
 
 /**
@@ -31,11 +31,18 @@ export const decodeOpen = (raw: unknown, uids: ReadonlyArray<number>): ReadonlyS
   return new Set(uidsOf(list))
 }
 
-/** The URL's value: absent with none open; "all" with the closed ones when most are open. */
-export const encodeOpen = (open: ReadonlySet<number>, uids: ReadonlyArray<number>) => {
+/** Whether the URL's value is the "all" mode (Expand all, then some closed). */
+export const allMode = (raw: unknown) => Array.isArray(raw) && raw[0] === "all"
+
+/**
+ * The URL's value: absent with none open; in the "all" mode (`all`: Expand all, or the value
+ * was in it already) every entry but the closed ones, so entries added later show open too;
+ * else the open ones. Only the user's Expand all starts the mode: entries opened one by one
+ * never make later ones open.
+ */
+export const encodeOpen = (open: ReadonlySet<number>, uids: ReadonlyArray<number>, all = false) => {
   if (open.size === 0) return undefined
-  const closed = uids.filter((uid) => !open.has(uid))
-  if (closed.length < open.size) return ["all", ...closed.slice(-OPEN_LIMIT)]
+  if (all) return ["all", ...uids.filter((uid) => !open.has(uid)).slice(-OPEN_LIMIT)]
   return [...open].slice(-OPEN_LIMIT)
 }
 
@@ -46,18 +53,30 @@ export const encodeOpen = (open: ReadonlySet<number>, uids: ReadonlyArray<number
 export function useOpenEntries(scope: string, initial: number | null, uids: ReadonlyArray<number>) {
   const [raw, setRaw] = usePlaceValue(`${scope}:open`)
   const open = useMemo(() => decodeOpen(raw, uids), [raw, uids])
-  const setOpen = (next: ReadonlySet<number> | ((open: ReadonlySet<number>) => ReadonlySet<number>)) =>
-    setRaw((current) => encodeOpen(typeof next === "function" ? next(decodeOpen(current, uids)) : next, uids))
+  /** `all`: the user's Expand all, which starts the "all" mode. */
+  const setOpen = (next: ReadonlySet<number> | ((open: ReadonlySet<number>) => ReadonlySet<number>), all = false) =>
+    setRaw((current) =>
+      encodeOpen(typeof next === "function" ? next(decodeOpen(current, uids)) : next, uids, all || allMode(current))
+    )
   // The entry just added when the view mounted opens with it, then is in the URL like any other.
-  // Until that write reaches the URL (the value still the one it mounted with), it shows open.
+  // Until that write reaches the URL it shows open; once the URL's value has moved at all, never
+  // again (comparing with the mount's value instead kept it open: closing it put the URL back
+  // to that value).
   const [mounted] = useState(() => ({ initial, raw, uids }))
+  const [landed, setLanded] = useState(false)
+  if (!landed && raw !== mounted.raw) setLanded(true)
+  // Once, when the view mounts. `setRaw` changes with each URL value, so the effect runs again
+  // after every write: without the flag, closing the added entry opened it again at once.
+  const wrote = useRef(false)
   useEffect(() => {
     const { initial: adding } = mounted
-    // Once, when the view mounts: the book's entries as they are then.
+    if (wrote.current || adding === null) return
+    wrote.current = true
+    // The book's entries as they are at mount.
     const all = mounted.uids
-    if (adding !== null) setRaw((current) => encodeOpen(new Set(decodeOpen(current, all)).add(adding), all))
+    setRaw((current) => encodeOpen(new Set(decodeOpen(current, all)).add(adding), all, allMode(current)))
   }, [mounted, setRaw])
-  const adding = mounted.initial !== null && raw === mounted.raw ? mounted.initial : null
+  const adding = mounted.initial !== null && !landed && raw === mounted.raw ? mounted.initial : null
   const shown = useMemo(() => (adding === null || open.has(adding) ? open : new Set(open).add(adding)), [open, adding])
   return [shown, setOpen] as const
 }

@@ -893,7 +893,8 @@ export function LorebookTable(props: {
         disabled={uids.length === 0}
         className="size-7!"
         onClick={() => {
-          if (!anyOpen) return setOpened((set) => new Set([...set, ...uids]))
+          // The "all" mode (later entries open too) only when every entry of the book is shown.
+          if (!anyOpen) return setOpened((set) => new Set([...set, ...uids]), uids.length === bookUids.length)
           enteredHere.current = null
           setEntryKey("", true)
           setOpened(new Set())

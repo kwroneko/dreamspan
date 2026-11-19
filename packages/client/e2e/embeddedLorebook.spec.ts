@@ -415,3 +415,24 @@ test("typing after a key search visit keeps the new caret position", async ({ pa
   await keys.press("o")
   await expect(keys).toHaveValue("first\npo")
 })
+
+// Review of tablocal2 (findings 1 and 4): the entry added with the book opens with it, then
+// closes like any other (it opened again at once: the mount's write ran again after each URL
+// write), and opening entries one by one never starts the "all" mode that opens later ones.
+test("the first entry of a new embedded book closes and stays closed", async ({ page }) => {
+  const card = await admin((api) => api.CreateCard({ label: "Closing lore", name: "Closing lore" }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/library/${card.id}?focus=lorebook`)
+  await page.getByRole("button", { name: "Add entry", exact: true }).click()
+  const close = page.getByRole("button", { name: "Close Untitled entry", exact: true })
+  const open = page.getByRole("button", { name: "Open Untitled entry", exact: true })
+  await expect(close).toBeVisible()
+  await expect.poll(() => decodeURIComponent(new URL(page.url()).search)).not.toContain('"all"')
+  await close.click()
+  await expect(open).toBeVisible()
+  await page.waitForTimeout(600)
+  await expect(open).toBeVisible()
+  await open.click()
+  await expect(close).toBeVisible()
+  await expect.poll(() => decodeURIComponent(new URL(page.url()).search)).toMatch(/:open=\[\d+\]/)
+})
