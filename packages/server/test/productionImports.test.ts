@@ -199,8 +199,30 @@ const references = (file: string, text = readFileSync(file, "utf8")) => {
 }
 const staticImports = (file: string) => references(file).imports.map((entry) => entry.specifier)
 
-/** Final-stage COPY contract. Reject unsupported syntax rather than silently guessing. */
-const imageCopies = (text: string) => {
+/**
+ * A build-context source with `*` in its last component only (`spec/*.md`), as the files of the
+ * repository it names, sorted; a source without one as itself.
+ */
+const expandSource = (source: string, line: string, base = root) => {
+  if (!source.includes("*")) return [source]
+  const folder = dirname(source)
+  const pattern = basename(source)
+  if (folder.includes("*") || pattern === "*" || source.startsWith("/")) throw new Error(`Unsupported COPY: ${line}`)
+  const matcher = new RegExp(`^${pattern.replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*/g, "[^/]*")}$`)
+  const names = readdirSync(join(base, folder), { withFileTypes: true })
+    .filter((entry) => entry.isFile() && matcher.test(entry.name))
+    .map((entry) => join(folder, entry.name))
+    .sort()
+  if (names.length === 0) throw new Error(`COPY matches nothing: ${line}`)
+  return names
+}
+
+/**
+ * Final-stage COPY contract. Reject unsupported syntax rather than silently guessing: a `*` in a
+ * build-context source's last component is expanded against the repository (Docker's own glob
+ * for that case); `?`, `[`, `$`, JSON form and globs elsewhere are refused.
+ */
+const imageCopies = (text: string, base = root) => {
   const final = text.split(/^FROM .+$/m).at(-1)!
   return final
     .split("\n")
@@ -208,9 +230,13 @@ const imageCopies = (text: string) => {
     .flatMap((line) => {
       const words = line.split(/\s+/).slice(1)
       const stage = words[0]?.startsWith("--from=") ? words.shift()!.slice(7) : null
-      if (words.length < 2 || words.some((word) => /[\[\]*?$]/.test(word))) throw new Error(`Unsupported COPY: ${line}`)
+      if (words.length < 2 || words.some((word) => /[\[\]?$]/.test(word))) throw new Error(`Unsupported COPY: ${line}`)
       const destination = words.pop()!.replace(/^\.\//, "").replace(/\/$/, "") || "."
-      return words.map((source) => ({ stage, source: source.replace(/^\/app\//, "").replace(/\/$/, ""), destination }))
+      if (destination.includes("*") || (stage !== null && words.some((word) => word.includes("*"))))
+        throw new Error(`Unsupported COPY: ${line}`)
+      return words
+        .flatMap((source) => expandSource(source, line, base))
+        .map((source) => ({ stage, source: source.replace(/^\/app\//, "").replace(/\/$/, ""), destination }))
     })
 }
 const copies = imageCopies(dockerfile)
@@ -445,6 +471,21 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
       "open(join(config.dataDir, file.path), O_RDONLY | O_NOFOLLOW)"
     ]
   },
+  "packages/server/src/files/commandOutput.ts": {
+    reason:
+      "Commands' kept output in the configured data volume (DATA_DIR/command-output/<user>/cmd_<16 hex>.log, FILES §5.1): a fresh file of this server's own naming created exclusively 0600, read back by the account's own id (checked as cmd_ + hex), and the per-account folders listed for the daily prune. Never a path from a command or the model.",
+    expressions: ['open(path, "wx", 0o600)', 'open(path, "r")', 'open(path, "r")', "readdir(base)", "readdir(folder)"]
+  },
+  "packages/server/src/files/appSource.ts": {
+    reason:
+      "The app's own shipped source (spec/*.md, ARCHITECTURE.md, README.md and the package sources the final Docker COPY includes, FILES §3.6): walked from the app's root, skipping the data folder, each entry lstat'ed and only regular text files up to the size cap read, copied into the data volume's /app-source copy; older copies' folder names read to remove them.",
+    expressions: ["readdir(join(root, folder), { withFileTypes: true })", "readFile(join(root, path))", "readdir(base)"]
+  },
+  "packages/server/src/files/hostFolders.ts": {
+    reason:
+      "An admin's listing of operator-allowed HOST_FOLDERS roots (FILES §3.7): only a path the check accepted (its real path under a configured root, no link, not overlapping the app's data, code or secrets) has its subfolder names listed; no file content is read.",
+    expressions: ["readdir(path, { withFileTypes: true })"]
+  },
   "packages/server/src/files/bin.ts": {
     reason:
       "The account's own bin folders in the configured data volume (filesDir/.bin/<user>/<item>): opened O_DIRECTORY|O_NOFOLLOW, listed through /proc/self/fd of the opened handle, and the per-account folder names read for the expiry sweep (FILES bin). User data only.",
@@ -463,8 +504,8 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
   },
   "packages/server/src/agent/tools/files.ts": {
     reason:
-      "A file undo's earlier content, from the file-version store in the configured data volume; the stored media path is checked against the store's own paths first (FILES §7.1).",
-    expressions: ["readFile(join(deps.dataDir, version.mediaPath!))"]
+      "A file undo's earlier content, from the file-version store in the configured data volume; the stored media path is checked against the store's own paths first (FILES §7.1). Reset lists the account's own home folder through the descriptor the no-follow walk opened (/proc/self/fd), to remove its entries.",
+    expressions: ["readFile(join(deps.dataDir, version.mediaPath!))", "readdir(`/proc/self/fd/${dir.fd}`)"]
   },
   "packages/server/src/sandbox/linuxBwrap.ts": {
     reason:
@@ -677,6 +718,12 @@ it("fails for reachable files absent from the final COPY set", () => {
     { stage: null, source: "b", destination: "." }
   ])
   expect(() => imageCopies('FROM node\nCOPY ["a", "b"]')).toThrow("Unsupported COPY")
+  // A `*` in a source's last component is the repository's matching files; elsewhere it's refused.
+  expect(imageCopies("FROM node\nCOPY spec/*.md spec/").map((copy) => copy.source)).toContain("spec/DESIGN.md")
+  expect(imageCopies("FROM node\nCOPY spec/*.md spec/").every((copy) => copy.source.endsWith(".md"))).toBe(true)
+  expect(() => imageCopies("FROM node\nCOPY sp*/DESIGN.md spec/")).toThrow("Unsupported COPY")
+  expect(() => imageCopies("FROM node\nCOPY spec/?.md spec/")).toThrow("Unsupported COPY")
+  expect(() => imageCopies("FROM node\nCOPY spec/*.nothing spec/")).toThrow("COPY matches nothing")
 })
 
 it("copies every stamped worker source, tokenizer and licence, and installs external imports", () => {
