@@ -15,9 +15,9 @@ import { usePlaceValue } from "../../usePlaceParam.ts"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 
 /** "Summaries in chat": `timeline=summaries` or `timeline=originals`. */
-export const TIMELINE_PARAM = "timeline"
+const TIMELINE_PARAM = "timeline"
 /** The coverage rail beside the messages: `rail=on` or `rail=off`. */
-export const RAIL_PARAM = "rail"
+const RAIL_PARAM = "rail"
 
 /**
  * What each pane (its router) last showed for a chat, so a navigation within the chat that
