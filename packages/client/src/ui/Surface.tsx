@@ -46,9 +46,11 @@ export function CardHeader({
     )
   return (
     <div
-      className={`mb-4 flex gap-3 ${inline ? "flex-row items-start justify-between" : "flex-col sm:flex-row sm:items-start sm:justify-between"}`}
+      className={`mb-4 flex gap-3 ${inline ? "flex-row items-start justify-between" : "flex-col sm:flex-row sm:flex-wrap sm:items-start sm:justify-between"}`}
     >
-      <div className="flex min-w-0 flex-col gap-1">
+      {/* The title keeps room for itself (10rem at least): when the actions don't fit beside it,
+          they go to the next line rather than squeeze it ("API key" wrapped under its buttons). */}
+      <div className={`flex min-w-0 flex-col gap-1 ${inline ? "" : "sm:shrink-0 sm:grow sm:basis-40"}`}>
         {about ? (
           <LabelWithHelp
             help={<AboutHint heading={typeof title === "string" ? title : "this section"}>{about}</AboutHint>}
@@ -60,7 +62,7 @@ export function CardHeader({
         )}
         {description && <p className="text-sm text-muted">{description}</p>}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}
+      {actions && <div className={`flex min-w-0 flex-wrap gap-2 ${inline ? "shrink-0" : ""}`}>{actions}</div>}
     </div>
   )
 }
