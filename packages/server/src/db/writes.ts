@@ -765,7 +765,12 @@ export const makeWriteHandlers = (bin: Bin) =>
       MarkVersion: ({ userId, versionId, mark }) =>
         Effect.gen(function* () {
           const row = yield* ownedVersion(userId, versionId, true)
-          if (row.writer !== "model" || row.status !== "complete" || row.purged_at !== null)
+          // A finished reply, or one that failed because it was never sent (the judge read what it
+          // wrote instead, spec/REPLY-CONTRACT.md §3.6).
+          const unsent =
+            row.status === "failed" &&
+            (JSON.parse(row.error_json ?? "null") as { class?: string } | null)?.class === "contract"
+          if (row.writer !== "model" || (row.status !== "complete" && !unsent) || row.purged_at !== null)
             return yield* new NotFound({ entity: "version", id: versionId })
           yield* sql`UPDATE versions SET mark = ${mark} WHERE id = ${versionId}`
           return toVersion(yield* ownedVersion(userId, versionId, true))

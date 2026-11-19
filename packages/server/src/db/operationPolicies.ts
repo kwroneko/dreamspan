@@ -403,6 +403,7 @@ export const operationPolicies = makeRegistry<OperationPolicy>([
     "generation.model",
     "generation.preset",
     "generation.judge",
+    "generation.judge_endings",
     "generation.lcm"
   ]),
   settingsPolicy("SetCardFavourite", ["cards.favourites"], "library.write", "Changed card favourites"),

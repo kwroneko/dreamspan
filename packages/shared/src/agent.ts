@@ -287,6 +287,69 @@ export const CutSpan = Schema.Struct({
 })
 export type CutSpan = typeof CutSpan.Type
 
+/**
+ * Why a reply attempt under the send tool wasn't the reply (spec/REPLY-CONTRACT.md §3.6), in
+ * precedence order: a send the app refused, tool-call markup written as text, the context's own
+ * markup copied, plain text, nothing at all.
+ */
+export const CONTRACT_FAILURES = [
+  "invalid_tool_call",
+  "textual_tool_call",
+  "context_mimicry",
+  "text_only",
+  "empty"
+] as const
+export const ContractFailure = Schema.Literals(CONTRACT_FAILURES)
+export type ContractFailure = typeof ContractFailure.Type
+
+/**
+ * One ending of a run under the send tool: the turn before a nudge, or the run's last. `ending`:
+ * `sent` (send_message), `passed` (no_reply), `written` (the answer to the cap's "write now", which
+ * is the reply), or `failed`, with `failures` saying why. `cut`: a Resume dropped it.
+ */
+export const ContractAttempt = Schema.Struct({
+  ending: Schema.Literals(["sent", "passed", "written", "failed"]),
+  failures: Schema.Array(ContractFailure),
+  cut: Schema.Boolean
+})
+export type ContractAttempt = typeof ContractAttempt.Type
+
+/**
+ * How a run met the send tool's contract: `clean` (the first ending was the reply or a pass),
+ * `recovered` (sent after nudges), `gave_up` (passed after nudges), `exhausted` (the nudges ran
+ * out); null while the run hasn't ended in one (it's running, or it stopped or failed).
+ */
+export const ContractOutcome = Schema.Literals(["clean", "recovered", "gave_up", "exhausted"])
+export type ContractOutcome = typeof ContractOutcome.Type
+
+export const ContractRecord = Schema.Struct({
+  attempts: Schema.Array(ContractAttempt),
+  /** The asks to send, those a Resume cut included. */
+  nudges: Schema.Int,
+  outcome: Schema.NullOr(ContractOutcome)
+})
+export type ContractRecord = typeof ContractRecord.Type
+
+/**
+ * How one model's story replies under the send tool met its contract (spec/REPLY-CONTRACT.md
+ * §3.6, milestone 4), over every reply that reached an outcome: how many the app had to ask to
+ * send, how many then sent, passed after asking, or never sent.
+ */
+export const ModelBehaviour = Schema.Struct({
+  connectionId: Schema.String,
+  connectionName: Schema.String,
+  modelId: Schema.String,
+  modelKey: Schema.String,
+  replies: Schema.Int,
+  nudged: Schema.Int,
+  recovered: Schema.Int,
+  gaveUp: Schema.Int,
+  exhausted: Schema.Int,
+  /** The asks to send, all of them. */
+  nudges: Schema.Int
+})
+export type ModelBehaviour = typeof ModelBehaviour.Type
+
 /** An agent run as the inspector shows it: the tools offered and every turn after the request. */
 export const RunTranscript = Schema.Struct({
   tools: Schema.Array(OfferedTool),
@@ -294,7 +357,9 @@ export const RunTranscript = Schema.Struct({
   /** What resuming dropped of the run it carried on, oldest first. */
   cut: Schema.Array(CutSpan),
   /** The ledger's rows of the run's MCP calls, oldest first (spec/MCP.md §10); absent without any. */
-  mcpCalls: Schema.optionalKey(Schema.Array(McpCallLine))
+  mcpCalls: Schema.optionalKey(Schema.Array(McpCallLine)),
+  /** Its attempts at the send tool's contract; absent for a run under another contract. */
+  contract: Schema.optionalKey(ContractRecord)
 })
 export type RunTranscript = typeof RunTranscript.Type
 

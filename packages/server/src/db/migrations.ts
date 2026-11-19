@@ -7,6 +7,7 @@ import { previewMacroMigration } from "./migrationPreviewMacro.ts"
 import { subagentSchema } from "./subagentSchema.ts"
 import { workshopBranchesMigration } from "./migrationWorkshopBranches.ts"
 import { personaLocksMigration } from "./migrationPersonaLocks.ts"
+import { contractRecordsMigration } from "./migrationContractRecords.ts"
 import { rebuildTable, type OutsideStep } from "./tableRebuild.ts"
 
 /**
@@ -35,7 +36,9 @@ export const migrationDefinitions = {
   // Greeting previews with macros replaced: one nullable column on the stored fork summaries.
   "0005_preview_macro": { statements: previewMacroMigration },
   // DESIGN §2.2 (owner, 2026-11-18): the persona a character's new single chats start with.
-  "0006_persona_locks": { statements: personaLocksMigration }
+  "0006_persona_locks": { statements: personaLocksMigration },
+  // spec/REPLY-CONTRACT.md §3.6: how each agent story reply met the send tool's contract.
+  "0007_contract_records": { statements: contractRecordsMigration }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 
 const runAll = (statements: ReadonlyArray<string>) =>

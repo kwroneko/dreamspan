@@ -210,7 +210,9 @@ function VersionBody({
       )}
       {version.mark === "refused" && (
         <p role="note" className="text-sm text-muted">
-          A judge model found this reply a refusal. Its text is kept; › generates another version to try again.
+          {version.status === "failed"
+            ? "A judge model read what was written instead of a reply and found it a refusal."
+            : "A judge model found this reply a refusal. Its text is kept; › generates another version to try again."}
         </p>
       )}
       {version.status === "failed" && version.error && (

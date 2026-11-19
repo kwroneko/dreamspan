@@ -226,7 +226,15 @@ import {
 } from "@dreamspan/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@dreamspan/shared/generation.ts"
 import { DraftChatPreview, NextContext, RunContext, VersionMetrics } from "@dreamspan/shared/inspectorApi.ts"
-import { ActivityCursor, ActivityPage, NotResumable, RolloutStep, RunTranscript } from "@dreamspan/shared/agent.ts"
+import {
+  ActivityCursor,
+  ActivityPage,
+  ContractOutcome,
+  ModelBehaviour,
+  NotResumable,
+  RolloutStep,
+  RunTranscript
+} from "@dreamspan/shared/agent.ts"
 import { SubagentRun } from "@dreamspan/shared/agentApi.ts"
 import { SubagentRow } from "@dreamspan/shared/agent.ts"
 import {
@@ -2554,7 +2562,10 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Struct({ chatId: ChatId, forkId: ForkId, slotId: SlotId }),
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** A judge model's finding on a finished model version: its text stays (spec/LCM.md §2.4). */
+  /**
+   * A judge model's finding on a finished model version: its text stays (spec/LCM.md §2.4). Also on
+   * a reply that failed because it was never sent (spec/REPLY-CONTRACT.md §3.6).
+   */
   Rpc.make("MarkVersion", {
     payload: { userId: UserId, versionId: VersionId, mark: Schema.NullOr(Schema.Literals(["refused"])) },
     success: Version,
@@ -3985,8 +3996,18 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Void,
     error: StorageError
   }),
+  /**
+   * `contract`: the run ended, and this is how it met the send tool's contract (its outcome, null
+   * when it reached none, and its nudges), for the per-model metrics (spec/REPLY-CONTRACT.md §3.6).
+   */
   Rpc.make("SaveRolloutTranscript", {
-    payload: { userId: UserId, rolloutId: Schema.String, transcript: Schema.String, steps: Schema.Int },
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      transcript: Schema.String,
+      steps: Schema.Int,
+      contract: Schema.optionalKey(Schema.Struct({ outcome: Schema.NullOr(ContractOutcome), nudges: Schema.Int }))
+    },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -5777,6 +5798,12 @@ export class ReadOps extends RpcGroup.make(
       transcript: Schema.NullOr(Schema.String)
     }),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Per model, how the user's story replies met the send tool's contract (agentReads.ts). */
+  Rpc.make("ModelBehaviour", {
+    payload: { userId: UserId },
+    success: Schema.Array(ModelBehaviour),
+    error: StorageError
   }),
   /** An agent reply's transcript after its request, verbatim, with its offered tools (agentReads.ts). */
   Rpc.make("RolloutTranscript", {

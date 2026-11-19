@@ -109,6 +109,8 @@ export const makeRolloutWriteHandlers = (addSelectedVersion: AddSelectedVersion)
               request_class, context_issues_json, history_start_slot_id, history_start_depth, history_depth,
               ${added.forkId}, ${steps}, mode, ${now}, ${now}, ${now}
             FROM rollouts WHERE id = ${source.rollout_id}`
+          // The reply goes on in the new run: its contract record is the new run's once it ends.
+          yield* sql`UPDATE rollouts SET contract_outcome = NULL, contract_nudges = NULL WHERE id = ${source.rollout_id}`
           yield* sql`INSERT INTO rollout_payloads (rollout_id, context_snapshot_json, transcript_json)
             SELECT ${rolloutId}, coalesce(${snapshot ?? null}, context_snapshot_json), ${transcript}
             FROM rollout_payloads WHERE rollout_id = ${source.rollout_id}`

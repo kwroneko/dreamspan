@@ -1,5 +1,6 @@
 import * as plugins from "./plugins/index.tsx"
 import * as costs from "./costs.tsx"
+import * as modelBehaviour from "./modelBehaviour.tsx"
 import * as clientVersion from "./clientVersion.tsx"
 import * as snippets from "./snippets/index.tsx"
 // The core features, each registering its routes and slot entries the way a plugin will.
@@ -79,6 +80,7 @@ export const registerFeatures = () => {
   decisions.register()
   firstRun.register()
   costs.register()
+  modelBehaviour.register()
   credentials.register()
   network.register()
   regex.register()

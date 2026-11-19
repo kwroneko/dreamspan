@@ -2727,6 +2727,15 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         assert.isArray((yield* owner.api.GetAgentPermissions({ chatId: owner.chat.chatId, slotId: null })).cards)
       })
   },
+  GetModelBehaviour: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Read by the caller's own rollouts and connections: the owner's never show.
+        const theirs = (yield* owner.api.GetModelBehaviour()).map((r) => r.connectionId)
+        const mine = yield* actor.api.GetModelBehaviour()
+        assert.isFalse(mine.some((r) => theirs.includes(r.connectionId)))
+      })
+  },
   ListActivity: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

@@ -61,6 +61,7 @@ import {
   resolveDispatch
 } from "./dispatcher.ts"
 import { cutAnswersIn, liveSuffix, nudgesIn, sendOnlyTranscript } from "./messages.ts"
+import { contractAttempts } from "./contract.ts"
 import { loadedSet, loadPoints, type Skill, type ToolLoadingWire } from "./toolLoading.ts"
 import { executionRegistry } from "../execution.ts"
 
@@ -132,11 +133,26 @@ export const WRITE_NOW = "Write the reply now."
  * What a reply that never sent fails with (spec/REPLY-CONTRACT.md §3.4): `times` plain turns,
  * the nudges' and the first. Resume and Regenerate are offered on it.
  */
-const contractFailure = (times: number) =>
+const contractFailure = (times: number, unsent: string) =>
   new GenerationFailed({
     class: "contract",
-    message: `The model didn't send a reply: it wrote text ${times} times without calling send_message.`
+    message: `The model didn't send a reply: it wrote text ${times} times without calling send_message.`,
+    ...(unsent === "" ? {} : { unsent })
   })
+
+/** The last text the run wrote outside a send, at most 8,000 characters: what the ending check reads. */
+const lastUnsent = (messages: ReadonlyArray<AgentMessage>) => {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!
+    if (m.role !== "assistant") continue
+    const text = m.content
+      .flatMap((p) => (p.type === "text" ? [p.text] : []))
+      .join("")
+      .trim()
+    if (text !== "") return text.length > 8000 ? text.slice(-8000) : text
+  }
+  return ""
+}
 
 /** A tool result's `details` when a stop cut the call off: resume runs the call again. */
 const INTERRUPTED = { interrupted: true } as const
@@ -1159,7 +1175,10 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             if (requests >= cap - 1) return { action: "continue" }
             if (nudges >= SEND_NUDGES) {
               // Every plain turn of the reply: one before each nudge, this one, and those Resume cut.
-              exhausted = contractFailure(nudges + 1 + cutAnswersIn(agent.state.messages.slice(historical)))
+              exhausted = contractFailure(
+                nudges + 1 + cutAnswersIn(agent.state.messages.slice(historical)),
+                lastUnsent([...agent.state.messages.slice(historical), message])
+              )
               return { action: "end" }
             }
             pendingNudge = ++nudges
@@ -1190,8 +1209,16 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       // The transcript is the agent's whole state, flushed in order after each turn and at the
       // end (reference-harness session-capture). A failed write is logged, never fatal.
       let flushing: Promise<void> = Promise.resolve()
-      const flush = () => {
+      /**
+       * `final`: the run ended, so a story reply under the send tool records how it met the
+       * contract, for the per-model metrics (spec/REPLY-CONTRACT.md §3.6).
+       */
+      const flush = (final = false) => {
         const messages = agent.state.messages.slice()
+        const record =
+          final && sendOnly && (input.purpose ?? "generation") === "generation"
+            ? contractAttempts(messages, [])
+            : undefined
         const saving = flushing.then(() =>
           runPromise(
             writer
@@ -1199,7 +1226,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 userId: request.userId,
                 rolloutId,
                 transcript: JSON.stringify(messages),
-                steps: countSteps(messages)
+                steps: countSteps(messages),
+                ...(record ? { contract: { outcome: record.outcome, nudges: record.nudges } } : {})
               })
               .pipe(
                 Effect.as(true),
@@ -1272,7 +1300,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       agent.subscribe((event) => {
         if (event.type === "tool_execution_end") quoteRuntimeFailure(event.result, event.isError, event.toolCallId)
         if (event.type === "turn_end" || event.type === "agent_end")
-          void flush().then(() => showSteps(event.type === "agent_end"))
+          void flush(event.type === "agent_end").then(() => showSteps(event.type === "agent_end"))
         if (event.type === "message_end" || event.type === "tool_execution_end" || event.type === "turn_end")
           showSteps(false)
       })
@@ -1283,7 +1311,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           progressTimer = null
           agent.abort()
           await agent.waitForIdle()
-          await flush()
+          await flush(true)
         })
       )
       // A resumed run first runs the calls it had made without results (receipts make a

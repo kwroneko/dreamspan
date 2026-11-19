@@ -61,6 +61,8 @@ const definitions: ReadonlyArray<SettingDefinition> = [
   { id: "generation.model", scope: "user", schema: Schema.NullOr(ModelChoice) },
   { id: "generation.preset", scope: "user", schema: Schema.NullOr(Schema.String) },
   { id: "generation.judge", scope: "user", schema: Schema.NullOr(ModelChoice) },
+  // Whether the judge also reads a reply that was never sent (spec/REPLY-CONTRACT.md §3.6).
+  { id: "generation.judge_endings", scope: "user", schema: Schema.Boolean },
   { id: "generation.lcm", scope: "user", schema: Schema.NullOr(LcmDefaults) },
   { id: "regex.global", scope: "user", schema: GlobalScripts },
   // Subagents' models and limits (spec/SUBAGENTS.md §5, §6.2): consent and spend, so never an

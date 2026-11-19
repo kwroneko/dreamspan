@@ -38,6 +38,7 @@ import { query } from "./tx.ts"
 import { transcriptEntries } from "./transcriptEntries.ts"
 import { withSubagents } from "./subagents.ts"
 import { workshopDefaultsOf } from "./workshopDefaults.ts"
+import { contractAttempts, underSendContract } from "../agent/contract.ts"
 import { knowsSql, readKnowers } from "./knowers.ts"
 import { threadStretches } from "./threadStretches.ts"
 import { foldState } from "@dreamspan/shared/state.ts"
@@ -48,6 +49,13 @@ import { AssemblySources } from "../assembler/pipeline.ts"
 import { inFork } from "./forkState.ts"
 import { withAssemblyModules } from "../assembler/modules.ts"
 import type { McpCallRow } from "./mcpRows.ts"
+
+/** The names a request's context used (`AssembledRequest.names`), for the contract's records. */
+const contextNames = (json: string | null): Array<string> => {
+  if (json === null) return []
+  const names = JSON.parse(json) as { user?: string; char?: string; group?: ReadonlyArray<string> }
+  return [...new Set([names.user ?? "", names.char ?? "", ...(names.group ?? [])].filter((n) => n.trim() !== ""))]
+}
 
 /** At most this many full-text matches in the chat, SearchChat starts from them. */
 const FEW = 2000
@@ -730,10 +738,12 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           readonly turn_cap: number | null
           readonly rollout_id: string
           readonly model: string | null
+          readonly names: string | null
         }>`
           SELECT p.transcript_json AS transcript, json_extract(p.context_snapshot_json, '$.agent.tools') AS tools,
             json_extract(p.context_snapshot_json, '$.agent.turnCap') AS turn_cap, r.id AS rollout_id,
-            json_extract(p.context_snapshot_json, '$.inputs.model') AS model
+            json_extract(p.context_snapshot_json, '$.inputs.model') AS model,
+            json_extract(p.context_snapshot_json, '$.request.names') AS names
           FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           JOIN rollouts r ON r.id = v.rollout_id LEFT JOIN rollout_payloads p ON p.rollout_id = r.id
           WHERE v.id = ${versionId} AND c.owner_user_id = ${userId}
@@ -807,9 +817,62 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
               : {})
           })),
           entries: transcriptEntries(messages, tools.length, turnCap, placedSteps(messages, tools, true, versionId)),
-          cut: cutSpans(messages, branches, tools.length, turnCap)
+          cut: cutSpans(messages, branches, tools.length, turnCap),
+          // The run's attempts at the send tool's contract (spec/REPLY-CONTRACT.md §3.6).
+          ...(underSendContract(messages)
+            ? {
+                contract: contractAttempts(
+                  messages,
+                  branches.map((b) => ({
+                    reason: b.reason,
+                    forkIndex: b.fork_index,
+                    messages: JSON.parse(b.messages_json) as ReadonlyArray<AgentMessage>
+                  })),
+                  { names: contextNames(row.names), toolNames: tools.map((t) => t.name) }
+                )
+              }
+            : {})
         }
       }).pipe(query("RolloutTranscript")),
+    // Every reply that reached an outcome (rollouts_contract), per model; a resumed reply counts
+    // once, in the run that carried it on (StartResumedVersion clears the one it resumed).
+    ModelBehaviour: ({ userId }) =>
+      sql<{
+        readonly connection_id: string
+        readonly connection_name: string
+        readonly model_id: string
+        readonly model_key: string
+        readonly replies: number
+        readonly nudged: number
+        readonly recovered: number
+        readonly gave_up: number
+        readonly exhausted: number
+        readonly nudges: number
+      }>`
+        SELECT r.connection_id, k.name AS connection_name, r.model_id, m.model_key, count(*) AS replies,
+          sum(r.contract_nudges > 0) AS nudged, sum(r.contract_outcome = 'recovered') AS recovered,
+          sum(r.contract_outcome = 'gave_up') AS gave_up, sum(r.contract_outcome = 'exhausted') AS exhausted,
+          coalesce(sum(r.contract_nudges), 0) AS nudges
+        FROM rollouts r JOIN chats c ON c.id = r.chat_id JOIN models m ON m.id = r.model_id
+          JOIN connections k ON k.id = r.connection_id
+        WHERE r.contract_outcome IS NOT NULL AND c.owner_user_id = ${userId} AND k.owner_user_id = ${userId}
+        GROUP BY r.model_id, r.connection_id ORDER BY replies DESC, m.model_key`.pipe(
+        Effect.map((rows) =>
+          rows.map((r) => ({
+            connectionId: r.connection_id,
+            connectionName: r.connection_name,
+            modelId: r.model_id,
+            modelKey: r.model_key,
+            replies: r.replies,
+            nudged: r.nudged,
+            recovered: r.recovered,
+            gaveUp: r.gave_up,
+            exhausted: r.exhausted,
+            nudges: r.nudges
+          }))
+        ),
+        query("ModelBehaviour")
+      ),
     ListActivity: ({ userId, chatId, before, limit }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ readonly id: string }>`

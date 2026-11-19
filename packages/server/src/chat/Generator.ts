@@ -108,7 +108,12 @@ export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("Ge
   class: Schema.String,
   message: Schema.String,
   /** A context-length error's stated limit and the model it applies to (`VersionError.contextLimit`). */
-  contextLimit: Schema.optionalKey(Schema.Struct({ tokens: Schema.Int, modelId: Schema.String }))
+  contextLimit: Schema.optionalKey(Schema.Struct({ tokens: Schema.Int, modelId: Schema.String })),
+  /**
+   * A reply that was never sent (class `contract`): the text the model wrote instead, for the
+   * ending check (spec/REPLY-CONTRACT.md §3.6). Never stored with the version.
+   */
+  unsent: Schema.optionalKey(Schema.String)
 }) {}
 
 export interface GeneratorShape {

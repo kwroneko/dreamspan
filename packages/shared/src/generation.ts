@@ -20,6 +20,11 @@ export class GenerationDefaults extends Schema.Class<GenerationDefaults>("Genera
    * provider's own refusal signal is detected.
    */
   judge: Schema.optionalKey(Schema.NullOr(ModelChoice)),
+  /**
+   * The judge also reads what a model wrote when it never sent the reply (spec/REPLY-CONTRACT.md
+   * §3.6): opt-in, as it sends that text to the judge's model. Absent: off.
+   */
+  judgeEndings: Schema.optionalKey(Schema.Boolean),
   /** The current account prompt preset; none selects the built-in preset named Default. */
   preset: Schema.NullOr(RefId)
 }) {}
@@ -36,6 +41,7 @@ export const GenerationDefaultsChange = Schema.Struct({
   model: Schema.optionalKey(Schema.NullOr(ModelChoice)),
   preset: Schema.optionalKey(Schema.NullOr(RefId)),
   judge: Schema.optionalKey(Schema.NullOr(ModelChoice)),
+  judgeEndings: Schema.optionalKey(Schema.Boolean),
   fallback: Schema.optionalKey(Schema.NullOr(ModelChoice)),
   summarizer: Schema.optionalKey(Schema.NullOr(ModelChoice)),
   tail: Schema.optionalKey(Schema.NullOr(Schema.String)),

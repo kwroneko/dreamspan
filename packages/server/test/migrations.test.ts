@@ -121,7 +121,7 @@ describe("0002_files", () => {
       const ledger = yield* sql<{ name: string }>`SELECT name FROM effect_sql_migrations ORDER BY migration_id`
       assert.deepStrictEqual(
         ledger.map((r) => r.name),
-        ["baseline", "files", "subagents", "workshop_branches", "preview_macro", "persona_locks"]
+        ["baseline", "files", "subagents", "workshop_branches", "preview_macro", "persona_locks", "contract_records"]
       )
       // The existing row is kept, an image by default.
       assert.deepStrictEqual(yield* sql`SELECT id, alt_text, kind, name FROM composer_images`, [
@@ -312,7 +312,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0003_subagents",
       "0004_workshop_branches",
       "0005_preview_macro",
-      "0006_persona_locks"
+      "0006_persona_locks",
+      "0007_contract_records"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -378,7 +379,12 @@ describe("0005_preview_macro", () => {
   it.effect("adds the column to a database at 0004; its older summaries are stale by format", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0005_preview_macro": _new, "0006_persona_locks": _later, ...before } = migrations
+      const {
+        "0005_preview_macro": _new,
+        "0006_persona_locks": _later,
+        "0007_contract_records": _latest,
+        ...before
+      } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'rp', 'active', 0)`
@@ -407,7 +413,7 @@ describe("0006_persona_locks", () => {
   it.effect("adds the table to a database at 0005, keeping its cards, and guards its rows", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0006_persona_locks": _new, ...before } = migrations
+      const { "0006_persona_locks": _new, "0007_contract_records": _later, ...before } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       for (const user of ["u", "v"])
         yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES (${user}, ${user}, 'Owner', 'user', 0)`
@@ -440,6 +446,27 @@ describe("0006_persona_locks", () => {
       assert.deepStrictEqual(yield* sql`SELECT character_entity_id, persona_entity_id FROM persona_locks`, [
         { character_entity_id: "harbor", persona_entity_id: "pilot" }
       ])
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
+describe("0007_contract_records", () => {
+  it.effect("adds the rollout's contract columns to a database at 0006, keeping its rollouts, and guards them", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { "0007_contract_records": _new, ...before } = migrations
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'rp', 'active', 0)`
+      yield* sql`INSERT INTO rollouts (id, chat_id, kind, status, role, request_class, created_at, updated_at)
+        VALUES ('r', 'c', 'generation', 'completed', 'reply', 'interactive', 0, 0)`
+      yield* Effect.scoped(Layer.build(Migrations))
+      assert.deepStrictEqual(yield* sql`SELECT id, contract_outcome, contract_nudges FROM rollouts`, [
+        { id: "r", contract_outcome: null, contract_nudges: null }
+      ])
+      yield* sql`UPDATE rollouts SET contract_outcome = 'recovered', contract_nudges = 2`
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(sql`UPDATE rollouts SET contract_outcome = 'maybe'`)))
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(sql`UPDATE rollouts SET contract_nudges = -1`)))
     }).pipe(Effect.provide(layer()))
   )
 })

@@ -459,6 +459,10 @@ export const makeAgentHandlers = Effect.gen(function* () {
       Effect.flatMap(CurrentUser, (user) => reader.RolloutTranscript({ userId: user.id, versionId })).pipe(
         internal("GetRunTranscript")
       ),
+    GetModelBehaviour: () =>
+      Effect.flatMap(CurrentUser, (user) => reader.ModelBehaviour({ userId: user.id })).pipe(
+        internal("GetModelBehaviour")
+      ),
     // A subagent's own run, through the reply it belongs to (spec/SUBAGENTS.md §7).
     GetSubagentRun: ({ versionId, rolloutId }) =>
       Effect.flatMap(CurrentUser, (user) => reader.SubagentRun({ userId: user.id, versionId, rolloutId })).pipe(
