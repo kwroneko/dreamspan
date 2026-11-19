@@ -9,6 +9,10 @@ export const SUBAGENT_TASK = "List every card in the library and say which one i
 export const SUBAGENT_NAME = "lighthouse cards"
 export const PARENT_ANSWER = "The subagent looked through the library for me."
 export const SUBAGENT_REPORT = "Found the card of the lighthouse keeper."
+/** SA5: what the reply says before it waits for a background subagent, and after its report. */
+export const BACKGROUND_WAITING = "I've asked a helper to look; I'll sum up when it reports."
+export const BACKGROUND_ANSWER = "The helper reported back: the keeper's card is in the library."
+export const SUBAGENT_PROGRESS = "Read 1 of 2 shelves"
 
 interface Body {
   readonly messages: ReadonlyArray<{ readonly role: string; readonly content?: unknown }>
@@ -22,6 +26,8 @@ export const startSubagentProvider = async () => {
   let reports = false
   /** Set: the subagent reads this chat first (reading chats asks first), instead of the library. */
   let reads: string | null = null
+  /** Set: the reply starts its subagent in the background, writes, waits, then sums up (SA5). */
+  let background = false
   const chunk = (delta: object, finish: string | null = null, usage?: object) =>
     `data: ${JSON.stringify({
       id: "subagent",
@@ -59,6 +65,13 @@ export const startSubagentProvider = async () => {
       bodies.push(body)
       const results = body.messages.filter((m) => m.role === "tool").length
       const child = JSON.stringify(body.messages[0]?.content ?? "").includes("You are a subagent")
+      if (child && background) {
+        if (results === 0) return call(res, "child_progress", "report_progress", { text: SUBAGENT_PROGRESS })
+        if (results === 1) return call(res, "child_1", "list_library", { kind: "card" })
+        if (reports) return text(res, SUBAGENT_REPORT)
+        held.push(res)
+        return
+      }
       if (child) {
         if (results === 0)
           return reads
@@ -73,6 +86,23 @@ export const startSubagentProvider = async () => {
       if (!workshop) return text(res, "Ready.")
       const from = body.messages.findLastIndex((m) => m.role === "user")
       const done = body.messages.slice(Math.max(0, from)).filter((m) => m.role === "tool").length
+      if (background) {
+        const reported = body.messages.some(
+          (m) => m.role === "user" && JSON.stringify(m.content ?? "").includes("finished:")
+        )
+        if (reported) return text(res, BACKGROUND_ANSWER)
+        const started = body.messages.some(
+          (m) => m.role === "tool" && JSON.stringify(m.content ?? "").includes("in the background")
+        )
+        if (!started)
+          return call(res, "call_agent", "agent", {
+            type: "research",
+            task: SUBAGENT_TASK,
+            name: SUBAGENT_NAME,
+            background: true
+          })
+        return text(res, BACKGROUND_WAITING)
+      }
       if (done === 0)
         return call(res, "call_agent", "agent", { type: "research", task: SUBAGENT_TASK, name: SUBAGENT_NAME })
       return text(res, PARENT_ANSWER)
@@ -90,6 +120,16 @@ export const startSubagentProvider = async () => {
     reset: () => {
       reports = false
       reads = null
+      background = false
+    },
+    /** SA5: the reply starts its subagent in the background, which shows progress, lists, then waits. */
+    inBackground: () => {
+      background = true
+    },
+    /** Answers the held subagent requests with the report, and reports from now on. */
+    release: () => {
+      reports = true
+      for (const res of held.splice(0)) if (!res.destroyed && !res.writableEnded) text(res, SUBAGENT_REPORT)
     },
     /** The subagent's first call reads this chat, which asks first. */
     readChat: (chatId: string) => {

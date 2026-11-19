@@ -282,6 +282,7 @@ describe("workshop", () => {
           "clone_card",
           "start_chat",
           "agent",
+          "message_agent",
           ...WORKSHOP_HISTORY_TOOLS,
           ...PLUGIN_TOOLS,
           // The account's files and commands (FILES §5), as far as registered.
@@ -574,6 +575,7 @@ describe("workshop", () => {
           "clone_card",
           "start_chat",
           "agent",
+          "message_agent",
           ...WORKSHOP_HISTORY_TOOLS,
           ...PLUGIN_TOOLS,
           // The account's files and commands (FILES §5), as far as registered.

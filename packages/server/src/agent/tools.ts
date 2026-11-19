@@ -7,7 +7,7 @@ import type { ApprovalPrompt, SubagentRow } from "@dreamspan/shared/agent.ts"
 import { Type, type TSchema } from "@earendil-works/pi-ai"
 import type { ChatId, ForkId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
-import { Effect } from "effect"
+import { Effect, type Scope } from "effect"
 import type { Reader, Writer } from "../db/Database.ts"
 
 /**
@@ -74,6 +74,8 @@ export interface ToolContext {
    * it. Live only: never stored, never sent to the model.
    */
   readonly progress?: (text: string | null) => void
+  /** A subagent's own run: shows a one-line status in its row (`report_progress`, spec/SUBAGENTS.md §4). */
+  readonly reportProgress?: (text: string) => void
 }
 
 /** Where a new run starts, for a tool's `offerFor`: reads at the run's position only. */
@@ -83,6 +85,8 @@ export interface OfferContext {
   readonly chatId: ChatId
   readonly forkId: ForkId | null
   readonly leafSlotId: SlotId | null
+  /** The run's reply contract: `several` lets it go on after its subagents report (spec/SUBAGENTS.md §3.2). */
+  readonly contract?: string
 }
 
 /** The tools a new run offers, each as its `offerFor` makes it for this chat (absent: as registered). */
@@ -101,6 +105,18 @@ interface SubagentHost {
   readonly show: (row: SubagentRow | null) => void
   /** Shows the call waiting for the user's answer (a subagent that couldn't be resumed); null: no longer. */
   readonly wait: (prompt: import("@dreamspan/shared/agent.ts").ApprovalPrompt | null) => void
+  /**
+   * Runs a subagent in the background (spec/SUBAGENTS.md §3.2), in the run's own scope: the run
+   * doesn't end before it does, and what it returns reaches the run's model at its next request
+   * boundary as an app message. Absent where the run can't wait for one (a contract other than
+   * `several`).
+   */
+  readonly background?: (
+    callId: string,
+    child: Effect.Effect<import("@earendil-works/pi-agent-core").AgentMessage | null, never, Scope.Scope>
+  ) => void
+  /** A background subagent's progress note, delivered with the run's next request (§4). */
+  readonly note?: (handle: string, message: import("@earendil-works/pi-agent-core").AgentMessage) => void
 }
 
 /** What a tool returns to the model: text, or a failure the model can correct. */
@@ -123,6 +139,11 @@ export interface ToolOutput {
   readonly images?: ReadonlyArray<{ readonly data: string; readonly mimeType: string }>
   /** The subagent an `agent` call started: kept with the result as `details.subagent`, never sent. */
   readonly subagent?: SubagentRow
+  /**
+   * The call started work that reports later (a background subagent, spec/SUBAGENTS.md §3.2):
+   * stored as `details.background`, so a resumed run carries it on (`resumeBackground`).
+   */
+  readonly background?: true
 }
 
 export type WorkshopStoryRead = "positioned" | "conversation" | "library" | "account" | "refused"
@@ -172,6 +193,11 @@ export interface RolloutTool<A = never> {
    * step edits offer the frozen definition, never this again.
    */
   readonly offerFor?: (context: OfferContext) => Effect.Effect<RolloutTool<never> | null>
+  /**
+   * A call of this tool whose work went on in the background (`ToolOutput.background`) and hadn't
+   * reported when its run stopped: the resumed run carries it on (spec/SUBAGENTS.md §8).
+   */
+  readonly resumeBackground?: (ctx: ToolContext, args: A) => Effect.Effect<void>
   /** The step's one-line title from its arguments: “lighthouse”. */
   readonly summarize?: (args: A) => string
   /** Optional state frozen before a result is returned; shared keys prepare once per run.

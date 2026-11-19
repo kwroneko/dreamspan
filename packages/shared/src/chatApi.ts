@@ -325,7 +325,12 @@ export const ChatEvent = Schema.Union([
    */
   Schema.TaggedStruct("Delta", { versionId: VersionId, offset: Schema.Int, text: Schema.String, replace: LiveReplace }),
   /** A generating agent reply's steps, all of them as they stand (spec/AGENTIC.md §5.1). */
-  Schema.TaggedStruct("Steps", { versionId: VersionId, steps: Schema.Array(RolloutStep) }),
+  Schema.TaggedStruct("Steps", {
+    versionId: VersionId,
+    steps: Schema.Array(RolloutStep),
+    /** Background subagents the run waits for (spec/SUBAGENTS.md §3.2): "Waiting for 2 subagents". */
+    waitingFor: Schema.optionalKey(Schema.Int)
+  }),
   /** Reasoning appended to a generating version at `offset`, as `Delta` is for its text. */
   Schema.TaggedStruct("Reasoning", {
     versionId: VersionId,

@@ -117,6 +117,7 @@ it.live("loads a deferred tool mid-run without changing the declared tools", () 
       [
         "list_library",
         "agent",
+        "message_agent",
         // A workshop works in a folder (FILES §2): the file and command tools are immediate.
         "read_file",
         "list_files",

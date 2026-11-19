@@ -16,8 +16,18 @@ import { Icon, type IconName } from "../../../ui/Icon.tsx"
 import { Spinner } from "../../../ui/Spinner.tsx"
 import { Tooltip } from "../../../ui/Tooltip.tsx"
 import { useViewPrefs } from "../../../ui/viewPrefs.ts"
-import { liveSteps, type ChatSession } from "../session.ts"
-import { excerpt, isOpen, statusText, stepsChoice, stepsText, stepsView } from "./steps.ts"
+import { liveSteps, liveWaitingFor, type ChatSession } from "../session.ts"
+import {
+  excerpt,
+  isOpen,
+  postedSteps,
+  statusText,
+  stepsChoice,
+  stepsText,
+  stepsView,
+  storedStepReads,
+  subagentsWaitText
+} from "./steps.ts"
 import { useStepActions, waitsForUser } from "./stepActions.ts"
 
 const effectIcon: Record<Extract<RolloutStep, { kind: "tool" }>["effect"], IconName> = {
@@ -33,7 +43,7 @@ interface Stored {
 }
 
 /** Finished replies' steps by version, read once a page: a finished run's transcript doesn't change. */
-const reads = new Map<string, Promise<Stored>>()
+const reads = storedStepReads as Map<string, Promise<Stored>>
 
 /** A finished reply's steps, read when first opened; null until they've come. */
 function useStoredSteps(session: ChatSession, version: Version, wanted: boolean) {
@@ -149,8 +159,10 @@ export function StepRow({
 
 export function Steps({ version, session }: { version: Version; session: ChatSession }) {
   const live = useAtomValue(liveSteps(version.id))
+  const waitingFor = useAtomValue(liveWaitingFor(version.id))
+  const posted = useAtomValue(postedSteps(version.id))
   const generating = version.status === "generating"
-  const view = stepsView(live, version.steps, generating)
+  const view = stepsView(live, version.steps, generating, waitingFor)
   // The last steps streamed, shown at once if the element is opened right after the reply ends.
   const [lastLive, setLastLive] = useState<{ id: string; steps: ReadonlyArray<RolloutStep> } | null>(null)
   if (live !== null && live.length > 0 && (lastLive?.id !== version.id || lastLive.steps !== live))
@@ -169,13 +181,15 @@ export function Steps({ version, session }: { version: Version; session: ChatSes
 
   const hint = waiting
     ? "The assistant is waiting for your answer below."
-    : open
-      ? streaming
-        ? "Click to hide the steps. Replies after this one show them folded too."
-        : "Click to hide the steps"
-      : streaming
-        ? "Click to show the steps as they happen. Replies after this one show them open too."
-        : "Click to show the steps behind this reply"
+    : view.waitingFor > 0
+      ? "The assistant goes on when its subagents report back. Stop ends the wait."
+      : open
+        ? streaming
+          ? "Click to hide the steps. Replies after this one show them folded too."
+          : "Click to hide the steps"
+        : streaming
+          ? "Click to show the steps as they happen. Replies after this one show them open too."
+          : "Click to show the steps behind this reply"
   const toggle = () => {
     if (waiting) return
     setChosen({ open: !open, streaming })
@@ -185,7 +199,7 @@ export function Steps({ version, session }: { version: Version; session: ChatSes
       if (steps !== preferred) void viewer.change({ steps })
     }
   }
-  const steps = view.live ?? stored?.steps ?? (lastLive?.id === version.id ? lastLive.steps : null)
+  const steps = view.live ?? posted ?? stored?.steps ?? (lastLive?.id === version.id ? lastLive.steps : null)
 
   return (
     <div className="flex flex-col gap-1" data-steps-panel={streaming ? "running" : "done"}>
@@ -207,6 +221,10 @@ export function Steps({ version, session }: { version: Version; session: ChatSes
                 {waiting ? (
                   <span className="font-medium text-text" data-waiting="">
                     Waiting for you
+                  </span>
+                ) : view.waitingFor > 0 ? (
+                  <span className="font-medium text-text" data-waiting-subagents={view.waitingFor}>
+                    {subagentsWaitText(view.waitingFor)}
                   </span>
                 ) : (
                   <span className="animate-pulse font-medium motion-reduce:animate-none" data-working="">
@@ -246,7 +264,9 @@ export function Steps({ version, session }: { version: Version; session: ChatSes
               <p className="text-xs text-muted">Loading the steps…</p>
             )
           ) : steps.length === 0 ? (
-            <p className="text-xs text-muted">No steps were kept for this reply.</p>
+            <p className="text-xs text-muted">
+              {view.waitingFor > 0 ? "No steps yet in this message." : "No steps were kept for this reply."}
+            </p>
           ) : (
             <ol className="flex flex-col gap-1" aria-label="Steps of this reply">
               {steps.map((step, i) => (
@@ -291,11 +311,12 @@ export function Steps({ version, session }: { version: Version; session: ChatSes
 export function StepsBadge({ entry }: { entry: PathEntry; session: ChatSession; generating: boolean }) {
   const version = entry.version
   const live = useAtomValue(liveSteps(version.id))
+  const waitingFor = useAtomValue(liveWaitingFor(version.id))
   const generating = version.status === "generating"
-  const view = stepsView(live, version.steps, generating)
+  const view = stepsView(live, version.steps, generating, waitingFor)
   const viewer = useViewPrefs()
   const [chosen, setChosen] = useAtom(stepsChoice(version.id))
-  if (view === null || view.count === 0) return null
+  if (view === null || (view.count === 0 && view.waitingFor === 0)) return null
   const streaming = view.running
   const waiting = waitsForUser(view.live)
   const open = waiting || isOpen(chosen, streaming, viewer.prefs.steps)
@@ -304,9 +325,11 @@ export function StepsBadge({ entry }: { entry: PathEntry; session: ChatSession; 
       label={
         waiting
           ? "The assistant is waiting for your answer. Click to go to it."
-          : open
-            ? "Click to hide the steps"
-            : "Click to show the steps behind this reply"
+          : view.waitingFor > 0
+            ? "The assistant goes on when its subagents report back. Stop ends the wait."
+            : open
+              ? "Click to hide the steps"
+              : "Click to show the steps behind this reply"
       }
     >
       <button
@@ -332,7 +355,11 @@ export function StepsBadge({ entry }: { entry: PathEntry; session: ChatSession; 
         className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-border px-2 text-xs font-medium whitespace-nowrap text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus aria-pressed:bg-surface-raised aria-pressed:text-text"
       >
         <Icon name={waiting ? "help" : "tool"} size={12} />
-        {waiting ? "Waiting for you" : stepsText(view.count, view.ms)}
+        {waiting
+          ? "Waiting for you"
+          : view.waitingFor > 0
+            ? subagentsWaitText(view.waitingFor)
+            : stepsText(view.count, view.ms)}
       </button>
     </Tooltip>
   )

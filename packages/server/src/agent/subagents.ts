@@ -30,11 +30,20 @@ import type { SubagentSnapshot } from "../db/subagents.ts"
 import type { SubagentModelEntry, SubagentModelsAt } from "../db/subagentSettings.ts"
 import { executionRegistry } from "../execution.ts"
 import { askUser, makePermit, offeredByGrants } from "./approvals.ts"
+import { Mailbox } from "./mailbox.ts"
 import { planResume } from "./resume.ts"
 import { runAgent, type AgentRun } from "./session.ts"
 import { countSteps } from "./steps.ts"
 import { escapeToolData, toolData, TOOL_RESULT_CHARS } from "./toolData.ts"
-import type { FrozenTool, OfferContext, RolloutTool, ToolContext, ToolOutput } from "./tools.ts"
+import { PROGRESS } from "../db/subagents.ts"
+import {
+  frozenTool,
+  type FrozenTool,
+  type OfferContext,
+  type RolloutTool,
+  type ToolContext,
+  type ToolOutput
+} from "./tools.ts"
 
 /** A kind of subagent the parent may start (spec/SUBAGENTS.md §2.5); plugins add theirs (SA7). */
 interface SubagentType {
@@ -93,8 +102,19 @@ const WRAP_UP = "You're close to your limit: stop looking further and write your
 /** A report longer than this is cut with a marker, so its envelope fits the result budget. */
 const REPORT_CHARS = TOOL_RESULT_CHARS - 1_000
 
-/** Running subagents in this process, by rollout: what their row's Stop interrupts. */
-const running = new Map<string, { readonly userId: string; readonly stop: () => void }>()
+/**
+ * Running subagents in this process, by rollout: what their row's Stop interrupts, where their
+ * parent's messages go (§4), and when they've ended.
+ */
+const running = new Map<
+  string,
+  {
+    readonly userId: string
+    readonly stop: () => void
+    readonly mailbox: Mailbox
+    readonly done: Deferred.Deferred<void>
+  }
+>()
 
 /** Stops one running subagent of the user's; false when none runs here by that id. */
 export const stopSubagent = (userId: string, rolloutId: string) => {
@@ -164,6 +184,7 @@ interface AgentArgs {
   readonly task: string
   readonly name?: string
   readonly model?: string
+  readonly background?: boolean
 }
 
 const refuse = (text: string): ToolOutput => ({ text, isError: true })
@@ -185,7 +206,16 @@ interface ChildStart {
   readonly tools: ReadonlyArray<RolloutTool<never>>
   readonly frozen: ReadonlyArray<FrozenTool>
   readonly limits: ChildLimits
-  readonly resume?: { readonly transcript: ReadonlyArray<AgentMessage>; readonly continuation?: string }
+  readonly resume?: {
+    readonly transcript: ReadonlyArray<AgentMessage>
+    readonly continuation?: string
+    /** Messages before this run's own (a continuation's): its turn cap counts from here. */
+    readonly historical?: number
+  }
+  /** Messages it takes before its first request: the parent's message to a continuation (§4). */
+  readonly inbox?: ReadonlyArray<AgentMessage>
+  /** It runs in the background: its progress reaches the parent too (§3.2, §4). */
+  readonly background?: boolean
 }
 
 type Host = NonNullable<ToolContext["subagentHost"]>
@@ -201,10 +231,13 @@ const childTools = (ctx: ToolContext, host: Host, names: (tool: RolloutTool<neve
       candidates
     )
     const ids = new Set(tools.map((t) => t.id))
-    const frozen: ReadonlyArray<FrozenTool> = host.offered
-      .filter((t) => ids.has(t.name))
-      .map(({ deferred: _deferred, ...t }) => t)
-    return { tools, frozen }
+    // And every subagent's own tools (report_progress): never a parent's.
+    const own = subagentTools.list().filter((t) => !ids.has(t.id))
+    const frozen: ReadonlyArray<FrozenTool> = [
+      ...host.offered.filter((t) => ids.has(t.name)).map(({ deferred: _deferred, ...t }) => t),
+      ...own.map(frozenTool)
+    ]
+    return { tools: [...tools, ...own], frozen }
   })
 
 /** The model a call runs on: the alias it names, else its type's default, else `same`, else the first. */
@@ -218,10 +251,18 @@ const modelLines = (entries: ReadonlyArray<SubagentModelEntry>) =>
   entries.map((e) => `- ${e.alias}: ${e.name}.${e.note.trim() ? ` ${e.note.trim()}` : ""}`).join("\n")
 
 /** The tool's description: when to delegate, when not, the types and the models it offers (§2.1, §5.1). */
-const description = (entries?: ReadonlyArray<SubagentModelEntry>) =>
+const description = (entries?: ReadonlyArray<SubagentModelEntry>, background = false) =>
   [
     "Hands one task to a subagent: a helper that works on its own, in a fresh context, and returns a report. Use it for searches or reading that would take many calls (looking through many cards, chats or files), or to keep long material out of your own context. Don't use it for a single lookup you can do yourself.",
     "The subagent sees only what you write in `task`, not this conversation: say exactly what to find and what to report. It has only your read tools, and it can't start subagents of its own. You wait for its report, which comes back as this call's result.",
+    ...(background
+      ? [
+          "With `background: true` the call returns at once and you carry on; its report reaches you later as a message, and you can tell the user what you're waiting for. Start several in the background to work in parallel. Your reply doesn't end while they run: when you've said what you have so far, end your turn and their reports come to you.",
+          "Each subagent has a handle (research-2) in its result: `message_agent` sends it more instructions while it runs, or a follow-up once it has finished (it remembers what it read)."
+        ]
+      : [
+          "Each subagent has a handle (research-2) in its result: `message_agent` sends it a follow-up once it has finished (it remembers what it read)."
+        ]),
     `Types: ${subagentTypes
       .list()
       .map((t) => {
@@ -236,7 +277,7 @@ const description = (entries?: ReadonlyArray<SubagentModelEntry>) =>
       : [])
   ].join("\n\n")
 
-const parametersFor = (entries?: ReadonlyArray<SubagentModelEntry>) =>
+const parametersFor = (entries?: ReadonlyArray<SubagentModelEntry>, background = false) =>
   Type.Object({
     type: Type.String({ description: "The subagent's type, from the list above: research." }),
     task: Type.String({
@@ -249,7 +290,16 @@ const parametersFor = (entries?: ReadonlyArray<SubagentModelEntry>) =>
       Type.String({
         description: `The model it runs on, by name from the list above${entries?.length ? `: ${entries.map((e) => e.alias).join(", ")}` : ""}. Absent: its type's default.`
       })
-    )
+    ),
+    ...(background
+      ? {
+          background: Type.Optional(
+            Type.Boolean({
+              description: "True: return at once and carry on; its report reaches you later. Absent: wait for it."
+            })
+          )
+        }
+      : {})
   })
 
 /** The chat's subagent models at a position, as `SubagentModelsAt` resolves them. */
@@ -275,21 +325,32 @@ const liveRow = (row: SubagentRow, steps: ReadonlyArray<RolloutStep>): SubagentR
     const { subagent: _subagent, ...step } = s
     return step
   })
+  const progress = own.findLast((s) => s.kind === "tool" && s.tool === PROGRESS)
+  const line =
+    progress?.kind === "tool" && typeof (progress.args as { text?: unknown } | undefined)?.text === "string"
+      ? (progress.args as { text: string }).text.trim()
+      : ""
   return {
     ...row,
     steps: own,
     count: own.filter((s) => s.kind === "tool").length,
-    status: own.some((s) => s.kind === "tool" && s.status === "waiting") ? "waiting" : "running"
+    status: own.some((s) => s.kind === "tool" && s.status === "waiting") ? "waiting" : "running",
+    ...(line ? { progress: line } : {})
   }
 }
 
-const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutput> =>
+/**
+ * A call that already started a subagent (the reply was stopped or the app restarted while it ran)
+ * never starts another (§8): its receipt answers it, or its subagent carries on where it stopped,
+ * in the background again if it ran there. Null: the call starts one now.
+ */
+const already = (
+  ctx: ToolContext,
+  host: Host,
+  background: boolean
+): Effect.Effect<ToolOutput | null, never, Scope.Scope> =>
   Effect.gen(function* () {
-    const host = ctx.subagentHost
-    if (!host) return refuse("A subagent can't start subagents of its own.")
-    const { userId, chatId, reader, writer } = ctx
-    // A call that already started one (the reply was stopped or the app restarted while it ran)
-    // never starts another (§8): its receipt answers it, or its subagent carries on where it stopped.
+    const { userId, reader } = ctx
     const receipt = yield* reader
       .RolloutToolReceipt({ userId, rolloutId: ctx.rolloutId, toolCallId: ctx.toolCallId })
       .pipe(Effect.option)
@@ -308,7 +369,52 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
     }
     // Only a call the resumed reply carried on (one its kept transcript holds) is the same call: a
     // new call that happens to reuse an id (some providers number them) starts its own subagent.
-    if (prior.value !== null && carried(host, ctx.toolCallId)) return yield* carryOn(ctx, host, prior.value)
+    if (prior.value === null || !carried(host, ctx.toolCallId)) return null
+    if (background && host.background) {
+      const found = prior.value
+      host.background(
+        ctx.toolCallId,
+        carryOn(ctx, host, found).pipe(Effect.map((out) => reportOf(ctx, found.row, out)))
+      )
+      return started(found.row, true)
+    }
+    return yield* carryOn(ctx, host, prior.value)
+  })
+
+/** What a background start returns at once (§3.2): its handle, and that its report comes later. */
+const started = (row: SubagentRow, again = false): ToolOutput => ({
+  text: `${again ? "Carried on" : "Started"} ${row.name ? `“${row.name}” (${row.handle})` : row.handle} in the background. Its report will reach you as a message when it's done; carry on meanwhile.`,
+  dataOnly: true,
+  subagent: { ...row, background: true },
+  background: true
+})
+
+/** Who a report or progress note is from: "research-2 (cache TTLs)". */
+const who = (row: Pick<SubagentRow, "handle" | "name">) => (row.name ? `${row.handle} (${row.name})` : row.handle)
+
+/**
+ * A background subagent's report as it reaches the parent (§3.2): an app message at the parent's
+ * next request boundary, the report in the same data envelope as a call's result.
+ */
+const reportOf = (ctx: ToolContext, row: SubagentRow, out: ToolOutput): AgentMessage => {
+  const status = out.subagent?.status ?? row.status
+  return {
+    role: "rpApp",
+    content: `Subagent ${who(row)} ${status === "done" ? "finished" : "ended without finishing"}:\n${out.text}`,
+    report: { callId: ctx.toolCallId, handle: row.handle },
+    timestamp: Date.now()
+  }
+}
+
+const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutput> =>
+  Effect.gen(function* () {
+    const host = ctx.subagentHost
+    if (!host) return refuse("A subagent can't start subagents of its own.")
+    const { userId, chatId, reader, writer } = ctx
+    // Only where the run can wait for its report (§3.2); elsewhere it runs as the call.
+    const background = args.background === true && host.background !== undefined
+    const before = yield* already(ctx, host, background)
+    if (before !== null) return before
     const type = subagentTypes.get(args.type)
     const kind = host.run.kind ?? ""
     const offeredTypes = subagentTypes.list().filter((t) => t.kinds.includes(kind))
@@ -373,9 +479,10 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
       context: "task",
       spawnedBy: ctx.rolloutId,
       callId: ctx.toolCallId,
+      ...(background ? { background: true } : {}),
       caps
     }
-    const started = yield* writer
+    const begun = yield* writer
       .StartSubagent({
         userId,
         parentRolloutId: ctx.rolloutId,
@@ -394,19 +501,19 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
         runCost
       })
       .pipe(Effect.option)
-    if (Option.isNone(started)) return refuse("The subagent couldn't be started.")
-    if ("refused" in started.value)
+    if (Option.isNone(begun)) return refuse("The subagent couldn't be started.")
+    if ("refused" in begun.value)
       return refuse(
-        started.value.refused === "limit"
+        begun.value.refused === "limit"
           ? "This reply has started as many subagents as it may. Do the rest yourself."
-          : started.value.refused === "spent"
+          : begun.value.refused === "spent"
             ? "This reply's subagents have spent what they may together. Do the rest yourself."
-            : started.value.refused === "nested"
+            : begun.value.refused === "nested"
               ? "A subagent can't start subagents of its own."
               : "This reply has ended."
       )
-    const handle = started.value.handle
-    return yield* runChild(ctx, host, {
+    const handle = begun.value.handle
+    const start: ChildStart = {
       rolloutId,
       handle,
       row: {
@@ -422,13 +529,22 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
         steps: [],
         count: 0,
         ms: null,
-        cost: null
+        cost: null,
+        ...(background ? { background: true } : {})
       },
       generation,
       tools,
       frozen,
-      limits: { caps, runCost, runConcurrent: limits.runConcurrent, accountConcurrent: limits.accountConcurrent }
-    })
+      limits: { caps, runCost, runConcurrent: limits.runConcurrent, accountConcurrent: limits.accountConcurrent },
+      ...(background ? { background: true } : {})
+    }
+    if (!background) return yield* runChild(ctx, host, start)
+    // In the background (§3.2): the call returns now, and the report reaches the reply later.
+    host.background!(
+      ctx.toolCallId,
+      runChild(ctx, host, start).pipe(Effect.map((out) => reportOf(ctx, start.row, out)))
+    )
+    return started(start.row)
   }).pipe(Effect.scoped)
 
 /** Whether the run carries this call on from the run it resumes (its seed transcript holds it). */
@@ -626,6 +742,23 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
     let row = start.row
     const execution = yield* executionRegistry
     host.show(row)
+    // What its parent sends it while it runs (§4), and a continuation's first message.
+    const mailbox = new Mailbox()
+    for (const message of start.inbox ?? []) mailbox.post(message)
+    /** Its `report_progress` line: in its row at once; a background one's reaches the parent too. */
+    const progress = (text: string) => {
+      const line = text.trim().slice(0, 200)
+      if (!line) return
+      row = { ...row, progress: line }
+      host.show(row)
+      if (start.background)
+        host.note?.(handle, {
+          role: "rpApp",
+          content: `Progress from subagent ${who(row)}:\n${toolData(line)}`,
+          progress: handle,
+          timestamp: Date.now()
+        })
+    }
     const childRequest: GenerationRequest = {
       userId,
       chatId: chatId as ChatId,
@@ -647,8 +780,9 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
       ...(run.onChanged ? { onChanged: run.onChanged } : {}),
       ...(run.onState ? { onState: run.onState } : {}),
       permit: makePermit({ registries: execution, reader: run.reader, writer: run.writer, userId, chatId, rolloutId }),
-      subagent: { writeNow: WRITE_REPORT, beforeNextRequest: (signal) => limitCheck(signal) },
-      ...(start.resume ? { resume: { ...start.resume, historical: 0 } } : {})
+      subagent: { writeNow: WRITE_REPORT, beforeNextRequest: (signal) => limitCheck(signal), onProgress: progress },
+      mailbox,
+      ...(start.resume ? { resume: { ...start.resume, historical: start.resume.historical ?? 0 } } : {})
     }
     let report = start.resume?.continuation ?? ""
     let startedAt = Date.now()
@@ -757,17 +891,27 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
     let stopped = false
     const forked = yield* Effect.forkChild(child)
     live.fiber = forked
+    const done = Deferred.makeUnsafe<void>()
     running.set(rolloutId, {
       userId,
       stop: () => {
         stopped = true
         forked.interruptUnsafe()
-      }
+      },
+      mailbox,
+      done
     })
     // Stopping the reply stops it too, and waits for it to close (§8).
     const exit = yield* Fiber.await(forked).pipe(
       Effect.onInterrupt(() => Fiber.interrupt(forked)),
-      Effect.ensuring(Effect.sync(() => running.delete(rolloutId)))
+      Effect.ensuring(
+        Effect.sync(() => {
+          mailbox.close()
+          running.delete(rolloutId)
+          // Closed and saved: a message that came too late carries it on instead (§4).
+          Deferred.doneUnsafe(done, Effect.void)
+        })
+      )
     )
     const status = Exit.isSuccess(exit)
       ? "done"
@@ -841,17 +985,23 @@ export const agentTool: RolloutTool<AgentArgs> = {
   // The chat's subagent models, listed for the assistant where the run starts (§5.1); none: not offered.
   offerFor: (context) =>
     modelsAt(context).pipe(
-      Effect.map((at) =>
-        at === null
-          ? (agentTool as RolloutTool<never>)
+      Effect.map((at) => {
+        // Background children only where the run can go on after their reports (§3.2).
+        const background = context.contract === "several"
+        return at === null
+          ? ({
+              ...agentTool,
+              description: description(undefined, background),
+              parameters: parametersFor(undefined, background)
+            } as RolloutTool<never>)
           : at.entries.length === 0
             ? null
             : ({
                 ...agentTool,
-                description: description(at.entries),
-                parameters: parametersFor(at.entries)
+                description: description(at.entries, background),
+                parameters: parametersFor(at.entries, background)
               } as RolloutTool<never>)
-      )
+      })
     ),
   describe: (ctx, args) =>
     Effect.gen(function* () {
@@ -875,5 +1025,307 @@ export const agentTool: RolloutTool<AgentArgs> = {
         ]
       }
     }),
-  execute: (ctx, args) => runSubagent(ctx, args)
+  execute: (ctx, args) => runSubagent(ctx, args),
+  resumeBackground: (ctx) => resumeBackground(ctx)
 }
+
+/**
+ * A background call that hadn't reported when its reply stopped, in the resumed reply (§8): its
+ * receipt is the report if it had finished; otherwise its subagent carries on where it stopped,
+ * in the background, and reports as before.
+ */
+const resumeBackground = (ctx: ToolContext): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const host = ctx.subagentHost
+    if (!host?.background) return
+    const { userId, reader } = ctx
+    const prior = yield* reader
+      .FindSubagent({ userId, rolloutId: ctx.rolloutId, toolCallId: ctx.toolCallId })
+      .pipe(Effect.orElseSucceed(() => null))
+    if (prior === null) return
+    const receipt = yield* reader
+      .RolloutToolReceipt({ userId, rolloutId: ctx.rolloutId, toolCallId: ctx.toolCallId })
+      .pipe(Effect.orElseSucceed(() => null))
+    host.show(prior.row)
+    host.background(
+      ctx.toolCallId,
+      receipt !== null
+        ? Effect.succeed(reportOf(ctx, prior.row, { ...receipt, subagent: prior.row }))
+        : carryOn(ctx, host, prior).pipe(Effect.map((out) => reportOf(ctx, prior.row, out)))
+    )
+  })
+
+interface MessageArgs {
+  readonly agent: string
+  readonly message: string
+  readonly background?: boolean
+}
+
+/** The message as the subagent reads it: its parent's, not data (§4). */
+const fromParent = (message: string): AgentMessage => ({
+  role: "rpApp",
+  content: `Message from the assistant that started you:\n${message}`,
+  fromParent: true,
+  timestamp: Date.now()
+})
+
+/** The tool calls a transcript holds: where a causal handle lookup looks (§4). */
+const callsIn = (messages: ReadonlyArray<AgentMessage>) =>
+  messages.flatMap((m) =>
+    m.role === "assistant" ? m.content.flatMap((p) => (p.type === "toolCall" ? [p.id] : [])) : []
+  )
+
+/**
+ * `message_agent` (§4): to a running subagent, the message reaches it at its next request; to a
+ * finished or stopped one, it carries it on as a continuation that remembers its run and reports
+ * again. Only subagents this conversation started, on its own run chain, are found.
+ */
+const messageSubagent = (ctx: ToolContext, args: MessageArgs): Effect.Effect<ToolOutput> =>
+  Effect.gen(function* () {
+    const host = ctx.subagentHost
+    if (!host) return refuse("A subagent can't message other subagents.")
+    const { userId, reader } = ctx
+    const background = args.background === true && host.background !== undefined
+    // A call that already carried one on (the reply stopped meanwhile) never does it twice (§8).
+    const before = yield* already(ctx, host, background)
+    if (before !== null) return before
+    const name = typeof args.agent === "string" ? args.agent.trim() : ""
+    const message = typeof args.message === "string" ? args.message.trim() : ""
+    if (name === "") return refuse("Say in `agent` which subagent: its handle (research-2) or its name.")
+    if (message === "") return refuse("Say in `message` what to tell it.")
+    const find = reader
+      .FindSubagentByHandle({
+        userId,
+        rolloutId: ctx.rolloutId,
+        handle: name,
+        // Causal: only calls this conversation holds, so one in a version swiped away isn't found.
+        calls: callsIn(ctx.transcript?.() ?? [])
+      })
+      .pipe(Effect.option)
+    let found = yield* find
+    if (Option.isNone(found)) return refuse("The app couldn't look the subagent up. Try again.")
+    if (found.value === null) return refuse(`No subagent ${name} in this conversation.`)
+    // Running here: the message reaches it at its next request (§4).
+    const live = running.get(found.value.rolloutId)
+    if (live && live.userId === userId) {
+      if (live.mailbox.post(fromParent(message))) return { text: `Delivered to ${found.value.handle}.` }
+      // It was just finishing: once it has, the message carries it on instead.
+      yield* Deferred.await(live.done)
+      found = yield* find
+      if (Option.isNone(found) || found.value === null)
+        return refuse("The app couldn't look the subagent up. Try again.")
+    }
+    return yield* continueChild(ctx, host, found.value, message, background)
+  }).pipe(Effect.scoped)
+
+/** A finished or stopped subagent carried on with the parent's message (§4): a new run of the same handle. */
+const continueChild = (
+  ctx: ToolContext,
+  host: Host,
+  prior: Prior,
+  message: string,
+  background: boolean
+): Effect.Effect<ToolOutput, never, Scope.Scope> =>
+  Effect.gen(function* () {
+    const { userId, writer } = ctx
+    let snapshot: ChildSnapshot | null = null
+    try {
+      snapshot = prior.snapshot === null ? null : (JSON.parse(prior.snapshot) as ChildSnapshot)
+    } catch {
+      snapshot = null
+    }
+    const model = snapshot?.inputs?.model ?? null
+    if (!snapshot?.request || !model)
+      return refuse(`${prior.handle} can't be carried on. Start a new subagent with agent if you still need it.`)
+    // A finished one goes on from its whole run; a stopped one from where it stopped, its
+    // finished calls answered from their receipts (§8). One whose run can't be used and that had
+    // done something isn't started over unasked: the parent starts a new one.
+    let transcript: ReadonlyArray<AgentMessage>
+    let keptCalls: ReadonlyArray<string>
+    if (prior.status === "completed") {
+      try {
+        transcript = JSON.parse(prior.transcript ?? "[]") as ReadonlyArray<AgentMessage>
+      } catch {
+        transcript = []
+      }
+      keptCalls = callsIn(transcript)
+    } else {
+      const plan = planResume(prior.transcript, { prefill: false })
+      if (plan.policy === "fresh" && prior.row.count > 0)
+        return refuse(
+          `${prior.handle}'s run can't be carried on, and starting it over could repeat what it did. Start a new subagent with agent if you still need it.`
+        )
+      transcript = plan.transcript
+      keptCalls = plan.keptCalls
+    }
+    if (!transcript.some((m) => m.role === "rpRequest"))
+      return refuse(`${prior.handle} can't be carried on. Start a new subagent with agent if you still need it.`)
+    // Its tools as it was given them, among the reply's and the grants now (§6.1); its limits as
+    // they applied, counted from this run on, and the reply's places and spend now (§6.2, §6.3).
+    const given = new Set((snapshot.agent?.tools ?? []).map((t) => t.name))
+    const { tools, frozen } = yield* childTools(ctx, host, (t) => given.has(t.id))
+    const at = yield* modelsAt({
+      reader: ctx.reader,
+      userId,
+      chatId: ctx.chatId,
+      forkId: ctx.forkId,
+      leafSlotId: ctx.leafSlotId
+    })
+    const now = at?.limits ?? resolveLimits(null)
+    const caps = snapshot.subagent?.caps ?? {
+      requests: now.requests,
+      tokens: now.tokens,
+      cost: now.cost,
+      minutes: now.minutes
+    }
+    const rolloutId = uuidv7()
+    const continued = yield* writer
+      .ContinueSubagent({
+        userId,
+        parentRolloutId: ctx.rolloutId,
+        callId: ctx.toolCallId,
+        sourceRolloutId: prior.rolloutId,
+        rolloutId,
+        transcript: JSON.stringify(transcript),
+        steps: countSteps(transcript),
+        keptCalls,
+        background,
+        perRun: now.perRun,
+        runCost: now.cost * now.runCostTimes
+      })
+      .pipe(Effect.option)
+    if (Option.isNone(continued)) return refuse(`${prior.handle} couldn't be carried on. Try again.`)
+    if ("refused" in continued.value)
+      return refuse(
+        continued.value.refused === "limit"
+          ? "This reply has started as many subagents as it may. Do the rest yourself."
+          : continued.value.refused === "spent"
+            ? "This reply's subagents have spent what they may together. Do the rest yourself."
+            : continued.value.refused === "running"
+              ? `${prior.handle} is still running. Try again in a moment.`
+              : continued.value.refused === "not_running"
+                ? "This reply has ended."
+                : `No subagent ${prior.handle} in this conversation.`
+      )
+    const start: ChildStart = {
+      rolloutId: continued.value.rolloutId,
+      handle: prior.handle,
+      row: {
+        ...prior.row,
+        rolloutId: continued.value.rolloutId,
+        status: "running",
+        steps: [],
+        count: 0,
+        ms: null,
+        cost: null,
+        continued: true,
+        ...(background ? { background: true } : {})
+      },
+      generation: childGeneration(host, snapshot.request, model, snapshot.inputs?.leafSlotId ?? null),
+      tools,
+      frozen,
+      limits: {
+        caps,
+        runCost: now.cost * now.runCostTimes,
+        runConcurrent: now.runConcurrent,
+        accountConcurrent: now.accountConcurrent
+      },
+      // Its run so far is the start of this one: its limits count from here.
+      resume: { transcript, historical: transcript.length },
+      inbox: [fromParent(message)],
+      ...(background ? { background: true } : {})
+    }
+    if (!background) return yield* runChild(ctx, host, start)
+    host.background!(
+      ctx.toolCallId,
+      runChild(ctx, host, start).pipe(Effect.map((out) => reportOf(ctx, start.row, out)))
+    )
+    return started(start.row)
+  })
+
+/** The parent's `message_agent` tool (spec/SUBAGENTS.md §4): offered with `agent`, never to a subagent. */
+export const messageAgentTool: RolloutTool<MessageArgs> = {
+  source: import.meta.url,
+  id: "message_agent",
+  label: "Messaged a subagent",
+  explanation: "Send a subagent more instructions, or a follow-up once it has finished",
+  capability: "subagents",
+  effect: "read",
+  replyTool: false,
+  storyRead: "conversation",
+  titleField: "agent",
+  description: messageDescription(false),
+  parameters: messageParameters(false),
+  // With `agent`: where it isn't offered, there's no subagent to message.
+  offerFor: (context) =>
+    agentTool.offerFor!(context).pipe(
+      Effect.map((agent) =>
+        agent === null
+          ? null
+          : ({
+              ...messageAgentTool,
+              description: messageDescription(context.contract === "several"),
+              parameters: messageParameters(context.contract === "several")
+            } as RolloutTool<never>)
+      )
+    ),
+  describe: (_ctx, args) =>
+    Effect.succeed({
+      title: `Message a subagent: ${String(args.agent ?? "")}`,
+      rows: [{ label: "Message", value: String(args.message ?? "") }]
+    }),
+  execute: (ctx, args) => messageSubagent(ctx, args),
+  resumeBackground: (ctx) => resumeBackground(ctx)
+}
+
+function messageDescription(background: boolean) {
+  return [
+    "Sends a message to a subagent you started, by its handle (research-2, from the agent call's result) or its name.",
+    background
+      ? "While it runs, the message reaches it at its next step and this returns at once. Once it has finished, the message carries it on: it remembers everything it read, works on, and reports again (with `background: true`, later, as a message; otherwise as this call's result)."
+      : "Once it has finished, the message carries it on: it remembers everything it read, works on, and reports again as this call's result.",
+    "Use it to ask for more detail, a part of a report that was cut, or a related task that needs what it already read."
+  ].join(" ")
+}
+
+function messageParameters(background: boolean) {
+  return Type.Object({
+    agent: Type.String({ description: "The subagent's handle (research-2) or the name you gave it." }),
+    message: Type.String({ description: "What to tell it." }),
+    ...(background
+      ? {
+          background: Type.Optional(
+            Type.Boolean({
+              description:
+                "For a finished subagent: true carries it on in the background; its report reaches you later."
+            })
+          )
+        }
+      : {})
+  })
+}
+
+/** `report_progress` (§4): a subagent's one-line status, shown in its row at once. */
+const progressTool: RolloutTool<{ readonly text: string }> = {
+  source: import.meta.url,
+  id: PROGRESS,
+  label: "Reported progress",
+  explanation: "Show a short status line while it works",
+  effect: "read",
+  replyTool: false,
+  storyRead: "conversation",
+  titleField: "text",
+  description:
+    "Shows a one-line status of your work to the user (and, if you run in the background, to the assistant that started you): “Read 12 of 40 files”. Use it now and then on long tasks; it doesn't end your work, and the report still comes at the end.",
+  parameters: Type.Object({ text: Type.String({ description: "The status, one short line.", maxLength: 200 }) }),
+  execute: (ctx, args) =>
+    Effect.sync(() => {
+      const text = typeof args.text === "string" ? args.text.trim() : ""
+      if (!text) return refuse("Write the status in `text`.")
+      ctx.reportProgress?.(text)
+      return { text: "Shown." }
+    })
+}
+
+/** Tools every subagent gets besides its type's (§4): a registry plugins add to, replace or disable. */
+const subagentTools = makeRegistry<RolloutTool<never>>([progressTool as RolloutTool<never>])

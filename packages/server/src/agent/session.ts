@@ -48,6 +48,8 @@ import {
   toolWriter
 } from "./tools.ts"
 import { forTarget, rolloutRequest } from "./wire.ts"
+import { Mailbox } from "./mailbox.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { declarePresence } from "./tools/sendPresence.ts"
 import {
   BAD_ARGS,
@@ -113,7 +115,14 @@ export interface AgentRun {
      * the next request (the 80% "wrap up"), or nothing. At a limit it stops the run itself.
      */
     readonly beforeNextRequest?: (signal?: AbortSignal) => Promise<string | undefined>
+    /** Its `report_progress` line, shown in its row at once (spec/SUBAGENTS.md §4). */
+    readonly onProgress?: (text: string) => void
   }
+  /**
+   * What reaches the run while it works (spec/SUBAGENTS.md §3.2, §4): a subagent's messages from
+   * its parent. Absent: the run makes its own (its background subagents' reports).
+   */
+  readonly mailbox?: Mailbox
 }
 
 export interface AgentStrategyInput {
@@ -274,6 +283,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       const services = yield* Effect.context<never>()
       const runFork = Effect.runForkWith(services)
       const runPromise = Effect.runPromiseWith(services)
+      /** The run's own scope: background subagents run in it, so a stop stops them (spec/SUBAGENTS.md §3.2). */
+      const runScope = yield* Effect.scope
+      const mailbox = run.mailbox ?? new Mailbox()
+      /** Background subagents the run waits for, shown on the working message while it does. */
+      let waitingFor = 0
       // A turn that may call tools can't be prefilled (spec/AGENTIC.md §3.2).
       const resolved = yield* input.resolveImages({ ...generation.request, prefill: null })
       const basePrefix = providerRequest(resolved, model)
@@ -690,6 +704,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           cardSkills: run.cardSkills ?? []
         },
         reader: run.reader,
+        ...(run.subagent?.onProgress ? { reportProgress: run.subagent.onProgress } : {}),
         // A subagent's tools start none of their own (spec/SUBAGENTS.md §6.1).
         ...(run.subagent
           ? {}
@@ -703,7 +718,27 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                   else children.delete(toolCallId)
                   showSteps(false)
                 },
-                wait: (prompt: ApprovalPrompt | null) => waitingChanged(toolCallId, prompt)
+                wait: (prompt: ApprovalPrompt | null) => waitingChanged(toolCallId, prompt),
+                // Only a run that can go on after its model ended a turn waits for reports (§3.2).
+                ...(several
+                  ? {
+                      background: (
+                        callId: string,
+                        child: Effect.Effect<AgentMessage | null, never, import("effect").Scope.Scope>
+                      ) => {
+                        mailbox.start(callId)
+                        runFork(
+                          child.pipe(
+                            Effect.scoped,
+                            Effect.flatMap((message) => Effect.sync(() => message && mailbox.post(message))),
+                            Effect.ensuring(Effect.sync(() => mailbox.end(callId))),
+                            Effect.forkIn(runScope)
+                          )
+                        )
+                      },
+                      note: (handle: string, message: AgentMessage) => mailbox.note(handle, message)
+                    }
+                  : {})
               }
             }),
         progress: (text: string | null) => {
@@ -954,13 +989,19 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             content,
             // What a loading call loaded is part of the transcript: replay derives the loaded set from it.
             details:
-              sentText !== fullText || result.loaded?.length || result.presentation || result.subagent
+              sentText !== fullText ||
+              result.loaded?.length ||
+              result.presentation ||
+              result.subagent ||
+              result.background
                 ? {
                     ...(sentText !== fullText ? { sentText } : {}),
                     ...(result.loaded?.length && !result.isError ? { loaded: [...result.loaded] } : {}),
                     ...(result.presentation ? { presentation: result.presentation } : {}),
                     // The subagent this call started, kept with its result (never sent to a model).
-                    ...(result.subagent ? { subagent: result.subagent } : {})
+                    ...(result.subagent ? { subagent: result.subagent } : {}),
+                    // Its work goes on and reports later: a resumed run carries it on (§8).
+                    ...(result.background && !result.isError ? { background: true } : {})
                   }
                 : null,
             ...(result.isError ? { isError: true } : {})
@@ -1191,19 +1232,21 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         prepareNextTurnWithContext: async (_context, signal) => {
           // A subagent's limits are checked first: at one, it stops before anything is sent.
           const limitNote = run.subagent?.beforeNextRequest ? await run.subagent.beforeNextRequest(signal) : undefined
+          // What arrived meanwhile (reports, progress, the parent's messages) goes in first (§3.2, §4).
+          const mail = mailbox.drain()
+          const withMail = (messages: Array<AgentMessage>) =>
+            mail.length + messages.length === 0 ? undefined : { messages: [...mail, ...messages] }
           if (requests === cap - 1) {
             pendingNudge = undefined
-            return {
-              messages: [{ role: "rpApp", content: run.subagent?.writeNow ?? WRITE_NOW, timestamp: Date.now() }]
-            }
+            return withMail([{ role: "rpApp", content: run.subagent?.writeNow ?? WRITE_NOW, timestamp: Date.now() }])
           }
           if (pendingNudge === undefined)
-            return limitNote === undefined
-              ? undefined
-              : { messages: [{ role: "rpApp", content: limitNote, timestamp: Date.now() }] }
+            return withMail(
+              limitNote === undefined ? [] : [{ role: "rpApp", content: limitNote, timestamp: Date.now() }]
+            )
           const nudge = pendingNudge
           pendingNudge = undefined
-          return { messages: [{ role: "rpApp", content: nudgeText, nudge, timestamp: Date.now() }] }
+          return withMail([{ role: "rpApp", content: nudgeText, nudge, timestamp: Date.now() }])
         }
       })
 
@@ -1292,7 +1335,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 !m.isError &&
                 (m.details as { versionId?: string } | null)?.versionId
                   ? [(m.details as { versionId: typeof request.versionId }).versionId]
-                  : []
+                  : m.role === "rpPosted"
+                    ? [m.versionId as typeof request.versionId]
+                    : []
               )
           : []
         for (const id of [...new Set([...posted, working.versionId])]) {
@@ -1307,10 +1352,12 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               ? { ...shown, ...approval.presentation, status: "waiting" as const, approval }
               : shown
           })
-          const json = JSON.stringify(steps)
+          // The working message says how many background subagents the run waits for (§3.2).
+          const waits = id === working.versionId && waitingFor > 0 ? waitingFor : 0
+          const json = JSON.stringify([steps, waits])
           if (json === shown.get(id)) continue
           shown.set(id, json)
-          emit({ steps, ...(several ? { versionId: id } : {}) })
+          emit({ steps, ...(several ? { versionId: id } : {}), ...(waits > 0 ? { waitingFor: waits } : {}) })
         }
       }
       agent.subscribe((event) => {
@@ -1326,6 +1373,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           if (!settled) stopped = true
           if (progressTimer !== null) clearTimeout(progressTimer)
           progressTimer = null
+          // A message sent after this is refused, so its sender knows it never arrived (§4).
+          mailbox.close()
           agent.abort()
           await agent.waitForIdle()
           await flush(true)
@@ -1428,31 +1477,128 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         }
         yield* Effect.promise(() => flush())
       }
+      // Background work this run started that hadn't reported when it stopped carries on with it
+      // (spec/SUBAGENTS.md §8): each such call's tool picks it up, and its report arrives as before.
+      if (seed) {
+        const own = seed.slice(historical)
+        const reported = new Set(
+          own.flatMap((m) =>
+            m.role === "rpApp" && (m as { report?: { callId: string } }).report
+              ? [(m as { report: { callId: string } }).report.callId]
+              : []
+          )
+        )
+        for (const message of own) {
+          if (
+            message.role !== "toolResult" ||
+            message.isError ||
+            (message.details as { background?: unknown } | null)?.background !== true ||
+            reported.has(message.toolCallId)
+          )
+            continue
+          const tool = tools.find((t) => t.id === message.toolName)
+          const call = own
+            .flatMap((m) =>
+              m.role === "assistant"
+                ? m.content.filter((p) => p.type === "toolCall" && p.id === message.toolCallId)
+                : []
+            )
+            .at(-1)
+          if (tool?.resumeBackground && call?.type === "toolCall")
+            yield* tool.resumeBackground(context(message.toolCallId), call.arguments as never)
+        }
+      }
       showSteps(false)
       // The call carried on was the message itself (or the pass).
       if (sent !== undefined || passed) {
         settled = true
         yield* Effect.promise(() => flushing)
+        mailbox.close()
         showSteps(true)
         return yield* Queue.end(queue)
       }
-      // The tail is the frozen request (or the kept transcript): the loop sends it, with no user turn of its own.
-      const started = yield* Effect.tryPromise(() => agent.continue()).pipe(Effect.option)
+      /** What arrived for the run: into its transcript, before the next request. */
+      const deliver = () => {
+        const mail = mailbox.drain()
+        if (mail.length > 0) agent.state.messages = [...agent.state.messages, ...mail]
+        return mail.length > 0
+      }
+      if (deliver()) yield* Effect.promise(() => flush())
+      // A run stopped while it waited for its subagents' reports (§3.2) waits again first.
+      const tail = agent.state.messages.at(-1)
+      let ended =
+        tail?.role === "rpPosted" ||
+        (tail?.role === "assistant" &&
+          !tail.content.some((p) => p.type === "toolCall") &&
+          tail.stopReason !== "error" &&
+          tail.stopReason !== "aborted")
+      while (true) {
+        if (!ended) {
+          // The tail is the frozen request (or the kept transcript): the loop sends it, with no user turn of its own.
+          const started = yield* Effect.tryPromise(() => agent.continue()).pipe(Effect.option)
+          settled = true
+          if (Option.isNone(started) && !failure)
+            failure = new GenerationFailed({ class: "server", message: "The agent couldn't start." })
+          if (Option.isNone(started)) return yield* Queue.fail(queue, failure!)
+          yield* Effect.promise(() => flushing)
+          // The nudges ran out: the reply fails visibly, its stray text kept in its steps (§3.4).
+          if (exhausted) return yield* Queue.fail(queue, exhausted)
+          const final = agent.state.messages.at(-1)
+          if (final?.role === "assistant" && (final.stopReason === "error" || final.stopReason === "aborted")) {
+            return yield* Queue.fail(
+              queue,
+              failure ?? new GenerationFailed({ class: "server", message: final.errorMessage ?? "The reply failed." })
+            )
+          }
+        }
+        ended = false
+        // A run doesn't end while its background subagents run, nor with a message unread
+        // (spec/SUBAGENTS.md §3.2, §4). A sent message or a pass ends it whatever comes.
+        if (sent !== undefined || passed || (mailbox.waitingFor === 0 && !mailbox.hasMail)) break
+        // The text its model ended with is a message of its own, and the run goes on in a new
+        // one; under the other contracts it becomes a step, and the reply is what comes next.
+        if (body.text) {
+          if (several) {
+            const next = yield* Effect.tryPromise(
+              () =>
+                new Promise<{
+                  slotId: typeof request.slotId
+                  versionId: typeof request.versionId
+                  postedVersionId: typeof request.versionId
+                }>((resolve, reject) =>
+                  emit({ post: { rolloutId, toolCallId: `posted-${uuidv7()}`, resolve, reject } })
+                )
+            ).pipe(Effect.option)
+            if (Option.isNone(next))
+              return yield* Queue.fail(
+                queue,
+                new GenerationFailed({ class: "server", message: "The server couldn't post the message." })
+              )
+            working = { slotId: next.value.slotId, versionId: next.value.versionId }
+            agent.state.messages = [
+              ...agent.state.messages,
+              { role: "rpPosted", versionId: next.value.postedVersionId, timestamp: Date.now() }
+            ]
+            yield* Effect.promise(() => flush())
+          } else emit({ restart: true })
+          body.text = false
+          body.prose = false
+        }
+        // Waiting, with no request open: the working message says for how many.
+        while (!mailbox.hasMail && mailbox.waitingFor > 0) {
+          waitingFor = mailbox.waitingFor
+          showSteps(false)
+          yield* Effect.promise(() => mailbox.next())
+        }
+        waitingFor = 0
+        if (!deliver()) break
+        yield* Effect.promise(() => flush())
+        showSteps(false)
+      }
       settled = true
-      if (Option.isNone(started) && !failure)
-        failure = new GenerationFailed({ class: "server", message: "The agent couldn't start." })
-      if (Option.isNone(started)) return yield* Queue.fail(queue, failure!)
+      mailbox.close()
       yield* Effect.promise(() => flushing)
       showSteps(true)
-      // The nudges ran out: the reply fails visibly, its stray text kept in its steps (§3.4).
-      if (exhausted) return yield* Queue.fail(queue, exhausted)
-      const final = agent.state.messages.at(-1)
-      if (final?.role === "assistant" && (final.stopReason === "error" || final.stopReason === "aborted")) {
-        return yield* Queue.fail(
-          queue,
-          failure ?? new GenerationFailed({ class: "server", message: final.errorMessage ?? "The reply failed." })
-        )
-      }
       yield* Queue.end(queue)
     })
   )

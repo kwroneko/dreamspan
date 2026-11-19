@@ -131,6 +131,8 @@ export const placedSteps = (
   const steps: Array<PlacedStep> = []
   messages.forEach((m, index) => {
     if (m.role !== "assistant" || index === lastPlain) return
+    // A plain turn posted as its own message while the run waited (spec/SUBAGENTS.md §3.2).
+    if (messages[index + 1]?.role === "rpPosted" && !m.content.some((p) => p.type === "toolCall")) return
     // A turn that sends the message first, with no text, keeps its thinking as the message's.
     const first = m.content.find((p) => p.type === "toolCall")
     const reasoningOfMessage =
@@ -219,10 +221,13 @@ export const callsFrom = (messages: ReadonlyArray<AgentMessage>, versionId?: str
  * version, or (when there is no final message) the last posted message. */
 export const messageBounds = (messages: ReadonlyArray<AgentMessage>, versionId: string, final: boolean) => {
   const posts = messages.flatMap((m, index) => {
+    // A turn's text posted when the run waited for its subagents ends a message too (§3.2).
     const id =
       m.role === "toolResult" && m.toolName === SEND_MESSAGE && !m.isError
         ? (m.details as { versionId?: string } | null)?.versionId
-        : undefined
+        : m.role === "rpPosted"
+          ? m.versionId
+          : undefined
     return id ? [{ id, index }] : []
   })
   const at = posts.findIndex((p) => p.id === versionId)

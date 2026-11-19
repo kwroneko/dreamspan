@@ -52,6 +52,7 @@ import { type Copy, copiesOf, pendingOf } from "../editor/backup.ts"
 import { editorKey, MessageDraft, messageCopies, type MessageEditorKey, targetOf } from "./messageDraft.ts"
 import { beforeReply, chatStateChanged } from "./replyHooks.ts"
 import { guardReply } from "./replyGuards.ts"
+import { postedSteps, storedStepReads } from "./agent/steps.ts"
 
 /** How many slots one read asks for. */
 const PAGE = 60
@@ -72,6 +73,8 @@ export const liveReasoning = Atom.family((_id: VersionId) => Atom.make<string | 
 export const liveSections = Atom.family((_id: VersionId) => Atom.make<string | null>(null))
 /** A generating agent reply's steps as they stand (spec/AGENTIC.md §5.1); null when it isn't generating or has none yet. */
 export const liveSteps = Atom.family((_id: VersionId) => Atom.make<ReadonlyArray<RolloutStep> | null>(null))
+/** How many background subagents a generating reply waits for (spec/SUBAGENTS.md §3.2); 0: none. */
+export const liveWaitingFor = Atom.family((_id: VersionId) => Atom.make(0))
 
 /** Multiple workbench views share live atoms in the same registry. */
 const liveOwners = new WeakMap<AtomRegistry.AtomRegistry, Map<VersionId, number>>()
@@ -1221,7 +1224,16 @@ export class ChatSession {
         return
       case "Steps":
         // Each event holds every step as it stands: the newest replaces what's shown.
-        return this.setLiveSteps(event.versionId, event.steps)
+        // A message its run already posted: a background subagent it started still changes its
+        // steps (spec/SUBAGENTS.md §3.2). Shown as they come; read again when next opened.
+        if (this.view.entries.some((e) => e.version.id === event.versionId && e.version.status !== "generating")) {
+          storedStepReads.delete(event.versionId)
+          this.registry.set(postedSteps(event.versionId), event.steps)
+          return
+        }
+        this.setLiveSteps(event.versionId, event.steps)
+        this.registry.set(liveWaitingFor(event.versionId), event.waitingFor ?? 0)
+        return
       case "RequestNotice":
         if (this.view.entries.some((e) => e.version.id === event.versionId)) this.notice(event.message)
         return
@@ -1480,6 +1492,7 @@ export class ChatSession {
     const reasoning = this.registry.mount(liveReasoning(id))
     const sections = this.registry.mount(liveSections(id))
     const steps = this.registry.mount(liveSteps(id))
+    const waitingFor = this.registry.mount(liveWaitingFor(id))
     const waiting = this.registry.mount(waitingCache(id))
     return () => {
       const remaining = (owners.get(id) ?? 1) - 1
@@ -1491,11 +1504,13 @@ export class ChatSession {
         this.registry.set(liveReasoning(id), null)
         this.registry.set(liveSections(id), null)
         this.registry.set(liveSteps(id), null)
+        this.registry.set(liveWaitingFor(id), 0)
       }
       text()
       reasoning()
       sections()
       steps()
+      waitingFor()
       waiting()
     }
   }
@@ -1534,6 +1549,7 @@ export class ChatSession {
     this.registry.set(liveReasoning(id), null)
     this.registry.set(liveSections(id), null)
     this.registry.set(liveSteps(id), null)
+    this.registry.set(liveWaitingFor(id), 0)
     this.live.get(id)?.()
     this.live.delete(id)
   }

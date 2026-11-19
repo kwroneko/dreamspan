@@ -34,6 +34,8 @@ export const workshopMode: OrchestrationMode = {
       "start_chat",
       // A subagent inside the reply (spec/SUBAGENTS.md §2.1), under the `subagents` capability.
       "agent",
+      // Messages to its subagents, running or finished (§4).
+      "message_agent",
       // The conversation's own history (spec/WORKSHOP-CONTEXT.md §3.3).
       ...WORKSHOP_HISTORY_TOOLS,
       ...(state.workshopAttached === undefined ? PLUGIN_TOOLS : []),

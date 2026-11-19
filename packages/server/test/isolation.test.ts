@@ -5543,6 +5543,31 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  ContinueSubagent: (_reader, actor, owner, writer) =>
+    refused(
+      writer.ContinueSubagent({
+        userId: actor.user.id,
+        parentRolloutId: owner.chat.rolloutId,
+        callId: "call_1",
+        sourceRolloutId: owner.chat.rolloutId,
+        rolloutId: "foreign-continued-subagent",
+        transcript: "[]",
+        steps: 0,
+        keptCalls: [],
+        background: false
+      }),
+      "NotFound"
+    ),
+  FindSubagentByHandle: (reader, actor, owner) =>
+    refused(
+      reader.FindSubagentByHandle({
+        userId: actor.user.id,
+        rolloutId: owner.chat.rolloutId,
+        handle: "research-1",
+        calls: ["call_1"]
+      }),
+      "NotFound"
+    ),
   FindSubagent: (reader, actor, owner) =>
     refused(
       reader.FindSubagent({ userId: actor.user.id, rolloutId: owner.chat.rolloutId, toolCallId: "call_1" }),
