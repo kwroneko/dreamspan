@@ -187,6 +187,24 @@ describe("re-pricing past requests (PRICES §6.1)", () => {
     assert.strictEqual(update.expectFormula, "builtin:pi-ai@0.0.1+old")
     assert.strictEqual(update.cost, 2)
     assert.isNull(repriceBuiltin(registry, connection, model, { ...row, formula: `builtin:${BUILTIN_PRICE_VERSION}` }))
+    // A price with its own reasoning rate re-prices the reasoning tokens at it and keeps it with the rates.
+    const unlisted = {
+      ...model,
+      key: "unlisted-model",
+      upstream: { price: { input: 1, output: 10, reasoning: 2 } }
+    } as unknown as Model
+    const thinking = { ...row, modelKey: "unlisted-model", inputUncached: 0, output: 1_000_000, reasoning: 500_000 }
+    const withReasoning = repriceBuiltin(registry, connection, unlisted, thinking)!
+    assert.strictEqual(withReasoning.cost, 5 + 1)
+    assert.strictEqual(withReasoning.rates.reasoning, 2)
+    const asOutput = repriceBuiltin(
+      registry,
+      connection,
+      { ...unlisted, upstream: { price: { input: 1, output: 10 } } } as never,
+      thinking
+    )!
+    assert.strictEqual(asOutput.cost, 10)
+    assert.notProperty(asOutput.rates, "reasoning")
     assert.isNull(repriceBuiltin(registry, undefined, model, row))
   })
 })

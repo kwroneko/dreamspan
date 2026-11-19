@@ -36,17 +36,19 @@ const cacheWrites = (value: unknown): Pick<Price, "cacheWrite" | "cacheWriteLong
   }
 }
 
-type Rates = Pick<Price, "input" | "output" | "cacheRead" | "cacheWrite" | "cacheWriteLong">
+type Rates = Pick<Price, "input" | "output" | "cacheRead" | "cacheWrite" | "cacheWriteLong" | "reasoning">
 
 /** The known rates of one entry or tier; an absent, null or out-of-range rate is left out (unknown). */
 const ratesOf = (entry: Record<string, unknown>): Partial<Rates> => {
   const input = rate(entry.input)
   const output = rate(entry.output)
   const read = rate(entry.cache_read)
+  const reasoning = rate(entry.reasoning)
   return {
     ...(input === undefined ? {} : { input }),
     ...(output === undefined ? {} : { output }),
     ...(read === undefined ? {} : { cacheRead: read }),
+    ...(reasoning === undefined ? {} : { reasoning }),
     ...cacheWrites(entry.cache_write)
   }
 }

@@ -222,6 +222,8 @@ export const Price = Schema.Struct({
   cacheWrite: Schema.optionalKey(Schema.Number),
   /** The long-TTL cache write rate (Anthropic's 1 h, OpenAI's 12 h). Absent: twice `input`. */
   cacheWriteLong: Schema.optionalKey(Schema.Number),
+  /** The rate for reasoning tokens when it differs from `output`. Absent: `output`. */
+  reasoning: Schema.optionalKey(Schema.Number),
   /** A flat price per request, in `currency`, not per million tokens. */
   perRequest: Schema.optionalKey(Schema.Number),
   /** A label for the amounts; nothing converts. Absent: USD. */
@@ -235,7 +237,8 @@ export const Price = Schema.Struct({
         output: Schema.Number,
         cacheRead: Schema.optionalKey(Schema.Number),
         cacheWrite: Schema.optionalKey(Schema.Number),
-        cacheWriteLong: Schema.optionalKey(Schema.Number)
+        cacheWriteLong: Schema.optionalKey(Schema.Number),
+        reasoning: Schema.optionalKey(Schema.Number)
       })
     )
   )

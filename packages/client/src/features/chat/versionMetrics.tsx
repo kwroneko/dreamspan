@@ -108,6 +108,11 @@ export const costDetails = (m: VersionMetrics): ReadonlyArray<[string, string]> 
       }`
     ])
     rows.push(["Priced by", m.costSources.map(sourceName).join(", ")])
+    if (m.reasoningRates.length > 0 && (m.reasoning ?? 0) > 0)
+      rows.push([
+        "Reasoning priced at",
+        `${m.reasoningRates.map((r) => `${formatCost(r)} per million tokens`).join(", ")} (its own rate, not the output rate)`
+      ])
   }
   const usd = m.costs.find((c) => c.currency === "USD")
   const same =
