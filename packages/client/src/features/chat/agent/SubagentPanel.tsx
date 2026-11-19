@@ -14,6 +14,7 @@ import { Icon } from "../../../ui/Icon.tsx"
 import { Spinner } from "../../../ui/Spinner.tsx"
 import { Badge } from "../../../ui/Surface.tsx"
 import { Tooltip } from "../../../ui/Tooltip.tsx"
+import { FILES_PAGE } from "../../files/href.ts"
 import { formatCost } from "../versionMetrics.tsx"
 import type { StepActionProps } from "./stepActions.ts"
 import { StepRow } from "./Steps.tsx"
@@ -93,6 +94,21 @@ export function SubagentPanel({ step, version, session }: StepActionProps) {
               {row.forked && <span className="block text-muted">Started from this conversation</span>}
               {row.continued && <span className="block text-muted">Carried on with a message</span>}
               {row.resumed && <span className="block text-muted">Resumed where it stopped</span>}
+              {row.folder && (
+                <span className="block text-muted [overflow-wrap:anywhere]" data-subagent-folder="">
+                  Works in {row.folder}
+                </span>
+              )}
+              {row.copy && (
+                <span
+                  className="block text-muted [overflow-wrap:anywhere]"
+                  data-subagent-copy={row.copy.kept === false ? "removed" : row.copy.kept ? "kept" : "working"}
+                >
+                  {row.copy.kept === false
+                    ? "Its copy had no changes and was removed"
+                    : `${row.copy.kept ? "Its copy" : "Works in its copy"}: ${row.copy.path}${row.copy.branch ? ` · branch ${row.copy.branch}` : ""}`}
+                </span>
+              )}
               {row.progress && (
                 <span className="block text-text italic [overflow-wrap:anywhere]" data-subagent-progress="">
                   {row.progress}
@@ -114,6 +130,17 @@ export function SubagentPanel({ step, version, session }: StepActionProps) {
             >
               Stop
             </Button>
+          )}
+          {row.copy && row.copy.kept !== false && (
+            <Tooltip label="Opens its copy in Files. Nothing in it is merged back on its own.">
+              <Link
+                to={FILES_PAGE}
+                search={{ path: row.copy.path }}
+                className="inline-flex h-7 items-center rounded-md px-2 text-xs text-muted hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+              >
+                Open folder
+              </Link>
+            </Tooltip>
           )}
           <Tooltip label="Opens this subagent's own run: its instructions, tools, requests and costs.">
             <Link

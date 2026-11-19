@@ -178,6 +178,13 @@ export const SubagentContext = Schema.Literals(["task", "fork"])
 export type SubagentContext = typeof SubagentContext.Type
 
 /**
+ * Where a subagent works on files (spec/SUBAGENTS.md §3.3): `none`, it doesn't; `same`, in the
+ * reply's working folder; `copy`, in its own copy of it. The call's `copy` overrides the last two.
+ */
+export const SubagentIsolation = Schema.Literals(["none", "same", "copy"])
+export type SubagentIsolation = typeof SubagentIsolation.Type
+
+/**
  * One of the user's subagent types, or their change to a built-in or plugin type (spec/SUBAGENTS.md
  * §10): absent fields keep the type's own. A type of their own has a name, what it's for,
  * instructions and tools. No limits here: those are the user's alone (§6.2), on Subagent limits.
@@ -191,6 +198,7 @@ export const SubagentTypeEdit = Schema.Struct({
   tools: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMaxLength(100))).check(Schema.isMaxLength(200))),
   defaultAlias: Schema.optionalKey(SubagentAlias),
   context: Schema.optionalKey(SubagentContext),
+  isolation: Schema.optionalKey(SubagentIsolation),
   /** A built-in or plugin type the assistant isn't offered. */
   off: Schema.optionalKey(Schema.Boolean)
 })
@@ -209,6 +217,7 @@ export const SubagentTypeView = Schema.Struct({
   tools: Schema.Array(Schema.String),
   defaultAlias: Schema.String,
   context: SubagentContext,
+  isolation: SubagentIsolation,
   source: Schema.Literals(["builtin", "plugin", "user"]),
   /** The user changed a built-in or plugin type. */
   edited: Schema.Boolean,

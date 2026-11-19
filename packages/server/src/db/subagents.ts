@@ -51,6 +51,12 @@ export interface SubagentSnapshot {
   readonly background?: boolean
   /** It carries a finished subagent on with the parent's message (`message_agent`, §4). */
   readonly continued?: boolean
+  /**
+   * Where it works on files (spec/SUBAGENTS.md §3.3): the folder it starts in (`start`), the
+   * folder its file tools stay inside (`root`, a copy's), and the copy itself, made before it
+   * started. What became of the copy is its run's `COPY_CALL` receipt.
+   */
+  readonly workspace?: SubagentWorkspaceRecord
   /** Its limits, as they applied (spec/SUBAGENTS.md §6.2); absent on SA1's children. */
   readonly caps?: {
     readonly requests: number
@@ -59,6 +65,34 @@ export interface SubagentSnapshot {
     readonly minutes: number
   }
 }
+
+/** A subagent's working folder, as its snapshot keeps it (spec/SUBAGENTS.md §3.3). */
+export interface SubagentWorkspaceRecord {
+  readonly start: string
+  readonly root?: string
+  readonly copy?: SubagentCopyRecord
+}
+
+/** An isolated copy: where, of what, and how it was made. */
+export interface SubagentCopyRecord {
+  /** The copy, under /files/.subagents. */
+  readonly path: string
+  /** The folder it copies (the reply's working folder). */
+  readonly from: string
+  /** `git`: a worktree of the repository at `top` on `branch`, made at commit `base`. */
+  readonly kind: "git" | "files"
+  readonly top?: string
+  readonly branch?: string
+  readonly base?: string
+  /** When the subagent ended: true, it had changes and stays; false, it was removed. */
+  readonly kept?: boolean
+}
+
+/**
+ * The receipt a subagent's run records when it ends with a copy (its outcome, `{ kept }`), under
+ * this call id of its own; a kept copy is a `subagent.copy` effect there too, listed in Changes.
+ */
+export const COPY_CALL = "subagent-copy"
 
 /** The rollouts a run carries on from, itself first: where its earlier calls' children were started. */
 export const chainOf = (sql: SqlClient.SqlClient, rolloutId: string) =>
@@ -176,6 +210,7 @@ interface ChildRecord {
   readonly cost: number | null
   readonly currency: string | null
   readonly unpriced: number
+  readonly copy_outcome: string | null
 }
 
 /** A run chain's children, newest first; `calls` narrows them to those calls. */
@@ -188,7 +223,8 @@ const childrenOf = (sql: SqlClient.SqlClient, chain: ReadonlyArray<string>, call
       (SELECT count(*) FROM llm_requests q WHERE q.rollout_id = r.id) AS requests,
       (SELECT sum(q.cost) FROM llm_requests q WHERE q.rollout_id = r.id) AS cost,
       (SELECT min(q.cost_currency) FROM llm_requests q WHERE q.rollout_id = r.id) AS currency,
-      (SELECT count(*) FROM llm_requests q WHERE q.rollout_id = r.id AND q.cost IS NULL) AS unpriced
+      (SELECT count(*) FROM llm_requests q WHERE q.rollout_id = r.id AND q.cost IS NULL) AS unpriced,
+      (SELECT t.result_json FROM rollout_receipts t WHERE t.rollout_id = r.id AND t.tool_call_id = ${COPY_CALL}) AS copy_outcome
     FROM rollouts r LEFT JOIN rollout_payloads p ON p.rollout_id = r.id
     WHERE r.spawned_by_rollout_id IN (SELECT value FROM json_each(${JSON.stringify(chain)}))
       ${calls ? sql`AND r.spawned_by_call_id IN (SELECT value FROM json_each(${JSON.stringify(calls)}))` : sql``}
@@ -246,6 +282,8 @@ const rowOf = (r: ChildRecord, earlier: ReadonlyArray<ChildRecord> = []): Subage
     return step
   })
   const sub = snapshot.subagent
+  const outcome = parse<string | null>(r.copy_outcome, null)
+  const kept = outcome === null ? undefined : parse<{ readonly kept?: unknown }>(outcome, {}).kept
   // Its latest progress line (`report_progress`, §4), from its own steps.
   const progress = steps.findLast((s) => s.kind === "tool" && s.tool === PROGRESS)
   const line =
@@ -273,7 +311,19 @@ const rowOf = (r: ChildRecord, earlier: ReadonlyArray<ChildRecord> = []): Subage
     ...(line ? { progress: line } : {}),
     ...(sub?.background ? { background: true } : {}),
     ...(sub?.continued ? { continued: true } : {}),
-    ...(sub?.context === "fork" ? { forked: true } : {})
+    ...(sub?.context === "fork" ? { forked: true } : {}),
+    ...(sub?.workspace?.copy
+      ? {
+          copy: {
+            path: sub.workspace.copy.path,
+            from: sub.workspace.copy.from,
+            ...(sub.workspace.copy.branch ? { branch: sub.workspace.copy.branch } : {}),
+            ...(typeof kept === "boolean" ? { kept } : {})
+          }
+        }
+      : sub?.workspace
+        ? { folder: sub.workspace.start }
+        : {})
   }
 }
 

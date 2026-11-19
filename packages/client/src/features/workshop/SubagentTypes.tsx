@@ -54,6 +54,21 @@ const CONTEXTS = [
   }
 ]
 
+const FOLDERS = [
+  { value: "none" as const, label: "None", description: "It doesn't get a folder to work in." },
+  {
+    value: "same" as const,
+    label: "Your folder",
+    description: "It works in the workshop's working folder, alongside the assistant."
+  },
+  {
+    value: "copy" as const,
+    label: "Its own copy",
+    description:
+      "It works in a copy of the working folder (a new branch when it's a Git repository). A copy it didn't change is removed."
+  }
+]
+
 interface Draft {
   readonly id: string
   readonly label: string
@@ -62,6 +77,7 @@ interface Draft {
   readonly tools: ReadonlyArray<string>
   readonly defaultAlias: string
   readonly context: "task" | "fork"
+  readonly isolation: "none" | "same" | "copy"
   readonly off: boolean
 }
 
@@ -75,6 +91,7 @@ const draftOf = (type: SubagentTypeView | undefined): Draft =>
         tools: type.tools,
         defaultAlias: type.defaultAlias,
         context: type.context,
+        isolation: type.isolation,
         off: type.off
       }
     : {
@@ -85,6 +102,7 @@ const draftOf = (type: SubagentTypeView | undefined): Draft =>
         tools: [],
         defaultAlias: SAME,
         context: "task",
+        isolation: "none",
         off: false
       }
 
@@ -137,6 +155,7 @@ function TypeEditor({
             tools: [...draft.tools],
             defaultAlias: draft.defaultAlias,
             context: draft.context,
+            isolation: draft.isolation,
             ...(draft.off ? { off: true } : {})
           }
         }),
@@ -249,6 +268,12 @@ function TypeEditor({
           onValueChange={(value) => edit({ context: value })}
         />
       </div>
+      <Segmented
+        label="Works in"
+        options={FOLDERS}
+        value={draft.isolation}
+        onValueChange={(value) => edit({ isolation: value })}
+      />
       {!isNew && type.source !== "user" && (
         <Checkbox
           checked={!draft.off}

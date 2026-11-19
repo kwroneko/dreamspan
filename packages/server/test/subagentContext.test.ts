@@ -378,6 +378,8 @@ describe("subagent context (SA7)", () => {
         types.map((t) => [t.id, t.source]),
         [
           ["research", "builtin"],
+          ["code", "builtin"],
+          ["general", "builtin"],
           ["plugged", "plugin"],
           ["checker", "user"]
         ]

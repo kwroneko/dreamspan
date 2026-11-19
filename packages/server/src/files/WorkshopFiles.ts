@@ -111,6 +111,7 @@ export class WorkshopFiles extends Context.Service<
         onChanged: changed
       })
       for (const tool of files.tools) yield* execution.rolloutTools.register(tool)
+      yield* execution.subagentWorkspaces.register(files.workspaces)
       // The turn's tail says where commands start (§2.1), when the turn offers the file tools.
       yield* execution.turnNotes.register({
         id: "files.workingFolder",

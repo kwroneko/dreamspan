@@ -30,10 +30,13 @@ export type OpenTarget =
   | { readonly to: "/chats/$chatId"; readonly params: { readonly chatId: string } }
   | { readonly to: "/library/$refId"; readonly params: { readonly refId: string } }
   | { readonly to: "/cards/$entityId"; readonly params: { readonly entityId: string } }
+  | { readonly to: "/files"; readonly params: Record<string, never>; readonly search: { readonly path: string } }
 
 /** Where a change opens: the chat it started, or the item it made or edited. */
 export const openTarget = (effect: RolloutEffect): OpenTarget | null => {
   if (effect.targetKind === "chat") return { to: "/chats/$chatId", params: { chatId: effect.targetId } }
+  // A folder of the user's Files: a subagent's kept copy (spec/SUBAGENTS.md §3.3).
+  if (effect.targetKind === "folder") return { to: "/files", params: {}, search: { path: effect.targetId } }
   if (effect.targetKind !== "entity") return null
   const refId = effect.undo?.refId
   return typeof refId === "string"
@@ -43,7 +46,11 @@ export const openTarget = (effect: RolloutEffect): OpenTarget | null => {
 
 /** What Open's hover says. */
 export const openHint = (effect: RolloutEffect) =>
-  effect.targetKind === "chat" ? "Opens the chat it started." : "Opens the item in its editor, with its history."
+  effect.targetKind === "chat"
+    ? "Opens the chat it started."
+    : effect.targetKind === "folder"
+      ? "Opens the folder in Files."
+      : "Opens the item in its editor, with its history."
 
 /** It can still be undone from here: the app kept how, and it isn't undone yet. */
 export const undoable = (effect: RolloutEffect) => effect.undo !== null && effect.undoneAt === null
