@@ -4115,6 +4115,33 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     error: StorageError
   }),
   /**
+   * A subagent carried on with its resumed reply (spec/SUBAGENTS.md §8), in one transaction: a
+   * child of the running rollout `parentRolloutId` for its call `callId`, carrying on from the
+   * stopped child `sourceRolloutId` (spawned by the same call on the parent's run chain): the
+   * same handle, chat, position, model and frozen snapshot, `parent_rollout_id` the source, with
+   * the kept transcript, the receipts of the calls kept and the cut tail. A second resume for the
+   * same call returns the first (`existing`). `refused` when the parent isn't running or the source
+   * isn't that call's subagent.
+   */
+  Rpc.make("ResumeSubagent", {
+    payload: {
+      userId: UserId,
+      parentRolloutId: Schema.String,
+      callId: Schema.String,
+      sourceRolloutId: Schema.String,
+      rolloutId: Schema.String,
+      transcript: Schema.String,
+      steps: Schema.Int,
+      keptCalls: Schema.Array(Schema.String),
+      branch: Schema.NullOr(Schema.Struct({ messages: Schema.String }))
+    },
+    success: Schema.Union([
+      Schema.Struct({ rolloutId: Schema.String, handle: Schema.String, existing: Schema.Boolean }),
+      Schema.Struct({ refused: Schema.Literals(["not_running", "not_found"]) })
+    ]),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
    * `contract`: the run ended, and this is how it met the send tool's contract (its outcome, null
    * when it reached none, and its nudges), for the per-model metrics (spec/REPLY-CONTRACT.md §3.6).
    */
@@ -6014,7 +6041,12 @@ const ReadOpsOwn = RpcGroup.make(
         /** The last text it wrote, if any: what it had of its report. */
         partial: Schema.NullOr(Schema.String),
         /** Its row as the steps show it, with what its requests cost. */
-        row: SubagentRow
+        row: SubagentRow,
+        /** Its transcript and frozen snapshot as last saved, for resuming it (§8). */
+        transcript: Schema.NullOr(Schema.String),
+        snapshot: Schema.NullOr(Schema.String),
+        /** The run that started it: this one, or one it carries on from. */
+        spawnedBy: Schema.String
       })
     ),
     error: Schema.Union([NotFound, StorageError])

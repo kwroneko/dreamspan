@@ -65,7 +65,12 @@ export const ApprovalPrompt = Schema.Struct({
       /** That request's ledger status: running, interrupted, cancelled, timeout or failed. */
       status: Schema.NullOr(Schema.String)
     })
-  )
+  ),
+  /**
+   * A subagent whose run couldn't be resumed (spec/SUBAGENTS.md §8), asked as "Start the task
+   * again" or "Leave it", with the changes its first attempt made.
+   */
+  restart: Schema.optionalKey(Schema.Struct({ handle: Schema.String, effects: Schema.Array(Schema.String) }))
 })
 export type ApprovalPrompt = typeof ApprovalPrompt.Type
 
@@ -138,7 +143,9 @@ export const SubagentRow = Schema.Struct({
   count: Schema.Int,
   ms: Schema.NullOr(Schema.Int),
   /** What its requests cost, as the ledger priced them; null when unknown or still running. */
-  cost: Schema.NullOr(Schema.Struct({ amount: Schema.Number, currency: Schema.String }))
+  cost: Schema.NullOr(Schema.Struct({ amount: Schema.Number, currency: Schema.String })),
+  /** It was stopped with the reply and carried on where it stopped when the reply was resumed (§8). */
+  resumed: Schema.optionalKey(Schema.Boolean)
 })
 export type SubagentRow = typeof SubagentRow.Type
 

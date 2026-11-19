@@ -9,6 +9,7 @@ import { Effect, Stream } from "effect"
 import type { RolloutStep } from "@dreamspan/shared/agent.ts"
 import type { Chat, VersionId } from "@dreamspan/shared/chat.ts"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import { subagentTypes } from "../src/agent/subagents.ts"
 import { TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
 import { Reader } from "../src/db/Database.ts"
 import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
@@ -73,6 +74,7 @@ const scripted = (options: {
   readonly answer?: string
 }) => {
   let holdAt: number | null = null
+  let parentHoldAt: number | null = null
   let held = false
   const handler = (request: Recorded, res: ServerResponse) => {
     const body = request.body as unknown as Body
@@ -92,13 +94,23 @@ const scripted = (options: {
     if (!JSON.stringify(messages).includes(TRIGGER)) return sse(res, completionChunks(["Ready."], {}))
     const lastTask = messages.findLastIndex((m) => m.role === "user" && JSON.stringify(m.content).includes(TRIGGER))
     const done = messages.slice(lastTask).filter((m) => m.role === "tool").length
+    if (parentHoldAt === done) {
+      held = true
+      return
+    }
     const step = options.parent[done]
     sse(res, step ? toolCall(step.name, step.args, step.id) : completionChunks([options.answer ?? "Done."], {}))
   }
   return {
     handler,
-    holdChild: (at: number) => {
+    /** Pauses the child's request after `at` of its results; null lets every request through. */
+    holdChild: (at: number | null) => {
       holdAt = at
+      held = false
+    },
+    holdParent: (at: number | null) => {
+      parentHoldAt = at
+      held = false
     },
     isHeld: () => held
   }
@@ -349,10 +361,10 @@ describe("subagents", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("stopping the reply stops its subagent; Resume refuses to start it again", () => {
+  it.live("stopping the reply stops its subagent; Resume carries it on where it stopped", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      const script = scripted({ parent: [START], child: [LIST], answer: "After resume." })
+      const script = scripted({ parent: [START], child: [LIST], report: "Two cards.", answer: "After resume." })
       script.holdChild(1)
       const { api, chat, events, mock } = yield* workshop(script.handler)
       const versionId = yield* task(api, chat, "stop the reply")
@@ -360,6 +372,8 @@ describe("subagents", () => {
       yield* api.StopGeneration({ versionId })
       yield* eventually(() => finished(events, versionId) !== undefined)
       assert.strictEqual(finished(events, versionId)!.status, "stopped")
+      // The next reply's cache is the reply's, not its subagent's: their requests don't count.
+      yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
       const [stopped] = yield* fixtureSql(
         config.dataDir,
         [{ sql: "SELECT status FROM rollouts WHERE spawned_by_rollout_id IS NOT NULL" }],
@@ -367,14 +381,70 @@ describe("subagents", () => {
       )
       assert.deepStrictEqual(stopped, [{ status: "stopped" }])
 
+      const before = completions(mock.requests()).filter(isChild)
+      script.holdChild(null)
+      const resumed = yield* resume(api, chat, versionId)
+      yield* eventually(() => finished(events, resumed) !== undefined)
+      assert.strictEqual(finished(events, resumed)!.status, "complete")
+      // One more request of the child's: the one the stop cut, sent again as it was.
+      const after = completions(mock.requests()).filter(isChild)
+      assert.lengthOf(after, before.length + 1)
+      assert.deepStrictEqual(after.at(-1)!.messages, before.at(-1)!.messages)
+      // A new child rollout carrying the stopped one on: the same handle and call, the resumed reply's.
+      const [rows] = yield* fixtureSql(
+        config.dataDir,
+        [
+          {
+            sql: "SELECT c.id, c.status, c.agent_handle, c.spawned_by_call_id, c.parent_rollout_id, c.slot_id, (SELECT v.id FROM versions v WHERE v.rollout_id = c.spawned_by_rollout_id) AS version FROM rollouts c WHERE c.spawned_by_rollout_id IS NOT NULL ORDER BY c.created_at"
+          }
+        ],
+        { readOnly: true }
+      )
+      assert.lengthOf(rows!, 2)
+      assert.deepStrictEqual(
+        rows!.map((r) => [r["status"], r["agent_handle"], r["spawned_by_call_id"], r["version"]]),
+        [
+          ["stopped", "research-1", "spawn", versionId],
+          ["completed", "research-1", "spawn", resumed]
+        ]
+      )
+      assert.strictEqual(rows![1]!["parent_rollout_id"], rows![0]!["id"])
+      const parents = completions(mock.requests()).filter(
+        (b) => !isChild(b) && JSON.stringify(b.messages).includes(TRIGGER)
+      )
+      const result = toolTexts(parents.at(-1)!).at(-1)!
+      assert.include(result, meta("status", "done"))
+      assert.include(result, "Two cards.")
+      // The resumed reply's step shows the subagent done, carried on.
+      const steps = yield* api.GetRolloutSteps({ versionId: resumed })
+      const spawn = steps.find((s) => s.kind === "tool" && s.id === "spawn")
+      const row = spawn?.kind === "tool" ? spawn.subagent : undefined
+      assert.strictEqual(row?.status, "done")
+      assert.strictEqual(row?.resumed, true)
+      assert.strictEqual(row?.count, 1)
+      // The stopped reply still shows its own, stopped.
+      const old = (yield* api.GetRolloutSteps({ versionId })).find((s) => s.kind === "tool" && s.id === "spawn")
+      assert.strictEqual(old?.kind === "tool" ? old.subagent?.status : null, "stopped")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a subagent that finished before the reply stopped answers from its receipt, never again", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const script = scripted({ parent: [START], child: [LIST], report: "Kept report." })
+      script.holdParent(1)
+      const { api, chat, events, mock } = yield* workshop(script.handler)
+      const versionId = yield* task(api, chat, "finish then stop")
+      yield* eventually(() => script.isHeld())
+      yield* api.StopGeneration({ versionId })
+      yield* eventually(() => finished(events, versionId) !== undefined)
+      // As a crash after the receipt and before the result was saved leaves it: the call dangling.
+      yield* cutAfterCall(config.dataDir, versionId, "spawn")
       const childRequests = completions(mock.requests()).filter(isChild).length
-      const me = yield* api.Whoami()
-      const slotId = (yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId!
-      const slot = yield* (yield* Reader).GetSlot({ userId: me.id, slotId })
-      const resumed = yield* api.ResumeVersion({ versionId, expectedRowVersion: slot.entry.rowVersion })
-      yield* eventually(() => finished(events, resumed.version.id) !== undefined)
-      assert.strictEqual(finished(events, resumed.version.id)!.status, "complete")
-      // No new subagent, and no request of the old one's again.
+      script.holdParent(null)
+      const resumed = yield* resume(api, chat, versionId)
+      yield* eventually(() => finished(events, resumed) !== undefined)
+      assert.strictEqual(finished(events, resumed)!.status, "complete")
       assert.strictEqual(completions(mock.requests()).filter(isChild).length, childRequests)
       const [rows] = yield* fixtureSql(
         config.dataDir,
@@ -386,12 +456,187 @@ describe("subagents", () => {
         (b) => !isChild(b) && JSON.stringify(b.messages).includes(TRIGGER)
       )
       const result = toolTexts(parents.at(-1)!).at(-1)!
-      assert.include(result, "wasn't started again")
-      assert.include(result, meta("status", "not_rerun"))
-      // The resumed reply's step still shows the subagent, as stopped.
-      const steps = yield* api.GetRolloutSteps({ versionId: resumed.version.id })
-      const spawn = steps.find((s) => s.kind === "tool" && s.id === "spawn")
-      assert.strictEqual(spawn?.kind === "tool" ? spawn.subagent?.status : null, "stopped")
+      assert.include(result, "Kept report.")
+      assert.include(result, meta("status", "done"))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a subagent whose run can't be carried on asks: Leave it, or Start the task again", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const script = scripted({ parent: [START], child: [LIST], report: "Fresh report." })
+      const { api, chat, events, mock } = yield* workshop(script.handler)
+      const stopUnusable = (content: string) =>
+        Effect.gen(function* () {
+          script.holdChild(1)
+          const versionId = yield* task(api, chat, content)
+          yield* eventually(() => script.isHeld())
+          yield* api.StopGeneration({ versionId })
+          yield* eventually(() => finished(events, versionId) !== undefined)
+          // Its saved run is gone (as a damaged one would be): it can't be carried on.
+          yield* fixtureSql(config.dataDir, [
+            {
+              sql: "UPDATE rollout_payloads SET transcript_json = NULL WHERE rollout_id = (SELECT id FROM rollouts WHERE spawned_by_rollout_id = (SELECT rollout_id FROM versions WHERE id = ?))",
+              params: [versionId]
+            }
+          ])
+          script.holdChild(null)
+          const resumed = yield* resume(api, chat, versionId)
+          yield* eventually(() => {
+            const step = lastSteps(events, resumed).find((s) => s.kind === "tool" && s.id === "spawn")
+            return step?.kind === "tool" && step.status === "waiting" && step.approval?.restart !== undefined
+          })
+          const step = lastSteps(events, resumed).find((s) => s.kind === "tool" && s.id === "spawn")!
+          return { resumed, prompt: step.kind === "tool" ? step.approval! : undefined }
+        })
+
+      // Leave it: nothing runs again.
+      const left = yield* stopUnusable("leave it")
+      assert.strictEqual(left.prompt!.restart!.handle, "research-1")
+      assert.strictEqual(left.prompt!.capability, "subagents")
+      const childRequests = completions(mock.requests()).filter(isChild).length
+      yield* api.AnswerToolApproval({
+        rolloutId: left.prompt!.rolloutId,
+        toolCallId: left.prompt!.toolCallId,
+        digest: left.prompt!.digest,
+        answer: "deny"
+      })
+      yield* eventually(() => finished(events, left.resumed) !== undefined)
+      assert.strictEqual(finished(events, left.resumed)!.status, "complete")
+      assert.strictEqual(completions(mock.requests()).filter(isChild).length, childRequests)
+      const parents = completions(mock.requests()).filter(
+        (b) => !isChild(b) && JSON.stringify(b.messages).includes(TRIGGER)
+      )
+      const refused = toolTexts(parents.at(-1)!).at(-1)!
+      assert.include(refused, meta("status", "not_resumed"))
+      assert.include(refused, "couldn't be resumed")
+
+      // Start the task again: the child starts over from its task.
+      const again = yield* stopUnusable("start again")
+      const startedAt = completions(mock.requests()).length
+      yield* api.AnswerToolApproval({
+        rolloutId: again.prompt!.rolloutId,
+        toolCallId: again.prompt!.toolCallId,
+        digest: again.prompt!.digest,
+        answer: "allow"
+      })
+      yield* eventually(() => finished(events, again.resumed) !== undefined)
+      assert.strictEqual(finished(events, again.resumed)!.status, "complete")
+      const restarted = completions(mock.requests().slice(startedAt)).filter(isChild)
+      assert.lengthOf(restarted, 2)
+      assert.deepStrictEqual(
+        restarted[0]!.messages.map((m) => m.role),
+        ["system", "user"]
+      )
+      const report = toolTexts(
+        completions(mock.requests())
+          .filter((b) => !isChild(b) && JSON.stringify(b.messages).includes(TRIGGER))
+          .at(-1)!
+      ).at(-1)!
+      assert.include(report, "Fresh report.")
+      // The same subagent, started over: its handle stays.
+      assert.include(report, meta("agent", again.prompt!.restart!.handle))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a subagent's changes are its reply's: listed, undone and dropped with its call", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      // A type that may make cards, for this test only (types are registered parts, §10).
+      yield* subagentTypes.register({
+        id: "maker",
+        label: "Make cards",
+        description: "Makes cards.",
+        kinds: ["workshop"],
+        tools: (tool) => tool.id === "create_card" || tool.effect === "read",
+        defaultAlias: "same",
+        instructions: "You are a subagent that makes cards."
+      })
+      const look = { name: "list_library", args: { kind: "card" }, id: "parent-list" }
+      const make = { name: "agent", args: { type: "maker", task: "Make a card." }, id: "spawn-maker" }
+      const script = scripted({
+        parent: [look, make],
+        child: [{ name: "create_card", args: { name: "Mara Quill" }, id: "child-create" }],
+        report: "Made it."
+      })
+      const { api, chat, events } = yield* workshop(script.handler)
+      const versionId = yield* task(api, chat, "make a card")
+      yield* eventually(() => finished(events, versionId) !== undefined)
+      assert.strictEqual(finished(events, versionId)!.status, "complete")
+      const effects = yield* api.ListVersionEffects({ versionId })
+      const made = effects.filter((e) => e.kind.startsWith("library."))
+      assert.lengthOf(made, 1)
+      assert.strictEqual(made[0]!.toolCallId, "child-create")
+      assert.strictEqual(made[0]!.subagent?.handle, "maker-1")
+      assert.strictEqual(made[0]!.subagent?.callId, "spawn-maker")
+      const parentRollout = made[0]!.subagent!.rolloutId
+      // Changes lists it with the reply that started it.
+      const listed = (yield* api.ListRolloutEffects({ chatId: chat.id })).find((e) => e.toolCallId === "child-create")
+      assert.strictEqual(listed?.subagent?.rolloutId, parentRollout)
+
+      // Carrying on from the step before the `agent` call drops it and its subagent's change from
+      // the new version; the old version keeps it.
+      const me = yield* api.Whoami()
+      const slotId = (yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId!
+      const slot = yield* (yield* Reader).GetSlot({ userId: me.id, slotId })
+      const from = yield* api.ResumeFromStep({ versionId, step: 0, expectedRowVersion: slot.entry.rowVersion })
+      yield* eventually(() => finished(events, from.version.id) !== undefined)
+      assert.strictEqual(finished(events, from.version.id)!.status, "complete")
+      const fresh = (yield* api.ListVersionEffects({ versionId: from.version.id })).filter((e) =>
+        e.kind.startsWith("library.")
+      )
+      // The new version's own `agent` call (the model asked again) started a subagent of its own.
+      assert.deepStrictEqual(
+        fresh.map((e) => e.subagent?.handle),
+        ["maker-2"]
+      )
+      const kept = (yield* api.ListVersionEffects({ versionId })).filter((e) => e.kind.startsWith("library."))
+      assert.deepStrictEqual(
+        kept.map((e) => e.subagent?.handle),
+        ["maker-1"]
+      )
+
+      // "Undo all of this reply" undoes its subagent's change too.
+      const undone = yield* api.UndoRolloutEffects({ chatId: chat.id, rolloutId: parentRollout })
+      assert.deepStrictEqual(
+        undone.undone.map((e) => e.toolCallId),
+        ["child-create"]
+      )
+      assert.isNull(undone.refused)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })
+
+/** Resumes the reply as the chat shows it now. */
+const resume = (api: Api, chat: Chat, versionId: VersionId) =>
+  Effect.gen(function* () {
+    const me = yield* api.Whoami()
+    const slotId = (yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId!
+    const slot = yield* (yield* Reader).GetSlot({ userId: me.id, slotId })
+    const resumed = yield* api.ResumeVersion({ versionId, expectedRowVersion: slot.entry.rowVersion })
+    return resumed.version.id as VersionId
+  })
+
+/** Cuts a stopped reply's saved transcript just after the call, as a crash before its result was saved leaves it. */
+const cutAfterCall = (dataDir: string, versionId: VersionId, callId: string) =>
+  Effect.gen(function* () {
+    const [rows] = yield* fixtureSql(
+      dataDir,
+      [
+        {
+          sql: "SELECT p.rollout_id, p.transcript_json FROM rollout_payloads p JOIN versions v ON v.rollout_id = p.rollout_id WHERE v.id = ?",
+          params: [versionId]
+        }
+      ],
+      { readOnly: true }
+    )
+    const row = rows![0]!
+    const messages = JSON.parse(String(row["transcript_json"])) as Array<{ role: string; toolCallId?: string }>
+    const at = messages.findIndex((m) => m.role === "toolResult" && m.toolCallId === callId)
+    yield* fixtureSql(dataDir, [
+      {
+        sql: "UPDATE rollout_payloads SET transcript_json = ? WHERE rollout_id = ?",
+        params: [JSON.stringify(messages.slice(0, at)), String(row["rollout_id"])]
+      }
+    ])
+  })

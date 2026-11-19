@@ -78,6 +78,16 @@ export function ApprovalPanel({ step, version }: StepActionProps) {
   }
   const busy = answering !== null
   const rerun = approval.rerun
+  if (approval.restart)
+    return (
+      <RestartPanel
+        approval={approval}
+        restart={approval.restart}
+        answer={answer}
+        answering={answering}
+        error={action.error}
+      />
+    )
   return (
     <div
       data-approval={approval.toolCallId}
@@ -217,6 +227,82 @@ export function ApprovalPanel({ step, version }: StepActionProps) {
             Add a note
           </Button>
         )}
+      </div>
+    </div>
+  )
+}
+
+type Prompt = NonNullable<StepActionProps["step"]["approval"]>
+
+/**
+ * A subagent that couldn't be resumed with its reply (spec/SUBAGENTS.md §8): start its task again,
+ * knowing what its first attempt already changed, or leave it.
+ */
+function RestartPanel({
+  approval,
+  restart,
+  answer,
+  answering,
+  error
+}: {
+  approval: Prompt
+  restart: NonNullable<Prompt["restart"]>
+  answer: (choice: ApprovalAnswer) => Promise<void>
+  answering: ApprovalAnswer | null
+  error: Parameters<typeof ErrorAlert>[0]["error"]
+}) {
+  const busy = answering !== null
+  return (
+    <div
+      data-approval={approval.toolCallId}
+      data-restart={restart.handle}
+      role="group"
+      aria-label={approval.title}
+      className="ml-5 flex flex-col gap-2 rounded-md border border-warning/50 bg-surface p-3 text-sm"
+    >
+      <p className="font-medium [overflow-wrap:anywhere]">{approval.title}</p>
+      <Alert tone="warning">
+        <p>The app stopped while this subagent was working, and what it had done can't be carried on.</p>
+        {restart.effects.length > 0 ? (
+          <>
+            <p>Its first attempt already made these changes. Starting again may make them twice.</p>
+            <ul aria-label="Changes its first attempt made" className="list-disc pl-5">
+              {restart.effects.map((title, i) => (
+                <li key={i} className="[overflow-wrap:anywhere]">
+                  {title}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <p>It had already taken steps. Starting again repeats them.</p>
+        )}
+      </Alert>
+      {approval.rows.map((row) => (
+        <p key={row.label} className="text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">
+          <span className="text-muted">{row.label}: </span>
+          {row.value}
+        </p>
+      ))}
+      <ErrorAlert error={error} title="Your answer wasn’t taken" />
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="primary"
+          pending={answering === "allow"}
+          disabled={busy}
+          hint="Starts this subagent's task over from the beginning."
+          onClick={() => void answer("allow")}
+        >
+          Start the task again
+        </Button>
+        <Button
+          pending={answering === "deny"}
+          disabled={busy}
+          hint="Tells the assistant the subagent couldn't be resumed. Nothing runs again."
+          onClick={() => void answer("deny")}
+        >
+          Leave it
+        </Button>
       </div>
     </div>
   )

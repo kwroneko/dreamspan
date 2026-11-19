@@ -362,3 +362,57 @@ export const offeredByGrants = <T extends { readonly capability?: string | undef
     ]
     return { tools: tools.filter((tool) => !isOff(tool)), off }
   })
+
+/**
+ * Asks the user one question about a call that isn't a tool's own permit, with the same pending
+ * row, wait and answer as Ask first: a subagent that couldn't be resumed (spec/SUBAGENTS.md §8),
+ * "Start the task again" or "Leave it". `allow` only when the user chose to; Stop, Off and a
+ * stale answer are `deny`.
+ */
+export const askUser = (
+  deps: Pick<PermitDeps, "reader" | "writer" | "userId" | "chatId" | "rolloutId">,
+  input: {
+    readonly toolCallId: string
+    readonly capability: string
+    readonly prompt: Omit<ApprovalPrompt, "rolloutId" | "toolCallId" | "digest" | "capability">
+    readonly onWaiting: (prompt: ApprovalPrompt | null) => void
+  }
+): Effect.Effect<{ readonly allow: boolean; readonly note: string | null }> =>
+  Effect.gen(function* () {
+    const { writer, userId, rolloutId } = deps
+    const { toolCallId, capability } = input
+    const digest = argsDigest({ ask: input.prompt.title, capability, rows: input.prompt.rows })
+    const prompt: ApprovalPrompt = { ...input.prompt, rolloutId, toolCallId, digest, capability }
+    const key = keyOf(rolloutId, toolCallId)
+    if (waiters.has(key)) return { allow: false, note: null }
+    const deferred = Deferred.makeUnsafe<Answer>()
+    waiters.set(key, {
+      chatId: deps.chatId,
+      capability,
+      settle: (answer) => Deferred.doneUnsafe(deferred, Effect.succeed(answer))
+    })
+    const answered = yield* writer
+      .RequestToolApproval({ userId: userId as never, rolloutId, toolCallId, digest, capability, prompt })
+      .pipe(
+        Effect.andThen(Effect.sync(() => input.onWaiting(prompt))),
+        Effect.andThen(Deferred.await(deferred)),
+        Effect.onInterrupt(() =>
+          writer
+            .SettleToolApproval({ userId: userId as never, rolloutId, toolCallId, status: "cancelled" })
+            .pipe(Effect.ignore)
+        ),
+        Effect.ensuring(Effect.sync(() => (waiters.delete(key), input.onWaiting(null))))
+      )
+    if (answered.revoked || answered.answer === "deny") return { allow: false, note: answered.note }
+    const consumed = yield* writer.SettleToolApproval({
+      userId: userId as never,
+      rolloutId,
+      toolCallId,
+      status: "used"
+    })
+    return { allow: consumed, note: null }
+  }).pipe(
+    Effect.catchTag(["NotFound", "StorageError", "RpcClientError", "ApprovalRefused"], () =>
+      Effect.succeed({ allow: false, note: null })
+    )
+  )

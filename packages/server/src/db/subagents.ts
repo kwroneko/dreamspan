@@ -44,7 +44,7 @@ export interface SubagentSnapshot {
 }
 
 /** The rollouts a run carries on from, itself first: where its earlier calls' children were started. */
-const chainOf = (sql: SqlClient.SqlClient, rolloutId: string) =>
+export const chainOf = (sql: SqlClient.SqlClient, rolloutId: string) =>
   sql<{ id: string }>`
     WITH RECURSIVE chain(id, depth) AS (
       SELECT ${rolloutId}, 0
@@ -60,6 +60,7 @@ interface ChildRecord {
   readonly status: string
   readonly spawned_by_rollout_id: string
   readonly spawned_by_call_id: string
+  readonly parent_rollout_id: string | null
   readonly step_count: number
   readonly created_at: number
   readonly completed_at: number | null
@@ -75,7 +76,8 @@ interface ChildRecord {
 /** A run chain's children, newest first; `calls` narrows them to those calls. */
 const childrenOf = (sql: SqlClient.SqlClient, chain: ReadonlyArray<string>, calls?: ReadonlyArray<string>) =>
   sql<ChildRecord>`
-    SELECT r.id, r.agent_handle AS handle, r.status, r.spawned_by_rollout_id, r.spawned_by_call_id, r.step_count,
+    SELECT r.id, r.agent_handle AS handle, r.status, r.spawned_by_rollout_id, r.spawned_by_call_id,
+      r.parent_rollout_id, r.step_count,
       r.created_at, r.completed_at, r.error,
       p.context_snapshot_json AS snapshot, p.transcript_json AS transcript,
       (SELECT count(*) FROM llm_requests q WHERE q.rollout_id = r.id) AS requests,
@@ -121,8 +123,11 @@ const lastText = (messages: ReadonlyArray<AgentMessage>): string | null => {
   return null
 }
 
-/** A child as its row shows it, from its rollout, snapshot, transcript and ledger rows. */
-const rowOf = (r: ChildRecord): SubagentRow => {
+/**
+ * A child as its row shows it, from its rollout, snapshot, transcript and ledger rows. `earlier`:
+ * the runs of the same call it was resumed from (§8), whose time and cost it adds to its own.
+ */
+const rowOf = (r: ChildRecord, earlier: ReadonlyArray<ChildRecord> = []): SubagentRow => {
   const snapshot = parse<{
     readonly subagent?: SubagentSnapshot
     readonly agent?: { readonly tools?: ReadonlyArray<FrozenTool> }
@@ -147,12 +152,45 @@ const rowOf = (r: ChildRecord): SubagentRow => {
     status: statusOf(r.status, steps, r.error),
     steps,
     count: r.step_count,
-    ms: r.completed_at === null ? null : Math.max(0, r.completed_at - r.created_at),
-    cost:
-      !running && r.requests > 0 && r.unpriced === 0 && r.cost !== null && r.currency !== null
-        ? { amount: r.cost, currency: r.currency }
-        : null
+    ms:
+      r.completed_at === null
+        ? null
+        : [r, ...earlier].reduce((ms, c) => ms + Math.max(0, (c.completed_at ?? c.created_at) - c.created_at), 0),
+    cost: running ? null : costOf([r, ...earlier]),
+    ...(earlier.length > 0 ? { resumed: true } : {})
   }
+}
+
+/** What the runs' requests cost together, when every one was priced in one currency. */
+const costOf = (runs: ReadonlyArray<ChildRecord>) => {
+  const priced = runs.filter((c) => c.requests > 0)
+  const currency = priced[0]?.currency ?? null
+  if (priced.length === 0 || currency === null) return null
+  if (priced.some((c) => c.unpriced > 0 || c.cost === null || c.currency !== currency)) return null
+  return { amount: priced.reduce((sum, c) => sum + c.cost!, 0), currency }
+}
+
+/**
+ * Each call's subagent as it stands, newest first by call: the run that answers it now, then the
+ * runs it was resumed from (its `parent_rollout_id` links among the same call's children).
+ */
+const byCall = (children: ReadonlyArray<ChildRecord>) => {
+  const calls = new Map<string, Array<ChildRecord>>()
+  for (const child of children) {
+    const runs = calls.get(child.spawned_by_call_id)
+    if (runs) runs.push(child)
+    else calls.set(child.spawned_by_call_id, [child])
+  }
+  return new Map([...calls].map(([call, runs]) => [call, resumedChain(runs)]))
+}
+
+/** The newest run and the runs it carries on from, newest first. */
+const resumedChain = (runs: ReadonlyArray<ChildRecord>): ReadonlyArray<ChildRecord> => {
+  const byId = new Map(runs.map((r) => [r.id, r]))
+  const chain: Array<ChildRecord> = []
+  for (let run = runs[0]; run && chain.length < runs.length; run = byId.get(run.parent_rollout_id ?? ""))
+    chain.push(run)
+  return chain
 }
 
 /** The run behind a version, if it's the user's. */
@@ -175,6 +213,16 @@ const childOfVersion = (sql: SqlClient.SqlClient, userId: UserId, versionId: Ver
     return child
   })
 
+/** The runs of a child's call it was resumed from, newest first (§8). */
+const earlierRuns = (sql: SqlClient.SqlClient, userId: UserId, versionId: VersionId, child: ChildRecord) =>
+  Effect.gen(function* () {
+    const chain = yield* chainOf(sql, yield* versionRollout(sql, userId, versionId))
+    const runs = (yield* childrenOf(sql, chain, [child.spawned_by_call_id])).filter(
+      (c) => c.created_at <= child.created_at
+    )
+    return resumedChain([child, ...runs.filter((c) => c.id !== child.id)]).slice(1)
+  })
+
 /**
  * A run's tool steps with the subagents their `agent` calls started (spec/SUBAGENTS.md §7):
  * for the stored steps, read in the same transaction as them.
@@ -191,12 +239,10 @@ export const withSubagents = <S extends { readonly kind: string }>(
         : []
     )
     if (calls.length === 0) return steps
-    const children = yield* childrenOf(sql, yield* chainOf(sql, rolloutId), calls)
-    const byCall = new Map<string, ChildRecord>()
-    for (const child of children) if (!byCall.has(child.spawned_by_call_id)) byCall.set(child.spawned_by_call_id, child)
+    const children = byCall(yield* childrenOf(sql, yield* chainOf(sql, rolloutId), calls))
     return steps.map((s) => {
-      const child = s.kind === "tool" ? byCall.get((s as unknown as { id: string }).id) : undefined
-      return child ? { ...s, subagent: rowOf(child) } : s
+      const runs = s.kind === "tool" ? children.get((s as unknown as { id: string }).id) : undefined
+      return runs ? { ...s, subagent: rowOf(runs[0]!, runs.slice(1)) } : s
     })
   })
 
@@ -208,14 +254,17 @@ export const makeSubagentReadHandlers = Effect.gen(function* () {
         const [owned] = yield* sql<{ id: string }>`SELECT r.id FROM rollouts r JOIN chats c ON c.id = r.chat_id
           WHERE r.id = ${rolloutId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
         if (!owned) return yield* new NotFound({ entity: "rollout", id: rolloutId })
-        const [child] = yield* childrenOf(sql, yield* chainOf(sql, rolloutId), [toolCallId])
+        const [child, ...earlier] = resumedChain(yield* childrenOf(sql, yield* chainOf(sql, rolloutId), [toolCallId]))
         if (!child) return null
         return {
           rolloutId: child.id,
           handle: child.handle,
           status: child.status,
           partial: lastText(parse<ReadonlyArray<AgentMessage>>(child.transcript, [])),
-          row: rowOf(child)
+          row: rowOf(child, earlier),
+          transcript: child.transcript,
+          snapshot: child.snapshot,
+          spawnedBy: child.spawned_by_rollout_id
         }
       }).pipe(query("FindSubagent")),
 
@@ -236,7 +285,7 @@ export const makeSubagentReadHandlers = Effect.gen(function* () {
         const messages = parse<ReadonlyArray<AgentMessage>>(child.transcript, [])
         const requests = yield* rolloutUsage(sql, userId, child.id)
         return {
-          row: rowOf(child),
+          row: rowOf(child, yield* earlierRuns(sql, userId, versionId, child)),
           startedBy: { versionId, toolCallId: child.spawned_by_call_id },
           instructions: snapshot.subagent?.instructions ?? "",
           tools: tools.map((t) => ({
@@ -308,8 +357,11 @@ export const makeSubagentWriteHandlers = Effect.gen(function* () {
         if (parent.status !== "running") return { refused: "not_running" as const }
         if (!(yield* ownedModel(sql, userId, connectionId, modelId)))
           return yield* new NotFound({ entity: "model", id: modelId })
+        // A child resumed with the run (§8) is the same subagent, not another one.
         const [started] = yield* sql<{ n: number }>`
-          SELECT count(*) AS n FROM rollouts WHERE spawned_by_rollout_id = ${parentRolloutId}`
+          SELECT count(*) AS n FROM rollouts r WHERE r.spawned_by_rollout_id = ${parentRolloutId}
+            AND NOT EXISTS (SELECT 1 FROM rollouts s WHERE s.id = r.parent_rollout_id
+              AND s.spawned_by_call_id = r.spawned_by_call_id)`
         if (started!.n >= (perRun ?? SUBAGENTS_PER_RUN)) return { refused: "limit" as const }
         if (runCost !== undefined) {
           const [spent] = yield* sql<{ cost: number | null }>`
@@ -320,7 +372,7 @@ export const makeSubagentWriteHandlers = Effect.gen(function* () {
         // Numbered across the run chain, so a handle names one child wherever the run carried on.
         const chain = yield* chainOf(sql, parentRolloutId)
         const [same] = yield* sql<{ n: number }>`
-          SELECT count(*) AS n FROM rollouts
+          SELECT count(DISTINCT agent_handle) AS n FROM rollouts
           WHERE spawned_by_rollout_id IN (SELECT value FROM json_each(${JSON.stringify(chain)}))
             AND agent_handle LIKE ${`${type}-%`}`
         const handle = `${type}-${same!.n + 1}`

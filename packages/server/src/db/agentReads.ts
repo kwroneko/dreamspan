@@ -68,6 +68,7 @@ const contextNames = (json: string | null): Array<string> => {
   const names = JSON.parse(json) as { user?: string; char?: string; group?: ReadonlyArray<string> }
   return [...new Set([names.user ?? "", names.char ?? "", ...(names.group ?? [])].filter((n) => n.trim() !== ""))]
 }
+import { markSubagentEffects } from "./subagentEffects.ts"
 
 /** At most this many full-text matches in the chat, SearchChat starts from them. */
 const FEW = 2000
@@ -527,7 +528,8 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         >`SELECT e.* FROM rollout_effects e JOIN rollouts r ON r.id = e.rollout_id
         WHERE r.chat_id = ${chatId} AND ${before ? sql`(e.created_at, e.rollout_id, e.tool_call_id, e.seq) < (${before.createdAt}, ${before.rolloutId}, ${before.toolCallId}, ${before.seq})` : sql`1`}
         ORDER BY e.created_at DESC, e.rollout_id DESC, e.tool_call_id DESC, e.seq DESC LIMIT ${Math.max(1, Math.min(200, limit ?? 50))}`
-        return rows.map(toRolloutEffect)
+        // A subagent's change is listed with the reply that started it (spec/SUBAGENTS.md §8).
+        return yield* markSubagentEffects(sql, rows.map(toRolloutEffect))
       }).pipe(query("ListRolloutEffects")),
     RolloutToolReceipt: ({ userId, rolloutId, toolCallId }) =>
       Effect.gen(function* () {

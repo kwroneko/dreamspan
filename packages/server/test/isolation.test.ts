@@ -5529,6 +5529,21 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  ResumeSubagent: (_reader, actor, owner, writer) =>
+    refused(
+      writer.ResumeSubagent({
+        userId: actor.user.id,
+        parentRolloutId: owner.chat.rolloutId,
+        callId: "call_1",
+        sourceRolloutId: owner.chat.rolloutId,
+        rolloutId: "foreign-resumed-subagent",
+        transcript: "[]",
+        steps: 0,
+        keptCalls: [],
+        branch: null
+      }),
+      "NotFound"
+    ),
   FindSubagent: (reader, actor, owner) =>
     refused(
       reader.FindSubagent({ userId: actor.user.id, rolloutId: owner.chat.rolloutId, toolCallId: "call_1" }),

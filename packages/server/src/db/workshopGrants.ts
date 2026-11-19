@@ -12,6 +12,7 @@ import { query, transaction } from "./tx.ts"
 import { displayEndOf } from "./displayPath.ts"
 import type { StoryAt } from "@dreamspan/shared/chat.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
+import { childEffects, newestFirst } from "./subagentEffects.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { callsFrom } from "../agent/steps.ts"
 import { recoveredOperationText } from "./operationReceipts.ts"
@@ -277,11 +278,14 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const run = yield* ownedRollout(sql, userId, rolloutId)
         if (run.chat_id !== chatId) return yield* new NotFound({ entity: "workshop rollout", id: rolloutId })
-        return (yield* sql<
+        const own = (yield* sql<
           Parameters<typeof toRolloutEffect>[0]
         >`SELECT * FROM rollout_effects WHERE rollout_id = ${rolloutId} AND undone_at IS NULL ORDER BY created_at DESC, tool_call_id DESC, seq DESC`).map(
           toRolloutEffect
         )
+        // Its subagents' changes are the reply's too (spec/SUBAGENTS.md §8).
+        const children = yield* childEffects(sql, [rolloutId], { undone: false })
+        return children.length === 0 ? own : [...own, ...children].sort(newestFirst)
       }).pipe(query("RolloutEffectsForRun")),
     RolloutEffectFor: (input) =>
       Effect.gen(function* () {
@@ -334,7 +338,14 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
               run.rollout_id,
               run.transcript === null ? new Map() : callsFrom(JSON.parse(run.transcript) as ReadonlyArray<AgentMessage>)
             )
-        return rows
+        // The changes of the subagents its kept `agent` calls started (spec/SUBAGENTS.md §8): a
+        // call cut by carrying on from an earlier step leaves its subagents' with the old version.
+        const children = yield* childEffects(
+          sql,
+          runs.map((r) => r.id),
+          { calls: new Set(calls.keys()), undone: true }
+        )
+        const own = rows
           .filter((row) => {
             if (!calls.has(row.tool_call_id)) return false
             if (row.rollout_id === version.rollout_id) return true
@@ -348,6 +359,7 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
             )
           })
           .map(toRolloutEffect)
+        return children.length === 0 ? own : [...own, ...children].sort(newestFirst)
       }).pipe(query("VersionEffects"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })
