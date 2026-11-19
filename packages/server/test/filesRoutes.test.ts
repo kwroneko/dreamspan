@@ -2,6 +2,7 @@
 // the real boundary: upload with the batch's conflict answers, listing, Range reads, folders,
 // renames, deletion, and links planted in the tree listed but never followed. Synthetic files only.
 import { assert, describe, it } from "@effect/vitest"
+import { createHash } from "node:crypto"
 import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { FolderListing } from "@dreamspan/shared/files.ts"
@@ -47,14 +48,14 @@ describe("file routes", () => {
       assert.deepStrictEqual((yield* list("/files")).entries, [])
 
       const first = yield* upload("/files/thesis/notes.md", "Synthetic notes.")
-      assert.deepStrictEqual(yield* Effect.promise(() => first.json()), {
+      assert.deepInclude((yield* Effect.promise(() => first.json())) as object, {
         path: "/files/thesis/notes.md",
         outcome: "written"
       })
       // A taken name asks, then takes the batch's answer.
       assert.strictEqual((yield* upload("/files/thesis/notes.md", "Again.")).status, 409)
       const kept = yield* upload("/files/thesis/notes.md", "Again.", "keep")
-      assert.deepStrictEqual(yield* Effect.promise(() => kept.json()), {
+      assert.deepInclude((yield* Effect.promise(() => kept.json())) as object, {
         path: "/files/thesis/notes (2).md",
         outcome: "written"
       })
@@ -209,6 +210,78 @@ describe("file routes", () => {
       for (const name of names) assert.notInclude(name, "\\")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
+  it.live(
+    "the editor: a text file with its hash, a save only onto what it opened, and drafts that follow a move",
+    () => {
+      const config = testConfig()
+      const hash = (text: string) => createHash("sha256").update(text).digest("hex")
+      const save = (path: string, text: string, base: string) =>
+        call(`/files/upload?${new URLSearchParams({ path, conflict: "replace", base })}`, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: text
+        })
+      return Effect.gen(function* () {
+        const api = yield* client()
+        yield* upload("/files/draft/notes.md", "First text.")
+        const opened = yield* call("/files/text?path=%2Ffiles%2Fdraft%2Fnotes.md")
+        assert.strictEqual(opened.status, 200)
+        const file = (yield* Effect.promise(() => opened.json())) as { text: string; sha256: string; size: number }
+        assert.deepInclude(file, { text: "First text.", sha256: hash("First text."), size: 11 })
+
+        // A save names the hash it was typed on; the earlier content is kept as an editor version.
+        const saved = yield* save("/files/draft/notes.md", "Second text.", file.sha256)
+        assert.strictEqual(saved.status, 200)
+        assert.deepInclude((yield* Effect.promise(() => saved.json())) as object, {
+          outcome: "replaced",
+          sha256: hash("Second text.")
+        })
+        // The same base again: the file changed since, so nothing is written.
+        const stale = yield* save("/files/draft/notes.md", "Lost?", file.sha256)
+        assert.strictEqual(stale.status, 409)
+        assert.deepInclude((yield* Effect.promise(() => stale.json())) as object, { changed: true })
+        assert.strictEqual(yield* body(yield* call("/files/raw?path=%2Ffiles%2Fdraft%2Fnotes.md")), "Second text.")
+        // A base names a file that is there: a missing one isn't made by a save.
+        assert.strictEqual((yield* save("/files/draft/none.md", "x", file.sha256)).status, 409)
+        assert.strictEqual((yield* save("/files/draft/notes.md", "x", "nothex")).status, 400)
+
+        // Bytes that aren't UTF-8 aren't opened as text; a missing file is 404.
+        yield* call(`/files/upload?${new URLSearchParams({ path: "/files/draft/blob.txt", conflict: "ask" })}`, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: new Uint8Array([0xff, 0xfe, 0x00, 0xc3])
+        })
+        assert.strictEqual((yield* call("/files/text?path=%2Ffiles%2Fdraft%2Fblob.txt")).status, 415)
+        assert.strictEqual((yield* call("/files/text?path=%2Ffiles%2Fdraft%2Fgone.txt")).status, 404)
+        assert.strictEqual((yield* call("/files/text?path=%2Fetc%2Fpasswd")).status, 400)
+
+        // An unsaved edit is a draft of its path; moving the folder in the app takes it along.
+        const draft = yield* api.SaveFileDraft({
+          path: "/files/draft/notes.md",
+          draftId: null,
+          content: "Unsaved text.",
+          expectedRowVersion: null,
+          expectedSession: null,
+          baseSha256: hash("Second text.")
+        })
+        assert.strictEqual(draft.baseRevision, hash("Second text."))
+        assert.strictEqual((yield* json("/files/move", { from: "/files/draft", to: "/files/moved" })).status, 200)
+        assert.isNull(yield* api.GetFileDraft({ path: "/files/draft/notes.md" }))
+        const moved = yield* api.GetFileDraft({ path: "/files/moved/notes.md" })
+        assert.strictEqual(moved?.content, "Unsaved text.")
+        // Paths outside the user's Files name nothing.
+        const outside = yield* Effect.flip(api.GetFileDraft({ path: "/files/../etc/passwd" }))
+        assert.strictEqual(outside._tag, "NotFound")
+        const ended = yield* api.EndFileDraft({
+          path: "/files/moved/notes.md",
+          draftId: moved!.id,
+          expectedRowVersion: moved!.rowVersion,
+          outcome: "committed"
+        })
+        assert.strictEqual(ended.status, "committed")
+      }).pipe(Effect.provide(serverLayer(config)))
+    }
+  )
 
   it.live("refuses paths, links and origins that would leave the account's tree", () => {
     const config = testConfig()

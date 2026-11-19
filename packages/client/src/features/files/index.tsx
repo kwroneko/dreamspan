@@ -17,7 +17,7 @@ import { fileAttachments } from "../chat/fileAttachments.ts"
 import { userNoticeReceivers } from "../noticeContributions.tsx"
 import { filesNoticeReceiver } from "./live.ts"
 import { filesSources, httpFilesSource, useFilesSource } from "./source.ts"
-import { registerViewers } from "./viewers.tsx"
+import { AttachmentViewer, registerViewers, viewerFor } from "./viewers.tsx"
 
 /** A file of Files shown where it is: its folder in the Files page, with it open. */
 const showInFiles = (path: string) => filesHref(parentOf(path), nameOf(path))
@@ -63,7 +63,9 @@ export const register = () => [
       }
     },
     copyUrl: httpFilesSource.attachmentUrl,
-    showHref: showInFiles
+    showHref: showInFiles,
+    opens: (name: string) => viewerFor(name) !== null,
+    Viewer: AttachmentViewer
   }),
   ...registerViewers(),
   chatPanels.register({

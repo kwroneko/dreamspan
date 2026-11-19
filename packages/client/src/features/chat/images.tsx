@@ -17,6 +17,7 @@ import type { ImagesLeftOut } from "@dreamspan/shared/inspectorApi.ts"
 import { useSession } from "../../session.ts"
 import { uuid } from "../../uuid.ts"
 import { Button, LinkButton } from "../../ui/Button.tsx"
+import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { useNavigate } from "@tanstack/react-router"
 import { ATTACHMENT_MAX_BYTES, nameOf as fileNameOf } from "@dreamspan/shared/files.ts"
 import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
@@ -226,7 +227,8 @@ function AttachedThumbnail({
   item: AttachmentItem
   onPeek: (picture: Portrait, file: Blob | undefined) => void
 }) {
-  if (item.kind === "file") return <FileTile name={item.name} href={item.fileHref ?? null} />
+  if (item.kind === "file")
+    return <FileTile name={item.name} href={item.fileHref ?? null} view={item.fileView ?? null} />
   const picture = item.mediaId ? attachmentPicture(item.mediaId, item.name) : null
   const peekable = picture !== null || item.file !== undefined
   return (
@@ -264,8 +266,23 @@ function AttachedThumbnail({
  * A file that isn't an image (spec/FILES-AND-ENVIRONMENT.md §6.1): its type icon and name. With
  * `href`, a link that downloads the copy sent with the message; without, it's still being added.
  */
-function FileTile({ name, href, show }: { name: string; href: string | null; show?: string | null }) {
+function FileTile({
+  name,
+  href,
+  view,
+  show
+}: {
+  name: string
+  href: string | null
+  /** The copy as sent, inline: it opens in the viewer for its type, where there is one. */
+  view?: string | null
+  show?: string | null
+}) {
   const navigate = useNavigate()
+  const attachments = useFileAttachments()
+  const [open, setOpen] = useState(false)
+  const Viewer = attachments?.Viewer
+  const opens = view !== null && view !== undefined && Viewer !== undefined && (attachments?.opens?.(name) ?? false)
   const body = (
     <>
       <Icon name="file" className="shrink-0 text-muted" />
@@ -276,7 +293,40 @@ function FileTile({ name, href, show }: { name: string; href: string | null; sho
     "flex h-11 max-w-60 min-w-0 items-center gap-2 rounded-md border border-border px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
   return (
     <span className="flex min-w-0 items-center gap-1">
-      {href ? (
+      {href && opens && Viewer && view ? (
+        <>
+          <Tooltip label="Opens the copy of this file as it was attached.">
+            <button
+              type="button"
+              className={`${tile} hover:bg-hover`}
+              aria-label={`Open ${name}`}
+              onClick={() => setOpen(true)}
+            >
+              {body}
+            </button>
+          </Tooltip>
+          <Dialog open={open} onOpenChange={setOpen} title={name} description="As it was attached." wide>
+            {open && <Viewer name={name} url={view} />}
+            <DialogActions>
+              <Button
+                hint="Saves the copy as it was attached on this device."
+                onClick={() => {
+                  const link = document.createElement("a")
+                  link.href = href
+                  link.download = name
+                  link.rel = "noopener"
+                  document.body.append(link)
+                  link.click()
+                  link.remove()
+                }}
+              >
+                <Icon name="download" />
+                Download
+              </Button>
+            </DialogActions>
+          </Dialog>
+        </>
+      ) : href ? (
         <Tooltip label="Downloads the copy of this file as it was attached.">
           <a
             href={href}
@@ -316,6 +366,8 @@ interface AttachmentItem {
   /** A file that isn't an image (§6.1): shown by its name, opening its copy at `fileHref`. */
   readonly kind?: "file"
   readonly fileHref?: string | null
+  /** The copy as sent, inline, for its viewer. */
+  readonly fileView?: string | null
   readonly thumbnail: ReactNode
   readonly sending?: boolean
   /** Its stored image, once uploaded. */
@@ -473,7 +525,8 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
               ...(image.kind === "file"
                 ? {
                     kind: "file" as const,
-                    fileHref: attachments?.copyUrl(image.mediaId, image.name ?? image.altText ?? "file", true) ?? null
+                    fileHref: attachments?.copyUrl(image.mediaId, image.name ?? image.altText ?? "file", true) ?? null,
+                    fileView: attachments?.copyUrl(image.mediaId, image.name ?? image.altText ?? "file") ?? null
                   }
                 : {}),
               thumbnail: (
@@ -901,7 +954,9 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
                             fileHref:
                               entry.mediaId && state.attacher
                                 ? state.attacher.copyUrl(entry.mediaId, entry.name, true)
-                                : null
+                                : null,
+                            fileView:
+                              entry.mediaId && state.attacher ? state.attacher.copyUrl(entry.mediaId, entry.name) : null
                           }
                         : {}),
                       ...(entry.sending ? { sending: true } : {})
@@ -1041,6 +1096,7 @@ function Thumbnails({
               <FileTile
                 name={file.name ?? file.altText ?? "File"}
                 href={attachments ? attachments.copyUrl(file.mediaId, file.name ?? file.altText ?? "file", true) : null}
+                view={attachments ? attachments.copyUrl(file.mediaId, file.name ?? file.altText ?? "file") : null}
                 show={attachments && file.path ? attachments.showHref(file.path) : null}
               />
             </li>

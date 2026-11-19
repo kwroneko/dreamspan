@@ -12,10 +12,12 @@ import { operationWriter, installOperationRuntime } from "./agent/operations.ts"
 import { installLibraryImport } from "./agent/libraryImport.ts"
 import { makeWorkshopHandlers } from "./api/workshop.ts"
 import { makeFilesQuotaHandlers } from "./api/filesQuota.ts"
+import { makeFilesHandlers } from "./api/files.ts"
 import {
   AuthenticatedAgentApi,
   AuthenticatedWorkshopApi,
   AuthenticatedFilesQuotaApi,
+  AuthenticatedFilesApi,
   AuthenticatedChatEventsApi,
   AuthenticatedMessageVersionApi,
   AuthenticatedMoveApi,
@@ -248,6 +250,7 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedAgentApi.toLayer(makeAgentHandlers),
   AuthenticatedWorkshopApi.toLayer(makeWorkshopHandlers),
   AuthenticatedFilesQuotaApi.toLayer(makeFilesQuotaHandlers),
+  AuthenticatedFilesApi.toLayer(makeFilesHandlers),
   AuthenticatedPluginApi.toLayer(makePluginHandlers),
   AuthenticatedDecisionApi.toLayer(makeDecisionHandlers),
   AuthenticatedThinkingApi.toLayer(makeThinkingHandlers),

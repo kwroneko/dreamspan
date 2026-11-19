@@ -1,19 +1,28 @@
 // What a file opens in (spec/FILES-AND-ENVIRONMENT.md §8.2), by type: a registry, so a plugin can
-// add or replace a viewer (the full set, PDF and the editor among them, is track B2). Built in:
-// text and code (read-only here), images, video and audio. Anything else offers a download.
-import { viewOf, type FileView } from "@dreamspan/shared/files.ts"
-import { useEffect, useState, type ComponentType } from "react"
+// add or replace a viewer. Built in: the text editor (text and code, Markdown with its preview,
+// CSV and TSV as a table, HTML as source with a sandboxed preview), images, video and audio, and
+// PDF. Anything else offers a download. A viewer shows either a file of Files (`path`, which it may
+// change unless `readOnly`) or an attachment's copy as sent (`path` null: read-only).
+import type { FileView } from "@dreamspan/shared/files.ts"
+import { viewOf } from "@dreamspan/shared/files.ts"
+import { lazy, Suspense, useState, type ComponentType } from "react"
 import { makeRegistry } from "../../registry.ts"
-import { CodeEditor } from "../../ui/CodeEditor.tsx"
 import { ImageViewer, type Zoom } from "../../ui/ImageViewer.tsx"
 import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import type { FilesSource } from "./source.ts"
+import type { TextMode } from "./TextViewer.tsx"
 
-interface ViewerProps {
-  readonly path: string
+export interface ViewerProps {
   readonly name: string
   readonly size: number
-  readonly source: FilesSource
+  /** Where its bytes load from. */
+  readonly url: string
+  /** Its path in Files, or null for an attachment's copy as sent. */
+  readonly path: string | null
+  /** The store it's in, for a file of Files. */
+  readonly source: FilesSource | null
+  /** Shown only: a folder shared as Can view, or a copy as sent. */
+  readonly readOnly: boolean
 }
 
 interface FileViewer {
@@ -28,81 +37,63 @@ export const fileViewers = makeRegistry<FileViewer>()
 /** The viewer for a file, or null: it downloads. */
 export const viewerFor = (name: string) => fileViewers.get(viewOf(name)) ?? null
 
-/** More than this shows as a download instead: a viewer that pages through big text is B2's. */
-const TEXT_LIMIT = 2 * 1024 * 1024
+/** An attachment's copy as sent in the viewer for its type, read-only (§6.1): the chat's file tiles open it. */
+export function AttachmentViewer({ name, url }: { readonly name: string; readonly url: string }) {
+  const Viewer = viewerFor(name)?.component
+  return Viewer ? <Viewer name={name} url={url} size={-1} path={null} source={null} readOnly /> : null
+}
 
-function TextViewer({ path, name, size, source }: ViewerProps) {
-  const [text, setText] = useState<{ for: string; value: string } | { for: string; error: string } | null>(null)
-  const tooBig = size > TEXT_LIMIT
-  useEffect(() => {
-    if (tooBig) return
-    let live = true
-    fetch(source.rawUrl(path), { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`The server answered ${response.status}.`)
-        return response.text()
-      })
-      .then(
-        (value) => live && setText({ for: path, value }),
-        (error: unknown) =>
-          live && setText({ for: path, error: error instanceof Error ? error.message : String(error) })
-      )
-    return () => {
-      live = false
-    }
-  }, [path, source, tooBig])
-  if (tooBig) return <NoViewer name={name} size={size} why="It's too large to show here." />
-  const shown = text?.for === path ? text : null
-  if (shown === null)
-    return (
-      <p role="status" className="text-sm text-muted">
-        Loading {name}…
-      </p>
-    )
-  if ("error" in shown)
-    return (
-      <p role="alert" className="text-sm text-danger">
-        {name} couldn’t be read: {shown.error}
-      </p>
-    )
+const Text = lazy(() => import("./TextViewer.tsx").then((m) => ({ default: m.TextViewer })))
+const Pdf = lazy(() => import("./PdfViewer.tsx").then((m) => ({ default: m.PdfViewer })))
+
+function Loading({ name }: { name: string }) {
   return (
-    <CodeEditor
-      label={`Contents of ${name}`}
-      value={shown.value}
-      base={shown.value}
-      readOnly
-      mono
-      textActions={false}
-      expand={false}
-      rows={16}
-      onChange={() => undefined}
-    />
+    <p role="status" className="text-sm text-muted">
+      Loading {name}…
+    </p>
   )
 }
 
-function PictureViewer({ path, name, source }: ViewerProps) {
+const textViewer = (mode: TextMode) =>
+  function TextFileViewer(props: ViewerProps) {
+    return (
+      <Suspense fallback={<Loading name={props.name} />}>
+        <Text {...props} mode={mode} />
+      </Suspense>
+    )
+  }
+
+function PdfFileViewer(props: ViewerProps) {
+  return (
+    <Suspense fallback={<Loading name={props.name} />}>
+      <Pdf {...props} />
+    </Suspense>
+  )
+}
+
+function PictureViewer({ url, name }: ViewerProps) {
   const [zoom, setZoom] = useState<Zoom>("fit")
   return (
     <div className="h-[min(70vh,40rem)] min-h-64 overflow-hidden rounded-md border border-border bg-canvas">
-      <ImageViewer src={source.rawUrl(path)} alt={name} zoom={zoom} onZoom={setZoom} initials={name.slice(0, 2)} />
+      <ImageViewer src={url} alt={name} zoom={zoom} onZoom={setZoom} initials={name.slice(0, 2)} />
     </div>
   )
 }
 
-function VideoViewer({ path, name, source }: ViewerProps) {
+function VideoViewer({ url, name }: ViewerProps) {
   return (
     <video
       controls
       preload="metadata"
       aria-label={name}
-      src={source.rawUrl(path)}
+      src={url}
       className="max-h-[70vh] w-full rounded-md border border-border bg-canvas"
     />
   )
 }
 
-function AudioViewer({ path, name, source }: ViewerProps) {
-  return <audio controls preload="metadata" aria-label={name} src={source.rawUrl(path)} className="w-full" />
+function AudioViewer({ url, name }: ViewerProps) {
+  return <audio controls preload="metadata" aria-label={name} src={url} className="w-full" />
 }
 
 /** A file no viewer shows: what it is, and the way to get it. The header's Download is the action. */
@@ -117,7 +108,11 @@ export function NoViewer({ name, size, why }: { name: string; size: number; why?
 }
 
 export const registerViewers = () => [
-  fileViewers.register({ id: "text", component: TextViewer }),
+  fileViewers.register({ id: "text", component: textViewer("text") }),
+  fileViewers.register({ id: "markdown", component: textViewer("markdown") }),
+  fileViewers.register({ id: "table", component: textViewer("table") }),
+  fileViewers.register({ id: "html", component: textViewer("html") }),
+  fileViewers.register({ id: "pdf", component: PdfFileViewer }),
   fileViewers.register({ id: "image", component: PictureViewer }),
   fileViewers.register({ id: "video", component: VideoViewer }),
   fileViewers.register({ id: "audio", component: AudioViewer })

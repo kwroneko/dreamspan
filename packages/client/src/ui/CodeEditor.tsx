@@ -36,6 +36,8 @@ export interface CodeEditorProps {
   /** A CSS height the box is at least, overriding `rows`: a field opened large. */
   minHeight?: string | undefined
   mono?: boolean | undefined
+  /** A syntax mode (`codeLanguages.ts`, by `languageOf`), loaded when first needed. */
+  language?: string | null | undefined
   readOnly?: boolean | undefined
   onChange: (value: string) => void
   onSelectionRangeChange?: ((range: { readonly at: number; readonly length: number }) => void) | undefined

@@ -7,7 +7,12 @@ import {
   Changed,
   Deleted,
   FILES_ROUTES,
+  FileVersionEntry,
   FolderListing,
+  FolderShare,
+  RestoredVersion,
+  type ShareMode,
+  TextFile,
   UploadOutcome,
   type UploadConflict
 } from "@dreamspan/shared/files.ts"
@@ -23,6 +28,12 @@ export class NameTaken extends FilesError {}
 
 /** There's no room left for it in the account's Files quota (507). */
 export class NoRoom extends FilesError {}
+
+/** An editor save found the file changed since the text was typed on it (409 `{ changed: true }`). */
+export class FileChanged extends FilesError {}
+
+/** The file can't be opened as text: too large to edit (413), or not UTF-8 (415). */
+class NotText extends FilesError {}
 
 export interface FilesSource {
   readonly id: string
@@ -46,6 +57,22 @@ export interface FilesSource {
   readonly attach: (path: string) => Promise<AttachedFile>
   /** The URL an attachment's copy as sent opens at, or downloads from. */
   readonly attachmentUrl: (mediaId: string, name: string, download?: boolean) => string
+  /** A text file for the editor, with the hash a save names (§8.2). */
+  readonly readText: (path: string) => Promise<TextFile>
+  /**
+   * Writes the editor's text over the file, only while it still has the hash `base`: otherwise
+   * `FileChanged`. The earlier content is kept as a version.
+   */
+  readonly saveText: (path: string, text: string, base: string) => Promise<UploadOutcome>
+  /** Who a folder of yours is shared with (§1.4). A source without sharing leaves these out. */
+  readonly shares?: (path: string) => Promise<ReadonlyArray<FolderShare>>
+  /** Shares a folder with an account by its name, or changes how; refused for an unknown name. */
+  readonly share?: (path: string, handle: string, mode: ShareMode) => Promise<FolderShare>
+  readonly unshare?: (shareId: string) => Promise<void>
+  /** A file's earlier contents, newest first (§1.3). */
+  readonly versions?: (path: string) => Promise<ReadonlyArray<FileVersionEntry>>
+  /** Puts a version back; what was there is kept as a version, so restoring that one undoes it. */
+  readonly restoreVersion?: (path: string, versionId: string) => Promise<RestoredVersion>
 }
 
 export const filesSources = makeRegistry<FilesSource>()
@@ -61,13 +88,16 @@ const failure = async (response: Response) => {
   const text = await response.text().catch(() => "")
   let message = text.trim()
   try {
-    const body = JSON.parse(text) as { message?: unknown; taken?: unknown }
+    const body = JSON.parse(text) as { message?: unknown; taken?: unknown; changed?: unknown }
     if (body.taken === true) return new NameTaken("That name is taken.")
     if (typeof body.message === "string") message = body.message
+    if (body.changed === true) return new FileChanged(message || "It changed since you opened it.")
   } catch {
     // Plain text, or nothing.
   }
   if (response.status === 507) return new NoRoom(message || "There's no room left for files.")
+  if (response.status === 413 || response.status === 415)
+    return new NotText(message || "This file can't be opened as text.")
   if (response.status === 404 && message === "") message = "Not found. It may have been moved or deleted."
   return new FilesError(message || `The server answered ${response.status}.`)
 }
@@ -105,6 +135,10 @@ const send = (url: string, file: Blob, onProgress?: (sent: number) => void) =>
     request.send(file)
   })
 
+const done = async (response: Response) => {
+  if (!response.ok) throw await failure(response)
+}
+
 export const httpFilesSource: FilesSource = {
   id: "files.http",
   order: 100,
@@ -124,5 +158,30 @@ export const httpFilesSource: FilesSource = {
   zipUrl: (path) => `${FILES_ROUTES.zip}?${new URLSearchParams({ path })}`,
   attach: async (path) => json(AttachedFile, await post(FILES_ROUTES.attach, { path })),
   attachmentUrl: (id, name, download = false) =>
-    `${FILES_ROUTES.attachment}?${new URLSearchParams(download ? { id, name, download: "1" } : { id, name })}`
+    `${FILES_ROUTES.attachment}?${new URLSearchParams(download ? { id, name, download: "1" } : { id, name })}`,
+  readText: async (path) =>
+    json(TextFile, await reach(`${FILES_ROUTES.text}?${new URLSearchParams({ path })}`, { cache: "no-store" })),
+  saveText: async (path, text, base) =>
+    json(
+      UploadOutcome,
+      await reach(`${FILES_ROUTES.upload}?${new URLSearchParams({ path, conflict: "replace", base })}`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: new TextEncoder().encode(text)
+      })
+    ),
+  shares: async (path) =>
+    json(
+      Schema.Array(FolderShare),
+      await reach(`${FILES_ROUTES.shares}?${new URLSearchParams({ path })}`, { cache: "no-store" })
+    ),
+  share: async (path, handle, mode) => json(FolderShare, await post(FILES_ROUTES.share, { path, handle, mode })),
+  unshare: async (shareId) => done(await post(FILES_ROUTES.unshare, { shareId })),
+  versions: async (path) =>
+    json(
+      Schema.Array(FileVersionEntry),
+      await reach(`${FILES_ROUTES.versions}?${new URLSearchParams({ path })}`, { cache: "no-store" })
+    ),
+  restoreVersion: async (path, versionId) =>
+    json(RestoredVersion, await post(FILES_ROUTES.restoreVersion, { path, versionId }))
 }

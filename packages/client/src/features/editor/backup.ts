@@ -9,6 +9,7 @@ import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { UserDraftSave, EditorDraftSave } from "@dreamspan/shared/editorApi.ts"
 import { SummaryDraftSave } from "@dreamspan/shared/lcm.ts"
 import { MessageDraftSave } from "@dreamspan/shared/chatApi.ts"
+import { FileDraftSave } from "@dreamspan/shared/filesApi.ts"
 import { Option, Schema } from "effect"
 
 const PendingSave = Schema.Union([
@@ -32,6 +33,7 @@ const PendingSave = Schema.Union([
   }),
   Schema.Struct({ kind: Schema.Literal("summary"), payload: SummaryDraftSave }),
   Schema.Struct({ kind: Schema.Literal("message"), payload: MessageDraftSave }),
+  Schema.Struct({ kind: Schema.Literal("file"), payload: FileDraftSave }),
   // Legacy account-setting copies transfer to user_field drafts when the editor opens.
   Schema.Struct({ kind: Schema.Literal("setting"), payload: Schema.Struct({ content: Schema.String }) })
 ])
@@ -250,7 +252,8 @@ export const flushCopies = async (userId: string) => {
       drafts: save.kind === "editor" ? [save.payload] : [],
       composers: save.kind === "composer" ? [save.payload] : [],
       summaries: save.kind === "summary" ? [save.payload] : [],
-      messages: save.kind === "message" ? [save.payload] : []
+      messages: save.kind === "message" ? [save.payload] : [],
+      files: save.kind === "file" ? [save.payload] : []
     })
     try {
       const response = await fetch("/library/drafts", {

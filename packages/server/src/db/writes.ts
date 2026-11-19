@@ -116,6 +116,8 @@ export const makeWriteHandlers = (bin: Bin) =>
       user_field: (userId) => sql`SELECT count(*) AS n FROM users WHERE id = ${userId}`,
       // A source's card is the user's to try; the source and the card are checked where its drafts are read.
       remote_card: (userId) => sql`SELECT count(*) AS n FROM users WHERE id = ${userId}`,
+      // A path of the user's own Files, checked against the tree by the caller (api/fileDrafts.ts).
+      file: (userId) => sql`SELECT count(*) AS n FROM users WHERE id = ${userId}`,
       composer: (userId, key) => sql`SELECT count(*) AS n FROM forks f JOIN chats c ON c.id = f.chat_id
         WHERE f.id = ${key.field} AND c.id = ${key.targetId} AND c.owner_user_id = ${userId}
           AND f.deleted_at IS NULL AND c.deleted_at IS NULL`,

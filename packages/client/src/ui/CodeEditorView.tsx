@@ -7,6 +7,7 @@ import type { CodeEditorProps } from "./CodeEditor.tsx"
 import { changeGutter, comparisonBase, lineChanges, quietMarkers } from "./codeChanges.ts"
 import { editorExtensions } from "./editorExtensions.ts"
 import { proseTheme } from "./codeTheme.ts"
+import { loadLanguage } from "./codeLanguages.ts"
 import { FieldRevertButton } from "./FieldRevertButton.tsx"
 import { Dialog } from "./Dialog.tsx"
 import { chromeButton, FieldFrame } from "./FieldFrame.tsx"
@@ -172,6 +173,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
   const root = host.shadowRoot ?? host.attachShadow({ mode: "open" })
   const options = new Compartment()
   const contributions = new Compartment()
+  const syntax = new Compartment()
   let props = initial
   let applying = false
   let deferred: string | null = null
@@ -191,6 +193,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       extensions: [
         proseTheme,
         contributions.of([]),
+        syntax.of([]),
         EditorView.lineWrapping,
         history(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
@@ -262,6 +265,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
   let flash: CodeEditorProps["flash"]
   let fade: ReturnType<typeof setTimeout> | undefined
   let base: string | null = null
+  let language: string | null = null
   const update = (next: CodeEditorProps) => {
     const oldProps = props
     props = next
@@ -300,6 +304,13 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       view.dispatch({ effects: [setFlash.of({ from, to }), EditorView.scrollIntoView(to, { y: "nearest" })] })
       clearTimeout(fade)
       fade = setTimeout(() => view.dispatch({ effects: setFlash.of(null) }), 1600)
+    }
+    if ((next.language ?? null) !== language) {
+      const wanted = next.language ?? null
+      language = wanted
+      void (wanted === null ? Promise.resolve([]) : loadLanguage(wanted)).then((extension) => {
+        if (language === wanted) view.dispatch({ effects: syntax.reconfigure(extension) })
+      })
     }
     if (base !== next.base) {
       base = next.base
@@ -343,6 +354,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
     },
     destroy: () => {
       extensionVersion++
+      language = "\0gone" // A mode still loading isn't applied to a destroyed view.
       unsubscribe()
       clearTimeout(fade)
       view.destroy()

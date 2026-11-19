@@ -473,6 +473,19 @@ const CloseLlmRequest = Schema.Struct({
 })
 
 // --- Library import
+/** A folder shared by its owner with another account (fileShares.ts); `handle` names the other side. */
+const FileShare = Schema.Struct({
+  id: Schema.String,
+  ownerUserId: Schema.String,
+  path: Schema.String,
+  granteeUserId: Schema.String,
+  mode: Schema.Literals(["view", "edit"]),
+  createdAt: Schema.Number,
+  /** The grantee's, in the owner's list; the owner's, in the grantee's. */
+  handle: Schema.String,
+  displayName: Schema.String
+})
+
 export const Sha256 = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
 
 /** A file that came with an imported one, already written to media storage. */
@@ -2898,6 +2911,41 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     },
     success: Schema.Struct({ mediaId: Schema.String, mime: Schema.String }),
     error: StorageError
+  }),
+  /**
+   * A file or folder renamed or moved in the app (spec/FILES-AND-ENVIRONMENT.md §1.1): the stored
+   * references to it and to what's inside it follow, in one transaction: unsaved edits (`file`
+   * drafts). One already at the new path keeps its place.
+   */
+  Rpc.make("MoveFileReferences", {
+    payload: {
+      userId: UserId,
+      from: Schema.String.check(Schema.isMaxLength(4096)),
+      to: Schema.String.check(Schema.isMaxLength(4096))
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
+  /**
+   * Shares a folder of the owner's Files with another enabled account (spec/FILES-AND-ENVIRONMENT.md
+   * §1.4), Can view or Can edit; sharing it again with the same account changes the mode.
+   */
+  Rpc.make("ShareFolder", {
+    payload: {
+      userId: UserId,
+      path: Schema.String.check(Schema.isMaxLength(4096)),
+      inode: Schema.NullOr(Schema.Number),
+      granteeUserId: UserId,
+      mode: Schema.Literals(["view", "edit"])
+    },
+    success: FileShare,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The owner stops sharing: the other account's next look no longer finds it. */
+  Rpc.make("StopSharingFolder", {
+    payload: { userId: UserId, shareId: Schema.String },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
   }),
   /**
    * Retention (§1.3): file versions made before `before` (one account's, or every account's),
@@ -6009,6 +6057,33 @@ const ReadOpsOwn = RpcGroup.make(
       /** Folders moved in the app, oldest first, for finding a branch's stored folder again. */
       moves: Schema.Array(Schema.Struct({ from: Schema.String, to: Schema.String }))
     }),
+    error: StorageError
+  }),
+  /** Every folder the owner shares, with whom (fileShares.ts). */
+  Rpc.make("SharedByMe", {
+    payload: { userId: UserId },
+    success: Schema.Array(FileShare),
+    error: StorageError
+  }),
+  /** The folders other enabled accounts share with this one, each with its owner's handle. */
+  Rpc.make("SharesWithMe", {
+    payload: { userId: UserId },
+    success: Schema.Array(FileShare),
+    error: StorageError
+  }),
+  /** A file's earlier contents, newest first (§1.3), each with the account that acted. */
+  Rpc.make("ListFileVersions", {
+    payload: { userId: UserId, path: Schema.String, limit: Schema.Number },
+    success: Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        createdAt: Schema.Number,
+        origin: Schema.String,
+        byteSize: Schema.Number,
+        hasContent: Schema.Boolean,
+        actor: Schema.NullOr(Schema.Struct({ handle: Schema.String, displayName: Schema.String }))
+      })
+    ),
     error: StorageError
   }),
   /** A file or folder in the user's bin, with where it was (fileVersions.ts). */

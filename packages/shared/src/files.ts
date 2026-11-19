@@ -23,6 +23,16 @@ export const FILES_ROUTES = {
   move: "/files/move",
   /** POST `{ path }`: to the bin when the listing said so, otherwise gone (`Deleted`). */
   delete: "/files/delete",
+  /** GET `?path=`: who a folder of yours is shared with (`FolderShare[]`). */
+  shares: "/files/shares",
+  /** POST `{ path, handle, mode }`: shares a folder of yours with an account (`FolderShare`). */
+  share: "/files/share",
+  /** POST `{ shareId }`: stops sharing. */
+  unshare: "/files/unshare",
+  /** GET `?path=`: a file's versions, newest first (`FileVersionEntry[]`). */
+  versions: "/files/versions",
+  /** POST `{ path, versionId }`: a version's content back at the path; what was there is kept (`RestoredVersion`). */
+  restoreVersion: "/files/versions/restore",
   /** POST `{ binItemId }`: a deleted file or folder put back (`Changed`). */
   restore: "/files/restore",
   /** GET `?path=`: a folder and everything in it as one zip, streamed (links and special files left out). */
@@ -33,8 +43,30 @@ export const FILES_ROUTES = {
    */
   attach: "/files/attach",
   /** GET `?id=&name=` (and `&download=1`): an attachment's copy as sent, served as `raw` serves files. */
-  attachment: "/files/attachment"
+  attachment: "/files/attachment",
+  /**
+   * GET `?path=`: a text file for the editor (`TextFile`), with the hash of its bytes, which an
+   * editor save names as `base` (§8.2). At most `TEXT_OPEN_MAX_BYTES`; 415 for bytes that aren't UTF-8.
+   */
+  text: "/files/text"
 } as const
+
+/** The largest text file the editor opens whole; a larger one is shown read-only, a page at a time (§8.2). */
+export const TEXT_OPEN_MAX_BYTES = 5 * 1024 * 1024
+
+/** The longest text the editor lets you change: what an unsaved edit's draft can hold. */
+export const TEXT_EDIT_MAX_CHARS = 1_000_000
+
+/** A text file as the editor opens it: its text, and what a save checks it against. */
+export const TextFile = Schema.Struct({
+  path: Schema.String,
+  text: Schema.String,
+  /** SHA-256 of the file's bytes, hex: an editor save sends it back as `base`. */
+  sha256: Schema.String,
+  size: Schema.Number,
+  mtimeMs: Schema.Number
+})
+export type TextFile = typeof TextFile.Type
 
 /** The largest file a message can attach; larger ones stay in Files for the assistant to open (§6.1). */
 export const ATTACHMENT_MAX_BYTES = 64 * 1024 * 1024
@@ -62,7 +94,9 @@ export const FileEntry = Schema.Struct({
   kind: FileKind,
   /** Bytes, for a file. */
   size: Schema.Number,
-  mtimeMs: Schema.Number
+  mtimeMs: Schema.Number,
+  /** A folder of yours shared with other accounts (§1.4): how many. */
+  shared: Schema.optionalKey(Schema.Number)
 })
 export type FileEntry = typeof FileEntry.Type
 
@@ -73,6 +107,8 @@ export const FolderListing = Schema.Struct({
   more: Schema.Boolean,
   /** A folder shared with this account as Can view: every change is refused (§1.4). */
   readOnly: Schema.Boolean,
+  /** Where folders shared with you appear (`list`), or one shared with you to `view` or `edit` (§1.4). */
+  shared: Schema.optionalKey(Schema.Literals(["list", "view", "edit"])),
   /** Deleting here moves to the bin, with Undo (§1.3); false: it's gone, so the app asks first. */
   bin: Schema.Boolean
 })
@@ -85,7 +121,9 @@ export type UploadConflict = typeof UploadConflict.Type
 export const UploadOutcome = Schema.Struct({
   /** Where it was written: another name under Keep both. */
   path: Schema.String,
-  outcome: Schema.Literals(["written", "replaced", "skipped"])
+  outcome: Schema.Literals(["written", "replaced", "skipped"]),
+  /** SHA-256 of what was written, hex (not for a skip): the base of the next editor save. */
+  sha256: Schema.optionalKey(Schema.String)
 })
 export type UploadOutcome = typeof UploadOutcome.Type
 
@@ -180,27 +218,26 @@ export const sortEntries = (entries: ReadonlyArray<FileEntry>, by: FileSort): Re
 
 // --- Which viewer --------------------------------------------------------------------------
 
-export type FileView = "text" | "image" | "video" | "audio" | "pdf" | "download"
+export type FileView = "text" | "markdown" | "table" | "html" | "image" | "video" | "audio" | "pdf" | "download"
 
 const VIEWS: ReadonlyArray<readonly [FileView, ReadonlyArray<string>]> = [
   ["image", ["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp"]],
   ["video", ["mp4", "webm", "mov", "m4v", "ogv"]],
   ["audio", ["mp3", "wav", "ogg", "oga", "m4a", "flac", "opus"]],
   ["pdf", ["pdf"]],
+  ["markdown", ["md", "markdown"]],
+  ["table", ["csv", "tsv"]],
+  ["html", ["html", "htm"]],
   [
     "text",
     [
       "txt",
-      "md",
-      "markdown",
       "json",
       "jsonl",
       "yaml",
       "yml",
       "toml",
       "ini",
-      "csv",
-      "tsv",
       "log",
       "js",
       "mjs",
@@ -210,8 +247,6 @@ const VIEWS: ReadonlyArray<readonly [FileView, ReadonlyArray<string>]> = [
       "jsx",
       "css",
       "scss",
-      "html",
-      "htm",
       "xml",
       "svg",
       "py",
@@ -243,7 +278,7 @@ const VIEWS: ReadonlyArray<readonly [FileView, ReadonlyArray<string>]> = [
   ]
 ]
 
-/** The viewer a file opens in, by its name: what isn't known downloads (§8.2). */
+/** The viewer a file opens in, by its name: what isn't known downloads (§8.2). SVG is shown as its text. */
 export const viewOf = (name: string): FileView => {
   const lower = name.toLowerCase()
   const dot = lower.lastIndexOf(".")
@@ -251,3 +286,46 @@ export const viewOf = (name: string): FileView => {
   for (const [view, extensions] of VIEWS) if (extensions.includes(ext)) return view
   return "download"
 }
+
+/** Where folders other accounts share with you appear (§1.4): `/files/Shared/<owner>/<folder>`. */
+export const SHARED_FOLDER = "Shared"
+
+export const ShareMode = Schema.Literals(["view", "edit"])
+export type ShareMode = typeof ShareMode.Type
+
+/** One account a folder of yours is shared with. */
+export const FolderShare = Schema.Struct({
+  id: Schema.String,
+  handle: Schema.String,
+  displayName: Schema.String,
+  mode: ShareMode
+})
+export type FolderShare = typeof FolderShare.Type
+
+export const ShareRequest = Schema.Struct({
+  path: Schema.String.check(Schema.isMaxLength(4096)),
+  handle: Schema.String.check(Schema.isMaxLength(128)),
+  mode: ShareMode
+})
+
+/**
+ * A file's earlier content (§1.3). `origin` is what replaced it: `upload`, `editor`, `agent`,
+ * `restore`, `delete`; `command` is the content a command left. `actor` is the account that acted
+ * when it wasn't you.
+ */
+export const FileVersionEntry = Schema.Struct({
+  id: Schema.String,
+  createdAt: Schema.Number,
+  origin: Schema.String,
+  byteSize: Schema.Number,
+  restorable: Schema.Boolean,
+  actor: Schema.NullOr(Schema.Struct({ handle: Schema.String, displayName: Schema.String }))
+})
+export type FileVersionEntry = typeof FileVersionEntry.Type
+
+export const RestoredVersion = Schema.Struct({
+  path: Schema.String,
+  /** The version keeping what the restore replaced: restoring it undoes the restore. */
+  keptVersionId: Schema.NullOr(Schema.String)
+})
+export type RestoredVersion = typeof RestoredVersion.Type

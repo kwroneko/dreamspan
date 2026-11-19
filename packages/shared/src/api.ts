@@ -3,6 +3,7 @@ import { ExternalMediaApi } from "./externalMedia.ts"
 import { SavedMediaApi } from "./savedMedia.ts"
 import { WorkshopApi } from "./workshopApi.ts"
 import { FilesQuotaApi } from "./filesQuotaApi.ts"
+import { FilesApi } from "./filesApi.ts"
 import { SplitChatApi } from "./splitChat.ts"
 import { MessageSelectionApi } from "./messageSelectionApi.ts"
 import { ChatContextsApi } from "./contextsApi.ts"
@@ -483,6 +484,9 @@ export class AuthenticatedWorkshopApi extends WorkshopApi.middleware(Authenticat
 /** The Files quota (filesQuotaApi.ts). */
 export class AuthenticatedFilesQuotaApi extends FilesQuotaApi.middleware(Authentication) {}
 
+/** The file manager: the editor's unsaved edits (filesApi.ts). */
+export class AuthenticatedFilesApi extends FilesApi.middleware(Authentication) {}
+
 export class AuthenticatedAgentApi extends AgentApi.middleware(Authentication) {}
 
 /** The decision-model settings RPCs (decisionApi.ts). */
@@ -529,6 +533,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedAgentApi)
   .merge(AuthenticatedWorkshopApi)
   .merge(AuthenticatedFilesQuotaApi)
+  .merge(AuthenticatedFilesApi)
   .merge(AuthenticatedDecisionApi)
   .merge(AuthenticatedThinkingApi)
   .merge(AuthenticatedCardArchiveApi)

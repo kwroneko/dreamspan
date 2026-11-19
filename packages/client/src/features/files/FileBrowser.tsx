@@ -52,6 +52,8 @@ import {
 import { freeBytes, noRoomMessage, roomProblem } from "./usage.ts"
 import { UsageDetails } from "./UsageDetails.tsx"
 import { NoViewer, viewerFor } from "./viewers.tsx"
+import { ShareDialog } from "./ShareDialog.tsx"
+import { VersionsDialog } from "./VersionsDialog.tsx"
 
 /** The chat's working folder on its branch (§2.1), and how to change it where that's offered. */
 export interface WorkingFolder {
@@ -114,6 +116,9 @@ export function FileBrowser(props: FileBrowserProps) {
   const [renaming, setRenaming] = useState<string | null>(null)
   const [creating, setCreating] = useState<"folder" | "file" | null>(null)
   const [moving, setMoving] = useState<FileEntry | null>(null)
+  const [sharing, setSharing] = useState<FileEntry | null>(null)
+  /** The file whose versions are shown. */
+  const [versionsOf, setVersionsOf] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<FileEntry | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -179,6 +184,8 @@ export function FileBrowser(props: FileBrowserProps) {
   const current = loaded?.for === folder ? loaded : null
   const listing = current && "listing" in current ? current.listing : null
   const readOnly = listing?.readOnly ?? false
+  /** Shared with you (§1.4): "list" where the shares appear, else how it's shared with you. */
+  const sharedHere = listing?.shared
   const names = new Set(listing?.entries.map((e) => e.name) ?? [])
 
   /** Runs a change, says what failed, and reads the folder again. */
@@ -439,6 +446,8 @@ export function FileBrowser(props: FileBrowserProps) {
           name={opened}
           entry={entry}
           loading={current === null}
+          readOnly={readOnly}
+          onVersions={source.versions ? () => setVersionsOf(joinPath(folder, opened)) : undefined}
           onClose={() => onOpened(null)}
           tab={props.onOpenTab ? () => props.onOpenTab!(folder, opened) : undefined}
           tabHref={props.tabHref?.(folder, opened)}
@@ -531,8 +540,14 @@ export function FileBrowser(props: FileBrowserProps) {
             />
           </div>
           {usage && <UsageDetails usage={usage} onChanged={() => void readUsage()} />}
-          {readOnly && (
+          {sharedHere === "view" && (
             <p className="text-sm text-muted">Shared with you to view: you can open and download, not change.</p>
+          )}
+          {sharedHere === "edit" && (
+            <p className="text-sm text-muted">Shared with you to edit. What you add uses its owner’s storage.</p>
+          )}
+          {sharedHere === "list" && (
+            <p className="text-sm text-muted">Folders other accounts share with you, by their name.</p>
           )}
           {progress !== null && (
             <ProgressBar label="Uploading" value={progress.done} max={progress.total} className="h-1.5" />
@@ -613,6 +628,16 @@ export function FileBrowser(props: FileBrowserProps) {
                         setMoving(item)
                       }}
                       onDownload={() => download(source, joinPath(folder, item.name), item.kind === "folder")}
+                      onShare={
+                        source.share && sharedHere === undefined && item.kind === "folder"
+                          ? () => setSharing(item)
+                          : undefined
+                      }
+                      onVersions={
+                        source.versions && item.kind === "file"
+                          ? () => setVersionsOf(joinPath(folder, item.name))
+                          : undefined
+                      }
                       onWorking={(path) => void change(() => working!.set!(path), "The working folder wasn't changed")}
                       onAttach={props.onAttach}
                     />
@@ -645,14 +670,31 @@ export function FileBrowser(props: FileBrowserProps) {
         onOpenChange={(open) => !open && setConfirm(null)}
         title={`Delete “${confirm?.name ?? ""}”?`}
         description={
-          confirm?.kind === "folder"
-            ? "The folder and everything in it will be gone. This can't be undone."
-            : "The file will be gone. This can't be undone."
+          sharedHere === "edit"
+            ? "It goes to the bin of the folder's owner, who can restore it."
+            : confirm?.kind === "folder"
+              ? "The folder and everything in it will be gone. This can't be undone."
+              : "The file will be gone. This can't be undone."
         }
         confirmLabel="Delete"
         confirmHint="Deletes it for good."
         pending={busy}
         onConfirm={() => confirm && void remove(confirm)}
+      />
+      <ShareDialog
+        source={source}
+        path={sharing ? joinPath(folder, sharing.name) : null}
+        name={sharing?.name ?? ""}
+        onClose={() => {
+          setSharing(null)
+          reload()
+        }}
+      />
+      <VersionsDialog
+        source={source}
+        path={versionsOf}
+        name={versionsOf ? nameOf(versionsOf) : ""}
+        onClose={() => setVersionsOf(null)}
       />
       <MoveDialog
         source={source}
@@ -758,7 +800,9 @@ function EntryRow({
   onMove,
   onDownload,
   onWorking,
-  onAttach
+  onAttach,
+  onShare,
+  onVersions
 }: {
   entry: FileEntry
   folder: string
@@ -775,6 +819,8 @@ function EntryRow({
   onDownload: () => void
   onWorking: (path: string) => void
   onAttach?: ((path: string) => void) | undefined
+  onShare?: (() => void) | undefined
+  onVersions?: (() => void) | undefined
 }) {
   const [menu, setMenu] = useState(false)
   const path = joinPath(folder, entry.name)
@@ -841,6 +887,16 @@ function EntryRow({
       >
         Copy path
       </MenuItem>
+      {onVersions && (
+        <MenuItem description="Shows its earlier contents, to put one back." onClick={onVersions}>
+          Versions…
+        </MenuItem>
+      )}
+      {onShare && (
+        <MenuItem description="Lets other accounts open this folder, or change what's in it." onClick={onShare}>
+          Share…
+        </MenuItem>
+      )}
       {entry.kind === "folder" && working?.set && !isWorking && (
         <MenuItem
           description="Makes this the folder the assistant's commands start in, on this branch."
@@ -905,6 +961,7 @@ function EntryRow({
                 {entry.mtimeMs > 0 ? ` · ${formatMoment(entry.mtimeMs)}` : ""}
               </span>
             </span>
+            {entry.shared !== undefined && <Badge>Shared</Badge>}
             {isWorking && <Badge tone="accent">Working here</Badge>}
           </button>
         }
@@ -998,6 +1055,8 @@ function OpenedFile({
   name,
   entry,
   loading,
+  readOnly,
+  onVersions,
   onClose,
   tab,
   tabHref
@@ -1007,6 +1066,8 @@ function OpenedFile({
   name: string
   entry: FileEntry | null
   loading: boolean
+  readOnly: boolean
+  onVersions: (() => void) | undefined
   onClose: () => void
   tab: (() => void) | undefined
   tabHref: string | undefined
@@ -1026,7 +1087,18 @@ function OpenedFile({
         {name} isn’t in this folder any more. It may have been renamed, moved or deleted.
       </p>
     )
-  else if (Viewer) body = <Viewer path={path} name={name} size={entry.size} source={source} />
+  else if (Viewer)
+    body = (
+      <Viewer
+        key={path}
+        path={path}
+        url={source.rawUrl(path)}
+        name={name}
+        size={entry.size}
+        source={source}
+        readOnly={readOnly}
+      />
+    )
   else body = <NoViewer name={name} size={entry.size} />
   return (
     <section aria-label={name} className="flex min-w-0 flex-col gap-2" data-file-open={path}>
@@ -1039,6 +1111,11 @@ function OpenedFile({
           <Button hint="Saves a copy on this device." onClick={() => download(source, path)}>
             <Icon name="download" />
             Download
+          </Button>
+        )}
+        {entry?.kind === "file" && onVersions && (
+          <Button variant="ghost" hint="Shows its earlier contents, to put one back." onClick={onVersions}>
+            Versions
           </Button>
         )}
         {tab && (

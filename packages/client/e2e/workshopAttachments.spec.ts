@@ -1,7 +1,7 @@
 // Attachments of any type in workshops (spec/FILES-AND-ENVIRONMENT.md §6.1, track A3) in the
 // browser: the paperclip takes a text file, which is saved in the working folder's Attachments
 // folder; the Files tab's Attach to message attaches a file as it is; the sent message lists both
-// by name, with Download (the copy as sent) and Show in Files; the model is told where each one is.
+// by name, opening the copy as sent in its viewer (with Download there), and Show in Files; the model is told where each one is.
 // Layout audit at 1440 and 390, light and dark. A scripted loopback provider and synthetic files.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -86,7 +86,7 @@ for (const width of [1440, 390])
       buffer: Buffer.from("Synthetic notes for the assistant.")
     })
     const attached = page.getByRole("list", { name: "Attached files" })
-    await expect(attached.getByRole("link", { name: "Download notes.txt" })).toBeVisible()
+    await expect(attached.getByRole("button", { name: "Open notes.txt" })).toBeVisible()
     await expect(page.getByText("Saved in /files/Attachments.")).toBeVisible()
     await expect.poll(() => files.has("/files/Attachments/notes.txt")).toBe(true)
 
@@ -96,7 +96,7 @@ for (const width of [1440, 390])
     await row.getByRole("button", { name: "Actions for outline.md" }).click()
     await page.getByRole("menuitem", { name: "Attach to message" }).click()
     if (phone) await page.keyboard.press("Escape")
-    await expect(attached.getByRole("link", { name: "Download outline.md" })).toBeVisible()
+    await expect(attached.getByRole("button", { name: "Open outline.md" })).toBeVisible()
     expect(await files.has("/files/Attachments/outline.md")).toBe(false)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await audit(page, info, `attachments-composer-${width}`, '[aria-label="Image attachments"]')
@@ -109,12 +109,25 @@ for (const width of [1440, 390])
     })
     const sent = page.getByRole("article").filter({ hasText: "Read my notes." }).last()
     const listed = sent.getByRole("list", { name: "Message files" })
-    await expect(listed.getByRole("link", { name: "Download notes.txt" })).toHaveAttribute(
-      "href",
-      /\/files\/attachment\?id=.+&name=notes\.txt&download=1/
-    )
     await expect(attached).toHaveCount(0)
     await audit(page, info, `attachments-message-${width}`, "article[data-slot]")
+
+    // A file opens its copy as sent in the viewer for its type (§8.2), read-only, with Download.
+    await files.put("/files/Attachments/notes.txt", "Changed after sending.")
+    await listed.getByRole("button", { name: "Open notes.txt" }).click()
+    const viewer = page.getByRole("dialog", { name: "notes.txt" })
+    await expect(viewer.getByRole("textbox", { name: "Contents of notes.txt" })).toHaveText(
+      "Synthetic notes for the assistant."
+    )
+    await expect(viewer.getByRole("textbox", { name: "Contents of notes.txt" })).toHaveAttribute(
+      "aria-readonly",
+      "true"
+    )
+    const download = page.waitForEvent("download")
+    await viewer.getByRole("button", { name: "Download" }).click()
+    expect((await download).suggestedFilename()).toBe("notes.txt")
+    await audit(page, info, `attachments-viewer-${width}`, '[role="dialog"]')
+    await viewer.getByRole("button", { name: "Close" }).click()
 
     // Show in Files opens where it is now.
     await listed.getByRole("link", { name: "Show notes.txt in Files" }).click()
