@@ -216,17 +216,18 @@ for (const transport of ["native", "dispatcher"] as const)
           new RegExp(`^Sent from the start · ${sentFromStart.length} tools, [\\d,]+ tokens$`)
         )
         expect(sentFromStart).toContain("list_library")
-        for (const name of sentFromStart) await expect(sentFirst.getByRole("region", { name })).toBeVisible()
-        await expect(sentFirst.getByRole("region", { name: "list_library" })).toBeVisible()
-        await expect(sentFirst.getByRole("region", { name: "load_skill" })).toBeVisible()
+        for (const name of sentFromStart)
+          await expect(sentFirst.getByRole("region", { name, exact: true })).toBeVisible()
+        await expect(sentFirst.getByRole("region", { name: "list_library", exact: true })).toBeVisible()
+        await expect(sentFirst.getByRole("region", { name: "load_skill", exact: true })).toBeVisible()
         // The Cards skill's seven tools, with ownturn1's move_card_text and edit_card_note, and
         // wsb3's persona flag (notes are their own skill).
         await expect(loaded.getByRole("heading")).toHaveText(/^Loaded during the run · 8 tools, [\d,]+ tokens$/)
-        await expect(loaded.getByRole("region", { name: "read_card" })).toContainText(
+        await expect(loaded.getByRole("region", { name: "read_card", exact: true })).toContainText(
           /[\d,]+ tokens · loaded by load_skill/
         )
-        await expect(never.getByRole("region", { name: "start_chat" })).toBeVisible()
-        await expect(never.getByRole("region", { name: "read_card" })).toHaveCount(0)
+        await expect(never.getByRole("region", { name: "start_chat", exact: true })).toBeVisible()
+        await expect(never.getByRole("region", { name: "read_card", exact: true })).toHaveCount(0)
 
         await sentFirst.scrollIntoViewIfNeeded()
         if (shots) {
