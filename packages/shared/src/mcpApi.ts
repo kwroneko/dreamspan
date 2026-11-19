@@ -14,8 +14,10 @@ import {
   McpConnectionSummary,
   McpLoading,
   McpRefused,
+  McpShareScope,
   McpToolChoices
 } from "./mcp.ts"
+import { UserId } from "./domain.ts"
 import { CredentialId, ProxyMode } from "./providers.ts"
 
 /**
@@ -87,6 +89,30 @@ export class McpApi extends RpcGroup.make(
     success: McpConnection,
     error: Schema.Union([McpRefused, NotFound, StaleWrite, ServerError])
   }),
+  /**
+   * A local program's environment variables (an admin's; replaces them all; null for none).
+   * Values are encrypted and never shown again.
+   */
+  Rpc.make("SetMcpEnvironment", {
+    payload: {
+      connectionId: McpConnectionId,
+      env: Schema.NullOr(Schema.Record(Schema.String, Schema.String)),
+      expectedRowVersion: Schema.Int
+    },
+    success: McpConnection,
+    error: Schema.Union([McpRefused, NotFound, StaleWrite, ServerError])
+  }),
+  /** Whether this user may add local programs here, and if not, why (spec/MCP.md §2.2). */
+  Rpc.make("GetMcpLocalPrograms", {
+    success: Schema.Struct({ allowed: Schema.Boolean, reason: Schema.NullOr(Schema.String) }),
+    error: ServerError
+  }),
+  /** What a local program wrote to stderr lately (the last 64 KiB), for the caller's own process. */
+  Rpc.make("GetMcpProgramOutput", {
+    payload: { connectionId: McpConnectionId },
+    success: Schema.Struct({ running: Schema.Boolean, output: Schema.String }),
+    error: Schema.Union([NotFound, ServerError])
+  }),
   Rpc.make("SetMcpProxy", {
     payload: { connectionId: McpConnectionId, mode: ProxyMode, url: Schema.NullOr(Schema.String) },
     success: McpConnection,
@@ -125,6 +151,40 @@ export class McpApi extends RpcGroup.make(
     },
     success: McpConnection,
     error: Schema.Union([NotFound, ServerError])
+  }),
+  /**
+   * Starts signing in with the server (spec/MCP.md §2.4): finds its sign-in service, registers
+   * the app there if needed, and returns the page to open. `appOrigin` is the address the browser
+   * uses for the app; the sign-in page sends the browser back to it. Nothing of the user's is sent.
+   */
+  Rpc.make("StartMcpSignIn", {
+    payload: { connectionId: McpConnectionId, appOrigin: Schema.String },
+    success: Schema.Struct({ authorizationUrl: Schema.String }),
+    error: Schema.Union([McpRefused, NotFound, StaleWrite, ServerError])
+  }),
+  /**
+   * The sign-in page sent the browser back (its `state`, and a `code` or an `error`): the app
+   * exchanges the code for the user's own tokens and keeps them, encrypted, on their use.
+   */
+  Rpc.make("FinishMcpSignIn", {
+    payload: { state: Schema.String, code: Schema.NullOr(Schema.String), error: Schema.NullOr(Schema.String) },
+    success: Schema.Struct({ connectionId: McpConnectionId, name: Schema.String }),
+    error: Schema.Union([McpRefused, NotFound, StaleWrite, ServerError])
+  }),
+  /** Forgets the user's own sign-in with the server. Nothing is sent to it. */
+  Rpc.make("SignOutOfMcp", {
+    payload: { connectionId: McpConnectionId },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StaleWrite, ServerError])
+  }),
+  /**
+   * An admin shares their server (spec/MCP.md §3): with nobody, everyone, or the users chosen.
+   * Those who lose it lose their own use of it, their sign-in included.
+   */
+  Rpc.make("SetMcpShare", {
+    payload: { connectionId: McpConnectionId, scope: McpShareScope, userIds: Schema.Array(UserId) },
+    success: McpConnection,
+    error: Schema.Union([McpRefused, NotFound, ServerError])
   }),
   Rpc.make("DeleteMcpConnection", {
     payload: { connectionId: McpConnectionId },

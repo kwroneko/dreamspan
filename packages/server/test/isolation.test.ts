@@ -1104,6 +1104,45 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.ListMcpCalls({ connectionId: owner.mcpConnectionId, before: null }), "NotFound")
   },
+  StartMcpSignIn: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.StartMcpSignIn({ connectionId: owner.mcpConnectionId, appOrigin: "http://localhost:5173" }),
+        "NotFound"
+      )
+  },
+  // A sign-in's state is the user's who started it; nobody else can finish it (mcpOAuth.test.ts).
+  FinishMcpSignIn: {
+    probe: (actor) =>
+      refused(actor.api.FinishMcpSignIn({ state: "someone-elses-state", code: "x", error: null }), "McpRefused")
+  },
+  // Local programs are an admin's, where the instance allows them (mcpLocal.test.ts); here the
+  // switch is off, so everyone is refused before anything is read.
+  SetMcpEnvironment: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.SetMcpEnvironment({ connectionId: owner.mcpConnectionId, env: { A: "b" }, expectedRowVersion: 1 }),
+        "McpRefused"
+      )
+  },
+  GetMcpLocalPrograms: {
+    probe: (actor) => Effect.map(actor.api.GetMcpLocalPrograms(), (gate) => assert.isFalse(gate.allowed))
+  },
+  GetMcpProgramOutput: {
+    probe: (actor, owner) => refused(actor.api.GetMcpProgramOutput({ connectionId: owner.mcpConnectionId }), "NotFound")
+  },
+  // Sharing is the owner's (an admin's); another user's server is NotFound, and only an admin
+  // shares at all (mcpSharing.test.ts).
+  SetMcpShare: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.SetMcpShare({ connectionId: owner.mcpConnectionId, scope: "all", userIds: [] }),
+        actor.user.role === "admin" ? "NotFound" : "McpRefused"
+      )
+  },
+  SignOutOfMcp: {
+    probe: (actor, owner) => refused(actor.api.SignOutOfMcp({ connectionId: owner.mcpConnectionId }), "NotFound")
+  },
   SetConnectionHeaders: {
     probe: (actor, owner) =>
       Effect.flatMap(ownConnection(owner), (theirs) =>

@@ -54,6 +54,7 @@ export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigSh
   secretKey: Option.none(),
   secretKeyFile: Option.none(),
   keyHostBinding: true,
+  mcpLocalPrograms: false,
   ...overrides
 })
 

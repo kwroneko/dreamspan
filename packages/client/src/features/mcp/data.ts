@@ -10,6 +10,9 @@ export const mcpConnectionAtom = (connectionId: McpConnectionId) =>
 export const mcpCallsAtom = (connectionId: McpConnectionId) =>
   AppClient.query("ListMcpCalls", { connectionId, before: null }, { reactivityKeys: ["mcp"] })
 
+/** Whether this user may add local programs here, and why not (spec/MCP.md §2.2). */
+export const localProgramsAtom = AppClient.query("GetMcpLocalPrograms", undefined, { reactivityKeys: ["mcp"] })
+
 export const credentialsAtom = AppClient.query("ListCredentials", undefined, { reactivityKeys: ["credentials"] })
 
 /** The server's host as people read it: "api.example.com", or the address when it isn't a URL. */
@@ -27,7 +30,9 @@ export const mcpStatus = (
   connection: Pick<McpConnectionSummary, "checkError" | "listedAt">
 ): { readonly tone: "success" | "danger" | "neutral"; readonly label: string } =>
   connection.checkError !== null
-    ? { tone: "danger", label: "Couldn't connect" }
+    ? /sign in/i.test(connection.checkError)
+      ? { tone: "danger", label: "Sign in again" }
+      : { tone: "danger", label: "Couldn't connect" }
     : connection.listedAt === null
       ? { tone: "neutral", label: "Not checked" }
       : { tone: "success", label: "Ready" }

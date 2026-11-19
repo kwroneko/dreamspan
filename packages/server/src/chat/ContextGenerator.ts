@@ -385,7 +385,7 @@ export const layer = Layer.effect(
           // at the reply's parent, frozen with the run.
           const storyMcp = agentic && mcp !== undefined && admitsEffect({ ...profile, allowsOutside: false }, "mcp")
           const mcpChoices = state.agentMcp ?? {}
-          const mcpServers =
+          const mcpListed =
             agentic && mcp && !profile.allowsOutside
               ? storyMcp
                 ? enabledStoryServers(
@@ -407,6 +407,8 @@ export const layer = Layer.effect(
                       )
                   )
                 : []
+          // A local program's tools are offered only where the instance runs local programs.
+          const mcpServers = mcpListed.filter((entry) => entry.connection.transport !== "stdio" || mcp?.localPrograms)
           const candidates = [
             ...plan.tools.flatMap((id) => {
               const tool = toolForKind(execution, chat.kind, id)

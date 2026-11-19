@@ -18,7 +18,7 @@ import { tmpdir } from "node:os"
 import { delimiter, dirname, join } from "node:path"
 import { bwrapLimiters, selectLimiter, WEAKER_LIMITS, type CommandCgroup } from "./cgroupLimits.ts"
 import { BRIDGE_SOURCE, sandboxNetworks, type SandboxProxy } from "./network.ts"
-import type { Availability, CommandSandbox, RunResult, RunSpec } from "./registry.ts"
+import type { Availability, CommandSandbox, RunResult, RunSpec, SandboxProcess, SpawnSpec } from "./registry.ts"
 
 /** Kept of a command's output: its start and its end (the tool shows less of each). */
 const KEEP_HEAD = 1 << 20
@@ -157,7 +157,8 @@ const proxyEnv = (network: RunSpec["network"]): Record<string, string> => {
   }
 }
 
-const tmpBytes = (spec: RunSpec) => Math.max(2 ** 20, Math.floor(spec.limits.tmpBytes ?? TMP_BYTES))
+const tmpBytes = (spec: Pick<RunSpec, "limits"> | Pick<SpawnSpec, "limits">) =>
+  Math.max(2 ** 20, Math.floor(spec.limits.tmpBytes ?? TMP_BYTES))
 
 /** Whether a filesystem has gone below the reserve; an unreadable one counts as below. */
 const belowReserve = async (path: string, reserve: NonNullable<RunSpec["limits"]["reserve"]>) => {
@@ -170,7 +171,9 @@ const belowReserve = async (path: string, reserve: NonNullable<RunSpec["limits"]
   }
 }
 
-const anyBelowReserve = async (spec: RunSpec) => {
+const anyBelowReserve = async (
+  spec: Pick<RunSpec, "mounts"> & { readonly limits: Pick<RunSpec["limits"], "reserve"> }
+) => {
   const reserve = spec.limits.reserve
   if (!reserve) return false
   const checks = await Promise.all(spec.mounts.filter((m) => m.writable).map((m) => belowReserve(m.source, reserve)))
@@ -311,7 +314,7 @@ export const seccompFilter = (arch: NodeJS.Architecture = process.arch): Buffer 
 }
 
 /** The arguments to bubblewrap for one command, given its runtime folder. */
-const bwrapArgs = (spec: RunSpec, runDir: string) => {
+const bwrapArgs = (spec: RunSpec | SpawnSpec, runDir: string) => {
   const args = [
     "--unshare-user",
     "--unshare-pid",
@@ -462,6 +465,171 @@ const argsFile = async (runDir: string, args: ReadonlyArray<string>) => {
   return open(path, "r")
 }
 
+/**
+ * A run's folder: the synthetic /etc files, the proxy bridge, and with network the proxy's
+ * socket, returned open.
+ */
+const fillRunDir = async (runDir: string, network: RunSpec["network"]): Promise<SandboxProxy | null> => {
+  await mkdir(join(runDir, "rp"), { mode: 0o700 })
+  const uid = process.getuid?.() ?? 1000
+  const gid = process.getgid?.() ?? 1000
+  await writeFile(join(runDir, "passwd"), `user:x:${uid}:${gid}:user:/home/user:/bin/bash\n`)
+  await writeFile(join(runDir, "group"), `user:x:${gid}:\n`)
+  await writeFile(join(runDir, "hosts"), "127.0.0.1 localhost sandbox\n::1 localhost\n")
+  await writeFile(join(runDir, "rp", "bridge.mjs"), BRIDGE_SOURCE)
+  if (network !== "public") return null
+  const socketPath = join(runDir, "rp", "proxy.sock")
+  if (Buffer.byteLength(socketPath) > SOCKET_PATH_MAX) throw new Error("The sandbox's runtime folder path is too long.")
+  const policy = sandboxNetworks.get("public")
+  if (!policy) throw new Error("No network policy is registered for commands.")
+  const proxy = await policy.open(socketPath)
+  await chmod(socketPath, 0o600)
+  return proxy
+}
+
+/**
+ * The program's own variables, as its first shell reads them once its limits are set: a file in
+ * the run folder (owner-only, as the argument file holding the sandbox's environment is), one
+ * NUL-ended NAME=VALUE each. Never one of the app's or the proxy's names.
+ */
+const PROGRAM_ENV_FILE = "program-env"
+const programEnvFile = (spec: SpawnSpec) => {
+  const fixed = { ...spec.env, ...proxyEnv(spec.network) }
+  return Object.entries(spec.programEnv ?? {})
+    .filter(([name, value]) => !(name in fixed) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !value.includes("\0"))
+    .map(([name, value]) => `${name}=${value}\0`)
+    .join("")
+}
+
+/**
+ * A program's first shell: the same limits as a command's prelude, the bridge to the proxy
+ * (reading nothing of the program's stdin), then the program itself in place of the shell, its
+ * arguments passed as they are (`"$@"`), never read by the shell. Its stdin, stdout and stderr
+ * are the app's pipes.
+ */
+const spawnPrelude = (spec: SpawnSpec) => {
+  const kib = (bytes: number) => Math.max(1, Math.floor(bytes / 1024))
+  const limit = (flag: string, value: number) =>
+    `ulimit ${flag} ${value} || { echo "The sandbox couldn't set its limits." >&2; exit 125; }`
+  return [
+    "echo 1000 > /proc/self/oom_score_adj 2>/dev/null",
+    limit("-u", spec.limits.processes),
+    limit("-d", kib(spec.limits.memoryBytes)),
+    limit("-f", kib(spec.limits.fileBytes)),
+    limit("-n", spec.limits.openFiles),
+    spec.network === "public"
+      ? `exec 3< <(${shellQuote(process.execPath)} ${RUNTIME}/bridge.mjs ${RUNTIME}/proxy.sock ${PROXY_PORT} </dev/null 2>/dev/null); read -r -t 10 __rp_ready <&3; exec 3<&-; unset __rp_ready`
+      : ":",
+    // Only now, with the limits set and the bridge started, the program's own variables: from a
+    // file, not the environment this shell started with, so none acts on this shell or the
+    // bridge (BASH_ENV, LD_PRELOAD and NODE_OPTIONS among them would). No braces: a cgroup
+    // wrapper (systemd-run) would expand them before bash sees this.
+    `while IFS= read -r -d '' __rp_pair; do export "$__rp_pair"; done < ${RUNTIME}/${PROGRAM_ENV_FILE}; unset __rp_pair`,
+    `cd -- ${shellQuote(spec.cwd)} || exit 1`,
+    // The shell's own variables don't reach the program: only what the spec gives, and the proxy's.
+    // (bash sets SHLVL again for what it execs, so env drops it).
+    "unset PWD OLDPWD",
+    'exec /usr/bin/env -u SHLVL -- "$@"'
+  ].join("\n")
+}
+
+/**
+ * Starts a long-running program in the sandbox with pipes (spec/MCP.md §2.2): the same
+ * namespaces, mounts, seccomp filter, limits and cgroup as a command, with no time limit.
+ * Stopped by its PID's group, as a command is at its timeout.
+ */
+const spawnOnce = async (spec: SpawnSpec): Promise<SandboxProcess> => {
+  const bwrap = findOnPath("bwrap")
+  if (!bwrap) throw new Error("bubblewrap isn't installed")
+  if (spec.argv.length === 0 || spec.argv[0] === "") throw new Error("No program to start.")
+  if (await anyBelowReserve(spec))
+    throw new Error("The disk the app keeps its data on is nearly full, so the program wasn't started.")
+  const runDir = await mkdtemp(join(runtimeRoot(), `${RUN_PREFIX}${process.pid}-`))
+  let proxy: SandboxProxy | null = null
+  let group: CommandCgroup | null = null
+  const cleanUp = async () => {
+    await group?.finish().catch(() => undefined)
+    await proxy?.close().catch(() => undefined)
+    await rm(runDir, { recursive: true, force: true }).catch(() => undefined)
+  }
+  try {
+    proxy = await fillRunDir(runDir, spec.network)
+    await writeFile(join(runDir, "rp", PROGRAM_ENV_FILE), programEnvFile(spec), { mode: 0o600 })
+    const filter = seccompFilter()
+    let filterFile: FileHandle | null = null
+    if (filter) {
+      await writeFile(join(runDir, "seccomp.bpf"), filter)
+      filterFile = await open(join(runDir, "seccomp.bpf"), "r")
+    }
+    const argsFd = filterFile ? 4 : 3
+    const args = await argsFile(runDir, [...(filterFile ? ["--seccomp", "3"] : []), ...bwrapArgs(spec, runDir)])
+    const argv = ["--args", String(argsFd), "/bin/bash", "-c", spawnPrelude(spec), "dreamspan-program", ...spec.argv]
+    const limiter = await selectLimiter(bwrapLimiters)
+    if (!("none" in limiter))
+      group = await limiter.open({ memoryBytes: spec.limits.memoryBytes, processes: spec.limits.processes })
+    const start = group ? group.wrap(bwrap, argv) : { file: bwrap, args: argv }
+    const child = (() => {
+      try {
+        return spawn(start.file, start.args, {
+          stdio: ["pipe", "pipe", "pipe", ...(filterFile ? [filterFile.fd] : []), args.fd],
+          detached: true,
+          env: { ...group?.env }
+        })
+      } finally {
+        void filterFile?.close()
+        void args.close()
+      }
+    })()
+    const pid = child.pid
+    if (pid === undefined) {
+      await new Promise((resolve) => child.once("error", resolve))
+      throw new Error("The program couldn't be started.")
+    }
+    const kill = () => {
+      if (child.exitCode !== null || child.signalCode !== null) return
+      // The whole group: bubblewrap's init dies with it, and every process the program started.
+      try {
+        process.kill(-pid, "SIGKILL")
+      } catch {
+        child.kill("SIGKILL")
+      }
+    }
+    // The reserve, watched as a command's is: below it, the program is stopped.
+    let diskLow = false
+    let checking = false
+    const watch = spec.limits.reserve
+      ? setInterval(() => {
+          if (checking) return
+          checking = true
+          void anyBelowReserve(spec).then((low) => {
+            checking = false
+            if (low && !diskLow) {
+              diskLow = true
+              kill()
+            }
+          })
+        }, RESERVE_CHECK_MS)
+      : null
+    watch?.unref()
+    const exited = new Promise<{ exitCode: number | null; memoryCapped: boolean }>((done) => {
+      child.once("error", () => done({ exitCode: null, memoryCapped: false }))
+      child.once("close", (code) => done({ exitCode: code, memoryCapped: false }))
+    }).then(async (end) => {
+      if (watch) clearInterval(watch)
+      const capped = group ? await group.finish().catch(() => ({ memoryCapped: false })) : { memoryCapped: false }
+      group = null
+      await cleanUp()
+      return diskLow ? { exitCode: null, memoryCapped: false, diskLow } : { ...end, memoryCapped: capped.memoryCapped }
+    })
+    // A pipe closing under a write is the program ending, which `exited` reports.
+    child.stdin!.on("error", () => undefined)
+    return { pid, stdin: child.stdin!, stdout: child.stdout!, stderr: child.stderr!, exited, kill }
+  } catch (error) {
+    await cleanUp()
+    throw error
+  }
+}
+
 const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> => {
   const bwrap = findOnPath("bwrap")
   if (!bwrap) throw new Error("bubblewrap isn't installed")
@@ -482,22 +650,7 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
   let proxy: SandboxProxy | null = null
   let group: CommandCgroup | null = null
   try {
-    await mkdir(join(runDir, "rp"), { mode: 0o700 })
-    const uid = process.getuid?.() ?? 1000
-    const gid = process.getgid?.() ?? 1000
-    await writeFile(join(runDir, "passwd"), `user:x:${uid}:${gid}:user:/home/user:/bin/bash\n`)
-    await writeFile(join(runDir, "group"), `user:x:${gid}:\n`)
-    await writeFile(join(runDir, "hosts"), "127.0.0.1 localhost sandbox\n::1 localhost\n")
-    await writeFile(join(runDir, "rp", "bridge.mjs"), BRIDGE_SOURCE)
-    if (spec.network === "public") {
-      const socketPath = join(runDir, "rp", "proxy.sock")
-      if (Buffer.byteLength(socketPath) > SOCKET_PATH_MAX)
-        throw new Error("The sandbox's runtime folder path is too long.")
-      const network = sandboxNetworks.get("public")
-      if (!network) throw new Error("No network policy is registered for commands.")
-      proxy = await network.open(socketPath)
-      await chmod(socketPath, 0o600)
-    }
+    proxy = await fillRunDir(runDir, spec.network)
     const marker = `__rp_cwd_${randomBytes(12).toString("hex")}__`
     // The filter goes to bubblewrap as descriptor 3 and its arguments as the next one; it reads
     // and closes both before the command.
@@ -653,6 +806,7 @@ export const linuxBwrap: CommandSandbox = {
   platforms: ["linux"],
   available: checkAvailable,
   run: runOnce,
+  spawn: spawnOnce,
   note: limitsNote,
   start: async () => {
     const removed = await sweepRunFolders()

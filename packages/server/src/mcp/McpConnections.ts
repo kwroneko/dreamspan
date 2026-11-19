@@ -24,11 +24,13 @@ import {
   ResultSchema,
   ToolListChangedNotificationSchema
 } from "@modelcontextprotocol/sdk/types.js"
+import { createHash } from "node:crypto"
 import type { UserId } from "@dreamspan/shared/domain.ts"
-import type { NotFound, StaleWrite } from "@dreamspan/shared/errors.ts"
+import { NotFound, type StaleWrite } from "@dreamspan/shared/errors.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import {
   MCP_LISTING_BYTES_LIMIT,
+  MCP_OAUTH_CALLBACK,
   MCP_TIMEOUT_MAX_S,
   MCP_TIMEOUT_MIN_S,
   MCP_TOOLS_LIMIT,
@@ -47,31 +49,64 @@ import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import type { McpResolved, StorageError } from "../db/ops.ts"
 import type { RpcClientError } from "effect/rpc"
+import { parsePublicOrigins } from "../net/exposure.ts"
 import { Network, type ProxyOverride, type RequestNetwork } from "../net/Network.ts"
 import { describeRoute, proxyUrlProblem } from "../net/route.ts"
 import { credentialBinding, requestSecrets } from "../providers/Providers.ts"
 import { Secrets } from "../secrets.ts"
 import { buildCatalog, serverInfoOf } from "./catalog.ts"
+import {
+  LOCAL_PROGRAMS_OFF,
+  makeProgramStarter,
+  PROGRAM_LIMITS,
+  ProgramEnded,
+  programEnvProblem,
+  ProgramTransport
+} from "./stdio.ts"
+import {
+  briefSignInError,
+  finishSignIn as finishFlow,
+  makeClientRegistry,
+  type PendingSignIn,
+  REFRESH_AHEAD_MS,
+  refreshSignIn,
+  SIGN_IN_PENDING_MAX,
+  SIGN_IN_PENDING_MS,
+  SIGN_IN_PENDING_PER_USER,
+  signInTargets,
+  startSignIn as startFlow,
+  type StoredSignIn
+} from "./oauth.ts"
 
 /** What the app says it is to every server (spec/MCP.md §2.1): no capabilities declared. */
 const MCP_CLIENT_INFO = { name: "dreamspan", version: "0.0.0" }
 
 const headersBinding = (connectionId: string) => `mcp:${connectionId}:headers`
 const proxyBinding = (connectionId: string) => `mcp:${connectionId}:proxy_url`
+/** A user's own sign-in with a connection (spec/MCP.md §2.4). */
+const oauthBinding = (connectionId: string, userId: string) => `mcp:${connectionId}:${userId}:oauth`
+const envBinding = (connectionId: string) => `mcp:${connectionId}:env`
 
 /** Everything a request to a server needs, secrets decrypted. Lives for one piece of work. */
 export interface McpPrepared {
   readonly connection: McpConnection
-  readonly url: URL
+  /** A remote server's address; null for a local program. */
+  readonly url: URL | null
+  /** A local program: its argument list and its own variables, decrypted; null for a remote server. */
+  readonly program: { readonly argv: ReadonlyArray<string>; readonly env: Readonly<Record<string, string>> } | null
   /** The custom headers, with the key as `Authorization: Bearer`. */
   readonly headers: Readonly<Record<string, string>>
   readonly network: RequestNetwork
   /** Removes this connection's secrets from text that will be stored or shown. */
   readonly scrub: (text: string) => string
+  /** Which sign-in the headers carry ("" for none): a kept client opened with another is replaced. */
+  readonly signIn: string
 }
 
 /** A client connected to one server, with what it has sent and received so far. */
 interface McpSession {
+  /** A local program's transport, which knows when it ended; null for a remote server. */
+  readonly program: ProgramTransport | null
   readonly client: Client
   readonly counts: { sent: number; received: number }
   readonly protocolVersion: () => string
@@ -140,6 +175,24 @@ export interface McpConnectionsShape {
     attribution: McpAttribution,
     transport?: RemoteMcpTransport
   ) => Effect.Effect<McpSession, McpRequestFailed | NotFound | StorageFailure, Scope.Scope>
+  /** `MCP_LOCAL_PROGRAMS=on`: local programs may run here. */
+  readonly localPrograms: boolean
+  /** Whether a user with this role may add local programs here, and if not, why. */
+  readonly localProgramsFor: (
+    role: "admin" | "user"
+  ) => Effect.Effect<{ readonly allowed: boolean; readonly reason: string | null }>
+  /** A local program's environment (admins: the RPC checks); its kept clients close. */
+  readonly setEnvironment: (
+    userId: UserId,
+    connectionId: McpConnectionId,
+    env: Readonly<Record<string, string>> | null,
+    expectedRowVersion: number
+  ) => Effect.Effect<McpConnection, McpFailure>
+  /** The caller's own process of a local program: whether it runs, and its last stderr. */
+  readonly programOutput: (
+    userId: UserId,
+    connectionId: McpConnectionId
+  ) => Effect.Effect<{ readonly running: boolean; readonly output: string }, NotFound | StorageFailure>
   /**
    * One `tools/call` (spec/MCP.md §7): a client opened for it (its `initialize` in the ledger),
    * the call recorded before it's sent, and closed after. Stop (interrupting the effect) and the
@@ -159,6 +212,34 @@ export interface McpConnectionsShape {
   readonly closeKept: (connectionId: McpConnectionId) => Effect.Effect<void>
   /** How many kept clients are open now, for tests. */
   readonly kept: () => number
+  /** What is held in memory between requests, for tests: each is bounded. */
+  readonly retained: () => {
+    readonly pendingSignIns: number
+    readonly locks: number
+    readonly outputs: number
+    readonly registrations: number
+  }
+  /**
+   * Starts the user's sign-in with the server (spec/MCP.md §2.4): the page the browser opens,
+   * which sends it back to `appOrigin` + MCP_OAUTH_CALLBACK.
+   */
+  readonly startSignIn: (
+    userId: UserId,
+    connectionId: McpConnectionId,
+    appOrigin: string
+  ) => Effect.Effect<{ readonly authorizationUrl: string }, McpFailure>
+  /** The browser came back from the sign-in page: the code becomes the user's own tokens. */
+  readonly finishSignIn: (
+    userId: UserId,
+    state: string,
+    code: string | null,
+    error: string | null
+  ) => Effect.Effect<{ readonly connectionId: McpConnectionId; readonly name: string }, McpFailure>
+  /** Forgets the user's sign-in; their kept client closes. */
+  readonly signOut: (
+    userId: UserId,
+    connectionId: McpConnectionId
+  ) => Effect.Effect<McpConnection, NotFound | StaleWrite | StorageFailure>
   /** One request on an open client, recorded in the ledger. */
   readonly request: <A>(
     userId: UserId,
@@ -196,6 +277,8 @@ interface Pooled {
   readonly userId: string
   /** The connection's `cache_revision` it was opened at. */
   readonly revision: number
+  /** The sign-in its headers carry (McpPrepared.signIn). */
+  readonly signIn: string
   readonly scope: Scope.Closeable
   readonly session: McpSession
   /** Calls running on it now. */
@@ -218,7 +301,8 @@ export class McpConnections extends Context.Service<McpConnections, McpConnectio
 /** A request to a server that failed, with what the ledger and the user are told. */
 export class McpRequestFailed extends Error {
   override readonly name = "McpRequestFailed"
-  readonly status: "error" | "failed" | "timeout" | "cancelled"
+  /** `interrupted`: a local program ended while the request waited on it. */
+  readonly status: "error" | "failed" | "timeout" | "cancelled" | "interrupted"
   /** The server refused the key or headers: the other transport needn't be tried. */
   readonly auth: boolean
   /**
@@ -282,6 +366,29 @@ class CountingTransport implements Transport {
   }
 }
 
+const keyOf = (connectionId: string, userId: string) => `${connectionId}\u0000${userId}`
+
+/** Locks by key, each gone once nothing holds or waits for it, so they don't pile up. */
+const keyedLocks = () => {
+  const locks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>()
+  const withLock = <A, E, R>(key: string, effect: Effect.Effect<A, E, R>) =>
+    Effect.suspend(() => {
+      let entry = locks.get(key)
+      if (!entry) locks.set(key, (entry = { lock: Semaphore.makeUnsafe(1), users: 0 }))
+      const held = entry
+      held.users += 1
+      return held.lock.withPermit(effect).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            held.users -= 1
+            if (held.users === 0 && locks.get(key) === held) locks.delete(key)
+          })
+        )
+      )
+    })
+  return { withLock, size: () => locks.size }
+}
+
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 /** The status code an SDK transport error carries, if any. */
@@ -306,14 +413,28 @@ const failureOf = (
   name: string,
   timeoutS: number,
   aborted: boolean,
-  scrub: (text: string) => string
+  scrub: (text: string) => string,
+  program: ProgramTransport | null
 ): McpRequestFailed => {
   if (aborted) return new McpRequestFailed("cancelled", "Stopped before the server answered.", false)
+  // A local program that ended under a request: it may have done it before it stopped.
+  if (program !== null && (program.ended !== null || error instanceof ProgramEnded))
+    return new McpRequestFailed(
+      "interrupted",
+      `${name} stopped while it ran: ${(program.ended ?? (error as Error)).message}.`,
+      false
+    )
   if (error instanceof McpError && error.code === ErrorCode.RequestTimeout)
     return new McpRequestFailed("timeout", `${name} didn't answer within ${timeoutS} s.`, false)
   const code = httpCode(error)
   const text = scrub(messageOf(error))
-  if (code === 401 || code === 403 || /\b(401|403)\b|unauthori[sz]ed|forbidden/i.test(text))
+  if (code === 401)
+    return new McpRequestFailed(
+      "failed",
+      `${name} asks you to sign in (401). Sign in with the server, or give it a key.`,
+      true
+    )
+  if (code === 403 || /\b(401|403)\b|unauthori[sz]ed|forbidden/i.test(text))
     return new McpRequestFailed("failed", `${name} refused the request (${code ?? "unauthorized"}): ${text}`, true)
   if (error instanceof McpError) return new McpRequestFailed("error", `${name} answered with an error: ${text}`, false)
   if (isDeadSession(error))
@@ -341,6 +462,26 @@ export const layer = Layer.effect(
         const url = settings.url.trim()
         if (name === "" || name.length > 100) return yield* refused("Give the server a name of at most 100 characters.")
         if (settings.about.length > 1000) return yield* refused("Keep what it's for under 1,000 characters.")
+        if (
+          !Number.isInteger(settings.timeoutS) ||
+          settings.timeoutS < MCP_TIMEOUT_MIN_S ||
+          settings.timeoutS > MCP_TIMEOUT_MAX_S
+        )
+          return yield* refused(`Choose a timeout from ${MCP_TIMEOUT_MIN_S} to ${MCP_TIMEOUT_MAX_S} seconds.`)
+        if (settings.transport === "stdio") {
+          const command = settings.program?.command.trim() ?? ""
+          const args = settings.program?.args ?? []
+          if (command === "" || command.length > PROGRAM_LIMITS.command || command.includes("\0"))
+            return yield* refused("Enter the program to run, such as npx.")
+          if (
+            args.length > PROGRAM_LIMITS.arguments ||
+            args.some((arg) => arg.length > PROGRAM_LIMITS.argument || arg.includes("\0"))
+          )
+            return yield* refused(
+              `Give at most ${PROGRAM_LIMITS.arguments} arguments of at most ${PROGRAM_LIMITS.argument.toLocaleString("en")} characters.`
+            )
+          return { ...settings, name, url: "", program: { command, args: [...args] }, about: settings.about.trim() }
+        }
         const origin = originOf(url)
         if (origin === null || !/^https?:$/.test(new URL(url).protocol) || url.length > 2048)
           return yield* refused("Enter the server's full address, such as https://example.com/mcp.")
@@ -350,7 +491,8 @@ export const layer = Layer.effect(
           settings.timeoutS > MCP_TIMEOUT_MAX_S
         )
           return yield* refused(`Choose a timeout from ${MCP_TIMEOUT_MIN_S} to ${MCP_TIMEOUT_MAX_S} seconds.`)
-        return { ...settings, name, url, about: settings.about.trim() }
+        const { program: _program, ...remote } = settings
+        return { ...remote, name, url, about: settings.about.trim() }
       })
 
     /** A key as typed: whitespace dropped, nothing left means none. */
@@ -373,12 +515,131 @@ export const layer = Layer.effect(
       }
     }
 
-    const prepare: McpConnectionsShape["prepare"] = (userId, connectionId) =>
+    /** Every request of a sign-in step counted, and stopped with the ledger row's signal. */
+    const signInFetch =
+      (fetchFn: typeof fetch, counts: { sent: number; received: number }, signal: AbortSignal) =>
+      async (url: string | URL, init?: RequestInit) => {
+        const body = init?.body
+        counts.sent +=
+          typeof body === "string"
+            ? Buffer.byteLength(body)
+            : body instanceof URLSearchParams
+              ? Buffer.byteLength(body.toString())
+              : 0
+        const response = await fetchFn(url, {
+          ...init,
+          signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal
+        })
+        const length = Number(response.headers.get("content-length"))
+        if (Number.isFinite(length)) counts.received += length
+        return response
+      }
+
+    /**
+     * One sign-in step (discovery, registration, the code exchange or a refresh) as a ledger row.
+     * Its requests go through the connection's network, to the server's own origin or to public
+     * addresses only (`signInTargets`), and its failure never repeats what a service answered.
+     */
+    const signInStep = <A>(
+      userId: UserId,
+      target: Pick<McpPrepared, "connection" | "scrub">,
+      network: RequestNetwork,
+      server: URL,
+      step: (fetchFn: (url: string | URL, init?: RequestInit) => Promise<Response>) => Promise<A>
+    ) => {
+      const counts = { sent: 0, received: 0 }
+      return recorded(userId, target, counts, { method: "oauth", tool: null }, CHECK, (signal) =>
+        step(signInFetch(network.fetchFor(undefined, signInTargets(server)), counts, signal)).catch(
+          (error: unknown) => {
+            throw Object.assign(new Error(briefSignInError(target.scrub(messageOf(error)))), {
+              code: httpCode(error)
+            })
+          }
+        )
+      ).pipe(
+        Effect.mapError((failure) =>
+          failure instanceof McpRequestFailed
+            ? new McpRefused({
+                message:
+                  failure.status === "timeout"
+                    ? failure.message
+                    : `Signing in with ${target.connection.name} didn't work: ${failure.message.replace(/^Couldn't reach [^:]*: /, "")}`
+              })
+            : failure
+        )
+      )
+    }
+
+    /** A stored sign-in, decrypted, or null when it can't be read (the user signs in again). */
+    const readSignIn = (connectionId: string, userId: string, blob: Uint8Array) =>
+      secrets.decrypt(blob, oauthBinding(connectionId, userId)).pipe(
+        Effect.map((json) => JSON.parse(json) as StoredSignIn),
+        Effect.orElseSucceed(() => null)
+      )
+
+    const signInLocks = keyedLocks()
+
+    /**
+     * The user's sign-in, its access token refreshed first when it has expired or is about to
+     * (spec/MCP.md §2.4: in the call path, before the request, once). One refresh at a time per
+     * (connection, user): a caller that waited uses what the first stored.
+     */
+    const currentSignIn = (
+      userId: UserId,
+      connection: McpConnection,
+      url: URL,
+      network: RequestNetwork,
+      scrub: (text: string) => string,
+      blob: Uint8Array
+    ) =>
+      Effect.gen(function* () {
+        const again = () => refused(`Sign in to ${connection.name} again.`)
+        const moved = () => refused(`Sign in to ${connection.name} again: its address changed since you signed in.`)
+        if (connection.use.signIn?.origin !== url.origin) return yield* moved()
+        const fresh = (stored: StoredSignIn) =>
+          stored.expiresAt === null || stored.expiresAt - REFRESH_AHEAD_MS > Date.now()
+        const stored = yield* readSignIn(connection.id, userId, blob)
+        if (stored === null) return yield* again()
+        // Tokens go only to the address they were issued for.
+        if (stored.serverUrl !== url.href) return yield* moved()
+        if (fresh(stored)) return stored
+        return yield* signInLocks.withLock(
+          keyOf(connection.id, userId),
+          Effect.gen(function* () {
+            // Another call may have refreshed it while this one waited.
+            const latest = yield* reader.ResolveMcpConnection({ userId, connectionId: connection.id })
+            if (latest.oauthEnc === null) return yield* again()
+            const current = yield* readSignIn(connection.id, userId, latest.oauthEnc)
+            if (current === null) return yield* again()
+            if (current.serverUrl !== url.href) return yield* moved()
+            if (fresh(current)) return current
+            const refreshed = yield* signInStep(userId, { connection, scrub }, network, url, (fetchFn) =>
+              refreshSignIn(fetchFn, url, current, Date.now())
+            )
+            if (refreshed === null) return yield* again()
+            yield* writer
+              .SetMcpOAuth({
+                userId,
+                connectionId: connection.id,
+                oauth: {
+                  enc: secrets.encrypt(JSON.stringify(refreshed), oauthBinding(connection.id, userId)),
+                  origin: url.origin,
+                  expiresAt: refreshed.expiresAt
+                },
+                expectedEnc: latest.oauthEnc,
+                at: Date.now()
+              })
+              .pipe(Effect.catchTag("StaleWrite", () => again()))
+            return refreshed
+          })
+        )
+      })
+
+    const prepareWith = (userId: UserId, connectionId: McpConnectionId, withSignIn: boolean) =>
       Effect.gen(function* () {
         const resolved: typeof McpResolved.Type = yield* reader.ResolveMcpConnection({ userId, connectionId })
         const connection = resolved.connection
-        if (connection.transport === "stdio" || connection.url === null)
-          return yield* refused(`${connection.name} is a local program, which this server doesn't run.`)
+        if (connection.transport === "stdio" || connection.url === null) return yield* prepareProgram(resolved)
         const url = new URL(connection.url)
         const origin = url.origin
         const inventory = requestSecrets()
@@ -414,9 +675,23 @@ export const layer = Layer.effect(
             : connection.proxyMode === "direct"
               ? { mode: "direct" }
               : { mode: "inherit" }
+        const requestNetwork = network.prepare(override, inventory.add)
+        // The user's own sign-in, when they have one, is sent in place of the connection's key.
+        const signIn =
+          withSignIn && resolved.oauthEnc !== null
+            ? yield* currentSignIn(userId, connection, url, requestNetwork, inventory.scrub, resolved.oauthEnc)
+            : null
+        if (signIn !== null) {
+          inventory.add(signIn.tokens.access_token)
+          if (signIn.tokens.refresh_token) inventory.add(signIn.tokens.refresh_token)
+        }
         const headers: Record<string, string> = {
           ...(headersJson === null ? {} : (JSON.parse(headersJson) as Record<string, string>)),
-          ...(apiKey === null ? {} : { Authorization: `Bearer ${apiKey}` })
+          ...(signIn !== null
+            ? { Authorization: `Bearer ${signIn.tokens.access_token}` }
+            : apiKey === null
+              ? {}
+              : { Authorization: `Bearer ${apiKey}` })
         }
         inventory.headers(headers)
         // Over http a connection's own proxy reads every byte, the key included.
@@ -427,22 +702,68 @@ export const layer = Layer.effect(
         return {
           connection,
           url,
+          program: null,
           headers,
-          network: network.prepare(override, inventory.add),
-          scrub: inventory.scrub
+          network: requestNetwork,
+          scrub: inventory.scrub,
+          signIn:
+            signIn === null ? "" : createHash("sha256").update(signIn.tokens.access_token).digest("hex").slice(0, 16)
+        } satisfies McpPrepared
+      })
+
+    const prepare: McpConnectionsShape["prepare"] = (userId, connectionId) => prepareWith(userId, connectionId, true)
+
+    // Local programs (spec/MCP.md §2.2): run in the command sandbox, only where the instance
+    // allows them and only while their owner is an admin.
+    const programs = makeProgramStarter({ dataDir: config.dataDir, sandboxId: config.commandSandbox })
+    const localProgramsFor: McpConnectionsShape["localProgramsFor"] = (role) =>
+      Effect.promise(async () => {
+        if (!config.mcpLocalPrograms) return { allowed: false, reason: LOCAL_PROGRAMS_OFF }
+        if (role !== "admin") return { allowed: false, reason: "Only an admin can add a local program." }
+        const reason = await programs.unavailable()
+        return { allowed: reason === null, reason }
+      })
+    const prepareProgram = (resolved: typeof McpResolved.Type) =>
+      Effect.gen(function* () {
+        const connection = resolved.connection
+        if (!config.mcpLocalPrograms) return yield* refused(LOCAL_PROGRAMS_OFF)
+        if (resolved.ownerRole !== "admin")
+          return yield* refused(`${connection.name} is a local program, which only an admin's server runs.`)
+        if (connection.program === null || connection.program.command === "")
+          return yield* refused(`${connection.name} has no program to run.`)
+        const inventory = requestSecrets()
+        const envJson =
+          resolved.envEnc === null
+            ? null
+            : yield* secrets
+                .decrypt(resolved.envEnc, envBinding(connection.id))
+                .pipe(Effect.mapError((error) => new McpRefused({ message: error.message })))
+        const env = envJson === null ? {} : (JSON.parse(envJson) as Record<string, string>)
+        for (const value of Object.values(env)) inventory.add(value)
+        return {
+          connection,
+          url: null,
+          program: { argv: [connection.program.command, ...connection.program.args], env },
+          headers: {},
+          // Unused: the program reaches the internet through the sandbox's own proxy.
+          network: network.prepare({ mode: "inherit" }, inventory.add),
+          scrub: inventory.scrub,
+          signIn: ""
         } satisfies McpPrepared
       })
 
     /** Runs one request with its ledger row: opened before anything is sent, closed once after. */
     const recorded = <A>(
       userId: UserId,
-      prepared: McpPrepared,
+      prepared: Pick<McpPrepared, "connection" | "scrub">,
       counts: { sent: number; received: number },
-      row: { readonly method: "initialize" | "tools/list" | "tools/call"; readonly tool: string | null },
+      row: { readonly method: "initialize" | "tools/list" | "tools/call" | "oauth"; readonly tool: string | null },
       attribution: McpAttribution,
       send: (signal: AbortSignal, timeoutMs: number) => Promise<A>,
       /** The longest the request may take in all (a call reporting progress); else the timeout. */
-      totalMs?: number
+      totalMs?: number,
+      /** A local program's transport, to tell a request it ended under. */
+      program: ProgramTransport | null = null
     ) =>
       Effect.gen(function* () {
         const connection = prepared.connection
@@ -483,7 +804,7 @@ export const layer = Layer.effect(
             signal.addEventListener("abort", () => (aborted = true))
             return send(signal, timeoutMs)
           },
-          catch: (error) => failureOf(error, connection.name, connection.timeoutS, aborted, prepared.scrub)
+          catch: (error) => failureOf(error, connection.name, connection.timeoutS, aborted, prepared.scrub, program)
         }).pipe(
           // The SSE transport's start has no timeout of its own.
           Effect.timeoutOrElse({
@@ -515,19 +836,34 @@ export const layer = Layer.effect(
         const options = { fetch, requestInit: { headers: { ...prepared.headers } } }
         const kind = which ?? (connection.transport === "sse" ? "sse" : "streamable-http")
         const counts = { sent: 0, received: 0 }
+        const local = prepared.program
+        const startProgram = (local: NonNullable<McpPrepared["program"]>) => {
+          // What it writes to stderr is shown without the owner's variables' values.
+          const output = programs.outputOf(connection.id, userId)
+          output.keepSecrets(Object.values(local.env))
+          return new ProgramTransport(
+            () => programs.start({ connectionId: connection.id, userId, argv: local.argv, env: local.env }),
+            output
+          )
+        }
+        const program = local === null ? null : startProgram(local)
+        const url = prepared.url
+        if (program === null && url === null) return yield* Effect.die(new Error("no address"))
         const transport = new CountingTransport(
-          kind === "sse"
-            ? new SSEClientTransport(prepared.url, options)
-            : new StreamableHTTPClientTransport(prepared.url, {
-                ...options,
-                // A dropped stream isn't reopened behind the app's back: the call reports it.
-                reconnectionOptions: {
-                  maxRetries: 0,
-                  initialReconnectionDelay: 1000,
-                  maxReconnectionDelay: 1000,
-                  reconnectionDelayGrowFactor: 1
-                }
-              }),
+          program !== null
+            ? program
+            : kind === "sse"
+              ? new SSEClientTransport(url!, options)
+              : new StreamableHTTPClientTransport(url!, {
+                  ...options,
+                  // A dropped stream isn't reopened behind the app's back: the call reports it.
+                  reconnectionOptions: {
+                    maxRetries: 0,
+                    initialReconnectionDelay: 1000,
+                    maxReconnectionDelay: 1000,
+                    reconnectionDelayGrowFactor: 1
+                  }
+                }),
           counts
         )
         const client = new Client(MCP_CLIENT_INFO, { capabilities: {} })
@@ -541,8 +877,15 @@ export const layer = Layer.effect(
           throw new McpError(ErrorCode.MethodNotFound, `${request.method} isn't supported`)
         }
         yield* Effect.acquireRelease(
-          recorded(userId, prepared, counts, { method: "initialize", tool: null }, attribution, (signal, timeout) =>
-            client.connect(transport, { signal, timeout })
+          recorded(
+            userId,
+            prepared,
+            counts,
+            { method: "initialize", tool: null },
+            attribution,
+            (signal, timeout) => client.connect(transport, { signal, timeout }),
+            undefined,
+            program
           ),
           // A cancellation being sent goes first. Closing aborts the client's streams; a server that
           // never lets go doesn't hold the caller.
@@ -554,6 +897,7 @@ export const layer = Layer.effect(
             ).pipe(Effect.timeout("5 seconds"), Effect.ignore)
         )
         return {
+          program,
           client,
           counts,
           protocolVersion: () => transport.protocolVersion,
@@ -562,20 +906,14 @@ export const layer = Layer.effect(
       })
 
     const request: McpConnectionsShape["request"] = (userId, prepared, session, { method, tool, attribution, send }) =>
-      recorded(userId, prepared, session.counts, { method, tool }, attribution, send)
+      recorded(userId, prepared, session.counts, { method, tool }, attribution, send, undefined, session.program)
 
     // The kept clients (spec/MCP.md §7.1): one per (connection, user), opened by the first call
     // that needs one and closed after 5 idle minutes, when the connection's `cache_revision`
     // moves on (an edit of where or how calls are sent), when it stops being usable and at
     // shutdown. Opening and reconnecting a key take its lock, so concurrent callers share one.
     const pool = new Map<string, Pooled>()
-    const locks = new Map<string, Semaphore.Semaphore>()
-    const keyOf = (connectionId: string, userId: string) => `${connectionId}\u0000${userId}`
-    const lockOf = (key: string) => {
-      let lock = locks.get(key)
-      if (!lock) locks.set(key, (lock = Semaphore.makeUnsafe(1)))
-      return lock
-    }
+    const locks = keyedLocks()
 
     /** Closes a kept client once nothing uses it; a call still running on it keeps it open. */
     const retire = (key: string, entry: Pooled) =>
@@ -621,14 +959,16 @@ export const layer = Layer.effect(
      */
     const acquire = (userId: UserId, prepared: McpPrepared, attribution: McpAttribution, stale?: Pooled) => {
       const key = keyOf(prepared.connection.id, userId)
-      return lockOf(key).withPermit(
+      return locks.withLock(
+        key,
         Effect.gen(function* () {
           const kept = pool.get(key)
           if (
             kept !== undefined &&
             kept !== stale &&
             !kept.dead &&
-            kept.revision === prepared.connection.cacheRevision
+            kept.revision === prepared.connection.cacheRevision &&
+            kept.signIn === prepared.signIn
           ) {
             kept.users += 1
             if (kept.timer !== null) clearTimeout(kept.timer)
@@ -645,6 +985,7 @@ export const layer = Layer.effect(
             connectionId: prepared.connection.id,
             userId,
             revision: prepared.connection.cacheRevision,
+            signIn: prepared.signIn,
             scope,
             session,
             users: 1,
@@ -657,8 +998,9 @@ export const layer = Layer.effect(
             entry.dead = true
           }
           // A connected server says its tools changed: list them again at once (spec/MCP.md §4.1).
+          // Only the owner's session stores what everyone sharing the server sees.
           session.client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
-            runFork(relist(userId, prepared, key, entry))
+            if (prepared.connection.owned) runFork(relist(userId, prepared, key, entry))
           })
           pool.set(key, entry)
           return { key, entry }
@@ -721,7 +1063,8 @@ export const layer = Layer.effect(
                     })
                 }
               ),
-            MCP_CALL_MAX_MS
+            MCP_CALL_MAX_MS,
+            session.program
           )
         /** One attempt on a kept client, released after; `stale` asks for a fresh one. */
         const attempt = (number: number, stale?: Pooled) =>
@@ -735,12 +1078,17 @@ export const layer = Layer.effect(
             if (outcome._tag === "Success") return { _tag: "Done", result: outcome.success } as const
             const failure = outcome.failure
             // A dropped connection leaves the session in doubt: the next call opens another.
-            if (failure instanceof McpRequestFailed && failure.status === "failed") entry.dead = true
+            if (
+              failure instanceof McpRequestFailed &&
+              (failure.status === "failed" || failure.status === "interrupted")
+            )
+              entry.dead = true
             return { _tag: "Sent", failure, entry } as const
           })
         const first = yield* attempt(attribution.attempt)
-        // The first connect of this process for the connection lists its tools again, after the call.
-        if (first._tag !== "NotSent" && !listedHere.has(connectionId)) {
+        // The owner's first connect of this process for the connection lists its tools again, after
+        // the call.
+        if (first._tag !== "NotSent" && ready.connection.owned && !listedHere.has(connectionId)) {
           listedHere.add(connectionId)
           const key = keyOf(connectionId, userId)
           const entry = pool.get(key)
@@ -818,20 +1166,21 @@ export const layer = Layer.effect(
     // Listing again on a kept client (spec/MCP.md §4.1): when a connected server says its tools
     // changed (`notifications/tools/list_changed`), and at the first connect of this process for a
     // connection. It carries nothing of the user's, and the connection is enabled, or it wouldn't
-    // be connected. The catalog is stored only if it changed (`SaveMcpCatalog`), and a listing made
+    // be connected. Only on the owner's session: a shared user's session carries their own
+    // sign-in (or their own program's files), and the catalog and instructions it lists are what
+    // every other user's model is sent, so another account's listing never replaces them. The catalog is stored only if it changed (`SaveMcpCatalog`), and a listing made
     // against an older `cache_revision` is dropped. One listing of a connection at a time.
     const listedHere = new Set<string>()
-    const listLocks = new Map<string, Semaphore.Semaphore>()
+    const listLocks = keyedLocks()
     const relist = (userId: UserId, prepared: McpPrepared, key: string, entry: Pooled) => {
       const connectionId = prepared.connection.id
-      let lock = listLocks.get(connectionId)
-      if (!lock) listLocks.set(connectionId, (lock = Semaphore.makeUnsafe(1)))
-      return lock
-        .withPermit(
+      return listLocks
+        .withLock(
+          connectionId,
           Effect.gen(function* () {
             if (entry.dead || entry.retired) return
             const before = yield* reader.GetMcpConnection({ userId, connectionId })
-            if (before.cacheRevision !== entry.revision) return
+            if (!before.owned || before.cacheRevision !== entry.revision) return
             entry.users += 1
             if (entry.timer !== null) clearTimeout(entry.timer)
             entry.timer = null
@@ -859,6 +1208,8 @@ export const layer = Layer.effect(
     const check: McpConnectionsShape["check"] = (userId, connectionId) =>
       Effect.gen(function* () {
         const before = yield* reader.GetMcpConnection({ userId, connectionId })
+        // Check stores the catalog everyone sharing it sees: only the owner starts one.
+        if (!before.owned) return yield* Effect.fail(new NotFound({ entity: "mcp_connection", id: connectionId }))
         const save = (outcome: { server: McpServerInfo; tools: Array<McpTool> } | { error: string }) =>
           writer.SaveMcpCatalog({
             userId,
@@ -905,7 +1256,10 @@ export const layer = Layer.effect(
         // The user picks the transport; when it fails, Check sees whether the other one answers.
         const other: RemoteMcpTransport = transport === "sse" ? "streamable-http" : "sse"
         const probe =
-          listed.failure.auth || listed.failure.status === "timeout" || listed.failure.status === "cancelled"
+          before.transport === "stdio" ||
+          listed.failure.auth ||
+          listed.failure.status === "timeout" ||
+          listed.failure.status === "cancelled"
             ? false
             : yield* Effect.scoped(open(userId, prepared.success, CHECK, other)).pipe(
                 Effect.as(true),
@@ -930,6 +1284,8 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const valid = yield* checked(settings)
         const key = typedKey(apiKey)
+        if (valid.transport === "stdio" && (key !== null || credentialId !== null))
+          return yield* refused("A local program takes no key: give it environment variables instead.")
         const connectionId = uuidv7() as McpConnectionId
         yield* writer.CreateMcpConnection({
           userId,
@@ -954,7 +1310,11 @@ export const layer = Layer.effect(
           at: Date.now()
         })
         if (connection.cacheRevision !== before.cacheRevision) yield* closeKept(connectionId)
-        if (before.url === connection.url && before.transport === connection.transport)
+        if (
+          before.url === connection.url &&
+          before.transport === connection.transport &&
+          JSON.stringify(before.program) === JSON.stringify(connection.program)
+        )
           return { connection, check: null }
         return yield* check(userId, connectionId)
       })
@@ -1025,7 +1385,169 @@ export const layer = Layer.effect(
           .pipe(Effect.tap(() => closeKept(connectionId)))
       })
 
+    // Signing in with the server (spec/MCP.md §2.4). The browser is away on the server's sign-in
+    // page between the two steps; what the second needs waits here, keyed by the random `state`
+    // the page sends back, for the user who started it. It doesn't outlive the process.
+    const pendingSignIns = new Map<
+      string,
+      {
+        readonly userId: UserId
+        readonly connectionId: McpConnectionId
+        readonly cacheRevision: number
+        readonly origin: string
+        readonly pending: PendingSignIn
+        readonly until: number
+      }
+    >()
+    const prunePending = (now: number) => {
+      for (const [state, entry] of pendingSignIns) if (entry.until < now) pendingSignIns.delete(state)
+    }
+    const clientRegistry = makeClientRegistry()
+    const { publicOrigins } = parsePublicOrigins(config.publicOrigins)
+    const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"])
+
+    /** The browser's address for the app, if the sign-in page may send it back there. */
+    const appOriginProblem = (appOrigin: string) => {
+      const origin = originOf(appOrigin)
+      if (origin === null || origin !== appOrigin) return "This app's address isn't valid."
+      const host = new URL(origin).hostname
+      if (publicOrigins.origins.includes(origin) || loopbackHosts.has(host)) return null
+      return `The server can't send you back to ${origin}: it isn't one of this app's public addresses. An admin can add it to PUBLIC_ORIGINS.`
+    }
+
+    const startSignIn: McpConnectionsShape["startSignIn"] = (userId, connectionId, appOrigin) =>
+      Effect.gen(function* () {
+        const problem = appOriginProblem(appOrigin)
+        if (problem !== null) return yield* refused(problem)
+        const prepared = yield* prepareWith(userId, connectionId, false)
+        const url = prepared.url
+        if (url === null) return yield* refused(`${prepared.connection.name} is a local program: it has no sign-in.`)
+        const resolved = yield* reader.ResolveMcpConnection({ userId, connectionId })
+        // An earlier sign-in's discovery and registration are used again only for the same address.
+        const previous = resolved.oauthEnc === null ? null : yield* readSignIn(connectionId, userId, resolved.oauthEnc)
+        const redirectUri = `${appOrigin}${MCP_OAUTH_CALLBACK}`
+        prunePending(Date.now())
+        if (pendingSignIns.size >= SIGN_IN_PENDING_MAX)
+          return yield* refused("Too many sign-ins are waiting on this server. Try again in a few minutes.")
+        const started = yield* signInStep(userId, prepared, prepared.network, url, (fetchFn) =>
+          startFlow(fetchFn, url, redirectUri, previous, {
+            registry: clientRegistry,
+            // A shared user's browser is sent with the server's origin only (spec/MCP.md §3).
+            resourceOrigin: !prepared.connection.owned
+          })
+        )
+        // The page is opened by the browser: only a web address.
+        if (!/^https?:$/.test(started.authorizationUrl.protocol))
+          return yield* refused(`${prepared.connection.name}'s sign-in page isn't a web address.`)
+        const now = Date.now()
+        prunePending(now)
+        // A user's oldest waiting sign-ins give way to a new one.
+        const mine = [...pendingSignIns].filter(([, entry]) => entry.userId === userId)
+        for (const [state] of mine.slice(0, Math.max(0, mine.length - SIGN_IN_PENDING_PER_USER + 1)))
+          pendingSignIns.delete(state)
+        pendingSignIns.set(started.pending.state, {
+          userId,
+          connectionId,
+          cacheRevision: prepared.connection.cacheRevision,
+          origin: url.origin,
+          pending: started.pending,
+          until: now + SIGN_IN_PENDING_MS
+        })
+        return { authorizationUrl: started.authorizationUrl.href }
+      })
+
+    const finishSignIn: McpConnectionsShape["finishSignIn"] = (userId, state, code, error) =>
+      Effect.gen(function* () {
+        prunePending(Date.now())
+        const entry = pendingSignIns.get(state)
+        // Only the user who started it may finish it, so a link to someone else's sign-in does nothing.
+        if (entry === undefined || entry.userId !== userId || entry.until < Date.now())
+          return yield* refused(
+            "This sign-in has expired or was started elsewhere. Start it again from the server's page."
+          )
+        pendingSignIns.delete(state)
+        const prepared = yield* prepareWith(userId, entry.connectionId, false)
+        const name = prepared.connection.name
+        if (error !== null) return yield* refused(`${name} didn't sign you in: ${prepared.scrub(error).slice(0, 200)}`)
+        if (code === null || code === "") return yield* refused(`${name} didn't sign you in.`)
+        const url = prepared.url
+        if (prepared.connection.cacheRevision !== entry.cacheRevision || url === null || url.origin !== entry.origin)
+          return yield* refused(`${name}'s address changed while you were signing in. Start again.`)
+        const stored = yield* signInStep(userId, prepared, prepared.network, url, (fetchFn) =>
+          finishFlow(fetchFn, url, entry.pending, code, Date.now())
+        )
+        yield* writer.SetMcpOAuth({
+          userId,
+          connectionId: entry.connectionId,
+          oauth: {
+            enc: secrets.encrypt(JSON.stringify(stored), oauthBinding(entry.connectionId, userId)),
+            origin: entry.origin,
+            expiresAt: stored.expiresAt
+          },
+          at: Date.now()
+        })
+        yield* closeKeptFor(entry.connectionId, userId)
+        // A new sign-in is checked once, as a new address is (spec/MCP.md §2.5).
+        yield* check(userId, entry.connectionId).pipe(Effect.ignore)
+        return { connectionId: entry.connectionId, name }
+      })
+
+    const signOut: McpConnectionsShape["signOut"] = (userId, connectionId) =>
+      writer
+        .SetMcpOAuth({ userId, connectionId, oauth: null, at: Date.now() })
+        .pipe(Effect.tap(() => closeKeptFor(connectionId, userId)))
+
+    const setEnvironment: McpConnectionsShape["setEnvironment"] = (userId, connectionId, env, expectedRowVersion) =>
+      Effect.gen(function* () {
+        const connection = yield* reader.GetMcpConnection({ userId, connectionId })
+        if (connection.transport !== "stdio") return yield* refused("Only a local program has environment variables.")
+        const entries = Object.entries(env ?? {}).map(([name, value]) => [name.trim(), value] as const)
+        for (const [name, value] of entries) {
+          // PATH, HOME and LANG are the sandbox's own, and nothing that changes how programs start.
+          const problem = programEnvProblem(name)
+          if (problem !== null) return yield* refused(problem)
+          if (value.includes("\0") || value.length > 32_768)
+            return yield* refused(`${name}'s value is too long or invalid.`)
+        }
+        if (entries.length > 64) return yield* refused("Give at most 64 variables.")
+        return yield* writer
+          .SetMcpEnvironment({
+            userId,
+            connectionId,
+            expectedRowVersion,
+            env:
+              entries.length === 0
+                ? null
+                : {
+                    enc: secrets.encrypt(JSON.stringify(Object.fromEntries(entries)), envBinding(connectionId)),
+                    names: entries.map(([name]) => name)
+                  },
+            at: Date.now()
+          })
+          .pipe(
+            Effect.tap(() => closeKept(connectionId)),
+            Effect.tap(() => Effect.sync(() => programs.forget(connectionId)))
+          )
+      })
+
+    // A program's error output is its owner's only (spec/MCP.md §3: a shared user never sees
+    // its secrets, and programs print their configuration), and the owner's variables' values
+    // are scrubbed from it.
+    const programOutput: McpConnectionsShape["programOutput"] = (userId, connectionId) =>
+      Effect.flatMap(reader.GetMcpConnection({ userId, connectionId }), (connection) => {
+        if (!connection.owned) return Effect.fail(new NotFound({ entity: "mcp_connection", id: connectionId }))
+        const ring = programs.outputOf(connectionId, userId)
+        return Effect.succeed({ running: ring.running, output: ring.text() })
+      })
+
     return McpConnections.of({
+      localPrograms: config.mcpLocalPrograms,
+      localProgramsFor,
+      setEnvironment,
+      programOutput,
+      startSignIn,
+      finishSignIn,
+      signOut,
       create,
       update,
       setKey,
@@ -1037,7 +1559,13 @@ export const layer = Layer.effect(
       request,
       call,
       closeKept,
-      kept: () => [...pool.values()].filter((entry) => !entry.dead && !entry.retired).length
+      kept: () => [...pool.values()].filter((entry) => !entry.dead && !entry.retired).length,
+      retained: () => ({
+        pendingSignIns: pendingSignIns.size,
+        locks: locks.size() + signInLocks.size() + listLocks.size(),
+        outputs: programs.size(),
+        registrations: clientRegistry.size()
+      })
     })
   })
 )

@@ -158,4 +158,5 @@ a development server (a systemd user service) needs nothing extra: bubblewrap fr
 packages, the kernel's unprivileged user namespaces, and the user manager for the per-command
 scopes. `COMMAND_SANDBOX` names the sandbox to use (`linux-bwrap` is the only one); empty picks
 the first available. `COMMAND_CGROUP` names a delegated cgroup subtree the server may write,
-for hosts that make one themselves.
+for hosts that make one themselves. `MCP_LOCAL_PROGRAMS=on` lets admins add MCP servers that are
+local programs; they run in the same sandbox (off by default).

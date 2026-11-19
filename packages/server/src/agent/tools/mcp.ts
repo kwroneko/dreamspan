@@ -14,7 +14,13 @@
 // unprocessed (spec/MCP.md §7.2), never on a message match.
 import { Type } from "@earendil-works/pi-ai"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
-import { MCP_DESCRIPTION_LIMIT, type McpConnection, mcpToolAllowed, type McpTool } from "@dreamspan/shared/mcp.ts"
+import {
+  MCP_DESCRIPTION_LIMIT,
+  type McpConnection,
+  mcpOfferedToolName,
+  mcpToolAllowed,
+  type McpTool
+} from "@dreamspan/shared/mcp.ts"
 import type { CapabilityMode } from "@dreamspan/shared/workshopApi.ts"
 import { Effect } from "effect"
 import type { McpConnectionsShape, McpProgress } from "../../mcp/McpConnections.ts"
@@ -60,10 +66,18 @@ export const enabledStoryServers = (
 /** How many of a server's tools the user allowed. */
 export const allowedToolCount = (connection: McpConnection) => allowedTools(connection).length
 
-/** The tools of a server the user allowed, by the name the model sees. */
+/**
+ * The tools of a server the user allowed, by the name the model sees: under the key the user's
+ * use offers it with, which differs from the server's own when two the user can use share one.
+ */
 const allowedTools = (connection: McpConnection): ReadonlyArray<McpTool> =>
   connection.tools
     .filter((tool) => mcpToolAllowed(tool, connection.use))
+    .map((tool) =>
+      connection.use.offeredKey === connection.key
+        ? tool
+        : { ...tool, exposed: mcpOfferedToolName(tool.exposed, connection.key, connection.use.offeredKey) }
+    )
     .toSorted((a, b) => (a.exposed < b.exposed ? -1 : a.exposed > b.exposed ? 1 : 0))
 
 /** The servers on in a workshop, in creation order (the reader lists them so). */

@@ -70,6 +70,45 @@ export interface RunResult {
   readonly durationMs: number
 }
 
+/**
+ * A long-running program started with pipes (an MCP server, spec/MCP.md §2.2): the same
+ * sandbox as a command, with its own stdin, stdout and stderr, no time limit and no shell.
+ */
+export interface SpawnSpec {
+  /** The program and its arguments, as given: never interpreted by a shell. */
+  readonly argv: ReadonlyArray<string>
+  readonly cwd: string
+  readonly mounts: ReadonlyArray<SandboxMount>
+  /** The sandbox's environment, from its first shell on: nothing of the app's own is passed on. */
+  readonly env: Readonly<Record<string, string>>
+  /**
+   * The program's own variables: given to the program only, after the limits are set, so none
+   * of them changes how the sandbox's shell or its proxy bridge start. They never override
+   * `env` or the proxy's variables.
+   */
+  readonly programEnv?: Readonly<Record<string, string>>
+  readonly network: "public" | "none"
+  /** The reserve is checked before it starts and while it runs: below it, it is stopped. */
+  readonly limits: Omit<RunLimits, "timeoutMs">
+}
+
+export interface SandboxProcess {
+  /** The process `spawn` returned; its group is what `kill` stops. */
+  readonly pid: number
+  readonly stdin: NodeJS.WritableStream
+  readonly stdout: NodeJS.ReadableStream
+  readonly stderr: NodeJS.ReadableStream
+  /** Settles once it has ended and the sandbox is cleaned up. */
+  readonly exited: Promise<{
+    readonly exitCode: number | null
+    readonly memoryCapped: boolean
+    /** Stopped because a writable mount's filesystem went below the reserve. */
+    readonly diskLow?: boolean
+  }>
+  /** Stops its whole process tree, by the group of the PID `spawn` returned. */
+  readonly kill: () => void
+}
+
 export type Availability =
   { readonly ok: true } | { readonly ok: false; readonly reason: string; readonly fix?: string }
 
@@ -82,6 +121,8 @@ export interface CommandSandbox {
   readonly available: () => Promise<Availability>
   /** Runs one command; aborting `signal` kills its whole process tree. */
   readonly run: (spec: RunSpec, signal: AbortSignal) => Promise<RunResult>
+  /** Starts a long-running program with pipes; absent where the sandbox can't. */
+  readonly spawn?: (spec: SpawnSpec) => Promise<SandboxProcess>
   /** User-facing, for the "Run commands" row when it is available but limited; null: nothing to say. */
   readonly note?: () => Promise<string | null>
   /** At server start: cleanup and what it found, for the log. */

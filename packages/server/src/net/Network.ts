@@ -45,7 +45,11 @@ interface NetworkView {
 
 /** Transport pinned to the settings whose secrets were registered for this request. */
 export interface RequestNetwork {
-  readonly fetchFor: (onRoute?: (route: Route, target: URL) => void) => typeof fetch
+  /**
+   * `targetAddresses` checks every hop before it connects (redirects included) and pins the
+   * connection to the addresses it returns, as `NetworkShape.fetchFor`'s does.
+   */
+  readonly fetchFor: (onRoute?: (route: Route, target: URL) => void, targetAddresses?: TargetAddresses) => typeof fetch
   readonly route: (target: URL) => Effect.Effect<Route>
 }
 
@@ -356,7 +360,7 @@ export const layer = Layer.effect(
         if (settings.proxyUrl !== null) registerSecret(settings.proxyUrl)
         if (override.mode === "custom") registerSecret(override.url)
         return {
-          fetchFor: (onRoute) => fetchFor(override, onRoute, undefined, undefined, settings),
+          fetchFor: (onRoute, targetAddresses) => fetchFor(override, onRoute, targetAddresses, undefined, settings),
           route: (target) => Effect.promise(() => routeNow(target, override, settings))
         }
       },
