@@ -18,7 +18,8 @@ import { makeAddressSet } from "../net/addressSet.ts"
 import { parsePublicOrigins } from "../net/exposure.ts"
 import { commandSandboxes } from "../sandbox/registry.ts"
 import { setPublicAddresses } from "../sandbox/network.ts"
-import { accountEnv } from "./environment.ts"
+import { accountEnv, prepareAccount } from "./environment.ts"
+import { folderAt, locateFolder } from "./workingFolder.ts"
 import { BIN_FOLDER, makeFilesBin, type FilesBin } from "./bin.ts"
 import { makeFilesQuota, parseByteSize, type FilesQuota } from "./quota.ts"
 
@@ -38,6 +39,13 @@ export class WorkshopFiles extends Context.Service<
      * changed, added or removed (`/files/…`); `all` when a command's scan couldn't list them all.
      */
     readonly changed: (userId: string, paths: ReadonlyArray<string>, all?: boolean) => void
+    /** A folder of the account's Files with its inode, for `workshop.folder` (§2.1); fails when it isn't one. */
+    readonly folderAt: (userId: string, path: string) => Effect.Effect<{ path: string; inode: number | null }, unknown>
+    /** Where a stored working folder is now (by path, else by inode); null when it's gone. */
+    readonly locateFolder: (
+      userId: string,
+      stored: { readonly path: string; readonly inode: number | null }
+    ) => Effect.Effect<string | null>
   }
 >()("rp/files/WorkshopFiles") {
   static readonly layer = Layer.effect(
@@ -142,7 +150,15 @@ export class WorkshopFiles extends Context.Service<
         commandsNote: files.commandsNote,
         quota,
         bin,
-        changed
+        changed,
+        folderAt: (userId, path) =>
+          Effect.tryPromise(async () => {
+            const env = accountEnv(dirs, userId)
+            await prepareAccount(env)
+            return folderAt(env.filesRoot, path)
+          }),
+        locateFolder: (userId, stored) =>
+          Effect.promise(() => locateFolder(accountEnv(dirs, userId).filesRoot, stored).catch(() => null))
       }
     })
   )

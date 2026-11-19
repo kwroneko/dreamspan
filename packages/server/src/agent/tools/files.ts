@@ -5,6 +5,7 @@
 // content as a version and records a `file.*` effect with Undo; every command records a
 // `shell.run` effect listing the files it changed, with no Undo. A call cut off without its
 // receipt is never run again silently: the permit asks (agent/approvals.ts).
+import { locateFolder } from "../../files/workingFolder.ts"
 import { createHash } from "node:crypto"
 import { readFile, statfs } from "node:fs/promises"
 import { join, posix } from "node:path"
@@ -219,16 +220,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
         .StateEventsAt({ userId: ctx.userId, chatId: ctx.chatId, slotId: ctx.leafSlotId, forkId: ctx.forkId })
         .pipe(Effect.orElseSucceed(() => []))
       const folder = foldState(events).workshopFolder
-      let start = FILES_MOUNT
-      if (folder) {
-        try {
-          const { full, segments } = resolveFilesPath(folder.path, FILES_MOUNT)
-          const info = yield* attempt(() => statPath(env.filesRoot, segments))
-          if (info?.isDirectory()) start = full
-        } catch {
-          // A folder that's gone: the top of Files (§2.2).
-        }
-      }
+      // Found again by its inode after a rename; a folder that's gone: the top of Files (§2.2).
+      const start = folder
+        ? ((yield* Effect.promise(() => locateFolder(env.filesRoot, folder).catch(() => null))) ?? FILES_MOUNT)
+        : FILES_MOUNT
       ctx.cache.set(CWD_KEY, start)
       return start
     })

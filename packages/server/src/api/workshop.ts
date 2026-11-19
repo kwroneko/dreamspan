@@ -1,5 +1,6 @@
 import { PluginHost } from "../plugins/Host.ts"
 import { WorkshopFiles } from "../files/WorkshopFiles.ts"
+import { FILES_TOP } from "@dreamspan/shared/files.ts"
 import { FILE_UNDO_ON_HOST } from "../db/workshopEffects.ts"
 import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
 import { CurrentUser } from "@dreamspan/shared/api.ts"
@@ -334,6 +335,20 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       Effect.flatMap(CurrentUser, (user) => writer.SetWorkshopPersona({ userId: user.id, persona })).pipe(
         internal("SetWorkshopPersona")
       ),
+    WorkshopFolderChoices: ({ chatId, stored, cardId }) =>
+      Effect.gen(function* () {
+        const userId = (yield* CurrentUser).id
+        const chat = yield* reader.GetChat({ userId, chatId })
+        if (chat.kind !== "workshop") return yield* new NotFound({ entity: "workshop", id: chatId })
+        const current = stored === null ? FILES_TOP : yield* files.locateFolder(userId, stored)
+        const memory = yield* reader.WorkshopFolderMemory({ userId, cardId })
+        const card = memory.card === null ? null : yield* files.locateFolder(userId, memory.card)
+        return {
+          current,
+          recent: memory.recent.map((folder) => folder.path),
+          card: card !== null && card !== current ? card : null
+        }
+      }).pipe(internal("WorkshopFolderChoices")),
     // Grants chosen before the first message: only what a new workshop offers, each as
     // `SetWorkshopGrant` would take it there, so nothing the strip couldn't set gets in.
     CreateWorkshop: (input) =>

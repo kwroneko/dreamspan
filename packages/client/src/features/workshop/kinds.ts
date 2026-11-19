@@ -1,7 +1,7 @@
 // The workshop's look (spec/WORKSHOP.md §2.1, §2.5): what tells a workshop from a story wherever it
 // shows. Its behaviour is the shared `workshop` profile (`@dreamspan/shared/chatKinds.ts`).
 import type { ChatKindLook } from "../chat/kindLooks.ts"
-import { FILES_TAB } from "../files/ids.ts"
+import { FILES_TAB, FOLDER_CHIP } from "../files/ids.ts"
 
 const WORKSHOP_KIND = "workshop"
 export const CAPABILITY_CHIP = "workshop.capabilities"
@@ -24,6 +24,6 @@ export const workshopLook: ChatKindLook = {
     "chat.new-with-cast"
   ],
   // The capability chip, the Changes tab and the step rows’ Undo and Open (§2.5, §3.6), and the
-  // Files tab (spec/FILES-AND-ENVIRONMENT.md §8.1), and the subagent model chip (spec/SUBAGENTS.md §5.1a).
-  shows: [CAPABILITY_CHIP, SUBAGENT_MODELS_CHIP, "workshop.changes", FILES_TAB]
+  // Files tab and the working-folder chip (spec/FILES-AND-ENVIRONMENT.md §8.1, §2.2), and the subagent model chip (spec/SUBAGENTS.md §5.1a).
+  shows: [CAPABILITY_CHIP, SUBAGENT_MODELS_CHIP, "workshop.changes", FILES_TAB, FOLDER_CHIP]
 }

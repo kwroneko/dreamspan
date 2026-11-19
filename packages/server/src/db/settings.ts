@@ -58,6 +58,21 @@ const definitions: ReadonlyArray<SettingDefinition> = [
     })
   },
   { id: "chat.persona", scope: "user", schema: Schema.NullOr(Schema.String) },
+  // The working folder a workshop starts in, per assistant card, and the folders picked last
+  // (spec/FILES-AND-ENVIRONMENT.md §2.3): the user's, never part of a card.
+  {
+    id: "workshop.cardFolders",
+    scope: "user",
+    schema: Schema.Record(
+      Schema.String,
+      Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number), at: Schema.Number })
+    )
+  },
+  {
+    id: "workshop.recentFolders",
+    scope: "user",
+    schema: Schema.Array(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) }))
+  },
   { id: "generation.model", scope: "user", schema: Schema.NullOr(ModelChoice) },
   { id: "generation.preset", scope: "user", schema: Schema.NullOr(Schema.String) },
   { id: "generation.judge", scope: "user", schema: Schema.NullOr(ModelChoice) },

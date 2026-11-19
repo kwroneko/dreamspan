@@ -1,3 +1,4 @@
+import { startingFolder } from "./workingFolders.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 /** One writer transaction creates the seeds, their setting, the chat and its greeting. */
 import { type ChatId, type EntityId, type ForkId, NewVersion } from "@dreamspan/shared/chat.ts"
@@ -209,6 +210,10 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
             key: "participant.join",
             value: { entity: entity as EntityId }
           })
+        // Its working folder (spec/FILES-AND-ENVIRONMENT.md §2.3): its card's, else the last picked.
+        const folder = yield* startingFolder(sql, userId, card.entity_id)
+        if (folder)
+          yield* graph.insertStateEvent(userId, chatId, null, null, null, { key: "workshop.folder", value: folder })
         if (played)
           yield* graph.insertStateEvent(userId, chatId, null, null, null, {
             key: "played_by_me.set",

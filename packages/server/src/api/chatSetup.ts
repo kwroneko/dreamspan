@@ -33,6 +33,7 @@ import type { ChatSummaries } from "../db/forkSummaries.ts"
 import { shellCardsUpdate, shellForksUpdate } from "@dreamspan/shared/shellUpdates.ts"
 import { freezeTemplate } from "../chat/macros.ts"
 import { internal } from "./internal.ts"
+import { WorkshopFiles } from "../files/WorkshopFiles.ts"
 import { remoteOf } from "@dreamspan/shared/cardSources.ts"
 import { NotFound, ServerError } from "@dreamspan/shared/errors.ts"
 import { CardSources } from "../sources/CardSources.ts"
@@ -95,6 +96,9 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "lorebook.below_history", value: { on: change.on } }
     case "HtmlDepth":
       return { key: "context.html_depth", value: change.depth }
+    case "WorkshopFolder":
+      // The inode is the host's to find (ChangeCast); a bare path is only a fallback.
+      return { key: "workshop.folder", value: { path: change.path, inode: null } }
     case "ReplyOrder":
       return { key: "reply.order", value: change.order }
     case "ReplySingle":
@@ -283,6 +287,7 @@ const bindingsOf = (state: ChatState) =>
 export const makeChatSetupHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer
+  const files = yield* WorkshopFiles
   const warmth = yield* CacheWarmth
   const hub = yield* ChatHub
   const generations = yield* Generations
@@ -544,6 +549,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       ...(state.agentEnabled === null ? {} : { agentEnabled: state.agentEnabled }),
       ...(state.cardsRotation === true ? { cardsRotation: true } : {}),
       ...(state.htmlDepth === null ? {} : { htmlDepth: state.htmlDepth }),
+      ...(state.workshopFolder ? { workshopFolder: state.workshopFolder } : {}),
       ...(state.agentTools ? { agentTools: state.agentTools } : {}),
       ...(state.sendPresence ? { sendPresence: state.sendPresence } : {}),
       ...(state.requestCap === undefined ? {} : { requestCap: state.requestCap }),
@@ -836,6 +842,27 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
                 .map((e) => toEvent({ _tag: "Leave", entityId: e }))
             ]
           })
+        } else if (change._tag === "WorkshopFolder") {
+          // A folder of the user's Files, with its inode (spec/FILES-AND-ENVIRONMENT.md §2.1), and
+          // remembered for the workshop's assistant card and as the account's last pick (§2.3).
+          const chat = yield* reader.GetChat({ userId: id, chatId })
+          if (chat.kind !== "workshop") return yield* new NotFound({ entity: "workshop", id: chatId })
+          const folder = yield* files
+            .folderAt(id, change.path)
+            .pipe(Effect.mapError(() => new NotFound({ entity: "folder", id: change.path })))
+          yield* writer.AddStateEvent({
+            userId: id,
+            chatId,
+            forkId: forkId ?? null,
+            slotId,
+            displayEnd,
+            versionId: null,
+            scope: null,
+            data: { key: "workshop.folder", value: folder }
+          })
+          const before = yield* castAt(id, chatId, slotId, forkId, displayEnd)
+          const assistant = before.cards.find((card) => !card.persona && before.participants.includes(card.entityId))
+          yield* writer.RememberWorkshopFolder({ userId: id, cardId: assistant?.entityId ?? null, ...folder })
         } else {
           yield* writer.AddStateEvent({
             userId: id,

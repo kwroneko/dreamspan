@@ -2874,6 +2874,17 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     success: BinItem,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** A working folder picked with the folder chip: remembered for the card and as recent (workingFolders.ts). */
+  Rpc.make("RememberWorkshopFolder", {
+    payload: {
+      userId: UserId,
+      cardId: Schema.NullOr(Schema.String),
+      path: Schema.String.check(Schema.isMaxLength(4096)),
+      inode: Schema.NullOr(Schema.Number)
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
   /** The host put a file back (or found its content gone): its bin row goes. */
   Rpc.make("ForgetFileBinItem", {
     payload: { userId: UserId, itemId: Schema.String },
@@ -5797,6 +5808,15 @@ const ReadOpsOwn = RpcGroup.make(
       mediaPath: Schema.NullOr(Schema.String)
     }),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The folders the user picked last, and the one remembered for a card (workingFolders.ts). */
+  Rpc.make("WorkshopFolderMemory", {
+    payload: { userId: UserId, cardId: Schema.NullOr(Schema.String) },
+    success: Schema.Struct({
+      recent: Schema.Array(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) })),
+      card: Schema.NullOr(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) }))
+    }),
+    error: StorageError
   }),
   /** A file or folder in the user's bin, with where it was (fileVersions.ts). */
   Rpc.make("FileBinItem", {
