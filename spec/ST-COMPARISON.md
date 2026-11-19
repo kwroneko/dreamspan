@@ -1,4 +1,4 @@
-# SillyTavern versus rp-harness on the same data
+# SillyTavern versus Dreamspan on the same data
 
 **Status: completed comparison, 2026-10-14.** Stock **SillyTavern 1.19.0** versus master **`7af349035f1f3debd9a7ea3d6bb1f035b9530fbe`**. This records master, not the unmerged R4 work. No application code was changed.
 

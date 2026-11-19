@@ -11,7 +11,7 @@ says why commands are unavailable.
 ```yaml
 services:
   rp:
-    image: rp-harness
+    image: dreamspan
     user: "0:0"                                 # the entrypoint drops to node (uid 1000); see below
     cgroup: private                             # the container's own cgroup namespace (Docker's default on cgroup v2)
     mem_limit: 8g                               # the container's cap: the server and every command together
@@ -19,7 +19,7 @@ services:
       - seccomp=./docker/seccomp-userns.json   # Docker's default profile plus namespace calls
       - systempaths=unconfined                  # lets the sandbox mount its own /proc
       # Hosts with AppArmor (Ubuntu, Debian with AppArmor on), after loading the profile:
-      # - apparmor=rp-harness
+      # - apparmor=dreamspan
     environment:
       # The server's public addresses behind NAT, which commands may not reach (see below).
       # PUBLIC_ADDRESSES: "203.0.113.7"
@@ -28,7 +28,7 @@ services:
 ```
 
 With `docker run`: `--user 0:0 --cgroupns private --security-opt seccomp=docker/seccomp-userns.json
---security-opt systempaths=unconfined` (plus `--security-opt apparmor=rp-harness` on AppArmor
+--security-opt systempaths=unconfined` (plus `--security-opt apparmor=dreamspan` on AppArmor
 hosts).
 
 - **seccomp-userns.json** is Docker's default profile (moby/profiles, `seccomp/default.json`)
@@ -70,11 +70,11 @@ starts as root (`user: "0:0"`):
 
 1. It enters a new user namespace that maps root and node (uid 1000) to themselves, with new
    mount and cgroup namespaces. Root there holds no capability on the host, but may mount a
-   cgroup2 view of the container's own cgroup, read-write, at `/run/rp-cgroup`.
+   cgroup2 view of the container's own cgroup, read-write, at `/run/dreamspan-cgroup`.
 2. It moves itself to `rp/server`, hands the memory and pids controllers down to `rp`, and gives
    `rp` to node. Commands' groups are made under `rp`, beside the server's.
 3. `setpriv` drops to node with no capabilities, and the server starts with
-   `COMMAND_CGROUP=/run/rp-cgroup/rp`.
+   `COMMAND_CGROUP=/run/dreamspan-cgroup/rp`.
 
 At startup the server checks that it can make and limit a group there, and logs which limiter
 commands use. `docker exec` (and the health check) still work: Docker puts them in the
@@ -94,7 +94,7 @@ limits (some don't delegate the memory controller).
 ## AppArmor
 
 Docker's `docker-default` profile denies `mount`, which bubblewrap needs.
-`docker/apparmor-rp-harness` is `docker-default` (as Docker 29 generates it) with `deny mount`
+`docker/apparmor-dreamspan` is `docker-default` (as Docker 29 generates it) with `deny mount`
 replaced by `mount`, `remount`, `pivot_root` and `userns`; every other rule is the same (the
 `/proc` and `/sys` write denials, no `/sys/firmware`, `/sys/kernel/security`, `kcore` or
 `sysrq-trigger`). The kernel still checks each mount against the namespace's own capabilities,
@@ -102,11 +102,11 @@ so the server, without `CAP_SYS_ADMIN`, can mount only inside a user namespace o
 It replaces `apparmor=unconfined`, which removed AppArmor from the whole server process.
 
 ```sh
-sudo apparmor_parser -r -W docker/apparmor-rp-harness   # load (and on each boot, e.g. from /etc/apparmor.d)
+sudo apparmor_parser -r -W docker/apparmor-dreamspan   # load (and on each boot, e.g. from /etc/apparmor.d)
 docker info | grep -i apparmor                           # AppArmor hosts list it among the security options
 ```
 
-Then `security_opt: apparmor=rp-harness`. `userns,` is an AppArmor 4 rule (Ubuntu 23.10 and
+Then `security_opt: apparmor=dreamspan`. `userns,` is an AppArmor 4 rule (Ubuntu 23.10 and
 later restrict unprivileged user namespaces to profiles that allow them); AppArmor 3 parsers
 (Debian 12) don't know it: delete that line there. Hosts without AppArmor need nothing.
 
@@ -149,7 +149,7 @@ node, reaches a public site, and is refused 127.0.0.1; with only the seccomp fil
 The final stage installs `bubblewrap` and the tools commands find inside the sandbox: git,
 python3 (with pip and venv), ripgrep, curl, procps, xz-utils, unzip, less and file. Node is the
 image's own. This adds about 170 MB (measured on the test host: 403 MB against 230 MB for the base image).
-The entrypoint (`/usr/local/bin/rp-entrypoint`) uses util-linux's `unshare` and `setpriv`, already
+The entrypoint (`/usr/local/bin/dreamspan-entrypoint`) uses util-linux's `unshare` and `setpriv`, already
 in the base image.
 
 ## Outside Docker

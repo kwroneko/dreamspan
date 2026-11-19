@@ -1,4 +1,4 @@
-# CLAUDE.md: rp-harness
+# CLAUDE.md: Dreamspan
 
 ## What this is
 

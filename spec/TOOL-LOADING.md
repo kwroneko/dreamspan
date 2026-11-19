@@ -58,10 +58,10 @@ A call to a deferred tool before it's loaded returns, as an error result: “rea
 
 ## 6. Card skills
 
-A card carries skills in `extensions.rp_harness.skills` (format **[P]**), which other apps keep on export and ignore, like any extension:
+A card carries skills in `extensions.dreamspan.skills` (format **[P]**), which other apps keep on export and ignore, like any extension:
 
 ```json
-{ "extensions": { "rp_harness": { "skills": [
+{ "extensions": { "dreamspan": { "skills": [
   { "use": "cards" },
   { "name": "proofread", "description": "Checks a card's spelling.",
     "instructions": "Read the card, then list each typo with its field.", "tools": ["read_card"] }

@@ -315,7 +315,7 @@ PLUGINS' **[D]**s bind: plugins can change almost anything; running one is the u
 ### 5.1 Folders, manifest, enabled state
 
 - **Repositories.** Instance plugins: `DATA_DIR/plugins/instance/<id>/`. A user's plugins: `DATA_DIR/plugins/users/<userId>/<id>/`. Each is a git repository (PLUGINS §4 [D]); a registry install, a folder or a zip becomes one with an initial commit (PLUGINS §4). Builds: `DATA_DIR/plugins/.builds/<scope>/<id>/<commit>/`, holding the checked-out tree, `server.mjs`, `worker.mjs`, `client.mjs` and `check.json`.
-- **The manifest**, `rp-plugin.json` at the root:
+- **The manifest**, `dreamspan-plugin.json` at the root:
 
   ```json
   { "id": "dice-roller", "name": "Dice roller", "api": 1,

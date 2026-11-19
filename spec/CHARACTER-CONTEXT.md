@@ -120,7 +120,7 @@ The preset's layout is the default: every cast card where the preset puts it, on
 **Words.** *Own-turn*: sent only when that character is the speaker. The UI says "only on <name>'s turns", because "private" already means "not exported" for notes (ARCHITECTURE §8).
 
 - **[D]** (owner, 2026-11-06) "Card fields have nothing to do with this. You can't split this unless you do something like edit the card with an LLM. Usually 'description' contains everything. We could invent a concept of a card having a public and a private part of its def, but it would be non-standard. This requires the user to adapt the card either way."
-- **[D]** (owner, 2026-11-06) "This was already decided. The only way to do it is notes. The other surface doesn't work. There's no public/private part in the spec. If we were to use card extensions, we'd use them to specify the card notes and their configuration, since that's actually general purpose." Own-turn card notes are the mechanism. There is no public/private card extension. Card notes already travel in `extensions.rp_harness.notes`.
+- **[D]** (owner, 2026-11-06) "This was already decided. The only way to do it is notes. The other surface doesn't work. There's no public/private part in the spec. If we were to use card extensions, we'd use them to specify the card notes and their configuration, since that's actually general purpose." Own-turn card notes are the mechanism. There is no public/private card extension. Card notes already travel in `extensions.dreamspan.notes`.
 
 #### Move to an own-turn note
 
@@ -156,7 +156,7 @@ An own-turn note at the start of the tail (the default marker place) or in the c
 
 - **[D]** (owner, 2026-11-06) "This doesn't really solve the issue of interoperability. The user will be editing notes and not the card, so exporting it will show the original description. The UI probably will help make it clear enough so they're not surprised, but this isn't really 'solving' it. ST cards just don't have this functionality."
 
-ST gets the original Description. An ST export writes the card's own fields, and ST has no notes, conditions or replacements, so ST sends the whole Description on every turn, with the moved passage still in it and without any edits made to the notes since. The notes travel in `extensions.rp_harness.notes` for this app only; ST ignores them. Re-importing the file into this app brings the notes back.
+ST gets the original Description. An ST export writes the card's own fields, and ST has no notes, conditions or replacements, so ST sends the whole Description on every turn, with the moved passage still in it and without any edits made to the notes since. The notes travel in `extensions.dreamspan.notes` for this app only; ST ignores them. Re-importing the file into this app brings the notes back.
 
 Export deltas (`importer/exporters.ts` `withNotes`), so the round trip into this app keeps the setup: export keeps the self-referring condition ("its card's turn", no library id needed) and the self-replacement target, which export drops today ("conditions stay behind"). It never picks an own-turn note or a replacement note as the note that becomes ST's `depth_prompt`, or ST would send the passage twice.
 
@@ -229,7 +229,7 @@ The two decision points:
 
 ## 7. Schema impact
 
-- Own-turn notes and card-swap rotation: no table change. The note document's `Placement` (`@dreamspan/shared/docs/note.ts`) gains one value, "at the preset's Own-turn notes", and the preset's order one marker identifier (`ownTurnNotes`); both are JSON documents, not SQL. Export carries the condition and the replacement target inside `extensions.rp_harness.notes`.
+- Own-turn notes and card-swap rotation: no table change. The note document's `Placement` (`@dreamspan/shared/docs/note.ts`) gains one value, "at the preset's Own-turn notes", and the preset's order one marker identifier (`ownTurnNotes`); both are JSON documents, not SQL. Export carries the condition and the replacement target inside `extensions.dreamspan.notes`.
 - The four choices [P]: branch-owned state keys in `@dreamspan/shared/state.ts`, replacing `orchestration.mode` (removed, no migration, §1): `context.per_speaker` (`shared` | `separate`), `agent.enabled` (tools on or off; the existing `agent.tools` stays the list), `cards.rotation` (card-swap on or off), and the existing composer choice for turn picking (Auto, No one; decision points are per decision connection, as built). `output.contract` stays. The narrator role: a cast state event. State keys are TypeScript schemas, not SQL; the baseline is untouched.
 - Separate contexts (later): `versions.cast_json` (built) gives the knowers. The away mark (§2.1) changes the cast snapshot's shape. `summaries.audience_json` (in the baseline) holds a context's character set. The exact-position repeat digest is kept per context (`cacheHistory[contextKey]`), in the snapshot only.
 - **BASELINE unchanged** by this study.

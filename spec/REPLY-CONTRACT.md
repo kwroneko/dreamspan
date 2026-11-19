@@ -101,13 +101,13 @@ The budget is per run, not per message; `noReply` is reported after a delivered 
 |---|---|
 | `send_message` tool | `sendMessageDefinition` (`agent/tools.ts`): one `message` argument, ends the loop (`finishTurn`); a second call gets an error. `present` added by send presence. No `final`: an RP reply is one message ("[D] RP produces one message per turn"). |
 | `no_reply` | none yet. **[D]** Stories get it (§3.1): a pass shows as the line "<Name> stays silent", swipeable. A workshop's `several` contract ends on plain text. |
-| Nudge | one nudge under `send_message` (`SEND_NUDGE`, an `rpHarness` message sent as a user turn), then plain text is taken as the reply. |
+| Nudge | one nudge under `send_message` (`SEND_NUDGE`, an `rpApp` message sent as a user turn), then plain text is taken as the reply. |
 | `throwIfLlmFailure` | a failed provider turn fails the version (`failure` in `session.ts`) before `finishTurn` can nudge (`failed` check). |
 | Stop authoritative | `signal.aborted` ends the loop in `finishTurn`. |
 | Turn caps | `turnCap` (now `agent.request_cap`, default 12): the last request has no tools and asks "Write the reply now." reference-harness has none. |
 | Output gate | the refusal judge (`decision/RefusalJudge.ts`) reads a finished reply and marks the version; observe-only, after the fact. Summaries have `SummaryChecks`. |
 | Decision models | `decisionPoints` (`presence`, `next`, `lore`), opt-in per connection, heuristic fallbacks (DESIGN §7.6). |
-| Harness marker | `rpHarness` messages (`agent/messages.ts`) are the app's, labelled so in Steps and the inspector. |
+| Harness marker | `rpApp` messages (`agent/messages.ts`) are the app's, labelled so in Steps and the inspector. |
 | Records | the transcript, `rollouts.step_count`, `rollout_branches` (resume and edit cuts), the usage ledger. No per-attempt contract rows. |
 | Resume | `planResume` (`agent/resume.ts`): strip the failed tail, rerun, resample, carry on, or fresh; the frozen snapshot holds contract and cap. |
 | Steps | `stepsOf`: text from turns that went on to call tools is a step; a plain turn that was then sent is a step. |
@@ -144,8 +144,8 @@ Under `send_message`, a turn's text never streams into the body (today it stream
   ```
 
   There's no `sent_not_final` variant: a send ends our run.
-- **Role and position:** an `rpHarness` message (a user turn on the wire) appended after the failed turn, with `nudge: n` (1-based) on the stored message; Steps label it "The app asked for the reply to be sent". It appends, so the cached prefix is unchanged (the existing cache-marker tests cover a tail append).
-- **Budget:** 3 per run, counted from the transcript (`rpHarness` messages with `nudge`), so a resumed run continues the count. Nudges are model requests and count toward the request cap.
+- **Role and position:** an `rpApp` message (a user turn on the wire) appended after the failed turn, with `nudge: n` (1-based) on the stored message; Steps label it "The app asked for the reply to be sent". It appends, so the cached prefix is unchanged (the existing cache-marker tests cover a tail append).
+- **Budget:** 3 per run, counted from the transcript (`rpApp` messages with `nudge`), so a resumed run continues the count. Nudges are model requests and count toward the request cap.
 - **No LLM-failure nudges:** a failed or stopped turn fails or stops the version, as now.
 
 ### 3.4 When the nudges run out

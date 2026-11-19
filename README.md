@@ -1,4 +1,4 @@
-# rp-harness (working name)
+# Dreamspan
 
 A browser-based agentic roleplay harness meant to replace SillyTavern (ST) for people who want more than a chat UI. It runs on a server, is used remotely from any browser, and must eventually work well on phones.
 
