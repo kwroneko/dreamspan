@@ -40,6 +40,8 @@ export interface CommandCgroup {
   readonly env: Readonly<Record<string, string>>
   /** After the command: whether the memory cap stopped it. Removes the group. */
   readonly finish: () => Promise<{ readonly memoryCapped: boolean }>
+  /** Kills every process still in the group now, wherever it went in the process tree. */
+  readonly kill: () => Promise<void>
 }
 
 export interface CgroupLimiter {
@@ -143,6 +145,9 @@ const delegatedCgroup: CgroupLimiter = {
         const memoryCapped = (await oomKills(dir)) > 0
         await removeGroup(dir).catch(() => undefined)
         return { memoryCapped }
+      },
+      kill: async () => {
+        await writeFile(join(dir, "cgroup.kill"), "1").catch(() => undefined)
       }
     }
   }
@@ -242,6 +247,10 @@ const systemdScope: CgroupLimiter = {
         const result = await systemctl(env, ["show", `${unit}.scope`, "-p", "Result", "--value"])
         if (result !== "success") await systemctl(env, ["reset-failed", `${unit}.scope`])
         return { memoryCapped: result === "oom-kill" }
+      },
+      // A scope stays while any process is in it, whatever process group it moved to.
+      kill: async () => {
+        await systemctl(env, ["kill", "--signal=SIGKILL", `${unit}.scope`])
       }
     }
   }
