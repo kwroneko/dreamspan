@@ -177,9 +177,19 @@ export interface VersionRow {
   readonly recorded_generation_json?: string | null
 }
 
+/**
+ * An attachment row (`version_attachments`, `alias`) as `MessageImages` holds it: an image, or a
+ * workshop's file of any type, with its name and path in Files when it has one (§6.1).
+ */
+export const attachmentJson = (alias: string) =>
+  `json(CASE WHEN ${alias}.path IS NULL AND ${alias}.kind <> 'file'
+    THEN json_object('mediaId', ${alias}.media_id, 'altText', coalesce(${alias}.alt_text, ''))
+    ELSE json_patch(json_object('mediaId', ${alias}.media_id, 'altText', coalesce(${alias}.alt_text, '')),
+      json_object('kind', CASE WHEN ${alias}.kind = 'file' THEN 'file' END, 'name', ${alias}.name, 'path', ${alias}.path)) END)`
+
 /** The columns `toVersion` reads beyond the version's own: its row version, its context's issues and its model's name. */
 export const versionExtras = (alias: string) =>
-  `(SELECT json_group_array(json_object('mediaId', a.media_id, 'altText', coalesce(a.alt_text, '')))
+  `(SELECT json_group_array(${attachmentJson("a")})
     FROM (SELECT * FROM version_attachments WHERE version_id = ${alias}.id ORDER BY ordinal) a) AS images_json,
   (SELECT count(*) FROM version_history h WHERE h.version_id = ${alias}.id) AS amend_count,
   (SELECT r.context_issues_json FROM rollouts r WHERE r.id = ${alias}.rollout_id) AS context_issues,

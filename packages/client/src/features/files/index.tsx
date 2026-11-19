@@ -7,16 +7,20 @@ import { kindShows } from "../chat/kindLooks.ts"
 import { chatPanels, lazyPanel, type PanelProps } from "../chat/panels.tsx"
 import { tabKinds } from "../workbench/kinds.ts"
 import { FilesPage } from "./FilesPage.tsx"
-import { FILES_PAGE } from "./href.ts"
+import { FILES_PAGE, filesHref } from "./href.ts"
 import { FILES_TAB, FOLDER_CHIP } from "./ids.ts"
 import { composerControls } from "../chat/composerControls.tsx"
 import { FolderChip, useFolderChoices } from "./FolderChip.tsx"
 import { workingFolderSources } from "./working.ts"
-import { FILES_TOP } from "@dreamspan/shared/files.ts"
+import { ATTACHMENTS_FOLDER, FILES_TOP, joinPath, nameOf, parentOf } from "@dreamspan/shared/files.ts"
+import { fileAttachments } from "../chat/fileAttachments.ts"
 import { userNoticeReceivers } from "../noticeContributions.tsx"
 import { filesNoticeReceiver } from "./live.ts"
-import { filesSources, httpFilesSource } from "./source.ts"
+import { filesSources, httpFilesSource, useFilesSource } from "./source.ts"
 import { registerViewers } from "./viewers.tsx"
+
+/** A file of Files shown where it is: its folder in the Files page, with it open. */
+const showInFiles = (path: string) => filesHref(parentOf(path), nameOf(path))
 
 export const register = () => [
   filesSources.register(httpFilesSource),
@@ -38,6 +42,28 @@ export const register = () => [
       if (!shows || !folder.ready) return null
       return { path: folder.choices?.current ?? FILES_TOP, set: folder.choose }
     }
+  }),
+  // Attachments of any type in workshops (§6.1): saved in the working folder's Attachments folder
+  // and attached by their path; a file of Files attached as it is.
+  fileAttachments.register({
+    id: "files.attachments",
+    useFileAttacher: (session, view) => {
+      const shows = kindShows(view.chat?.kind, FOLDER_CHIP)
+      const folder = useFolderChoices(session, shows)
+      const source = useFilesSource()
+      if (!shows || !source) return null
+      if (!folder.ready) return "loading"
+      const target = joinPath(folder.choices?.current ?? FILES_TOP, ATTACHMENTS_FOLDER)
+      return {
+        folder: target,
+        upload: async (file, name) => source.attach((await source.upload(joinPath(target, name), file, "keep")).path),
+        attach: source.attach,
+        copyUrl: source.attachmentUrl,
+        showHref: showInFiles
+      }
+    },
+    copyUrl: httpFilesSource.attachmentUrl,
+    showHref: showInFiles
   }),
   ...registerViewers(),
   chatPanels.register({

@@ -3,6 +3,7 @@
 // another store behind the same panel. The built-in source speaks the HTTP contract in
 // `@dreamspan/shared/files.ts`; the first registered source by order is the one used.
 import {
+  AttachedFile,
   Changed,
   Deleted,
   FILES_ROUTES,
@@ -41,6 +42,10 @@ export interface FilesSource {
   readonly rawUrl: (path: string, download?: boolean) => string
   /** The URL a folder downloads from as one zip. */
   readonly zipUrl: (path: string) => string
+  /** A file attached to a workshop message (§6.1): its content kept as the copy the message sends. */
+  readonly attach: (path: string) => Promise<AttachedFile>
+  /** The URL an attachment's copy as sent opens at, or downloads from. */
+  readonly attachmentUrl: (mediaId: string, name: string, download?: boolean) => string
 }
 
 export const filesSources = makeRegistry<FilesSource>()
@@ -116,5 +121,8 @@ export const httpFilesSource: FilesSource = {
   restore: async (binItemId) => json(Changed, await post(FILES_ROUTES.restore, { binItemId })),
   rawUrl: (path, download = false) =>
     `${FILES_ROUTES.raw}?${new URLSearchParams(download ? { path, download: "1" } : { path })}`,
-  zipUrl: (path) => `${FILES_ROUTES.zip}?${new URLSearchParams({ path })}`
+  zipUrl: (path) => `${FILES_ROUTES.zip}?${new URLSearchParams({ path })}`,
+  attach: async (path) => json(AttachedFile, await post(FILES_ROUTES.attach, { path })),
+  attachmentUrl: (id, name, download = false) =>
+    `${FILES_ROUTES.attachment}?${new URLSearchParams(download ? { id, name, download: "1" } : { id, name })}`
 }

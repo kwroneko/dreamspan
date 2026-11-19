@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -11,11 +12,15 @@ import {
   type ReactNode
 } from "react"
 import { positionOf } from "./position.ts"
-import type { MessageImages, PathEntry } from "@dreamspan/shared/chat.ts"
+import { imagesOnly, type MessageImages, type PathEntry } from "@dreamspan/shared/chat.ts"
 import type { ImagesLeftOut } from "@dreamspan/shared/inspectorApi.ts"
 import { useSession } from "../../session.ts"
 import { uuid } from "../../uuid.ts"
-import { Button } from "../../ui/Button.tsx"
+import { Button, LinkButton } from "../../ui/Button.tsx"
+import { useNavigate } from "@tanstack/react-router"
+import { ATTACHMENT_MAX_BYTES, nameOf as fileNameOf } from "@dreamspan/shared/files.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
+import type { ComposerImage } from "@dreamspan/shared/composerApi.ts"
 import { ContentImage } from "../../ui/ContentImage.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
@@ -41,12 +46,21 @@ import {
   type ChatSurfaceProps
 } from "./presentation.tsx"
 import { dropImage, keepImage, readImages, type ImageDraftEntry } from "./imageDraft.ts"
+import {
+  FILE_PATH_MIME,
+  onAttachRequest,
+  useFileAttachments,
+  type FileAttacher,
+  type FileAttachments
+} from "./fileAttachments.ts"
 
 interface ImagesState {
   readonly entries: readonly ImageDraftEntry[]
   readonly ready: boolean
   readonly busy: boolean
   readonly error: string | null
+  /** Where files of any type go (a workshop), or null: images only. */
+  readonly attacher: FileAttacher | null
   readonly add: (files: File[]) => void
   readonly remove: (id: string) => void
   readonly capture: AttachmentInput["capture"]
@@ -75,11 +89,14 @@ const imageFiles = (files: Iterable<File>) => Array.from(files).filter((file) =>
 function AttachButton({
   disabled,
   onFiles,
-  pickerLabel = "Choose images",
+  anyType = false,
+  pickerLabel = anyType ? "Choose files" : "Choose images",
   hint = "Attach images. You can also paste an image or drop it anywhere in the chat."
 }: {
   disabled: boolean
   onFiles: (files: File[]) => void
+  /** Files of any type (a workshop, §6.1), not only images. */
+  anyType?: boolean
   pickerLabel?: string
   hint?: string
 }) {
@@ -91,7 +108,7 @@ function AttachButton({
         className="sr-only"
         disabled={disabled}
         type="file"
-        accept={IMAGE_TYPES}
+        {...(anyType ? {} : { accept: IMAGE_TYPES })}
         multiple
         aria-label={pickerLabel}
         onChange={(event) => {
@@ -100,7 +117,7 @@ function AttachButton({
         }}
       />
       <SquareIconButton
-        label="Attach images"
+        label={anyType ? "Attach files" : "Attach images"}
         hint={hint}
         variant="ghost"
         disabled={disabled}
@@ -209,6 +226,7 @@ function AttachedThumbnail({
   item: AttachmentItem
   onPeek: (picture: Portrait, file: Blob | undefined) => void
 }) {
+  if (item.kind === "file") return <FileTile name={item.name} href={item.fileHref ?? null} />
   const picture = item.mediaId ? attachmentPicture(item.mediaId, item.name) : null
   const peekable = picture !== null || item.file !== undefined
   return (
@@ -242,9 +260,62 @@ function AttachedThumbnail({
   )
 }
 
+/**
+ * A file that isn't an image (spec/FILES-AND-ENVIRONMENT.md §6.1): its type icon and name. With
+ * `href`, a link that downloads the copy sent with the message; without, it's still being added.
+ */
+function FileTile({ name, href, show }: { name: string; href: string | null; show?: string | null }) {
+  const navigate = useNavigate()
+  const body = (
+    <>
+      <Icon name="file" className="shrink-0 text-muted" />
+      <span className="min-w-0 truncate">{name}</span>
+    </>
+  )
+  const tile =
+    "flex h-11 max-w-60 min-w-0 items-center gap-2 rounded-md border border-border px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+  return (
+    <span className="flex min-w-0 items-center gap-1">
+      {href ? (
+        <Tooltip label="Downloads the copy of this file as it was attached.">
+          <a
+            href={href}
+            download={name}
+            rel="noopener"
+            className={`${tile} hover:bg-hover`}
+            aria-label={`Download ${name}`}
+          >
+            {body}
+          </a>
+        </Tooltip>
+      ) : (
+        <Tooltip label="This file is still being added.">
+          <span tabIndex={0} className={tile} aria-label={`${name}, being added`}>
+            {body}
+          </span>
+        </Tooltip>
+      )}
+      {show && (
+        <LinkButton
+          href={show}
+          onOpen={() => void navigate({ href: show })}
+          variant="ghost"
+          aria-label={`Show ${name} in Files`}
+          hint="Opens the folder it was saved in, in Files, with the file as it is now."
+        >
+          <Icon name="folder" />
+        </LinkButton>
+      )}
+    </span>
+  )
+}
+
 interface AttachmentItem {
   readonly id: string
   readonly name: string
+  /** A file that isn't an image (§6.1): shown by its name, opening its copy at `fileHref`. */
+  readonly kind?: "file"
+  readonly fileHref?: string | null
   readonly thumbnail: ReactNode
   readonly sending?: boolean
   /** Its stored image, once uploaded. */
@@ -285,7 +356,11 @@ function AttachmentList({
               <span className="text-xs text-muted">Sending…</span>
             ) : (
               <Button
-                hint="Removes this attached image."
+                hint={
+                  item.kind === "file"
+                    ? "Removes this file from the message. It stays in Files."
+                    : "Removes this attached image."
+                }
                 variant="ghost"
                 aria-label={`Remove ${item.name}`}
                 onClick={() => onRemove(item.id)}
@@ -309,6 +384,7 @@ function AttachmentList({
 function EditorImages({ draft, images }: { draft: MessageDraft; base: string; images: MessageImages }) {
   const view = useSyncExternalStore(draft.subscribe, draft.snapshot)
   const current = view.images ?? images
+  const attachments = useFileAttachments()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const add = useCallback(
@@ -391,8 +467,15 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
             label="Images of this version"
             items={current.map((image, index) => ({
               id: `${index}:${image.mediaId}`,
-              name: attachmentName(image.altText, null, index, current.length),
+              name: image.name ?? attachmentName(image.altText, null, index, current.length),
               mediaId: image.mediaId,
+              // A workshop's file (§6.1) keeps its place in the set; it opens its copy as sent.
+              ...(image.kind === "file"
+                ? {
+                    kind: "file" as const,
+                    fileHref: attachments?.copyUrl(image.mediaId, image.name ?? image.altText ?? "file", true) ?? null
+                  }
+                : {}),
               thumbnail: (
                 <ContentImage
                   src={mediaUrl(image.mediaId, 160)}
@@ -417,8 +500,20 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
   )
 }
 
-function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { scope: string }) {
+function ImageScope({
+  children,
+  scope,
+  session,
+  view,
+  attacher
+}: ChatSurfaceProps & { scope: string; attacher: FileAttacher | "loading" | null }) {
   const user = useSession().user.id
+  // Read by the queued work, which runs after renders: the newest one.
+  const attaching = attacher === "loading" ? null : attacher
+  const files = useRef(attaching)
+  useLayoutEffect(() => {
+    files.current = attaching
+  }, [attaching])
   const draft = composerWorkspace(session, user).draft
   const resolvedDraftId = useSyncExternalStore(draft.subscribe, () => draft.draftIdFor(view.forkId))
   const [entries, setEntries] = useState<readonly ImageDraftEntry[]>([])
@@ -442,31 +537,47 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
         draftId: draftId.current!,
         id: entry.id,
         mediaId: entry.mediaId!,
-        altText: entry.name.slice(0, 2000)
+        altText: entry.name.slice(0, 2000),
+        ...(entry.kind ? { kind: entry.kind } : {}),
+        ...(entry.path ? { name: entry.name.slice(0, 255), path: entry.path } : {})
       })
     )
     if (!saved.ok) throw new Error(saved.error.message)
     if (saved.value.status !== "active") await dropImage(entry.id)
-    else
-      await keepImage({
-        id: entry.id,
-        scope,
-        name: saved.value.altText,
-        mediaId: saved.value.mediaId!,
-        position: saved.value.position,
-        saved: true
-      })
+    else await keepImage({ ...fromServer(saved.value), id: entry.id })
   }
+  /** A row the server holds, as this browser keeps it. */
+  const fromServer = (row: ComposerImage): ImageDraftEntry => ({
+    id: row.id,
+    scope,
+    name: row.name ?? row.altText,
+    mediaId: row.mediaId!,
+    position: row.position,
+    saved: true,
+    ...(row.kind ? { kind: row.kind } : {}),
+    ...(row.path ? { path: row.path } : {})
+  })
   const upload = async (entry: ImageDraftEntry) => {
     if (entry.mediaId) return sync(entry)
-    if (!entry.file) return
+    if (!entry.file && !entry.path) return
     try {
-      const mediaId = await uploadImage(entry.file)
-      const uploaded = {
+      const attaching = files.current
+      // In a workshop, saved in Files first (or already there) and attached by its path (§6.1).
+      const attached = attaching
+        ? entry.file
+          ? await attaching.upload(entry.file, entry.name)
+          : await attaching.attach(entry.path!)
+        : entry.file
+          ? { mediaId: await uploadImage(entry.file) }
+          : null
+      if (!attached) throw new Error("Files can be attached in a workshop only.")
+      const uploaded: ImageDraftEntry = {
         id: entry.id,
         scope,
-        name: entry.name,
-        mediaId,
+        name: "name" in attached ? attached.name : entry.name,
+        mediaId: attached.mediaId,
+        ...("path" in attached ? { path: attached.path } : {}),
+        ...("kind" in attached && attached.kind === "file" ? { kind: "file" as const } : {}),
         ...(entry.pendingPosition === undefined ? {} : { pendingPosition: entry.pendingPosition })
       }
       await keepImage(uploaded)
@@ -478,8 +589,10 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
     }
   }
 
+  const loading = attacher === "loading"
   useEffect(() => {
-    if (resolvedDraftId === null) return
+    // Uploads replay where they belong: wait until it's known whether files go to Files.
+    if (resolvedDraftId === null || loading) return
     let live = true
     void enqueue(async () => {
       try {
@@ -495,21 +608,13 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
         if (!remote.ok) throw new Error(remote.error.message)
         const tombstones = new Set(remote.value.filter((entry) => entry.status !== "active").map((entry) => entry.id))
         for (const entry of remote.value) {
-          if (entry.status === "active")
-            await keepImage({
-              id: entry.id,
-              scope,
-              name: entry.altText,
-              mediaId: entry.mediaId!,
-              position: entry.position,
-              saved: true
-            })
+          if (entry.status === "active") await keepImage(fromServer(entry))
           else await dropImage(entry.id)
         }
         for (const entry of stored) {
           if (tombstones.has(entry.id)) continue
           if (entry.sending)
-            setError("A previous send was not acknowledged. Check the chat before sending these images again.")
+            setError("A previous send was not acknowledged. Check the chat before sending these attachments again.")
           await upload(entry)
         }
       } finally {
@@ -527,27 +632,46 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
     }
     // The keyed provider owns one fork; opening it replays its durable upload queue.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedDraftId])
-  const add = (files: File[]) => {
+  }, [resolvedDraftId, loading])
+  /** Attaches files from this device, or (`paths`) files already in Files. */
+  const add = (picked: File[], paths: ReadonlyArray<string> = []) => {
     if (!ready) {
-      setError("Wait for the chat to load before attaching images.")
+      setError("Wait for the chat to load before attaching.")
       return
     }
     void enqueue(async () => {
       setBusy(true)
       setError(null)
       try {
-        const stored = await readImages(scope)
-        const selected = files.filter((file) => file.type.startsWith("image/"))
-        if (stored.length + selected.length > 32) throw new Error("A message can hold at most 32 images.")
-        const firstPosition = Math.max(0, ...stored.map((entry) => entry.pendingPosition ?? 0)) + 1
-        const added = selected.map((file, index) => ({
-          id: uuid(),
-          scope,
-          name: file.name || "Pasted image",
-          file,
-          pendingPosition: firstPosition + index
-        }))
+        const kept = await readImages(scope)
+        // Any type where the chat saves files in Files (a workshop); images elsewhere.
+        const selected = files.current ? picked : imageFiles(picked)
+        const large = selected.find((file) => file.size > ATTACHMENT_MAX_BYTES)
+        if (large)
+          throw new Error(
+            `“${large.name}” is larger than ${formatByteSize(ATTACHMENT_MAX_BYTES)}. Put it in Files and tell the assistant where it is.`
+          )
+        if (paths.length && !files.current) throw new Error("Files can be attached in a workshop only.")
+        if (kept.length + selected.length + paths.length > 32)
+          throw new Error("A message can hold at most 32 attachments.")
+        const firstPosition = Math.max(0, ...kept.map((entry) => entry.pendingPosition ?? 0)) + 1
+        const added: Array<ImageDraftEntry> = [
+          ...selected.map((file, index) => ({
+            id: uuid(),
+            scope,
+            name: file.name || "Pasted image",
+            file,
+            ...(file.type.startsWith("image/") ? {} : { kind: "file" as const }),
+            pendingPosition: firstPosition + index
+          })),
+          ...paths.map((path, index) => ({
+            id: uuid(),
+            scope,
+            name: fileNameOf(path),
+            path,
+            pendingPosition: firstPosition + selected.length + index
+          }))
+        ]
         // Keep the entire selection before any upload can fail or outlive this page.
         for (const entry of added) await keepImage(entry)
         await refresh()
@@ -560,11 +684,20 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
       }
     })
   }
+  // The Files tab's Attach to message (§6.1).
+  useEffect(
+    () => onAttachRequest(session.chatId, (path) => add([], [path])),
+    // `add` reads its state through refs and the queue; one subscription per chat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [session.chatId, ready]
+  )
   const capture = () => {
     const captured = entries.filter((entry) => entry.mediaId && entry.saved && !entry.sending)
     const images: MessageImages = captured.map((entry) => ({
       mediaId: entry.mediaId!,
-      altText: entry.name.slice(0, 2000)
+      altText: entry.name.slice(0, 2000),
+      ...(entry.kind ? { kind: entry.kind } : {}),
+      ...(entry.path ? { name: entry.name.slice(0, 255), path: entry.path } : {})
     }))
     return {
       images,
@@ -600,17 +733,20 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
         ready,
         busy,
         error,
+        attacher: attaching,
         add,
         capture,
         restore: (images) => {
           void enqueue(async () => {
             try {
               for (const image of images) {
-                const entry = {
+                const entry: ImageDraftEntry = {
                   id: uuid(),
                   scope,
-                  name: image.altText || "Restored image",
-                  mediaId: image.mediaId
+                  name: image.name ?? (image.altText || "Restored image"),
+                  mediaId: image.mediaId,
+                  ...(image.kind ? { kind: image.kind } : {}),
+                  ...(image.path ? { path: image.path } : {})
                 }
                 await keepImage(entry)
                 await upload(entry)
@@ -642,19 +778,29 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
       <div
         className="flex min-h-0 flex-1 flex-col"
         onDragOver={(event) => {
-          if (event.dataTransfer.types.includes("Files") && !isAppDrag(event.dataTransfer)) event.preventDefault()
+          if (attacher !== null && attacher !== "loading" && event.dataTransfer.types.includes(FILE_PATH_MIME))
+            event.preventDefault()
+          else if (event.dataTransfer.types.includes("Files") && !isAppDrag(event.dataTransfer)) event.preventDefault()
         }}
         onDrop={(event) => {
-          // Nothing dragged from inside the app is an attachment: a portrait goes to the frame as a tab.
+          // A file dragged from the Files tab: attached as it is, with no copy (§6.1).
+          const dragged = event.dataTransfer.getData(FILE_PATH_MIME)
+          if (dragged && files.current) {
+            event.preventDefault()
+            add([], [dragged])
+            return
+          }
+          // Nothing else dragged from inside the app is an attachment: a portrait goes to the frame as a tab.
           if (!event.dataTransfer.files.length || isAppDrag(event.dataTransfer)) return
           event.preventDefault()
           add(Array.from(event.dataTransfer.files))
         }}
         onPaste={(event) => {
-          const files = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"))
-          if (!files.length) return
+          const pasted = Array.from(event.clipboardData.files)
+          const taken = files.current ? pasted : imageFiles(pasted)
+          if (!taken.length) return
           event.preventDefault()
-          add(files)
+          add(taken)
         }}
       >
         {children}
@@ -664,11 +810,34 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
 }
 function ImageProvider(props: ChatSurfaceProps) {
   const user = useSession().user.id
+  const attachments = useFileAttachments()
   // Opening the temporary "current" scope can overwrite this fork's durable send
   // marker before ReadPath resolves it. Only the resolved fork may reconcile images.
   if (props.view.forkId === null) return props.children
   const scope = `${user}:${props.session.chatId}:${props.view.forkId}`
-  return <ImageScope key={scope} {...props} scope={scope} />
+  // Keyed by the part, so one registered later starts its hook afresh.
+  return attachments ? (
+    <WithAttacher key={attachments.id} part={attachments} session={props.session} view={props.view}>
+      {(attacher) => <ImageScope key={scope} {...props} scope={scope} attacher={attacher} />}
+    </WithAttacher>
+  ) : (
+    <ImageScope key={scope} {...props} scope={scope} attacher={null} />
+  )
+}
+
+function WithAttacher({
+  part,
+  session,
+  view,
+  children
+}: {
+  part: FileAttachments
+  session: ChatSession
+  view: ChatSurfaceProps["view"]
+  children: (attacher: FileAttacher | "loading" | null) => ReactNode
+}) {
+  const { useFileAttacher } = part
+  return children(useFileAttacher(session, view))
 }
 function DraftThumbnail({ entry }: { entry: ImageDraftEntry }) {
   const ref = useCallback(
@@ -694,6 +863,7 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
   if (!state) return <Composer {...props} />
   const vision = props.view.history?.model?.vision
   const maxImages = props.view.history?.model?.maxImages ?? 4
+  const images = state.entries.some((entry) => entry.kind !== "file")
   return (
     <Composer
       {...props}
@@ -702,36 +872,62 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
         busy: !state.ready || state.busy || state.entries.some((entry) => !entry.mediaId || !entry.saved),
         capture: state.capture,
         restore: state.restore,
-        action: <AttachButton disabled={!state.ready || state.busy} onFiles={state.add} />,
+        action: state.attacher ? (
+          <AttachButton
+            anyType
+            disabled={!state.ready || state.busy}
+            onFiles={state.add}
+            hint={`Attach files of any type. They're saved in ${state.attacher.folder}, where the assistant can open them. You can also paste or drop them here, or drag a file from the Files tab.`}
+          />
+        ) : (
+          <AttachButton disabled={!state.ready || state.busy} onFiles={state.add} />
+        ),
         editor:
           state.entries.length > 0 || state.error ? (
             <div className="flex flex-col gap-2" aria-label="Image attachments">
               {state.entries.length > 0 && (
                 <>
                   <AttachmentList
-                    label="Attached images"
+                    label={state.attacher ? "Attached files" : "Attached images"}
                     items={state.entries.map((entry) => ({
                       id: entry.id,
                       name: entry.name,
                       mediaId: entry.mediaId ?? null,
                       file: entry.file,
                       thumbnail: <DraftThumbnail entry={entry} />,
+                      ...(entry.kind === "file" || (!entry.mediaId && entry.path && !entry.file)
+                        ? {
+                            kind: "file" as const,
+                            fileHref:
+                              entry.mediaId && state.attacher
+                                ? state.attacher.copyUrl(entry.mediaId, entry.name, true)
+                                : null
+                          }
+                        : {}),
                       ...(entry.sending ? { sending: true } : {})
                     }))}
                     onRemove={state.remove}
                   />
-                  <p role="status" className={`text-sm ${vision === false ? "text-danger" : "text-muted"}`}>
-                    {vision === false
-                      ? "This model cannot see images. Choose a vision model before replying."
-                      : vision === undefined
-                        ? "Choose a vision model to reply to these images."
-                        : `The model sees up to the last ${maxImages} images in context.`}
-                  </p>
+                  {state.attacher ? (
+                    <p role="status" className="text-sm text-muted">
+                      {`Saved in ${state.attacher.folder}. The assistant is told where each one is${
+                        images && vision === false ? "; this model can't see images" : ""
+                      }.`}
+                    </p>
+                  ) : (
+                    <p role="status" className={`text-sm ${vision === false ? "text-danger" : "text-muted"}`}>
+                      {vision === false
+                        ? "This model cannot see images. Choose a vision model before replying."
+                        : vision === undefined
+                          ? "Choose a vision model to reply to these images."
+                          : `The model sees up to the last ${maxImages} images in context.`}
+                    </p>
+                  )}
                 </>
               )}
               {state.error && (
                 <p role="alert" className="text-sm text-danger">
-                  {state.error} Remove an image or reload to retry.
+                  {state.error} {state.attacher ? "Remove an attachment" : "Remove an image"} or reload to retry.
                 </p>
               )}
             </div>
@@ -821,6 +1017,7 @@ function Thumbnails({
   const viewer = usePortraitViewer()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const attachments = useFileAttachments()
   const session = controls?.session
   const readLeftOut = () => session?.snapshot().history?.images
   const leftOut = useSyncExternalStore(session?.subscribe ?? noSubscribe, readLeftOut, readLeftOut)
@@ -832,14 +1029,33 @@ function Thumbnails({
   const editing = useSyncExternalStore(session?.subscribeEditors ?? noSubscribe, readEditing, readEditing)
   // The editor shows the images it saves, with their own controls.
   if (!images.length || editing) return null
+  // A workshop's files of other types (§6.1) by name; the images' indexes are among images only.
+  const pictures = imagesOnly(images)
+  const others = images.filter((image) => image.kind === "file")
   return (
     <>
-      <div className="flex flex-wrap gap-2" aria-label="Message images">
-        {images.map((image, index) => {
+      {others.length > 0 && (
+        <ul className="flex flex-wrap gap-2" aria-label="Message files">
+          {others.map((file, index) => (
+            <li key={`${file.mediaId}:${index}`} className="min-w-0">
+              <FileTile
+                name={file.name ?? file.altText ?? "File"}
+                href={attachments ? attachments.copyUrl(file.mediaId, file.name ?? file.altText ?? "file", true) : null}
+                show={attachments && file.path ? attachments.showHref(file.path) : null}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex flex-wrap gap-2 empty:hidden" aria-label="Message images">
+        {pictures.map((image, index) => {
           const excluded = controls?.entry.excludedImages?.includes(image.mediaId) ?? false
           const left = controls && !excluded ? leftOutBy(leftOut, controls.entry, index) : null
           const reason = excluded ? "taken out of the context by you" : left ? left.message : null
-          const picture = attachmentPicture(image.mediaId, attachmentName(image.altText, speaker, index, images.length))
+          const picture = attachmentPicture(
+            image.mediaId,
+            attachmentName(image.altText, speaker, index, pictures.length)
+          )
           const view = (
             <ImageMenu
               picture={picture}

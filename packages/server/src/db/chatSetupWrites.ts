@@ -491,7 +491,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             ? yield* sql`DELETE FROM queued_messages WHERE chat_id = ${chatId} AND fork_id = ${fork.id} AND round = 1 RETURNING id`
             : []
         for (const id of round ?? []) yield* graph.checkSpeaker(userId, id)
-        yield* graph.checkImages(userId, images ?? [])
+        yield* graph.checkImages(userId, images ?? [], chatId)
         yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
         yield* graph.checkSpeaker(userId, speakerEntityId)
         if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)

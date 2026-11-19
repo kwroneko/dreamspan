@@ -4,6 +4,7 @@ import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import type { ImageLeftOut } from "@dreamspan/shared/inspectorApi.ts"
 import { need, type AssemblerStage, type Assembly } from "./pipeline.ts"
 import type { HistoryImage, RequestMessage } from "./types.ts"
+import { pathOnlyImage } from "./attachments.ts"
 
 /** Images every request carries at most when the model doesn't say (DESIGN §10.2a). */
 export const DEFAULT_MAX_IMAGES = 4
@@ -29,13 +30,17 @@ export const newestImages = (messages: ReadonlyArray<Pick<RequestMessage, "image
  * quadratic in a long chat.
  */
 export const messageImagesOf = (assembly: Assembly) => {
-  const byVersion = new Map(assembly.resolved?.map(({ entry }) => [entry.versionId, entry.images ?? []]))
+  const byVersion = new Map(assembly.resolved?.map(({ entry }) => [entry.versionId, entry]))
   return (pieces: ReadonlyArray<number>) =>
     pieces.flatMap((p) => {
       const source = assembly.pieces[p]?.source
       if (source?.kind !== "message") return []
-      return (byVersion.get(source.version) ?? []).flatMap((image: HistoryImage, index) =>
-        image.excluded ? [] : [{ version: source.version, index, image }]
+      const entry = byVersion.get(source.version)
+      // A workshop's image saved in Files goes by its path alone to a model that can't see it.
+      return (entry?.images ?? []).flatMap((image: HistoryImage, index) =>
+        image.excluded || pathOnlyImage(assembly, entry!, image.mediaId)
+          ? []
+          : [{ version: source.version, index, image }]
       )
     })
 }
@@ -66,20 +71,22 @@ export const imagesStage: AssemblerStage = {
           const at = sent.get(`${entry.versionId}:${index}`)
           const [rule, message] = image.excluded
             ? ["user", "Taken out of the context by you"]
-            : !entry.inContext
-              ? ["hidden", "Its message isn't sent to the model"]
-              : at === undefined
-                ? ["history", "Its message doesn't fit in this context"]
-                : model?.vision === false
-                  ? ["vision", `${model.key} can't see images`]
-                  : !newest.has(at)
-                    ? [
-                        "limit",
-                        max === 1
-                          ? "Only the last image is sent to this model"
-                          : `Only the last ${max} images are sent to this model`
-                      ]
-                    : [null, null]
+            : entry.inContext && pathOnlyImage(assembly, entry, image.mediaId)
+              ? ["vision", `${model!.key} can't see images; it's told where the file is`]
+              : !entry.inContext
+                ? ["hidden", "Its message isn't sent to the model"]
+                : at === undefined
+                  ? ["history", "Its message doesn't fit in this context"]
+                  : model?.vision === false
+                    ? ["vision", `${model.key} can't see images`]
+                    : !newest.has(at)
+                      ? [
+                          "limit",
+                          max === 1
+                            ? "Only the last image is sent to this model"
+                            : `Only the last ${max} images are sent to this model`
+                        ]
+                      : [null, null]
           if (rule === null) continue
           images.push({
             slotId: entry.slotId as SlotId,

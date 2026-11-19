@@ -46,8 +46,8 @@ export const forkImportSlot = (sql: SqlClient.SqlClient, source: string, parent:
       })}`
       yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json, reasoning_json, sections_json)
         SELECT ${versionId}, content, replaced_at, images_json, reasoning_json, sections_json FROM version_history WHERE version_id = ${shownId} ORDER BY id`
-      yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text)
-        SELECT ${versionId}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id = ${shownId}`
+      yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text, name, path)
+        SELECT ${versionId}, ordinal, media_id, kind, alt_text, name, path FROM version_attachments WHERE version_id = ${shownId}`
     }
     // The copy's chain is the database's to assign (schema/chains.ts), as are its events'.
     const { shown_excluded, shown_version_id, chain_id: _chain, ...position } = slot!

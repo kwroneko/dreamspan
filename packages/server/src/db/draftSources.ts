@@ -5,7 +5,7 @@
 // first send reads them; the chat's own parts (its starting events, the greetings as picked, the
 // typed message and the reply after it) come from the draft. A card from a card source has no
 // row yet: its document and Character's Note come with the draft, under its placeholder id.
-import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { imagesOnly, type EntityId } from "@dreamspan/shared/chat.ts"
 import { NotFound } from "@dreamspan/shared/errors.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { NoteDoc } from "@dreamspan/shared/docs/note.ts"
@@ -97,7 +97,7 @@ export const draftSources = (sql: SqlClient.SqlClient, draft: Draft) =>
       })
     }
     if (draft.first._tag === "Send") {
-      const images = yield* Effect.forEach(draft.first.images ?? [], (image) =>
+      const images = yield* Effect.forEach(imagesOnly(draft.first.images ?? []), (image) =>
         Effect.gen(function* () {
           const [media] = yield* sql<{ sha256: string; width: number | null; height: number | null }>`
             SELECT m.sha256, m.width, m.height FROM media_assets m

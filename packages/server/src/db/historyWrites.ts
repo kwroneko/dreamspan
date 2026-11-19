@@ -196,8 +196,8 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                 FROM version_records v WHERE id=?`,
                   [afterId, edit.after, edit.targetId, forkId, forkId, record.id, Date.now(), Date.now(), current.id]
                 )
-                yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text)
-                SELECT ${afterId}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id=${current.id}`
+                yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text, name, path)
+                SELECT ${afterId}, ordinal, media_id, kind, alt_text, name, path FROM version_attachments WHERE version_id=${current.id}`
                 copies.set(copyKey, afterId)
               }
               yield* recordHistoryReduction(sql, current.slot_id!, edit.after, current.id, forkId)

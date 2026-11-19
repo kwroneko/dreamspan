@@ -1182,6 +1182,8 @@ All owner statements below are from 2026-11-17 unless dated otherwise, relayed b
 
 - **[P]** (files2, 2026-11-19) Files in the bin: a file or folder deleted in the app keeps no extra version (the bin holds it); its bytes count against the account's Files quota until the bin is emptied, and not against the bin's own byte limit, so a large deleted folder never pushes deleted chats out of the bin. A restore whose name is taken comes back as "name (restored)".
 - **[P]** (files2, 2026-11-19) The working folder: the account's "last folder" (§2.3 `workshop.lastFolder`) is the newest of the chip's Recent list (`workshop.recentFolders`, 5 kept), one setting instead of two. A forked card with no folder of its own uses the folder of the card it was forked from, up to 8 forks back. A rename or move outside the app is followed by inode when the chip or `bash` looks; the stored path isn't rewritten. The turn's tail note "Working folder: …" (spec §2.1) is not built yet: it changes what the model sees, so it waits for the owner.
+- **[P]** (files3, 2026-11-19) Workshop attachments: the copy a message sends is taken when the file is attached (in the composer), not at send, so what the user saw attached is what the model gets; an attachment is at most 64 MiB (a larger file stays in Files for the assistant to open by path); a model that can't see images gets an image's path and a note instead of a refusal; `image_block` marks images sent as blocks by the vision check and the exclusion toggle only.
+- **[P]** (files3, 2026-11-19) The working-folder tail note on carried workshop turns: with the run carried over, the note goes with the new user message only on a turn after the folder changed.
 
 ### 7.10 Subagents
 

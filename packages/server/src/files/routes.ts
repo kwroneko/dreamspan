@@ -6,14 +6,16 @@
 // never opened. Main-thread async file I/O; SQLite only through the writer (file versions).
 import { createHash, randomBytes } from "node:crypto"
 import { constants } from "node:fs"
-import { lstat, mkdir, open, rename, unlink, type FileHandle } from "node:fs/promises"
+import { lstat, mkdir, open, readFile, rename, unlink, type FileHandle } from "node:fs/promises"
 import { join } from "node:path"
 import { Transform, Writable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 import { CurrentUser } from "@dreamspan/shared/api.ts"
 import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import {
+  ATTACHMENT_MAX_BYTES,
   FILES_ROUTES,
+  type AttachedFile,
   FILES_TOP,
   isWithin,
   keepBothName,
@@ -27,9 +29,11 @@ import { ByteSize, Cause, Effect, Layer, Option, Schema, Stream } from "effect"
 import { HttpIncomingMessage, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { Accounts } from "../auth/Accounts.ts"
 import { AppConfig } from "../config.ts"
-import { Writer } from "../db/Database.ts"
+import { Reader, Writer } from "../db/Database.ts"
 import { MediaHolds } from "../importer/MediaHolds.ts"
 import { storeMedia } from "../importer/mediaFiles.ts"
+import { Formats } from "../importer/Formats.ts"
+import { describeImage } from "../importer/images.ts"
 import { zipStream, type ZipStreamEntry } from "../formats/zipStream.ts"
 import { WorkshopFiles } from "./WorkshopFiles.ts"
 import { BinContentGone } from "./bin.ts"
@@ -85,6 +89,42 @@ const INLINE_TYPES: Record<string, string> = {
   csv: "text/plain; charset=utf-8",
   json: "text/plain; charset=utf-8"
 }
+
+/** Other types an attachment's line names (§6.1); never served inline. */
+const OTHER_TYPES: Record<string, string> = {
+  html: "text/html",
+  htm: "text/html",
+  svg: "image/svg+xml",
+  xml: "application/xml",
+  js: "text/javascript",
+  mjs: "text/javascript",
+  ts: "text/x-typescript",
+  tsx: "text/x-typescript",
+  py: "text/x-python",
+  css: "text/css",
+  tsv: "text/tab-separated-values",
+  yaml: "application/yaml",
+  yml: "application/yaml",
+  toml: "application/toml",
+  zip: "application/zip",
+  gz: "application/gzip",
+  tar: "application/x-tar",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  epub: "application/epub+zip",
+  rtf: "application/rtf"
+}
+
+/** A file's type by its name, as an attachment's line names it. */
+const typeOf = (name: string) =>
+  (INLINE_TYPES[extension(name)] ?? OTHER_TYPES[extension(name)] ?? "application/octet-stream").replace(
+    /; charset=.*$/,
+    ""
+  )
+
+/** Images a model can be sent as blocks, as message images are (ARCHITECTURE §12). */
+const BLOCK_IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
 
 const extension = (name: string) => {
   const dot = name.lastIndexOf(".")
@@ -188,6 +228,8 @@ export const filesRoutes = Layer.unwrap(
     const accounts = yield* Accounts
     const config = yield* AppConfig
     const writer = yield* Writer
+    const reader = yield* Reader
+    const formats = yield* Formats
     const holds = yield* MediaHolds
     // The account's Files quota (files/quota.ts): checked before an upload and as it streams.
     const { quota, bin, changed } = yield* WorkshopFiles
@@ -574,6 +616,78 @@ export const filesRoutes = Layer.unwrap(
       return HttpServerResponse.jsonUnsafe({ binItemId: item.id })
     })
 
+    /**
+     * A file of the account's Files attached to a workshop message (§6.1): its content is kept
+     * in the media store as the copy the message sends, so a later change to the file never
+     * rewrites what the message showed or what a reply saw. An image a model can see is marked
+     * `image`, with its size, as message images are.
+     */
+    const attach = Effect.gen(function* () {
+      const body = yield* jsonBody(PathBody)
+      const { userId, root, full, segments } = yield* place(body.path)
+      if (segments.length === 0) return refuse(400, "Name a file.")
+      const info = yield* Effect.tryPromise(() => statPath(root, segments))
+      if (!info?.isFile()) return refuse(400, "Only a file can be attached.")
+      if (info.size > ATTACHMENT_MAX_BYTES)
+        return refuse(
+          413,
+          `Attachments can be at most ${formatByteSize(ATTACHMENT_MAX_BYTES)}. The assistant can still open it at ${full}.`
+        )
+      const { bytes } = yield* Effect.tryPromise(() => readRegularFile(root, segments, ATTACHMENT_MAX_BYTES))
+      const name = segments.at(-1)!
+      const image = describeImage(bytes)
+      const isImage = BLOCK_IMAGES.has(image.mime) && (yield* formats.validateImage(bytes))
+      const sha256 = createHash("sha256").update(bytes).digest("hex")
+      const mime = isImage ? image.mime : typeOf(name)
+      const mediaId = yield* holds.holding(
+        [sha256],
+        Effect.andThen(
+          storeMedia(config.dataDir, sha256, bytes),
+          writer.RecordMessageImage({
+            userId: userId as never,
+            media: {
+              sha256,
+              mime,
+              byteSize: bytes.byteLength,
+              width: isImage ? image.width : null,
+              height: isImage ? image.height : null
+            }
+          })
+        )
+      )
+      const attached: AttachedFile = {
+        mediaId,
+        kind: isImage ? "image" : "file",
+        name,
+        path: full,
+        mime,
+        size: bytes.byteLength
+      }
+      return HttpServerResponse.jsonUnsafe(attached, { headers: { "cache-control": "no-store" } })
+    })
+
+    /** An attachment's copy as sent (§6.1), served as `raw` serves files: never as the app's own content. */
+    const attachment = Effect.gen(function* () {
+      const query = yield* queryOf
+      const user = yield* CurrentUser
+      const file = yield* reader
+        .GetMediaFile({ userId: user.id, mediaId: query.get("id") ?? "" })
+        .pipe(Effect.mapError(() => new Answer(404, "That attachment isn't here any more.")))
+      const name = (query.get("name") ?? "attachment").slice(0, 255) || "attachment"
+      const inline = query.get("download") === null ? INLINE_TYPES[extension(name)] : undefined
+      const bytes = yield* Effect.tryPromise(() => readFile(join(config.dataDir, file.path)))
+      return HttpServerResponse.uint8Array(bytes, {
+        contentType: inline ?? "application/octet-stream",
+        headers: {
+          "cache-control": "private, no-store",
+          "x-content-type-options": "nosniff",
+          "cross-origin-resource-policy": "same-origin",
+          "content-security-policy": "sandbox; default-src 'none'; frame-ancestors 'none'",
+          "content-disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}`
+        }
+      })
+    })
+
     const restore = Effect.gen(function* () {
       const body = yield* jsonBody(RestoreBody)
       const { userId } = yield* place(FILES_TOP)
@@ -590,7 +704,9 @@ export const filesRoutes = Layer.unwrap(
       HttpRouter.add("POST", FILES_ROUTES.folder, authenticated(folder)),
       HttpRouter.add("POST", FILES_ROUTES.move, authenticated(move)),
       HttpRouter.add("POST", FILES_ROUTES.delete, authenticated(remove)),
-      HttpRouter.add("POST", FILES_ROUTES.restore, authenticated(restore))
+      HttpRouter.add("POST", FILES_ROUTES.restore, authenticated(restore)),
+      HttpRouter.add("POST", FILES_ROUTES.attach, authenticated(attach)),
+      HttpRouter.add("GET", FILES_ROUTES.attachment, authenticated(attachment))
     )
   })
 )

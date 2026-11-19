@@ -104,7 +104,7 @@ export const storageKinds = makeRegistry<StorageKind>([
   },
   {
     id: "version_attachments.kind",
-    values: ["image"]
+    values: ["image", "file"]
   },
   {
     id: "state_events.origin",

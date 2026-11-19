@@ -677,6 +677,21 @@ export interface HistoryImage extends RequestImage {
   readonly excluded?: true
 }
 
+/**
+ * A history message's attachment saved in Files (spec/FILES-AND-ENVIRONMENT.md §6.1): what its
+ * `<attachment>` line names. `image`: also one of the message's images; `excluded`: an image the
+ * fork took out of the context.
+ */
+export interface HistoryAttachment {
+  readonly mediaId: string
+  readonly name: string
+  readonly path: string
+  readonly mime: string
+  readonly size: number
+  readonly image: boolean
+  readonly excluded: boolean
+}
+
 /** Where the history before the target ends: the message right before it as its fork shows it. */
 export const historyLeafOf = (target: Target) =>
   target.historyLeaf === undefined ? target.parentSlotId : target.historyLeaf
@@ -723,6 +738,8 @@ export interface HistoryEntry {
   /** A merge's join message (spec/CHAT-MERGE.md); absent on any other message. */
   readonly merge?: HistoryMerge
   readonly images?: ReadonlyArray<HistoryImage>
+  /** Its attachments saved in Files, images among them (§6.1); absent in older snapshots. */
+  readonly attachments?: ReadonlyArray<HistoryAttachment>
   readonly slotId: string
   readonly versionId: string
   /** Its position: the depth, or the display position in a fork with insertions (spec/MESSAGE-INSERT.md §3.2). */

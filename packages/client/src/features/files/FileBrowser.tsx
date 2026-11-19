@@ -22,6 +22,7 @@ import {
   type FolderListing
 } from "@dreamspan/shared/files.ts"
 import { useNavigate } from "@tanstack/react-router"
+import { FILE_PATH_MIME } from "../chat/fileAttachments.ts"
 import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react"
 import type { FilesUsage } from "@dreamspan/shared/filesQuotaApi.ts"
 import { useAction } from "../../actions.tsx"
@@ -69,6 +70,8 @@ export interface FileBrowserProps {
   /** A link to this folder or file as a tab of its own, where it isn't one already. */
   readonly tabHref?: ((folder: string, file: string | null) => string) | undefined
   readonly onOpenTab?: ((folder: string, file: string | null) => void) | undefined
+  /** Attaches a file to the message being written, as it is (a workshop's Files tab, §6.1). */
+  readonly onAttach?: ((path: string) => void) | undefined
 }
 
 type Loaded =
@@ -610,6 +613,7 @@ export function FileBrowser(props: FileBrowserProps) {
                       }}
                       onDownload={() => download(source, joinPath(folder, item.name), item.kind === "folder")}
                       onWorking={(path) => void change(() => working!.set!(path), "The working folder wasn't changed")}
+                      onAttach={props.onAttach}
                     />
                   ))}
                 </ul>
@@ -752,7 +756,8 @@ function EntryRow({
   onDelete,
   onMove,
   onDownload,
-  onWorking
+  onWorking,
+  onAttach
 }: {
   entry: FileEntry
   folder: string
@@ -768,6 +773,7 @@ function EntryRow({
   onMove: () => void
   onDownload: () => void
   onWorking: (path: string) => void
+  onAttach?: ((path: string) => void) | undefined
 }) {
   const [menu, setMenu] = useState(false)
   const path = joinPath(folder, entry.name)
@@ -810,6 +816,14 @@ function EntryRow({
       {entry.kind === "file" && (
         <MenuItem description="Saves a copy on this device." onClick={onDownload}>
           Download
+        </MenuItem>
+      )}
+      {entry.kind === "file" && onAttach && (
+        <MenuItem
+          description="Adds this file to the message you're writing, with no copy in your files. Dragging it onto the message box does the same."
+          onClick={() => onAttach(path)}
+        >
+          Attach to message
         </MenuItem>
       )}
       {entry.kind === "folder" && (
@@ -873,6 +887,11 @@ function EntryRow({
             aria-label={`${entry.name}, ${kindText}`}
             className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-default"
             onClick={onOpen}
+            // Dragged onto the message box, a file is attached as it is (§6.1).
+            draggable={entry.kind === "file" && onAttach !== undefined}
+            onDragStart={(event) => {
+              if (entry.kind === "file" && onAttach) event.dataTransfer.setData(FILE_PATH_MIME, path)
+            }}
           >
             <Icon
               name={entry.kind === "folder" ? "folder" : entry.kind === "file" ? "file" : "link"}

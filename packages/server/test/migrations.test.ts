@@ -154,7 +154,16 @@ describe("0002_files", () => {
       const ledger = yield* sql<{ name: string }>`SELECT name FROM effect_sql_migrations ORDER BY migration_id`
       assert.deepStrictEqual(
         ledger.map((r) => r.name),
-        ["baseline", "files", "subagents", "workshop_branches", "preview_macro", "persona_locks", "contract_records"]
+        [
+          "baseline",
+          "files",
+          "subagents",
+          "workshop_branches",
+          "preview_macro",
+          "persona_locks",
+          "contract_records",
+          "attachment_paths"
+        ]
       )
       // The existing row is kept, an image by default.
       assert.deepStrictEqual(yield* sql`SELECT id, alt_text, kind, name FROM composer_images`, [
@@ -429,7 +438,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0004_workshop_branches",
       "0005_preview_macro",
       "0006_persona_locks",
-      "0007_contract_records"
+      "0007_contract_records",
+      "0008_attachment_paths"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -499,6 +509,7 @@ describe("0005_preview_macro", () => {
         "0005_preview_macro": _new,
         "0006_persona_locks": _later,
         "0007_contract_records": _latest,
+        "0008_attachment_paths": _newest,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -529,7 +540,12 @@ describe("0006_persona_locks", () => {
   it.effect("adds the table to a database at 0005, keeping its cards, and guards its rows", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0006_persona_locks": _new, "0007_contract_records": _later, ...before } = migrations
+      const {
+        "0006_persona_locks": _new,
+        "0007_contract_records": _later,
+        "0008_attachment_paths": _latest,
+        ...before
+      } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       for (const user of ["u", "v"])
         yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES (${user}, ${user}, 'Owner', 'user', 0)`
@@ -570,7 +586,7 @@ describe("0007_contract_records", () => {
   it.effect("adds the rollout's contract columns to a database at 0006, keeping its rollouts, and guards them", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0007_contract_records": _new, ...before } = migrations
+      const { "0007_contract_records": _new, "0008_attachment_paths": _later, ...before } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'rp', 'active', 0)`
@@ -583,6 +599,25 @@ describe("0007_contract_records", () => {
       yield* sql`UPDATE rollouts SET contract_outcome = 'recovered', contract_nudges = 2`
       assert.isTrue(Exit.isFailure(yield* Effect.exit(sql`UPDATE rollouts SET contract_outcome = 'maybe'`)))
       assert.isTrue(Exit.isFailure(yield* Effect.exit(sql`UPDATE rollouts SET contract_nudges = -1`)))
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
+describe("0008_attachment_paths", () => {
+  it.effect("adds the path of a workshop's attachment draft, keeping the drafts before it", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { "0008_attachment_paths": _new, ...before } = migrations
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'workshop', 'active', 0)`
+      yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, content, updated_at)
+        VALUES ('d', 'u', 'composer', 'c', '', 0)`
+      yield* sql`INSERT INTO composer_images (id, draft_id, media_id, alt_text, status) VALUES ('i', 'd', NULL, '', 'removed')`
+      yield* Effect.scoped(Layer.build(Migrations))
+      assert.deepStrictEqual(yield* sql`SELECT id, kind, name, path FROM composer_images`, [
+        { id: "i", kind: "image", name: null, path: null }
+      ])
     }).pipe(Effect.provide(layer()))
   )
 })

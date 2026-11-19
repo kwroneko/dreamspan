@@ -26,8 +26,33 @@ export const FILES_ROUTES = {
   /** POST `{ binItemId }`: a deleted file or folder put back (`Changed`). */
   restore: "/files/restore",
   /** GET `?path=`: a folder and everything in it as one zip, streamed (links and special files left out). */
-  zip: "/files/zip"
+  zip: "/files/zip",
+  /**
+   * POST `{ path }`: a file of the account's Files attached to a workshop message (§6.1): its
+   * content kept as the copy the message sends (`AttachedFile`).
+   */
+  attach: "/files/attach",
+  /** GET `?id=&name=` (and `&download=1`): an attachment's copy as sent, served as `raw` serves files. */
+  attachment: "/files/attachment"
 } as const
+
+/** The largest file a message can attach; larger ones stay in Files for the assistant to open (§6.1). */
+export const ATTACHMENT_MAX_BYTES = 64 * 1024 * 1024
+
+/** The folder a workshop's attachments are saved in, inside its working folder (§6.1). */
+export const ATTACHMENTS_FOLDER = "Attachments"
+
+/** A file attached to a message: the copy kept (`mediaId`), and where it is in Files. */
+export const AttachedFile = Schema.Struct({
+  mediaId: Schema.String,
+  /** `image`: a PNG, JPEG, GIF or WebP, also sent as an image to a model that sees images. */
+  kind: Schema.Literals(["image", "file"]),
+  name: Schema.String,
+  path: Schema.String,
+  mime: Schema.String,
+  size: Schema.Number
+})
+export type AttachedFile = typeof AttachedFile.Type
 
 /** What a name is: links and special files are listed with their kind and never opened (§1.1). */
 const FileKind = Schema.Literals(["file", "folder", "link", "other"])

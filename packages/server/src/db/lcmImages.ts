@@ -47,7 +47,9 @@ const cut = (images: ReadonlyArray<string>, limit: number | null) =>
 const attached = (sql: SqlClient.SqlClient, versionIds: ReadonlyArray<string | null>) => {
   const ids = versionIds.filter((id): id is string => id !== null)
   return ids.length
-    ? sql<{ media_id: string }>`SELECT media_id FROM version_attachments WHERE version_id IN ${sql.in(ids)}`.pipe(
+    ? sql<{
+        media_id: string
+      }>`SELECT media_id FROM version_attachments WHERE version_id IN ${sql.in(ids)} AND kind <> 'file'`.pipe(
         Effect.map((rows) => new Set(rows.map((r) => r.media_id)))
       )
     : Effect.succeed(new Set<string>())
@@ -138,7 +140,7 @@ export const imagesMatch = (
     const written = JSON.parse(recorded) as SummaryImages
     const rows = yield* sql<{ media_id: string; excluded: number }>`SELECT a.media_id,
         ${imageExcludedIn(sql, fork, `(${originalSql("v")})`, "a.media_id")} AS excluded
-      FROM summary_inputs i JOIN versions v ON v.id = i.version_id JOIN version_attachments a ON a.version_id = v.id
+      FROM summary_inputs i JOIN versions v ON v.id = i.version_id JOIN version_attachments a ON a.version_id = v.id AND a.kind <> 'file'
       WHERE i.summary_id = ${summaryId}
       ORDER BY i.ordinal, a.ordinal`
     const sends = rows.filter((r) => !r.excluded).map((r) => r.media_id)

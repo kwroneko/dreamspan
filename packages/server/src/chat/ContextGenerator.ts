@@ -23,7 +23,7 @@ import { executionRegistry } from "../execution.ts"
 import { Summarizer } from "../lcm/Summarizer.ts"
 // The real generator: assembly, rollout, provider stream (ARCHITECTURE §15, "Generation").
 import { uuidv7 } from "@dreamspan/shared/id.ts"
-import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import { imagesOnly, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
 import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
 import { Cause, Effect, Exit, Layer, Option, Stream } from "effect"
 import { type ContextSnapshot, type Generation, generationOf } from "../assembler/types.ts"
@@ -612,14 +612,15 @@ export const layer = Layer.effect(
               // New user turns use the same rendered history pieces as plain assembly. Images
               // stay as references in storage, hydrated only when the request is dispatched.
               const additions: Array<AgentMessage> = prior.after.map((entry) => {
-                const piece = snapshot.pieces.find(
+                // The last such piece: a later stage's (its attachment lines) stands for the message.
+                const piece = snapshot.pieces.findLast(
                   (p) => p.source.kind === "message" && p.source.version === entry.version.id
                 )
                 const rendered =
                   piece?.messages.flatMap((i) =>
                     snapshot.request.messages[i] ? [snapshot.request.messages[i]!] : []
                   ) ?? []
-                const imageIds = new Set((entry.version.images ?? []).map((image) => image.mediaId))
+                const imageIds = new Set(imagesOnly(entry.version.images ?? []).map((image) => image.mediaId))
                 const images = rendered
                   .flatMap((message) => message.images ?? [])
                   .filter((image) => imageIds.has(image.mediaId) && image.estimate?.sent !== false)
@@ -629,7 +630,9 @@ export const layer = Layer.effect(
                   ...(rendered[0]?.name ? { name: rendered[0].name } : {}),
                   ...(images.length ? { images } : {})
                 }
-                if (imageIds.size && snapshot.inputs.model?.vision === false) message.content += " [image]"
+                // A workshop's images saved in Files are named by their attachment lines already.
+                if (imageIds.size && snapshot.inputs.model?.vision === false && !piece?.text.includes("<attachment "))
+                  message.content += " [image]"
                 return { role: "rpUser", message, timestamp: entry.version.createdAt }
               })
               // A workshop's tail lines (the working folder, agent/turnNotes.ts) are told again

@@ -8,6 +8,10 @@ export interface ImageDraftEntry {
   readonly pendingPosition?: number
   readonly file?: Blob
   readonly mediaId?: string
+  /** A workshop's attachment that isn't an image (spec/FILES-AND-ENVIRONMENT.md §6.1). */
+  readonly kind?: "file"
+  /** Where it is in Files: saved there by its upload, or attached from there. */
+  readonly path?: string
   readonly saved?: boolean
   readonly sending?: {
     readonly draftId: string

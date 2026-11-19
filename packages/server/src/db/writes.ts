@@ -278,8 +278,14 @@ export const makeWriteHandlers = (bin: Bin) =>
           return yield* drafts.openComposer(userId, key, from)
         }).pipe(transaction("OpenComposer")),
 
-      SetComposerImage: ({ userId, chatId, draftId, id, mediaId, altText }) =>
-        composerImages(sql).set(userId, chatId, draftId, id, mediaId, altText).pipe(transaction("SetComposerImage")),
+      SetComposerImage: ({ userId, chatId, draftId, id, mediaId, altText, kind, name, path }) =>
+        composerImages(sql)
+          .set(userId, chatId, draftId, id, mediaId, altText, {
+            ...(kind ? { kind } : {}),
+            ...(name !== undefined ? { name } : {}),
+            ...(path !== undefined ? { path } : {})
+          })
+          .pipe(transaction("SetComposerImage")),
       SetComposerChoice: ({
         userId,
         chatId,
@@ -563,7 +569,15 @@ export const makeWriteHandlers = (bin: Bin) =>
           // The images it had, as its history keeps them, when this amend changes them.
           const had = JSON.parse(row.images_json ?? "[]") as MessageImages
           const normal = (list: MessageImages) =>
-            JSON.stringify(list.map((image) => ({ mediaId: image.mediaId, altText: image.altText ?? "" })))
+            JSON.stringify(
+              list.map((image) => ({
+                mediaId: image.mediaId,
+                altText: image.altText ?? "",
+                ...(image.kind ? { kind: image.kind } : {}),
+                ...(image.name !== undefined ? { name: image.name } : {}),
+                ...(image.path !== undefined ? { path: image.path } : {})
+              }))
+            )
           const before = images !== undefined && normal(images) !== normal(had) ? normal(had) : null
           // Its thinking, when this amend changes it: plain text, never a provider's signed block.
           const thinking = reasoning === undefined ? (row.reasoning ?? null) : reasoning || null
@@ -585,12 +599,16 @@ export const makeWriteHandlers = (bin: Bin) =>
           const rawReasoning = reasoningChanged ? rewritten.raw_reasoning : (row.raw_reasoning ?? null)
           const rawSections = sectionsChanged ? rewritten.raw_sections : (row.raw_sections ?? null)
           if (content === row.content && before === null && !thinkingChanged) return toVersion(shown)
-          if (before !== null) yield* checkImages(userId, images!)
+          if (before !== null) yield* checkImages(userId, images!, slot.chat_id)
           const attach = (target: string) =>
             Effect.forEach(
               images!,
-              (image, ordinal) => sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text)
-                VALUES (${target}, ${ordinal}, ${image.mediaId}, 'image', ${image.altText || null})`,
+              (
+                image,
+                ordinal
+              ) => sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text, name, path)
+                VALUES (${target}, ${ordinal}, ${image.mediaId}, ${image.kind ?? "image"}, ${image.altText || null},
+                  ${image.name ?? null}, ${image.path ?? null})`,
               { discard: true }
             )
           // Changeset before/after identities are durable snapshots too: a later undo may
@@ -654,8 +672,8 @@ export const makeWriteHandlers = (bin: Bin) =>
             VALUES (${copy}, ${row.content}, ${at}, ${normal(had)}, ${hadThinking}, ${hadSections})`
           if (before !== null) yield* attach(copy)
           else
-            yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text)
-              SELECT ${copy}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id = ${versionId}`
+            yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text, name, path)
+              SELECT ${copy}, ordinal, media_id, kind, alt_text, name, path FROM version_attachments WHERE version_id = ${versionId}`
           // Shorter than what the fork showed, before the fork shows the copy.
           yield* recordHistoryReduction(sql, row.slot_id, content, null, fork.id)
           yield* writeOverride(
@@ -714,8 +732,8 @@ export const makeWriteHandlers = (bin: Bin) =>
       SetImageExcluded: ({ userId, versionId, mediaId, forkId, excluded }) =>
         Effect.gen(function* () {
           const row = yield* ownedVersion(userId, versionId, true)
-          const images = JSON.parse(row.images_json ?? "[]") as ReadonlyArray<{ mediaId: string }>
-          if (!images.some((image) => image.mediaId === mediaId))
+          const images = JSON.parse(row.images_json ?? "[]") as MessageImages
+          if (!images.some((image) => image.mediaId === mediaId && image.kind !== "file"))
             return yield* new NotFound({ entity: "image", id: mediaId })
           const { slot, fork } = yield* slotInFork(userId, row.slot_id as SlotId, yield* forkOf(row.slot_id, forkId))
           const original = (row.fork_id === null ? row.id : row.source_version_id)!
