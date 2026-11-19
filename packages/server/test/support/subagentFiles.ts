@@ -54,8 +54,7 @@ const toolCall = (name: string, args: unknown, id: string) => [
   }
 ]
 
-const text = (m: Message | undefined) =>
-  typeof m?.content === "string" ? m.content : JSON.stringify(m?.content ?? "")
+const text = (m: Message | undefined) => (typeof m?.content === "string" ? m.content : JSON.stringify(m?.content ?? ""))
 /** Where a subagent's own run starts in its request: its task (a fork's comes after the reply's conversation). */
 const ownStart = (messages: ReadonlyArray<Message>) => {
   const fork = messages.findLastIndex((m) => text(m).includes(FORK))
