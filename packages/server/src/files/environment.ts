@@ -21,6 +21,8 @@ export interface ToolRoot {
   readonly writable: boolean
   /** The folder's components below `hostRoot` (a folder shared from another account's Files). */
   readonly base?: ReadonlyArray<string>
+  /** A folder on the server outside Files (§3.7): no quota. */
+  readonly host?: true
 }
 
 export interface AccountEnv {

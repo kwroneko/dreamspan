@@ -25,6 +25,8 @@ import { makeFilesQuota, parseByteSize, type FilesQuota } from "./quota.ts"
 import { prepareAppSource } from "./appSource.ts"
 import { makePluginCopies } from "./pluginCopies.ts"
 import { makeCommandOutputs } from "./commandOutput.ts"
+import { makeHostFolders, type HostFolders } from "./hostFolders.ts"
+import { APP_ROOT } from "./appSource.ts"
 
 export class WorkshopFiles extends Context.Service<
   WorkshopFiles,
@@ -48,11 +50,20 @@ export class WorkshopFiles extends Context.Service<
     readonly resetHome: (userId: string) => Effect.Effect<void, unknown>
     /** Bytes the account's commands moved over the internet since the server started. */
     readonly networkUse: (userId: string) => { readonly bytes: number; readonly since: number }
-    /** Where a stored working folder is now (workingFolder.ts `locateFolder`); null when it's gone. */
+    /**
+     * Where a stored working folder is now (workingFolder.ts `locateFolder`); null when it's gone.
+     * A host folder (§3.7) is where it was, while it's still allowed and the same folder; never
+     * for a non-admin.
+     */
     readonly locateFolder: (
       userId: string,
-      stored: { readonly path: string; readonly inode: number | null }
+      stored: { readonly path: string; readonly inode: number | null; readonly host?: true },
+      admin?: boolean
     ) => Effect.Effect<string | null>
+    /** Folders on the server outside Files (HOST_FOLDERS, §3.7), for admins. */
+    readonly hostFolders: HostFolders
+    /** ALLOW_UNSANDBOXED_COMMANDS is set and a `none` sandbox is registered (§3.7). */
+    readonly unsandboxedAllowed: boolean
   }
 >()("rp/files/WorkshopFiles") {
   static readonly layer = Layer.effect(
@@ -73,6 +84,10 @@ export class WorkshopFiles extends Context.Service<
         filesDir: config.filesDir || join(config.dataDir, "files"),
         homesDir: join(config.dataDir, "env-home")
       }
+      // Host folders (§3.7): never the app's data, Files or code.
+      const hostFolders = makeHostFolders(config.hostFolders, [config.dataDir, dirs.filesDir, APP_ROOT], (line) =>
+        Effect.runFork(Effect.logWarning(line))
+      )
       const quota = makeFilesQuota({
         reader,
         writer,
@@ -123,6 +138,8 @@ export class WorkshopFiles extends Context.Service<
       const files = makeFileTools({
         appSource,
         outputs,
+        hostFolders,
+        allowUnsandboxed: config.allowUnsandboxedCommands,
         onNetwork: (userId, bytes) => network.set(userId, (network.get(userId) ?? 0) + bytes),
         dataDir: config.dataDir,
         ...dirs,
@@ -167,6 +184,19 @@ export class WorkshopFiles extends Context.Service<
             if (!offered.some((id) => (FILE_TOOLS as ReadonlyArray<string>).includes(id))) return null
             const stored = state.workshopFolder
             if (!stored) return `Working folder: ${FILES_TOP}`
+            if (stored.host) {
+              // Only while the account is still an enabled admin.
+              const account = yield* reader
+                .GetPasswordHash({ userId: userId as UserId })
+                .pipe(Effect.orElseSucceed(() => null))
+              const at =
+                account?.user.role === "admin"
+                  ? yield* Effect.promise(() => hostFolders.check(stored.path).catch(() => null))
+                  : null
+              return at && (stored.inode === null || at.inode === stored.inode)
+                ? `Working folder: ${at.path} (a folder on the server, outside the files)`
+                : `Working folder: ${FILES_TOP} (${stored.path} isn't available, so commands start at the top of the files)`
+            }
             const now = yield* locate(userId, stored)
             return now
               ? `Working folder: ${now}`
@@ -237,7 +267,17 @@ export class WorkshopFiles extends Context.Service<
         resetHome: (userId) =>
           files.resetHome(userId).pipe(Effect.tap(() => quota.measure(userId).pipe(Effect.asVoid))),
         networkUse: (userId) => ({ bytes: network.get(userId) ?? 0, since: networkSince }),
-        locateFolder: locate
+        locateFolder: (userId, stored, admin = false) =>
+          stored.host
+            ? Effect.promise(async () => {
+                if (!admin) return null
+                const now = await hostFolders.check(stored.path).catch(() => null)
+                return now && (stored.inode === null || now.inode === stored.inode) ? now.path : null
+              })
+            : locate(userId, stored),
+        hostFolders,
+        unsandboxedAllowed:
+          config.allowUnsandboxedCommands && commandSandboxes.list().some((sandbox) => sandbox.unsandboxed)
       }
     })
   )

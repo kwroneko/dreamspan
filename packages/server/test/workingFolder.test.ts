@@ -51,7 +51,12 @@ describe("the workshop's working folder", () => {
 
       const stored = cast.workshopFolder!
       const choices = yield* api.WorkshopFolderChoices({ chatId: workshop.id, stored, cardId })
-      assert.deepStrictEqual(choices, { current: "/files/thesis", recent: ["/files/thesis"], card: null })
+      assert.deepStrictEqual(choices, {
+        current: "/files/thesis",
+        recent: ["/files/thesis"],
+        card: null,
+        hostFolders: false
+      })
 
       // Renamed in the app: found by its new path.
       assert.strictEqual((yield* json("/files/move", { from: "/files/thesis", to: "/files/paper" })).status, 200)
@@ -67,7 +72,8 @@ describe("the workshop's working folder", () => {
       assert.deepStrictEqual(yield* api.WorkshopFolderChoices({ chatId: workshop.id, stored, cardId }), {
         current: "/files/drafts/v2",
         recent: ["/files/drafts/v2"],
-        card: null
+        card: null,
+        hostFolders: false
       })
       assert.strictEqual((yield* json("/files/move", { from: "/files/drafts", to: "/files/journal" })).status, 200)
       assert.strictEqual(

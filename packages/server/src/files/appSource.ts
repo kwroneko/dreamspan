@@ -12,7 +12,7 @@ import { dirname, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 
 /** The app's install folder (the repository root, or /app in the image). */
-const APP_ROOT = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\/$/, "")
+export const APP_ROOT = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\/$/, "")
 
 /** What is copied, relative to the app's folder. */
 const SOURCE_FOLDERS = [

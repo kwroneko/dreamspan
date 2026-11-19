@@ -2,7 +2,7 @@ import { ForkId } from "./chat.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Chat } from "./chat.ts"
-import { NotFound, ServerError } from "./errors.ts"
+import { Forbidden, NotFound, ServerError } from "./errors.ts"
 
 /** What the assistant may do with a capability in one workshop (spec/WORKSHOP.md §3.4). */
 export const CapabilityMode = Schema.Literals(["allow", "ask", "off"])
@@ -29,9 +29,32 @@ export const WorkshopCapability = Schema.Struct({
    * What the row is for within its capability: an MCP server's connection id (spec/MCP.md §5.1).
    * Absent: the capability as a whole.
    */
-  target: Schema.optionalKey(Schema.String)
+  target: Schema.optionalKey(Schema.String),
+  /** A consent the client asks for before turning it on (no sandbox, spec/FILES-AND-ENVIRONMENT.md §3.7). */
+  confirm: Schema.optionalKey(
+    Schema.Struct({
+      title: Schema.String,
+      body: Schema.String,
+      confirmLabel: Schema.String,
+      cancelLabel: Schema.String
+    })
+  )
 })
 export type WorkshopCapability = typeof WorkshopCapability.Type
+
+/** A folder on the server an admin can't use as a working folder (spec/FILES-AND-ENVIRONMENT.md §3.7). */
+export class HostFolderRefused extends Schema.TaggedError<HostFolderRefused>()("HostFolderRefused", {
+  message: Schema.String
+}) {}
+
+/** A folder in the server folder browser (§3.7): the roots HOST_FOLDERS allows when `path` is null. */
+const HostFolderListing = Schema.Struct({
+  path: Schema.NullOr(Schema.String),
+  /** Where Up goes: a folder, "" for the list of allowed folders, null at that list. */
+  parent: Schema.NullOr(Schema.String),
+  folders: Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String })),
+  truncated: Schema.Boolean
+})
 
 /** An approval the server refused: answered already, no longer waiting, or for another call. */
 export class ApprovalRefused extends Schema.TaggedError<ApprovalRefused>()("ApprovalRefused", {
@@ -209,15 +232,32 @@ export class WorkshopApi extends RpcGroup.make(
   Rpc.make("WorkshopFolderChoices", {
     payload: {
       chatId: Chat.fields.id,
-      stored: Schema.NullOr(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) })),
+      stored: Schema.NullOr(
+        Schema.Struct({
+          path: Schema.String,
+          inode: Schema.NullOr(Schema.Number),
+          host: Schema.optionalKey(Schema.Literal(true))
+        })
+      ),
       cardId: Schema.NullOr(Schema.String)
     },
     success: Schema.Struct({
       current: Schema.NullOr(Schema.String),
       recent: Schema.Array(Schema.String),
-      card: Schema.NullOr(Schema.String)
+      card: Schema.NullOr(Schema.String),
+      /** The caller may choose a folder on the server (an admin, with HOST_FOLDERS set; §3.7). */
+      hostFolders: Schema.Boolean
     }),
     error: Schema.Union([NotFound, ServerError])
+  }),
+  /**
+   * A folder on the server's subfolders for choosing a working folder (§3.7), under HOST_FOLDERS;
+   * null lists the allowed folders. Admins only.
+   */
+  Rpc.make("ListHostFolders", {
+    payload: { path: Schema.NullOr(Schema.String.check(Schema.isMaxLength(4096))) },
+    success: HostFolderListing,
+    error: Schema.Union([Forbidden, HostFolderRefused, ServerError])
   }),
   /** A workshop's branches, each with the story branch it goes with. */
   Rpc.make("ListWorkshopBranches", {

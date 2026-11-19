@@ -202,6 +202,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   ListCredentials: "User-only security, consent, account, credential or network configuration.",
   ListDecisionPoints: "User-only security, consent, account, credential or network configuration.",
   ListFolder: "Not in W6's first exposures; use the bounded workshop read tools.",
+  ListHostFolders: "User-only security, consent, account, credential or network configuration.",
   ListForks: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListGroupChats: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListHistoryEdits: "Not in W6's first exposures; use the bounded workshop read tools.",

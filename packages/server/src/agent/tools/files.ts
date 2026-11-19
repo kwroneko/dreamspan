@@ -13,7 +13,7 @@ import { Type } from "@earendil-works/pi-ai"
 import { Effect, Semaphore } from "effect"
 import type { User } from "@dreamspan/shared/domain.ts"
 import type { RolloutEffect, RolloutEffectRecord } from "@dreamspan/shared/workshopApi.ts"
-import { foldState } from "@dreamspan/shared/state.ts"
+import { foldState, type ChatState } from "@dreamspan/shared/state.ts"
 import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
 import type { Reader, Writer } from "../../db/Database.ts"
 import { isMediaPath } from "../../db/media.ts"
@@ -55,10 +55,11 @@ import {
   type SandboxMount
 } from "../../sandbox/registry.ts"
 import type { CommandOutputs } from "../../files/commandOutput.ts"
+import type { HostFolders } from "../../files/hostFolders.ts"
 import { QuotaExceeded, type FilesQuota } from "../../files/quota.ts"
 import { sandboxPath } from "../../sandbox/linuxBwrap.ts"
 import type { SubagentCopyRecord } from "../../db/subagents.ts"
-import { COMMANDS_NETWORK, resolveMode, type CapabilityRegistries } from "../capabilities.ts"
+import { COMMANDS_NETWORK, COMMANDS_UNSANDBOXED, resolveMode, type CapabilityRegistries } from "../capabilities.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
 
 /** Where subagents' isolated copies go, under /files (spec/SUBAGENTS.md §3.3). */
@@ -139,6 +140,10 @@ export interface FileToolDeps {
   readonly onChanged?: (userId: string, paths: ReadonlyArray<string>, all?: boolean) => void
   /** The read-only copy of the app's source (files/appSource.ts), made on first use; null: none. */
   readonly appSource?: () => Promise<string | null>
+  /** Folders on the server outside Files an admin may work in (files/hostFolders.ts, §3.7). */
+  readonly hostFolders?: HostFolders
+  /** ALLOW_UNSANDBOXED_COMMANDS: an admin's workshop may turn the sandbox off (§3.7). */
+  readonly allowUnsandboxed?: boolean
   /** Where commands' whole output is kept (files/commandOutput.ts); absent: only the head and tail. */
   readonly outputs?: CommandOutputs
   /** Bytes a command moved over the internet, for the account's usage display. */
@@ -171,6 +176,11 @@ const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest(
 const isBinary = (bytes: Buffer) => bytes.subarray(0, 8192).includes(0)
 const readKey = (full: string) => `files:read:${full}`
 const CWD_KEY = "files:cwd"
+/** The call's account, kept in the run's cache by `wrap` for the checks that need its role. */
+const ACTOR_KEY = "files:actor"
+const STORED_KEY = "files:stored"
+type WorkshopFolderState = NonNullable<ChatState["workshopFolder"]>
+
 const CWD_LINE = /\nDirectory after: (\/[^\n]*)/g
 
 /** Head and tail of a long text, with what was left out between them. */
@@ -269,13 +279,43 @@ export const makeFileTools = (deps: FileToolDeps) => {
         })
       })
     )
-  /** The file tools' roots: the account's Files, the app's source, and shared folders (read-only). */
-  const rootsOf = (env: AccountEnv) =>
+  /** The branch's stored working folder (`workshop.folder`), read once per run. */
+  const storedFolder = (ctx: ToolContext) =>
+    Effect.gen(function* () {
+      if (ctx.cache.has(STORED_KEY)) return ctx.cache.get(STORED_KEY) as WorkshopFolderState | null
+      const events = yield* deps.reader
+        .StateEventsAt({ userId: ctx.userId, chatId: ctx.chatId, slotId: ctx.leafSlotId, forkId: ctx.forkId })
+        .pipe(Effect.orElseSucceed(() => []))
+      const folder = foldState(events).workshopFolder ?? null
+      ctx.cache.set(STORED_KEY, folder)
+      return folder
+    })
+  /**
+   * The workshop's host folder (§3.7), checked again at every call: the account is an admin, the
+   * folder is still under HOST_FOLDERS, its path has no link, and it's the folder chosen (its
+   * inode). Null otherwise: the tools then work in Files only.
+   */
+  const hostPlace = (ctx: ToolContext) =>
+    Effect.gen(function* () {
+      const actor = ctx.cache.get(ACTOR_KEY) as User | undefined
+      if (!deps.hostFolders || actor?.role !== "admin") return null
+      const stored = yield* storedFolder(ctx)
+      if (!stored?.host) return null
+      const checked = yield* Effect.promise(() => deps.hostFolders!.check(stored.path).catch(() => null))
+      if (!checked || (stored.inode !== null && checked.inode !== stored.inode)) return null
+      return { path: checked.path, segments: checked.path.split("/").filter(Boolean) }
+    })
+  /** The file tools' roots: the account's Files, the app's source, shared folders (read-only), a host folder. */
+  const rootsOf = (env: AccountEnv, ctx: ToolContext) =>
     Effect.gen(function* () {
       const source = yield* appSourceOf()
       const shares = yield* sharesOf(env.userId)
+      const host = yield* hostPlace(ctx)
       return [
         ...toolRoots(env, source),
+        ...(host
+          ? [{ mount: host.path, hostRoot: "/", base: host.segments, writable: true, host: true } as ToolRoot]
+          : []),
         ...shares.map(({ target, ownerRoot, segments }): ToolRoot => ({
           mount: target,
           hostRoot: ownerRoot,
@@ -293,7 +333,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
       )
     if (!resolved.root.writable)
       throw new FilePathRefused(`${resolved.root.mount} is read-only. Write your changes under ${FILES_MOUNT}.`)
-    if (resolved.root.mount !== FILES_MOUNT) throw new FilePathRefused(`${resolved.full} can't be changed here.`)
+    if (resolved.root.mount !== FILES_MOUNT && !resolved.root.host)
+      throw new FilePathRefused(`${resolved.full} can't be changed here.`)
     return resolved
   }
 
@@ -382,19 +423,21 @@ export const makeFileTools = (deps: FileToolDeps) => {
           return start
         }
       }
-      const events = yield* deps.reader
-        .StateEventsAt({ userId: ctx.userId, chatId: ctx.chatId, slotId: ctx.leafSlotId, forkId: ctx.forkId })
-        .pipe(Effect.orElseSucceed(() => []))
-      const folder = foldState(events).workshopFolder
-      // Found again after a move or rename (workingFolder.ts); a folder that's gone: the top of Files (§2.2).
-      const moves = folder
-        ? (yield* deps.reader
-            .WorkshopFolderMemory({ userId: ctx.userId, cardId: null })
-            .pipe(Effect.orElseSucceed(() => ({ moves: [] })))).moves
-        : []
-      const start = folder
-        ? ((yield* Effect.promise(() => locateFolder(env.filesRoot, folder, moves).catch(() => null))) ?? FILES_MOUNT)
-        : FILES_MOUNT
+      const folder = yield* storedFolder(ctx)
+      // A host folder still allowed (§3.7); one of Files found again after a move or rename
+      // (workingFolder.ts); a folder that's gone: the top of Files (§2.2).
+      const host = folder?.host ? yield* hostPlace(ctx) : null
+      const moves =
+        folder && !folder.host
+          ? (yield* deps.reader
+              .WorkshopFolderMemory({ userId: ctx.userId, cardId: null })
+              .pipe(Effect.orElseSucceed(() => ({ moves: [] })))).moves
+          : []
+      const start = folder?.host
+        ? (host?.path ?? FILES_MOUNT)
+        : folder
+          ? ((yield* Effect.promise(() => locateFolder(env.filesRoot, folder, moves).catch(() => null))) ?? FILES_MOUNT)
+          : FILES_MOUNT
       ctx.cache.set(CWD_KEY, start)
       return start
     })
@@ -442,7 +485,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
     ) =>
     (ctx: ToolContext, args: Record<string, unknown>): Effect.Effect<ToolOutput> =>
       proof(ctx, capability).pipe(
-        Effect.flatMap(({ actor, env }) => run(ctx, args, env, actor)),
+        Effect.flatMap(({ actor, env }) => {
+          ctx.cache.set(ACTOR_KEY, actor)
+          return run(ctx, args, env, actor)
+        }),
         Effect.catchCause((cause) => {
           const reason = cause.reasons.find((r) => r._tag === "Fail" || r._tag === "Die")
           const value = reason?._tag === "Fail" ? reason.error : reason?._tag === "Die" ? reason.defect : undefined
@@ -476,7 +522,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     execute: wrap("files", (ctx, args, env) =>
       Effect.gen(function* () {
         const cwd = yield* currentDir(ctx, env)
-        const { full, root, segments } = resolveIn(ctx, String(args.path), cwd, yield* rootsOf(env))
+        const { full, root, segments } = resolveIn(ctx, String(args.path), cwd, yield* rootsOf(env, ctx))
         const { bytes, info, truncated } = yield* attempt(() =>
           readRegularFile(root.hostRoot, segments, READ_MAX_BYTES)
         )
@@ -541,7 +587,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     execute: wrap("files", (ctx, args, env) =>
       Effect.gen(function* () {
         const cwd = yield* currentDir(ctx, env)
-        const { full, root, segments } = resolveIn(ctx, String(args.path ?? "."), cwd, yield* rootsOf(env))
+        const { full, root, segments } = resolveIn(ctx, String(args.path ?? "."), cwd, yield* rootsOf(env, ctx))
         const depth = Number(args.depth ?? 1)
         const pattern = typeof args.glob === "string" ? globToRegExp(args.glob) : null
         const found: Array<{ path: string; entry: Entry }> = []
@@ -626,10 +672,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
     execute: wrap("files", (ctx, args, env) =>
       Effect.gen(function* () {
         const cwd = yield* currentDir(ctx, env)
-        const { full, root, segments } = resolveIn(ctx, String(args.path ?? "."), cwd, yield* rootsOf(env))
+        const { full, root, segments } = resolveIn(ctx, String(args.path ?? "."), cwd, yield* rootsOf(env, ctx))
         const pattern = String(args.pattern)
         const selected = yield* sandboxFor()
-        const source = yield* appSourceOf()
         if (typeof selected !== "string") {
           const command = [
             "rg --line-number --no-heading --color never --max-columns 500 --max-count 100",
@@ -640,20 +685,20 @@ export const makeFileTools = (deps: FileToolDeps) => {
           ]
             .filter(Boolean)
             .join(" ")
-          const shared = yield* sharedPlaces(env.userId)
+          const setup = yield* commandSetup(ctx, env)
           const result = yield* attempt((signal) =>
             selected.run(
               {
                 command,
                 cwd: FILES_MOUNT,
-                mounts: [...accountMounts(env, source), ...shared.mounts],
+                mounts: setup.mounts,
                 env: commandEnv(),
                 network: "none",
                 limits: { ...limits.run, timeoutMs: 60_000 }
               },
               signal
             )
-          ).pipe(Effect.ensuring(Effect.promise(() => shared.close())))
+          ).pipe(Effect.ensuring(Effect.promise(() => setup.close())))
           if (result.exitCode === 0 || result.exitCode === 1) {
             const text = (result.head + result.tail).trim()
             return {
@@ -718,17 +763,21 @@ export const makeFileTools = (deps: FileToolDeps) => {
     ctx: ToolContext,
     env: AccountEnv,
     full: string,
+    root: ToolRoot,
     segments: ReadonlyArray<string>,
     next: (before: Buffer | null) => Buffer,
     kind: "write" | "edit"
   ) =>
     Semaphore.withPermit(writeLock(env.userId))(
       Effect.gen(function* () {
-        const info = yield* attempt(() => statPath(env.filesRoot, segments))
+        // A host folder (§3.7) has no quota; its changes are still versioned.
+        const counted = root.host !== true
+        const top = root.hostRoot
+        const info = yield* attempt(() => statPath(top, segments))
         if (info && !info.isFile()) throw new FilePathRefused(`${full} isn't a regular file.`)
         let before: { bytes: Buffer; inode: number } | null = null
         if (info) {
-          const read = yield* attempt(() => readRegularFile(env.filesRoot, segments, VERSION_MAX_BYTES + 1))
+          const read = yield* attempt(() => readRegularFile(top, segments, VERSION_MAX_BYTES + 1))
           if (read.truncated) throw new FilePathRefused(`${full} is too large to change with the file tools. Use bash.`)
           const seen = ctx.cache.get(readKey(full))
           if (seen === undefined) throw new FilePathRefused(`Read ${full} with read_file before changing it.`)
@@ -739,12 +788,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const content = next(before?.bytes ?? null)
         // The new content and the kept version both count against the quota.
         const adding = content.byteLength + (before?.bytes.byteLength ?? 0)
-        if (deps.quota) yield* deps.quota.check(env.userId, adding, "write files")
+        if (deps.quota && counted) yield* deps.quota.check(env.userId, adding, "write files")
         const versionId = before ? yield* keepVersion(ctx, env.userId, full, before, "agent") : null
-        const written = yield* attempt(() =>
-          writeRegularFile(env.filesRoot, segments, content, { createFolders: true })
-        )
-        deps.quota?.wrote(env.userId, adding)
+        const written = yield* attempt(() => writeRegularFile(top, segments, content, { createFolders: true }))
+        if (counted) deps.quota?.wrote(env.userId, adding)
         deps.onChanged?.(env.userId, [full])
         const after = sha256(content)
         ctx.cache.set(readKey(full), after)
@@ -755,7 +802,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
             targetKind: "file",
             targetId: full,
             title: `${before ? (kind === "edit" ? "Edited" : "Replaced") : "Created"} ${full}`,
-            undo: { path: full, before: versionId, after, inode: written.ino }
+            undo: { path: full, before: versionId, after, inode: written.ino, ...(root.host ? { host: true } : {}) }
           }
         ]
         return { before, written, effects }
@@ -782,9 +829,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
     execute: wrap("files", (ctx, args, env) =>
       Effect.gen(function* () {
         const cwd = yield* currentDir(ctx, env)
-        const { full, segments } = resolveIn(ctx, String(args.path), cwd, yield* rootsOf(env), true)
+        const { full, root, segments } = resolveIn(ctx, String(args.path), cwd, yield* rootsOf(env, ctx), true)
         const content = Buffer.from(String(args.content), "utf8")
-        const done = yield* replaceFile(ctx, env, full, segments, () => content, "write")
+        const done = yield* replaceFile(ctx, env, full, root, segments, () => content, "write")
         return {
           text: `${done.before ? "Replaced" : "Created"} ${full} (${content.byteLength.toLocaleString("en-US")} bytes).`,
           effects: done.effects
@@ -835,12 +882,13 @@ export const makeFileTools = (deps: FileToolDeps) => {
             : args.edits
         ) as ReadonlyArray<{ old_string: string; new_string: string; replace_all?: boolean }>
         const cwd = yield* currentDir(ctx, env)
-        const { full, segments } = resolveIn(ctx, String(args.path), cwd, yield* rootsOf(env), true)
+        const { full, root, segments } = resolveIn(ctx, String(args.path), cwd, yield* rootsOf(env, ctx), true)
         let replaced = 0
         const done = yield* replaceFile(
           ctx,
           env,
           full,
+          root,
           segments,
           (before) => {
             let text = before!.toString("utf8")
@@ -876,8 +924,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
   /** A tree whose changes a command's scan lists (§7.2): the account's Files. */
   interface ScanPlace {
     readonly root: string
-    /** How the agent names its top: /files. */
+    /** How the agent names its top: /files, or a host folder's real path. */
     readonly prefix: string
+    /** Where its files are read from by the no-follow walk, when not `root`: "/" and the components. */
+    readonly walk?: { readonly root: string; readonly base: ReadonlyArray<string> }
   }
   interface PlaceChanges {
     readonly place: ScanPlace
@@ -918,9 +968,13 @@ export const makeFileTools = (deps: FileToolDeps) => {
       let budget = Math.min(VERSIONS_PER_COMMAND, Math.max(0, free))
       for (const { place, changes } of found) {
         for (const path of [...changes.changed, ...changes.created]) {
-          const read = yield* attempt(() => readRegularFile(place.root, path.split("/"), VERSION_MAX_BYTES + 1)).pipe(
-            Effect.orElseSucceed(() => null)
-          )
+          const read = yield* attempt(() =>
+            readRegularFile(
+              place.walk?.root ?? place.root,
+              [...(place.walk?.base ?? []), ...path.split("/")],
+              VERSION_MAX_BYTES + 1
+            )
+          ).pipe(Effect.orElseSucceed(() => null))
           if (!read || read.truncated || read.bytes.byteLength > budget) continue
           budget -= read.bytes.byteLength
           yield* keepVersion(
@@ -1040,6 +1094,24 @@ export const makeFileTools = (deps: FileToolDeps) => {
     })
 
   /** Everything a command runs with for this account: its folders, shared folders and the app's source. */
+  /**
+   * Without a sandbox (§3.7): checked at every command, whatever the grant says: the server
+   * allows it (ALLOW_UNSANDBOXED_COMMANDS), the account is an admin, the workshop turned it on,
+   * and the `none` sandbox is registered.
+   */
+  const unsandboxedFor = (ctx: ToolContext) =>
+    Effect.gen(function* () {
+      const actor = ctx.cache.get(ACTOR_KEY) as User | undefined
+      if (deps.allowUnsandboxed !== true || actor?.role !== "admin") return null
+      const grants = new Map(
+        (yield* deps.reader.WorkshopGrants({ userId: ctx.userId, chatId: ctx.chatId, now: Date.now() })).map((g) => [
+          g.capability,
+          g.mode
+        ])
+      )
+      if (resolveMode(deps.registries, grants, COMMANDS_UNSANDBOXED, "outside") !== "allow") return null
+      return deps.sandboxes.list().find((sandbox) => sandbox.unsandboxed) ?? null
+    })
   const commandSetup = (ctx: ToolContext, env: AccountEnv) =>
     Effect.gen(function* () {
       const grants = new Map(
@@ -1052,11 +1124,26 @@ export const makeFileTools = (deps: FileToolDeps) => {
         resolveMode(deps.registries, grants, COMMANDS_NETWORK, "outside") === "allow" ? "public" : "none"
       const source = yield* appSourceOf()
       const shared = yield* sharedPlaces(env.userId)
+      // The workshop's host folder (§3.7): opened by the no-follow walk, checked by its inode,
+      // bound by that descriptor at its real path, writable.
+      const host = yield* hostPlace(ctx)
+      const hostDir = host ? yield* Effect.promise(() => openFolder("/", host.segments).catch(() => null)) : null
+      const hostInfo = hostDir ? yield* Effect.promise(() => hostDir.stat().catch(() => null)) : null
+      const hostMount: ReadonlyArray<SandboxMount> =
+        host && hostDir && hostInfo ? [{ source: host.path, target: host.path, writable: true, fd: hostDir.fd }] : []
       return {
         network,
-        mounts: [...accountMounts(env, source), ...shared.mounts],
-        places: [{ root: env.filesRoot, prefix: FILES_MOUNT }] as ReadonlyArray<ScanPlace>,
-        close: shared.close
+        mounts: [...accountMounts(env, source), ...shared.mounts, ...hostMount],
+        places: [
+          { root: env.filesRoot, prefix: FILES_MOUNT },
+          ...(hostMount.length
+            ? [{ root: host!.path, prefix: host!.path, walk: { root: "/", base: host!.segments } }]
+            : [])
+        ] as ReadonlyArray<ScanPlace>,
+        close: async () => {
+          await hostDir?.close().catch(() => undefined)
+          await shared.close()
+        }
       }
     })
 
@@ -1068,6 +1155,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
     readonly command: string
     readonly cwd: string
     readonly startedAt: number
+    /** The Changes rows' target kind: `command`, or `command.unsandboxed`. */
+    readonly kind: string
     readonly controller: AbortController
     /** Bytes of its output already given to the agent. */
     cursor: number
@@ -1118,9 +1207,12 @@ export const makeFileTools = (deps: FileToolDeps) => {
       }),
     execute: wrap("commands", (ctx, args, env) =>
       Effect.gen(function* () {
-        const selected = yield* sandboxFor()
+        const none = yield* unsandboxedFor(ctx)
+        const selected = none ?? (yield* sandboxFor())
         if (typeof selected === "string")
           return { isError: true, text: `Commands can't run here: ${selected} The file tools still work.` }
+        // The Changes row marks a command run without a sandbox.
+        const commandKind = none ? "command.unsandboxed" : "command"
         const background = args.run_in_background === true
         if (background && !deps.outputs)
           return { isError: true, text: "Commands can't run in the background here. Run it in the foreground." }
@@ -1169,6 +1261,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
             command: String(args.command),
             cwd,
             startedAt: Date.now(),
+            kind: commandKind,
             controller,
             cursor: 0,
             ended: null,
@@ -1203,7 +1296,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
             effects: [
               {
                 kind: "shell.run",
-                targetKind: "command",
+                targetKind: commandKind,
                 targetId: cwd,
                 title: `Started \`${short}\` in the background in ${cwd}`,
                 undo: null
@@ -1234,7 +1327,11 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const text =
           `${statusOf(result, timeoutMs)}\nDirectory after: ${result.cwd ?? cwd}\n` +
           changesText(changes) +
-          (setup.network === "none" ? "Internet from commands is off in this workshop.\n" : "") +
+          (none
+            ? `No sandbox: this ran directly on the server. /files is ${env.filesRoot} and /home/user is ${env.home} here.\n`
+            : setup.network === "none"
+              ? "Internet from commands is off in this workshop.\n"
+              : "") +
           (overQuota ? `${overQuota}\n` : "") +
           `Output (${result.outputBytes.toLocaleString("en-US")} bytes${cut && sink ? `; the whole output is kept: bash_output id ${sink.id}` : ""}):\n${shown}`
         return {
@@ -1243,7 +1340,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
           effects: [
             {
               kind: "shell.run",
-              targetKind: "command",
+              targetKind: commandKind,
               targetId: cwd,
               title: `Ran \`${short}\` in ${cwd}${counts.length ? `: ${counts.join(", ")}` : ""}`,
               undo: null
@@ -1351,7 +1448,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
           effects: [
             {
               kind: "shell.run",
-              targetKind: "command",
+              targetKind: job.kind,
               targetId: job.cwd,
               title: `Stopped \`${job.command.split("\n")[0]!.slice(0, 80)}\``,
               undo: null
@@ -1366,14 +1463,28 @@ export const makeFileTools = (deps: FileToolDeps) => {
   const undoEffect = (actor: User, effect: RolloutEffect) =>
     Effect.gen(function* () {
       if (effect.undoneAt !== null) return effect
-      const recipe = effect.undo as { path?: unknown; before?: unknown; after?: unknown } | null
+      const recipe = effect.undo as { path?: unknown; before?: unknown; after?: unknown; host?: unknown } | null
       if (!recipe || typeof recipe.path !== "string" || typeof recipe.after !== "string")
         return yield* new EffectUndoRefused({ message: "This change cannot be undone." })
       const env = accountEnv(deps, actor.id)
-      const { segments } = resolveFilesPath(recipe.path, FILES_MOUNT)
+      // A host folder's file (§3.7): only while the account is an admin and the folder is still
+      // allowed; reached by the no-follow walk from "/".
+      const host = recipe.host === true
+      if (host) {
+        const path = recipe.path
+        const allowed =
+          actor.role === "admin" &&
+          deps.hostFolders !== undefined &&
+          (yield* Effect.promise(() => deps.hostFolders!.allows(path).catch(() => false)))
+        if (!allowed) return yield* new EffectUndoRefused({ message: "That folder on the server isn't available now." })
+      }
+      const top = host ? "/" : env.filesRoot
+      const segments = host
+        ? recipe.path.split("/").filter(Boolean)
+        : resolveFilesPath(recipe.path, FILES_MOUNT).segments
       return yield* Semaphore.withPermit(writeLock(env.userId))(
         Effect.gen(function* () {
-          const current = yield* attempt(() => readRegularFile(env.filesRoot, segments, VERSION_MAX_BYTES + 1)).pipe(
+          const current = yield* attempt(() => readRegularFile(top, segments, VERSION_MAX_BYTES + 1)).pipe(
             Effect.orElseSucceed(() => null)
           )
           if (!current || current.truncated || sha256(current.bytes) !== recipe.after)
@@ -1386,7 +1497,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
             "restore"
           )
           // The kept version and the restored content count until the next measurement.
-          deps.quota?.wrote(env.userId, current.bytes.byteLength)
+          if (!host) deps.quota?.wrote(env.userId, current.bytes.byteLength)
           if (typeof recipe.before === "string") {
             // A version past retention (30 days) is gone with its content.
             const version = yield* deps.reader
@@ -1399,9 +1510,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
             if (!version.mediaPath || !isMediaPath(version.mediaPath))
               return yield* new EffectUndoRefused({ message: "Its earlier content is gone." })
             const bytes = yield* attempt(() => readFile(join(deps.dataDir, version.mediaPath!)))
-            yield* attempt(() => writeRegularFile(env.filesRoot, segments, bytes))
-            deps.quota?.wrote(env.userId, bytes.byteLength)
-          } else yield* attempt(() => removeFile(env.filesRoot, segments))
+            yield* attempt(() => writeRegularFile(top, segments, bytes))
+            if (!host) deps.quota?.wrote(env.userId, bytes.byteLength)
+          } else yield* attempt(() => removeFile(top, segments))
           deps.onChanged?.(env.userId, [recipe.path as string])
           return yield* deps.writer.CompleteFileUndo({
             userId: actor.id,

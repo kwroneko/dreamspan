@@ -847,22 +847,43 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           // remembered for the workshop's assistant card and as the account's last pick (§2.3).
           const chat = yield* reader.GetChat({ userId: id, chatId })
           if (chat.kind !== "workshop") return yield* new NotFound({ entity: "workshop", id: chatId })
-          const folder = yield* files
-            .folderAt(id, change.path)
-            .pipe(Effect.mapError(() => new NotFound({ entity: "folder", id: change.path })))
-          yield* writer.AddStateEvent({
-            userId: id,
-            chatId,
-            forkId: forkId ?? null,
-            slotId,
-            displayEnd,
-            versionId: null,
-            scope: null,
-            data: { key: "workshop.folder", value: folder }
-          })
-          const before = yield* castAt(id, chatId, slotId, forkId, displayEnd)
-          const assistant = before.cards.find((card) => !card.persona && before.participants.includes(card.entityId))
-          yield* writer.RememberWorkshopFolder({ userId: id, cardId: assistant?.entityId ?? null, ...folder })
+          // A folder on the server (§3.7): an admin's, under HOST_FOLDERS, by its real path; not
+          // remembered for the card or among the recent folders.
+          if (change.host === true) {
+            const user = yield* CurrentUser
+            // Never for another account, whatever the request says: as if there were no such folder.
+            if (user.role !== "admin") return yield* new NotFound({ entity: "folder", id: change.path })
+            const host = yield* Effect.tryPromise(() => files.hostFolders.check(change.path)).pipe(
+              Effect.mapError(() => new NotFound({ entity: "folder", id: change.path }))
+            )
+            yield* writer.AddStateEvent({
+              userId: id,
+              chatId,
+              forkId: forkId ?? null,
+              slotId,
+              displayEnd,
+              versionId: null,
+              scope: null,
+              data: { key: "workshop.folder", value: { path: host.path, inode: host.inode, host: true } }
+            })
+          } else {
+            const folder = yield* files
+              .folderAt(id, change.path)
+              .pipe(Effect.mapError(() => new NotFound({ entity: "folder", id: change.path })))
+            yield* writer.AddStateEvent({
+              userId: id,
+              chatId,
+              forkId: forkId ?? null,
+              slotId,
+              displayEnd,
+              versionId: null,
+              scope: null,
+              data: { key: "workshop.folder", value: folder }
+            })
+            const before = yield* castAt(id, chatId, slotId, forkId, displayEnd)
+            const assistant = before.cards.find((card) => !card.persona && before.participants.includes(card.entityId))
+            yield* writer.RememberWorkshopFolder({ userId: id, cardId: assistant?.entityId ?? null, ...folder })
+          }
         } else {
           yield* writer.AddStateEvent({
             userId: id,

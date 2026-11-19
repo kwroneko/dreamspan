@@ -3172,6 +3172,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
       })
   },
   ListFolder: { adminOnly: (actor) => refused(actor.api.ListFolder({ path: null }), "Forbidden") },
+  ListHostFolders: { adminOnly: (actor) => refused(actor.api.ListHostFolders({ path: null }), "Forbidden") },
   ScanStFolder: { adminOnly: (actor) => refused(actor.api.ScanStFolder({ path: "/" }), "Forbidden") },
   StImportPreview: {
     probe: (actor, owner) =>

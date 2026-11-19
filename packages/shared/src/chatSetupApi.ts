@@ -396,7 +396,14 @@ export class Cast extends Schema.Class<Cast>("Cast")({
    * A workshop's working folder on this branch as stored (`workshop.folder`,
    * spec/FILES-AND-ENVIRONMENT.md §2.1); absent: the top of Files.
    */
-  workshopFolder: Schema.optionalKey(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) })),
+  workshopFolder: Schema.optionalKey(
+    Schema.Struct({
+      path: Schema.String,
+      inode: Schema.NullOr(Schema.Number),
+      /** A folder on the server outside Files (§3.7). */
+      host: Schema.optionalKey(Schema.Literal(true))
+    })
+  ),
   /** The tools agent replies offer (`agent.tools`); absent: the default list. */
   agentTools: Schema.optionalKey(Schema.Array(Schema.String)),
   /** Whether a reply's send tool says who is present (`agent.send_presence`); absent: it doesn't. */
@@ -474,7 +481,11 @@ export const CastChange = Schema.Union([
    * §2.1): a folder of the user's Files (`/files/…`). The server records its inode, and remembers
    * it for the workshop's assistant card (§2.3).
    */
-  Schema.TaggedStruct("WorkshopFolder", { path: Schema.String.check(Schema.isMaxLength(4096)) }),
+  Schema.TaggedStruct("WorkshopFolder", {
+    path: Schema.String.check(Schema.isMaxLength(4096)),
+    /** A folder on the server outside Files, by its real path (§3.7): admins only, under HOST_FOLDERS. */
+    host: Schema.optionalKey(Schema.Boolean)
+  }),
   /** Who replies when nobody is picked (`reply.order`): a reply policy's id. */
   Schema.TaggedStruct("ReplyOrder", { order: Schema.String.check(Schema.isMaxLength(200)) }),
   /** One reply per user action, or the reply order's whole round as in ST (`reply.single`). */

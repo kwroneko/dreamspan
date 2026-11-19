@@ -5,11 +5,19 @@
 // differs, the folders picked last, the folders of Files one level at a time, New folder here and
 // Use the top of Files. Choosing one writes `workshop.folder` on this branch (`WorkshopFolder`),
 // which the server also remembers for the card (§2.3). A folder gone outside the app, and not found
-// again by its inode, shows the warning tone: the next turn starts at the top.
+// again by its inode, shows the warning tone: the next turn starts at the top. An admin, where the
+// server lists HOST_FOLDERS, also gets Folder on the server… (§3.7): a folder outside Files, shown
+// with a server badge. Where the workshop runs commands without a sandbox, the chip says so.
 import { FILES_TOP, isTop, joinPath, nameOf, nameProblem } from "@dreamspan/shared/files.ts"
+import { useAtomValue } from "@effect/atom-react"
+import { AsyncResult } from "effect/reactivity"
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 import { useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
+import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
+import { Badge } from "../../ui/Surface.tsx"
+import { FolderBrowser } from "../library/FolderBrowser.tsx"
+import { capabilitiesAtom } from "../workshop/capabilities.ts"
 import { Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Popover } from "../../ui/Popover.tsx"
@@ -25,6 +33,7 @@ interface Choices {
   readonly current: string | null
   readonly recent: ReadonlyArray<string>
   readonly card: string | null
+  readonly hostFolders: boolean
 }
 
 const folderLabel = (path: string) => (isTop(path) ? "All files" : nameOf(path))
@@ -68,8 +77,8 @@ export const useFolderChoices = (session: ChatSession, enabled = true) => {
   }, [stored])
   const refresh = useCallback(() => setVersion((v) => v + 1), [])
   const choose = useCallback(
-    async (path: string) => {
-      const outcome = await session.changeCast({ _tag: "WorkshopFolder", path })
+    async (path: string, host = false) => {
+      const outcome = await session.changeCast({ _tag: "WorkshopFolder", path, ...(host ? { host: true } : {}) })
       if (!outcome.ok) throw new Error(outcome.error.message)
     },
     [session]
@@ -91,17 +100,26 @@ export function FolderChip({ session }: ComposerControlContext) {
   const [error, setError] = useState<string | null>(null)
   const [naming, setNaming] = useState(false)
   const [pending, setPending] = useState(false)
+  const [browsing, setBrowsing] = useState(false)
+  const [hostPick, setHostPick] = useState<string | null>(null)
+  const capabilities = useAtomValue(capabilitiesAtom(session.chatId))
+  const unsandboxed =
+    AsyncResult.isSuccess(capabilities) &&
+    capabilities.value.some((c) => c.id === "commands.unsandboxed" && c.mode === "allow")
   if (!folder.ready || !folder.choices) return <LoadingChip label="Working folder" />
-  const { current, recent, card } = folder.choices
+  const { current, recent, card, hostFolders } = folder.choices
   const gone = current === null
   const shown = current ?? FILES_TOP
-  const pick = async (path: string) => {
+  // A folder on the server, outside Files (§3.7).
+  const host = folder.stored?.host === true
+  const pick = async (path: string, onServer = false) => {
     setPending(true)
     setError(null)
     try {
-      await folder.choose(path)
+      await folder.choose(path, onServer)
       setOpen(false)
       setNaming(false)
+      setBrowsing(false)
     } catch (cause) {
       setError(`The folder wasn't changed: ${cause instanceof Error ? cause.message : String(cause)}`)
     } finally {
@@ -124,127 +142,210 @@ export function FolderChip({ session }: ComposerControlContext) {
   }
   const others = recent.filter((path) => path !== shown && path !== card).slice(0, 5)
   return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next)
-        if (next) folder.refresh()
-        else setNaming(false)
-      }}
-      trigger={
-        <ChipText>
-          <span className="inline-flex min-w-0 items-center gap-1" data-folder-chip={shown}>
-            <Icon name="folder" size={14} />
-            <span className="min-w-0 truncate">{gone ? "Folder not found" : folderLabel(shown)}</span>
-          </span>
-        </ChipText>
-      }
-      triggerLabel={gone ? "Working folder: not found" : `Working folder: ${shown}`}
-      hint={
-        gone
-          ? `${folder.stored?.path ?? "The folder"} isn't in your files any more. Commands start at the top of your files until you choose another.`
-          : "Where the assistant's commands start. It can still reach all your files."
-      }
-      triggerClassName={chipClass(gone ? "warning" : "neutral")}
-      title="Working folder"
-    >
-      <div className="-mx-2 flex min-h-0 flex-col gap-2 overflow-y-auto px-2" data-folder-popover="">
-        <p className="px-2 text-sm [overflow-wrap:anywhere]" data-folder-current="">
-          {gone ? (
-            <span className="text-warning">Not found: {folder.stored?.path}</span>
-          ) : (
-            <>
-              Commands start in <span className="font-medium">{shown}</span>
-            </>
-          )}
-        </p>
-        {card && (
-          <FolderRow
-            path={card}
-            label={`Use ${folder.cardName ?? "the assistant"}'s folder: ${card}`}
-            hint={`The folder you last chose for ${folder.cardName ?? "this assistant"}.`}
-            disabled={pending}
-            onPick={(path) => void pick(path)}
-          />
-        )}
-        {others.length > 0 && (
-          <section aria-label="Recent" className="flex flex-col">
-            <h3 className="px-2 text-xs font-medium text-muted">Recent</h3>
-            {others.map((path) => (
-              <FolderRow
-                key={path}
-                path={path}
-                label={path}
-                hint="A folder you chose recently."
-                disabled={pending}
-                onPick={(at) => void pick(at)}
-              />
-            ))}
-          </section>
-        )}
-        {source && (
-          <section aria-label="Your files" className="flex flex-col gap-1">
-            <h3 className="px-2 text-xs font-medium text-muted">Your files</h3>
-            <FolderTree source={source} folder={shown} onFolder={(path) => void pick(path)} version={0} />
-          </section>
-        )}
-        {naming ? (
-          <form
-            className="flex min-w-0 flex-wrap items-center gap-2 px-2"
-            onSubmit={(event) => {
-              event.preventDefault()
-              const value = new FormData(event.currentTarget).get("name")
-              void makeFolder(String(value ?? "").trim())
-            }}
-          >
-            <Input
-              name="name"
-              aria-label="Name of the new folder"
-              defaultValue="New folder"
-              autoFocus
-              className="min-w-0 flex-1 basis-32"
-            />
-            <Button
-              type="submit"
-              variant="primary"
-              hint={`Makes the folder in ${shown} and works there.`}
-              pending={pending}
+    <>
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next)
+          if (next) folder.refresh()
+          else setNaming(false)
+        }}
+        trigger={
+          <ChipText>
+            <span
+              className="inline-flex min-w-0 items-center gap-1"
+              data-folder-chip={shown}
+              {...(host ? { "data-folder-host": "" } : {})}
             >
-              Make folder
-            </Button>
-            <Button hint="Leaves the folder as it is." onClick={() => setNaming(false)}>
+              <Icon name={host && !gone ? "server" : "folder"} size={14} />
+              <span className="min-w-0 truncate">
+                {gone ? "Folder not found" : host ? (shown.split("/").at(-1) ?? shown) : folderLabel(shown)}
+              </span>
+              {unsandboxed && (
+                <Badge tone="warning" size="sm">
+                  No sandbox
+                </Badge>
+              )}
+            </span>
+          </ChipText>
+        }
+        triggerLabel={gone ? "Working folder: not found" : `Working folder: ${shown}`}
+        hint={[
+          gone
+            ? host
+              ? `${folder.stored?.path ?? "The folder"} isn't available on the server now. Commands start at the top of your files until you choose another.`
+              : `${folder.stored?.path ?? "The folder"} isn't in your files any more. Commands start at the top of your files until you choose another.`
+            : host
+              ? "A folder on the server, outside your files. Commands start there and can change it."
+              : "Where the assistant's commands start. It can still reach all your files.",
+          unsandboxed ? "Commands in this workshop run without a sandbox." : ""
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        triggerClassName={chipClass(gone || unsandboxed ? "warning" : "neutral")}
+        title="Working folder"
+      >
+        <div className="-mx-2 flex min-h-0 flex-col gap-2 overflow-y-auto px-2" data-folder-popover="">
+          <p className="px-2 text-sm [overflow-wrap:anywhere]" data-folder-current="">
+            {gone ? (
+              <span className="text-warning">Not found: {folder.stored?.path}</span>
+            ) : (
+              <>
+                Commands start in <span className="font-medium">{shown}</span>
+              </>
+            )}
+          </p>
+          {card && (
+            <FolderRow
+              path={card}
+              label={`Use ${folder.cardName ?? "the assistant"}'s folder: ${card}`}
+              hint={`The folder you last chose for ${folder.cardName ?? "this assistant"}.`}
+              disabled={pending}
+              onPick={(path) => void pick(path)}
+            />
+          )}
+          {others.length > 0 && (
+            <section aria-label="Recent" className="flex flex-col">
+              <h3 className="px-2 text-xs font-medium text-muted">Recent</h3>
+              {others.map((path) => (
+                <FolderRow
+                  key={path}
+                  path={path}
+                  label={path}
+                  hint="A folder you chose recently."
+                  disabled={pending}
+                  onPick={(at) => void pick(at)}
+                />
+              ))}
+            </section>
+          )}
+          {source && (
+            <section aria-label="Your files" className="flex flex-col gap-1">
+              <h3 className="px-2 text-xs font-medium text-muted">Your files</h3>
+              <FolderTree
+                source={source}
+                folder={host ? FILES_TOP : shown}
+                onFolder={(path) => void pick(path)}
+                version={0}
+              />
+            </section>
+          )}
+          {hostFolders && (
+            <Tooltip label="Chooses a folder on the server, outside your files, from those the server allows.">
+              <button
+                type="button"
+                disabled={pending}
+                data-folder-host-row=""
+                onClick={() => {
+                  setHostPick(host && !gone ? shown : null)
+                  setBrowsing(true)
+                  setOpen(false)
+                }}
+                className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-60"
+              >
+                <Icon name="server" size={14} className="shrink-0 text-muted" />
+                <span className="min-w-0 [overflow-wrap:anywhere]">Folder on the server…</span>
+              </button>
+            </Tooltip>
+          )}
+          {naming ? (
+            <form
+              className="flex min-w-0 flex-wrap items-center gap-2 px-2"
+              onSubmit={(event) => {
+                event.preventDefault()
+                const value = new FormData(event.currentTarget).get("name")
+                void makeFolder(String(value ?? "").trim())
+              }}
+            >
+              <Input
+                name="name"
+                aria-label="Name of the new folder"
+                defaultValue="New folder"
+                autoFocus
+                className="min-w-0 flex-1 basis-32"
+              />
+              <Button
+                type="submit"
+                variant="primary"
+                hint={`Makes the folder in ${shown} and works there.`}
+                pending={pending}
+              >
+                Make folder
+              </Button>
+              <Button hint="Leaves the folder as it is." onClick={() => setNaming(false)}>
+                Cancel
+              </Button>
+            </form>
+          ) : (
+            <div className="flex flex-wrap gap-2 px-2">
+              <Button
+                hint={`Makes a new folder in ${shown} and works there.`}
+                disabled={pending || !source || host}
+                onClick={() => setNaming(true)}
+              >
+                <Icon name="plus" />
+                New folder here
+              </Button>
+              {!isTop(shown) || gone || host ? (
+                <Button
+                  hint="Commands start at the top of your files."
+                  disabled={pending}
+                  onClick={() => void pick(FILES_TOP)}
+                >
+                  Use the top of Files
+                </Button>
+              ) : null}
+            </div>
+          )}
+          {error && (
+            <p role="alert" className="px-2 text-sm text-danger [overflow-wrap:anywhere]">
+              {error}
+            </p>
+          )}
+          <p className="shrink-0 border-t border-border px-2 pt-2 text-xs text-muted">
+            This holds for this branch only.
+          </p>
+        </div>
+      </Popover>
+      <Dialog
+        open={browsing}
+        onOpenChange={setBrowsing}
+        title="Folder on the server"
+        description="A folder outside your files that the server allows. Commands start there and can change it. Changes there don't count against your storage."
+      >
+        <div className="flex min-w-0 flex-col gap-3" data-host-folder-dialog="">
+          <FolderBrowser kind="host" start={hostPick} disabled={pending} onOpen={setHostPick} />
+          <p className="text-sm [overflow-wrap:anywhere]">
+            {hostPick ? (
+              <>
+                Chosen: <span className="font-medium">{hostPick}</span>
+              </>
+            ) : (
+              <span className="text-muted">Open a folder to choose it.</span>
+            )}
+          </p>
+          {error && browsing && (
+            <p role="alert" className="text-sm text-danger [overflow-wrap:anywhere]">
+              {error}
+            </p>
+          )}
+          <DialogActions>
+            <Button hint="Closes this without changing the folder." onClick={() => setBrowsing(false)}>
               Cancel
             </Button>
-          </form>
-        ) : (
-          <div className="flex flex-wrap gap-2 px-2">
             <Button
-              hint={`Makes a new folder in ${shown} and works there.`}
-              disabled={pending || !source}
-              onClick={() => setNaming(true)}
+              variant="primary"
+              hint="Commands start in this folder on this branch."
+              disabled={hostPick === null}
+              pending={pending}
+              onClick={() => hostPick && void pick(hostPick, true)}
             >
-              <Icon name="plus" />
-              New folder here
+              Use this folder
             </Button>
-            {!isTop(shown) || gone ? (
-              <Button
-                hint="Commands start at the top of your files."
-                disabled={pending}
-                onClick={() => void pick(FILES_TOP)}
-              >
-                Use the top of Files
-              </Button>
-            ) : null}
-          </div>
-        )}
-        {error && (
-          <p role="alert" className="px-2 text-sm text-danger [overflow-wrap:anywhere]">
-            {error}
-          </p>
-        )}
-        <p className="shrink-0 border-t border-border px-2 pt-2 text-xs text-muted">This holds for this branch only.</p>
-      </div>
-    </Popover>
+          </DialogActions>
+        </div>
+      </Dialog>
+    </>
   )
 }
 

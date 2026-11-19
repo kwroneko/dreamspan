@@ -110,6 +110,7 @@ export function ConfirmDialog({
   confirmLabel,
   confirmHint,
   confirmDisabled,
+  cancelLabel = "Cancel",
   pending,
   onConfirm,
   children
@@ -119,6 +120,8 @@ export function ConfirmDialog({
   title: ReactNode
   description: ReactNode
   confirmLabel: string
+  /** The button that closes it without the change. */
+  cancelLabel?: string
   confirmHint?: string
   confirmDisabled?: boolean
   pending?: boolean | undefined
@@ -139,7 +142,7 @@ export function ConfirmDialog({
           {children}
           <DialogActions>
             <BaseAlertDialog.Close render={<Button hint="Closes this confirmation without applying changes." />}>
-              Cancel
+              {cancelLabel}
             </BaseAlertDialog.Close>
             <Button
               hint={confirmHint ?? confirmLabel}
