@@ -8,7 +8,8 @@
     "0004_workshop_branches": "540d6fb096cbed38b4888c57f12bb395dc2490f19d4ca602784d3ad39eb9f585",
     "0005_preview_macro": "e7f28c60b75eb5fdbc63ebc8ace5071414d2b23ee03242779766bd97136f5c68",
     "0006_persona_locks": "4b493b3cd5e259f1d93beec91675307117dc750f9e2c6c15e41c79cf988adae8",
-    "0007_contract_records": "3216bbb24ba72d906af44f376d79c9182660de49217843ad2959e5f3eeb164e4"
+    "0007_contract_records": "3216bbb24ba72d906af44f376d79c9182660de49217843ad2959e5f3eeb164e4",
+    "0008_attachment_paths": "a269d7401bebea0e6c86b0c9cd63de3cabb549d7a6c416bcc5b4325d59243615"
   },
   "schema": [
     {
@@ -1323,7 +1324,7 @@
       "type": "table",
       "name": "composer_images",
       "tbl_name": "composer_images",
-      "sql": "CREATE TABLE composer_images ( id TEXT PRIMARY KEY, draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE, media_id TEXT REFERENCES media_assets(id), alt_text TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('active','sent','removed')), kind TEXT NOT NULL DEFAULT 'image', name TEXT, CHECK (status <> 'active' OR media_id IS NOT NULL) ) STRICT"
+      "sql": "CREATE TABLE composer_images ( id TEXT PRIMARY KEY, draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE, media_id TEXT REFERENCES media_assets(id), alt_text TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('active','sent','removed')), kind TEXT NOT NULL DEFAULT 'image', name TEXT, path TEXT, CHECK (status <> 'active' OR media_id IS NOT NULL) ) STRICT"
     },
     {
       "type": "table",
@@ -4173,7 +4174,7 @@
       "type": "trigger",
       "name": "versions_amend_history",
       "tbl_name": "version_texts",
-      "sql": "CREATE TRIGGER versions_amend_history AFTER UPDATE OF content ON version_texts WHEN NEW.content IS NOT OLD.content AND EXISTS ( SELECT 1 FROM versions WHERE seq = OLD.version_seq AND writer = 'human' AND status <> 'generating') BEGIN INSERT INTO version_history(version_id, content, replaced_at, images_json, reasoning_json, sections_json) SELECT v.id, OLD.content, v.updated_at, (SELECT json_group_array(json_object( 'mediaId', media_id, 'altText', coalesce(alt_text, ''))) FROM (SELECT media_id, alt_text FROM version_attachments WHERE version_id = v.id ORDER BY ordinal)), json_quote(OLD.reasoning), OLD.reply_sections FROM versions v WHERE v.seq = OLD.version_seq; END"
+      "sql": "CREATE TRIGGER versions_amend_history AFTER UPDATE OF content ON version_texts WHEN NEW.content IS NOT OLD.content AND EXISTS ( SELECT 1 FROM versions WHERE seq = OLD.version_seq AND writer = 'human' AND status <> 'generating') BEGIN INSERT INTO version_history(version_id, content, replaced_at, images_json, reasoning_json, sections_json) SELECT v.id, OLD.content, v.updated_at, (SELECT json_group_array(json(CASE WHEN a.path IS NULL AND a.kind <> 'file' THEN json_object('mediaId', a.media_id, 'altText', coalesce(a.alt_text, '')) ELSE json_patch(json_object('mediaId', a.media_id, 'altText', coalesce(a.alt_text, '')), json_object('kind', CASE WHEN a.kind = 'file' THEN 'file' END, 'name', a.name, 'path', a.path)) END)) FROM (SELECT media_id, alt_text, kind, name, path FROM version_attachments WHERE version_id = v.id ORDER BY ordinal) a), json_quote(OLD.reasoning), OLD.reply_sections FROM versions v WHERE v.seq = OLD.version_seq; END"
     },
     {
       "type": "trigger",

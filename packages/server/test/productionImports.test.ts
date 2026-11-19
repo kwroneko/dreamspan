@@ -385,8 +385,9 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
     expressions: ['readFileSync(path, "utf8")']
   },
   "packages/server/src/importer/mediaFiles.ts": {
-    reason: "Imported or generated media in the configured data volume.",
-    expressions: ["readdir(path)", "readFile(join(dataDir, path))"]
+    reason:
+      "Imported or generated media in the configured data volume, and the private temporary file a copy is written to first.",
+    expressions: ["readdir(path)", "readFile(join(dataDir, path))", 'open(temporary, "wx", 0o600)']
   },
   "packages/server/src/sources/cache.ts": {
     reason: "Card-source cache entries and blobs created in the data volume.",
@@ -438,7 +439,10 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
     expressions: [
       "open(at(dir, name), O_RDONLY | O_NOFOLLOW | O_NONBLOCK)",
       "open(at(dir, segments.at(-1)!), O_RDONLY | O_NOFOLLOW | O_NONBLOCK)",
-      "open(at(dir, temporary), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)"
+      "open(at(dir, temporary), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)",
+      // A copied attachment's temporary file and a saved file's path: user data in the data volume.
+      "readFile(copied.temporary)",
+      "open(join(config.dataDir, file.path), O_RDONLY | O_NOFOLLOW)"
     ]
   },
   "packages/server/src/files/bin.ts": {

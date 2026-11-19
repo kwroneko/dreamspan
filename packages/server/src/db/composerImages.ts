@@ -3,6 +3,7 @@ import type { SqlClient } from "effect/sql"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { MessageImages } from "@dreamspan/shared/chat.ts"
 import type { ComposerImage } from "@dreamspan/shared/composerApi.ts"
+import { attachedFrom, mediaHeldBy } from "./media.ts"
 import { NotFound, StorageError } from "./ops.ts"
 
 /** The row as the API gives it: a workshop's attachment adds its kind, name and path (§6.1). */
@@ -26,6 +27,26 @@ const toImage = ({ kind, name, path, ...row }: Row): ComposerImage => ({
 
 /** What an attachment's file may be: any type for a file, else a PNG, JPEG, GIF or WebP image. */
 const IMAGE_MIMES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const
+
+/**
+ * An attachment's own fields as the client gave them (§6.1): a file always has its path in
+ * Files; a name is a plain name, and with a path it's that path's last part.
+ */
+export const attachmentFieldsFit = (file: {
+  readonly kind?: "file"
+  readonly name?: string
+  readonly path?: string
+}) => {
+  if (file.kind === "file" && file.path === undefined) return false
+  if (file.name !== undefined && (file.name === "" || /[/\u0000-\u001f\u007f]/.test(file.name))) return false
+  if (
+    file.path !== undefined &&
+    file.name !== undefined &&
+    file.path.slice(file.path.lastIndexOf("/") + 1) !== file.name
+  )
+    return false
+  return true
+}
 
 export const composerImages = (sql: SqlClient.SqlClient) => {
   const owned = (userId: UserId, chatId: string, draftId: string) =>
@@ -57,13 +78,20 @@ export const composerImages = (sql: SqlClient.SqlClient) => {
       if (existing && existing.draft_id !== draftId) return yield* new NotFound({ entity: "composer image", id })
       if (mediaId !== null && !existing) {
         // A file of any type only where its chat is a workshop (§6.1); a story's are images.
-        const [media] =
-          file.kind === "file"
-            ? yield* sql`SELECT m.id FROM media_assets m JOIN media_refs r ON r.media_id=m.id
-            JOIN chats c ON c.id=${chatId} AND c.kind='workshop'
-            WHERE m.id=${mediaId} AND r.owner_user_id=${userId}`
-            : yield* sql`SELECT m.id FROM media_assets m JOIN media_refs r ON r.media_id=m.id
-            WHERE m.id=${mediaId} AND r.owner_user_id=${userId} AND m.mime IN ${sql.in(IMAGE_MIMES)}`
+        // Its name and path are what the model is told (§6.1): the path must be where this user
+        // attached the copy from, the name that path's own.
+        const [media] = !attachmentFieldsFit(file)
+          ? []
+          : file.kind === "file"
+            ? yield* sql`SELECT m.id FROM media_assets m JOIN chats c ON c.id=${chatId} AND c.kind='workshop'
+            WHERE m.id=${mediaId} AND ${mediaHeldBy(sql, "m.id", userId)}
+              AND ${attachedFrom(sql, "m.id", userId, file.path!)}`
+            : file.path !== undefined
+              ? yield* sql`SELECT m.id FROM media_assets m
+            WHERE m.id=${mediaId} AND ${mediaHeldBy(sql, "m.id", userId)} AND m.mime IN ${sql.in(IMAGE_MIMES)}
+              AND ${attachedFrom(sql, "m.id", userId, file.path)}`
+              : yield* sql`SELECT m.id FROM media_assets m
+            WHERE m.id=${mediaId} AND ${mediaHeldBy(sql, "m.id", userId)} AND m.mime IN ${sql.in(IMAGE_MIMES)}`
         if (!media) return yield* new NotFound({ entity: file.kind === "file" ? "file" : "image", id: mediaId })
         const [count] = yield* sql<{
           n: number

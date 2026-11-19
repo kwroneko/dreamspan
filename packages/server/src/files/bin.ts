@@ -8,13 +8,13 @@ import { constants } from "node:fs"
 import { lstat, mkdir, open, readdir, rename, rmdir, type FileHandle } from "node:fs/promises"
 import { join } from "node:path"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
-import { FILES_TOP, keepBothName } from "@dreamspan/shared/files.ts"
+import { FILES_TOP } from "@dreamspan/shared/files.ts"
 import type { BinItem } from "@dreamspan/shared/bin.ts"
 import { Cause, Effect } from "effect"
 import type { Reader, Writer } from "../db/Database.ts"
 import { resolveFilesPath } from "./environment.ts"
 import { measureBin, measureTree, type FilesQuota } from "./quota.ts"
-import { FilePathRefused, listFolder, openFolder, removeTreeAt } from "./safePath.ts"
+import { FilePathRefused, openFolder, removeTreeAt, renameNoReplace } from "./safePath.ts"
 
 const { O_RDONLY, O_DIRECTORY, O_NOFOLLOW } = constants
 
@@ -27,6 +27,21 @@ export const BIN_FOLDER = ".bin"
 const restoredName = (name: string) => {
   const dot = name.lastIndexOf(".")
   return dot > 0 ? `${name.slice(0, dot)} (restored)${name.slice(dot)}` : `${name} (restored)`
+}
+
+/** Restores tried at most per item before the name counts as taken. */
+const RESTORE_NAME_TRIES = 10_000
+
+/** The names a restore tries in turn: its own, "name (restored)", then "name (restored) (2)" on. */
+function* restoreNames(name: string): Generator<string> {
+  yield name
+  const restored = restoredName(name)
+  yield restored
+  // As keepBothName numbers a taken name.
+  const dot = restored.lastIndexOf(".")
+  const stem = dot > 0 ? restored.slice(0, dot) : restored
+  const ext = dot > 0 ? restored.slice(dot) : ""
+  for (let n = 2; n < RESTORE_NAME_TRIES; n++) yield `${stem} (${n})${ext}`
 }
 
 export class BinContentGone extends Error {}
@@ -150,14 +165,17 @@ export const makeFilesBin = (deps: FilesBinDeps) => {
               const parent = segments.slice(0, -1)
               const target = await openFolder(root, parent, { create: true })
               try {
-                let name = segments.at(-1)!
-                if (await lstat(at(target, name)).catch(() => null)) {
-                  const taken = new Set((await listFolder(root, parent, 100_000)).entries.map((entry) => entry.name))
-                  name = restoredName(name)
-                  if (taken.has(name)) name = keepBothName(name, taken)
+                // Each name is tried by a rename that never replaces (renameNoReplace), so
+                // whatever a command makes there meanwhile stays; a taken one goes to the next.
+                for (const name of restoreNames(segments.at(-1)!)) {
+                  try {
+                    await renameNoReplace(at(holder, item.name), at(target, name))
+                    return [...parent, name]
+                  } catch (error) {
+                    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+                  }
                 }
-                await rename(at(holder, item.name), at(target, name))
-                return [...parent, name]
+                throw Object.assign(new Error("every restored name is taken"), { code: "EEXIST" })
               } finally {
                 await target.close()
               }

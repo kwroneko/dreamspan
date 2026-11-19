@@ -35,6 +35,16 @@ export const makeBinHandlers = Effect.gen(function* () {
       yield* warmth.refreshUser(id)
     })
 
+  /**
+   * Attachment copies (files/routes.ts `attach`) that no message names once the purge is done
+   * go, and the Files usage is measured again when any did, so the room shows as free.
+   */
+  const dropAttachmentCopies = (id: UserId) =>
+    writer.PruneFileVersions({ userId: id, before: 0, limit: 1 }).pipe(
+      Effect.flatMap((done) => (done.attachments > 0 ? Effect.asVoid(files.quota.measure(id)) : Effect.void)),
+      Effect.catchCause((cause) => Effect.logWarning("dropping unused attachment copies failed", cause))
+    )
+
   const handlers = {
     GetBinLimits: () =>
       Effect.flatMap(userId, (id) => reader.GetBinLimits({ userId: id })).pipe(internal("GetBinLimits")),
@@ -89,8 +99,9 @@ export const makeBinHandlers = Effect.gen(function* () {
           ...(expectedForkIds ? { expectedForkIds } : {})
         })
         yield* afterPurge(id, chatIds)
-        // A file's content goes from disk once its row has.
+        // A file's content goes from disk once its row has, and attachment copies no message names any more.
         yield* files.bin.sweep(id)
+        yield* dropAttachmentCopies(id)
       }).pipe(Effect.uninterruptible, internal("PurgeBinItem")),
 
     EmptyBin: ({ itemIds, expectedForkIds }) =>
@@ -99,6 +110,7 @@ export const makeBinHandlers = Effect.gen(function* () {
         const result = yield* writer.EmptyBin({ userId: id, itemIds, ...(expectedForkIds ? { expectedForkIds } : {}) })
         yield* afterPurge(id, result.chatIds)
         yield* files.bin.sweep(id)
+        yield* dropAttachmentCopies(id)
         return { purged: result.purged }
       }).pipe(Effect.uninterruptible, internal("EmptyBin")),
 

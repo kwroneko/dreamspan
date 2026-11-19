@@ -37,7 +37,11 @@ export const storageKinds = makeRegistry<StorageKind>([
     ]
   },
   // Who or what made a file's earlier content (spec/FILES-AND-ENVIRONMENT.md §1.3).
-  { id: "file_versions.origin", values: ["upload", "editor", "agent", "command", "restore", "delete"] },
+  // `attachment`: the copy a workshop message sends of a file (§6.1), kept while a message names it.
+  {
+    id: "file_versions.origin",
+    values: ["upload", "editor", "agent", "command", "restore", "delete", "attachment"]
+  },
   { id: "changeset_groups.origin", values: ["user", "agent"] },
   {
     id: "bin_items.kind",

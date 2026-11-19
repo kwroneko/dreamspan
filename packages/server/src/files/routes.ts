@@ -5,8 +5,8 @@
 // walk (safePath.ts), never through a path as given: links and special files are listed and
 // never opened. Main-thread async file I/O; SQLite only through the writer (file versions).
 import { createHash, randomBytes } from "node:crypto"
-import { constants } from "node:fs"
-import { lstat, mkdir, open, readFile, rename, unlink, type FileHandle } from "node:fs/promises"
+import { constants, type Stats } from "node:fs"
+import { lstat, mkdir, open, readFile, rename, rm, unlink, type FileHandle } from "node:fs/promises"
 import { join } from "node:path"
 import { Transform, Writable } from "node:stream"
 import { pipeline } from "node:stream/promises"
@@ -25,20 +25,21 @@ import {
   type UploadOutcome
 } from "@dreamspan/shared/files.ts"
 import { NodeHttpServerRequest } from "@effect/platform-node"
-import { ByteSize, Cause, Effect, Layer, Option, Schema, Stream } from "effect"
+import { ByteSize, Cause, Effect, Layer, Option, Schema, Semaphore, Stream } from "effect"
 import { HttpIncomingMessage, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { Accounts } from "../auth/Accounts.ts"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { MediaHolds } from "../importer/MediaHolds.ts"
-import { storeMedia } from "../importer/mediaFiles.ts"
+import { placeStreamedMedia, storeMedia, streamToMedia } from "../importer/mediaFiles.ts"
 import { Formats } from "../importer/Formats.ts"
 import { describeImage } from "../importer/images.ts"
 import { zipStream, type ZipStreamEntry } from "../formats/zipStream.ts"
+import { isSafePath } from "../formats/zip.ts"
 import { WorkshopFiles } from "./WorkshopFiles.ts"
 import { BinContentGone } from "./bin.ts"
 import { accountEnv, prepareAccount, resolveFilesPath } from "./environment.ts"
-import { FilePathRefused, listFolder, openFolder, readRegularFile, statPath } from "./safePath.ts"
+import { FilePathRefused, listFolder, openFolder, readRegularFile, renameNoReplace, statPath } from "./safePath.ts"
 
 const { O_RDONLY, O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW, O_NONBLOCK } = constants
 
@@ -132,6 +133,62 @@ const extension = (name: string) => {
 }
 
 const at = (dir: FileHandle, name: string) => `/proc/self/fd/${dir.fd}/${name}`
+
+/** What an entry name in a folder zip may not hold (§8.1): `\`, which Windows tools split on, and control characters. */
+const UNSAFE_IN_ZIP = /[\\\u0000-\u001f\u007f]/
+/** A name a folder zip takes as it is: none of the above, and not `.` or `..`. */
+const zipSafeName = (name: string) => name !== "." && name !== ".." && !UNSAFE_IN_ZIP.test(name)
+/** The note a folder zip ends with when it left names out. */
+const ZIP_LEFT_OUT = "Left out of this zip.txt"
+
+/** Attach copies one account makes at once, and how many more may wait for a turn. */
+const ATTACH_AT_ONCE = 2
+const ATTACH_WAITING = 32
+/** An attached image is decoded (and can be sent as an image) up to this size, as message images are. */
+const IMAGE_CHECK_BYTES = 16 * 1024 * 1024
+
+/** Thrown when a file changes while it's copied for an attachment. */
+const changedWhileCopied = () =>
+  new Answer(409, "The file changed while it was being attached. Attach it again once it's saved.")
+
+/**
+ * Streams a regular file (opened without following a link) into the media folder, hashing it.
+ * Refused when it isn't the file that was checked (another inode), or its size or modification
+ * time changed by the end, or it gave more or fewer bytes than its size.
+ */
+async function copyAttachment(dataDir: string, root: string, segments: ReadonlyArray<string>, checked: Stats) {
+  const dir = await openFolder(root, segments.slice(0, -1))
+  let file: FileHandle
+  try {
+    file = await open(at(dir, segments.at(-1)!), O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+  } finally {
+    await dir.close()
+  }
+  try {
+    const before = await file.stat()
+    if (!before.isFile() || before.ino !== checked.ino || before.size !== checked.size) throw changedWhileCopied()
+    let head: Uint8Array = new Uint8Array(0)
+    const chunks = (async function* () {
+      let read = 0
+      for await (const chunk of file.createReadStream({ autoClose: false }) as AsyncIterable<Uint8Array>) {
+        read += chunk.byteLength
+        if (read > before.size) throw changedWhileCopied()
+        if (head.byteLength < 64) head = Buffer.concat([head, chunk.subarray(0, 64 - head.byteLength)])
+        yield chunk
+      }
+      if (read !== before.size) throw changedWhileCopied()
+    })()
+    const copied = await streamToMedia(dataDir, chunks)
+    const after = await file.stat()
+    if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
+      await rm(copied.temporary, { force: true })
+      throw changedWhileCopied()
+    }
+    return { ...copied, head }
+  } finally {
+    await file.close()
+  }
+}
 
 /** Entries one folder download takes at most. */
 const ZIP_MAX_ENTRIES = 200_000
@@ -397,11 +454,14 @@ export const filesRoutes = Layer.unwrap(
       const { root, segments } = yield* place(query.get("path") ?? FILES_TOP)
       const info = yield* Effect.tryPromise(() => statPath(root, segments))
       if (!info?.isDirectory()) return refuse(400, "That isn't a folder.")
-      const top = segments.at(-1) ?? "Files"
+      // The archive's own top folder: its name with what an extractor could read as a separator replaced.
+      const top = (segments.at(-1) ?? "Files").replace(new RegExp(UNSAFE_IN_ZIP.source, "g"), "_")
       async function* entries(): AsyncGenerator<ZipStreamEntry> {
         // Depth first, each folder opened by the no-follow walk; names sorted for a stable archive.
         const queue: Array<ReadonlyArray<string>> = [[]]
         let count = 0
+        /** Names an extractor could read as other paths: left out, and listed in a note. */
+        const left: Array<string> = []
         while (queue.length) {
           const below = queue.pop()!
           const listed = await listFolder(root, [...segments, ...below], ZIP_MAX_ENTRIES)
@@ -409,15 +469,26 @@ export const filesRoutes = Layer.unwrap(
           for (const entry of listed.entries) {
             if (entry.name.endsWith(".rp-tmp")) continue
             if (++count > ZIP_MAX_ENTRIES) throw new Error("too many entries for one zip")
+            if (entry.kind !== "folder" && entry.kind !== "file") continue
+            const name = [top, ...below, entry.name].join("/")
+            if (!zipSafeName(entry.name) || !isSafePath(name)) {
+              left.push(JSON.stringify([...below, entry.name].join("/")))
+              continue
+            }
             if (entry.kind === "folder") folders.push([...below, entry.name])
-            else if (entry.kind === "file")
-              yield {
-                name: [top, ...below, entry.name].join("/"),
-                chunks: regularFileChunks(root, [...segments, ...below, entry.name])
-              }
+            else yield { name, chunks: regularFileChunks(root, [...segments, ...below, entry.name]) }
           }
           queue.push(...folders.reverse())
         }
+        if (left.length > 0)
+          yield {
+            name: `${top}/${ZIP_LEFT_OUT}`,
+            chunks: (async function* () {
+              yield Buffer.from(
+                `These names have a backslash, a control character or a ".." part, which some unzip tools treat as a path elsewhere, so they aren't in this zip. Download them one at a time.\n\n${left.join("\n")}\n`
+              )
+            })()
+          }
       }
       const body = Stream.fromAsyncIterable(zipStream(entries()), (error) => error).pipe(
         Stream.tapError((error) => Effect.logWarning("a folder download stopped", error))
@@ -594,10 +665,14 @@ export const filesRoutes = Layer.unwrap(
         return yield* Effect.gen(function* () {
           const fromName = at(source, from.segments.at(-1)!)
           const toName = at(target, to.segments.at(-1)!)
-          yield* Effect.tryPromise(() => lstat(fromName))
-          const taken = yield* Effect.tryPromise(() => lstat(toName).catch(() => null))
-          if (taken) return refuse(409, "That name is taken.")
-          yield* Effect.tryPromise(() => rename(fromName, toName))
+          const moving = yield* Effect.tryPromise(() => lstat(fromName))
+          // Never over what's there, even something a command makes meanwhile (EEXIST: 409).
+          yield* Effect.tryPromise(() => renameNoReplace(fromName, toName))
+          // The working folders stored for it (and for folders in it) follow (§1 "Paths are the names").
+          if (moving.isDirectory())
+            yield* writer
+              .RecordFolderMove({ userId: from.userId as never, from: from.full, to: to.full })
+              .pipe(Effect.catchCause((cause) => Effect.logWarning("recording a folder move failed", cause)))
           changed(from.userId, [from.full, to.full])
           return HttpServerResponse.jsonUnsafe({ path: to.full })
         }).pipe(Effect.ensuring(Effect.promise(() => target.close())))
@@ -616,16 +691,25 @@ export const filesRoutes = Layer.unwrap(
       return HttpServerResponse.jsonUnsafe({ binItemId: item.id })
     })
 
+    /** Attach copies running per account, with how many wait (`ATTACH_AT_ONCE`, `ATTACH_WAITING`). */
+    const attaching = new Map<string, { readonly gate: Semaphore.Semaphore; waiting: number }>()
+
     /**
      * A file of the account's Files attached to a workshop message (§6.1): its content is kept
      * in the media store as the copy the message sends, so a later change to the file never
-     * rewrites what the message showed or what a reply saw. An image a model can see is marked
-     * `image`, with its size, as message images are.
+     * rewrites what the message showed or what a reply saw. The copy is streamed (never held
+     * whole), counts in the Files quota as a version of origin `attachment` until nothing names
+     * it, and is refused if the file changes while it's read. An image a model can see (checked
+     * by decoding it) is marked `image`, with its size, as message images are; anything else,
+     * whatever its name, is a plain file.
      */
     const attach = Effect.gen(function* () {
       const body = yield* jsonBody(PathBody)
       const { userId, root, full, segments } = yield* place(body.path)
       if (segments.length === 0) return refuse(400, "Name a file.")
+      const name = segments.at(-1)!
+      const problem = nameProblem(name)
+      if (problem) return refuse(400, problem)
       const info = yield* Effect.tryPromise(() => statPath(root, segments))
       if (!info?.isFile()) return refuse(400, "Only a file can be attached.")
       if (info.size > ATTACHMENT_MAX_BYTES)
@@ -633,37 +717,67 @@ export const filesRoutes = Layer.unwrap(
           413,
           `Attachments can be at most ${formatByteSize(ATTACHMENT_MAX_BYTES)}. The assistant can still open it at ${full}.`
         )
-      const { bytes } = yield* Effect.tryPromise(() => readRegularFile(root, segments, ATTACHMENT_MAX_BYTES))
-      const name = segments.at(-1)!
-      const image = describeImage(bytes)
-      const isImage = BLOCK_IMAGES.has(image.mime) && (yield* formats.validateImage(bytes))
-      const sha256 = createHash("sha256").update(bytes).digest("hex")
-      const mime = isImage ? image.mime : typeOf(name)
-      const mediaId = yield* holds.holding(
-        [sha256],
-        Effect.andThen(
-          storeMedia(config.dataDir, sha256, bytes),
-          writer.RecordMessageImage({
-            userId: userId as never,
-            media: {
-              sha256,
-              mime,
-              byteSize: bytes.byteLength,
-              width: isImage ? image.width : null,
-              height: isImage ? image.height : null
-            }
+      const slot = attaching.get(userId) ?? { gate: Semaphore.makeUnsafe(ATTACH_AT_ONCE), waiting: 0 }
+      attaching.set(userId, slot)
+      if (slot.waiting >= ATTACH_WAITING)
+        return refuse(429, "Too many files are being attached. Try again in a moment.")
+      slot.waiting++
+      return yield* Effect.gen(function* () {
+        // The copy takes room in the Files quota until no message names it.
+        yield* quota
+          .check(userId, info.size, "attach files")
+          .pipe(Effect.mapError((error) => new Answer(507, error.message)))
+        const copied = yield* Effect.tryPromise(() => copyAttachment(config.dataDir, root, segments, info))
+        return yield* Effect.gen(function* () {
+          // Only a block image the image worker decodes is an image; a file that fails is a
+          // plain file, never recorded with an image type (its bytes would be sent as one).
+          let image: { mime: string; width: number | null; height: number | null } | null = null
+          if (BLOCK_IMAGES.has(describeImage(copied.head).mime) && copied.size <= IMAGE_CHECK_BYTES) {
+            const bytes = yield* Effect.tryPromise(() => readFile(copied.temporary))
+            const described = describeImage(bytes)
+            if (BLOCK_IMAGES.has(described.mime) && (yield* formats.validateImage(bytes))) image = described
+          }
+          const named = typeOf(name)
+          const mime = image?.mime ?? (named.startsWith("image/") ? "application/octet-stream" : named)
+          const recorded = yield* holds.holding(
+            [copied.sha256],
+            Effect.andThen(
+              placeStreamedMedia(config.dataDir, copied.temporary, copied.sha256, copied.size),
+              writer.RecordAttachmentCopy({
+                userId: userId as never,
+                path: full,
+                inode: info.ino,
+                media: {
+                  sha256: copied.sha256,
+                  mime,
+                  byteSize: copied.size,
+                  width: image?.width ?? null,
+                  height: image?.height ?? null
+                }
+              })
+            )
+          )
+          quota.wrote(userId, copied.size)
+          // Those bytes recorded earlier under another type (a version's) are sent as that.
+          const isImage = image !== null && recorded.mime === image.mime
+          const attached: AttachedFile = {
+            mediaId: recorded.mediaId,
+            kind: isImage ? "image" : "file",
+            name,
+            path: full,
+            mime: recorded.mime,
+            size: copied.size
+          }
+          return HttpServerResponse.jsonUnsafe(attached, { headers: { "cache-control": "no-store" } })
+        }).pipe(Effect.ensuring(Effect.promise(() => rm(copied.temporary, { force: true }))))
+      }).pipe(
+        slot.gate.withPermits(1),
+        Effect.ensuring(
+          Effect.sync(() => {
+            slot.waiting--
           })
         )
       )
-      const attached: AttachedFile = {
-        mediaId,
-        kind: isImage ? "image" : "file",
-        name,
-        path: full,
-        mime,
-        size: bytes.byteLength
-      }
-      return HttpServerResponse.jsonUnsafe(attached, { headers: { "cache-control": "no-store" } })
     })
 
     /** An attachment's copy as sent (§6.1), served as `raw` serves files: never as the app's own content. */
@@ -675,17 +789,33 @@ export const filesRoutes = Layer.unwrap(
         .pipe(Effect.mapError(() => new Answer(404, "That attachment isn't here any more.")))
       const name = (query.get("name") ?? "attachment").slice(0, 255) || "attachment"
       const inline = query.get("download") === null ? INLINE_TYPES[extension(name)] : undefined
-      const bytes = yield* Effect.tryPromise(() => readFile(join(config.dataDir, file.path)))
-      return HttpServerResponse.uint8Array(bytes, {
-        contentType: inline ?? "application/octet-stream",
-        headers: {
-          "cache-control": "private, no-store",
-          "x-content-type-options": "nosniff",
-          "cross-origin-resource-policy": "same-origin",
-          "content-security-policy": "sandbox; default-src 'none'; frame-ancestors 'none'",
-          "content-disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}`
+      // Streamed: an attachment can be 64 MiB, and several can be downloaded at once.
+      const handle = yield* Effect.tryPromise(() => open(join(config.dataDir, file.path), O_RDONLY | O_NOFOLLOW))
+      const size = yield* Effect.tryPromise(() => handle.stat()).pipe(
+        Effect.map((stats) => stats.size),
+        Effect.tapError(() => Effect.promise(() => handle.close()))
+      )
+      const headers = {
+        "cache-control": "private, no-store",
+        "x-content-type-options": "nosniff",
+        "cross-origin-resource-policy": "same-origin",
+        "content-security-policy": "sandbox; default-src 'none'; frame-ancestors 'none'",
+        "content-disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}`
+      }
+      if (size === 0) {
+        yield* Effect.promise(() => handle.close())
+        return HttpServerResponse.uint8Array(new Uint8Array(0), {
+          contentType: inline ?? "application/octet-stream",
+          headers
+        })
+      }
+      return HttpServerResponse.stream(
+        Stream.fromAsyncIterable(handle.createReadStream({ autoClose: true }) as AsyncIterable<Uint8Array>, (e) => e),
+        {
+          contentType: inline ?? "application/octet-stream",
+          headers: { ...headers, "content-length": String(size) }
         }
-      })
+      )
     })
 
     const restore = Effect.gen(function* () {

@@ -11,6 +11,9 @@ import { SqlClient as Sql } from "effect/sql"
 
 const CARD_FOLDERS = "workshop.cardFolders"
 const RECENT_FOLDERS = "workshop.recentFolders"
+const FOLDER_MOVES = "workshop.folderMoves"
+/** Moves kept at most, the oldest dropped first. */
+const MAX_MOVES = 200
 const MAX_CARDS = 2000
 const MAX_RECENT = 5
 /** How many forks back a card's memory is looked for. */
@@ -27,6 +30,18 @@ const cardFoldersOf = (sql: SqlClient.SqlClient, userId: string) =>
 
 const recentOf = (sql: SqlClient.SqlClient, userId: string) =>
   Effect.map(readSetting(sql, "user", userId, RECENT_FOLDERS), ({ value }) => (value ?? []) as ReadonlyArray<Folder>)
+
+interface FolderMove {
+  readonly from: string
+  readonly to: string
+}
+
+const movesOf = (sql: SqlClient.SqlClient, userId: string) =>
+  Effect.map(readSetting(sql, "user", userId, FOLDER_MOVES), ({ value }) => (value ?? []) as ReadonlyArray<FolderMove>)
+
+/** `path` with the folder `from` (or a folder under it) now at `to`; unchanged when not under it. */
+const moved = (path: string, from: string, to: string) =>
+  path === from || path.startsWith(`${from}/`) ? `${to}${path.slice(from.length)}` : path
 
 /** The remembered folder of a card, or of the card it was forked from (up a few forks); null: none. */
 const cardFolderOf = (sql: SqlClient.SqlClient, userId: string, cardId: string | null) =>
@@ -65,7 +80,35 @@ export const makeWorkingFolderWriteHandlers = Effect.gen(function* () {
         }
         const recent = (yield* recentOf(sql, userId)).filter((entry) => entry.path !== path)
         yield* putUserSetting(sql, userId, RECENT_FOLDERS, [folder, ...recent].slice(0, MAX_RECENT))
-      }).pipe(transaction(sql, "RememberWorkshopFolder"))
+      }).pipe(transaction(sql, "RememberWorkshopFolder")),
+    // The settings' paths follow the move (their inodes stay: a move keeps them); branches'
+    // stored folders are state events, never rewritten, so the move is kept for finding them.
+    RecordFolderMove: ({ userId, from, to }) =>
+      Effect.gen(function* () {
+        if (from === to) return
+        const cards = yield* cardFoldersOf(sql, userId)
+        if (Object.values(cards).some((folder) => moved(folder.path, from, to) !== folder.path))
+          yield* putUserSetting(
+            sql,
+            userId,
+            CARD_FOLDERS,
+            Object.fromEntries(
+              Object.entries(cards).map(([card, folder]) => [card, { ...folder, path: moved(folder.path, from, to) }])
+            )
+          )
+        const recent = yield* recentOf(sql, userId)
+        if (recent.some((folder) => moved(folder.path, from, to) !== folder.path))
+          yield* putUserSetting(
+            sql,
+            userId,
+            RECENT_FOLDERS,
+            recent
+              .map((folder) => ({ ...folder, path: moved(folder.path, from, to) }))
+              .filter((folder, i, all) => all.findIndex((other) => other.path === folder.path) === i)
+          )
+        const moves = yield* movesOf(sql, userId)
+        yield* putUserSetting(sql, userId, FOLDER_MOVES, [...moves, { from, to }].slice(-MAX_MOVES))
+      }).pipe(transaction(sql, "RecordFolderMove"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
 })
 
@@ -74,7 +117,11 @@ export const makeWorkingFolderReadHandlers = Effect.gen(function* () {
   return {
     WorkshopFolderMemory: ({ userId, cardId }) =>
       Effect.gen(function* () {
-        return { recent: yield* recentOf(sql, userId), card: yield* cardFolderOf(sql, userId, cardId) }
+        return {
+          recent: yield* recentOf(sql, userId),
+          card: yield* cardFolderOf(sql, userId, cardId),
+          moves: yield* movesOf(sql, userId)
+        }
       }).pipe(query("WorkshopFolderMemory"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })

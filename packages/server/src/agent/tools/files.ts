@@ -220,9 +220,14 @@ export const makeFileTools = (deps: FileToolDeps) => {
         .StateEventsAt({ userId: ctx.userId, chatId: ctx.chatId, slotId: ctx.leafSlotId, forkId: ctx.forkId })
         .pipe(Effect.orElseSucceed(() => []))
       const folder = foldState(events).workshopFolder
-      // Found again by its inode after a rename; a folder that's gone: the top of Files (§2.2).
+      // Found again after a move or rename (workingFolder.ts); a folder that's gone: the top of Files (§2.2).
+      const moves = folder
+        ? (yield* deps.reader
+            .WorkshopFolderMemory({ userId: ctx.userId, cardId: null })
+            .pipe(Effect.orElseSucceed(() => ({ moves: [] })))).moves
+        : []
       const start = folder
-        ? ((yield* Effect.promise(() => locateFolder(env.filesRoot, folder).catch(() => null))) ?? FILES_MOUNT)
+        ? ((yield* Effect.promise(() => locateFolder(env.filesRoot, folder, moves).catch(() => null))) ?? FILES_MOUNT)
         : FILES_MOUNT
       ctx.cache.set(CWD_KEY, start)
       return start

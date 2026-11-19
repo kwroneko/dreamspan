@@ -73,6 +73,13 @@ const definitions: ReadonlyArray<SettingDefinition> = [
     scope: "user",
     schema: Schema.Array(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) }))
   },
+  // Folders moved or renamed in the app, oldest first (at most 200): a branch's stored working
+  // folder (an immutable state event) is found again through them (files/workingFolder.ts).
+  {
+    id: "workshop.folderMoves",
+    scope: "user",
+    schema: Schema.Array(Schema.Struct({ from: Schema.String, to: Schema.String }))
+  },
   { id: "generation.model", scope: "user", schema: Schema.NullOr(ModelChoice) },
   { id: "generation.preset", scope: "user", schema: Schema.NullOr(Schema.String) },
   { id: "generation.judge", scope: "user", schema: Schema.NullOr(ModelChoice) },

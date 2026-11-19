@@ -5,12 +5,16 @@ import { CurrentUser } from "@dreamspan/shared/api.ts"
 import type { ChatId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { MessageSelectionApi } from "@dreamspan/shared/messageSelectionApi.ts"
-import { Effect } from "effect"
+import type { BinItem } from "@dreamspan/shared/bin.ts"
+import { NotFound, type ServerError } from "@dreamspan/shared/errors.ts"
+import { Cause, Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"
 import { Reader, Writer } from "../db/Database.ts"
-import { internal } from "./internal.ts"
+import { WorkshopFiles } from "../files/WorkshopFiles.ts"
+import { BinContentGone } from "../files/bin.ts"
+import { internal, toServerError } from "./internal.ts"
 
 export const makeMessageSelectionHandlers = Effect.gen(function* () {
   const reader = yield* Reader
@@ -18,6 +22,7 @@ export const makeMessageSelectionHandlers = Effect.gen(function* () {
   const hub = yield* ChatHub
   const generations = yield* Generations
   const warmth = yield* CacheWarmth
+  const files = yield* WorkshopFiles
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
   /** The chat's tabs read it again and hear its new row. */
@@ -67,7 +72,49 @@ export const makeMessageSelectionHandlers = Effect.gen(function* () {
     RestoreBinItems: ({ itemIds }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const items = yield* writer.RestoreBinItems({ userId: id, itemIds })
+        // Files and folders are on disk: the files host moves each back (as RestoreBinItem does);
+        // the rest are restored together by the writer. The answer keeps the order asked.
+        const kinds = yield* Effect.forEach(itemIds, (itemId) =>
+          reader.FileBinItem({ userId: id, itemId }).pipe(
+            Effect.as(true),
+            Effect.catchTag("NotFound", () => Effect.succeed(false))
+          )
+        )
+        const fileIds = itemIds.filter((_, i) => kinds[i])
+        const otherIds = itemIds.filter((_, i) => !kinds[i])
+        const restoredFiles = new Map<string, BinItem>()
+        for (const itemId of fileIds) {
+          const restored = yield* files.bin.restore(id, itemId).pipe(
+            Effect.map((done) => {
+              files.changed(id, [done.path])
+              return done.item
+            }),
+            // Gone from disk or from the bin meanwhile: skipped, as the writer skips such items.
+            Effect.catch((error: unknown): Effect.Effect<null, ServerError> =>
+              error instanceof NotFound || (Cause.isUnknownError(error) && error.cause instanceof BinContentGone)
+                ? Effect.succeed(null)
+                : toServerError("RestoreBinItems")(error)
+            )
+          )
+          if (restored) restoredFiles.set(itemId, restored)
+        }
+        const others =
+          otherIds.length === 0
+            ? []
+            : yield* writer
+                .RestoreBinItems({ userId: id, itemIds: otherIds })
+                .pipe(
+                  Effect.catchTag("NotFound", (error) =>
+                    restoredFiles.size > 0 ? Effect.succeed([]) : Effect.fail(error)
+                  )
+                )
+        if (others.length === 0 && restoredFiles.size === 0)
+          return yield* new NotFound({ entity: "bin item", id: itemIds[0] ?? "" })
+        const byId = new Map([...others.map((item) => [item.id, item] as const), ...restoredFiles])
+        const items = itemIds.flatMap((itemId) => {
+          const item = byId.get(itemId)
+          return item ? [item] : []
+        })
         const chats = new Set(
           items.flatMap((item) =>
             item.kind === "message" || item.kind === "version" ? [item.origin.chatId as ChatId] : []

@@ -7,7 +7,7 @@
 // name in the opened folder and are renamed over the target, which replaces a link rather than
 // following it. Main-thread async file I/O only; no SQLite. Linux (procfs) only.
 import { constants, type Stats } from "node:fs"
-import { lstat, open, readdir, rename, unlink, mkdir, rmdir, type FileHandle } from "node:fs/promises"
+import { link, lstat, open, readdir, rename, unlink, mkdir, rmdir, type FileHandle } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
 
 const { O_RDONLY, O_WRONLY, O_CREAT, O_EXCL, O_DIRECTORY, O_NOFOLLOW, O_NONBLOCK } = constants
@@ -162,6 +162,35 @@ export const writeRegularFile = async (
     return await lstat(at(dir, name))
   } finally {
     await dir.close()
+  }
+}
+
+/**
+ * Renames `from` to `to` (both paths through opened folders, `/proc/self/fd/<fd>/<name>`) only
+ * when nothing is at `to`, in one step the file system checks: Node has no RENAME_NOREPLACE, so
+ * a folder takes an empty folder made at `to` with O_EXCL semantics (rename replaces only an
+ * empty folder, and fails if something was put in it), and anything else is hard-linked to `to`
+ * (which fails when the name is taken) and unlinked from `from`. Fails with EEXIST when `to` is
+ * taken, at any moment: a file a command makes in between is never replaced.
+ */
+export const renameNoReplace = async (from: string, to: string): Promise<void> => {
+  const info = await lstat(from)
+  if (info.isDirectory()) {
+    await mkdir(to, { mode: 0o700 })
+    try {
+      await rename(from, to)
+    } catch (error) {
+      await rmdir(to).catch(() => undefined)
+      throw error
+    }
+    return
+  }
+  await link(from, to)
+  try {
+    await unlink(from)
+  } catch (error) {
+    await unlink(to).catch(() => undefined)
+    throw error
   }
 }
 

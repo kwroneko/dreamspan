@@ -15,6 +15,7 @@ import type { FoldableEvent } from "@dreamspan/shared/state.ts"
 import { Effect, Layer } from "effect"
 import type { SqlClient } from "effect/sql"
 import { AssemblySources, type PositionedEvent } from "../assembler/pipeline.ts"
+import { mediaHeldBy } from "./media.ts"
 import type { CardInput, HistoryEntry, NoteInput } from "../assembler/types.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
@@ -102,7 +103,7 @@ export const draftSources = (sql: SqlClient.SqlClient, draft: Draft) =>
           const [media] = yield* sql<{ sha256: string; width: number | null; height: number | null }>`
             SELECT m.sha256, m.width, m.height FROM media_assets m
             WHERE m.id = ${image.mediaId} AND m.mime IN ('image/png','image/jpeg','image/gif','image/webp')
-              AND EXISTS (SELECT 1 FROM media_refs r WHERE r.media_id = m.id AND r.owner_user_id = ${draft.userId})`
+              AND ${mediaHeldBy(sql, "m.id", draft.userId)}`
           if (!media) return yield* new NotFound({ entity: "media", id: image.mediaId })
           return { mediaId: image.mediaId, ...media }
         })

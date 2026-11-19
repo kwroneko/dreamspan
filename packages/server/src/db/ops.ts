@@ -2874,9 +2874,34 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     error: StorageError
   }),
   /**
+   * A file of Files attached to a workshop message (§6.1), its bytes already stored by the host:
+   * the copy is a version of origin `attachment` at that path, which counts in the Files quota
+   * and is the user's hold on it (no media_refs row, so it can go when nothing names it).
+   * Answers the media id and the type the stored content is recorded with (the first record of
+   * those bytes wins).
+   */
+  Rpc.make("RecordAttachmentCopy", {
+    payload: {
+      userId: UserId,
+      path: Schema.String.check(Schema.isMaxLength(4096)),
+      inode: Schema.NullOr(Schema.Number),
+      media: Schema.Struct({
+        sha256: Sha256,
+        mime: Schema.String,
+        byteSize: Schema.Int,
+        width: Schema.NullOr(Schema.Int),
+        height: Schema.NullOr(Schema.Int)
+      })
+    },
+    success: Schema.Struct({ mediaId: Schema.String, mime: Schema.String }),
+    error: StorageError
+  }),
+  /**
    * Retention (§1.3): file versions made before `before` (one account's, or every account's),
-   * at most `limit` rows per call, oldest first; and the media rows nothing names any more. The
-   * bytes are removed later, outside any transaction, by the media sweep.
+   * at most `limit` rows per call, oldest first; attachment copies (origin `attachment`) of any
+   * age that no message, history entry or active composer attachment of their owner names; and
+   * the media rows nothing names any more. The bytes are removed later, outside any
+   * transaction, by the media sweep. `before: 0` drops only the attachment copies.
    */
   Rpc.make("PruneFileVersions", {
     payload: {
@@ -2884,7 +2909,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       before: Schema.Int,
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 10_000 }))
     },
-    success: Schema.Struct({ versions: Schema.Int, media: Schema.Int }),
+    success: Schema.Struct({ versions: Schema.Int, attachments: Schema.Int, media: Schema.Int }),
     error: StorageError
   }),
   /**
@@ -2911,6 +2936,19 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       cardId: Schema.NullOr(Schema.String),
       path: Schema.String.check(Schema.isMaxLength(4096)),
       inode: Schema.NullOr(Schema.Number)
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
+  /**
+   * A folder moved or renamed in the app (§1 "Paths are the names"): the remembered working
+   * folders under it follow, and the move is kept for branches' stored folders (workingFolders.ts).
+   */
+  Rpc.make("RecordFolderMove", {
+    payload: {
+      userId: UserId,
+      from: Schema.String.check(Schema.isMaxLength(4096)),
+      to: Schema.String.check(Schema.isMaxLength(4096))
     },
     success: Schema.Void,
     error: StorageError
@@ -5949,7 +5987,9 @@ const ReadOpsOwn = RpcGroup.make(
     payload: { userId: UserId, cardId: Schema.NullOr(Schema.String) },
     success: Schema.Struct({
       recent: Schema.Array(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) })),
-      card: Schema.NullOr(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) }))
+      card: Schema.NullOr(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) })),
+      /** Folders moved in the app, oldest first, for finding a branch's stored folder again. */
+      moves: Schema.Array(Schema.Struct({ from: Schema.String, to: Schema.String }))
     }),
     error: StorageError
   }),

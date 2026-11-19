@@ -53,14 +53,64 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
         }
         return ids
       }).pipe(transaction(sql, "RecordFileVersions")),
+    RecordAttachmentCopy: ({ userId, path, inode, media }) =>
+      Effect.gen(function* () {
+        yield* sql`INSERT INTO media_assets ${sql.insert({
+          id: uuidv7(),
+          sha256: media.sha256,
+          mime: media.mime,
+          width: media.width,
+          height: media.height,
+          byte_size: media.byteSize,
+          path: mediaPath(media.sha256),
+          created_at: Date.now()
+        })} ON CONFLICT (sha256) DO NOTHING`
+        const [row] = yield* sql<{ id: string; mime: string }>`
+          SELECT id, mime FROM media_assets WHERE sha256 = ${media.sha256}`
+        // One copy per path and content: attaching it again names the same one.
+        const [held] = yield* sql`SELECT 1 FROM file_versions
+          WHERE owner_user_id = ${userId} AND media_id = ${row!.id} AND origin = 'attachment' AND path = ${path}`
+        if (!held)
+          yield* sql`INSERT INTO file_versions ${sql.insert({
+            id: uuidv7(),
+            owner_user_id: userId,
+            path,
+            inode,
+            media_id: row!.id,
+            byte_size: media.byteSize,
+            origin: "attachment",
+            actor_user_id: userId,
+            rollout_id: null,
+            tool_call_id: null,
+            created_at: Date.now()
+          })}`
+        return { mediaId: row!.id, mime: row!.mime }
+      }).pipe(transaction(sql, "RecordAttachmentCopy")),
     PruneFileVersions: ({ userId, before, limit }) =>
       Effect.gen(function* () {
         const gone = yield* sql<{ media_id: string | null }>`DELETE FROM file_versions WHERE id IN (
-            SELECT id FROM file_versions WHERE created_at < ${before}
+            SELECT id FROM file_versions WHERE created_at < ${before} AND origin <> 'attachment'
               ${userId === undefined ? sql`` : sql`AND owner_user_id = ${userId}`}
             LIMIT ${limit})
           RETURNING media_id`
-        const media = [...new Set(gone.flatMap((row) => (row.media_id === null ? [] : [row.media_id])))]
+        // An attachment copy stays while its owner's messages (live or in the bin), their
+        // amendment history or an active composer attachment name it.
+        const dropped = yield* sql<{ media_id: string | null }>`DELETE FROM file_versions
+          WHERE origin = 'attachment' ${userId === undefined ? sql`` : sql`AND owner_user_id = ${userId}`}
+            AND NOT EXISTS (SELECT 1 FROM version_attachments a
+              JOIN versions v ON v.id = a.version_id JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+              WHERE a.media_id = file_versions.media_id AND c.owner_user_id = file_versions.owner_user_id)
+            AND NOT EXISTS (SELECT 1 FROM composer_images i JOIN drafts d ON d.id = i.draft_id
+              WHERE i.media_id = file_versions.media_id AND i.status = 'active'
+                AND d.user_id = file_versions.owner_user_id)
+            AND NOT EXISTS (SELECT 1 FROM version_history h
+              JOIN versions v ON v.id = h.version_id JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+              WHERE c.owner_user_id = file_versions.owner_user_id AND h.images_json IS NOT NULL
+                AND instr(h.images_json, file_versions.media_id) > 0)
+          RETURNING media_id`
+        const media = [
+          ...new Set([...gone, ...dropped].flatMap((row) => (row.media_id === null ? [] : [row.media_id])))
+        ]
         // A content goes only when nothing names it: no other version, no account's reference,
         // saved address, cover, attachment or composer image.
         const removed = media.length
@@ -75,7 +125,7 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
                 AND NOT EXISTS (SELECT 1 FROM composer_images WHERE media_id = media_assets.id)
               RETURNING id`
           : []
-        return { versions: gone.length, media: removed.length }
+        return { versions: gone.length, attachments: dropped.length, media: removed.length }
       }).pipe(transaction(sql, "PruneFileVersions")),
     /** The file was put back on disk by the host; this marks the agent's change undone. */
     CompleteFileUndo: (input) =>
