@@ -305,8 +305,9 @@ export const byteRange = (
     return { start: Math.max(0, size - suffix), end: size - 1 }
   }
   const start = Number(match[1])
+  if (match[2] !== "" && Number(match[2]) < start) return null // an invalid range spec is ignored (RFC 9110)
   const end = match[2] === "" ? size - 1 : Math.min(size - 1, Number(match[2]))
-  if (start >= size || start > end) return "unsatisfiable"
+  if (start >= size) return "unsatisfiable"
   return { start, end }
 }
 
@@ -350,7 +351,10 @@ export const savedMediaRoute = Layer.unwrap(
         if (request.headers["if-none-match"]?.split(",").some((tag) => tag.trim().replace(/^W\//, "") === `"${id}"`))
           return HttpServerResponse.empty({ status: 304, headers })
         // One byte range (a video player seeks, and some browsers play video only this way).
-        const range = byteRange(request.headers["range"], file.byteSize)
+        // If-Range: the range applies only when its validator is this file's ETag.
+        const ifRange = request.headers["if-range"]?.trim()
+        const range =
+          ifRange !== undefined && ifRange !== `"${id}"` ? null : byteRange(request.headers["range"], file.byteSize)
         if (range === "unsatisfiable")
           return HttpServerResponse.empty({
             status: 416,
