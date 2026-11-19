@@ -4,12 +4,13 @@ import { expect, test } from "@playwright/test"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 
 const server = serverPerFile(withAdmin)
 const shots = resolve(process.env.SCREENSHOT_DIR ?? join(tmpdir(), "rp-cost-screenshots"))
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
-    test(`custom cost formulas ${width} ${theme}`, async ({ page }) => {
+    test(`custom cost formulas ${width} ${theme}`, async ({ page }, info) => {
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
@@ -29,6 +30,7 @@ for (const width of [1440, 390])
       await page.getByLabel("Cache write", { exact: true }).fill("2.5")
       await page.getByLabel("Long cache write", { exact: true }).fill("4")
       await page.getByLabel("Output", { exact: true }).fill("8")
+      await page.getByLabel("Per request", { exact: true }).fill("0.01")
       await page.getByRole("button", { name: "Add context tier" }).click()
       await page.getByLabel("Total input above", { exact: true }).fill("128000")
       await page.getByLabel("Uncached input", { exact: true }).nth(1).fill("4")
@@ -38,6 +40,19 @@ for (const width of [1440, 390])
       await expect(page.getByLabel("Model", { exact: true })).toHaveValue("vendor/storyteller")
       await expect(page.getByLabel("Total input above", { exact: true })).toHaveValue("128000")
       await expect(page.getByLabel("Uncached input", { exact: true }).nth(1)).toHaveValue("4")
+      await expect(page.getByLabel("Per request", { exact: true })).toHaveValue("0.01")
+      // Past requests: counted first, on request only (PRICES §6.1). No requests were sent here.
+      const past = page.getByRole("region", { name: "Past requests" })
+      await past.getByRole("combobox", { name: "Re-price with" }).click()
+      await page.getByRole("option", { name: "Your price: Private contract", exact: true }).click()
+      const check = past.getByRole("button", { name: "Check past requests", exact: true })
+      await check.hover()
+      await expect(
+        page.getByText("Counts the past requests these prices would change.").filter({ visible: true }).first()
+      ).toBeVisible()
+      await check.click()
+      await expect(past.getByText("No past requests would change.", { exact: true })).toBeVisible()
+      await expectLayout(page, info, `costs-past-${width}-${theme}`, { scope: "main" })
       // Unapplied edits survive reload through a server draft.
       await page.getByLabel("Name", { exact: true }).fill("Private contract draft")
       await page.waitForTimeout(800)

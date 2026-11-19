@@ -2,7 +2,8 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { ConnectionForRequest, type ReadOps } from "./ops.ts"
-import { type CredentialId, ModelUse } from "@dreamspan/shared/providers.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { type ConnectionId, type CredentialId, ModelUse } from "@dreamspan/shared/providers.ts"
 import {
   connectionColumns,
   connectionFrom,
@@ -114,6 +115,71 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
           AND (${includeHidden ? 1 : 0} = 1 OR hidden = 0) ORDER BY model_key`
         return rows.map(toModel)
       }).pipe(query("ListModels")),
+
+    ListRecomputeRows: ({ userId, modelKey, formulaPrefix, exceptFormula, afterAt, afterId, limit }) =>
+      sql<{
+        id: string
+        connection_id: string
+        kind: string
+        model_id: string | null
+        model_key: string
+        upstream: string | null
+        started_at: number
+        cost_formula: string
+        input_uncached: number | null
+        cache_read: number | null
+        cache_write: number | null
+        cache_write_long: number | null
+        output: number | null
+        reasoning: number | null
+      }>`
+        SELECT r.id, r.connection_id, c.kind, r.model_id, r.model_key, r.upstream, r.started_at, r.cost_formula,
+          r.input_uncached, r.cache_read, r.cache_write, r.cache_write_long, r.output, r.reasoning
+        FROM llm_requests r INDEXED BY llm_requests_owner JOIN connections c ON c.id = r.connection_id
+        WHERE r.owner_user_id = ${userId}
+          AND (r.started_at > ${afterAt} OR (r.started_at = ${afterAt} AND r.id > ${afterId}))
+          AND r.status <> 'running' AND r.cost_rates_json IS NOT NULL AND r.cost_formula IS NOT 'reported'
+          AND (${modelKey} IS NULL OR r.model_key = ${modelKey})
+          AND (${formulaPrefix} IS NULL OR substr(r.cost_formula, 1, length(${formulaPrefix})) = ${formulaPrefix})
+          AND (${exceptFormula} IS NULL OR r.cost_formula <> ${exceptFormula})
+        ORDER BY r.started_at, r.id LIMIT ${Math.max(1, Math.min(limit, 1000))}`.pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            id: row.id,
+            connectionId: row.connection_id as ConnectionId,
+            kind: row.kind,
+            modelId: row.model_id,
+            modelKey: row.model_key,
+            upstream: row.upstream,
+            startedAt: row.started_at,
+            formula: row.cost_formula,
+            inputUncached: row.input_uncached,
+            cacheRead: row.cache_read,
+            cacheWrite: row.cache_write,
+            cacheWriteLong: row.cache_write_long,
+            output: row.output,
+            reasoning: row.reasoning
+          }))
+        ),
+        query("ListRecomputeRows")
+      ),
+
+    ListPriceFeedConnections: ({ usedSince }) =>
+      sql<{ owner_user_id: string; id: string }>`
+        SELECT c.owner_user_id, c.id FROM connections c
+        WHERE c.deleted_at IS NULL AND c.purged_at IS NULL
+          AND json_extract(c.provider_settings_json, '$.priceEndpoint') = 1
+          AND EXISTS (SELECT 1 FROM llm_requests r INDEXED BY llm_requests_connection
+            WHERE r.connection_id = c.id AND r.started_at >= ${usedSince})
+        ORDER BY c.id`.pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            userId: row.owner_user_id as UserId,
+            connectionId: row.id as ConnectionId
+          }))
+        ),
+        query("ListPriceFeedConnections")
+      ),
 
     // The owner index bounds the rows to the user's own requests.
     ListModelUse: ({ userId }) =>

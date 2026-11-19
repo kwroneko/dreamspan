@@ -1218,6 +1218,27 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.RefreshModelEndpoints({ modelId: owner.modelId }), "ProviderError:unusable")
   },
+  // Re-pricing reads and writes the caller's own ledger only: the owner's rows never count.
+  PreviewCostRecompute: {
+    probe: (actor) =>
+      Effect.gen(function* () {
+        assert.deepStrictEqual(yield* actor.api.PreviewCostRecompute({ target: { _tag: "Builtin" } }), {
+          count: 0,
+          from: null,
+          to: null
+        })
+      })
+  },
+  ApplyCostRecompute: {
+    probe: (actor) =>
+      Effect.gen(function* () {
+        assert.deepStrictEqual(yield* actor.api.ApplyCostRecompute({ target: { _tag: "Builtin" } }), { changed: 0 })
+      })
+  },
+  GetPriceFeedState: {
+    probe: (actor, owner) =>
+      refused(actor.api.GetPriceFeedState({ connectionId: owner.connectionId }), "ProviderError:unusable")
+  },
   SetModelHidden: {
     probe: (actor, owner) => refused(actor.api.SetModelHidden({ modelId: owner.modelId, hidden: true }), "NotFound")
   },

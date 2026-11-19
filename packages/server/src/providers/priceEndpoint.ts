@@ -1,6 +1,6 @@
 // The opt-in price endpoint (spec/PRICES.md §4): `GET {base}/v1/prices` on a connection whose
 // user turned on `priceEndpoint`. Nothing here runs for any other connection.
-import type { Price, PriceFeed } from "@dreamspan/shared/providers.ts"
+import type { Price, PriceFeed, PriceFeedRoute } from "@dreamspan/shared/providers.ts"
 import { Predicate } from "effect"
 
 /** `{base}` without a trailing `/v1`, so `https://gw.example/v1` and `https://gw.example` both probe the same path. */
@@ -51,11 +51,18 @@ const ratesOf = (entry: Record<string, unknown>): Partial<Rates> => {
   }
 }
 
-/** One model's price from its entry: null when `input` or `output` is unknown (§4.3). */
-const priceOf = (entry: Record<string, unknown>, currency: string): Price | null => {
-  const base = ratesOf(entry)
+/**
+ * One model's (or route's) price from its entry: null when `input` or `output` is unknown
+ * (§4.3). `under` is what a route's unknown fields fall back to: its model's own rates.
+ */
+const priceOf = (
+  entry: Record<string, unknown>,
+  currency: string,
+  { perRequest: underPerRequest, ...under }: Partial<Rates> & { readonly perRequest?: number } = {}
+): Price | null => {
+  const base = { ...under, ...ratesOf(entry) }
   if (base.input === undefined || base.output === undefined) return null
-  const perRequest = rate(entry.per_request)
+  const perRequest = rate(entry.per_request) ?? underPerRequest
   const tiers = Array.isArray(entry.tiers)
     ? entry.tiers.flatMap((tier: unknown) => {
         if (!Predicate.isObject(tier)) return []
@@ -75,10 +82,51 @@ const priceOf = (entry: Record<string, unknown>, currency: string): Price | null
   }
 }
 
+interface PriceListEntry {
+  readonly price: Price | null
+  readonly available?: boolean
+  readonly servedBy?: string
+  readonly pctOfList?: number
+  readonly routes?: ReadonlyArray<PriceFeedRoute>
+}
+
 export interface PriceList {
   readonly currency: string
   readonly validUntil: number | null
-  readonly models: ReadonlyMap<string, { readonly price: Price | null; readonly available?: boolean }>
+  readonly models: ReadonlyMap<string, PriceListEntry>
+}
+
+const label = (value: unknown) =>
+  Predicate.isString(value) && value.length > 0 && value.length <= 256 ? value : undefined
+const percent = (value: unknown) =>
+  Predicate.isNumber(value) && Number.isFinite(value) && value >= 0 && value <= 1e6 ? value : undefined
+
+/** The model's routes (§4.4): each route's rates over the model's own, at most 64. */
+const routesOf = (entry: Record<string, unknown>, currency: string): ReadonlyArray<PriceFeedRoute> => {
+  if (!Array.isArray(entry.routes)) return []
+  const perRequest = rate(entry.per_request)
+  const under = { ...ratesOf(entry), ...(perRequest === undefined ? {} : { perRequest }) }
+  return entry.routes.slice(0, 64).flatMap((item: unknown): PriceFeedRoute[] => {
+    if (!Predicate.isObject(item)) return []
+    const route = item as Record<string, unknown>
+    const target = label(route.target)
+    const upstream = label(route.upstream)
+    if (target === undefined && upstream === undefined) return []
+    const listInput = rate(route.list_input)
+    const listOutput = rate(route.list_output)
+    const pctOfList = percent(route.pct_of_list)
+    return [
+      {
+        ...(target === undefined ? {} : { target }),
+        ...(upstream === undefined ? {} : { upstream }),
+        // A route's own tiers only; the model's tiers are the model's.
+        price: priceOf(route, currency, under),
+        ...(listInput === undefined ? {} : { listInput }),
+        ...(listOutput === undefined ? {} : { listOutput }),
+        ...(pctOfList === undefined ? {} : { pctOfList })
+      }
+    ]
+  })
 }
 
 const UNIT = /^(\S{1,16}) per 1M tokens$/
@@ -101,18 +149,35 @@ export const parsePriceList = (body: unknown): PriceList | null => {
     if (!Predicate.isObject(item)) continue
     const entry = item as Record<string, unknown>
     if (!Predicate.isString(entry.id) || entry.id.length === 0 || entry.id.length > 512) continue
+    const servedBy = label(entry.served_by)
+    const pctOfList = percent(entry.pct_of_list)
+    const routes = routesOf(entry, currency)
     models.set(entry.id, {
       price: priceOf(entry, currency),
-      ...(Predicate.isBoolean(entry.available) ? { available: entry.available } : {})
+      ...(Predicate.isBoolean(entry.available) ? { available: entry.available } : {}),
+      ...(servedBy === undefined ? {} : { servedBy }),
+      ...(pctOfList === undefined ? {} : { pctOfList }),
+      ...(routes.length ? { routes } : {})
     })
   }
   return { currency, validUntil: Number.isFinite(until) ? until : null, models }
 }
 
-/** What one probe found (§4.5). */
+/** `Cache-Control: max-age`, in milliseconds; null when absent. */
+const maxAgeMs = (header: string | null) => {
+  const match = /(?:^|,)\s*max-age\s*=\s*"?(\d{1,10})"?\s*(?:,|$)/i.exec(header ?? "")
+  return match ? Number(match[1]) * 1000 : null
+}
+
+/** What one probe found (§4.5). `maxAgeMs` is the response's `Cache-Control: max-age`. */
 export type PriceProbe =
-  | { readonly state: "supported"; readonly list: PriceList; readonly etag: string | null }
-  | { readonly state: "unchanged" }
+  | {
+      readonly state: "supported"
+      readonly list: PriceList
+      readonly etag: string | null
+      readonly maxAgeMs: number | null
+    }
+  | { readonly state: "unchanged"; readonly maxAgeMs: number | null }
   | { readonly state: "unsupported" | "denied" | "failed"; readonly detail: string }
 
 /** Asks the connection's own server for its price list, with the headers `/v1/models` gets. */
@@ -133,7 +198,11 @@ export const fetchPriceList = async (
   } catch (error) {
     return { state: "failed", detail: error instanceof Error ? error.message : String(error) }
   }
-  if (response.status === 304) return { state: "unchanged" }
+  if (response.status === 304) {
+    await response.body?.cancel()
+    return { state: "unchanged", maxAgeMs: maxAgeMs(response.headers.get("cache-control")) }
+  }
+  if (!response.ok) await response.body?.cancel().catch(() => {})
   if ([404, 405, 501].includes(response.status))
     return { state: "unsupported", detail: `This server doesn't publish prices (${response.status})` }
   if (response.status === 401 || response.status === 403)
@@ -141,7 +210,12 @@ export const fetchPriceList = async (
   if (!response.ok) return { state: "failed", detail: `HTTP ${response.status}` }
   const list = parsePriceList(await response.json().catch(() => null))
   if (list === null) return { state: "failed", detail: "not a price list this app understands" }
-  return { state: "supported", list, etag: response.headers.get("etag") }
+  return {
+    state: "supported",
+    list,
+    etag: response.headers.get("etag"),
+    maxAgeMs: maxAgeMs(response.headers.get("cache-control"))
+  }
 }
 
 /**
@@ -157,13 +231,33 @@ export const feedsFor = (
   keys.map((key) => {
     const found = probe.list.models.get(key)
     if (!found) return { key, feed: null }
+    const validUntil = probe.list.validUntil ?? (probe.maxAgeMs === null ? null : fetchedAt + probe.maxAgeMs)
     const feed: PriceFeed = {
       fetchedAt,
       currency: probe.list.currency,
       price: found.price,
-      ...(probe.list.validUntil === null ? {} : { validUntil: probe.list.validUntil }),
+      ...(validUntil === null ? {} : { validUntil }),
       ...(probe.etag === null ? {} : { etag: probe.etag.slice(0, 256) }),
-      ...(found.available === undefined ? {} : { available: found.available })
+      ...(found.available === undefined ? {} : { available: found.available }),
+      ...(found.servedBy === undefined ? {} : { servedBy: found.servedBy }),
+      ...(found.pctOfList === undefined ? {} : { pctOfList: found.pctOfList }),
+      ...(found.routes ? { routes: found.routes } : {})
     }
     return { key, feed }
   })
+
+const MINUTE = 60_000
+/** Prices are asked for again at `valid_until` (or `max-age`), clamped to 5 minutes to a day; else hourly (§4.6). */
+const PRICE_REFRESH_MS = 60 * MINUTE
+const PRICE_REFRESH_MIN_MS = 5 * MINUTE
+const PRICE_REFRESH_MAX_MS = 24 * 60 * MINUTE
+/** A failure is asked about again after ten minutes, as the endpoint lists are (ENDPOINTS_RETRY_MS). */
+export const PRICE_RETRY_MS = 10 * MINUTE
+
+/** When to ask again after a fetch at `at` that the server says is good until `validUntil`. */
+export const nextPriceFetch = (at: number, validUntil: number | null | undefined) =>
+  at +
+  Math.min(
+    PRICE_REFRESH_MAX_MS,
+    Math.max(PRICE_REFRESH_MIN_MS, validUntil === null || validUntil === undefined ? PRICE_REFRESH_MS : validUntil - at)
+  )

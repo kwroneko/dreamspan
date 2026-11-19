@@ -1,4 +1,10 @@
-import { CostSettings, type CostRule, type CostRates } from "@dreamspan/shared/costFormulas.ts"
+import {
+  CostSettings,
+  type CostRule,
+  type CostRates,
+  type RecomputePreview,
+  type RecomputeTarget
+} from "@dreamspan/shared/costFormulas.ts"
 import type { Connection } from "@dreamspan/shared/providers.ts"
 import { Schema } from "effect"
 import { useState } from "react"
@@ -79,7 +85,10 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
           },
           (text) => JSON.stringify({ ...JSON.parse(text), revision })
         )
-        if (ok) setMessage("Saved. New requests use these prices; past costs stay as recorded.")
+        if (ok)
+          setMessage(
+            "Saved. New requests use these prices; past costs stay as recorded. Past requests, below, can re-price them."
+          )
       }}
     >
       <UserDraftStatus draft={durable} history />
@@ -163,6 +172,23 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
                   maxLength={16}
                   value={rule.currency}
                   onValueChange={(currency) => update(index, { currency })}
+                />
+              </Field>
+              <Field label="Per request" about="A flat charge for each request, in the currency above. Blank: none.">
+                <Input
+                  type="number"
+                  min={0}
+                  max={1e9}
+                  step="any"
+                  value={rule.perRequest ?? ""}
+                  onValueChange={(value) => {
+                    const { perRequest: _, ...rest } = rule
+                    edit(
+                      values.rules.map((r, i) =>
+                        i === index ? (value === "" ? rest : { ...rest, perRequest: Number(value) }) : r
+                      )
+                    )
+                  }}
                 />
               </Field>
             </div>
@@ -267,6 +293,97 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
     </form>
   )
 }
+const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" })
+const requestsText = (n: number) => (n === 1 ? "1 past request" : `${n} past requests`)
+
+/**
+ * "Apply to past requests" (spec/PRICES.md §6.1): on request only, re-prices past requests with
+ * one of your saved prices, or with the app's newer built-in prices. The count and dates come
+ * first. A charge the provider reported never changes.
+ */
+function PastRequests({ settings }: { settings: CostSettings }) {
+  const [choice, setChoice] = useState("builtin")
+  const [preview, setPreview] = useState<{ choice: string; value: RecomputePreview } | null>(null)
+  const [done, setDone] = useState<string | null>(null)
+  const action = useAction()
+  const rule = settings.rules.find((r) => r.id === choice)
+  const target: RecomputeTarget = rule ? { _tag: "Rule", ruleId: rule.id } : { _tag: "Builtin" }
+  const shown = preview?.choice === choice ? preview.value : null
+  return (
+    <section aria-label="Past requests" className="flex min-w-0 flex-col gap-3 border-t border-border pt-5">
+      <LabelWithHelp
+        help={
+          <AboutHint heading="Past requests">
+            Past requests keep the price they were charged at. Here you can re-price them with one of your saved prices,
+            or with the app’s corrected built-in prices. Charges the provider reported never change.
+          </AboutHint>
+        }
+      >
+        <h2 className="font-semibold">Past requests</h2>
+      </LabelWithHelp>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <Field label="Re-price with">
+          <Select
+            value={rule ? choice : "builtin"}
+            items={[
+              { value: "builtin", label: "The app’s newer built-in prices" },
+              ...settings.rules.map((r) => ({ value: r.id, label: `Your price: ${r.name}` }))
+            ]}
+            onValueChange={(value) => {
+              setChoice(value)
+              setDone(null)
+            }}
+          />
+        </Field>
+        <Button
+          hint="Counts the past requests these prices would change. Nothing changes yet."
+          pending={action.pending}
+          onClick={async () => {
+            setDone(null)
+            const result = await action.run((client) => client("PreviewCostRecompute", { target }))
+            if (result.ok) setPreview({ choice, value: result.value })
+          }}
+        >
+          Check past requests
+        </Button>
+      </div>
+      {shown && (
+        <Alert>
+          {shown.count === 0 || shown.from === null || shown.to === null ? (
+            <p>No past requests would change.</p>
+          ) : (
+            <div className="flex flex-col items-start gap-2">
+              <p>
+                {requestsText(shown.count)}, sent {dateFormat.format(shown.from)}
+                {dateFormat.format(shown.from) === dateFormat.format(shown.to)
+                  ? ""
+                  : ` to ${dateFormat.format(shown.to)}`}
+                , would be re-priced.
+              </p>
+              <Button
+                variant="primary"
+                hint="Re-prices those requests with these prices. Charges the provider reported never change."
+                pending={action.pending}
+                onClick={async () => {
+                  const result = await action.run((client) => client("ApplyCostRecompute", { target }), ["costs"])
+                  if (result.ok) {
+                    setPreview(null)
+                    setDone(`Re-priced ${requestsText(result.value.changed)}.`)
+                  }
+                }}
+              >
+                Apply to past requests
+              </Button>
+            </div>
+          )}
+        </Alert>
+      )}
+      {done && <Alert>{done}</Alert>}
+      <ErrorAlert error={action.error} title="Past requests weren't re-priced" />
+    </section>
+  )
+}
+
 function CostPage() {
   useTitle("Costs")
   return (
@@ -279,7 +396,12 @@ function CostPage() {
       <AsyncView atom={settingsAtom}>
         {(settings) => (
           <AsyncView atom={connectionsAtom}>
-            {(connections) => <CostForm settings={settings} connections={connections} />}
+            {(connections) => (
+              <div className="flex flex-col gap-5">
+                <CostForm settings={settings} connections={connections} />
+                <PastRequests settings={settings} />
+              </div>
+            )}
           </AsyncView>
         )}
       </AsyncView>

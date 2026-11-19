@@ -199,6 +199,16 @@ describe("version metrics display", () => {
     expect(mixed.Cost).toBe("$0.010 + 0.400 EUR; 1 request had none")
     expect(mixed["Priced by"]).toBe("the model's price list, your cost formula")
     expect(mixed.Cached).toBeUndefined()
+    // A price endpoint's cost names when its prices were fetched, and the route it was for.
+    const fetched = Date.UTC(2026, 10, 16, 18, 0)
+    const served = Object.fromEntries(
+      costDetails(
+        versionMetricsOf(id, [
+          request({ cost: { amount: 0.01, currency: "USD", formula: `endpoint:${fetched}:route-b` } })
+        ])
+      )
+    )
+    expect(served["Priced by"]).toMatch(/^this server's price list, fetched .+ \(route route-b\)$/)
   })
 
   it("puts the last request's cost beside its time and tokens", () => {

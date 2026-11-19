@@ -35,3 +35,22 @@ export const CostRules = Schema.Array(CostRule).check(
 )
 export const CostSettings = Schema.Struct({ revision: Schema.Int, rules: CostRules })
 export type CostSettings = typeof CostSettings.Type
+
+/**
+ * Which past requests "Apply to past requests" re-prices (spec/PRICES.md §6.1): those one of the
+ * user's prices now covers (`Rule`), or those priced from an older built-in table (`Builtin`).
+ * Never a charge the provider reported.
+ */
+export const RecomputeTarget = Schema.Union([
+  Schema.TaggedStruct("Rule", { ruleId: Schema.String.check(Schema.isMaxLength(160)) }),
+  Schema.TaggedStruct("Builtin", {})
+])
+export type RecomputeTarget = typeof RecomputeTarget.Type
+
+/** How many past requests would change, and when the first and last of them were sent. */
+export const RecomputePreview = Schema.Struct({
+  count: Schema.Int,
+  from: Schema.NullOr(Schema.Number),
+  to: Schema.NullOr(Schema.Number)
+})
+export type RecomputePreview = typeof RecomputePreview.Type

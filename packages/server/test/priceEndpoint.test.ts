@@ -8,7 +8,9 @@ import { Effect, Layer, Stream } from "effect"
 import * as Database from "../src/db/Database.ts"
 import * as Network from "../src/net/Network.ts"
 import * as ProviderBuiltins from "../src/providers/builtins.ts"
-import { parsePriceList, priceListUrl } from "../src/providers/priceEndpoint.ts"
+import { nextPriceFetch, parsePriceList, priceListUrl } from "../src/providers/priceEndpoint.ts"
+import { builtinCostFormulas, costOf, emptyCapture } from "../src/providers/usage.ts"
+import { unknownCounts } from "@dreamspan/shared/usage.ts"
 import * as Providers from "../src/providers/Providers.ts"
 import { makeSecrets, Secrets } from "../src/secrets.ts"
 import { testWorkers } from "./support/bundles.ts"
@@ -40,7 +42,13 @@ describe("the price list format", () => {
       ]
     })!
     assert.strictEqual(list.currency, "USD")
-    assert.deepStrictEqual(list.models.get("m"), { price: { input: 3, output: 15 }, available: true })
+    assert.deepStrictEqual(list.models.get("m"), {
+      price: { input: 3, output: 15 },
+      available: true,
+      servedBy: "x",
+      pctOfList: 80,
+      routes: [{ target: "a", upstream: "b", price: { input: 3, output: 15 }, listInput: 3.75, listOutput: 18.75 }]
+    })
   })
 
   it("reads the extension fields: currency, cache writes by TTL, per-request charges and tiers", () => {
@@ -118,8 +126,8 @@ describe("the price list format", () => {
   })
 })
 
-const layer = () =>
-  Providers.layer({ retry: { maxRetries: 0, baseDelayMs: 5, maxDelayMs: 100 } }).pipe(
+const layer = (options: Providers.ProvidersOptions = {}) =>
+  Providers.layer({ retry: { maxRetries: 0, baseDelayMs: 5, maxDelayMs: 100 }, priceTimerMs: 0, ...options }).pipe(
     Layer.provideMerge(Network.layer),
     Layer.provideMerge(ProviderBuiltins.layer),
     Layer.provideMerge(
@@ -189,7 +197,16 @@ const connectWith = (baseUrl: string, priceEndpoint: boolean | undefined) =>
           attribution: { purpose: "generation" }
         })
       ).pipe(Effect.map((events) => (events.at(-1) as { cost: { amount: number; formula: string } | null }).cost))
-    return { byKey, reply }
+    const models_ = () => reader.ListModels({ userId, connectionId: connection.id, includeHidden: true })
+    const feedOf = (key: string) => Effect.map(models_(), (all) => all.find((m) => m.key === key)!.upstream.priceFeed)
+    return {
+      byKey,
+      reply,
+      feedOf,
+      state: providers.priceFeedState(userId, connection.id),
+      refresh: providers.refreshModels(userId, connection.id),
+      timer: providers.priceTimerRound
+    }
   })
 
 describe("asking a connection's server for its prices", () => {
@@ -220,6 +237,246 @@ describe("asking a connection's server for its prices", () => {
       const cost = (yield* reply("m"))!
       assert.match(cost.formula, /^endpoint:\d+$/)
       assert.closeTo(cost.amount, (1000 * 2 + 100 * 10) / 1e6, 1e-12)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+})
+
+describe("routes (PRICES §4.4, §5.2)", () => {
+  const list = parsePriceList({
+    object: "list",
+    unit: "USD per 1M tokens",
+    data: [
+      {
+        id: "m",
+        input: 2,
+        output: 10,
+        cache_read: 0.2,
+        served_by: "pool",
+        pct_of_list: 80,
+        routes: [
+          { target: "fast", upstream: "Route-A", input: 4, list_input: 5, list_output: 20, pct_of_list: 80 },
+          { target: "cheap", upstream: "route-b", input: 1, output: 5 },
+          { input: 9, output: 9 },
+          "nonsense"
+        ]
+      }
+    ]
+  })!
+  const entry = list.models.get("m")!
+
+  it("reads each route's rates over the model's own, and the display fields", () => {
+    assert.strictEqual(entry.servedBy, "pool")
+    assert.strictEqual(entry.pctOfList, 80)
+    assert.deepStrictEqual(entry.routes, [
+      {
+        target: "fast",
+        upstream: "Route-A",
+        price: { input: 4, output: 10, cacheRead: 0.2 },
+        listInput: 5,
+        listOutput: 20,
+        pctOfList: 80
+      },
+      { target: "cheap", upstream: "route-b", price: { input: 1, output: 5, cacheRead: 0.2 } }
+    ])
+  })
+
+  const sources = {
+    endpoint: {
+      price: entry.price!,
+      fetchedAt: 300,
+      routes: entry.routes!.map((r) => ({
+        ...(r.target ? { target: r.target } : {}),
+        ...(r.upstream ? { upstream: r.upstream } : {}),
+        price: r.price!
+      }))
+    },
+    list: null,
+    builtin: null
+  }
+  const counts = {
+    ...unknownCounts,
+    inputUncached: 1_000_000,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cacheWriteLong: 0,
+    output: 0
+  }
+  const priced = (upstream: string | null) =>
+    costOf(
+      builtinCostFormulas,
+      { kind: "openai-chat", api: "openai-completions", model: "m" },
+      { counts, capture: { ...emptyCapture(), upstream }, price: null, sources }
+    )
+
+  it("prices from a route only when the ledger captured which one served the request", () => {
+    assert.deepStrictEqual(
+      { amount: priced(null)!.amount, formula: priced(null)!.formula },
+      { amount: 2, formula: "endpoint:300" }
+    )
+    assert.deepStrictEqual(
+      { amount: priced("route-a")!.amount, formula: priced("route-a")!.formula },
+      { amount: 4, formula: "endpoint:300:Route-A" }
+    )
+    // By target when no route names the upstream that way.
+    assert.strictEqual(priced("cheap")!.formula, "endpoint:300:route-b")
+    assert.strictEqual(priced("somewhere-else")!.formula, "endpoint:300")
+  })
+
+  it("bounds a request by its dearest route before dispatch", () => {
+    const formula = builtinCostFormulas.find((f) => f.id === "endpoint")!
+    const bound = formula.upperBound!({ inputTokens: 1_000_000, outputTokens: 0, price: null, sources } as never)
+    // The dearest route's dearest input rate: route A's long cache writes, unknown, count at twice its input.
+    assert.deepStrictEqual(bound, { amount: 8, currency: "USD" })
+  })
+})
+
+describe("when prices are asked again (PRICES §4.5, §4.6)", () => {
+  it("asks at valid_until or max-age, clamped to 5 minutes and a day, else hourly", () => {
+    const minute = 60_000
+    assert.strictEqual(nextPriceFetch(0, null), 60 * minute)
+    assert.strictEqual(nextPriceFetch(0, 30 * minute), 30 * minute)
+    assert.strictEqual(nextPriceFetch(0, minute), 5 * minute)
+    assert.strictEqual(nextPriceFetch(0, 90 * 24 * 60 * minute), 24 * 60 * minute)
+  })
+
+  /** A clock the layer reads, moved by the test. */
+  const clock = () => {
+    let at = Date.now()
+    return { now: () => at, advance: (ms: number) => (at += ms) }
+  }
+
+  it.live("keeps a server that doesn't publish prices unasked until models are refreshed", () => {
+    const time = clock()
+    return Effect.gen(function* () {
+      const server = yield* mock((request, res) =>
+        request.path.endsWith("/models")
+          ? json(res, 200, { data: [{ id: "m" }] })
+          : request.path === PRICES
+            ? json(res, 404, { error: "not found" })
+            : sse(res, completionChunks(["Hi."], { prompt_tokens: 10, completion_tokens: 1 }))
+      )
+      const asked = () => server.requests().filter((r) => r.path === PRICES).length
+      const { reply, state, refresh, timer } = yield* connectWith(server.url, true)
+      yield* reply("m")
+      assert.strictEqual(asked(), 1)
+      const first = (yield* state)!
+      assert.strictEqual(first.state, "unsupported")
+      assert.isNull(first.nextAt)
+      time.advance(48 * 60 * 60_000)
+      yield* timer
+      assert.strictEqual(asked(), 1)
+      yield* refresh
+      assert.strictEqual(asked(), 2)
+    }).pipe(Effect.scoped, Effect.provide(layer({ now: time.now })))
+  })
+
+  it.live("asks again when due, with the ETag; a 304 only moves fetchedAt", () => {
+    const time = clock()
+    return Effect.gen(function* () {
+      const server = yield* mock((request, res) => {
+        if (request.path.endsWith("/models")) {
+          json(res, 200, { data: [{ id: "m" }] })
+          return
+        }
+        if (request.path === PRICES) {
+          if (request.headers["if-none-match"] === '"v1"') {
+            res.writeHead(304, { etag: '"v1"', "cache-control": "max-age=600" })
+            res.end()
+            return
+          }
+          res.writeHead(200, { "content-type": "application/json", etag: '"v1"', "cache-control": "max-age=600" })
+          res.end(
+            JSON.stringify({ object: "list", unit: "USD per 1M tokens", data: [{ id: "m", input: 2, output: 10 }] })
+          )
+          return
+        }
+        sse(res, completionChunks(["Hi."], { prompt_tokens: 10, completion_tokens: 1 }))
+      })
+      const prices = () => server.requests().filter((r) => r.path === PRICES)
+      const { reply, feedOf, state, timer } = yield* connectWith(server.url, true)
+      yield* reply("m")
+      const before = (yield* feedOf("m"))!
+      assert.strictEqual(before.etag, '"v1"')
+      assert.strictEqual(before.validUntil, before.fetchedAt + 600_000)
+      assert.strictEqual((yield* state)!.nextAt, before.fetchedAt + 600_000)
+      // Not due yet: nothing is sent.
+      yield* timer
+      assert.strictEqual(prices().length, 1)
+      time.advance(11 * 60_000)
+      yield* timer
+      assert.strictEqual(prices().length, 2)
+      assert.strictEqual(prices()[1]!.headers["if-none-match"], '"v1"')
+      const after = (yield* feedOf("m"))!
+      assert.strictEqual(after.fetchedAt, time.now())
+      assert.deepStrictEqual(after.price, before.price)
+      assert.strictEqual((yield* state)!.state, "supported")
+    }).pipe(Effect.scoped, Effect.provide(layer({ now: time.now })))
+  })
+
+  it.live("retries a failure after ten minutes and keeps the last good prices", () => {
+    const time = clock()
+    let fail = false
+    return Effect.gen(function* () {
+      const server = yield* mock((request, res) =>
+        request.path.endsWith("/models")
+          ? json(res, 200, { data: [{ id: "m" }] })
+          : request.path === PRICES
+            ? fail
+              ? json(res, 500, { error: "down" })
+              : json(res, 200, { object: "list", unit: "USD per 1M tokens", data: [{ id: "m", input: 2, output: 10 }] })
+            : sse(res, completionChunks(["Hi."], { prompt_tokens: 10, completion_tokens: 1 }))
+      )
+      const prices = () => server.requests().filter((r) => r.path === PRICES).length
+      const { reply, feedOf, state, timer } = yield* connectWith(server.url, true)
+      yield* reply("m")
+      fail = true
+      time.advance(61 * 60_000)
+      yield* timer
+      assert.strictEqual(prices(), 2)
+      assert.strictEqual((yield* state)!.state, "failed")
+      assert.deepStrictEqual((yield* feedOf("m"))!.price, { input: 2, output: 10 })
+      time.advance(5 * 60_000)
+      yield* timer
+      assert.strictEqual(prices(), 2)
+      time.advance(6 * 60_000)
+      yield* timer
+      assert.strictEqual(prices(), 3)
+    }).pipe(Effect.scoped, Effect.provide(layer({ now: time.now })))
+  })
+
+  it.live("sends nothing for a connection not used in the last day", () => {
+    const time = clock()
+    return Effect.gen(function* () {
+      const server = yield* gateway()
+      const { timer } = yield* connectWith(server.url, true)
+      time.advance(2 * 60 * 60_000)
+      yield* timer
+      assert.strictEqual(server.requests().filter((r) => r.path === PRICES).length, 1)
+    }).pipe(Effect.scoped, Effect.provide(layer({ now: time.now })))
+  })
+
+  it.live("prices a reply from the route the server reports it took", () =>
+    Effect.gen(function* () {
+      const server = yield* mock((request, res) =>
+        request.path.endsWith("/models")
+          ? json(res, 200, { data: [{ id: "m" }] })
+          : request.path === PRICES
+            ? json(res, 200, {
+                object: "list",
+                unit: "USD per 1M tokens",
+                data: [
+                  { id: "m", input: 2, output: 10, routes: [{ target: "b", upstream: "route-b", input: 1, output: 5 }] }
+                ]
+              })
+            : sse(
+                res,
+                completionChunks(["Hi."], { prompt_tokens: 1000, completion_tokens: 100 }, { provider: "route-b" })
+              )
+      )
+      const { reply } = yield* connectWith(server.url, true)
+      const cost = (yield* reply("m"))!
+      assert.match(cost.formula, /^endpoint:\d+:route-b$/)
+      assert.closeTo(cost.amount, (1000 * 1 + 100 * 5) / 1e6, 1e-12)
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 })

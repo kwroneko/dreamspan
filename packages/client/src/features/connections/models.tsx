@@ -868,7 +868,9 @@ const shownPrice = (model: Model, resolved: ReturnType<typeof resolveModel>, pri
     return {
       price: feed.price,
       source: "endpoint",
-      text: `from this server’s price list, fetched ${fetchedFormat.format(feed.fetchedAt)}`,
+      text: `from this server’s price list, fetched ${fetchedFormat.format(feed.fetchedAt)}${
+        feed.pctOfList === undefined ? "" : `, ${feed.pctOfList} % of list price`
+      }`,
       hint: "This server’s own price for the model, fetched when models were last refreshed."
     }
   if (!resolved.price) return null
@@ -896,6 +898,27 @@ const shownPrice = (model: Model, resolved: ReturnType<typeof resolveModel>, pri
       }
 }
 
+/** The routes a price endpoint lists for a model (PRICES §4.4): where it may send it, at what price. */
+function FeedRoutes({ feed }: { feed: Model["upstream"]["priceFeed"] }) {
+  const routes = (feed?.routes ?? []).filter((route) => route.price !== null)
+  if (routes.length === 0) return null
+  return (
+    <Tooltip label="Where this server may send the model, and each route’s price. A request is charged at a route’s price when the server says that route served it.">
+      <span className="text-muted" data-price-routes={routes.length}>
+        Routes:{" "}
+        {routes
+          .map(
+            (route) =>
+              `${route.target ?? route.upstream} $${route.price!.input} / $${route.price!.output}${
+                route.pctOfList === undefined ? "" : ` (${route.pctOfList} %)`
+              }`
+          )
+          .join(", ")}
+      </span>
+    </Tooltip>
+  )
+}
+
 function ModelRow({
   model,
   compat,
@@ -920,6 +943,9 @@ function ModelRow({
           {model.source === "user" && <Badge>added by you</Badge>}
           {model.hidden && <Badge>hidden</Badge>}
           {model.missingSince !== null && <Badge tone="warning">no longer listed</Badge>}
+          {priceEndpoint && model.upstream.priceFeed?.available === false && (
+            <Badge tone="warning">unavailable on this server</Badge>
+          )}
         </div>
         {resolved.name.value !== model.key && (
           <p className="font-mono text-xs text-muted [overflow-wrap:anywhere]">{model.key}</p>
@@ -938,6 +964,7 @@ function ModelRow({
               </span>
             </Tooltip>
           )}
+          {priceEndpoint && <FeedRoutes feed={model.upstream.priceFeed} />}
           {capabilityBadges(resolved).map(([label]) => (
             <Badge key={label} tone="accent">
               {label}
