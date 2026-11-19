@@ -1,6 +1,7 @@
 // Saved card media (spec/SAVED-MEDIA.md): a card imported on the Import page asks about its new
 // site, its media is saved on the server (FAKE_SAVED_MEDIA: a synthetic file, no download), and
 // viewing its chat makes no request to any other site, with media from other sites blocked.
+// Saved video (§3.4) plays from this app.
 import { expect, test } from "@playwright/test"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -29,7 +30,8 @@ for (const width of [1440, 390])
           name,
           first_mes:
             `A saved map.\n\n<img class="map" alt="Saved map" src="https://${host}/map.png" width="80" height="80">` +
-            '<style>.tile{background-image:url("https://cardex.zip/i/tile.png");width:40px;height:40px}</style><div class="tile"></div>'
+            '<style>.tile{background-image:url("https://cardex.zip/i/tile.png");width:40px;height:40px}</style><div class="tile"></div>' +
+            '\n\n<video class="clip" width="64" height="64"><source src="https://cardex.zip/i/clip.webm" type="video/webm"></video>'
         }
       }
       const outside: string[] = []
@@ -63,7 +65,7 @@ for (const width of [1440, 390])
             (await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetSavedMediaStatus({ refId: ref.id })))
               .saved
         )
-        .toBe(2)
+        .toBe(3)
       const started = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         api.StartChat({
           cards: [ref.entityId as EntityId],
@@ -83,6 +85,15 @@ for (const width of [1440, 390])
       await expect
         .poll(() => article.locator(".custom-tile").evaluate((tile) => getComputedStyle(tile).backgroundImage))
         .toContain("/media/saved/")
+      // Saved video plays from this app: its source is the saved file, and the player reads it.
+      const clip = article.locator("video.custom-clip")
+      await expect(clip).toBeVisible()
+      await expect(clip).toHaveAttribute("controls", "")
+      await expect
+        .poll(() => clip.evaluate((video) => new URL((video as HTMLVideoElement).currentSrc).pathname))
+        .toMatch(/^\/media\/saved\//)
+      await expect.poll(() => clip.evaluate((video) => (video as HTMLVideoElement).readyState)).toBeGreaterThan(0)
+      await expect.poll(() => clip.evaluate((video) => (video as HTMLVideoElement).videoWidth)).toBe(16)
       // Saved, so nothing is blocked, and nothing went anywhere but this app.
       await expect(article.getByText("Images from other sites are blocked.", { exact: true })).toHaveCount(0)
       await expectLayout(page, info, `saved-media-chat-${width}-${theme}`, { scope: "[data-testid=messages]" })
@@ -90,7 +101,7 @@ for (const width of [1440, 390])
       await page.goto(`${server().url}/library/${ref.id}`)
       await page.getByRole("tab", { name: "Extra", exact: true }).click()
       const section = page.locator("section", { has: page.getByRole("heading", { name: "Saved media", exact: true }) })
-      await expect(section.getByText("2 media files saved here", { exact: true })).toBeVisible()
+      await expect(section.getByText("3 media files saved here", { exact: true })).toBeVisible()
       await expectLayout(page, info, `saved-media-editor-${width}-${theme}`, { scope: "main" })
 
       await page.goto(`${server().url}/settings/media-sites`)

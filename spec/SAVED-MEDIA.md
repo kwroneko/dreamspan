@@ -1,6 +1,6 @@
 # Saved media: card media kept on this server
 
-**Status: Proposed, 2026-11-12 (rehost1); built the same day, except saved video (§3.4).** Owner decisions are marked **[D]**; everything else is **[P]**. Built in the same job; ARCHITECTURE §12 "Saved card media" documents what is implemented. A delta from HTML-MESSAGES.md step 5 (`/media/external` and scoped consent), which stays as it is for every address that isn't saved.
+**Status: Proposed, 2026-11-12 (rehost1); built the same day; saved video (§3.4) built 2026-11-19 (mediaprices). Everything here is built.** Owner decisions are marked **[D]**; everything else is **[P]**. Built in the same job; ARCHITECTURE §12 "Saved card media" documents what is implemented. A delta from HTML-MESSAGES.md step 5 (`/media/external` and scoped consent), which stays as it is for every address that isn't saved.
 
 ## 1. The problem
 
@@ -55,7 +55,7 @@ A card's HTML and CSS can name media on other sites: `<img src="https://…">`, 
 ### 3.4 Showing a message
 
 - **[D]** Card text isn't rewritten. **[P]** When a message renders, each remote address is looked up (batched, `LookupSavedMedia`) among the account's saved files. A saved one is shown from `/media/saved/…`, whatever entry or message it's in. One still downloading shows a blank placeholder and is asked about again. Any other address follows HTML-MESSAGES' consent rules unchanged: blocked by default, proxied when allowed.
-- **[P]** Saved audio plays without the consent (it's this app's own file). Video stays out, saved or not, as before: showing saved video is a later step (the server already keeps MP4 and WebM).
+- **[P]** Saved audio plays without the consent (it's this app's own file). **Built, obsolete as a proposal (mediaprices, 2026-11-19; ARCHITECTURE §12 "Saved card media"):** saved video plays too, without the consent, when every file the `<video>` names is saved; a video naming any unsaved file stays out, with consent or without, since the proxy never serves video. Its poster follows the image rules, captions (`<track>`) stay out, autoplay is removed, and the saved-file route answers byte ranges so players can seek.
 - **[P] Built and browser-verified (review-rehost1), obsolete as an implementation proposal. No state rule needed:** the existing download queue (HTML-MESSAGES step 5) fetches every address a message's stylesheet names when the message is shown, whatever selectors match, and swaps in local copies. So `.custom-door:checked ~ .custom-room { background: url(https://tracker.example/opened) }` makes its one request when the message shows (only with consent, and never if saved), not when the door is opened: it can't tell the site what you did. An earlier draft of this spec refused remote addresses in stateful rules; that would have dropped working card styling for no gain, so it wasn't built. Browser request counts with no-store/no-cache responses stay unchanged across checkbox, hover, `:has()`, attribute, viewport/media, container, animation and late glyph changes. This applies to accepted URL syntax: `image-set()` is already refused, and `unicode-range` is already stripped. The glyph test uses a synthetic font mapping only the late glyph; the queue fetches it up front despite native font selection being lazy.
 
 ### 3.5 The entry's status

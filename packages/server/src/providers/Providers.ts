@@ -46,6 +46,7 @@ import {
   type Model,
   type ModelId,
   type ModelUpstream,
+  type PriceFeedState,
   type ProviderKind,
   ProviderInfo,
   ProviderKindInfo,
@@ -92,7 +93,7 @@ import { countingModelKey } from "./countingModel.ts"
 import { parseServiceAccount } from "./vertex.ts"
 import { type Capture, captureUsageHeaders, costOf, emptyCapture, finalCounts } from "./usage.ts"
 import { firstPrice, priceSources } from "./priceSources.ts"
-import { feedsFor, fetchPriceList } from "./priceEndpoint.ts"
+import { feedsFor, fetchPriceList, nextPriceFetch, PRICE_RETRY_MS } from "./priceEndpoint.ts"
 
 /** A request's model prices by source, now, for its connection's kind and region (PRICES §5.1). */
 const sourcesOf = (
@@ -111,6 +112,11 @@ const sourcesOf = (
 import { readDecisionUsage, unwrapEnvelope } from "@dreamspan/shared/decisions.ts"
 
 export { ProviderError } from "./errors.ts"
+
+/** The last answer of a connection's price endpoint, for the connection as it was then (`key`). */
+interface PriceProbeRecord extends PriceFeedState {
+  readonly key: string
+}
 
 /** Retries before the first token (PROVIDERS §7.2). After output, a failure is the user's call. */
 interface RetryPolicy {
@@ -346,6 +352,13 @@ export interface ProvidersOptions {
   readonly bindKeysToOrigins?: boolean
   /** How long an endpoint-list fetch may take before it counts as failed (default 10 s). */
   readonly endpointsTimeoutMs?: number
+  /**
+   * How often the price timer looks for opted-in connections whose prices are due (PRICES §4.6;
+   * default a minute). Zero turns the timer off.
+   */
+  readonly priceTimerMs?: number
+  /** The clock the price timer and probe state read (tests move it). */
+  readonly now?: () => number
 }
 
 export interface ProvidersShape {
@@ -424,6 +437,16 @@ export interface ProvidersShape {
    * model's general price applies. Other kinds' models are returned unchanged.
    */
   readonly refreshEndpoints: (userId: UserId, modelId: ModelId) => Effect.Effect<Model, ProviderError | ServerError>
+  /** What the connection's price endpoint answered last (PRICES §4.5); null when not asked since start. */
+  readonly priceFeedState: (
+    userId: UserId,
+    connectionId: ConnectionId
+  ) => Effect.Effect<PriceFeedState | null, ProviderError | ServerError>
+  /**
+   * One round of the price timer (PRICES §4.6): asks every opted-in connection used in the last
+   * day whose prices are due. The layer runs it every `priceTimerMs`; tests call it.
+   */
+  readonly priceTimerRound: Effect.Effect<void>
   /**
    * The model with a fresh endpoint list when its routing pins one provider and the stored list
    * is missing or stale; never fails (a failed fetch is stored, and the model comes back as it was).
@@ -985,22 +1008,44 @@ export const layer = (options: ProvidersOptions = {}) =>
           const result = yield* fromStorage(
             writer.SyncFetchedModels({ userId, connectionId, models, fetchedAt: Date.now() })
           )
-          yield* refreshPriceFeeds(
-            userId,
-            prepared,
-            models.map((m) => m.key)
-          )
+          yield* refreshPriceFeeds(userId, prepared, true)
           return { ...result, route }
         })
 
       /**
        * The connection's own price list (PRICES §4), asked only when its user turned on
        * `priceEndpoint`, with the same credentials as its model list. A failure keeps the last
-       * good prices; it never fails the refresh.
+       * good prices; it never fails the refresh. `manual` is Refresh models: it asks whatever the
+       * last answer was. The timer (`manual` false) asks only when the last answer is due again
+       * and never a server that said it doesn't publish prices, until the connection changes.
        */
-      const refreshPriceFeeds = (userId: UserId, prepared: Prepared, keys: ReadonlyArray<string>) =>
+      const probes = new Map<ConnectionId, PriceProbeRecord>()
+      const now = options.now ?? Date.now
+      const probeKey = (prepared: Prepared) =>
+        createHash("sha256")
+          .update(
+            JSON.stringify([
+              prepared.connection.rowVersion,
+              prepared.baseUrl,
+              prepared.apiKey,
+              prepared.headers,
+              prepared.connection.proxyMode
+            ])
+          )
+          .digest("hex")
+      const refreshPriceFeeds = (userId: UserId, prepared: Prepared, manual: boolean) =>
         Effect.gen(function* () {
-          if (prepared.settings.priceEndpoint !== true) return
+          const connectionId = prepared.connection.id
+          if (prepared.settings.priceEndpoint !== true) {
+            probes.delete(connectionId)
+            return
+          }
+          const key = probeKey(prepared)
+          const before = probes.get(connectionId)
+          const last = before?.key === key ? before : undefined
+          if (!manual && last && (last.nextAt === null || now() < last.nextAt)) return
+          const stored = yield* fromStorage(reader.ListModels({ userId, connectionId, includeHidden: true }))
+          const etag = stored.find((m) => m.upstream.priceFeed?.etag !== undefined)?.upstream.priceFeed?.etag ?? null
           const auth: Record<string, string> =
             prepared.apiKey === null
               ? {}
@@ -1012,27 +1057,95 @@ export const layer = (options: ProvidersOptions = {}) =>
               fetchFor(prepared, () => {}),
               prepared.baseUrl,
               { ...auth, ...prepared.headers },
-              null,
+              // A 304 only says the stored feeds are current, so ask conditionally only with feeds.
+              last?.state === "supported" || before === undefined ? etag : null,
               signal
             )
           ).pipe(
             Effect.timeoutOrElse({ duration: endpointsTimeoutMs, orElse: () => Effect.succeed(null) }),
             Effect.orElseSucceed(() => null)
           )
-          if (probe?.state !== "supported") {
-            yield* Effect.logInfo(
-              `price list of ${prepared.connection.id}: ${probe === null ? "no answer" : probe.state === "unchanged" ? "unchanged" : prepared.scrub(probe.detail)}`
+          const at = now()
+          const record = (state: PriceProbeRecord["state"], nextAt: number | null, detail: string | null) =>
+            probes.set(connectionId, { key, state, at, nextAt, detail })
+          if (probe === null || probe.state === "failed") {
+            const detail = probe === null ? "No answer in time." : prepared.scrub(probe.detail)
+            yield* Effect.logInfo(`price list of ${connectionId}: ${detail}`)
+            record("failed", at + PRICE_RETRY_MS, detail)
+            return
+          }
+          if (probe.state === "unsupported" || probe.state === "denied") {
+            yield* Effect.logInfo(`price list of ${connectionId}: ${prepared.scrub(probe.detail)}`)
+            // Unsupported: asked again only when the connection changes or models are refreshed.
+            record(
+              probe.state,
+              probe.state === "unsupported" ? null : nextPriceFetch(at, null),
+              prepared.scrub(probe.detail)
             )
             return
           }
-          yield* fromStorage(
-            writer.SetModelPriceFeeds({
-              userId,
-              connectionId: prepared.connection.id,
-              feeds: feedsFor(keys, probe, Date.now())
-            })
-          ).pipe(Effect.catch((e) => Effect.logWarning("could not store a price list", e)))
+          const fresh = probe.state === "supported" ? probe : null
+          const maxAge = probe.state === "supported" || probe.state === "unchanged" ? probe.maxAgeMs : null
+          const feeds =
+            fresh === null
+              ? // A 304 only moves `fetchedAt` (and the time it's good until, from `max-age`).
+                stored.flatMap((m) => {
+                  const feed = m.upstream.priceFeed
+                  if (!feed) return []
+                  const validUntil = maxAge === null ? feed.validUntil : at + maxAge
+                  return [
+                    {
+                      key: m.key,
+                      feed: {
+                        ...feed,
+                        fetchedAt: at,
+                        ...(validUntil === undefined ? {} : { validUntil })
+                      }
+                    }
+                  ]
+                })
+              : feedsFor(
+                  stored.map((m) => m.key),
+                  fresh,
+                  at
+                )
+          const validUntil =
+            fresh === null
+              ? (feeds[0]?.feed?.validUntil ?? null)
+              : (fresh.list.validUntil ?? (fresh.maxAgeMs === null ? null : at + fresh.maxAgeMs))
+          record("supported", nextPriceFetch(at, validUntil), null)
+          yield* fromStorage(writer.SetModelPriceFeeds({ userId, connectionId, feeds })).pipe(
+            Effect.catch((e) => Effect.logWarning("could not store a price list", e))
+          )
         })
+
+      const priceFeedState: ProvidersShape["priceFeedState"] = (userId, connectionId) =>
+        Effect.gen(function* () {
+          const prepared = yield* prepare(userId, connectionId)
+          if (prepared.settings.priceEndpoint !== true) return null
+          const record = probes.get(connectionId)
+          if (!record || record.key !== probeKey(prepared)) return null
+          return { state: record.state, at: record.at, nextAt: record.nextAt, detail: record.detail }
+        })
+
+      const DAY_MS = 24 * 60 * 60 * 1000
+      const priceTimerRound: ProvidersShape["priceTimerRound"] = Effect.gen(function* () {
+        const due = yield* reader.ListPriceFeedConnections({ usedSince: now() - DAY_MS })
+        for (const { userId, connectionId } of due) {
+          const record = probes.get(connectionId)
+          if (record && (record.nextAt === null || now() < record.nextAt)) continue
+          yield* prepare(userId, connectionId).pipe(
+            Effect.flatMap((prepared) => refreshPriceFeeds(userId, prepared, false)),
+            Effect.catch((error) => Effect.logInfo(`price timer skipped ${connectionId}`, error))
+          )
+        }
+      }).pipe(Effect.catch((error) => Effect.logWarning("price timer", error)))
+      const priceTimerMs = options.priceTimerMs ?? 60_000
+      if (priceTimerMs > 0)
+        yield* Effect.forkIn(
+          Effect.forever(Effect.sleep(priceTimerMs).pipe(Effect.andThen(priceTimerRound))),
+          yield* Effect.scope
+        )
 
       const endpointsTimeoutMs = options.endpointsTimeoutMs ?? 10_000
       const refreshEndpoints: ProvidersShape["refreshEndpoints"] = (userId, modelId) =>
@@ -2487,6 +2600,8 @@ export const layer = (options: ProvidersOptions = {}) =>
         refreshModels,
         refreshEndpoints,
         ensureEndpoints,
+        priceFeedState,
+        priceTimerRound,
         catalogUpstream,
         testConnection,
         stream

@@ -1,6 +1,6 @@
 // Which prices a request's model has, by source (spec/PRICES.md §3.1, §5.1). The formulas
 // (usage.ts, userCosts.ts) pick among them in the owner's order.
-import { type Model, routedPrice } from "@dreamspan/shared/providers.ts"
+import { type Model, type Price, routedPrice } from "@dreamspan/shared/providers.ts"
 import { BUILTIN_PRICE_VERSION, type PriceContext, supplementPrice } from "./prices/index.ts"
 import type { PriceSources } from "./registry.ts"
 
@@ -33,17 +33,26 @@ export const priceSources = (
   // without a refresh, PRICES §3.1); a rate it leaves unknown comes from the next source (§4.3).
   const feed = context.priceEndpoint === true ? upstream.priceFeed : undefined
   const next = list?.price ?? builtin
+  const filled = (price: Price): Price => ({
+    ...(next?.cacheRead === undefined ? {} : { cacheRead: next.cacheRead }),
+    ...(next?.cacheWrite === undefined ? {} : { cacheWrite: next.cacheWrite }),
+    ...(next?.cacheWriteLong === undefined ? {} : { cacheWriteLong: next.cacheWriteLong }),
+    ...price
+  })
+  const routes = (feed?.routes ?? []).flatMap((route) =>
+    route.price === null
+      ? []
+      : [
+          {
+            ...(route.target === undefined ? {} : { target: route.target }),
+            ...(route.upstream === undefined ? {} : { upstream: route.upstream }),
+            price: filled(route.price)
+          }
+        ]
+  )
   const endpoint =
     feed?.price && feed.available !== false
-      ? {
-          price: {
-            ...(next?.cacheRead === undefined ? {} : { cacheRead: next.cacheRead }),
-            ...(next?.cacheWrite === undefined ? {} : { cacheWrite: next.cacheWrite }),
-            ...(next?.cacheWriteLong === undefined ? {} : { cacheWriteLong: next.cacheWriteLong }),
-            ...feed.price
-          },
-          fetchedAt: feed.fetchedAt
-        }
+      ? { price: filled(feed.price), fetchedAt: feed.fetchedAt, ...(routes.length ? { routes } : {}) }
       : null
   return {
     endpoint,

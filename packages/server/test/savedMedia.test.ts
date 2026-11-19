@@ -6,7 +6,8 @@ import { createServer, type Server } from "node:http"
 import { assert, describe, it } from "@effect/vitest"
 import { DEFAULT_MEDIA_HOSTS, mediaKey } from "@dreamspan/shared/savedMedia.ts"
 import { Effect } from "effect"
-import { SavedMedia, makeSavedMediaFetcher } from "../src/api/savedMedia.ts"
+import { byteRange, SavedMedia, makeSavedMediaFetcher } from "../src/api/savedMedia.ts"
+import { FAKE_WEBM } from "../src/dev/fakeSavedMedia.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { RedirectRefused, type NetworkShape, type TargetAddresses } from "../src/net/Network.ts"
 import { documentMedia } from "../src/savedMedia/extract.ts"
@@ -38,6 +39,10 @@ const mediaServer = () => {
     const send = (type: string, body: Buffer) => response.writeHead(200, { "content-type": type }).end(body)
     if (path === "/pixel.png" || path === "/hover.png") send("image/png", PNG)
     else if (path === "/octet.png") send("application/octet-stream", PNG)
+    else if (path === "/clip.webm") send("video/webm", FAKE_WEBM)
+    else if (path === "/clip-as-png.png") send("image/png", FAKE_WEBM)
+    else if (path === "/page.webm") send("video/webm", Buffer.from("<!doctype html><title>not a video</title>"))
+    else if (path === "/big.webm") send("video/webm", Buffer.concat([FAKE_WEBM, Buffer.alloc(17 * 1024 * 1024, 1)]))
     else if (path === "/font.woff2") send("font/woff2", WOFF2)
     else if (path === "/page.html") send("image/png", Buffer.from("<!doctype html><title>not an image</title>"))
     else if (path === "/evil.svg") send("image/svg+xml", SVG)
@@ -125,6 +130,49 @@ describe("finding media in a document", () => {
         ["v.mp4", "video"]
       ]
     )
+  })
+})
+
+describe("saved video", () => {
+  it("keeps MP4 and WebM by their bytes, refusing pages and oversized files", async () => {
+    const { server } = mediaServer()
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done))
+    try {
+      const fetcher = makeSavedMediaFetcher(forwarding((server.address() as { port: number }).port), {
+        interfaces: () => ({}),
+        resolve: async () => [PUBLIC]
+      })
+      const get = (path: string) => fetcher(`https://cards.test${path}`, new AbortController().signal)
+      const clip = await get("/clip.webm")
+      assert.strictEqual(clip.mime, "video/webm")
+      await clip.dispose()
+      // The bytes decide, not the response's type header.
+      const misnamed = await get("/clip-as-png.png")
+      assert.strictEqual(misnamed.mime, "video/webm")
+      await misnamed.dispose()
+      for (const path of ["/page.webm", "/big.webm"]) {
+        const refused = await get(path).then(
+          () => false,
+          () => true
+        )
+        assert.isTrue(refused, path)
+      }
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()))
+    }
+  })
+  it("reads one byte range for players", () => {
+    assert.isNull(byteRange(undefined, 10))
+    assert.isNull(byteRange("bytes=0-1,4-5", 10))
+    assert.isNull(byteRange("items=0-1", 10))
+    assert.deepStrictEqual(byteRange("bytes=2-", 10), { start: 2, end: 9 })
+    assert.deepStrictEqual(byteRange("bytes=2-4", 10), { start: 2, end: 4 })
+    assert.deepStrictEqual(byteRange("bytes=2-40", 10), { start: 2, end: 9 })
+    assert.deepStrictEqual(byteRange("bytes=-3", 10), { start: 7, end: 9 })
+    assert.deepStrictEqual(byteRange("bytes=-30", 10), { start: 0, end: 9 })
+    assert.strictEqual(byteRange("bytes=10-", 10), "unsatisfiable")
+    assert.strictEqual(byteRange("bytes=5-2", 10), "unsatisfiable")
+    assert.strictEqual(byteRange("bytes=-0", 10), "unsatisfiable")
   })
 })
 
@@ -270,10 +318,26 @@ it.live("saves approved media once, serves it locally and leaves the card unchan
         headers: { "Remote-User": "alice", range: "bytes=0-7" }
       })
     )
-    assert.include([200, 206], ranged.status)
+    assert.strictEqual(ranged.status, 206)
     assert.strictEqual(ranged.headers.get("content-type"), "image/png")
+    assert.strictEqual(ranged.headers.get("content-range"), `bytes 0-7/${PNG.length}`)
     assert.strictEqual(ranged.headers.get("content-security-policy"), served.headers.get("content-security-policy"))
-    yield* Effect.promise(() => ranged.arrayBuffer())
+    assert.deepStrictEqual(Buffer.from(yield* Effect.promise(() => ranged.arrayBuffer())), PNG.subarray(0, 8))
+    const past = yield* Effect.promise(() =>
+      fetch(`http://127.0.0.1:${port}/media/saved/${found!.mediaId}`, {
+        headers: { "Remote-User": "alice", range: `bytes=${PNG.length}-` }
+      })
+    )
+    assert.strictEqual(past.status, 416)
+    assert.strictEqual(past.headers.get("content-range"), `bytes */${PNG.length}`)
+    yield* Effect.promise(() => past.arrayBuffer())
+    const otherRange = yield* Effect.promise(() =>
+      fetch(`http://127.0.0.1:${port}/media/saved/${found!.mediaId}`, {
+        headers: { "Remote-User": "bob", range: "bytes=0-7" }
+      })
+    )
+    assert.strictEqual(otherRange.status, 404)
+    yield* Effect.promise(() => otherRange.arrayBuffer())
     for (const path of ["%2e%2e%2fsecret", "unknown-id"])
       assert.strictEqual(
         (yield* Effect.promise(() =>

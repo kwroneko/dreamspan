@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { StMarkdown } from "../src/ui/StMarkdown.tsx"
 import { scopeStyles } from "../src/ui/html/css.ts"
 import { savedMedia } from "../src/ui/html/savedMedia.ts"
+import type { SavedMediaLookup } from "@dreamspan/shared/savedMedia.ts"
 import { extractStyles, HtmlMessageContext, HtmlSettingsContext, type PanelPermit } from "../src/ui/html/messageHtml.ts"
 import { htmlClassifiers, htmlSchemas, isDocumentBlock } from "../src/ui/html/parts.ts"
 import { registerHtmlParts } from "../src/ui/html/register.ts"
@@ -311,6 +312,68 @@ describe("external media consent", () => {
       expect(render('<img src="https://media.invalid/other.png">')).not.toContain("/media/")
       expect(render('<img src="https://media.invalid/other.png">', { mediaScope: "chat=synthetic" })).toContain(
         "/media/external?chat=synthetic"
+      )
+    } finally {
+      savedMedia.install(null)
+    }
+  })
+  it("plays saved video only, with its poster under the image rules and tracks left out", async () => {
+    savedMedia.install(async (urls) =>
+      urls.flatMap((url): ReadonlyArray<SavedMediaLookup> =>
+        url === "https://media.invalid/v.webm"
+          ? [{ url, mediaId: "v1", waiting: false }]
+          : url === "https://media.invalid/p.png"
+            ? [{ url, mediaId: "p1", waiting: false }]
+            : url === "https://media.invalid/later.webm"
+              ? [{ url, mediaId: null, waiting: true }]
+              : []
+      )
+    )
+    try {
+      const sources = {
+        saved: '<video src="https://media.invalid/v.webm" poster="https://media.invalid/p.png" autoplay></video>',
+        source:
+          '<video><source src="https://media.invalid/v.webm" type="video/webm"><track src="https://media.invalid/t.vtt"></video>',
+        mixed:
+          '<video><source src="https://media.invalid/v.webm"><source src="https://media.invalid/other.mp4"></video>',
+        unsaved: '<video src="https://media.invalid/other.mp4"></video>',
+        downloading: '<video src="https://media.invalid/later.webm"></video>',
+        posterOnly: '<video src="https://media.invalid/v.webm" poster="https://media.invalid/other.png"></video>',
+        empty: "<video controls></video>"
+      }
+      for (const source of Object.values(sources)) render(source)
+      await new Promise((done) => setTimeout(done, 50))
+      const saved = render(sources.saved)
+      expect(saved).toContain('src="/media/saved/v1"')
+      expect(saved).toContain('poster="/media/saved/p1"')
+      expect(saved).toContain("controls")
+      expect(saved).toContain('preload="metadata"')
+      expect(saved).not.toMatch(/autoPlay|autoplay/)
+      expect(saved).not.toContain("Images from other sites are blocked.")
+      const source = render(sources.source)
+      expect(source).toContain('src="/media/saved/v1"')
+      // Captions aren't a saved type: the track goes, and the note says something was left out.
+      expect(source).not.toContain("<track")
+      expect(source).not.toContain("t.vtt")
+      // A video that names any unsaved file stays out, with consent or without: the proxy never
+      // serves video.
+      for (const key of ["mixed", "unsaved", "empty"] as const)
+        for (const scope of [undefined, "chat=synthetic"]) {
+          const html = render(sources[key], scope ? { mediaScope: scope } : {})
+          expect(html, key).not.toContain("<video")
+          expect(html, key).not.toContain("https://media.invalid")
+          expect(html, key).not.toContain("/media/external?")
+        }
+      // Still downloading: a blank placeholder, never the other site.
+      const downloading = render(sources.downloading)
+      expect(downloading).toContain("<video")
+      expect(downloading).not.toContain("https://media.invalid")
+      // An unsaved poster follows consent: blocked without it, proxied with it.
+      const blockedPoster = render(sources.posterOnly)
+      expect(blockedPoster).toContain('src="/media/saved/v1"')
+      expect(blockedPoster).not.toContain("poster=")
+      expect(render(sources.posterOnly, { mediaScope: "chat=synthetic" })).toContain(
+        'poster="/media/external?chat=synthetic'
       )
     } finally {
       savedMedia.install(null)

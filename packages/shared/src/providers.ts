@@ -347,14 +347,49 @@ export const endpointsStale = (endpoints: ModelEndpoints | undefined, now: numbe
  * A model's price from its connection's own price endpoint (spec/PRICES.md §4.7), when the user
  * opted in. `price` is null when the server lists the model without a known input or output rate.
  */
+/**
+ * One of the routes a price endpoint says it may send the model to (§4.4): its rates, the model's
+ * filling what the route leaves unknown (null when neither knows input and output), and the
+ * list prices it is compared with, for display.
+ */
+export const PriceFeedRoute = Schema.Struct({
+  target: Schema.optionalKey(Schema.String),
+  upstream: Schema.optionalKey(Schema.String),
+  price: Schema.NullOr(Price),
+  listInput: Schema.optionalKey(Schema.Number),
+  listOutput: Schema.optionalKey(Schema.Number),
+  pctOfList: Schema.optionalKey(Schema.Number)
+})
+export type PriceFeedRoute = typeof PriceFeedRoute.Type
+
 export const PriceFeed = Schema.Struct({
   fetchedAt: Schema.Number,
   validUntil: Schema.optionalKey(Schema.Number),
   etag: Schema.optionalKey(Schema.String),
   currency: Schema.String,
   price: Schema.NullOr(Price),
-  available: Schema.optionalKey(Schema.Boolean)
+  available: Schema.optionalKey(Schema.Boolean),
+  /** Display only (§4.4): who serves it, and its price as a percentage of the list price. */
+  servedBy: Schema.optionalKey(Schema.String),
+  pctOfList: Schema.optionalKey(Schema.Number),
+  routes: Schema.optionalKey(Schema.Array(PriceFeedRoute))
 })
+
+/**
+ * What the opt-in price endpoint answered last for a connection (§4.5), kept in memory:
+ * `supported` (prices in use), `unsupported` (the server doesn't publish prices; not asked again
+ * until the connection changes or models are refreshed), `denied` (the key isn't accepted for
+ * prices) or `failed` (asked again after 10 minutes; the last good prices stay).
+ */
+export const PriceFeedState = Schema.Struct({
+  state: Schema.Literals(["supported", "unsupported", "denied", "failed"]),
+  /** When it was last asked. */
+  at: Schema.Number,
+  /** When it will be asked again by itself; null for never (only a refresh asks). */
+  nextAt: Schema.NullOr(Schema.Number),
+  detail: Schema.NullOr(Schema.String)
+})
+export type PriceFeedState = typeof PriceFeedState.Type
 export type PriceFeed = typeof PriceFeed.Type
 
 /** What pi-ai's catalog and the upstream list report. Rewritten by every refresh. */

@@ -18,7 +18,19 @@ test.beforeAll(async () => {
     models: [
       { id: MODEL, name: MODEL, context_length: 32768, pricing: { prompt: "0.000001", completion: "0.000002" } }
     ],
-    prices: { object: "list", unit: "USD per 1M tokens", data: [{ id: MODEL, input: 0.25, output: 0.75 }] }
+    prices: {
+      object: "list",
+      unit: "USD per 1M tokens",
+      data: [
+        {
+          id: MODEL,
+          input: 0.25,
+          output: 0.75,
+          pct_of_list: 80,
+          routes: [{ target: "fast", upstream: "fast-1", input: 0.3, output: 0.9, pct_of_list: 90 }]
+        }
+      ]
+    }
   })
 })
 test.afterAll(async () => {
@@ -76,7 +88,7 @@ for (const [width, height] of [
       await hover(
         page,
         "Fetch prices from this server",
-        /Asks this server for its model prices each time you refresh models/
+        /Asks this server for its model prices when you refresh models, and about every hour/
       )
       await expectLayout(page, info, `price-endpoint-form-${width}-${theme}`)
       await toggle.click()
@@ -87,7 +99,13 @@ for (const [width, height] of [
       await expect(row.locator('[data-price-source="endpoint"]')).toContainText(
         "$0.25 / $0.75 per M tokens, from this server’s price list, fetched"
       )
+      await expect(row.locator('[data-price-source="endpoint"]')).toContainText("80 % of list price")
+      // The routes the server lists, with their own prices (PRICES §4.4).
+      await expect(row.locator("[data-price-routes]")).toHaveText("Routes: fast $0.3 / $0.9 (90 %)")
+      await hover(page, /^Routes: fast/, /Where this server may send the model/)
       expect(provider.priceRequests).toBe(before + 1)
+      // The switch says what the server answered last (PRICES §4.5).
+      await expect(page.locator('[data-price-feed="supported"]')).toContainText("Prices fetched")
       await hover(page, /from this server’s price list/, /This server’s own price for the model/)
       await expectLayout(page, info, `price-endpoint-row-${width}-${theme}`)
     })

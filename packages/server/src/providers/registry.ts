@@ -159,7 +159,19 @@ export interface ResponseObserver {
  */
 export interface PriceSources {
   /** The connection's own price endpoint (PRICES §4), when the user opted in. */
-  readonly endpoint: { readonly price: Price; readonly fetchedAt: number } | null
+  readonly endpoint: {
+    readonly price: Price
+    readonly fetchedAt: number
+    /**
+     * The routes the server says it may send the model to (PRICES §4.4), each priced over the
+     * model's own rates; a request is priced from one only when the ledger captured its upstream.
+     */
+    readonly routes?: ReadonlyArray<{
+      readonly target?: string
+      readonly upstream?: string
+      readonly price: Price
+    }>
+  } | null
   /** The provider's model list, or for a pinned route its endpoint list (`endpoints`). */
   readonly list: { readonly price: Price; readonly fetchedAt: number | null; readonly endpoints: boolean } | null
   /** The built-in table: the supplement over pi-ai's catalog. */

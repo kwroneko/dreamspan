@@ -2,13 +2,16 @@
 // (spec/PROVIDERS.md). Every handler acts as the authenticated user; storage enforces
 // ownership, so another user's ids are NotFound.
 import { type AppApi, ConnectionTest, CurrentUser, ModelRefresh, NetworkSettings } from "@dreamspan/shared/api.ts"
+import type { RecomputeTarget } from "@dreamspan/shared/costFormulas.ts"
 import { Forbidden, ServerError } from "@dreamspan/shared/errors.ts"
-import type { ModelId } from "@dreamspan/shared/providers.ts"
+import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
 import { Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { Network } from "../net/Network.ts"
 import { Providers } from "../providers/Providers.ts"
+import { recomputeCosts } from "../providers/recompute.ts"
+import { ProviderRegistry } from "../providers/registry.ts"
 
 /** Failures the client can't act on are logged here and reported without internals. */
 const toServerError = (operation: string) => (error: unknown) =>
@@ -25,10 +28,23 @@ const admin = Effect.gen(function* () {
 /** The providers a new connection starts from (providerApi.ts), the same for every user. */
 export const makeProviderListHandlers = Effect.gen(function* () {
   const providers = yield* Providers
+  const reader = yield* Reader
+  const writer = yield* Writer
+  const registry = yield* ProviderRegistry
+  const recompute = (target: RecomputeTarget, apply: boolean, operation: string) =>
+    Effect.flatMap(CurrentUser, (user) => recomputeCosts({ reader, writer, registry }, user.id, target, apply)).pipe(
+      Effect.catch(toServerError(operation))
+    )
   return {
+    PreviewCostRecompute: ({ target }: { target: RecomputeTarget }) =>
+      recompute(target, false, "PreviewCostRecompute").pipe(Effect.map(({ count, from, to }) => ({ count, from, to }))),
+    ApplyCostRecompute: ({ target }: { target: RecomputeTarget }) =>
+      recompute(target, true, "ApplyCostRecompute").pipe(Effect.map(({ changed }) => ({ changed }))),
     ListProviders: () => Effect.sync(() => providers.providers()),
     RefreshModelEndpoints: ({ modelId }: { modelId: ModelId }) =>
-      Effect.flatMap(CurrentUser, (user) => providers.refreshEndpoints(user.id, modelId))
+      Effect.flatMap(CurrentUser, (user) => providers.refreshEndpoints(user.id, modelId)),
+    GetPriceFeedState: ({ connectionId }: { connectionId: ConnectionId }) =>
+      Effect.flatMap(CurrentUser, (user) => providers.priceFeedState(user.id, connectionId))
   }
 })
 

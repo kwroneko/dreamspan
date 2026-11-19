@@ -2061,6 +2061,34 @@ const WriteOpsChatOwn = RpcGroup.make(
    * Stores what a connection's price endpoint said (PRICES §4.7), by model key: each named model's
    * feed is replaced, and a null feed removed (the list no longer names the model).
    */
+  /**
+   * Re-prices closed requests (spec/PRICES.md §6.1), one transaction: each row only while it is
+   * still the owner's, closed and priced by `expectFormula` (so a row changed since it was read
+   * is left alone). The ledger trigger lets only rate-priced rows change, never a reported charge.
+   */
+  Rpc.make("RecomputeCosts", {
+    payload: {
+      userId: UserId,
+      rows: Schema.Array(
+        Schema.Struct({
+          id: Schema.String,
+          expectFormula: Schema.String,
+          cost: Schema.Number,
+          currency: Schema.String,
+          formula: Schema.String,
+          rates: Schema.Struct({
+            input: Schema.Number,
+            read: Schema.Number,
+            write: Schema.Number,
+            writeLong: Schema.Number,
+            output: Schema.Number
+          })
+        })
+      ).check(Schema.isMaxLength(1000))
+    },
+    success: Schema.Struct({ changed: Schema.Int }),
+    error: StorageError
+  }),
   Rpc.make("SetModelPriceFeeds", {
     payload: {
       userId: UserId,
@@ -4906,6 +4934,50 @@ const ReadOpsOwn = RpcGroup.make(
     payload: { userId: UserId, connectionId: ConnectionId },
     success: ConnectionForRequest,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Connections whose user turned on the price endpoint (spec/PRICES.md §4.6) and that sent a
+   * request since `usedSince`: the only ones the price timer asks.
+   */
+  /**
+   * A page of the user's closed requests priced from rates (not reported), oldest first, after
+   * (`afterAt`, `afterId`): those of one model (`modelKey`), or those priced by a formula starting
+   * with `formulaPrefix` other than `exceptFormula`. What "Apply to past requests" re-prices from.
+   */
+  Rpc.make("ListRecomputeRows", {
+    payload: {
+      userId: UserId,
+      modelKey: Schema.NullOr(Schema.String),
+      formulaPrefix: Schema.NullOr(Schema.String),
+      exceptFormula: Schema.NullOr(Schema.String),
+      afterAt: Schema.Number,
+      afterId: Schema.String,
+      limit: Schema.Int
+    },
+    success: Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        connectionId: ConnectionId,
+        kind: Schema.String,
+        modelId: Schema.NullOr(Schema.String),
+        modelKey: Schema.String,
+        upstream: Schema.NullOr(Schema.String),
+        startedAt: Schema.Number,
+        formula: Schema.String,
+        inputUncached: Schema.NullOr(Schema.Int),
+        cacheRead: Schema.NullOr(Schema.Int),
+        cacheWrite: Schema.NullOr(Schema.Int),
+        cacheWriteLong: Schema.NullOr(Schema.Int),
+        output: Schema.NullOr(Schema.Int),
+        reasoning: Schema.NullOr(Schema.Int)
+      })
+    ),
+    error: StorageError
+  }),
+  Rpc.make("ListPriceFeedConnections", {
+    payload: { usedSince: Schema.Number },
+    success: Schema.Array(Schema.Struct({ userId: UserId, connectionId: ConnectionId })),
+    error: StorageError
   }),
   Rpc.make("ListModels", {
     payload: { userId: UserId, connectionId: ConnectionId, includeHidden: Schema.Boolean },

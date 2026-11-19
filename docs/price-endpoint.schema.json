@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "price-endpoint.schema.json",
+  "title": "Price list (GET {base}/v1/prices)",
+  "description": "A server's model prices, in the format of docs/price-endpoint.md. Every rate is per million tokens in the list's currency, except per_request, which is per request. An absent or null rate is unknown, 0 is free.",
+  "type": "object",
+  "required": ["object", "unit", "data"],
+  "properties": {
+    "object": { "const": "list" },
+    "unit": {
+      "type": "string",
+      "description": "\"<currency> per 1M tokens\". A client ignores a response whose unit it doesn't recognise.",
+      "pattern": "^\\S{1,16} per 1M tokens$"
+    },
+    "currency": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16,
+      "description": "ISO 4217 code or a short label. Overrides the currency in unit. Default USD."
+    },
+    "fetched_at": { "type": "string", "format": "date-time", "description": "When the server computed these prices." },
+    "valid_until": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Until when a client may use these prices without asking again."
+    },
+    "data": { "type": "array", "items": { "$ref": "#/$defs/model" } }
+  },
+  "$defs": {
+    "rate": {
+      "description": "Per million tokens. Absent or null: unknown. Negative, non-finite or above 1e9: unknown for that entry.",
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1000000000
+    },
+    "cacheWrite": {
+      "description": "One rate for every cache lifetime, or rates by lifetime: \"5m\", \"1h\", or any \"<n>s\", \"<n>m\", \"<n>h\".",
+      "oneOf": [
+        { "$ref": "#/$defs/rate" },
+        {
+          "type": "object",
+          "propertyNames": { "pattern": "^[0-9]+[smh]$" },
+          "additionalProperties": { "$ref": "#/$defs/rate" }
+        }
+      ]
+    },
+    "rates": {
+      "type": "object",
+      "properties": {
+        "input": { "$ref": "#/$defs/rate" },
+        "output": { "$ref": "#/$defs/rate" },
+        "cache_read": { "$ref": "#/$defs/rate" },
+        "cache_write": { "$ref": "#/$defs/cacheWrite" },
+        "reasoning": { "$ref": "#/$defs/rate", "description": "Reasoning tokens, when they differ from output." },
+        "per_request": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "A flat price per request, in the list's currency (not per million tokens)."
+        }
+      }
+    },
+    "tier": {
+      "description": "Total input (uncached + cache read + cache write) above input_above bills the whole request at the tier's rates; a rate missing from a tier keeps the base rate.",
+      "allOf": [
+        { "$ref": "#/$defs/rates" },
+        {
+          "type": "object",
+          "required": ["input_above"],
+          "properties": { "input_above": { "type": "integer", "minimum": 0 } }
+        }
+      ]
+    },
+    "route": {
+      "description": "Where the server may send the model, and what that costs. Informational unless the server reports which route served a request.",
+      "allOf": [
+        { "$ref": "#/$defs/rates" },
+        {
+          "type": "object",
+          "properties": {
+            "target": { "type": "string" },
+            "upstream": { "type": "string" },
+            "list_input": { "$ref": "#/$defs/rate" },
+            "list_output": { "$ref": "#/$defs/rate" },
+            "pct_of_list": { "type": "number", "minimum": 0 },
+            "tiers": { "type": "array", "items": { "$ref": "#/$defs/tier" } }
+          }
+        }
+      ]
+    },
+    "model": {
+      "allOf": [
+        { "$ref": "#/$defs/rates" },
+        {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "description": "The same id /v1/models returns and a client sends as model."
+            },
+            "available": { "type": "boolean", "description": "false: the server won't serve the model now." },
+            "served_by": { "type": "string" },
+            "pct_of_list": { "type": "number", "minimum": 0 },
+            "order": { "type": "integer" },
+            "tiers": { "type": "array", "items": { "$ref": "#/$defs/tier" } },
+            "routes": { "type": "array", "items": { "$ref": "#/$defs/route" } }
+          }
+        }
+      ]
+    }
+  }
+}

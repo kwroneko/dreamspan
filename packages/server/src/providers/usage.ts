@@ -214,7 +214,7 @@ export const finalCounts = (
 export const priceCost = (counts: TokenCounts, price: Price): number | null => pricedCost(counts, price)?.amount ?? null
 
 /** `priceCost` with the rates it applied (the request's tier), which the ledger keeps beside the cost. */
-const pricedCost = (counts: TokenCounts, price: Price): { amount: number; rates: PricedRates } | null => {
+export const pricedCost = (counts: TokenCounts, price: Price): { amount: number; rates: PricedRates } | null => {
   const { inputUncached, cacheRead, cacheWrite, output } = counts
   if (inputUncached === null || output === null) return null
   const read = cacheRead ?? 0
@@ -284,12 +284,14 @@ export const costOf = (
  */
 const tableFormula = (
   id: string,
-  pick: (sources: PriceSources) => { readonly price: Price; readonly formula: string } | null,
-  legacy = false
+  pick: (sources: PriceSources, upstream: string | null) => { readonly price: Price; readonly formula: string } | null,
+  legacy = false,
+  /** Every price a request could be charged before its route is known (the bound is the dearest). */
+  candidates?: (sources: PriceSources) => ReadonlyArray<Price>
 ): CostFormula => {
-  const chosen = (input: { readonly price: Price | null; readonly sources?: PriceSources }) =>
+  const chosen = (input: { readonly price: Price | null; readonly sources?: PriceSources }, upstream: string | null) =>
     input.sources !== undefined
-      ? pick(input.sources)
+      ? pick(input.sources, upstream)
       : legacy && input.price !== null
         ? { price: input.price, formula: id }
         : null
@@ -297,11 +299,16 @@ const tableFormula = (
     id,
     appliesTo: () => true,
     upperBound: ({ inputTokens, outputTokens, price, sources }) => {
-      const found = chosen({ price, ...(sources ? { sources } : {}) })
-      return found === null ? null : priceBound(found.price, inputTokens, outputTokens)
+      const found = chosen({ price, ...(sources ? { sources } : {}) }, null)
+      if (found === null) return null
+      const all = [found.price, ...(sources && candidates ? candidates(sources) : [])]
+      const bounds = all.map((p) => priceBound(p, inputTokens, outputTokens))
+      // Mixed currency labels can't be compared, so no bound (as user rules do).
+      if (new Set(bounds.map((b) => b.currency)).size > 1) return null
+      return bounds.reduce((a, b) => (b.amount > a.amount ? b : a))
     },
     cost: (input) => {
-      const found = chosen(input)
+      const found = chosen(input, input.capture.upstream)
       const priced = found === null ? null : pricedCost(input.counts, found.price)
       return priced === null
         ? null
@@ -313,6 +320,20 @@ const tableFormula = (
           }
     }
   }
+}
+
+/** The route that served a request, by the upstream the ledger captured: its `upstream`, else its `target`. */
+const upstreamRoute = <R extends { readonly target?: string; readonly upstream?: string }>(
+  routes: ReadonlyArray<R> | undefined,
+  upstream: string | null
+): R | null => {
+  if (!upstream || !routes) return null
+  const wanted = upstream.toLowerCase()
+  return (
+    routes.find((route) => route.upstream?.toLowerCase() === wanted) ??
+    routes.find((route) => route.target?.toLowerCase() === wanted) ??
+    null
+  )
 }
 
 const at = (time: number | null) => (time === null ? "" : `:${time}`)
@@ -335,8 +356,22 @@ export const builtinCostFormulas: Array<CostFormula> = [
       ? { price: s.list.price, formula: `list${s.list.endpoints ? ":endpoints" : ""}${at(s.list.fetchedAt)}` }
       : null
   ),
-  tableFormula("endpoint", (s) =>
-    s.endpoint ? { price: s.endpoint.price, formula: `endpoint:${s.endpoint.fetchedAt}` } : null
+  // A route's rates apply only when the request's upstream is one of the routes (PRICES §4.4);
+  // before dispatch the route isn't known, so the bound is the dearest (§5.2).
+  tableFormula(
+    "endpoint",
+    (s, upstream) => {
+      if (!s.endpoint) return null
+      const route = upstreamRoute(s.endpoint.routes, upstream)
+      return route
+        ? {
+            price: route.price,
+            formula: `endpoint:${s.endpoint.fetchedAt}:${(route.upstream ?? route.target)!.slice(0, 160)}`
+          }
+        : { price: s.endpoint.price, formula: `endpoint:${s.endpoint.fetchedAt}` }
+    },
+    false,
+    (s) => (s.endpoint?.routes ?? []).map((route) => route.price)
   ),
   {
     id: "reported",

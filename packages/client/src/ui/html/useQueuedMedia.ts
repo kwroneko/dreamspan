@@ -18,6 +18,7 @@ export function useQueuedMediaProps(props: Record<string, unknown>, tag: string)
   const keys = [
     ...(["img", "input", "audio", "source"].includes(tag) ? ["src"] : []),
     ...(tag === "img" ? ["srcSet"] : []),
+    ...(tag === "video" ? ["poster"] : []),
     ...(["body", "table", "td", "th"].includes(tag) ? ["background"] : []),
     ...(["image", "feimage"].includes(tag) ? ["href", "xlinkHref", "xLinkHref"] : [])
   ]

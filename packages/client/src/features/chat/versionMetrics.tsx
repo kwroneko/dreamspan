@@ -60,6 +60,22 @@ export const shortCost = (m: VersionMetrics) => {
   return `${m.costEstimated ? "~" : ""}${formatCost(first)}${m.costUnknown > 0 || m.costs.length > 1 ? "+" : ""}`
 }
 
+const fetchedFormat = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit"
+})
+
+/** `endpoint:<fetched at>[:<route>]`: when the server's prices were fetched, and the route they were for. */
+const endpointSource = (formula: string) => {
+  const [, at, ...route] = formula.split(":")
+  const time = Number(at)
+  return `this server's price list${Number.isFinite(time) && time > 0 ? `, fetched ${fetchedFormat.format(time)}` : ""}${
+    route.length ? ` (route ${route.join(":")})` : ""
+  }`
+}
+
 const sourceName = (formula: string) =>
   formula === "reported"
     ? "the provider's charge"
@@ -71,7 +87,7 @@ const sourceName = (formula: string) =>
         : formula === "list" || formula.startsWith("list:")
           ? "the provider's price list"
           : formula.startsWith("endpoint:")
-            ? "this server's price list"
+            ? endpointSource(formula)
             : formula.startsWith("user:")
               ? "your cost formula"
               : formula

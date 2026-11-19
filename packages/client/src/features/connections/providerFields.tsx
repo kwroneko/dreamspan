@@ -9,7 +9,7 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Field, Fieldset, formText, Input, SecretInput } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Disclosure } from "../../ui/Surface.tsx"
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 import { parseOptionalInt } from "./data.ts"
 
 /** The provider settings as the form holds them: only what the user changed, numbers as typed. */
@@ -308,7 +308,8 @@ export function ProviderAdvanced({
   draft,
   onChange,
   problems,
-  cacheTtl
+  cacheTtl,
+  priceStatus
 }: {
   provider: ProviderInfo
   draft: ProviderDraft
@@ -316,6 +317,8 @@ export function ProviderAdvanced({
   problems: Problems
   /** The connection's cache lifetime field, for providers that show it. */
   cacheTtl: { readonly value: string; readonly onChange: (value: string) => void; readonly error: string | null }
+  /** What the price endpoint answered last, shown under its switch (a saved connection only). */
+  priceStatus?: ReactNode
 }) {
   const { settings } = parseProviderDraft(provider, draft)
   const shows = (name: string) => provider.settings.includes(name)
@@ -439,10 +442,11 @@ export function ProviderAdvanced({
       <Switch
         checked={settings.priceEndpoint ?? false}
         onCheckedChange={(priceEndpoint) => onChange({ ...draft, priceEndpoint })}
-        hint="Asks this server for its model prices each time you refresh models. Its prices then replace the app’s for this connection; your own prices for this connection still come first. Off: nothing is asked."
+        hint="Asks this server for its model prices when you refresh models, and about every hour while you use this connection. Its prices then replace the app’s for this connection; your own prices for this connection still come first. Off: nothing is asked."
       >
         Fetch prices from this server
       </Switch>
+      {settings.priceEndpoint === true && priceStatus}
       {provider.accounting.length > 0 && <Facts title="How tokens are counted" items={provider.accounting} />}
       {provider.rules.length > 0 && <Facts title="Fixes for some models" items={provider.rules} />}
       {changed && (

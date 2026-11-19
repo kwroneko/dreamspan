@@ -38,6 +38,7 @@ import {
   providerOf,
   providerSetupAtom
 } from "./data.ts"
+import { PriceFeedStatus } from "./priceFeedStatus.tsx"
 import {
   AwsKeyFields,
   awsKey,
@@ -288,6 +289,11 @@ export function SettingsSection(props: ConnectionSectionProps) {
             provider={provider}
             draft={providerDraft}
             onChange={editProvider}
+            priceStatus={
+              connection.providerSettings.priceEndpoint === true ? (
+                <PriceFeedStatus connectionId={connection.id} />
+              ) : null
+            }
             problems={{
               region: null,
               project: null,

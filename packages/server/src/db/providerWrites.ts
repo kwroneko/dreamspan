@@ -356,6 +356,20 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         return yield* reloadModel(modelId)
       }).pipe(transaction(sql, "SetModelEndpoints")),
 
+    RecomputeCosts: ({ userId, rows }) =>
+      Effect.gen(function* () {
+        let changed = 0
+        for (const row of rows) {
+          const done = yield* sql<{ id: string }>`
+            UPDATE llm_requests SET cost = ${row.cost}, cost_currency = ${row.currency},
+              cost_formula = ${row.formula}, cost_rates_json = ${JSON.stringify(row.rates)}
+            WHERE id = ${row.id} AND owner_user_id = ${userId} AND status <> 'running'
+              AND cost_formula IS ${row.expectFormula} AND cost_rates_json IS NOT NULL RETURNING id`
+          changed += done.length
+        }
+        return { changed }
+      }).pipe(transaction(sql, "RecomputeCosts")),
+
     SetModelPriceFeeds: ({ userId, connectionId, feeds }) =>
       Effect.gen(function* () {
         yield* ownedConnection(userId, connectionId)
