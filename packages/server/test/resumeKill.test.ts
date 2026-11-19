@@ -17,7 +17,12 @@ import { fixtureSql } from "./support/lcmFixtures.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 
 type Body = { readonly messages: Array<{ role: string; content?: unknown }>; readonly tools?: Array<unknown> }
-const agentOn = [{ key: "agent.enabled" as const, value: { on: true } }]
+// These replies end in plain text, carried on by a prefill: the contract that takes text (Either).
+// The send tool, the default, has its own case below ("Cut the send.").
+const agentOn = [
+  { key: "agent.enabled" as const, value: { on: true } },
+  { key: "output.contract" as const, value: "both" as const }
+]
 
 const chunk = (delta: Record<string, unknown>, finish: string | null = null) => ({
   id: "cmpl-k",
@@ -47,7 +52,7 @@ const bodies = (requests: ReadonlyArray<Recorded>) =>
  * that never answers. Once resumed, each finishes.
  */
 const provider = () => {
-  const held = { text: 0, wait: 0, plain: 0, first: 0, reasoning: 0, json: 0, unicode: 0 }
+  const held = { text: 0, wait: 0, plain: 0, first: 0, reasoning: 0, json: 0, unicode: 0, send: 0 }
   const handler = (request: Recorded, res: ServerResponse) => {
     const body = request.body as unknown as Body
     const user = lastUser(body)
@@ -88,6 +93,22 @@ const provider = () => {
       const torn = Buffer.from(`data: ${JSON.stringify(completionChunks(["漣"], {})[0])}\n\n`)
       res.write(torn.subarray(0, torn.indexOf(Buffer.from("漣")) + 1))
       return
+    }
+    if (user.includes("Cut the send.")) {
+      const call = (args: string, done: boolean) => [
+        chunk({
+          role: "assistant",
+          tool_calls: [{ index: 0, id: "s1", type: "function", function: { name: "send_message", arguments: args } }]
+        }),
+        ...(done ? [chunk({}, "tool_calls")] : [])
+      ]
+      if (held.send++ === 0) {
+        // The send's arguments half written, then nothing more: the app dies here.
+        res.writeHead(200, { "content-type": "text/event-stream" })
+        res.write(`data: ${JSON.stringify(call('{"message":"Ansel wa', false)[0])}\n\n`)
+        return
+      }
+      return sse(res, call(JSON.stringify({ message: "Ansel waves." }), true))
     }
     if (user.includes("Cut the text.") && held.text++ === 0) {
       // One delta, then nothing more: the app dies here. The saves after a stall keep it.
@@ -143,7 +164,8 @@ const crashAndResume = (
     | "Cut the first."
     | "Cut the reasoning."
     | "Cut the json."
-    | "Cut the unicode.",
+    | "Cut the unicode."
+    | "Cut the send.",
   cutReached: (dataDir: string, held: ReturnType<typeof provider>["held"]) => Effect.Effect<boolean, unknown>
 ) => {
   const config = testConfig()
@@ -181,6 +203,13 @@ const crashAndResume = (
       Effect.gen(function* () {
         const server = yield* spawnServer(config)
         const api = yield* clientAt(server.port)
+        // The send tool alone, the default contract, for its own case.
+        if (message === "Cut the send.")
+          yield* api.ChangeCast({
+            chatId: seeded.chatId,
+            slotId: null,
+            change: { _tag: "OutputContract", contract: "send_message" }
+          })
         const sent = yield* posted(
           api.SendMessage({ chatId: seeded.chatId, parentSlotId: seeded.leaf, branch: false, content: message })
         )
@@ -329,6 +358,15 @@ it.live(
 it.live(
   "killed inside a UTF-8 character and SSE frame: only complete text is kept",
   () => crashAndResume("Cut the unicode.", (dir) => savedText(dir, "Ansel 🌊")),
+  { timeout: 180_000, tags: ["slow"] }
+)
+
+it.live(
+  "killed while the send tool's message streams: Resume writes the turn again with its tools, and the send is the reply",
+  () =>
+    crashAndResume("Cut the send.", (_dir, held) =>
+      held.send > 0 ? Effect.as(Effect.sleep(2500), true) : Effect.succeed(false)
+    ),
   { timeout: 180_000, tags: ["slow"] }
 )
 
