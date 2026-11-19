@@ -145,7 +145,13 @@ export const SubagentRow = Schema.Struct({
   /** What its requests cost, as the ledger priced them; null when unknown or still running. */
   cost: Schema.NullOr(Schema.Struct({ amount: Schema.Number, currency: Schema.String })),
   /** It was stopped with the reply and carried on where it stopped when the reply was resumed (§8). */
-  resumed: Schema.optionalKey(Schema.Boolean)
+  resumed: Schema.optionalKey(Schema.Boolean),
+  /** Its latest `report_progress` line: "Read 12 of 40 files" (spec/SUBAGENTS.md §4). */
+  progress: Schema.optionalKey(Schema.String),
+  /** It works in the background: the reply goes on, and its report reaches the reply later (§3.2). */
+  background: Schema.optionalKey(Schema.Boolean),
+  /** It carries a finished subagent on with the assistant's message (`message_agent`, §4). */
+  continued: Schema.optionalKey(Schema.Boolean)
 })
 export type SubagentRow = typeof SubagentRow.Type
 

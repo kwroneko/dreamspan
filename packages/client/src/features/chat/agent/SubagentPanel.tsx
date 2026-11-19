@@ -2,7 +2,9 @@
 // "Subagent · Look things up · name", its model, "N steps · T s · $x" and its status. Opening it
 // shows the task and the subagent's own steps, with the same rows (and answers to calls that ask
 // first) as the reply's. Stop ends it alone, and the assistant carries on with what it had;
-// Inspect opens its own run in the run inspector.
+// Inspect opens its own run in the run inspector. A background subagent says so, its latest
+// progress line shows under its facts, and one carried on by a message (`message_agent`) shows
+// under that call's step, the same way (spec/SUBAGENTS.md §3.2, §4).
 import type { SubagentRow, SubagentStatus } from "@dreamspan/shared/agent.ts"
 import { Link } from "@tanstack/react-router"
 import { useId, useState } from "react"
@@ -83,7 +85,18 @@ export function SubagentPanel({ step, version, session }: StepActionProps) {
               <span className="block text-muted">
                 {subagentModel(row)} · {subagentFacts(row)}
               </span>
+              {row.background && (
+                <span className="block text-muted" data-subagent-background="">
+                  In the background
+                </span>
+              )}
+              {row.continued && <span className="block text-muted">Carried on with a message</span>}
               {row.resumed && <span className="block text-muted">Resumed where it stopped</span>}
+              {row.progress && (
+                <span className="block text-text italic [overflow-wrap:anywhere]" data-subagent-progress="">
+                  {row.progress}
+                </span>
+              )}
             </span>
           </button>
         </Tooltip>

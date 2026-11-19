@@ -4145,6 +4145,31 @@ const WriteOpsLibraryOwn = RpcGroup.make(
    * `contract`: the run ended, and this is how it met the send tool's contract (its outcome, null
    * when it reached none, and its nudges), for the per-model metrics (spec/REPLY-CONTRACT.md §3.6).
    */
+   * A follow-up to a finished or stopped subagent (spec/SUBAGENTS.md §4), in one transaction: a new
+   * child rollout of the running parent for its `message_agent` call, carried on from the source
+   * (same handle, snapshot and model; `parent_rollout_id` = the source), with the transcript given
+   * and the kept calls' receipts. Idempotent per (parent, call); counted toward the run's subagents.
+   */
+  Rpc.make("ContinueSubagent", {
+    payload: {
+      userId: UserId,
+      parentRolloutId: Schema.String,
+      callId: Schema.String,
+      sourceRolloutId: Schema.String,
+      rolloutId: Schema.String,
+      transcript: Schema.String,
+      steps: Schema.Int,
+      keptCalls: Schema.Array(Schema.String),
+      background: Schema.Boolean,
+      perRun: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 64 }))),
+      runCost: Schema.optionalKey(Schema.Number)
+    },
+    success: Schema.Union([
+      Schema.Struct({ rolloutId: Schema.String, handle: Schema.String, existing: Schema.Boolean }),
+      Schema.Struct({ refused: Schema.Literals(["not_running", "not_found", "running", "limit", "spent"]) })
+    ]),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("SaveRolloutTranscript", {
     payload: {
       userId: UserId,
@@ -6099,6 +6124,31 @@ const ReadOpsOwn = RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A subagent of the reply `versionId`'s run: its rollout status, for its Stop (subagentReads.ts). */
+  /**
+   * A subagent by the handle or name its parent gives (`message_agent`, spec/SUBAGENTS.md §4): one
+   * started on the run chain by one of `calls` (those its transcript holds), its newest run.
+   */
+  Rpc.make("FindSubagentByHandle", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      handle: Schema.String,
+      calls: Schema.Array(Schema.String)
+    },
+    success: Schema.NullOr(
+      Schema.Struct({
+        rolloutId: Schema.String,
+        handle: Schema.String,
+        status: Schema.String,
+        partial: Schema.NullOr(Schema.String),
+        row: SubagentRow,
+        transcript: Schema.NullOr(Schema.String),
+        snapshot: Schema.NullOr(Schema.String),
+        spawnedBy: Schema.String
+      })
+    ),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("SubagentStatus", {
     payload: { userId: UserId, versionId: VersionId, rolloutId: Schema.String },
     success: Schema.String,

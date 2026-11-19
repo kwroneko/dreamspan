@@ -36,6 +36,25 @@ declare module "@earendil-works/pi-agent-core" {
        * the failure counts every time it wrote text (§3.4).
        */
       readonly answersCut?: number
+      /**
+       * A background subagent's report (spec/SUBAGENTS.md §3.2): the call that started it, so a
+       * resumed run knows which reports it still waits for.
+       */
+      readonly report?: { readonly callId: string; readonly handle: string }
+      /** A background subagent's progress note (§4), by its handle. */
+      readonly progress?: string
+      /** A message the parent sent this subagent (`message_agent`, §4). */
+      readonly fromParent?: true
+    }
+    /**
+     * The text before it became a message of its own (contract `several`): the run's model ended
+     * its turn while background subagents still ran, and the run waited for their reports
+     * (spec/SUBAGENTS.md §3.2). Never sent; it marks the message's end for the steps and Resume.
+     */
+    rpPosted: {
+      readonly role: "rpPosted"
+      readonly versionId: string
+      readonly timestamp: number
     }
   }
 }

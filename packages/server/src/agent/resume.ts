@@ -282,11 +282,15 @@ export const planMessageResume = (
   )
   const result = messages[resultIndex]
   const callId = result?.role === "toolResult" ? result.toolCallId : undefined
+  // A turn's text posted while the run waited for its subagents (spec/SUBAGENTS.md §3.2): that turn.
+  const posted = messages.findIndex((m) => m.role === "rpPosted" && m.versionId === versionId)
   const at = callId
     ? messages
         .slice(0, resultIndex)
         .findLastIndex((m) => m.role === "assistant" && m.content.some((p) => p.type === "toolCall" && p.id === callId))
-    : messages.findLastIndex((m) => m.role === "assistant")
+    : posted > 0
+      ? posted - 1
+      : messages.findLastIndex((m) => m.role === "assistant")
   if (at < 0) return new StepNotResumable("This message has no saved turn to write again.")
   const kept = messages.slice(0, at)
   const turn = messages[at]

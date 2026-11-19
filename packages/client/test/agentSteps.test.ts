@@ -6,6 +6,7 @@ import {
   isOpen,
   stepsText,
   stepsView,
+  subagentsWaitText,
   toolCount,
   turnsOf
 } from "../src/features/chat/agent/steps.ts"
@@ -41,12 +42,22 @@ describe("an agent reply's steps", () => {
 
   it("shows live steps while generating, and afterwards only for a run with tool calls", () => {
     const live = [tool("a", "running")]
-    expect(stepsView(live, undefined, true)).toEqual({ running: true, count: 1, ms: null, live })
+    expect(stepsView(live, undefined, true)).toEqual({ running: true, count: 1, ms: null, live, waitingFor: 0 })
     // Before the first step there's nothing to show.
     expect(stepsView(null, undefined, true)).toBeNull()
     expect(stepsView([], { count: 0, ms: null }, true)).toBeNull()
     // Done: the version's summary, the steps read when opened.
-    expect(stepsView(null, { count: 2, ms: 9000 }, false)).toEqual({ running: false, count: 2, ms: 9000, live: null })
+    expect(stepsView(null, { count: 2, ms: 9000 }, false)).toEqual({
+      running: false,
+      count: 2,
+      ms: 9000,
+      live: null,
+      waitingFor: 0
+    })
+    // Waiting for background subagents (spec/SUBAGENTS.md §3.2): shown before any step of its own.
+    expect(stepsView(null, undefined, true, 2)).toEqual({ running: true, count: 0, ms: null, live: [], waitingFor: 2 })
+    expect(subagentsWaitText(1)).toBe("Waiting for 1 subagent")
+    expect(subagentsWaitText(3)).toBe("Waiting for 3 subagents")
     // A plain reply, or an agent reply that called no tool, shows nothing.
     expect(stepsView(null, undefined, false)).toBeNull()
     expect(stepsView(null, { count: 0, ms: 300 }, false)).toBeNull()

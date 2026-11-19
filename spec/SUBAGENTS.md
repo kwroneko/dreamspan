@@ -1,6 +1,6 @@
 # Subagents
 
-**Status**: Proposed, 2026-11-17 (job `subagentspec`, design only). **SA1 built (subagents1, 2026-11-17), for workshops with option 1: see ARCHITECTURE §16, "Subagents"; its parts here are obsolete as a proposal.** **SA2 (the model list and the subagent model chip, §5) and SA3 (limits and concurrency, §6.2, §6.3) built (subagents23, 2026-11-19): see ARCHITECTURE §16, "Subagent models" and "Subagent limits"; §5 and §6.2–§6.3 are obsolete as a proposal, and where the build differs, DESIGN §7.10 records it as [P].** **SA4 built (subagents45, 2026-11-19): see ARCHITECTURE §16, "Nested Resume, receipts and effects"; §8 here is obsolete as a proposal.** SA5–SA7 are still proposed. The owner's statements are in DESIGN §7.10, marked **[D]**, and are quoted here where they apply. Everything else is **[P]** unless it cites a **[D]**. It is written as deltas from reference-harness `latest` (`9b385944`: ARCHITECTURE §8 "Agent Sessions", §8d, §8i, "Session types"; `src/tools/delegate.ts`, `src/tools/spawn-session.ts`) and from the built agent machinery (ARCHITECTURE §16 "Agent rollouts", "Workshop result boundaries and recovery", "Workshop transcript summaries"; AGENTIC §3–§5, §12; WORKSHOP §2–§3; MCP; FILES-AND-ENVIRONMENT). Claude Code's subagents (public docs, `code.claude.com/docs/en/sub-agents`, read 2026-11-17) are the UX reference.
+**Status**: Proposed, 2026-11-17 (job `subagentspec`, design only). **SA1 built (subagents1, 2026-11-17), for workshops with option 1: see ARCHITECTURE §16, "Subagents"; its parts here are obsolete as a proposal.** **SA2 (the model list and the subagent model chip, §5) and SA3 (limits and concurrency, §6.2, §6.3) built (subagents23, 2026-11-19): see ARCHITECTURE §16, "Subagent models" and "Subagent limits"; §5 and §6.2–§6.3 are obsolete as a proposal, and where the build differs, DESIGN §7.10 records it as [P].** **SA4 built (subagents45, 2026-11-19): see ARCHITECTURE §16, "Nested Resume, receipts and effects"; §8 here is obsolete as a proposal.** **SA5 built (subagents5, 2026-11-19): see ARCHITECTURE §16, "Background subagents and messages"; §3.2 and §4 here are obsolete as a proposal, and where the build differs, DESIGN §7.10 records it as [P].** SA6 and SA7 are still proposed. The owner's statements are in DESIGN §7.10, marked **[D]**, and are quoted here where they apply. Everything else is **[P]** unless it cites a **[D]**. It is written as deltas from reference-harness `latest` (`9b385944`: ARCHITECTURE §8 "Agent Sessions", §8d, §8i, "Session types"; `src/tools/delegate.ts`, `src/tools/spawn-session.ts`) and from the built agent machinery (ARCHITECTURE §16 "Agent rollouts", "Workshop result boundaries and recovery", "Workshop transcript summaries"; AGENTIC §3–§5, §12; WORKSHOP §2–§3; MCP; FILES-AND-ENVIRONMENT). Claude Code's subagents (public docs, `code.claude.com/docs/en/sub-agents`, read 2026-11-17) are the UX reference.
 
 The owner's statements this design starts from:
 
@@ -128,6 +128,8 @@ Story types are in §9, and only if the owner accepts them.
 
 ### 3.2 Background and parallel children
 
+*Obsolete as a proposal: built in SA5 (ARCHITECTURE §16, "Background subagents and messages"). Differences: `background` is offered only under the `several` contract; a report arrives at the next request boundary through the run's mailbox (the same position as `steer()`), and after the run's turn ended through a follow-up.*
+
 - `background: true` returns at once: "Started cache TTLs (research-2). Its report will reach you when it's done." The parent goes on.
 - **Reports arrive as harness messages.** When a background child ends, its report is queued into the parent with pi-agent-core 1.0.3's `steer()` (the same mechanism reference-harness uses for interjections), as an `rpApp` user message: "Subagent research-2 (cache TTLs) finished:" and the report in the data envelope. It reaches the model at the parent's next request boundary and is part of the flushed transcript, so the inspector and Resume see exactly where it arrived.
 - **A run doesn't end while its children run.** When the parent's model ends its turn (a final text) with background children still running, the run posts that text as a message (contract `several`, WORKSHOP §2.3), stays `running` with no provider request open, and the header badge says "Waiting for 2 subagents". Each report then arrives through `followUp()` and the run continues, so the assistant can use the results and write further messages. Stop ends the wait. This is Claude Code's "completion notification in a later turn", kept inside one run so that nothing reaches the model that isn't in its transcript.
@@ -140,6 +142,8 @@ Story types are in §9, and only if the owner accepts them.
 - **Two children in one folder** can collide. The `code` type's description tells the parent to give parallel coding children isolated copies; the app doesn't lock files, since the sandbox, not the folder, is the boundary (FILES §2.1 [D]).
 
 ## 4. Messages between parent and subagent
+
+*Obsolete as a proposal: built in SA5 (ARCHITECTURE §16, "Background subagents and messages"). Differences: progress notes never wake a waiting reply; a stopped child whose run can't be used and that had taken steps isn't continued (the parent starts a new one); the lookup needs the spawning call in the current transcript, on the run chain.*
 
 Owner [D]: "Claude code can also message its agents continuously."
 
@@ -240,7 +244,7 @@ All on existing surfaces (checked: `features/chat/agent/Steps.tsx`, `RunSteps.ts
 
 ## 8. Stop, Resume, regenerate
 
-*Obsolete as a proposal: built as SA4 (ARCHITECTURE §16). Background children's resume (the fourth bullet) comes with SA5.*
+*Obsolete as a proposal: built as SA4 (ARCHITECTURE §16); background children's resume (the fourth bullet) as SA5.*
 
 The rule: **a nested Stop or Resume never re-runs an effect silently.**
 

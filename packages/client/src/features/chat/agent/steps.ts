@@ -32,7 +32,21 @@ export interface StepsView {
   readonly ms: number | null
   /** The steps as streamed; null once the reply is done (read from its transcript on opening). */
   readonly live: ReadonlyArray<RolloutStep> | null
+  /** Background subagents the reply waits for (spec/SUBAGENTS.md §3.2); 0: none. */
+  readonly waitingFor: number
 }
+
+/**
+ * A finished message's steps as its run still changes them: a background subagent started there
+ * goes on after the message was posted (spec/SUBAGENTS.md §3.2). Null: none came after it ended.
+ */
+export const postedSteps = Atom.family((_id: VersionId) => Atom.make<ReadonlyArray<RolloutStep> | null>(null))
+
+/** Finished replies' steps by version, read once a page; dropped when their run changes them (`postedSteps`). */
+export const storedStepReads = new Map<string, Promise<unknown>>()
+
+/** "Waiting for 2 subagents". */
+export const subagentsWaitText = (n: number) => `Waiting for ${n === 1 ? "1 subagent" : `${n} subagents`}`
 
 /**
  * What to show for a version, or null for nothing. While generating, its live steps once it has
@@ -41,12 +55,14 @@ export interface StepsView {
 export const stepsView = (
   live: ReadonlyArray<RolloutStep> | null,
   summary: StepsSummary | undefined,
-  generating: boolean
+  generating: boolean,
+  waitingFor = 0
 ): StepsView | null => {
-  if (generating && live !== null && live.length > 0) return { running: true, count: toolCount(live), ms: null, live }
+  if (generating && ((live !== null && live.length > 0) || waitingFor > 0))
+    return { running: true, count: toolCount(live ?? []), ms: null, live: live ?? [], waitingFor }
   if (generating) return null
   if (!summary || summary.count === 0) return null
-  return { running: false, count: summary.count, ms: summary.ms, live: null }
+  return { running: false, count: summary.count, ms: summary.ms, live: null, waitingFor: 0 }
 }
 
 /** One tool step's state as an icon and words, for its row. */

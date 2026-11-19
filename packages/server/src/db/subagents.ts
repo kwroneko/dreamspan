@@ -34,6 +34,10 @@ export interface SubagentSnapshot {
   readonly context: "task"
   readonly spawnedBy: string
   readonly callId: string
+  /** It ran in the background: the reply went on, and its report came later (§3.2). */
+  readonly background?: boolean
+  /** It carries a finished subagent on with the parent's message (`message_agent`, §4). */
+  readonly continued?: boolean
   /** Its limits, as they applied (spec/SUBAGENTS.md §6.2); absent on SA1's children. */
   readonly caps?: {
     readonly requests: number
@@ -140,6 +144,12 @@ const rowOf = (r: ChildRecord, earlier: ReadonlyArray<ChildRecord> = []): Subage
     return step
   })
   const sub = snapshot.subagent
+  // Its latest progress line (`report_progress`, §4), from its own steps.
+  const progress = steps.findLast((s) => s.kind === "tool" && s.tool === PROGRESS)
+  const line =
+    progress?.kind === "tool" && typeof (progress.args as { text?: unknown } | undefined)?.text === "string"
+      ? (progress.args as { text: string }).text.trim() || undefined
+      : undefined
   return {
     rolloutId: r.id,
     handle: r.handle,
@@ -157,9 +167,18 @@ const rowOf = (r: ChildRecord, earlier: ReadonlyArray<ChildRecord> = []): Subage
         ? null
         : [r, ...earlier].reduce((ms, c) => ms + Math.max(0, (c.completed_at ?? c.created_at) - c.created_at), 0),
     cost: running ? null : costOf([r, ...earlier]),
-    ...(earlier.length > 0 ? { resumed: true } : {})
+    ...(earlier.length > 0 ? { resumed: true } : {}),
+    ...(line ? { progress: line } : {}),
+    ...(sub?.background ? { background: true } : {}),
+    ...(sub?.continued ? { continued: true } : {})
   }
 }
+
+/** The subagent's own tool for a one-line status (spec/SUBAGENTS.md §4). */
+export const PROGRESS = "report_progress"
+
+/** The tools whose calls start or carry on a subagent: their steps carry its row (§7). */
+const SPAWNS = new Set(["agent", "message_agent"])
 
 /** What the runs' requests cost together, when every one was priced in one currency. */
 const costOf = (runs: ReadonlyArray<ChildRecord>) => {
@@ -234,7 +253,7 @@ export const withSubagents = <S extends { readonly kind: string }>(
 ) =>
   Effect.gen(function* () {
     const calls = steps.flatMap((s) =>
-      s.kind === "tool" && (s as unknown as { tool: string }).tool === "agent"
+      s.kind === "tool" && SPAWNS.has((s as unknown as { tool: string }).tool)
         ? [(s as unknown as { id: string }).id]
         : []
     )
@@ -267,6 +286,33 @@ export const makeSubagentReadHandlers = Effect.gen(function* () {
           spawnedBy: child.spawned_by_rollout_id
         }
       }).pipe(query("FindSubagent")),
+
+    // A subagent the parent names (`message_agent`, §4): by handle, else by the name it was given,
+    // among those started on its run chain by calls its transcript holds, so one in a version that
+    // was swiped away or on another branch is never found. The newest run of it answers.
+    FindSubagentByHandle: ({ userId, rolloutId, handle, calls }) =>
+      Effect.gen(function* () {
+        const [owned] = yield* sql<{ id: string }>`SELECT r.id FROM rollouts r JOIN chats c ON c.id = r.chat_id
+          WHERE r.id = ${rolloutId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+        if (!owned) return yield* new NotFound({ entity: "rollout", id: rolloutId })
+        const children = yield* childrenOf(sql, yield* chainOf(sql, rolloutId), calls)
+        const wanted = handle.trim().toLowerCase()
+        const named = (c: ChildRecord) =>
+          parse<{ readonly subagent?: SubagentSnapshot }>(c.snapshot, {}).subagent?.name?.trim().toLowerCase()
+        const child =
+          children.find((c) => c.handle.toLowerCase() === wanted) ?? children.find((c) => named(c) === wanted)
+        if (!child) return null
+        return {
+          rolloutId: child.id,
+          handle: child.handle,
+          status: child.status,
+          partial: lastText(parse<ReadonlyArray<AgentMessage>>(child.transcript, [])),
+          row: rowOf(child),
+          transcript: child.transcript,
+          snapshot: child.snapshot,
+          spawnedBy: child.spawned_by_rollout_id
+        }
+      }).pipe(query("FindSubagentByHandle")),
 
     SubagentStatus: ({ userId, versionId, rolloutId }) =>
       childOfVersion(sql, userId, versionId, rolloutId).pipe(

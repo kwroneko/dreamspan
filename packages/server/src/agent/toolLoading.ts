@@ -242,6 +242,7 @@ export const builtinToolLoadingProfiles: ReadonlyArray<ToolLoadingProfile> = [
     immediate: [
       "list_library",
       "agent",
+      "message_agent",
       "search_story",
       "read_story",
       "open_story_summary",

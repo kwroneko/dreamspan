@@ -101,7 +101,12 @@ export type GenerationChunk =
    */
   | { readonly restart: true }
   /** An agent reply's steps so far, all of them (spec/AGENTIC.md §5.1). */
-  | { readonly steps: ReadonlyArray<RolloutStep>; readonly versionId?: VersionId }
+  | {
+      readonly steps: ReadonlyArray<RolloutStep>
+      readonly versionId?: VersionId
+      /** Background subagents the run waits for (spec/SUBAGENTS.md §3.2); absent: none. */
+      readonly waitingFor?: number
+    }
 
 /** Why a generation failed, as its failed version records it (DESIGN §3.1). */
 export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("GenerationFailed", {

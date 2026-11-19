@@ -11,9 +11,12 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser, type Client } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import {
+  BACKGROUND_ANSWER,
+  BACKGROUND_WAITING,
   PARENT_ANSWER,
   startSubagentProvider,
   SUBAGENT_NAME,
+  SUBAGENT_PROGRESS,
   SUBAGENT_REPORT,
   SUBAGENT_TASK
 } from "./support/subagentProvider.ts"
@@ -183,4 +186,49 @@ for (const width of [1440, 390])
       await expect(resumed).toContainText("Resumed where it stopped")
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       await expectLayout(page, info, `subagents-resumed-${width}-${theme}`, { scope: "article:last-of-type" })
+    })
+
+// SA5 (spec/SUBAGENTS.md §3.2, §4): a background subagent. The reply goes on and writes, its text
+// becomes a message of its own, and the next one says "Waiting for 1 subagent" while the row,
+// marked "In the background", shows the subagent's progress line; its report then reaches the
+// reply, which sums up.
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`a background subagent's wait, progress and report at ${width} ${theme}`, async ({ page }, info) => {
+      test.setTimeout(180_000)
+      provider.inBackground()
+      const workshop = await admin((api) => api.CreateWorkshop({ title: `Subagents background ${width} ${theme}` }))
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ reducedMotion: "reduce", colorScheme: theme })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/chats/${workshop.id}`)
+      await expect(page.getByTestId("composer")).toBeVisible()
+      await page.getByLabel("Message", { exact: true }).fill("Look for the keeper while we talk.")
+      await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+
+      // What it wrote before waiting is a message of its own, holding the subagent's row.
+      const first = page.getByRole("article").filter({ hasText: BACKGROUND_WAITING })
+      await expect(first).toHaveCount(1, { timeout: 30_000 })
+      const waiting = page.locator("[data-waiting-subagents]")
+      await expect(waiting.first()).toHaveText("Waiting for 1 subagent", { timeout: 30_000 })
+      const badge = first.locator("[data-steps-badge]")
+      const row = first.locator("[data-subagent]")
+      await expect(async () => {
+        if ((await badge.getAttribute("aria-pressed")) !== "true") await badge.click()
+        await expect(row).toBeVisible({ timeout: 1_000 })
+      }).toPass({ timeout: 15_000 })
+      await expect(row.locator("[data-subagent-background]")).toHaveText("In the background")
+      await expect(row.locator("[data-subagent-progress]")).toHaveText(SUBAGENT_PROGRESS, { timeout: 30_000 })
+      await expect(row).toHaveAttribute("data-subagent-status", "running")
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      await expectLayout(page, info, `subagents-background-${width}-${theme}`, { scope: "main" })
+
+      // Its report reaches the reply, which sums up in the message after.
+      provider.release()
+      const done = page.getByRole("article").filter({ hasText: BACKGROUND_ANSWER })
+      await expect(done).toHaveCount(1, { timeout: 30_000 })
+      await expect(page.locator("[data-waiting-subagents]")).toHaveCount(0)
+      await expect(row).toHaveAttribute("data-subagent-status", "done", { timeout: 30_000 })
+      expect(JSON.stringify(provider.bodies.at(-1)?.messages ?? [])).toContain("finished:")
+      await expectLayout(page, info, `subagents-background-done-${width}-${theme}`, { scope: "main" })
     })

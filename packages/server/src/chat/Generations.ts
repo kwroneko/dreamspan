@@ -580,7 +580,12 @@ export class Generations extends Context.Service<
                   const { chatId } = entry.request
                   const versionId = chunk.versionId ?? entry.request.versionId
                   if (versionId === entry.request.versionId) entry.steps = chunk.steps
-                  hub.publish(chatId, { _tag: "Steps", versionId, steps: chunk.steps })
+                  hub.publish(chatId, {
+                    _tag: "Steps",
+                    versionId,
+                    steps: chunk.steps,
+                    ...(chunk.waitingFor ? { waitingFor: chunk.waitingFor } : {})
+                  })
                   if (versionId !== entry.request.versionId)
                     return reader.GetVersion({ userId: entry.request.userId, versionId }).pipe(
                       Effect.tap((version) => Effect.sync(() => hub.publish(chatId, { _tag: "Version", version }))),
