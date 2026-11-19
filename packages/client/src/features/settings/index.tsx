@@ -44,6 +44,7 @@ function NavLink({ entry, wide }: { entry: RouteEntry; wide: boolean }) {
   const link = (
     <Link
       to={fullPath(entry)}
+      activeOptions={{ includeSearch: false }}
       {...(description ? { "aria-describedby": id } : {})}
       className="flex items-center gap-2 px-4 py-3 text-text hover:bg-surface-raised md:rounded-md md:px-3 md:py-1.5 md:text-sm md:text-muted md:hover:text-text md:data-[status=active]:bg-surface-raised md:data-[status=active]:font-medium md:data-[status=active]:text-text"
     >

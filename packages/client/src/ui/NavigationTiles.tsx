@@ -58,7 +58,7 @@ export function NavigationTiles({
           <Tooltip key={item.to} label={item.description}>
             <Link
               to={item.to}
-              activeOptions={{ exact: item.to === "/" }}
+              activeOptions={{ exact: item.to === "/", includeSearch: false }}
               onClick={onNavigate}
               className={`group ${panelToolClass} data-[status=active]:border-accent data-[status=active]:text-text`}
             >
