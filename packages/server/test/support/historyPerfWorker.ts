@@ -21,6 +21,10 @@ const { file, chatId, userId, workload } = workerData as {
 }
 const length = workload === "long" ? 100000 : 10000
 const db = new DatabaseSync(file)
+// The writer's own pragmas (db/connection.ts). Without temp_store = MEMORY every trigger-firing
+// insert writes its statement journal to a temporary file: the 100,000-message fixture took
+// about 60 s that way and about 13 s without it (historyperf1).
+db.exec("PRAGMA temp_store = MEMORY; PRAGMA cache_size = -65536")
 try {
   {
     db.exec("PRAGMA foreign_keys = ON; BEGIN")
