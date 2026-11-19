@@ -225,7 +225,14 @@ test("deleting a named branch from the middle of a long chat follows the survivi
   await expect(page).toHaveURL(/[?&]slot=/)
   await branches.click()
   await list.getByRole("button", { name: "Delete Long road", exact: true }).click()
-  await expect(page).toHaveURL(new RegExp(`/chats/${chatId}\\?fork=[^&]+$`))
+  // On the surviving branch, with no message to go to; the pane's own view params (Messages or
+  // Summaries, the coverage rail) stay as they were.
+  await expect
+    .poll(() => {
+      const url = new URL(page.url())
+      return [url.pathname, [...url.searchParams.keys()].filter((key) => key !== "timeline" && key !== "rail")]
+    })
+    .toEqual([`/chats/${chatId}`, ["fork"]])
   await expect(page.getByTestId("messages").getByText("Surviving tip", { exact: true })).toBeVisible()
   await expect(branches).toBeVisible()
   await expect(branches).toBeDisabled()

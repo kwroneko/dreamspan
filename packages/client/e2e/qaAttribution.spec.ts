@@ -189,7 +189,11 @@ for (const width of [1440, 390])
       await expect(page.getByRole("button", { name: "Replace all", exact: true })).toBeEnabled()
       await page.getByLabel("Skip match 1 in message 1", { exact: true }).check()
       await result.click()
-      await expect(page.getByRole("tab", { name: "Summaries", exact: true })).toHaveAttribute("aria-selected", "true")
+      // The side panel's Summaries tab, not the chat's own Messages and Summaries tabs (at the
+      // summary divider and above the first message).
+      await expect(
+        page.getByRole("tablist", { name: "Chat panel" }).getByRole("tab", { name: "Summaries", exact: true })
+      ).toHaveAttribute("aria-selected", "true")
       const row = page.locator(`[data-summary="${summary.id}"]`)
       await expect(row).toBeVisible()
       await expect(row).toContainText("The bridge crosses the harbor.")

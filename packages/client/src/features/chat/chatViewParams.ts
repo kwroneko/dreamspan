@@ -18,6 +18,8 @@ import { useViewPrefs } from "../../ui/viewPrefs.ts"
 const TIMELINE_PARAM = "timeline"
 /** The coverage rail beside the messages: `rail=on` or `rail=off`. */
 const RAIL_PARAM = "rail"
+/** Both: a pane's own view, never a place to go (`viewParams`). */
+export const CHAT_VIEW_PARAMS = [TIMELINE_PARAM, RAIL_PARAM] as const
 
 /**
  * What each pane (its router) last showed for a chat, so a navigation within the chat that
