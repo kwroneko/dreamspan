@@ -22,6 +22,18 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SetMcpShare: "User-only security, consent, account, credential or network configuration.",
   SignOutOfMcp: "User-only security, consent, account, credential or network configuration.",
   UpdateMcpConnection: "User-only security, consent, account, credential or network configuration.",
+  // Subagent models and limits (spec/SUBAGENTS.md §5.1, §6.2) and stored costs: the user's alone.
+  GetSubagentSettings: "User-only: the account's subagent models and limits are the user's to see and set.",
+  ChangeSubagentSettings:
+    "User-only: the owner decided the assistant may not change subagent models or limits (they spend the user's money).",
+  GetSubagentTypes:
+    "User-only: the account's subagent types (their instructions and tools) are the user's to see and set.",
+  ChangeSubagentType:
+    "User-only: a subagent type's instructions, tools and caps decide what children may do, so the assistant may not edit them.",
+  GetModelBehaviour: "Not in W6's first exposures; use the bounded workshop read tools.",
+  GetPriceFeedState: "User-only security, consent, account, credential or network configuration.",
+  PreviewCostRecompute: "User-only: a preview of the stored-cost rewrite that ApplyCostRecompute makes.",
+  ApplyCostRecompute: "User-only: rewrites stored costs of past replies, with no undo adapter.",
   GoBackPlugin: "Plugin management stays user-only until P4 supplies its approval workflow.",
   ListBuiltinParts: "Dedicated plugin authoring tools retain source and permission boundaries.",
   CopyBuiltin: "Dedicated plugin authoring tools retain inertness, receipts and exact-version consent.",
