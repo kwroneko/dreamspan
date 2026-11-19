@@ -159,7 +159,7 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
     alongside: "commands",
     confirm: {
       title: "Run commands without a sandbox?",
-      body: "Commands will run as the server's app. They can read and change every account's chats, files and keys, and use the server's network and other devices. Changes outside your files can't be undone or restored.",
+      body: "Commands will run as the server's app. They can read and change every account's chats, files and keys, and use the server's network and other devices. Changes outside your files can't be undone or restored. Stopping a command, or turning this off, may not end everything it started: it can leave programs running or set to run later on the server.",
       confirmLabel: "Run without a sandbox",
       cancelLabel: "Keep the sandbox"
     }

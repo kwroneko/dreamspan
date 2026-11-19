@@ -13,7 +13,11 @@
 // - Reset and commands exclude each other;
 // - a subagent in its own copy reads the workshop's shared folders but writes only in its copy;
 // - the app's commands for subagents' copies are running commands: Reset waits for them, and
-//   revocation and the app's stop end them.
+//   revocation and the app's stop end them;
+// - a command waiting for a free slot is checked again before it starts;
+// - turning off Internet from commands stops the commands that have the internet;
+// - when storage fails, the recheck counts the account as not an admin and the no-sandbox grant
+//   as not given (files6).
 // Synthetic data only.
 import { mkdir, readFile, rename, symlink, writeFile, stat } from "node:fs/promises"
 import { existsSync } from "node:fs"
@@ -61,6 +65,7 @@ const heldSandbox = () => {
   let started: () => void = () => undefined
   const next = () => new Promise<void>((resolve) => (started = resolve))
   let waiting = next()
+  let runs = 0
   const sandbox = {
     ...linuxBwrap,
     id: "held",
@@ -80,6 +85,7 @@ const heldSandbox = () => {
           })
         signal.addEventListener("abort", end, { once: true })
         if (signal.aborted) end()
+        runs++
         started()
       })
   } as CommandSandbox
@@ -89,12 +95,19 @@ const heldSandbox = () => {
     started: async () => {
       await waiting
       waiting = next()
-    }
+    },
+    /** How many commands it started. */
+    runs: () => runs
   }
 }
 
 const world = (
-  options: { backgroundPerAccount?: number; allowUnsandboxed?: boolean; sandbox?: CommandSandbox } = {}
+  options: {
+    backgroundPerAccount?: number
+    perAccount?: number
+    allowUnsandboxed?: boolean
+    sandbox?: CommandSandbox
+  } = {}
 ) => {
   const dataDir = tempDir("cmdfix")
   const filesDir = join(dataDir, "files")
@@ -109,7 +122,10 @@ const world = (
     grants: new Map<string, CapabilityMode>(),
     consented: false,
     shares: [] as Array<Share>,
-    overQuota: new Set<string>()
+    overQuota: new Set<string>(),
+    /** Storage failing for the account's row, or for the consent's. */
+    failAccount: false,
+    failConsent: false
   }
   const versions: Array<{ userId: string; actorUserId?: string; paths: Array<string>; rolloutId?: string }> = []
   const changed: Array<{ userId: string; paths: ReadonlyArray<string> }> = []
@@ -121,15 +137,17 @@ const world = (
         ? Effect.fail({ _tag: "ApprovalRefused", message: "off" })
         : Effect.succeed(user(userId)),
     WorkshopGrants: ({ target }: { target?: string }) =>
-      Effect.succeed(
-        target === consent
-          ? state.consented
-            ? [{ capability: COMMANDS_UNSANDBOXED, mode: "allow" as const }]
-            : []
-          : target
-            ? []
-            : [...state.grants].map(([capability, mode]) => ({ capability, mode }))
-      ),
+      target === consent && state.failConsent
+        ? Effect.fail({ _tag: "StorageError", message: "disk" })
+        : Effect.succeed(
+            target === consent
+              ? state.consented
+                ? [{ capability: COMMANDS_UNSANDBOXED, mode: "allow" as const }]
+                : []
+              : target
+                ? []
+                : [...state.grants].map(([capability, mode]) => ({ capability, mode }))
+          ),
     StateEventsAt: () => Effect.succeed([]),
     WorkshopFolderMemory: () => Effect.succeed({ moves: [] }),
     FileSharesGrantedTo: ({ userId }: { userId: string }) =>
@@ -149,7 +167,9 @@ const world = (
           }))
       ),
     GetPasswordHash: ({ userId }: { userId: string }) =>
-      Effect.succeed(state.disabled.has(userId) ? null : { user: user(userId), passwordHash: null })
+      state.failAccount
+        ? Effect.fail({ _tag: "StorageError", message: "disk" })
+        : Effect.succeed(state.disabled.has(userId) ? null : { user: user(userId), passwordHash: null })
   }
   const writer = {
     RecordFileVersions: (input: {
@@ -194,7 +214,7 @@ const world = (
     limits: {
       defaultTimeoutMs: 60_000,
       maxTimeoutMs: 60_000,
-      perAccount: 4,
+      perAccount: options.perAccount ?? 4,
       perInstance: 16,
       backgroundPerAccount: options.backgroundPerAccount ?? 4,
       backgroundPerInstance: 16,
@@ -567,4 +587,75 @@ it.live("the app's commands for subagents' copies are running commands: Reset, r
     assert.isTrue(yield* Effect.promise(() => again))
     yield* w.files.resetHome("ben")
   })
+)
+
+it.live("a command waiting for a free slot doesn't start once Run commands was turned off", () =>
+  Effect.gen(function* () {
+    const held = heldSandbox()
+    const w = world({ sandbox: held.sandbox, perAccount: 1 })
+    const first = Effect.runPromise(w.run("ben", "bash", { command: "first" }))
+    yield* Effect.promise(() => held.started())
+    // The second waits for the account's only slot.
+    const second = Effect.runPromise(w.run("ben", "bash", { command: "second" }))
+    yield* Effect.sleep("300 millis")
+    assert.strictEqual(held.runs(), 1)
+    w.state.grants.set("commands", "off")
+    assert.strictEqual(yield* w.files.recheckCommands(["ben"]), 1)
+    assert.include((yield* Effect.promise(() => first)).text, "stopped: Run commands was turned off")
+    yield* Effect.sleep("300 millis")
+    const started = held.runs()
+    // Had it started, the next check stops it, so the test ends either way.
+    yield* w.files.recheckCommands(["ben"])
+    const out = yield* Effect.promise(() => second)
+    assert.strictEqual(started, 1, out.text)
+    assert.isTrue(out.isError)
+    assert.include(out.text, "Not started: Run commands was turned off")
+  })
+)
+
+it.live("turning off Internet from commands stops those that have it, not those without", () =>
+  Effect.gen(function* () {
+    const held = heldSandbox()
+    const w = world({ sandbox: held.sandbox })
+    const online = w.idOf((yield* w.run("ben", "bash", { command: "online", run_in_background: true })).text)
+    yield* Effect.promise(() => held.started())
+    w.state.grants.set("commands.network", "off")
+    assert.strictEqual(yield* w.files.recheckCommands(["ben"]), 1)
+    assert.include(yield* w.ended("ben", online), "stopped: Internet from commands was turned off")
+    // One started without the internet keeps running.
+    const offline = w.idOf((yield* w.run("ben", "bash", { command: "offline", run_in_background: true })).text)
+    yield* Effect.promise(() => held.started())
+    assert.strictEqual(yield* w.files.recheckCommands(["ben"]), 0)
+    yield* w.run("ben", "bash_stop", { id: offline })
+  })
+)
+
+it.live.skipIf(!commands)(
+  "when storage fails, a command without a sandbox is stopped (not an admin, no grant)",
+  () =>
+    Effect.gen(function* () {
+      const w = world({ allowUnsandboxed: true })
+      w.state.grants.set(COMMANDS_UNSANDBOXED, "allow")
+      w.state.consented = true
+      const start = () =>
+        w.run("ada", "bash", { command: "sleep 300", run_in_background: true }).pipe(
+          Effect.map((out) => {
+            assert.include(out.text, "Started in the background", out.text)
+            return w.idOf(out.text)
+          })
+        )
+      // The account can't be read: counted as not an admin.
+      const first = yield* start()
+      w.state.failAccount = true
+      assert.strictEqual(yield* w.files.recheckCommands(["ada"]), 1)
+      w.state.failAccount = false
+      assert.include(yield* w.ended("ada", first), "stopped: running commands without a sandbox isn't allowed now")
+      // The consent can't be read: the grant counts as not given.
+      const second = yield* start()
+      w.state.failConsent = true
+      assert.strictEqual(yield* w.files.recheckCommands(["ada"]), 1)
+      w.state.failConsent = false
+      assert.include(yield* w.ended("ada", second), "stopped: running without a sandbox was turned off")
+    }),
+  120_000
 )

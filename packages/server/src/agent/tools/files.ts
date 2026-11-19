@@ -61,6 +61,7 @@ import { OUTPUT_KEEP_MS } from "../../files/commandOutput.ts"
 import { folderShareRefusal } from "../../files/pluginCopies.ts"
 import { isSharedFolder, shareMountNames } from "../../files/sharedFolders.ts"
 import { sandboxPath } from "../../sandbox/linuxBwrap.ts"
+import { CommandRefused } from "../../sandbox/refused.ts"
 import type { SubagentCopyRecord } from "../../db/subagents.ts"
 import {
   COMMANDS_NETWORK,
@@ -1318,6 +1319,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
     /** Its workshop; null for the app's own commands for a subagent's copy outside a call. */
     readonly chatId: string | null
     readonly unsandboxed: boolean
+    /** Whether it was given the internet (Internet from commands). */
+    readonly network: "public" | "none"
     readonly host: { readonly path: string; readonly inode: number } | null
     readonly shares: ReadonlyArray<BoundShare>
     readonly controller: AbortController
@@ -1326,12 +1329,23 @@ export const makeFileTools = (deps: FileToolDeps) => {
   }
   const live = new Set<Live>()
 
-  /** Why a running command may no longer run; null: it may. Unknown (storage failed): it may. */
+  /**
+   * Why a running command may no longer run; null: it may. When storage fails, the account
+   * counts as not an admin and the no-sandbox grant as not given (logged), so what only an admin
+   * or that grant allows stops; the rest is checked again at the next sweep.
+   */
   const revoked = (entry: Live) =>
     Effect.gen(function* () {
       const account = yield* deps.reader
         .GetPasswordHash({ userId: entry.userId as never })
-        .pipe(Effect.orElseSucceed(() => undefined))
+        .pipe(
+          Effect.catch((error) =>
+            Effect.logWarning(
+              `Commands: the account ${entry.userId} couldn't be read; counted as not an admin`,
+              error
+            ).pipe(Effect.as("unknown" as const))
+          )
+        )
       if (account === null) return "the account was turned off"
       const grants =
         entry.chatId === null
@@ -1346,10 +1360,23 @@ export const makeFileTools = (deps: FileToolDeps) => {
       if (grants === null) return "its workshop is gone"
       if (grants && resolveMode(deps.registries, grants, "commands", "outside") === "off")
         return "Run commands was turned off in its workshop"
-      const admin = account === undefined || account.user.role === "admin"
+      if (
+        grants &&
+        entry.network === "public" &&
+        resolveMode(deps.registries, grants, COMMANDS_NETWORK, "outside") !== "allow"
+      )
+        return "Internet from commands was turned off in its workshop"
+      const admin = account !== "unknown" && account.user.role === "admin"
       if (entry.unsandboxed) {
         if (!admin || deps.allowUnsandboxed !== true) return "running commands without a sandbox isn't allowed now"
-        const granted = yield* unsandboxedGranted(entry.userId, entry.chatId!).pipe(Effect.orElseSucceed(() => true))
+        const granted = yield* unsandboxedGranted(entry.userId, entry.chatId!).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning(
+              `Commands: the no-sandbox grant of ${entry.userId} couldn't be read; counted as not given`,
+              error
+            ).pipe(Effect.as(false))
+          )
+        )
         if (!granted) return "running without a sandbox was turned off in its workshop"
       }
       if (entry.host) {
@@ -1522,6 +1549,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
             userId: env.userId,
             chatId: ctx.chatId,
             unsandboxed: none !== null,
+            network: setup.network,
             host: setup.bound.host,
             shares: setup.bound.shares,
             controller: new AbortController(),
@@ -1542,7 +1570,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
                 env: commandEnv(),
                 network: setup.network,
                 limits: { ...limits.run, timeoutMs },
-                ...(sink ? { onOutput: sink.write } : {})
+                ...(sink ? { onOutput: sink.write } : {}),
+                // Without a sandbox, a background command must be held together to be stopped.
+                ...(background ? { requireContainment: true } : {})
               },
               signal
             )
@@ -1583,9 +1613,16 @@ export const makeFileTools = (deps: FileToolDeps) => {
                       (overQuota ? `${overQuota}\n` : "")
                   }
                 })
-                .catch(async () => {
+                .catch(async (error: unknown) => {
                   await sink!.end(sink!.kept()).catch(() => undefined)
-                  job.ended = { at: Date.now(), failed: true, text: "The command couldn't run.\n" }
+                  job.ended = {
+                    at: Date.now(),
+                    failed: true,
+                    text:
+                      error instanceof CommandRefused
+                        ? `The command didn't start: ${error.message} Run it in the foreground.\n`
+                        : "The command couldn't run.\n"
+                  }
                 })
                 .finally(() => {
                   live.delete(entry)
@@ -1611,6 +1648,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
           }
 
           const run = Effect.gen(function* () {
+            // It may have waited for a free slot: what it was given is checked again first.
+            const why = yield* revoked(entry)
+            if (why) return { notStarted: why } as const
             const before = yield* scanPlaces(setup.places)
             live.add(entry)
             const result = yield* attempt((signal) => {
@@ -1622,9 +1662,14 @@ export const makeFileTools = (deps: FileToolDeps) => {
             const after = yield* scanPlaces(setup.places)
             return { result, found: diffPlaces(before, after) }
           })
-          const { result, found } = yield* Semaphore.withPermit(instance)(
-            Semaphore.withPermit(accountPermits(env.userId))(run)
-          ).pipe(Effect.ensuring(Effect.promise(() => setup.close())))
+          const ran = yield* Semaphore.withPermit(instance)(Semaphore.withPermit(accountPermits(env.userId))(run)).pipe(
+            Effect.ensuring(Effect.promise(() => setup.close()))
+          )
+          if ("notStarted" in ran) {
+            if (sink) yield* Effect.promise(() => sink.end(0).catch(() => undefined))
+            return { isError: true, text: `Not started: ${ran.notStarted}.` }
+          }
+          const { result, found } = ran
           if (sink) yield* Effect.promise(() => sink.end(result.outputBytes).catch(() => undefined))
           if (result.cwd) ctx.cache.set(CWD_KEY, result.cwd)
           const { changes, overQuota } = yield* afterCommand(call, env.userId, result, found)
@@ -1880,6 +1925,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
         userId: env.userId,
         chatId,
         unsandboxed: false,
+        network: "none",
         host: null,
         shares: [],
         controller: new AbortController(),

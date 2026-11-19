@@ -65,6 +65,8 @@ test.describe("host folders", () => {
         const consent = page.getByRole("alertdialog")
         await expect(consent.getByText("Run commands without a sandbox?")).toBeVisible()
         await expect(consent.getByRole("button", { name: "Keep the sandbox" })).toBeVisible()
+        // It says plainly that stopping may not end everything such a command started.
+        await expect(consent).toContainText("may not end everything it started")
         if (audit) await expectLayout(page, info, `host-consent-${width}-${theme}`, { scope: '[role="alertdialog"]' })
         await consent.getByRole("button", { name: "Run without a sandbox" }).click()
         await expect(row.getByRole("button", { name: "Allowed", exact: true })).toHaveAttribute("aria-pressed", "true")
