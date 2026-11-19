@@ -4,7 +4,7 @@
 // file system calls on the target name: a check of it sees nothing and then the file appears;
 // a call that would create it finds the file already there. Synthetic files only.
 import { assert, describe, it } from "@effect/vitest"
-import { readdirSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs"
+import { appendFileSync, readdirSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs"
 import { basename, dirname, join } from "node:path"
 import { vi } from "vitest"
 import { Effect } from "effect"
@@ -30,6 +30,9 @@ const intrude = (path: unknown) => {
   intruder.done = true
   writeFileSync(intruder.at, intruder.content)
 }
+
+/** Runs once when the app opens this file (a real path): a command writing to it meanwhile. */
+const onOpen: { at: string | null; run: () => void } = { at: null, run: () => undefined }
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const real = await importOriginal<typeof import("node:fs/promises")>()
@@ -58,7 +61,15 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     access: after(real.access as Fn),
     rename: before(real.rename as Fn, 1),
     link: before(real.link as Fn, 1),
-    mkdir: before(real.mkdir as Fn, 0)
+    mkdir: before(real.mkdir as Fn, 0),
+    open: async (...args: Parameters<typeof real.open>) => {
+      const handle = await real.open(...args)
+      if (onOpen.at !== null && resolved(args[0]) === onOpen.at) {
+        onOpen.at = null
+        onOpen.run()
+      }
+      return handle
+    }
   }
 })
 
@@ -122,6 +133,28 @@ describe("restore and move against a file made meanwhile", () => {
         assert.strictEqual((yield* upload(`/files/a/${name}`, "Taken.")).status, 200)
       const restored = yield* json("/files/restore", { binItemId })
       assert.deepStrictEqual(yield* Effect.promise(() => restored.json()), { path: "/files/a/n (restored) (4).txt" })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("an attachment is refused when its file changes while it's copied", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const filesDir = join(config.dataDir, "files")
+      // Just under the attachment limit; it grows past it as the copy starts.
+      const size = 64 * 1024 * 1024 - 10
+      const uploaded = yield* call(`/files/upload?${new URLSearchParams({ path: "/files/log.txt" })}`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: new Uint8Array(size)
+      })
+      assert.strictEqual(uploaded.status, 200)
+      const account = readdirSync(filesDir).find((name) => name !== ".bin")!
+      const log = join(realpathSync(join(filesDir, account)), "log.txt")
+      Object.assign(onOpen, { at: log, run: () => appendFileSync(log, "x".repeat(100)) })
+      const attached = yield* json("/files/attach", { path: "/files/log.txt" })
+      assert.isNull(onOpen.at)
+      // Before, the copy was cut at 64 MiB and attached with a size that looked right.
+      assert.strictEqual(attached.status, 409, yield* Effect.promise(() => attached.text()))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 })

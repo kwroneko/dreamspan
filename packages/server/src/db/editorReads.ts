@@ -17,7 +17,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
-import { isMediaPath } from "./media.ts"
+import { isMediaPath, mediaHeldBy } from "./media.ts"
 import { noteAt, noteHere, otherBranches } from "./noteAt.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { linkCounts, linkedNote, sharedNote } from "./sharedNotes.ts"
@@ -271,8 +271,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const [file] = yield* sql<{ path: string; mime: string; byteSize: number }>`
           SELECT m.path, m.mime, m.byte_size AS byteSize FROM media_assets m
-          WHERE m.id = ${mediaId}
-            AND EXISTS (SELECT 1 FROM media_refs r WHERE r.media_id = m.id AND r.owner_user_id = ${userId})`
+          WHERE m.id = ${mediaId} AND ${mediaHeldBy(sql, "m.id", userId)}`
         if (!file || !isMediaPath(file.path)) return yield* new NotFound({ entity: "media", id: mediaId })
         return file
       }).pipe(query("GetMediaFile"))

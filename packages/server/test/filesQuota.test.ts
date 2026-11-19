@@ -57,7 +57,7 @@ describe("a walk that stops at its limits", () => {
           GetAppSetting: () => Effect.succeed(null),
           FileVersionBytes: () => Effect.succeed(0)
         } as never,
-        writer: { PruneFileVersions: () => Effect.succeed({ versions: 0, media: 0 }) } as never,
+        writer: { PruneFileVersions: () => Effect.succeed({ versions: 0, attachments: 0, media: 0 }) } as never,
         folders: () => ({ filesRoot: join(root, "files"), home: join(root, "home") }),
         defaultBytes: 10 * 2 ** 30,
         walkMaxEntries: 5
@@ -106,7 +106,7 @@ describe("the cached figure between walks", () => {
             return 0
           })
       } as never,
-      writer: { PruneFileVersions: () => Effect.succeed({ versions: 0, media: 0 }) } as never,
+      writer: { PruneFileVersions: () => Effect.succeed({ versions: 0, attachments: 0, media: 0 }) } as never,
       folders: () => ({ filesRoot: join(root, "files"), home: join(root, "home") }),
       defaultBytes: 10 * 2 ** 30
     })
@@ -273,7 +273,7 @@ describe("the cached figure between walks", () => {
               ? Effect.die(new Error("boom"))
               : Effect.sync(() => (measuredFor.push(userId), 0))
         } as never,
-        writer: { PruneFileVersions: () => Effect.succeed({ versions: 0, media: 0 }) } as never,
+        writer: { PruneFileVersions: () => Effect.succeed({ versions: 0, attachments: 0, media: 0 }) } as never,
         folders: () => ({ filesRoot: join(root, "files"), home: join(root, "home") }),
         defaultBytes: 2 ** 30
       })
@@ -465,17 +465,17 @@ it.live("retention removes old versions, and the media only they named", () => {
     assert.strictEqual(yield* reader.FileVersionBytes({ userId: me }), 150)
     // Nothing is old yet.
     const none = yield* writer.PruneFileVersions({ before: Date.now() - 30 * 86_400_000, limit: 100 })
-    assert.deepStrictEqual(none, { versions: 0, media: 0 })
+    assert.deepStrictEqual(none, { versions: 0, attachments: 0, media: 0 })
     // One account's: its two versions go; the content the other account's version names stays.
     const mine = yield* writer.PruneFileVersions({ userId: me, before: Date.now() + 1, limit: 100 })
-    assert.deepStrictEqual(mine, { versions: 2, media: 1 })
+    assert.deepStrictEqual(mine, { versions: 2, attachments: 0, media: 1 })
     assert.strictEqual(yield* reader.FileVersionBytes({ userId: me }), 0)
     assert.strictEqual(yield* reader.FileVersionBytes({ userId: other }), 100)
     assert.isTrue(yield* reader.IsMediaRecorded({ sha256: shared }))
     assert.isFalse(yield* reader.IsMediaRecorded({ sha256: own }))
     // Everyone's, in batches of one.
     const first = yield* writer.PruneFileVersions({ before: Date.now() + 1, limit: 1 })
-    assert.deepStrictEqual(first, { versions: 1, media: 1 })
+    assert.deepStrictEqual(first, { versions: 1, attachments: 0, media: 1 })
     assert.isFalse(yield* reader.IsMediaRecorded({ sha256: shared }))
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })

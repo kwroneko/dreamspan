@@ -30,6 +30,8 @@ import {
 } from "./rows.ts"
 import { checkStateReferences, withoutPurged } from "./stateRefs.ts"
 import { attachmentJson } from "./rows.ts"
+import { attachmentFieldsFit } from "./composerImages.ts"
+import { attachedFrom, mediaHeldBy } from "./media.ts"
 import { recordStoryAt } from "./workshopPairing.ts"
 import type { WorkshopChoice } from "./workshopForks.ts"
 
@@ -92,21 +94,26 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
     Effect.forEach(
       images,
       (image) =>
-        image.kind === "file"
-          ? found(
-              sql`SELECT count(*) AS n FROM media_refs r JOIN media_assets m ON m.id=r.media_id
-              WHERE r.owner_user_id=${userId} AND r.media_id=${image.mediaId}
+        // The name and path the model is told must be where this user attached the copy from (§6.1).
+        !attachmentFieldsFit(image)
+          ? Effect.fail(new NotFound({ entity: "media", id: image.mediaId }))
+          : image.kind === "file"
+            ? found(
+                sql`SELECT count(*) AS n FROM media_assets m
+              WHERE m.id=${image.mediaId} AND ${mediaHeldBy(sql, "m.id", userId)}
+                AND ${attachedFrom(sql, "m.id", userId, image.path!)}
                 AND (${chatId ?? null} IS NULL OR EXISTS (SELECT 1 FROM chats c WHERE c.id=${chatId ?? null} AND c.kind='workshop'))`,
-              "media",
-              image.mediaId
-            )
-          : found(
-              sql`SELECT count(*) AS n FROM media_refs r JOIN media_assets m ON m.id=r.media_id
-              WHERE r.owner_user_id=${userId} AND r.media_id=${image.mediaId}
-                AND m.mime IN ('image/png', 'image/jpeg', 'image/gif', 'image/webp')`,
-              "media",
-              image.mediaId
-            ),
+                "media",
+                image.mediaId
+              )
+            : found(
+                sql`SELECT count(*) AS n FROM media_assets m
+              WHERE m.id=${image.mediaId} AND ${mediaHeldBy(sql, "m.id", userId)}
+                AND m.mime IN ('image/png', 'image/jpeg', 'image/gif', 'image/webp')
+                ${image.path === undefined ? sql`` : sql`AND ${attachedFrom(sql, "m.id", userId, image.path)}`}`,
+                "media",
+                image.mediaId
+              ),
       { discard: true }
     )
 

@@ -1,7 +1,7 @@
 // Media files on disk (DATA-MODEL §11), written and read on the main thread through
 // libuv's file I/O, which doesn't block the event loop.
-import { randomUUID } from "node:crypto"
-import { lstat, mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises"
+import { createHash, randomUUID } from "node:crypto"
+import { lstat, mkdir, open, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises"
 import { dirname, join, resolve, sep } from "node:path"
 import { Effect } from "effect"
 import { isMediaPath, mediaPath } from "../db/media.ts"
@@ -30,6 +30,60 @@ export const storeMedia = (dataDir: string, sha256: string, bytes: Uint8Array) =
     const temporary = `${path}.${randomUUID()}.tmp`
     try {
       await writeFile(temporary, bytes, { flag: "wx", mode: 0o600 })
+      await rename(temporary, path)
+    } finally {
+      await rm(temporary, { force: true })
+    }
+  })
+
+/**
+ * Streams bytes to a temporary file under the media folder while hashing them (an attachment's
+ * copy, files/routes.ts), so a large file is never held in memory. The file sits in a hash
+ * folder, so the sweep removes it if the server stops before `placeStreamedMedia` moves it.
+ */
+export const streamToMedia = async (dataDir: string, chunks: AsyncIterable<Uint8Array>) => {
+  const folder = join(dataDir, "media", "00")
+  await mkdir(folder, { recursive: true })
+  const temporary = join(folder, `stream-${randomUUID()}.tmp`)
+  const hash = createHash("sha256")
+  let size = 0
+  const out = await open(temporary, "wx", 0o600)
+  try {
+    for await (const chunk of chunks) {
+      hash.update(chunk)
+      size += chunk.byteLength
+      await out.write(chunk)
+    }
+    await out.sync()
+  } catch (error) {
+    await out.close().catch(() => undefined)
+    await rm(temporary, { force: true })
+    throw error
+  }
+  await out.close()
+  return { temporary, sha256: hash.digest("hex"), size }
+}
+
+/** Moves a streamed file under its SHA-256 (as `storeMedia` writes one), or drops it when that's there already. */
+export const placeStreamedMedia = (dataDir: string, temporary: string, sha256: string, size: number) =>
+  Effect.tryPromise(async () => {
+    const path = join(dataDir, mediaPath(sha256))
+    try {
+      const there = await stat(path).then(
+        (info) => info.size === size,
+        () => false
+      )
+      if (there) {
+        const now = new Date()
+        if (
+          await utimes(path, now, now).then(
+            () => true,
+            () => false
+          )
+        )
+          return
+      }
+      await mkdir(dirname(path), { recursive: true })
       await rename(temporary, path)
     } finally {
       await rm(temporary, { force: true })
