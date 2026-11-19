@@ -2766,6 +2766,35 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         assert.notStrictEqual(seen.limits.cost, 0.07)
       })
   },
+  GetSubagentTypes: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const id = `owner-${Math.random().toString(36).slice(2, 10)}`
+        yield* owner.api.ChangeSubagentType({
+          id,
+          edit: { id, label: "Owner only", instructions: "Synthetic.", tools: [] }
+        })
+        const seen = yield* actor.api.GetSubagentTypes({})
+        assert.isFalse(seen.types.some((t) => t.id === id))
+      })
+  },
+  ChangeSubagentType: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const id = `mine-${Math.random().toString(36).slice(2, 10)}`
+        yield* owner.api.ChangeSubagentType({ id: "research", edit: null })
+        yield* owner.api.ChangeSubagentType({
+          id,
+          edit: { id, label: "Owner's", instructions: "Synthetic.", tools: [] }
+        })
+        yield* actor.api.ChangeSubagentType({ id, edit: null })
+        yield* actor.api.ChangeSubagentType({ id: "research", edit: { id: "research", off: true } })
+        const own = yield* owner.api.GetSubagentTypes({})
+        assert.strictEqual(own.types.find((t) => t.id === id)?.label, "Owner's")
+        assert.isFalse(own.types.find((t) => t.id === "research")!.off)
+        yield* actor.api.ChangeSubagentType({ id: "research", edit: null })
+      })
+  },
   ChangeSubagentSettings: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

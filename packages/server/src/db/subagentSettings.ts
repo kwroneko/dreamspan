@@ -19,7 +19,8 @@ import {
   type ResolvedLimits,
   type SubagentLimits,
   type SubagentModelRow,
-  type SubagentModels
+  type SubagentModels,
+  type SubagentTypes
 } from "@dreamspan/shared/subagents.ts"
 import { AssemblySources } from "../assembler/pipeline.ts"
 import { resolveSummaryModel } from "../assembler/summaryModel.ts"
@@ -32,6 +33,7 @@ import { query, transaction } from "./tx.ts"
 
 const MODELS_KEY = "subagents.models"
 const LIMITS_KEY = "subagents.limits"
+const TYPES_KEY = "subagents.types"
 
 /** A decision connection answers decisions only, never a reply or a subagent (DESIGN §7.6). */
 const DECISION_KIND = "system-one"
@@ -51,13 +53,20 @@ export interface SubagentModelEntry {
 export interface SubagentModelsAt {
   readonly entries: ReadonlyArray<SubagentModelEntry>
   readonly limits: ResolvedLimits
+  /** The user's subagent types and changes (§10), as stored. */
+  readonly types: SubagentTypes
 }
 
 const stored = (sql: SqlClient.SqlClient, userId: string) =>
-  Effect.all([readSetting(sql, "user", userId, MODELS_KEY), readSetting(sql, "user", userId, LIMITS_KEY)]).pipe(
-    Effect.map(([models, limits]) => ({
+  Effect.all([
+    readSetting(sql, "user", userId, MODELS_KEY),
+    readSetting(sql, "user", userId, LIMITS_KEY),
+    readSetting(sql, "user", userId, TYPES_KEY)
+  ]).pipe(
+    Effect.map(([models, limits, types]) => ({
       models: resolveModels(models.value as SubagentModels | null),
-      limits: (limits.value as SubagentLimits | null) ?? {}
+      limits: (limits.value as SubagentLimits | null) ?? {},
+      types: Array.isArray(types.value) ? (types.value as SubagentTypes) : []
     }))
   )
 
@@ -86,7 +95,7 @@ export const makeSubagentSettingReadHandlers = Effect.gen(function* () {
         const [chat] = yield* sql<{ id: string }>`
           SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
         if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
-        const { models, limits } = yield* stored(sql, userId)
+        const { models, limits, types } = yield* stored(sql, userId)
         const sources = sqlSources(sql, { userId, chatId, next: true, leafSlotId })
         const base = yield* Effect.map(AssemblySources, (s) => s).pipe(Effect.provide(sources.layer))
         const state = foldState((yield* base.events(leafSlotId)).map((e) => e.event))
@@ -127,7 +136,7 @@ export const makeSubagentSettingReadHandlers = Effect.gen(function* () {
           listed.push(model)
           entries.push(entry(pick, rows.get(pick)!, model.key, model))
         }
-        const at: SubagentModelsAt = { entries, limits: resolveLimits(limits) }
+        const at: SubagentModelsAt = { entries, limits: resolveLimits(limits), types }
         return JSON.stringify(at)
       }).pipe(query("SubagentModelsAt")),
 
@@ -168,7 +177,7 @@ const normalized = (rows: Readonly<Record<string, SubagentModelRow>>) =>
 export const makeSubagentSettingWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
-    ChangeSubagentSettings: ({ userId, picks, rows, limits }) =>
+    ChangeSubagentSettings: ({ userId, picks, rows, limits, types }) =>
       Effect.gen(function* () {
         if (picks !== undefined || rows !== undefined) {
           const current = (yield* readSetting(sql, "user", userId, MODELS_KEY)).value as SubagentModels | null
@@ -178,6 +187,7 @@ export const makeSubagentSettingWriteHandlers = Effect.gen(function* () {
           } satisfies SubagentModels)
         }
         if (limits !== undefined) yield* putUserSetting(sql, userId as UserId, LIMITS_KEY, limits ?? {})
+        if (types !== undefined) yield* putUserSetting(sql, userId as UserId, TYPES_KEY, types)
       }).pipe(transaction(sql, "ChangeSubagentSettings"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
 })

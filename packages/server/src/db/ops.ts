@@ -244,7 +244,8 @@ import {
   SubagentModelRow,
   SubagentPick,
   SubagentPicks,
-  SubagentSettings
+  SubagentSettings,
+  SubagentTypes
 } from "@dreamspan/shared/subagents.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@dreamspan/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@dreamspan/shared/state.ts"
@@ -4147,7 +4148,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       userId: UserId,
       picks: Schema.optionalKey(SubagentPicks),
       rows: Schema.optionalKey(Schema.Record(SubagentPick, SubagentModelRow)),
-      limits: Schema.optionalKey(Schema.NullOr(SubagentLimits))
+      limits: Schema.optionalKey(Schema.NullOr(SubagentLimits)),
+      types: Schema.optionalKey(SubagentTypes)
     },
     success: Schema.Void,
     error: StorageError

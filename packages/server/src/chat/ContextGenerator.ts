@@ -550,7 +550,8 @@ export const layer = Layer.effect(
                 forkId: forkId ?? null,
                 leafSlotId: generation.leafSlotId as SlotId | null,
                 contract: plan.contract,
-                kind: chat.kind
+                kind: chat.kind,
+                execution
               })
             : tools
           // Dynamic tool loading (spec/TOOL-LOADING.md): what's sent from the start, what's loaded later.

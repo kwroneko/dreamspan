@@ -21,6 +21,7 @@ import { CHANGES } from "./effects.ts"
 import { CAPABILITY_CHIP, STORY_SUBAGENT_MODELS_CHIP, SUBAGENT_MODELS_CHIP, workshopLook } from "./kinds.ts"
 import { SavedSubagentModelsChip, StorySubagentModelsChip } from "./SubagentModelsChip.tsx"
 import { SubagentLimitsSection, SubagentModelsSection } from "./SubagentSettings.tsx"
+import { SubagentTypesSection } from "./SubagentTypes.tsx"
 import { assistantToolsSections } from "../assistantTools/index.tsx"
 import { askBeforeReply } from "./regenerateWarning.ts"
 import { SIDE_CHAT_TAB, TALK_ABOUT } from "./sideChat.ts"
@@ -97,6 +98,8 @@ export const register = () => [
   // Settings → Assistant tools: the subagents' models and limits (spec/SUBAGENTS.md §5.1, §6.2).
   assistantToolsSections.register({ id: "subagent-models", order: 10, component: SubagentModelsSection }),
   assistantToolsSections.register({ id: "subagent-limits", order: 20, component: SubagentLimitsSection }),
+  // The kinds of subagents, built in, from plugins and the user's own (spec/SUBAGENTS.md §10).
+  assistantToolsSections.register({ id: "subagent-types", order: 30, component: SubagentTypesSection }),
   // Beside the model chip, while subagents are allowed here (spec/SUBAGENTS.md §5.1a).
   composerControls.register({
     id: SUBAGENT_MODELS_CHIP,

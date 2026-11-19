@@ -24,6 +24,7 @@ const surfaces: Readonly<Record<string, string>> = {
   "server:replyStrategies": "Changes how replies are written.",
   "server:replyParsers": "Changes how model replies are read.",
   "server:liveRewrites": "Changes replies as they arrive.",
+  "server:subagentTypes": "Adds kinds of subagents the assistant can start.",
   "server:chatKinds": "Adds or changes kinds of chat.",
   "server:commands": "Adds or changes app actions.",
   "server:providerKinds": "Changes how the app connects to model providers.",

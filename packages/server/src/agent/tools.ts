@@ -87,8 +87,9 @@ export interface OfferContext {
   readonly leafSlotId: SlotId | null
   /** The run's reply contract: `several` lets it go on after its subagents report (spec/SUBAGENTS.md §3.2). */
   readonly contract?: string
-  /** The chat's kind (`rp`, `workshop`): which subagent types it offers. Absent: a workshop's. */
+  /** The chat's kind, and the registries in effect: which subagent types it offers (§10). */
   readonly kind?: string
+  readonly execution?: import("../execution.ts").ExecutionRegistry["Service"]
 }
 
 /** The tools a new run offers, each as its `offerFor` makes it for this chat (absent: as registered). */

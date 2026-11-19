@@ -46,8 +46,8 @@ import { Generator } from "../chat/Generator.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../execution.ts"
 import { internal } from "./internal.ts"
-import { stopSubagent } from "../agent/subagents.ts"
-import { rowProblems, SAME, SubagentSettingsRejected } from "@dreamspan/shared/subagents.ts"
+import { mayUse, NEVER, stopSubagent, typesFor } from "../agent/subagents.ts"
+import { rowProblems, SAME, SubagentSettingsRejected, type SubagentTypeEdit } from "@dreamspan/shared/subagents.ts"
 
 /** What a resume needs of the stopped run's frozen snapshot. */
 interface Frozen {
@@ -413,6 +413,17 @@ export const makeAgentHandlers = Effect.gen(function* () {
   const resume = yield* agentVersionResumer
 
   const registry = yield* ExecutionRegistry
+  /** The tools a subagent type may be given (§10): what a workshop offers, less what no subagent gets. */
+  const subagentToolCatalog = () => {
+    const plan = registry.orchestrationModes.get("workshop")?.plan({ state: foldState([]), kind: "workshop" })
+    const seen = new Set<string>()
+    return (plan?.tools ?? []).flatMap((id) => {
+      const tool = toolForKind(registry, "workshop", id)
+      if (!tool || NEVER.has(tool.id) || seen.has(tool.id)) return []
+      seen.add(tool.id)
+      return [tool]
+    })
+  }
   return {
     GetRolloutSteps: ({ versionId }) =>
       Effect.flatMap(CurrentUser, (user) => reader.RolloutSteps({ userId: user.id, versionId })).pipe(
@@ -544,6 +555,92 @@ export const makeAgentHandlers = Effect.gen(function* () {
           }))
         }
       }).pipe(internal("GetAgentPermissions")),
+    // The subagent types as they apply to the user (spec/SUBAGENTS.md §10), and the tools a type may get.
+    GetSubagentTypes: () =>
+      Effect.gen(function* () {
+        const user = yield* CurrentUser
+        const settings = yield* reader.SubagentSettings({ userId: user.id })
+        const catalog = subagentToolCatalog()
+        return {
+          types: typesFor(registry.subagentTypes.list(), settings.types)
+            .filter((t) => t.kinds.includes("workshop"))
+            .map((t) => ({
+              id: t.id,
+              label: t.label,
+              description: t.description,
+              instructions: t.instructions,
+              tools: catalog.filter((tool) => mayUse(t, tool)).map((tool) => tool.id),
+              defaultAlias: t.defaultAlias,
+              context: t.context ?? "task",
+              source: t.source,
+              edited: t.edited,
+              off: t.off
+            })),
+          tools: catalog.map((tool) => ({
+            id: tool.id,
+            label: tool.label,
+            explanation: tool.explanation ?? tool.label,
+            effect: tool.effect
+          }))
+        }
+      }).pipe(internal("GetSubagentTypes")),
+    ChangeSubagentType: ({ id, edit }) =>
+      Effect.gen(function* () {
+        const userId = (yield* CurrentUser).id
+        const current = (yield* reader.SubagentSettings({ userId })).types
+        const rest = current.filter((e) => e.id !== id)
+        let stored: SubagentTypeEdit | null = null
+        if (edit !== null) {
+          const reject = (message: string) => new SubagentSettingsRejected({ message })
+          if (edit.id !== id) return yield* reject("A type keeps its id.")
+          const catalog = subagentToolCatalog()
+          const unknown = (edit.tools ?? []).filter((tool) => !catalog.some((c) => c.id === tool))
+          if (unknown.length) return yield* reject(`Not a tool workshops offer: ${unknown.join(", ")}.`)
+          const base = registry.subagentTypes.get(id)
+          if (base && !base.kinds.includes("workshop"))
+            return yield* reject("That subagent has its own settings, in each chat's Tools.")
+          if (base) {
+            // A change to a built-in or plugin type keeps only what differs from it.
+            const baseTools = catalog.filter((tool) => mayUse(base, tool)).map((tool) => tool.id)
+            const sameTools =
+              edit.tools === undefined ||
+              (edit.tools.length === baseTools.length && edit.tools.every((tool) => baseTools.includes(tool)))
+            const differs = <K extends "label" | "description" | "instructions" | "defaultAlias">(key: K) =>
+              edit[key] !== undefined && edit[key] !== base[key] ? { [key]: edit[key] } : {}
+            const change: SubagentTypeEdit = {
+              id,
+              ...differs("label"),
+              ...differs("description"),
+              ...differs("instructions"),
+              ...differs("defaultAlias"),
+              ...(edit.context !== undefined && edit.context !== (base.context ?? "task")
+                ? { context: edit.context }
+                : {}),
+              ...(sameTools ? {} : { tools: [...new Set(edit.tools)] }),
+              ...(edit.off ? { off: true } : {})
+            }
+            stored = Object.keys(change).length > 1 ? change : null
+          } else {
+            if (!edit.label?.trim() || !edit.instructions?.trim())
+              return yield* reject("A type needs a name and instructions.")
+            stored = {
+              id,
+              label: edit.label.trim(),
+              description: edit.description?.trim() ?? "",
+              instructions: edit.instructions,
+              tools: [...new Set(edit.tools ?? [])],
+              defaultAlias: edit.defaultAlias ?? SAME,
+              context: edit.context ?? "task"
+            }
+            if (!current.some((e) => e.id === id) && rest.length >= 32)
+              return yield* reject("You have as many subagent types as you may.")
+          }
+        }
+        const at = current.findIndex((e) => e.id === id)
+        const types =
+          stored === null ? rest : at < 0 ? [...current, stored] : current.map((e, i) => (i === at ? stored : e))
+        yield* writer.ChangeSubagentSettings({ userId, types })
+      }).pipe(internal("ChangeSubagentType")),
     // External tools are never offered in an RP reply.
     ListReplyTools: () =>
       Effect.sync(() => {

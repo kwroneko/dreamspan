@@ -84,6 +84,25 @@ export interface ServerRegistries {
   readonly costFormulas: Handle<Registration>
   readonly decisionPoints: Handle<Registration>
   readonly commands: Handle<PluginCommand>
+  readonly subagentTypes: Handle<SubagentTypeV1>
+}
+/**
+ * A kind of subagent the assistant may start (spec/SUBAGENTS.md §10), plain data. Its tools are
+ * named by id or by effect class, and are always narrowed to the tools the starting reply has.
+ */
+export interface SubagentTypeV1 {
+  readonly id: string
+  /** Shown in a subagent's row: "Check names". */
+  readonly label: string
+  /** For the assistant: what it's for. */
+  readonly description: string
+  /** Chat kinds it's offered in: ["workshop"]. */
+  readonly kinds: ReadonlyArray<string>
+  readonly tools: { readonly ids?: ReadonlyArray<string>; readonly effects?: ReadonlyArray<string> }
+  /** A model alias from the user's subagent models, used when the assistant names none and it's picked. */
+  readonly defaultAlias: string
+  readonly instructions: string
+  readonly context?: "task" | "fork"
 }
 export interface ServerHost {
   readonly api: 1

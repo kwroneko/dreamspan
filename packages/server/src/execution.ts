@@ -19,7 +19,13 @@ import { editCard } from "./agent/tools/cardEdit.ts"
 import { editNote, listNotes, switchNote, writeNote } from "./agent/tools/notes.ts"
 import { lookupLore } from "./agent/tools/lore.ts"
 import { setPresence } from "./agent/tools/presence.ts"
-import { agentTool, messageAgentTool, storyHelperTool } from "./agent/subagents.ts"
+import {
+  agentTool,
+  builtinSubagentTypes,
+  messageAgentTool,
+  storyHelperTool,
+  type SubagentType
+} from "./agent/subagents.ts"
 import { defaultMode, type OrchestrationMode } from "./agent/modes.ts"
 import type { RolloutTool } from "./agent/tools.ts"
 import type { TurnNote } from "./agent/turnNotes.ts"
@@ -85,6 +91,8 @@ export class ExecutionRegistry extends Context.Service<
     readonly toolLoaders: Registry<RolloutTool<never>>
     /** Lines a workshop turn adds at its tail, in order (agent/turnNotes.ts). */
     readonly turnNotes: Registry<TurnNote>
+    /** The kinds of subagents a reply may start (spec/SUBAGENTS.md §2.5, §10); the user's own come from settings. */
+    readonly subagentTypes: Registry<SubagentType>
   }
 >()("rp/ExecutionRegistry") {
   static readonly layer = Layer.effect(
@@ -176,6 +184,13 @@ export class ExecutionRegistry extends Context.Service<
       const toolLoaders = makeRegistry<RolloutTool<never>>()
       yield* toolLoaders.register(toolSearch as RolloutTool<never>)
       yield* toolLoaders.register(makeLoadSkill() as RolloutTool<never>)
+      const typeEntries = makeRegistry<SubagentType>()
+      const subagentTypes = {
+        ...typeEntries,
+        register: (type: SubagentType) =>
+          Effect.sync(() => validateSubagentType(type)).pipe(Effect.andThen(typeEntries.register(type)))
+      }
+      for (const type of builtinSubagentTypes) yield* subagentTypes.register(type)
       const replies = makeRegistry<ReplyOutputStrategy>()
       const summaries = makeRegistry<SummaryStrategy>()
       const runCompactors = makeRegistry<RunCompactor>()
@@ -212,10 +227,23 @@ export class ExecutionRegistry extends Context.Service<
         toolLoadingWires,
         skills,
         toolLoaders,
-        turnNotes: makeRegistry<TurnNote>()
+        turnNotes: makeRegistry<TurnNote>(),
+        subagentTypes
       }
     })
   )
+}
+
+/** A subagent type a plugin registers is plain data the agent tool can list and run (spec/SUBAGENTS.md §10). */
+const validateSubagentType = (type: SubagentType) => {
+  if (!/^[a-z][a-z0-9_-]{0,31}$/.test(type.id)) throw new Error("A subagent type's id is one lower-case word.")
+  if (!type.label?.trim() || !type.instructions?.trim())
+    throw new Error("A subagent type needs a label and instructions.")
+  if (!Array.isArray(type.kinds) || type.kinds.length === 0) throw new Error("A subagent type names its chat kinds.")
+  if (typeof type.tools !== "function" && (typeof type.tools !== "object" || type.tools === null))
+    throw new Error("A subagent type's tools are ids or effect classes.")
+  if (type.context !== undefined && type.context !== "task" && type.context !== "fork")
+    throw new Error("A subagent type's context is task or fork.")
 }
 
 /** Standalone service construction uses the same scoped defaults as the server. */

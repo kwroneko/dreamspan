@@ -170,10 +170,72 @@ export const rowProblems = (rows: Readonly<Record<string, SubagentModelRow>>): R
   return problems
 }
 
-/** The settings page's read: the account's models (picks and rows, defaults filled in) and limits. */
+/** A subagent type's id, the word the assistant writes in `agent`'s `type`: `research`, `check-names`. */
+export const SubagentTypeId = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_-]{0,31}$/))
+
+/** What a subagent sees (§2.3): its task alone, or the reply's conversation and then its task. */
+export const SubagentContext = Schema.Literals(["task", "fork"])
+export type SubagentContext = typeof SubagentContext.Type
+
+/**
+ * One of the user's subagent types, or their change to a built-in or plugin type (spec/SUBAGENTS.md
+ * §10): absent fields keep the type's own. A type of their own has a name, what it's for,
+ * instructions and tools. No limits here: those are the user's alone (§6.2), on Subagent limits.
+ */
+export const SubagentTypeEdit = Schema.Struct({
+  id: SubagentTypeId,
+  label: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(60))),
+  description: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(600))),
+  instructions: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(20_000))),
+  /** Tool ids, from what workshops offer. */
+  tools: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMaxLength(100))).check(Schema.isMaxLength(200))),
+  defaultAlias: Schema.optionalKey(SubagentAlias),
+  context: Schema.optionalKey(SubagentContext),
+  /** A built-in or plugin type the assistant isn't offered. */
+  off: Schema.optionalKey(Schema.Boolean)
+})
+export type SubagentTypeEdit = typeof SubagentTypeEdit.Type
+
+/** The account setting `subagents.types`: the user's types and changes, at most this many. */
+export const SubagentTypes = Schema.Array(SubagentTypeEdit).check(Schema.isMaxLength(32))
+export type SubagentTypes = typeof SubagentTypes.Type
+
+/** A type as the settings list shows it: as it applies now, with where it came from. */
+export const SubagentTypeView = Schema.Struct({
+  id: SubagentTypeId,
+  label: Schema.String,
+  description: Schema.String,
+  instructions: Schema.String,
+  tools: Schema.Array(Schema.String),
+  defaultAlias: Schema.String,
+  context: SubagentContext,
+  source: Schema.Literals(["builtin", "plugin", "user"]),
+  /** The user changed a built-in or plugin type. */
+  edited: Schema.Boolean,
+  off: Schema.Boolean
+})
+export type SubagentTypeView = typeof SubagentTypeView.Type
+
+/** A tool a type may be given: one workshops offer. */
+export const SubagentToolChoice = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  explanation: Schema.String,
+  effect: Schema.String
+})
+export type SubagentToolChoice = typeof SubagentToolChoice.Type
+
+export const SubagentTypesView = Schema.Struct({
+  types: Schema.Array(SubagentTypeView),
+  tools: Schema.Array(SubagentToolChoice)
+})
+export type SubagentTypesView = typeof SubagentTypesView.Type
+
+/** The settings page's read: the account's models (picks and rows, defaults filled in), limits and types. */
 export const SubagentSettings = Schema.Struct({
   models: SubagentModels,
-  limits: SubagentLimits
+  limits: SubagentLimits,
+  types: SubagentTypes
 })
 export type SubagentSettings = typeof SubagentSettings.Type
 

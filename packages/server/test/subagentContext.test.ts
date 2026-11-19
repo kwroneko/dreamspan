@@ -9,6 +9,8 @@ import type { Chat, VersionId } from "@dreamspan/shared/chat.ts"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { newCardDoc } from "@dreamspan/shared/editing.ts"
 import { Writer } from "../src/db/Database.ts"
+import { settingsRegistry } from "../src/db/settings.ts"
+import { ExecutionRegistry } from "../src/execution.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
@@ -290,6 +292,143 @@ describe("subagent context (SA7)", () => {
       // `fast` isn't picked here; either way no fork runs on another model.
       assert.match(result, /no subagent model|only on the model this chat uses/)
       assert.isFalse(completions(mock.requests()).some((b) => text(b).includes("From here on you are a subagent")))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("types: the user's own, changes to a built-in one, and a plugin's, as the agent tool offers them", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const CHECKER = "You are a checker subagent."
+      let spawn: Record<string, unknown> = { type: "checker", task: "Check the card names." }
+      const handler = (request: Recorded, res: ServerResponse) => {
+        const body = request.body as unknown as Body
+        if (!body?.messages) return sse(res, completionChunks(["Ready."], {}))
+        if (text(body).includes(CHECKER) && !text(body).includes(TRIGGER))
+          return sse(res, completionChunks(["Names look fine."], {}))
+        if (!text(body).includes(TRIGGER)) return sse(res, completionChunks(["Ready."], {}))
+        const at = body.messages.findLastIndex((m) => m.role === "user" && JSON.stringify(m.content).includes(TRIGGER))
+        const done = body.messages.slice(at).filter((m) => m.role === "tool").length
+        return sse(res, done === 0 ? toolCall("agent", spawn, `spawn-${at}`) : completionChunks(["Done."], {}))
+      }
+      const { api, chat, events, mock } = yield* workshop(handler)
+      const registry = yield* ExecutionRegistry
+
+      // Validation: a tool workshops don't offer, and a new type without instructions.
+      const unknownTool = yield* api
+        .ChangeSubagentType({
+          id: "checker",
+          edit: { id: "checker", label: "Check", instructions: CHECKER, tools: ["no_such_tool"] }
+        })
+        .pipe(Effect.flip)
+      assert.strictEqual(unknownTool._tag, "SubagentSettingsRejected")
+      const incomplete = yield* api
+        .ChangeSubagentType({ id: "checker", edit: { id: "checker", label: "Check" } })
+        .pipe(Effect.flip)
+      assert.strictEqual(incomplete._tag, "SubagentSettingsRejected")
+
+      // The user's own type, with one tool.
+      yield* api.ChangeSubagentType({
+        id: "checker",
+        edit: {
+          id: "checker",
+          label: "Check names",
+          description: "Checks card names.",
+          instructions: CHECKER,
+          tools: ["list_library"]
+        }
+      })
+      // A plugin's type, plain data.
+      yield* registry.subagentTypes.register({
+        id: "plugged",
+        label: "From a plugin",
+        description: "A plugin's type.",
+        kinds: ["workshop"],
+        tools: { effects: ["read"] },
+        defaultAlias: "same",
+        instructions: "You are a plugin's subagent."
+      })
+      // Saving a built-in type unchanged keeps no change.
+      const listed = yield* api.GetSubagentTypes({})
+      const research = listed.types.find((t) => t.id === "research")!
+      yield* api.ChangeSubagentType({
+        id: "research",
+        edit: {
+          id: "research",
+          label: research.label,
+          description: research.description,
+          instructions: research.instructions,
+          tools: [...research.tools],
+          defaultAlias: research.defaultAlias,
+          context: research.context
+        }
+      })
+      assert.deepStrictEqual((yield* api.GetSubagentSettings({})).types, [
+        {
+          id: "checker",
+          label: "Check names",
+          description: "Checks card names.",
+          instructions: CHECKER,
+          tools: ["list_library"],
+          defaultAlias: "same",
+          context: "task"
+        }
+      ])
+      const types = (yield* api.GetSubagentTypes({})).types
+      assert.deepStrictEqual(
+        types.map((t) => [t.id, t.source]),
+        [
+          ["research", "builtin"],
+          ["plugged", "plugin"],
+          ["checker", "user"]
+        ]
+      )
+      // The story helper isn't listed (it has its own settings) and can't be changed here.
+      const helper = yield* api
+        .ChangeSubagentType({ id: "helper", edit: { id: "helper", off: true } })
+        .pipe(Effect.flip)
+      assert.include(helper.message, "its own settings")
+      assert.deepStrictEqual(types.find((t) => t.id === "checker")!.tools, ["list_library"])
+      assert.isTrue(types.find((t) => t.id === "research")!.tools.includes("list_library"))
+
+      // Research turned off, the checker run: the agent tool lists what's offered, and the child
+      // gets its own instructions and only its own tool (and report_progress).
+      yield* api.ChangeSubagentType({ id: "research", edit: { ...research, off: true } })
+      const versionId = yield* task(api, chat, "check names")
+      yield* eventually(() => finished(events, versionId) !== undefined, 60_000)
+      const bodies = completions(mock.requests())
+      const parent = bodies.find((b) => text(b).includes(TRIGGER))!
+      const agent = JSON.stringify((parent.tools ?? []).find((t) => t.function.name === "agent"))
+      assert.include(agent, "checker")
+      assert.include(agent, "plugged")
+      assert.notInclude(agent, '\\"research\\"')
+      const child = bodies.find((b) => text(b).includes(CHECKER) && !text(b).includes(TRIGGER))!
+      assert.deepStrictEqual((child.tools ?? []).map((t) => t.function.name).sort(), [
+        "list_library",
+        "report_progress"
+      ])
+      const steps = yield* api.GetRolloutSteps({ versionId })
+      const row = steps.find((s) => s.kind === "tool" && s.tool === "agent")
+      assert.strictEqual(row?.kind === "tool" ? row.subagent?.typeLabel : undefined, "Check names")
+
+      // A type turned off isn't started.
+      spawn = { type: "research", task: "Anything." }
+      const off = yield* task(api, chat, "research while it's off")
+      yield* eventually(() => finished(events, off) !== undefined, 60_000)
+      const last = completions(mock.requests())
+        .filter((b) => text(b).includes(TRIGGER))
+        .at(-1)!
+      assert.include(JSON.stringify(last.messages.at(-1)!.content), "no subagent type")
+
+      // Restore drops the change; deleting the user's type removes it.
+      yield* api.ChangeSubagentType({ id: "research", edit: null })
+      yield* api.ChangeSubagentType({ id: "checker", edit: null })
+      const after = (yield* api.GetSubagentTypes({})).types
+      assert.isFalse(after.find((t) => t.id === "research")!.off)
+      assert.isFalse(after.some((t) => t.id === "checker"))
+      // The workshop's assistant may write types (as a setup change), never models or limits.
+      assert.isDefined(settingsRegistry.get("subagents.types")?.agent)
+      assert.isUndefined(settingsRegistry.get("subagents.models")?.agent)
+      assert.isUndefined(settingsRegistry.get("subagents.limits")?.agent)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })
