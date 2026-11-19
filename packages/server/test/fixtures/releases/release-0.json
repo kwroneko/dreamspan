@@ -9,7 +9,8 @@
     "0005_preview_macro": "e7f28c60b75eb5fdbc63ebc8ace5071414d2b23ee03242779766bd97136f5c68",
     "0006_persona_locks": "4b493b3cd5e259f1d93beec91675307117dc750f9e2c6c15e41c79cf988adae8",
     "0007_contract_records": "3216bbb24ba72d906af44f376d79c9182660de49217843ad2959e5f3eeb164e4",
-    "0008_attachment_paths": "a269d7401bebea0e6c86b0c9cd63de3cabb549d7a6c416bcc5b4325d59243615"
+    "0008_attachment_paths": "a269d7401bebea0e6c86b0c9cd63de3cabb549d7a6c416bcc5b4325d59243615",
+    "0009_share_invitations": "b70a23d8eb33716b36fd93dc604f90620b6095e0bcf80b89787d84adac247376"
   },
   "schema": [
     {
@@ -257,6 +258,12 @@
       "name": "entity_tags_tag",
       "tbl_name": "entity_tags",
       "sql": "CREATE INDEX entity_tags_tag ON entity_tags(tag, entity_id)"
+    },
+    {
+      "type": "index",
+      "name": "file_share_invitations_grantee",
+      "tbl_name": "file_share_invitations",
+      "sql": "CREATE INDEX file_share_invitations_grantee ON file_share_invitations(grantee_user_id)"
     },
     {
       "type": "index",
@@ -1412,9 +1419,15 @@
     },
     {
       "type": "table",
+      "name": "file_share_invitations",
+      "tbl_name": "file_share_invitations",
+      "sql": "CREATE TABLE file_share_invitations ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, path TEXT NOT NULL CHECK (length(path) BETWEEN 1 AND 4096), inode INTEGER, device INTEGER, handle TEXT NOT NULL CHECK (length(handle) BETWEEN 1 AND 128), grantee_user_id TEXT REFERENCES users(id) ON DELETE CASCADE, mode TEXT NOT NULL CHECK (mode IN ('view', 'edit')), created_at INTEGER NOT NULL, UNIQUE (owner_user_id, path, handle) ) STRICT"
+    },
+    {
+      "type": "table",
       "name": "file_shares",
       "tbl_name": "file_shares",
-      "sql": "CREATE TABLE file_shares ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, path TEXT NOT NULL CHECK (length(path) BETWEEN 1 AND 4096), inode INTEGER, grantee_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, mode TEXT NOT NULL CHECK (mode IN ('view', 'edit')), created_at INTEGER NOT NULL, UNIQUE (owner_user_id, path, grantee_user_id) ) STRICT"
+      "sql": "CREATE TABLE file_shares ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, path TEXT NOT NULL CHECK (length(path) BETWEEN 1 AND 4096), inode INTEGER, grantee_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, mode TEXT NOT NULL CHECK (mode IN ('view', 'edit')), created_at INTEGER NOT NULL, device INTEGER, suspended_at INTEGER, UNIQUE (owner_user_id, path, grantee_user_id) ) STRICT"
     },
     {
       "type": "table",
@@ -2249,6 +2262,12 @@
       "name": "entity_revisions_immutable",
       "tbl_name": "entity_revisions",
       "sql": "CREATE TRIGGER entity_revisions_immutable BEFORE UPDATE OF seq, id, entity_id, parents, doc_json, doc_hash, schema_version, origin, origin_ref, search_text, created_at ON entity_revisions BEGIN SELECT RAISE(ABORT, 'entity revisions are immutable'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "file_share_invitations_not_self",
+      "tbl_name": "file_share_invitations",
+      "sql": "CREATE TRIGGER file_share_invitations_not_self BEFORE INSERT ON file_share_invitations WHEN NEW.owner_user_id = NEW.grantee_user_id BEGIN SELECT RAISE(ABORT, 'a folder is not shared with its owner'); END"
     },
     {
       "type": "trigger",
