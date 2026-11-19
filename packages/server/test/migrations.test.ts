@@ -6,7 +6,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "../src/db/connection.ts"
-import { Migrations, migrations } from "../src/db/migrations.ts"
+import { migrate, migrationDefinitions, Migrations, migrations } from "../src/db/migrations.ts"
 import { FORK_SUMMARY_FORMAT, summaryValidSql } from "../src/db/summaryValidity.ts"
 import { tempDir } from "./support/tempDir.ts"
 
@@ -212,9 +212,68 @@ describe("the migrator", () => {
       yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (1, 'users'), (56, 'card_forks')`
       const exit = yield* Effect.exit(Effect.scoped(Layer.build(Migrations)))
       assert.isTrue(Exit.isFailure(exit))
-      assert.include(String(exit), "empty data directory")
+      assert.include(String(exit), "whose database this version can't read")
+      assert.notInclude(String(exit), "empty")
       const tables = yield* sql<{ n: number }>`SELECT count(*) AS n FROM sqlite_master WHERE name = 'users'`
       assert.strictEqual(tables[0]!.n, 0)
+    }).pipe(Effect.provide(layer()))
+  )
+
+  it.effect("refuses data made by a newer version, saying to update or restore, and changes nothing", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* Effect.scoped(Layer.build(Migrations))
+      yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (9999, 'from_the_future')`
+      const exit = yield* Effect.exit(Effect.scoped(Layer.build(Migrations)))
+      assert.isTrue(Exit.isFailure(exit))
+      assert.include(String(exit), "This data was made by a newer version of Dreamspan (it has 9999_from_the_future")
+      assert.include(String(exit), "restore the backup")
+      assert.notInclude(String(exit), "empty")
+    }).pipe(Effect.provide(layer()))
+  )
+
+  it.effect("refuses to start on rows that point at rows that don't exist, never saying to empty the data folder", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* Effect.scoped(Layer.build(Migrations))
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'rp', 'active', 0)`
+      // Broken outside the app (foreign keys off): a pin of a chat that isn't there.
+      yield* sql.unsafe("PRAGMA foreign_keys = OFF")
+      yield* sql`INSERT INTO chat_pins (user_id, chat_id) VALUES ('u', 'gone'), ('u', 'lost')`
+      yield* sql.unsafe("PRAGMA foreign_keys = ON")
+      const exit = yield* Effect.exit(Effect.scoped(Layer.build(Migrations)))
+      assert.isTrue(Exit.isFailure(exit))
+      assert.include(
+        String(exit),
+        "Dreamspan won't start: 2 rows in its database point at rows that don't exist: 2 in chat_pins (pointing into chats)"
+      )
+      assert.include(String(exit), "restore the backup taken before this update")
+      assert.notInclude(String(exit), "empty")
+      // Mended, it starts.
+      yield* sql`DELETE FROM chat_pins WHERE chat_id IN ('gone', 'lost')`
+      assert.isTrue(Exit.isSuccess(yield* Effect.exit(Effect.scoped(Layer.build(Migrations)))))
+    }).pipe(Effect.provide(layer()))
+  )
+
+  it.effect("keeps a pending migration out when the reference check after it fails", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const upTo5 = Object.fromEntries(Object.entries(migrationDefinitions).filter(([key]) => key < "0006"))
+      yield* migrate(upTo5)
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* sql.unsafe("PRAGMA foreign_keys = OFF")
+      yield* sql`INSERT INTO chat_pins (user_id, chat_id) VALUES ('u', 'gone')`
+      yield* sql.unsafe("PRAGMA foreign_keys = ON")
+      const exit = yield* Effect.exit(migrate(migrationDefinitions))
+      assert.isTrue(Exit.isFailure(exit))
+      assert.deepStrictEqual(yield* sql`SELECT name FROM sqlite_master WHERE name = 'persona_locks'`, [])
+      assert.deepStrictEqual(
+        (yield* sql<{ migration_id: number }>`SELECT max(migration_id) AS migration_id FROM effect_sql_migrations`).map(
+          (row) => row.migration_id
+        ),
+        [5]
+      )
     }).pipe(Effect.provide(layer()))
   )
 
