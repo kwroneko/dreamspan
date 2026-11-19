@@ -21,7 +21,8 @@ import {
   type JSONRPCMessage,
   McpError,
   type MessageExtraInfo,
-  ResultSchema
+  ResultSchema,
+  ToolListChangedNotificationSchema
 } from "@modelcontextprotocol/sdk/types.js"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { NotFound, StaleWrite } from "@dreamspan/shared/errors.ts"
@@ -295,7 +296,7 @@ const httpCode = (error: unknown): number | undefined => {
  * the response to the request's own POST, so the server refused it before processing it. A
  * transport error, a timeout or an error message alone never counts.
  */
-export const isDeadSession = (error: unknown) =>
+const isDeadSession = (error: unknown) =>
   error instanceof StreamableHTTPError &&
   (error.code === 404 || (error.code === 400 && /not initiali[sz]ed|session/i.test(error.message)))
 
@@ -655,6 +656,10 @@ export const layer = Layer.effect(
           session.client.onclose = () => {
             entry.dead = true
           }
+          // A connected server says its tools changed: list them again at once (spec/MCP.md §4.1).
+          session.client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+            runFork(relist(userId, prepared, key, entry))
+          })
           pool.set(key, entry)
           return { key, entry }
         })
@@ -734,6 +739,13 @@ export const layer = Layer.effect(
             return { _tag: "Sent", failure, entry } as const
           })
         const first = yield* attempt(attribution.attempt)
+        // The first connect of this process for the connection lists its tools again, after the call.
+        if (first._tag !== "NotSent" && !listedHere.has(connectionId)) {
+          listedHere.add(connectionId)
+          const key = keyOf(connectionId, userId)
+          const entry = pool.get(key)
+          if (entry !== undefined) runFork(relist(userId, ready, key, entry))
+        }
         const settled =
           // The server refused it unprocessed: reconnect once and send it again (spec/MCP.md §7.2).
           first._tag === "Sent" && first.failure instanceof McpRequestFailed && first.failure.deadSession
@@ -760,45 +772,89 @@ export const layer = Layer.effect(
     /** `initialize` and every page of `tools/list`, up to the listing's bounds. */
     const list = (userId: UserId, prepared: McpPrepared, transport: RemoteMcpTransport) =>
       Effect.scoped(
-        Effect.gen(function* () {
-          const session = yield* open(userId, prepared, CHECK, transport)
-          const tools: Array<unknown> = []
-          let bytes = 0
-          let truncated = false
-          let cursor: string | undefined
-          do {
-            const page = yield* request(userId, prepared, session, {
-              method: "tools/list",
-              tool: null,
-              attribution: CHECK,
-              send: (signal, timeout) =>
-                session.client.request(
-                  { method: "tools/list", params: cursor === undefined ? {} : { cursor } },
-                  ResultSchema,
-                  { signal, timeout }
-                )
-            })
-            const listed = Array.isArray(page.tools) ? page.tools : []
-            for (const tool of listed) {
-              bytes += Buffer.byteLength(JSON.stringify(tool))
-              if (tools.length >= MCP_TOOLS_LIMIT || bytes > MCP_LISTING_BYTES_LIMIT) {
-                truncated = true
-                break
-              }
-              tools.push(tool)
-            }
-            cursor = typeof page.nextCursor === "string" && page.nextCursor !== "" ? page.nextCursor : undefined
-          } while (cursor !== undefined && !truncated)
-          const server = serverInfoOf(
-            session.client.getServerVersion(),
-            session.protocolVersion(),
-            session.client.getServerCapabilities(),
-            session.client.getInstructions(),
-            truncated
-          )
-          return { server, tools, route: session.route() }
-        })
+        Effect.flatMap(open(userId, prepared, CHECK, transport), (session) => listOn(userId, prepared, session))
       )
+
+    /** Every page of `tools/list` on an open client, up to the listing's bounds, as Check stores it. */
+    const listOn = (userId: UserId, prepared: McpPrepared, session: McpSession) =>
+      Effect.gen(function* () {
+        const tools: Array<unknown> = []
+        let bytes = 0
+        let truncated = false
+        let cursor: string | undefined
+        do {
+          const page = yield* request(userId, prepared, session, {
+            method: "tools/list",
+            tool: null,
+            attribution: CHECK,
+            send: (signal, timeout) =>
+              session.client.request(
+                { method: "tools/list", params: cursor === undefined ? {} : { cursor } },
+                ResultSchema,
+                { signal, timeout }
+              )
+          })
+          const listed = Array.isArray(page.tools) ? page.tools : []
+          for (const tool of listed) {
+            bytes += Buffer.byteLength(JSON.stringify(tool))
+            if (tools.length >= MCP_TOOLS_LIMIT || bytes > MCP_LISTING_BYTES_LIMIT) {
+              truncated = true
+              break
+            }
+            tools.push(tool)
+          }
+          cursor = typeof page.nextCursor === "string" && page.nextCursor !== "" ? page.nextCursor : undefined
+        } while (cursor !== undefined && !truncated)
+        const server = serverInfoOf(
+          session.client.getServerVersion(),
+          session.protocolVersion(),
+          session.client.getServerCapabilities(),
+          session.client.getInstructions(),
+          truncated
+        )
+        return { server, tools, route: session.route() }
+      })
+
+    // Listing again on a kept client (spec/MCP.md §4.1): when a connected server says its tools
+    // changed (`notifications/tools/list_changed`), and at the first connect of this process for a
+    // connection. It carries nothing of the user's, and the connection is enabled, or it wouldn't
+    // be connected. The catalog is stored only if it changed (`SaveMcpCatalog`), and a listing made
+    // against an older `cache_revision` is dropped. One listing of a connection at a time.
+    const listedHere = new Set<string>()
+    const listLocks = new Map<string, Semaphore.Semaphore>()
+    const relist = (userId: UserId, prepared: McpPrepared, key: string, entry: Pooled) => {
+      const connectionId = prepared.connection.id
+      let lock = listLocks.get(connectionId)
+      if (!lock) listLocks.set(connectionId, (lock = Semaphore.makeUnsafe(1)))
+      return lock
+        .withPermit(
+          Effect.gen(function* () {
+            if (entry.dead || entry.retired) return
+            const before = yield* reader.GetMcpConnection({ userId, connectionId })
+            if (before.cacheRevision !== entry.revision) return
+            entry.users += 1
+            if (entry.timer !== null) clearTimeout(entry.timer)
+            entry.timer = null
+            const listed = yield* listOn(userId, prepared, entry.session).pipe(
+              Effect.ensuring(Effect.suspend(() => release(key, entry)))
+            )
+            const tools = buildCatalog(before.key, listed.tools, before.tools, before.catalogRevision + 1)
+            yield* writer.SaveMcpCatalog({
+              userId,
+              connectionId,
+              expectedCacheRevision: before.cacheRevision,
+              expectedCatalogRevision: before.catalogRevision,
+              outcome: { server: listed.server, tools },
+              at: Date.now()
+            })
+          })
+        )
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning(`listing ${prepared.connection.name}'s tools again failed`, cause)
+          )
+        )
+    }
 
     const check: McpConnectionsShape["check"] = (userId, connectionId) =>
       Effect.gen(function* () {

@@ -3,6 +3,7 @@
 // its own, and a session the server lost reconnects once, sending the call again only when the
 // server's answer proves it refused the call unprocessed. Never a third-party server.
 import { assert, describe, it } from "@effect/vitest"
+import { eventually } from "./support/generation.ts"
 import type { McpConnectionSettings } from "@dreamspan/shared/mcp.ts"
 import { Effect } from "effect"
 import { McpConnections, mcpClientTiming } from "../src/mcp/McpConnections.ts"
@@ -52,7 +53,8 @@ const setup = (initial: Parameters<typeof startFakeMcpServer>[0] = {}) =>
     return { api, server, mcp, call, ledger, connection: created.connection }
   })
 
-const sentMethods = (methods: ReadonlyArray<string>) => methods.filter((m) => m !== "notifications/initialized")
+const sentMethods = (methods: ReadonlyArray<string>) =>
+  methods.filter((m) => m !== "notifications/initialized" && m !== "tools/list")
 
 describe("kept MCP clients", () => {
   it.live("a second call reuses the first's client; an edit closes it and the next call opens another", () =>
@@ -173,6 +175,73 @@ describe("kept MCP clients", () => {
       server.reset()
       yield* call("three")
       assert.deepStrictEqual(sentMethods(server.methods()), ["initialize", "tools/call"])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+})
+
+/** Waits until a check through the API holds. */
+const until = <E, R>(check: Effect.Effect<boolean, E, R>) =>
+  Effect.gen(function* () {
+    for (let i = 0; i < 400; i++) {
+      if (yield* check) return
+      yield* Effect.sleep("50 millis")
+    }
+    return yield* Effect.die(new Error("timed out waiting"))
+  })
+
+describe("listing a server's tools again", () => {
+  it.live("the first connect of a process lists again after the call, and a changed-tools notice lists at once", () =>
+    Effect.gen(function* () {
+      const { api, server, call, connection } = yield* setup()
+      const listings = () => server.methods().filter((m) => m === "tools/list").length
+      yield* call("one")
+      // The first connect of this process lists once, after the call, with the check's purpose.
+      yield* eventually(() => listings() === 1)
+      const listed = (yield* api.ListMcpCalls({ connectionId: connection.id, before: null })).filter(
+        (row) => row.method === "tools/list"
+      )
+      assert.isTrue(listed.every((row) => row.purpose === "check" && row.chatId === null))
+      // Unchanged: the catalog keeps its revision.
+      assert.strictEqual((yield* api.GetMcpConnection({ connectionId: connection.id })).catalogRevision, 1)
+      yield* call("two")
+      assert.strictEqual(listings(), 1)
+
+      // The server adds a tool and says so: listed at once, stored as a new revision, the new
+      // tool off and marked new until the user chooses.
+      server.state.tools = [fakeTool("echo"), fakeTool("paint")]
+      yield* Effect.promise(() => server.toolsChanged())
+      yield* eventually(() => listings() === 2)
+      yield* until(Effect.map(api.GetMcpConnection({ connectionId: connection.id }), (c) => c.catalogRevision === 2))
+      const after = yield* api.GetMcpConnection({ connectionId: connection.id })
+      assert.deepStrictEqual(
+        after.tools.map((t) => [t.name, t.firstRevision]),
+        [
+          ["echo", 1],
+          ["paint", 2]
+        ]
+      )
+      assert.strictEqual(after.use.reviewedRevision, 1)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("a notice from a server with no kept client, or after an edit, changes nothing", () =>
+    Effect.gen(function* () {
+      const { api, server, mcp, call, connection } = yield* setup()
+      yield* call("one")
+      yield* eventually(() => server.methods().includes("tools/list"))
+      // An edit closes the kept client: the old session's notice isn't heard.
+      yield* api.UpdateMcpConnection({
+        connectionId: connection.id,
+        settings: settings(connection.url!, { timeoutS: 7 }),
+        expectedRowVersion: connection.rowVersion
+      })
+      assert.strictEqual(mcp.kept(), 0)
+      server.reset()
+      server.state.tools = [fakeTool("echo"), fakeTool("later")]
+      yield* Effect.promise(() => server.toolsChanged())
+      yield* Effect.sleep("300 millis")
+      assert.lengthOf(server.requests(), 0)
+      assert.strictEqual((yield* api.GetMcpConnection({ connectionId: connection.id })).catalogRevision, 1)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 })
