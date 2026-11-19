@@ -19,7 +19,7 @@ import { editCard } from "./agent/tools/cardEdit.ts"
 import { editNote, listNotes, switchNote, writeNote } from "./agent/tools/notes.ts"
 import { lookupLore } from "./agent/tools/lore.ts"
 import { setPresence } from "./agent/tools/presence.ts"
-import { agentTool, messageAgentTool } from "./agent/subagents.ts"
+import { agentTool, messageAgentTool, storyHelperTool } from "./agent/subagents.ts"
 import { defaultMode, type OrchestrationMode } from "./agent/modes.ts"
 import type { RolloutTool } from "./agent/tools.ts"
 import {
@@ -156,6 +156,8 @@ export class ExecutionRegistry extends Context.Service<
         agentTool,
         // SA5: messages to the reply's subagents, running or finished.
         messageAgentTool,
+        // SA8: the story helper, a story reply's one subagent; off until This chat → Tools allows it.
+        storyHelperTool,
         { ...editCard, kindOverrides: ["workshop"] }
       ] as ReadonlyArray<RolloutTool<never>>)
         yield* rolloutTools.register(tool)

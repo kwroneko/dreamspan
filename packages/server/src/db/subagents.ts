@@ -177,9 +177,6 @@ const rowOf = (r: ChildRecord, earlier: ReadonlyArray<ChildRecord> = []): Subage
 /** The subagent's own tool for a one-line status (spec/SUBAGENTS.md §4). */
 export const PROGRESS = "report_progress"
 
-/** The tools whose calls start or carry on a subagent: their steps carry its row (§7). */
-const SPAWNS = new Set(["agent", "message_agent"])
-
 /** What the runs' requests cost together, when every one was priced in one currency. */
 const costOf = (runs: ReadonlyArray<ChildRecord>) => {
   const priced = runs.filter((c) => c.requests > 0)
@@ -243,7 +240,7 @@ const earlierRuns = (sql: SqlClient.SqlClient, userId: UserId, versionId: Versio
   })
 
 /**
- * A run's tool steps with the subagents their `agent` calls started (spec/SUBAGENTS.md §7):
+ * A run's tool steps with the subagents their calls started (spec/SUBAGENTS.md §7):
  * for the stored steps, read in the same transaction as them.
  */
 export const withSubagents = <S extends { readonly kind: string }>(
@@ -252,11 +249,8 @@ export const withSubagents = <S extends { readonly kind: string }>(
   steps: ReadonlyArray<S>
 ) =>
   Effect.gen(function* () {
-    const calls = steps.flatMap((s) =>
-      s.kind === "tool" && SPAWNS.has((s as unknown as { tool: string }).tool)
-        ? [(s as unknown as { id: string }).id]
-        : []
-    )
+    // Any tool's call may have started one (`agent`, `message_agent`, the story helper, a plugin's).
+    const calls = steps.flatMap((s) => (s.kind === "tool" ? [(s as unknown as { id: string }).id] : []))
     if (calls.length === 0) return steps
     const children = byCall(yield* childrenOf(sql, yield* chainOf(sql, rolloutId), calls))
     return steps.map((s) => {

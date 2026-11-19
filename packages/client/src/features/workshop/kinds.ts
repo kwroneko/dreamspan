@@ -7,6 +7,8 @@ const WORKSHOP_KIND = "workshop"
 export const CAPABILITY_CHIP = "workshop.capabilities"
 /** The subagent model chip beside the model chip (spec/SUBAGENTS.md §5.1a). */
 export const SUBAGENT_MODELS_CHIP = "workshop.subagent-models"
+/** The same chip in a story, while This chat → Tools allows the story helper (spec/SUBAGENTS.md §9). */
+export const STORY_SUBAGENT_MODELS_CHIP = "story.subagent-models"
 
 export const workshopLook: ChatKindLook = {
   id: WORKSHOP_KIND,

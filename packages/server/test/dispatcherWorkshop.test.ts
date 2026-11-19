@@ -140,6 +140,7 @@ it.live("dispatches through canonical approvals, receipts, step edits, capabilit
       [
         "list_library",
         "agent",
+        "message_agent",
         "read_file",
         "list_files",
         "search_files",

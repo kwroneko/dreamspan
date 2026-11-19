@@ -63,10 +63,21 @@ export const SubagentLimits = Schema.Struct({
   /** Running at once per reply; more wait, queued. */
   runConcurrent: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 16 }))),
   /** Running at once across the account; more wait, queued. */
-  accountConcurrent: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 64 })))
+  accountConcurrent: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 64 }))),
+  /** The story helper's own limits (spec/SUBAGENTS.md §6.2's story column, §9): lower, a reply waits on it. */
+  story: Schema.optionalKey(SubagentCaps)
 })
 export type SubagentLimits = typeof SubagentLimits.Type
-export type ResolvedLimits = Required<SubagentLimits>
+export type ResolvedCaps = Required<SubagentCaps>
+export type ResolvedLimits = Required<Omit<SubagentLimits, "story">> & { readonly story: ResolvedCaps }
+
+/** The story helper's defaults (spec/SUBAGENTS.md §6.2): the reply it helps waits for it. */
+export const DEFAULT_STORY_CAPS: ResolvedCaps = {
+  requests: 6,
+  tokens: 60_000,
+  cost: 0.05,
+  minutes: 1
+}
 
 /** The defaults (§6.2, §6.3), for a workshop subagent. */
 export const DEFAULT_LIMITS: ResolvedLimits = {
@@ -77,13 +88,21 @@ export const DEFAULT_LIMITS: ResolvedLimits = {
   perRun: 16,
   runCostTimes: 4,
   runConcurrent: 4,
-  accountConcurrent: 8
+  accountConcurrent: 8,
+  story: DEFAULT_STORY_CAPS
 }
 
 export const resolveLimits = (stored: SubagentLimits | null | undefined): ResolvedLimits => ({
   ...DEFAULT_LIMITS,
-  ...stored
+  ...stored,
+  story: { ...DEFAULT_STORY_CAPS, ...stored?.story }
 })
+
+/**
+ * The story helper's tool (spec/SUBAGENTS.md §9, DESIGN §7.10 [D]): one read-only subagent a
+ * story reply may ask to look something up or check a draft. Off unless This chat → Tools allows it.
+ */
+export const STORY_HELPER = "ask_helper"
 
 /** The rows the account has without writing any: `same` and the summary model's `fast`. */
 const DEFAULT_ROWS: Readonly<Record<string, SubagentModelRow>> = {
