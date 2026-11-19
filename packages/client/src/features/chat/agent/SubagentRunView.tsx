@@ -13,6 +13,7 @@ import { CenterHeaderContent } from "../../../ui/CenterHeader.tsx"
 import { Card, CardHeader } from "../../../ui/Surface.tsx"
 import { Tooltip } from "../../../ui/Tooltip.tsx"
 import { useTitle } from "../../shell.tsx"
+import { effortLabel } from "../../connections/ReasoningEffort.tsx"
 import { Steps, Tools } from "./RunSteps.tsx"
 import { subagentFacts } from "./SubagentPanel.tsx"
 
@@ -73,6 +74,8 @@ export function SubagentRunView({
                     ? `The reply's own: ${run.row.model}`
                     : `${run.row.alias}: ${run.row.model}`}
                 </dd>
+                <dt className="text-muted">Reasoning effort</dt>
+                <dd data-subagent-effort="">{run.row.effort ? effortLabel(run.row.effort) : "The model's default"}</dd>
                 {run.error && run.row.status !== "limit" && (
                   <>
                     <dt className="text-muted">Error</dt>

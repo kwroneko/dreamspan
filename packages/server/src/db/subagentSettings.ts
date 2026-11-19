@@ -8,6 +8,8 @@ import { SqlClient } from "effect/sql"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { foldState } from "@dreamspan/shared/state.ts"
 import { resolveLcm } from "@dreamspan/shared/lcmSettings.ts"
+import { supportedEfforts, type ReasoningEffort } from "@dreamspan/shared/modelSettings.ts"
+import { resolveModel } from "@dreamspan/shared/providers.ts"
 import {
   parseModelPick,
   resolveLimits,
@@ -27,6 +29,7 @@ import { resolveSummaryModel } from "../assembler/summaryModel.ts"
 import type { ModelInput } from "../assembler/types.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
+import { toModel, type ModelRow } from "./providers.ts"
 import { putUserSetting, readSetting } from "./settings.ts"
 import { replySubagents, spendOf } from "./subagents.ts"
 import { query, transaction } from "./tx.ts"
@@ -44,6 +47,10 @@ export interface SubagentModelEntry {
   readonly alias: string
   readonly note: string
   readonly caps?: SubagentCaps
+  /** The row's reasoning level (§5.1), where set. */
+  readonly effort?: ReasoningEffort
+  /** The levels its model takes (`supportedEfforts`); empty where it doesn't reason. */
+  readonly efforts: ReadonlyArray<ReasoningEffort>
   /** The model's key, as the assistant reads it beside the alias. */
   readonly name: string
   /** Absent for `same`: the run's own model. */
@@ -83,6 +90,17 @@ const modelOf = (
       )
     )
 
+/** The reasoning levels a model takes, from its own capabilities (what the model settings show). */
+const effortsOf = (sql: SqlClient.SqlClient, model: ModelInput) =>
+  Effect.map(
+    sql<ModelRow>`SELECT * FROM models WHERE id = ${model.modelId} AND connection_id = ${model.connectionId}`,
+    ([row]): ReadonlyArray<ReasoningEffort> => {
+      if (!row) return []
+      const m = toModel(row)
+      return supportedEfforts(resolveModel(m.key, m.upstream, m.overrides))
+    }
+  )
+
 const sameModel = (a: ModelInput, b: ModelInput) => a.connectionId === b.connectionId && a.modelId === b.modelId
 
 export const makeSubagentSettingReadHandlers = Effect.gen(function* () {
@@ -105,16 +123,26 @@ export const makeSubagentSettingReadHandlers = Effect.gen(function* () {
         const chatModel = yield* modelOf(base, state.modelBindings[""] ?? null)
         const listed: Array<ModelInput> = chatModel ? [chatModel] : []
         const entries: Array<SubagentModelEntry> = []
-        const entry = (pick: string, row: SubagentModelRow, name: string, model?: ModelInput): SubagentModelEntry => ({
+        const entry = (
+          pick: string,
+          row: SubagentModelRow,
+          name: string,
+          efforts: ReadonlyArray<ReasoningEffort>,
+          model?: ModelInput
+        ): SubagentModelEntry => ({
           pick,
           alias: row.alias,
           note: row.note,
           name,
           ...(row.caps ? { caps: row.caps } : {}),
+          ...(row.effort ? { effort: row.effort } : {}),
+          efforts,
           ...(model ? { model } : {})
         })
         if (picks.includes(SAME) && chatModel)
-          entries.push(entry(SAME, { ...rows.get(SAME)!, alias: "same" }, chatModel.key))
+          entries.push(
+            entry(SAME, { ...rows.get(SAME)!, alias: "same" }, chatModel.key, yield* effortsOf(sql, chatModel))
+          )
         // `summary` is the chat's summary model only where this chat summarizes (§5.1): there it
         // already sends to it. Elsewhere the pick, made in another chat, names nothing, so it never
         // sends a chat's content to a connection that chat didn't choose.
@@ -134,7 +162,7 @@ export const makeSubagentSettingReadHandlers = Effect.gen(function* () {
           // Gone, a decision connection, or already listed (the chat's own model is `same`).
           if (!model || model.kind === DECISION_KIND || listed.some((m) => sameModel(m, model))) continue
           listed.push(model)
-          entries.push(entry(pick, rows.get(pick)!, model.key, model))
+          entries.push(entry(pick, rows.get(pick)!, model.key, yield* effortsOf(sql, model), model))
         }
         const at: SubagentModelsAt = { entries, limits: resolveLimits(limits), types }
         return JSON.stringify(at)

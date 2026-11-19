@@ -572,6 +572,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
               instructions: t.instructions,
               tools: catalog.filter((tool) => mayUse(t, tool)).map((tool) => tool.id),
               defaultAlias: t.defaultAlias,
+              effort: t.effort ?? null,
               context: t.context ?? "task",
               isolation: t.isolation ?? ("none" as const),
               source: t.source,
@@ -617,6 +618,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
               ...differs("description"),
               ...differs("instructions"),
               ...differs("defaultAlias"),
+              ...(edit.effort !== undefined && edit.effort !== (base.effort ?? null) ? { effort: edit.effort } : {}),
               ...(edit.context !== undefined && edit.context !== (base.context ?? "task")
                 ? { context: edit.context }
                 : {}),
@@ -638,6 +640,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
               instructions: edit.instructions,
               tools: [...new Set(edit.tools ?? [])],
               defaultAlias: edit.defaultAlias ?? SAME,
+              ...(edit.effort ? { effort: edit.effort } : {}),
               context: edit.context ?? "task",
               ...(edit.isolation && edit.isolation !== "none" ? { isolation: edit.isolation } : {})
             }

@@ -140,6 +140,8 @@ export const SubagentRow = Schema.Struct({
   /** The allowed-list alias it ran on (spec/SUBAGENTS.md §5.1), and that model's name. */
   alias: Schema.String,
   model: Schema.String,
+  /** The reasoning level its requests asked for ("high"); absent: none, the model's default. */
+  effort: Schema.optionalKey(Schema.String),
   status: SubagentStatus,
   /** Its steps, as its own transcript holds them (absent where they weren't read). */
   steps: Schema.optionalKey(Schema.Array(ChildStep)),

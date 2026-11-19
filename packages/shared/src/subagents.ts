@@ -7,6 +7,7 @@
 // The account's picks are what every chat follows; a chat locked to its own picks keeps them
 // (state key `subagents.models`), exactly as the model chip's lock works (DESIGN §7.10 [D]).
 import { Schema } from "effect"
+import { ReasoningEffort } from "./modelSettings.ts"
 
 /** The chat's own model: always first on the list the assistant sees, where it's picked. */
 export const SAME = "same"
@@ -42,7 +43,9 @@ export type SubagentCaps = typeof SubagentCaps.Type
 export const SubagentModelRow = Schema.Struct({
   alias: SubagentAlias,
   note: Schema.String.check(Schema.isMaxLength(300)),
-  caps: Schema.optionalKey(SubagentCaps)
+  caps: Schema.optionalKey(SubagentCaps),
+  /** The reasoning level its subagents ask for, where the model takes it; absent: the model's own. */
+  effort: Schema.optionalKey(ReasoningEffort)
 })
 export type SubagentModelRow = typeof SubagentModelRow.Type
 
@@ -170,6 +173,17 @@ export const rowProblems = (rows: Readonly<Record<string, SubagentModelRow>>): R
   return problems
 }
 
+/**
+ * The reasoning level a subagent's requests ask for (DESIGN §7.10 [P]): its type's, else its
+ * model row's, else none (the model's own setting applies). A level its model doesn't take
+ * (`supported`, from `supportedEfforts`) is passed over, so a model that doesn't reason gets none.
+ */
+export const effectiveEffort = (
+  type: ReasoningEffort | null | undefined,
+  row: ReasoningEffort | undefined,
+  supported: ReadonlyArray<ReasoningEffort>
+): ReasoningEffort | null => (type && supported.includes(type) ? type : row && supported.includes(row) ? row : null)
+
 /** A subagent type's id, the word the assistant writes in `agent`'s `type`: `research`, `check-names`. */
 export const SubagentTypeId = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_-]{0,31}$/))
 
@@ -199,6 +213,8 @@ export const SubagentTypeEdit = Schema.Struct({
   /** Tool ids, from what workshops offer. */
   tools: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMaxLength(100))).check(Schema.isMaxLength(200))),
   defaultAlias: Schema.optionalKey(SubagentAlias),
+  /** Its reasoning level, over its model's row (`effectiveEffort`); null: none of its own. */
+  effort: Schema.optionalKey(Schema.NullOr(ReasoningEffort)),
   context: Schema.optionalKey(SubagentContext),
   isolation: Schema.optionalKey(SubagentIsolation),
   /** A built-in or plugin type the assistant isn't offered. */
@@ -219,6 +235,7 @@ export const SubagentTypeView = Schema.Struct({
   instructions: Schema.String,
   tools: Schema.Array(Schema.String),
   defaultAlias: Schema.String,
+  effort: Schema.NullOr(ReasoningEffort),
   context: SubagentContext,
   isolation: SubagentIsolation,
   source: Schema.Literals(["builtin", "plugin", "user"]),

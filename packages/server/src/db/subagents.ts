@@ -33,6 +33,8 @@ export interface SubagentSnapshot {
   readonly alias: string
   /** The model's name as the row shows it. */
   readonly model: string
+  /** The reasoning level its requests asked for (§5.1); absent: none, the model's default. */
+  readonly effort?: string
   readonly instructions: string
   /** What it sees (spec/SUBAGENTS.md §2.3): its task alone, or its parent's conversation and then its task. */
   readonly context: "task" | "fork"
@@ -301,6 +303,7 @@ const rowOf = (r: ChildRecord, earlier: ReadonlyArray<ChildRecord> = []): Subage
     task: sub?.task ?? "",
     alias: sub?.alias ?? "same",
     model: sub?.model ?? "",
+    ...(sub?.effort ? { effort: sub.effort } : {}),
     status: statusOf(r.status, steps, r.error),
     steps,
     count: r.step_count,

@@ -40,6 +40,7 @@ import {
 import { builtinSkills } from "./agent/skills.ts"
 import { makeLoadSkill, toolSearch } from "./agent/tools/loading.ts"
 import { Context, Effect, Layer, Option } from "effect"
+import { isReasoningEffort, REASONING_EFFORTS } from "@dreamspan/shared/modelSettings.ts"
 import { makeRegistry, type Registry } from "./registry.ts"
 import type { SubagentWorkspaces } from "./agent/tools/files.ts"
 import { defaultReplyOutput, type ReplyOutputStrategy } from "./chat/replyOutput.ts"
@@ -261,6 +262,8 @@ const validateSubagentType = (type: SubagentType) => {
   }
   if (type.explanation !== undefined && (typeof type.explanation !== "string" || type.explanation.length > 200))
     throw new Error("A subagent type's explanation is a short sentence, at most 200 characters.")
+  if (type.effort !== undefined && !isReasoningEffort(type.effort))
+    throw new Error(`A subagent type's effort is one of ${REASONING_EFFORTS.join(", ")}.`)
   if (type.context !== undefined && type.context !== "task" && type.context !== "fork")
     throw new Error("A subagent type's context is task or fork.")
   if (type.isolation !== undefined && type.isolation !== "same" && type.isolation !== "copy")

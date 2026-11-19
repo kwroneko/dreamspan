@@ -92,3 +92,33 @@ export const StSettingsImport = Schema.Struct({
   )
 })
 export type StSettingsImport = typeof StSettingsImport.Type
+
+/**
+ * The reasoning levels a request can ask for (pi-ai's thinking levels), as the model's "Reasoning
+ * effort" setting names them; each provider maps them onto its own field (assembler/wire.ts).
+ */
+export const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const
+export const ReasoningEffort = Schema.Literals(REASONING_EFFORTS)
+export type ReasoningEffort = typeof ReasoningEffort.Type
+
+export const EFFORT_LABELS: Readonly<Record<ReasoningEffort, string>> = {
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max"
+}
+
+export const isReasoningEffort = (value: unknown): value is ReasoningEffort =>
+  typeof value === "string" && (REASONING_EFFORTS as ReadonlyArray<string>).includes(value)
+
+/**
+ * The levels a model takes: none where it doesn't reason; else every level its thinking-level map
+ * doesn't mark unsupported (null). `reasoning` and `thinkingLevels` as `resolveModel` resolves them.
+ */
+export const supportedEfforts = (model: {
+  readonly reasoning: { readonly value: boolean }
+  readonly thinkingLevels: { readonly value: Readonly<Record<string, string | null>> | null }
+}): ReadonlyArray<ReasoningEffort> =>
+  model.reasoning.value ? REASONING_EFFORTS.filter((level) => model.thinkingLevels.value?.[level] !== null) : []

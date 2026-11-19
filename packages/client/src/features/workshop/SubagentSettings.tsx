@@ -19,11 +19,13 @@ import {
   type SubagentModelRow,
   type SubagentSettings
 } from "@dreamspan/shared/subagents.ts"
+import { REASONING_EFFORTS, type ReasoningEffort } from "@dreamspan/shared/modelSettings.ts"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Alert, Card, CardHeader, Disclosure } from "../../ui/Surface.tsx"
 import { useModelChoiceList } from "../chat/modelChoices.ts"
+import { ReasoningEffortSelect } from "../connections/ReasoningEffort.tsx"
 import { pickLabel, SUBAGENT_SETTINGS_KEY, subagentSettingsAtom } from "./SubagentModelsChip.tsx"
 
 const KEYS = ["settings", SUBAGENT_SETTINGS_KEY]
@@ -254,12 +256,14 @@ function LimitsForm({ settings }: { settings: SubagentSettings }) {
 interface RowDraft {
   readonly alias: string
   readonly note: string
+  readonly effort: ReasoningEffort | null
   readonly caps: Draft<CapField["key"]>
 }
 
 const rowDraft = (row: SubagentModelRow): RowDraft => ({
   alias: row.alias,
   note: row.note,
+  effort: row.effort ?? null,
   caps: Object.fromEntries(CAP_FIELDS.map((f) => [f.key, shown(row.caps?.[f.key])])) as Draft<CapField["key"]>
 })
 
@@ -301,7 +305,8 @@ function ModelsForm({ settings }: { settings: SubagentSettings }) {
       changed[pick] = {
         alias,
         note: draft.note.trim().slice(0, 300),
-        ...(Object.keys(values).length ? { caps: values } : {})
+        ...(Object.keys(values).length ? { caps: values } : {}),
+        ...(draft.effort ? { effort: draft.effort } : {})
       }
     }
     const result = await action.run((client) => client("ChangeSubagentSettings", { rows: changed }), KEYS)
@@ -316,6 +321,9 @@ function ModelsForm({ settings }: { settings: SubagentSettings }) {
         {listed.map((pick) => {
           const draft = draftOf(pick)
           const picked = picks.includes(pick)
+          // Same and the summary model are whatever each chat uses: every level, used where it's taken.
+          const tracks = pick === SAME || pick === SUMMARY
+          const efforts = tracks ? REASONING_EFFORTS : choices.find((c) => c.value === pick)?.efforts
           return (
             <li key={pick} className="flex flex-col gap-3 py-3 first:pt-0" data-subagent-model-row={pick}>
               <div className="flex min-w-0 flex-col">
@@ -345,6 +353,23 @@ function ModelsForm({ settings }: { settings: SubagentSettings }) {
                     onChange={(event) => edit(pick, { note: event.currentTarget.value })}
                   />
                 </Field>
+                {efforts !== undefined && efforts.length > 0 && (
+                  <Field
+                    label="Reasoning effort"
+                    about="How much its subagents think before answering. A subagent type's own effort wins over this."
+                    {...(tracks ? { description: "Used where the chat's model has that level." } : {})}
+                  >
+                    <div data-subagent-model-effort={pick}>
+                      <ReasoningEffortSelect
+                        value={draft.effort}
+                        levels={efforts}
+                        defaultLabel="The model's own"
+                        defaultDescription="The effort set on the model, or its default."
+                        onValueChange={(effort) => edit(pick, { effort: effort as ReasoningEffort | null })}
+                      />
+                    </div>
+                  </Field>
+                )}
               </div>
               <Disclosure
                 title="Limits for this model"
@@ -376,7 +401,7 @@ function ModelsForm({ settings }: { settings: SubagentSettings }) {
         <Button
           type="submit"
           variant="primary"
-          hint="Saves these names, notes and limits."
+          hint="Saves these names, notes, efforts and limits."
           pending={action.pending}
           disabled={Object.keys(drafts).length === 0}
         >
