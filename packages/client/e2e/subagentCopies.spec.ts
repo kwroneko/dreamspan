@@ -1,7 +1,8 @@
 // Subagents that work on files (spec/SUBAGENTS.md SA6, §3.3) in the browser: a workshop reply
 // starts a `code` subagent in its own copy of the working folder; the subagent's row says where
 // its copy is, Open folder shows the copy in Files with the file it wrote, and Changes lists the
-// kept copy and its file under its handle. The type editor offers where a type works. Layout
+// kept copy and its file under its handle. The type editor offers where a type works and its
+// short explanation (SA9). Layout
 // audit at 1440 and 390, light and dark. A scripted loopback provider and synthetic text only;
 // copies are made in the command sandbox, so the test needs it.
 import { createServer, type ServerResponse } from "node:http"
@@ -189,6 +190,9 @@ test("the type editor says where a type works", async ({ page }, info) => {
     await expect(code).toBeVisible()
     await code.getByRole("button", { name: "Edit" }).click()
     const editor = page.locator('[data-subagent-type-editor="code"]')
+    await expect(editor.getByRole("textbox", { name: "In short" })).toHaveValue(
+      "Reads and changes files and runs commands, then reports what it changed."
+    )
     const works = editor.getByRole("group", { name: "Works in" })
     await expect(works.getByRole("button", { name: "Your folder" })).toHaveAttribute("aria-pressed", "true")
     await works.getByRole("button", { name: "Its own copy" }).click()

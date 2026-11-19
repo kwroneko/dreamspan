@@ -72,6 +72,7 @@ const FOLDERS = [
 interface Draft {
   readonly id: string
   readonly label: string
+  readonly explanation: string
   readonly description: string
   readonly instructions: string
   readonly tools: ReadonlyArray<string>
@@ -86,6 +87,7 @@ const draftOf = (type: SubagentTypeView | undefined): Draft =>
     ? {
         id: type.id,
         label: type.label,
+        explanation: type.explanation,
         description: type.description,
         instructions: type.instructions,
         tools: type.tools,
@@ -97,6 +99,7 @@ const draftOf = (type: SubagentTypeView | undefined): Draft =>
     : {
         id: "",
         label: "",
+        explanation: "",
         description: "",
         instructions: "",
         tools: [],
@@ -150,6 +153,7 @@ function TypeEditor({
           edit: {
             id,
             label: draft.label.trim(),
+            explanation: draft.explanation.trim(),
             description: draft.description.trim(),
             instructions: draft.instructions.trim(),
             tools: [...draft.tools],
@@ -209,6 +213,14 @@ function TypeEditor({
           />
         </Field>
       </div>
+      <Field label="In short" about="Shown when you hover a subagent of this type.">
+        <Input
+          name="explanation"
+          value={draft.explanation}
+          maxLength={200}
+          onChange={(event) => edit({ explanation: event.currentTarget.value })}
+        />
+      </Field>
       <Field label="What it's for" about="The assistant reads this when it chooses a type.">
         <Textarea
           name="description"

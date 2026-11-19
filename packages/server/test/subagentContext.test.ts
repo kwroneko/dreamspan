@@ -427,6 +427,13 @@ describe("subagent context (SA7)", () => {
       const after = (yield* api.GetSubagentTypes({})).types
       assert.isFalse(after.find((t) => t.id === "research")!.off)
       assert.isFalse(after.some((t) => t.id === "checker"))
+      // A type's short explanation (SA9): a change keeps only it; the list returns it.
+      yield* api.ChangeSubagentType({ id: "code", edit: { id: "code", explanation: "Edits my files." } })
+      assert.deepInclude((yield* api.GetSubagentSettings({})).types, { id: "code", explanation: "Edits my files." })
+      assert.strictEqual(
+        (yield* api.GetSubagentTypes({})).types.find((t) => t.id === "code")!.explanation,
+        "Edits my files."
+      )
       // The workshop's assistant may write types (as a setup change), never models or limits.
       assert.isDefined(settingsRegistry.get("subagents.types")?.agent)
       assert.isUndefined(settingsRegistry.get("subagents.models")?.agent)

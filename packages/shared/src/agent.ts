@@ -130,6 +130,8 @@ export const SubagentRow = Schema.Struct({
   type: Schema.String,
   /** The type's own label: "Look things up". */
   typeLabel: Schema.String,
+  /** What the type does, for the row's hover. */
+  typeExplanation: Schema.optionalKey(Schema.String),
   /** The short label the parent gave it, if any. */
   name: Schema.optionalKey(Schema.String),
   task: Schema.String,

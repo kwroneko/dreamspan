@@ -147,8 +147,24 @@ const displayCopies = [
     "packages/client/src/features/chat/displayRegex.ts": "@dreamspan/plugin-api/display"
   }
 }))
+const subagentTypeCopies = [
+  ["research", "Look things up (subagent type)", "researchType"],
+  ["code", "Work on files (subagent type)", "codeType"],
+  ["general", "Work on part of the task (subagent type)", "generalType"]
+].map(([id, label, entry]) => ({
+  registry: "subagentTypes",
+  id: id!,
+  label: label!,
+  side: "server" as const,
+  path: "packages/server/src/agent/subagentTypesPart.ts",
+  entry: entry!,
+  files: ["packages/server/src/agent/subagentTypesPart.ts"],
+  surfaces: ["server:subagentTypes"],
+  imports: { "packages/plugin-api/src/server.ts": "@dreamspan/plugin-api/server" }
+}))
 export const builtinCopies = [
   ...baseCopies,
+  ...subagentTypeCopies,
   reverseCopy,
   ...macroCopies,
   ...historyCopies,

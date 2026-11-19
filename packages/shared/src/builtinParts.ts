@@ -12,6 +12,12 @@ for (const part of macroParts)
         side: "worker",
         label: `${part.name} macro (${id})`
       }
+for (const [id, label] of [
+  ["research", "Look things up (research)"],
+  ["code", "Work on files (code)"],
+  ["general", "Work on part of the task (general)"]
+])
+  parts[`subagentTypes:${id}`] = { side: "server", label: label! }
 for (const id of ["search_chat", "read_messages", "expand_summary", "search_summaries", "list_notes", "switch_note"])
   parts[`rolloutTools:${id}`] = { side: "server", label: id }
 for (const [registry, entries] of Object.entries({

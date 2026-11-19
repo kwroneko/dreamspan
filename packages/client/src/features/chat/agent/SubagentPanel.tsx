@@ -70,7 +70,9 @@ export function SubagentPanel({ step, version, session }: StepActionProps) {
       data-subagent-status={row.status}
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <Tooltip label={open ? "Hides the subagent's task and steps." : "Shows the subagent's task and steps."}>
+        <Tooltip
+          label={`${row.typeExplanation ? `${row.typeExplanation} ` : ""}${open ? "Hides its task and steps." : "Shows its task and steps."}`}
+        >
           <button
             type="button"
             aria-expanded={open}

@@ -27,6 +27,7 @@ const SUBAGENTS_PER_RUN = 16
 export interface SubagentSnapshot {
   readonly type: string
   readonly typeLabel: string
+  readonly typeExplanation?: string
   readonly task: string
   readonly name?: string
   readonly alias: string
@@ -295,6 +296,7 @@ const rowOf = (r: ChildRecord, earlier: ReadonlyArray<ChildRecord> = []): Subage
     handle: r.handle,
     type: sub?.type ?? "",
     typeLabel: sub?.typeLabel ?? "Subagent",
+    ...(sub?.typeExplanation ? { typeExplanation: sub.typeExplanation } : {}),
     ...(sub?.name ? { name: sub.name } : {}),
     task: sub?.task ?? "",
     alias: sub?.alias ?? "same",
