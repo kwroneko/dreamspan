@@ -1,6 +1,6 @@
 # Overview
 
-**Status**: Design draft, 2026-10-09. Distilled from the initial planning session. Details are in [DESIGN.md](DESIGN.md), phases in [PLAN.md](PLAN.md). Implementation status 2026-10-30: the foundations, ST compatibility, non-agentic chat and LCM portions are built and obsolete as implementation proposals; ARCHITECTURE.md is the current implementation record. Agentic RP, workshop and plugin installation remain future work. The original proposed stack labels below record provenance, not missing implementations.
+**Status**: Design draft, 2026-10-09. Distilled from the initial planning session. Details are in [DESIGN.md](DESIGN.md), phases in [PLAN.md](PLAN.md). Implementation status 2026-10-30: the foundations, ST compatibility, non-agentic chat and LCM portions are built and obsolete as implementation proposals; ARCHITECTURE.md is the current implementation record. Updated 2026-11-20: agentic rollouts, workshops, subagents, MCP servers, the plugin host, files and sandboxed commands are built too (PLAN.md "State at 2026-11-20"); the plugin registry and installing from a remote repository, per-character agents, the desktop package and the public release are not. The product is named Dreamspan (DESIGN §12). The original proposed stack labels below record provenance, not missing implementations.
 
 ## Why
 

@@ -2,6 +2,10 @@
 
 **Status**: Draft, 2026-10-09. The phases are ordered so the owner can **replace ST for daily use as early as possible**, then gain LCM, then agentic features. The data model is designed in full in phase 0, even where the UI comes later. Retrofitting the graph, versions, layers or state events would be far more expensive than building them in from the start.
 
+## State at 2026-11-20 (plancleanup1; checked against ARCHITECTURE.md and the code)
+
+Phases 0 to 6 are built, and so is most of phase 7 except the items listed under it. The phase sections below say what is built and what is not. **Everything dated before 2026-11-19 under "Next session" is history**; it is kept as the record of how the work went, not as a to-do list. The product is named **Dreamspan** (DESIGN §12 **[D]**, owner 2026-11-19): the in-repo rename and the dev and prod infrastructure are done; the GitHub repository rename and the local directory renames (the repository and its work folder are still `rp-harness` and `work-folder/`) are not. The next milestones are the owner's real data on prod and then the first testers (see "Release readiness" under phase 7). Tonight's queue (2026-11-19) finished every spec unit that had been designed: stories' reply contract M1–M4, workshop subagents SA1–SA9, MCP M0–M6, the files track A and B, the HTML panel reads and the panel exfiltration block, prices, saved video, and schema safety. What tonight's work left unbuilt is listed under the phase it belongs to, and in each spec's status line.
+
 ## Next session: start here
 
 Session notes are not kept in the repository.
@@ -16,7 +20,7 @@ Session notes are not kept in the repository.
 - **Data model and schema** (drafted in [DATA-MODEL.md](DATA-MODEL.md); DESIGN §3, §4, §6.2): message graph (slots with parents, threads, path selection), versions with provenance and status, state events, layered entities (base, variant, override, revisions), notes, connections and models, rollouts, summaries over path segments, changesets, drafts with undo history.
 - Server skeleton: typed operations (every UI action is an operation), WebSocket subscriptions, per-entity optimistic concurrency, single-writer SQLite queue (as in reference-harness).
 - Users and auth: separate users with per-user ownership in every query; a trusted reverse-proxy header (Authelia `Remote-User`) mapped to a user, plus built-in login.
-- ~~Provider layer~~: built (ARCHITECTURE.md §6, [PROVIDERS.md](PROVIDERS.md)). Still to do there: the settings UI, user cost formulas, explicit breakpoints for the non-Anthropic APIs, and ledger rollups (with generation, phase 2).
+- ~~Provider layer~~: built (ARCHITECTURE.md §6, [PROVIDERS.md](PROVIDERS.md)). The settings UI, user cost formulas, per-API cache handling and ledger rollups followed (PROVIDERS.md status line).
 - ~~Exposure safety~~ (DESIGN §11): built, except the password branch, which comes with built-in login.
 
 ## Phase 1: Import and compatibility core
@@ -35,7 +39,7 @@ Session notes are not kept in the repository.
 - **Differential test harness**: stock ST in a container plus a mock endpoint that records requests, and synthetic fixtures. This is the fidelity gate for the assembler.
 
 ## Phase 2: Non-agentic chat that can replace ST (first milestone)
-**Status (2026-10-30): built, awaiting the owner's daily-use trial (the exit criterion).** Everything listed below is built, except where owner decisions overtook it: the Members/Personas/All cards speaker panel became the cast speaker with a separate persona choice, and the preset scope chain and overlays became global model/preset selection with three-way re-import. Not complete: a multi-swipe composition scratchpad, and inserting messages anywhere (spec/MESSAGE-INSERT.md, units in progress). General library-text search, with replace, was built 2026-11-12 (ARCHITECTURE §14.6 "Across the library").
+**Status (2026-10-30): built, awaiting the owner's daily-use trial (the exit criterion).** Everything listed below is built, except where owner decisions overtook it: the Members/Personas/All cards speaker panel became the cast speaker with a separate persona choice, and the preset scope chain and overlays became global model/preset selection with three-way re-import. Built since: inserting messages anywhere (spec/MESSAGE-INSERT.md units 1 to 9, 2026-10-30) and the composition scratchpad ("Write your own version", ARCHITECTURE §12). General library-text search, with replace, was built 2026-11-12 (ARCHITECTURE §14.6 "Across the library").
 
 - The context assembler in ST-compatible mode, passing the differential tests. Card layout modes. Role projection strategies. Cache breakpoints.
 - Chat UI:
@@ -59,7 +63,7 @@ Session notes are not kept in the repository.
 - **Exit criterion:** the owner moves their daily RP from ST to this.
 
 ## Phase 3: LCM
-**Status (2026-10-30): built.** Summary storage and lineage, planning and worker execution, direct and tool output, refusal handling, condensation, stale repair, editable revisions, the boundary, rail and request views, and explicit enable/adopt/approved backfill with estimates. Not built: per-summary model and cost, and access to the summary rollout panel; a dedicated summarizer model stays open.
+**Status (2026-10-30): built.** Summary storage and lineage, planning and worker execution, direct and tool output, refusal handling, condensation, stale repair, editable revisions, the boundary, rail and request views, and explicit enable/adopt/approved backfill with estimates. Built since: per-summary details (model, times, attempts, tokens, cost, request link), summaries kept per view for separate contexts, and workshop transcript summaries. Open: a dedicated summarizer model.
 
 - Port the reference-harness §9b design: tiers, eager thresholds, worker pool, condensation, lineage, failure placeholders. Summaries over path segments.
 - Summarization with the preset loaded and a summarization tail prompt. Idle-time jobs while the cache is warm.
@@ -68,7 +72,7 @@ Session notes are not kept in the repository.
 - Backfill for imported chats (lazy, with a cost estimate).
 
 ## Phase 4: Agentic rollouts
-**Status (2026-11-05): designed** in [AGENTIC.md](AGENTIC.md) (deltas from reference-harness `latest`, ten build units in its §11); building from U1.
+**Status (2026-11-20): built.** AGENTIC.md units U1 to U10 and the resume requirement (its §12) are built (ARCHITECTURE §16 "Agent rollouts", "Decision models"). Not built, by decision (AGENTIC §10 "Left for later"): the per-character orchestration mode with presence-cut summaries, per-agent private state, and automatic mid-stream resampling of a broken turn. The orchestration mode registry has the one `default` planner; card swap is a card layout setting.
 
 - Timeline/rollout separation: fork per turn, a commit pipeline for both output contracts.
 - pi-agent-core with reference-harness-style persistence: context snapshot, flushed transcript, invisible mid-rollout resume, editing a step and then resuming.
@@ -78,18 +82,21 @@ Session notes are not kept in the repository.
 - Orchestration modes: single narrator with all cards, and card-swap. The per-character agent mode is optional in this phase.
 
 ## Phase 5: Layered entities and editing at scale
+**Status (2026-11-20): built, in the form the owner decided.** Card variants and chat-local overrides were replaced by independent forks, swaps and notes that replace prompts (DESIGN §4; ARCHITECTURE §3.8, §3.9, §12, §15). Changesets (search and replace across chats and summaries, revert, diff view) and the composition scratchpad are built (ARCHITECTURE §3.13, §12, §14.6). Open: the changes below that name variants and promotion describe the superseded design.
 - Card variants, chat-local overrides, promotion, edit-scope UI, the library grouped by variant, diffs. Card modules with private/exportable flags.
 - Changesets: search and replace across chats and summaries, revert, diff view.
 - Composition scratchpad.
 
 ## Phase 6: Workshop and meta tools
-**Status (2026-11-12): designed** in [WORKSHOP.md](WORKSHOP.md) (workshop chats, setup tools, the side chat, the plugin loader and the agent writing plugins, as deltas from the build and reference-harness `latest`; fourteen build units in its §9, open questions in its §10).
+**Status (2026-11-20): built.** WORKSHOP.md units W1 to W9 and P1 to P5 are built (ARCHITECTURE §16 "Workshop chats" and following, §17), with subagents SA1 to SA9 (SUBAGENTS.md), MCP servers M0 to M6 (MCP.md), files and commands in a sandbox, attachments of any type, the file manager with viewers, the editor and sharing (FILES-AND-ENVIRONMENT.md tracks A and B), workshop branches and story-position reads. Not built: a GitHub-repository plugin registry and remote plugin installation (PLUGINS.md), a real sandbox for plugin code before a non-admin can enable one, and the desktop-platform sandboxes (FILES-AND-ENVIRONMENT.md track D, which waits for a desktop package, DESKTOP.md).
 - Workshop chat kind, with its template, permissions and capability strip.
 - Meta tools: create, edit and clone cards; settings; chat setup. Agentic chat editing through changesets.
 - The out-of-character side channel docked in RP chats.
 - Plugin system ([PLUGINS.md](PLUGINS.md)): registries the core itself uses, overrides, plugins as git repositories, a GitHub-repo registry, consent prompts for enabling and applying. Plugins written by the agent itself.
 
 ## Phase 7: Advanced RP and release readiness
+**Status (2026-11-20): mostly built.** Built: parallel threads, sending to several threads and merges (THREADS.md TH1 to TH8, CHAT-MERGE.md, including separate timelines), separate contexts per character with presence and away (CHARACTER-CONTEXT.md C1 to C9), HTML rendering in sandboxed frames with scripts, the bridge, external media consent, saved video, the Tavern Helper reads for approved panels and the block on ways out of a panel (HTML-MESSAGES.md steps 1 to 6, SAVED-MEDIA.md), internal side-by-side panels (the workbench). Not built: per-character agents (AGENTIC.md §10), message variables for panels (they wait for the ST importer to read Tavern Helper's per-swipe variables), template-bound UI (model-driven widgets, DESIGN §10.2 **[L]**), web push (not found in ARCHITECTURE or the code), a desktop package (DESKTOP.md, nothing built), and a public release: docs, installation as a single binary, the security review.
+
 - Parallel threads, sending to several threads, merges.
 - Per-character agents with presence-limited views and private state.
 - HTML rendering in a sandbox, rich and compact forms, then template-bound UI.
@@ -104,4 +111,4 @@ Session notes are not kept in the repository.
 5. ~~Client framework~~ **Resolved: React** (owner, 2026-10-10; [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md)). Server HTTP framework: deferred by the owner (2026-10-10); [EFFECT.md](EFFECT.md) proposes Effect's own HTTP server.
 6. ~~Cordis as the plugin kernel~~: not adopted (owner, 2026-10-11). Plugin structure and threat model proposed in [PLUGINS.md](PLUGINS.md), with its own open questions.
 7. Whether intermediate output blocks are real messages (shelved, §7.2).
-8. The project's name.
+8. ~~The project's name.~~ **Resolved: Dreamspan** (owner, 2026-11-19; DESIGN §12).
