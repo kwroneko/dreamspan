@@ -65,6 +65,10 @@ export const transcriptEntries = (
           tool: m.toolName,
           text: textOf(m.content),
           isError: m.isError,
+          // What the model was sent, when it was a page of the whole result (built `sentText`).
+          ...(typeof (m.details as { sentText?: unknown } | null)?.sentText === "string"
+            ? { sent: (m.details as { sentText: string }).sentText }
+            : {}),
           ...index(callStep.get(`${assistantAt}:${m.toolCallId}`))
         }
       ]

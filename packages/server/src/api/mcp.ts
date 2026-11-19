@@ -81,6 +81,7 @@ export const makeMcpHandlers = Effect.gen(function* () {
       ).pipe(internal("SetMcpLoading")),
     DeleteMcpConnection: ({ connectionId }) =>
       Effect.flatMap(userId, (id) => writer.DeleteMcpConnection({ userId: id, connectionId })).pipe(
+        Effect.tap(() => mcp.closeKept(connectionId)),
         internal("DeleteMcpConnection")
       ),
     ListMcpCalls: ({ connectionId, before }) =>

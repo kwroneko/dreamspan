@@ -97,7 +97,12 @@ const ToolStepFields = {
   /** Existing steps render these three display classes. */
   effect: Schema.Literals(["read", "chat_state", "external"]),
   /** The refined execution class, when it differs from the display class. */
-  effectClass: Schema.optionalKey(EffectClass)
+  effectClass: Schema.optionalKey(EffectClass),
+  /**
+   * While it runs, how far the tool says it got (an MCP server's progress, spec/MCP.md §7.3):
+   * "Working… 40%" or the server's own words. Live only, never stored.
+   */
+  progress: Schema.optionalKey(Schema.String)
 }
 
 /** A subagent's own step, one level deep: never a subagent of its own (spec/SUBAGENTS.md §6.1). */
@@ -190,9 +195,32 @@ export const OfferedTool = Schema.Struct({
   /** Declared but not sent from the start: a loading call made it callable (spec/TOOL-LOADING.md). */
   deferred: Schema.optionalKey(Schema.Boolean),
   /** The loading call that loaded it in this run, when one did. */
-  loadedBy: Schema.optionalKey(Schema.String)
+  loadedBy: Schema.optionalKey(Schema.String),
+  /** An MCP server's tool (spec/MCP.md §10): which server, where, and when its tools were listed. */
+  mcp: Schema.optionalKey(
+    Schema.Struct({
+      connection: Schema.String,
+      connectionName: Schema.String,
+      host: Schema.String,
+      listedAt: Schema.NullOr(Schema.Number)
+    })
+  )
 })
 export type OfferedTool = typeof OfferedTool.Type
+
+/**
+ * One request of an MCP call as the ledger recorded it (spec/MCP.md §10): every attempt, with
+ * when it was sent, how long it took and how much came back. Never its arguments or result.
+ */
+export const McpCallLine = Schema.Struct({
+  toolCallId: Schema.String,
+  attempt: Schema.Int,
+  status: Schema.Literals(["running", "complete", "error", "failed", "timeout", "cancelled", "interrupted"]),
+  startedAt: Schema.Number,
+  endedAt: Schema.NullOr(Schema.Number),
+  receivedBytes: Schema.NullOr(Schema.Number)
+})
+export type McpCallLine = typeof McpCallLine.Type
 
 /**
  * The step a part of the transcript is, as `ResumeFromStep` names it: its index in the version's
@@ -233,6 +261,8 @@ export const TranscriptEntry = Schema.Union([
     tool: Schema.String,
     text: Schema.String,
     isError: Schema.Boolean,
+    /** What the model was sent of it, when that was a page of the whole result. */
+    sent: Schema.optionalKey(Schema.String),
     /** Its call's step, whose result it is. */
     ...StepIndex
   }),
@@ -261,7 +291,9 @@ export const RunTranscript = Schema.Struct({
   tools: Schema.Array(OfferedTool),
   entries: Schema.Array(TranscriptEntry),
   /** What resuming dropped of the run it carried on, oldest first. */
-  cut: Schema.Array(CutSpan)
+  cut: Schema.Array(CutSpan),
+  /** The ledger's rows of the run's MCP calls, oldest first (spec/MCP.md §10); absent without any. */
+  mcpCalls: Schema.optionalKey(Schema.Array(McpCallLine))
 })
 export type RunTranscript = typeof RunTranscript.Type
 

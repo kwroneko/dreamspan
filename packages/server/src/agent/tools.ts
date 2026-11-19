@@ -69,6 +69,11 @@ export interface ToolContext {
   }
   /** The run a subagent would be a child of (spec/SUBAGENTS.md); absent in a subagent's own run. */
   readonly subagentHost?: SubagentHost
+  /**
+   * Shows how far the call got in its step's row while it runs (spec/MCP.md §7.3); null clears
+   * it. Live only: never stored, never sent to the model.
+   */
+  readonly progress?: (text: string | null) => void
 }
 
 /** What the `agent` tool needs of the run whose call starts a subagent (agent/subagents.ts). */
@@ -242,6 +247,8 @@ export interface McpToolRef {
   readonly catalogRevision: number
   /** The server's own name for the tool, sent in `tools/call`. */
   readonly tool: string
+  /** When the server's tools were last listed, as the run was planned (for the inspector). */
+  readonly listedAt?: number | null
 }
 
 export const frozenTool = (tool: RolloutTool<never>): FrozenTool => ({

@@ -3,13 +3,17 @@
 // through the database workers; this module only encrypts, decrypts and talks to servers.
 //
 // Deltas from reference-harness's `McpClientPool` (src/mcp/client-pool.ts): servers are rows the user
-// adds, not config; nothing connects at startup; a client is opened for one piece of work the
-// user started (here, Check) and closed after; headers and keys are host-bound secrets resolved
-// per request; every request is a ledger row; requests go through `Network` (proxy, bypass,
-// same-origin redirects) via the SDK's `fetch` option.
+// adds, not config; nothing connects at startup; a call's client is kept per (connection, user),
+// opened at the first call that needs it and closed after 5 idle minutes, on an edit of the
+// connection (its `cache_revision`), when it stops being usable and at shutdown; a Check opens a
+// client of its own and closes it after. A dead session reconnects once, shared by concurrent
+// callers, as reference-harness's `reconnect`, but the call is sent again only when the HTTP status
+// proves the server refused it unprocessed (§7.2), never on a message match. Headers and keys
+// are host-bound secrets resolved per call; every request is a ledger row; requests go through
+// `Network` (proxy, bypass, same-origin redirects) via the SDK's `fetch` option.
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
+import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import type { Transport, TransportSendOptions } from "@modelcontextprotocol/sdk/shared/transport.js"
 import {
   CallToolResultSchema,
@@ -17,7 +21,8 @@ import {
   type JSONRPCMessage,
   McpError,
   type MessageExtraInfo,
-  ResultSchema
+  ResultSchema,
+  ToolListChangedNotificationSchema
 } from "@modelcontextprotocol/sdk/types.js"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { NotFound, StaleWrite } from "@dreamspan/shared/errors.ts"
@@ -37,7 +42,7 @@ import {
   type RemoteMcpTransport
 } from "@dreamspan/shared/mcp.ts"
 import { type CredentialId, originOf, type ProxyMode } from "@dreamspan/shared/providers.ts"
-import { Context, Effect, Exit, Layer, Option, type Scope } from "effect"
+import { Context, Effect, Exit, Layer, Option, Scope, Semaphore } from "effect"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import type { McpResolved, StorageError } from "../db/ops.ts"
@@ -147,7 +152,13 @@ export interface McpConnectionsShape {
     readonly tool: string
     readonly args: unknown
     readonly attribution: McpAttribution
+    /** The server's progress notifications for this call, as they come (spec/MCP.md §7.3). */
+    readonly onProgress?: (progress: McpProgress) => void
   }) => Effect.Effect<McpCallOutcome, StorageFailure>
+  /** Closes every kept client of a connection (an edit, a delete), whoever's. */
+  readonly closeKept: (connectionId: McpConnectionId) => Effect.Effect<void>
+  /** How many kept clients are open now, for tests. */
+  readonly kept: () => number
   /** One request on an open client, recorded in the ledger. */
   readonly request: <A>(
     userId: UserId,
@@ -172,6 +183,33 @@ type McpCallOutcome =
       readonly message: string
     }
 
+/** A server's progress notification for a call. */
+export interface McpProgress {
+  readonly progress: number
+  readonly total?: number | undefined
+  readonly message?: string | undefined
+}
+
+/** A kept client (spec/MCP.md §7.1) and who is using it. */
+interface Pooled {
+  readonly connectionId: string
+  readonly userId: string
+  /** The connection's `cache_revision` it was opened at. */
+  readonly revision: number
+  readonly scope: Scope.Closeable
+  readonly session: McpSession
+  /** Calls running on it now. */
+  users: number
+  timer: ReturnType<typeof setTimeout> | null
+  /** Closed by the server or the network, or its session is in doubt. */
+  dead: boolean
+  /** Out of the pool; closes once its last call ends. */
+  retired: boolean
+}
+
+/** A kept client closes after `idleMs` unused (spec/MCP.md §7.1: 5 minutes); tests shorten it. */
+export const mcpClientTiming = { idleMs: 5 * 60 * 1000 }
+
 /** A call may report progress for this long in all (spec/MCP.md §7.3). */
 const MCP_CALL_MAX_MS = 30 * 60 * 1000
 
@@ -183,10 +221,16 @@ export class McpRequestFailed extends Error {
   readonly status: "error" | "failed" | "timeout" | "cancelled"
   /** The server refused the key or headers: the other transport needn't be tried. */
   readonly auth: boolean
-  constructor(status: McpRequestFailed["status"], message: string, auth: boolean) {
+  /**
+   * The server answered this very request with a status that proves it didn't process it: it
+   * lost the session (spec/MCP.md §7.2). Only then may a call be sent again.
+   */
+  readonly deadSession: boolean
+  constructor(status: McpRequestFailed["status"], message: string, auth: boolean, deadSession = false) {
     super(message)
     this.status = status
     this.auth = auth
+    this.deadSession = deadSession
   }
 }
 
@@ -246,6 +290,16 @@ const httpCode = (error: unknown): number | undefined => {
   return typeof code === "number" && code >= 100 && code < 600 ? code : undefined
 }
 
+/**
+ * The server answered the request itself with "I don't know this session": a 404 on the
+ * session, or a 400 saying it isn't initialized (spec/MCP.md §7.2). Both are HTTP statuses on
+ * the response to the request's own POST, so the server refused it before processing it. A
+ * transport error, a timeout or an error message alone never counts.
+ */
+const isDeadSession = (error: unknown) =>
+  error instanceof StreamableHTTPError &&
+  (error.code === 404 || (error.code === 400 && /not initiali[sz]ed|session/i.test(error.message)))
+
 /** A failed request as the ledger records it and the user reads it, secrets scrubbed. */
 const failureOf = (
   error: unknown,
@@ -262,6 +316,8 @@ const failureOf = (
   if (code === 401 || code === 403 || /\b(401|403)\b|unauthori[sz]ed|forbidden/i.test(text))
     return new McpRequestFailed("failed", `${name} refused the request (${code ?? "unauthorized"}): ${text}`, true)
   if (error instanceof McpError) return new McpRequestFailed("error", `${name} answered with an error: ${text}`, false)
+  if (isDeadSession(error))
+    return new McpRequestFailed("failed", `${name} had lost the app's session (${code}).`, false, true)
   return new McpRequestFailed("failed", `Couldn't reach ${name}: ${text}`, false)
 }
 
@@ -508,64 +564,197 @@ export const layer = Layer.effect(
     const request: McpConnectionsShape["request"] = (userId, prepared, session, { method, tool, attribution, send }) =>
       recorded(userId, prepared, session.counts, { method, tool }, attribution, send)
 
-    const call: McpConnectionsShape["call"] = ({ userId, connectionId, tool, args, attribution }) =>
+    // The kept clients (spec/MCP.md §7.1): one per (connection, user), opened by the first call
+    // that needs one and closed after 5 idle minutes, when the connection's `cache_revision`
+    // moves on (an edit of where or how calls are sent), when it stops being usable and at
+    // shutdown. Opening and reconnecting a key take its lock, so concurrent callers share one.
+    const pool = new Map<string, Pooled>()
+    const locks = new Map<string, Semaphore.Semaphore>()
+    const keyOf = (connectionId: string, userId: string) => `${connectionId}\u0000${userId}`
+    const lockOf = (key: string) => {
+      let lock = locks.get(key)
+      if (!lock) locks.set(key, (lock = Semaphore.makeUnsafe(1)))
+      return lock
+    }
+
+    /** Closes a kept client once nothing uses it; a call still running on it keeps it open. */
+    const retire = (key: string, entry: Pooled) =>
+      Effect.suspend(() => {
+        if (pool.get(key) === entry) pool.delete(key)
+        if (entry.timer !== null) clearTimeout(entry.timer)
+        entry.timer = null
+        entry.retired = true
+        return entry.users > 0 ? Effect.void : Scope.close(entry.scope, Exit.void)
+      })
+
+    const idleLater = (key: string, entry: Pooled) => {
+      if (entry.timer !== null) clearTimeout(entry.timer)
+      entry.timer = setTimeout(() => runFork(retire(key, entry)), mcpClientTiming.idleMs)
+      entry.timer.unref?.()
+    }
+
+    /** Stops using a kept client: idle from now, or closed if it was retired while in use. */
+    const release = (key: string, entry: Pooled) =>
+      Effect.suspend(() => {
+        entry.users -= 1
+        if (entry.users > 0) return Effect.void
+        if (entry.retired || entry.dead) return retire(key, entry)
+        idleLater(key, entry)
+        return Effect.void
+      })
+
+    const closeKept: McpConnectionsShape["closeKept"] = (connectionId) =>
+      Effect.forEach(
+        [...pool].filter(([, entry]) => entry.connectionId === connectionId),
+        ([key, entry]) => retire(key, entry),
+        { discard: true }
+      )
+
+    yield* Effect.addFinalizer(() =>
+      Effect.forEach([...pool], ([key, entry]) => Effect.ignore(retire(key, entry)), { discard: true })
+    )
+
+    /**
+     * The user's kept client for the connection, opened (its `initialize` in the ledger) when there
+     * is none, it died, or the connection changed since. `stale`: the client a dead session was
+     * found on; it's replaced unless another caller replaced it already (one reconnect for all).
+     */
+    const acquire = (userId: UserId, prepared: McpPrepared, attribution: McpAttribution, stale?: Pooled) => {
+      const key = keyOf(prepared.connection.id, userId)
+      return lockOf(key).withPermit(
+        Effect.gen(function* () {
+          const kept = pool.get(key)
+          if (
+            kept !== undefined &&
+            kept !== stale &&
+            !kept.dead &&
+            kept.revision === prepared.connection.cacheRevision
+          ) {
+            kept.users += 1
+            if (kept.timer !== null) clearTimeout(kept.timer)
+            kept.timer = null
+            return { key, entry: kept }
+          }
+          if (kept !== undefined) yield* retire(key, kept)
+          const scope = yield* Scope.make()
+          const session = yield* open(userId, prepared, attribution).pipe(
+            Scope.provide(scope),
+            Effect.onError(() => Scope.close(scope, Exit.void))
+          )
+          const entry: Pooled = {
+            connectionId: prepared.connection.id,
+            userId,
+            revision: prepared.connection.cacheRevision,
+            scope,
+            session,
+            users: 1,
+            timer: null,
+            dead: false,
+            retired: false
+          }
+          // The server or the network closed it: the next call opens another.
+          session.client.onclose = () => {
+            entry.dead = true
+          }
+          // A connected server says its tools changed: list them again at once (spec/MCP.md §4.1).
+          session.client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+            runFork(relist(userId, prepared, key, entry))
+          })
+          pool.set(key, entry)
+          return { key, entry }
+        })
+      )
+    }
+
+    const unavailable = (failure: McpRefused | NotFound | StaleWrite) =>
+      ({
+        _tag: "Failed",
+        sent: false,
+        status: "refused",
+        message:
+          failure._tag === "McpRefused"
+            ? failure.message
+            : failure._tag === "NotFound"
+              ? "This server isn't available now."
+              : "This server changed. Try again."
+      }) as const
+
+    const call: McpConnectionsShape["call"] = ({ userId, connectionId, tool, args, attribution, onProgress }) =>
       Effect.gen(function* () {
         const prepared = yield* Effect.result(prepare(userId, connectionId))
         if (prepared._tag === "Failure") {
           const failure = prepared.failure
-          if (failure._tag === "McpRefused")
-            return { _tag: "Failed", sent: false, status: "refused", message: failure.message } as const
-          if (failure._tag === "NotFound")
-            return {
-              _tag: "Failed",
-              sent: false,
-              status: "refused",
-              message: "This server isn't available now."
-            } as const
-          if (failure._tag === "StaleWrite")
-            return {
-              _tag: "Failed",
-              sent: false,
-              status: "refused",
-              message: "This server changed. Try again."
-            } as const
+          // A server that can't be used now keeps no client.
+          if (failure._tag === "McpRefused" || failure._tag === "NotFound" || failure._tag === "StaleWrite") {
+            yield* closeKeptFor(connectionId, userId)
+            return unavailable(failure)
+          }
           return yield* Effect.fail(failure)
         }
         const ready = prepared.success
-        let sent = false
         // `initialize` is the connection's, not the call's: only `tools/call` names the call.
         const opening = { ...attribution, rolloutId: null, toolCallId: null }
-        const outcome = yield* Effect.scoped(
+        const send = (session: McpSession, attempt: number) =>
+          recorded(
+            userId,
+            ready,
+            session.counts,
+            { method: "tools/call", tool },
+            { ...attribution, attempt },
+            (signal, timeout) =>
+              session.client.request(
+                {
+                  method: "tools/call",
+                  params: { name: tool, arguments: (args ?? {}) as Record<string, unknown> }
+                },
+                CallToolResultSchema,
+                {
+                  signal,
+                  timeout,
+                  resetTimeoutOnProgress: true,
+                  maxTotalTimeout: MCP_CALL_MAX_MS,
+                  // The server's words are shown to the user: its secrets scrubbed first.
+                  onprogress: (progress) =>
+                    onProgress?.({
+                      ...progress,
+                      message: progress.message === undefined ? undefined : ready.scrub(progress.message)
+                    })
+                }
+              ),
+            MCP_CALL_MAX_MS
+          )
+        /** One attempt on a kept client, released after; `stale` asks for a fresh one. */
+        const attempt = (number: number, stale?: Pooled) =>
           Effect.gen(function* () {
-            const session = yield* open(userId, ready, opening)
-            sent = true
-            return yield* recorded(
-              userId,
-              ready,
-              session.counts,
-              { method: "tools/call", tool },
-              attribution,
-              (signal, timeout) =>
-                session.client.request(
-                  {
-                    method: "tools/call",
-                    params: { name: tool, arguments: (args ?? {}) as Record<string, unknown> }
-                  },
-                  CallToolResultSchema,
-                  {
-                    signal,
-                    timeout,
-                    resetTimeoutOnProgress: true,
-                    maxTotalTimeout: MCP_CALL_MAX_MS,
-                    onprogress: () => undefined
-                  }
-                ),
-              MCP_CALL_MAX_MS
+            const held = yield* Effect.result(acquire(userId, ready, opening, stale))
+            if (held._tag === "Failure") return { _tag: "NotSent", failure: held.failure } as const
+            const { key, entry } = held.success
+            const outcome = yield* Effect.result(send(entry.session, number)).pipe(
+              Effect.ensuring(Effect.suspend(() => release(key, entry)))
             )
+            if (outcome._tag === "Success") return { _tag: "Done", result: outcome.success } as const
+            const failure = outcome.failure
+            // A dropped connection leaves the session in doubt: the next call opens another.
+            if (failure instanceof McpRequestFailed && failure.status === "failed") entry.dead = true
+            return { _tag: "Sent", failure, entry } as const
           })
-        ).pipe(Effect.result)
-        if (outcome._tag === "Success") return { _tag: "Result", result: outcome.success, scrub: ready.scrub } as const
-        const failure = outcome.failure
+        const first = yield* attempt(attribution.attempt)
+        // The first connect of this process for the connection lists its tools again, after the call.
+        if (first._tag !== "NotSent" && !listedHere.has(connectionId)) {
+          listedHere.add(connectionId)
+          const key = keyOf(connectionId, userId)
+          const entry = pool.get(key)
+          if (entry !== undefined) runFork(relist(userId, ready, key, entry))
+        }
+        const settled =
+          // The server refused it unprocessed: reconnect once and send it again (spec/MCP.md §7.2).
+          first._tag === "Sent" && first.failure instanceof McpRequestFailed && first.failure.deadSession
+            ? yield* attempt(attribution.attempt + 1, first.entry)
+            : first
+        if (settled._tag === "Done") return { _tag: "Result", result: settled.result, scrub: ready.scrub } as const
+        const failure = settled.failure
+        // Refused unprocessed both times, or never sent at all: nothing can have happened.
+        const sent = settled._tag === "Sent" && !(failure instanceof McpRequestFailed && failure.deadSession)
         if (failure instanceof McpRequestFailed)
           return { _tag: "Failed", sent, status: failure.status, message: failure.message } as const
         if (failure._tag === "NotFound")
@@ -573,48 +762,99 @@ export const layer = Layer.effect(
         return yield* Effect.fail(failure)
       })
 
+    const closeKeptFor = (connectionId: string, userId: string) =>
+      Effect.suspend(() => {
+        const key = keyOf(connectionId, userId)
+        const entry = pool.get(key)
+        return entry === undefined ? Effect.void : retire(key, entry)
+      })
+
     /** `initialize` and every page of `tools/list`, up to the listing's bounds. */
     const list = (userId: UserId, prepared: McpPrepared, transport: RemoteMcpTransport) =>
       Effect.scoped(
-        Effect.gen(function* () {
-          const session = yield* open(userId, prepared, CHECK, transport)
-          const tools: Array<unknown> = []
-          let bytes = 0
-          let truncated = false
-          let cursor: string | undefined
-          do {
-            const page = yield* request(userId, prepared, session, {
-              method: "tools/list",
-              tool: null,
-              attribution: CHECK,
-              send: (signal, timeout) =>
-                session.client.request(
-                  { method: "tools/list", params: cursor === undefined ? {} : { cursor } },
-                  ResultSchema,
-                  { signal, timeout }
-                )
-            })
-            const listed = Array.isArray(page.tools) ? page.tools : []
-            for (const tool of listed) {
-              bytes += Buffer.byteLength(JSON.stringify(tool))
-              if (tools.length >= MCP_TOOLS_LIMIT || bytes > MCP_LISTING_BYTES_LIMIT) {
-                truncated = true
-                break
-              }
-              tools.push(tool)
-            }
-            cursor = typeof page.nextCursor === "string" && page.nextCursor !== "" ? page.nextCursor : undefined
-          } while (cursor !== undefined && !truncated)
-          const server = serverInfoOf(
-            session.client.getServerVersion(),
-            session.protocolVersion(),
-            session.client.getServerCapabilities(),
-            session.client.getInstructions(),
-            truncated
-          )
-          return { server, tools, route: session.route() }
-        })
+        Effect.flatMap(open(userId, prepared, CHECK, transport), (session) => listOn(userId, prepared, session))
       )
+
+    /** Every page of `tools/list` on an open client, up to the listing's bounds, as Check stores it. */
+    const listOn = (userId: UserId, prepared: McpPrepared, session: McpSession) =>
+      Effect.gen(function* () {
+        const tools: Array<unknown> = []
+        let bytes = 0
+        let truncated = false
+        let cursor: string | undefined
+        do {
+          const page = yield* request(userId, prepared, session, {
+            method: "tools/list",
+            tool: null,
+            attribution: CHECK,
+            send: (signal, timeout) =>
+              session.client.request(
+                { method: "tools/list", params: cursor === undefined ? {} : { cursor } },
+                ResultSchema,
+                { signal, timeout }
+              )
+          })
+          const listed = Array.isArray(page.tools) ? page.tools : []
+          for (const tool of listed) {
+            bytes += Buffer.byteLength(JSON.stringify(tool))
+            if (tools.length >= MCP_TOOLS_LIMIT || bytes > MCP_LISTING_BYTES_LIMIT) {
+              truncated = true
+              break
+            }
+            tools.push(tool)
+          }
+          cursor = typeof page.nextCursor === "string" && page.nextCursor !== "" ? page.nextCursor : undefined
+        } while (cursor !== undefined && !truncated)
+        const server = serverInfoOf(
+          session.client.getServerVersion(),
+          session.protocolVersion(),
+          session.client.getServerCapabilities(),
+          session.client.getInstructions(),
+          truncated
+        )
+        return { server, tools, route: session.route() }
+      })
+
+    // Listing again on a kept client (spec/MCP.md §4.1): when a connected server says its tools
+    // changed (`notifications/tools/list_changed`), and at the first connect of this process for a
+    // connection. It carries nothing of the user's, and the connection is enabled, or it wouldn't
+    // be connected. The catalog is stored only if it changed (`SaveMcpCatalog`), and a listing made
+    // against an older `cache_revision` is dropped. One listing of a connection at a time.
+    const listedHere = new Set<string>()
+    const listLocks = new Map<string, Semaphore.Semaphore>()
+    const relist = (userId: UserId, prepared: McpPrepared, key: string, entry: Pooled) => {
+      const connectionId = prepared.connection.id
+      let lock = listLocks.get(connectionId)
+      if (!lock) listLocks.set(connectionId, (lock = Semaphore.makeUnsafe(1)))
+      return lock
+        .withPermit(
+          Effect.gen(function* () {
+            if (entry.dead || entry.retired) return
+            const before = yield* reader.GetMcpConnection({ userId, connectionId })
+            if (before.cacheRevision !== entry.revision) return
+            entry.users += 1
+            if (entry.timer !== null) clearTimeout(entry.timer)
+            entry.timer = null
+            const listed = yield* listOn(userId, prepared, entry.session).pipe(
+              Effect.ensuring(Effect.suspend(() => release(key, entry)))
+            )
+            const tools = buildCatalog(before.key, listed.tools, before.tools, before.catalogRevision + 1)
+            yield* writer.SaveMcpCatalog({
+              userId,
+              connectionId,
+              expectedCacheRevision: before.cacheRevision,
+              expectedCatalogRevision: before.catalogRevision,
+              outcome: { server: listed.server, tools },
+              at: Date.now()
+            })
+          })
+        )
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning(`listing ${prepared.connection.name}'s tools again failed`, cause)
+          )
+        )
+    }
 
     const check: McpConnectionsShape["check"] = (userId, connectionId) =>
       Effect.gen(function* () {
@@ -713,6 +953,7 @@ export const layer = Layer.effect(
           expectedRowVersion,
           at: Date.now()
         })
+        if (connection.cacheRevision !== before.cacheRevision) yield* closeKept(connectionId)
         if (before.url === connection.url && before.transport === connection.transport)
           return { connection, check: null }
         return yield* check(userId, connectionId)
@@ -724,13 +965,15 @@ export const layer = Layer.effect(
         const key = typedKey(apiKey)
         if (key !== null && connection.url === null)
           return yield* refused("This server has no address to send a key to.")
-        return yield* writer.SetMcpKey({
-          userId,
-          connectionId,
-          expectedRowVersion,
-          credential: key === null ? null : newCredential(connection.name, key, connection.url!),
-          at: Date.now()
-        })
+        return yield* writer
+          .SetMcpKey({
+            userId,
+            connectionId,
+            expectedRowVersion,
+            credential: key === null ? null : newCredential(connection.name, key, connection.url!),
+            at: Date.now()
+          })
+          .pipe(Effect.tap(() => closeKept(connectionId)))
       })
 
     const setHeaders: McpConnectionsShape["setHeaders"] = (userId, connectionId, headers, expectedRowVersion) =>
@@ -742,20 +985,22 @@ export const layer = Layer.effect(
         const origin = connection.url === null ? null : originOf(connection.url)
         if (entries.length > 0 && origin === null)
           return yield* refused("This server has no address to send headers to.")
-        return yield* writer.SetMcpHeaders({
-          userId,
-          connectionId,
-          expectedRowVersion,
-          headers:
-            entries.length === 0
-              ? null
-              : {
-                  enc: secrets.encrypt(JSON.stringify(Object.fromEntries(entries)), headersBinding(connectionId)),
-                  names: entries.map(([name]) => name),
-                  origin: origin!
-                },
-          at: Date.now()
-        })
+        return yield* writer
+          .SetMcpHeaders({
+            userId,
+            connectionId,
+            expectedRowVersion,
+            headers:
+              entries.length === 0
+                ? null
+                : {
+                    enc: secrets.encrypt(JSON.stringify(Object.fromEntries(entries)), headersBinding(connectionId)),
+                    names: entries.map(([name]) => name),
+                    origin: origin!
+                  },
+            at: Date.now()
+          })
+          .pipe(Effect.tap(() => closeKept(connectionId)))
       })
 
     const setProxy: McpConnectionsShape["setProxy"] = (userId, connectionId, mode, url) =>
@@ -769,16 +1014,31 @@ export const layer = Layer.effect(
           const problem = url === null ? "no proxy URL" : proxyUrlProblem(url)
           if (problem) return yield* refused(`Proxy: ${problem}.`)
         }
-        return yield* writer.SetMcpProxy({
-          userId,
-          connectionId,
-          mode,
-          urlEnc: mode === "custom" && url !== null ? secrets.encrypt(url, proxyBinding(connectionId)) : null,
-          at: Date.now()
-        })
+        return yield* writer
+          .SetMcpProxy({
+            userId,
+            connectionId,
+            mode,
+            urlEnc: mode === "custom" && url !== null ? secrets.encrypt(url, proxyBinding(connectionId)) : null,
+            at: Date.now()
+          })
+          .pipe(Effect.tap(() => closeKept(connectionId)))
       })
 
-    return McpConnections.of({ create, update, setKey, setHeaders, setProxy, check, prepare, open, request, call })
+    return McpConnections.of({
+      create,
+      update,
+      setKey,
+      setHeaders,
+      setProxy,
+      check,
+      prepare,
+      open,
+      request,
+      call,
+      closeKept,
+      kept: () => [...pool.values()].filter((entry) => !entry.dead && !entry.retired).length
+    })
   })
 )
 

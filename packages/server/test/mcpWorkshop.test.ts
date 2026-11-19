@@ -261,12 +261,62 @@ describe("MCP servers in workshops", () => {
       const step = steps.find((s) => s.kind === "tool" && s.id === "w1")
       assert.isTrue(step?.kind === "tool" && step.effect === "external" && step.effectClass === "mcp")
       assert.isTrue(step?.kind === "tool" && step.label === "wipe (Vault)")
+      // The inspector groups the tool under its server and has the call's ledger line.
+      const inspected = yield* api.GetRunTranscript({ versionId: versionId as VersionId })
+      const offered = inspected.tools.find((t) => t.name === "mcp_vault_wipe")!
+      assert.strictEqual(offered.mcp?.connectionName, "Vault")
+      assert.strictEqual(offered.mcp?.connection, connection.id)
+      assert.match(offered.mcp?.host ?? "", /^127\.0\.0\.1:\d+$/)
+      assert.isNumber(offered.mcp?.listedAt)
+      assert.isUndefined(inspected.tools.find((t) => t.name === "list_library")?.mcp)
+      assert.deepStrictEqual(
+        (inspected.mcpCalls ?? []).map((c) => [c.toolCallId, c.attempt, c.status]),
+        [["w1", 1, "complete"]]
+      )
+      assert.isAbove(inspected.mcpCalls![0]!.receivedBytes ?? 0, 0)
       const undone = yield* Effect.flip(
         api.UndoRolloutEffect({ rolloutId: effects[0]!.rolloutId, toolCallId: "w1", seq: 0 })
       )
       assert.notStrictEqual(undone._tag, undefined)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
+
+  it.live("the server's progress shows in the step's row while it runs, and never reaches the model", () =>
+    Effect.gen(function* () {
+      const script = scripted([{ name: "mcp_painter_paint", args: { text: "a lighthouse" }, id: "p1" }])
+      const { api, chat, events, mock } = yield* workshop(script.handler)
+      const painter = yield* fakeServer([fakeTool("paint")])
+      let release: () => void = () => undefined
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      painter.state.call = async (_name, _args, _signal, progress) => {
+        await progress(2, 5)
+        await new Promise((resolve) => setTimeout(resolve, 400))
+        await progress(4, 5, "Adding the waves")
+        await gate
+        return { content: [{ type: "text", text: "painted" }] }
+      }
+      const connection = yield* addServer(api, painter, "Painter")
+      yield* api.SetMcpUse({ connectionId: connection.id, workshops: true })
+      const versionId = yield* task(api, chat, "paint it")
+      const progressOf = () =>
+        events.flatMap((e) =>
+          e._tag === "Steps" && e.versionId === versionId
+            ? e.steps.flatMap((s) => (s.kind === "tool" && s.id === "p1" && s.progress ? [s.progress] : []))
+            : []
+        )
+      yield* eventually(() => progressOf().includes("Working… 40%"))
+      yield* eventually(() => progressOf().includes("Adding the waves (80%)"))
+      release()
+      yield* eventually(() => finished(events, versionId as VersionId) !== undefined)
+      // Done, the row has no progress, and nothing of it was stored or sent to the model.
+      const last = events.flatMap((e) => (e._tag === "Steps" && e.versionId === versionId ? [e.steps] : [])).at(-1)!
+      const step = last.find((s) => s.kind === "tool" && s.id === "p1")
+      assert.isTrue(step?.kind === "tool" && step.status === "done" && step.progress === undefined)
+      const stored = yield* api.GetRolloutSteps({ versionId: versionId as VersionId })
+      assert.notInclude(JSON.stringify(stored), "Adding the waves")
+      assert.notInclude(JSON.stringify(mock.requests()), "Adding the waves")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
 
   it.live("a large result is kept whole and the model is shown a page it can read on from", () =>
     Effect.gen(function* () {
@@ -284,6 +334,10 @@ describe("MCP servers in workshops", () => {
       const transcript = yield* api.GetRunTranscript({ versionId: versionId as VersionId })
       const stored = JSON.stringify(transcript)
       assert.include(stored, "line 5999 of the archive")
+      // The inspector has what the model was sent of it beside the whole result.
+      const entry = transcript.entries.find((e) => e.role === "toolResult" && e.toolCallId === "b1")
+      assert.isTrue(entry?.role === "toolResult" && entry.text.includes("line 5999 of the archive"))
+      assert.isTrue(entry?.role === "toolResult" && entry.sent !== undefined && !entry.sent.includes("line 5999"))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
@@ -393,6 +447,15 @@ describe("MCP servers in workshops", () => {
         { status: "cancelled", attempt: 1 },
         { status: "complete", attempt: 2 }
       ])
+      // The resumed run's inspector lists both attempts, the stopped run's included.
+      const inspected = yield* api.GetRunTranscript({ versionId: resumed.version.id })
+      assert.deepStrictEqual(
+        (inspected.mcpCalls ?? []).map((c) => [c.toolCallId, c.attempt, c.status]),
+        [
+          ["r1", 1, "cancelled"],
+          ["r1", 2, "complete"]
+        ]
+      )
       // The change the resumed version kept is the call that went through.
       const effects = yield* api.ListVersionEffects({ versionId: resumed.version.id })
       assert.deepStrictEqual(

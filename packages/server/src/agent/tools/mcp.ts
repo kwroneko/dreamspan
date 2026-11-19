@@ -9,14 +9,15 @@
 // with `read_result`, which reads only the run's own transcript.
 //
 // Deltas from reference-harness (`src/mcp/`, `src/agent/dynamic-tools.ts`): no annotation-based effect
-// classes (one class, `mcp`, enabled is the consent); a client opened per call rather than a pool;
-// a call is never retried behind the model's back.
+// classes (one class, `mcp`, enabled is the consent); clients kept per (connection, user) rather
+// than a process-wide pool; a call is sent again only when the server proved it refused it
+// unprocessed (spec/MCP.md §7.2), never on a message match.
 import { Type } from "@earendil-works/pi-ai"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { MCP_DESCRIPTION_LIMIT, type McpConnection, mcpToolAllowed, type McpTool } from "@dreamspan/shared/mcp.ts"
 import type { CapabilityMode } from "@dreamspan/shared/workshopApi.ts"
 import { Effect } from "effect"
-import type { McpConnectionsShape } from "../../mcp/McpConnections.ts"
+import type { McpConnectionsShape, McpProgress } from "../../mcp/McpConnections.ts"
 import { MCP_CAPABILITY } from "../capabilities.ts"
 import { escapeToolData, toolDataBody, toolDataPage } from "../toolData.ts"
 import type { Skill } from "../toolLoading.ts"
@@ -200,6 +201,20 @@ const frameOf = (ref: McpToolRef, bytes: number) =>
 const labelOf = (tool: Pick<McpTool, "title" | "name">, connection: string) =>
   `${tool.title ?? tool.name} (${connection})`
 
+/**
+ * A progress notification as the step's row shows it (spec/MCP.md §7.3): the server's own words
+ * when it gave some (with the share done, if it knows the total), else "Working… 40%".
+ */
+export const progressText = (progress: McpProgress) => {
+  const share =
+    progress.total !== undefined && progress.total > 0 && Number.isFinite(progress.progress)
+      ? `${Math.max(0, Math.min(100, Math.round((progress.progress / progress.total) * 100)))}%`
+      : null
+  const message = progress.message?.replace(/\s+/g, " ").trim().slice(0, 200)
+  if (message) return share ? `${message} (${share})` : message
+  return share ? `Working… ${share}` : "Working…"
+}
+
 /** What the user is told after Stop or a timeout: the server may have done it anyway. */
 const failureText = (
   outcome: { readonly sent: boolean; readonly status: string; readonly message: string },
@@ -249,8 +264,11 @@ const toolFor = (
           rolloutId: context.rolloutId,
           toolCallId: context.toolCallId,
           attempt: earlier.length + 1
-        }
+        },
+        // The server's progress shows in the step's row while it runs, never to the model.
+        ...(context.progress ? { onProgress: (progress) => context.progress!(progressText(progress)) } : {})
       })
+      context.progress?.(null)
       // The call reached the server: a change the app can't undo, listed in Changes.
       const effects = (sent: boolean) =>
         sent && workshop
@@ -314,7 +332,8 @@ export const mcpOfferTools = (
             host: mcpHostOf(connection),
             key: connection.use.offeredKey,
             catalogRevision: connection.catalogRevision,
-            tool: tool.name
+            tool: tool.name,
+            listedAt: connection.listedAt
           }
         ) as unknown as RolloutTool<never>
     )

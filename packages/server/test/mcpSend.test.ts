@@ -4,7 +4,7 @@
 // is on. Editing it, setting its key, headers, route and switches, reading it, deleting and
 // restoring it, a story reply without tools, a workshop turn or story reply that doesn't call it,
 // a workshop or story branch where it's off (by default or by its own Off) and a call there send
-// it nothing. A local fake server only.
+// it nothing. After an enabled call, the first connect of the process lists its tools again. A local fake server only.
 import { assert, describe, it } from "@effect/vitest"
 import type { Chat } from "@dreamspan/shared/chat.ts"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
@@ -161,9 +161,11 @@ describe("what reaches an MCP server", () => {
       yield* api.SetMcpUse({ connectionId: id, workshops: false })
       yield* api.SetWorkshopGrant({ chatId: off.id, capability: "mcp", target: id, mode: "allow" })
       yield* turnIn(off.id, CALL)
+      // Then this process's first connect lists the tools again (spec/MCP.md §4.1): nothing of the user's.
+      yield* eventually(() => mcp.methods().includes("tools/list"))
       assert.deepStrictEqual(
         mcp.methods().filter((method) => method !== "notifications/initialized"),
-        ["initialize", "tools/call"]
+        ["initialize", "tools/call", "tools/list"]
       )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
@@ -235,9 +237,11 @@ describe("what reaches an MCP server", () => {
       yield* api.SetMcpUse({ connectionId: id, stories: false })
       yield* choose(true)
       yield* reply
+      // Then this process's first connect lists the tools again (spec/MCP.md §4.1): nothing of the user's.
+      yield* eventually(() => mcp.methods().includes("tools/list"))
       assert.deepStrictEqual(
         mcp.methods().filter((method) => method !== "notifications/initialized"),
-        ["initialize", "tools/call"]
+        ["initialize", "tools/call", "tools/list"]
       )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
