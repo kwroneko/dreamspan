@@ -247,15 +247,18 @@ export function htmlFinish(options: { parts: number; block: number; mediaScope?:
           }
         } else {
           const name = child.tagName!.toLowerCase()
-          // Audio plays with consent, or when every file it names is saved (savedMedia.ts).
-          const player = name === "audio" || name === "source"
-          const saved =
-            player &&
-            [child, ...elements(child)].every((inner) => {
-              const src = String(inner.properties?.src ?? "")
-              return !src || savedMedia.answer(src).kind !== "missing"
-            })
-          if (MEDIA.has(name) && !(player && (options.mediaScope || saved))) {
+          // Audio plays with consent, or when every file it names is saved (savedMedia.ts). Video
+          // plays only from saved files: the proxy never serves video, so consent alone doesn't
+          // show it. Its poster is an image and follows the image rules.
+          const player = name === "audio" || name === "source" || name === "video"
+          const sources = player
+            ? [child, ...elements(child).filter((inner) => inner.tagName?.toLowerCase() === "source")]
+                .map((inner) => String(inner.properties?.src ?? ""))
+                .filter(Boolean)
+            : []
+          const saved = player && sources.every((src) => savedMedia.answer(src).kind !== "missing")
+          const shown = name === "video" ? saved && sources.length > 0 : options.mediaScope || saved
+          if (MEDIA.has(name) && !(player && shown)) {
             blocked ||= ["src", "srcSet", "poster"].some((key) => REMOTE.test(String(properties[key] ?? "")))
             blocked ||= elements(child).some((inner) => REMOTE.test(String(inner.properties?.src ?? "")))
             continue
@@ -355,15 +358,25 @@ function finishParsed(node: Node, name: string, mediaScope?: string | null): boo
     }
   }
 
-  if (name === "audio" || name === "source") {
-    const proxy = proxyMediaUrl(String(properties.src ?? ""), mediaScope)
-    if (proxy) properties.src = proxy
-    else delete properties.src
+  if (name === "audio" || name === "source" || name === "video") {
+    if (properties.src !== undefined) {
+      const proxy = proxyMediaUrl(String(properties.src), mediaScope)
+      if (proxy) properties.src = proxy
+      else delete properties.src
+    }
     delete properties.srcSet
-    if (name === "audio") {
+    if (name !== "source") {
       delete properties.autoPlay
       properties.controls = true
-      properties.preload = "none"
+      properties.preload = name === "video" ? "metadata" : "none"
+    }
+    if (name === "video" && typeof properties.poster === "string" && !properties.poster.startsWith("data:")) {
+      const proxy = proxyMediaUrl(properties.poster, mediaScope)
+      if (proxy) properties.poster = proxy
+      else {
+        blocked ||= REMOTE.test(properties.poster)
+        delete properties.poster
+      }
     }
   }
   if (name === "image" || name === "feimage") {

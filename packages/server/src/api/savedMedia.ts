@@ -289,6 +289,27 @@ export const makeSavedMediaHandlers = Effect.gen(function* () {
   } satisfies Parameters<typeof SavedMediaApi.of>[0]
 })
 
+/**
+ * A single `bytes=` range of a file of `size` bytes: null for the whole file (no header, or one
+ * this doesn't read, such as several ranges), "unsatisfiable" when it starts past the end.
+ */
+export const byteRange = (
+  header: string | undefined,
+  size: number
+): { readonly start: number; readonly end: number } | null | "unsatisfiable" => {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header?.trim() ?? "")
+  if (!match || (match[1] === "" && match[2] === "")) return null
+  if (match[1] === "") {
+    const suffix = Number(match[2])
+    if (suffix === 0 || size === 0) return "unsatisfiable"
+    return { start: Math.max(0, size - suffix), end: size - 1 }
+  }
+  const start = Number(match[1])
+  const end = match[2] === "" ? size - 1 : Math.min(size - 1, Number(match[2]))
+  if (start >= size || start > end) return "unsatisfiable"
+  return { start, end }
+}
+
 const notFound = () =>
   HttpServerResponse.text("Not found", {
     status: 404,
@@ -323,14 +344,29 @@ export const savedMediaRoute = Layer.unwrap(
           "cross-origin-resource-policy": "same-origin",
           "content-disposition": "attachment",
           "content-security-policy": "sandbox; default-src 'none'; frame-ancestors 'none'",
-          etag: `"${id}"`
+          etag: `"${id}"`,
+          "accept-ranges": "bytes"
         }
         if (request.headers["if-none-match"]?.split(",").some((tag) => tag.trim().replace(/^W\//, "") === `"${id}"`))
           return HttpServerResponse.empty({ status: 304, headers })
+        // One byte range (a video player seeks, and some browsers play video only this way).
+        const range = byteRange(request.headers["range"], file.byteSize)
+        if (range === "unsatisfiable")
+          return HttpServerResponse.empty({
+            status: 416,
+            headers: { ...headers, "content-range": `bytes */${file.byteSize}` }
+          })
         return yield* HttpServerResponse.file(join(config.dataDir, file.path), {
           contentType: file.mime,
           chunkSize: 64 * 1024,
-          headers
+          ...(range
+            ? {
+                status: 206,
+                offset: range.start,
+                bytesToRead: range.end - range.start + 1,
+                headers: { ...headers, "content-range": `bytes ${range.start}-${range.end}/${file.byteSize}` }
+              }
+            : { headers })
         }).pipe(Effect.orElseSucceed(notFound))
       }).pipe(Effect.catchTag("StorageError", () => Effect.succeed(notFound())))
     )

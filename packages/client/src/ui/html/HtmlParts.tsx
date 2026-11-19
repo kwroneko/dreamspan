@@ -113,6 +113,22 @@ export function BlockedMediaNote() {
   )
 }
 
+/**
+ * A video: the browser picks among its `<source>`s once, when it loads, so a source that changes
+ * later (a saved file whose lookup answered after a placeholder) mounts a new player.
+ */
+function Video(props: Props) {
+  const queued = useQueuedMediaProps(props, "video")
+  const { node, ...dom } = queued
+  const sources = [
+    String(props.src ?? ""),
+    ...(node?.children ?? []).map((child) =>
+      child.type === "element" && child.tagName === "source" ? String(child.properties?.src ?? "") : ""
+    )
+  ].join(" ")
+  return createElement("video", { ...dom, key: sources })
+}
+
 /** A document block, through the registered frame renderer (parts.ts, `html.frame`). */
 function DocumentBlock(props: Props) {
   const renderer = effectiveDocumentRenderer()
@@ -152,6 +168,7 @@ export function htmlComponents(markdown: object | undefined): Record<string, Com
     textarea: Textarea,
     select: Select,
     option: Option,
+    video: Video,
     [FRAME_ELEMENT]: DocumentBlock,
     [MEDIA_MARKER]: MediaMarker
   }
