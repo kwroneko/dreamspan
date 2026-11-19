@@ -2554,7 +2554,10 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Struct({ chatId: ChatId, forkId: ForkId, slotId: SlotId }),
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** A judge model's finding on a finished model version: its text stays (spec/LCM.md §2.4). */
+  /**
+   * A judge model's finding on a finished model version: its text stays (spec/LCM.md §2.4). Also on
+   * a reply that failed because it was never sent (spec/REPLY-CONTRACT.md §3.6).
+   */
   Rpc.make("MarkVersion", {
     payload: { userId: UserId, versionId: VersionId, mark: Schema.NullOr(Schema.Literals(["refused"])) },
     success: Version,

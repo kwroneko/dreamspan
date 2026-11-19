@@ -1,4 +1,4 @@
-import { RefusalJudge } from "../decision/RefusalJudge.ts"
+import { RefusalJudge, UNSENT_TASK } from "../decision/RefusalJudge.ts"
 import { Summarizer } from "../lcm/Summarizer.ts"
 // Running generations (DESIGN §3.1): one fiber each, any number at once, several under one
 // slot. Their text streams to the chat's subscribers as deltas and is saved now and then,
@@ -152,30 +152,40 @@ export class Generations extends Context.Service<
        * A finished reply is read by the judge model, if the user chose one: a refusal marks the
        * version and leaves its text (spec/LCM.md §2.4). A judge that fails marks nothing.
        */
-      const markIfRefused = (request: GenerationRequest, text: string) =>
-        judge.judge({ userId: request.userId, chatId: request.chatId, text, versionId: request.versionId }).pipe(
-          Effect.flatMap((verdict) =>
-            verdict === "refused"
-              ? writer
-                  .MarkVersion({ userId: request.userId, versionId: request.versionId, mark: "refused" })
-                  .pipe(
-                    Effect.tap((version) =>
-                      Effect.sync(() => hub.publish(request.chatId, { _tag: "Version", version }))
+      const markIfRefused = (request: GenerationRequest, text: string, at?: "ending") =>
+        judge
+          .judge({
+            userId: request.userId,
+            chatId: request.chatId,
+            text,
+            versionId: request.versionId,
+            // A reply never sent: the judge reads what it wrote instead, if the user turned that on.
+            ...(at ? { at, instruction: UNSENT_TASK } : {})
+          })
+          .pipe(
+            Effect.flatMap((verdict) =>
+              verdict === "refused"
+                ? writer
+                    .MarkVersion({ userId: request.userId, versionId: request.versionId, mark: "refused" })
+                    .pipe(
+                      Effect.tap((version) =>
+                        Effect.sync(() => hub.publish(request.chatId, { _tag: "Version", version }))
+                      )
                     )
-                  )
-              : Effect.void
-          ),
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logWarning("judging a reply failed", cause)
-          ),
-          Effect.asVoid
-        )
+                : Effect.void
+            ),
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logWarning("judging a reply failed", cause)
+            ),
+            Effect.asVoid
+          )
 
       const finish = (entry: Running, exit: Exit.Exit<void, GenerationFailed>) =>
         Effect.gen(function* () {
           let { request } = entry
           let status: Version["status"] = "complete"
           let error: Version["error"] = null
+          let unsent: string | undefined
           if (Exit.isFailure(exit)) {
             if (Cause.hasInterruptsOnly(exit.cause)) {
               status = entry.stopped ? "stopped" : "interrupted"
@@ -184,6 +194,7 @@ export class Generations extends Context.Service<
               const failure = Cause.findErrorOption(exit.cause)
               if (Option.isSome(failure)) {
                 const { contextLimit } = failure.value
+                unsent = failure.value.unsent
                 error = {
                   class: failure.value.class,
                   message: failure.value.message,
@@ -264,6 +275,9 @@ export class Generations extends Context.Service<
           }
           if (!request.replyOnly && status === "complete" && entry.text.trim() !== "")
             yield* Effect.forkIn(markIfRefused(request, entry.text), scope)
+          // The ending check (spec/REPLY-CONTRACT.md §3.6): observe-only, it marks the failed reply.
+          if (!request.replyOnly && status === "failed" && error?.class === "contract" && unsent)
+            yield* Effect.forkIn(markIfRefused(request, unsent, "ending"), scope)
           // A pass said nothing, so there's nothing for a decision point to read after it.
           if (!request.replyOnly && status === "complete" && !entry.silent && Option.isSome(decisions))
             yield* Effect.forkIn(

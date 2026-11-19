@@ -132,11 +132,26 @@ export const WRITE_NOW = "Write the reply now."
  * What a reply that never sent fails with (spec/REPLY-CONTRACT.md §3.4): `times` plain turns,
  * the nudges' and the first. Resume and Regenerate are offered on it.
  */
-const contractFailure = (times: number) =>
+const contractFailure = (times: number, unsent: string) =>
   new GenerationFailed({
     class: "contract",
-    message: `The model didn't send a reply: it wrote text ${times} times without calling send_message.`
+    message: `The model didn't send a reply: it wrote text ${times} times without calling send_message.`,
+    ...(unsent === "" ? {} : { unsent })
   })
+
+/** The last text the run wrote outside a send, at most 8,000 characters: what the ending check reads. */
+const lastUnsent = (messages: ReadonlyArray<AgentMessage>) => {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!
+    if (m.role !== "assistant") continue
+    const text = m.content
+      .flatMap((p) => (p.type === "text" ? [p.text] : []))
+      .join("")
+      .trim()
+    if (text !== "") return text.length > 8000 ? text.slice(-8000) : text
+  }
+  return ""
+}
 
 /** A tool result's `details` when a stop cut the call off: resume runs the call again. */
 const INTERRUPTED = { interrupted: true } as const
@@ -1159,7 +1174,10 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             if (requests >= cap - 1) return { action: "continue" }
             if (nudges >= SEND_NUDGES) {
               // Every plain turn of the reply: one before each nudge, this one, and those Resume cut.
-              exhausted = contractFailure(nudges + 1 + cutAnswersIn(agent.state.messages.slice(historical)))
+              exhausted = contractFailure(
+                nudges + 1 + cutAnswersIn(agent.state.messages.slice(historical)),
+                lastUnsent([...agent.state.messages.slice(historical), message])
+              )
               return { action: "end" }
             }
             pendingNudge = ++nudges

@@ -186,6 +186,18 @@ function ChatDefaultsContent() {
               onValueChange={(value) => void change({ judge: value === NONE ? null : parseModelValue(value) })}
             />
           </Field>
+          <Switch
+            checked={defaults?.judgeEndings === true}
+            disabled={!defaults?.judge}
+            onCheckedChange={(judgeEndings) => void change({ judgeEndings })}
+            hint={
+              defaults?.judge
+                ? "When a reply fails because the model never sent it, the judge reads what it wrote instead. That text goes to the judge's model."
+                : "Choose a refusal judge first."
+            }
+          >
+            Also check replies that were never sent
+          </Switch>
         </div>
       </Card>
       <SlotOutlet

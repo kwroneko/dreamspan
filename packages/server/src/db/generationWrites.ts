@@ -12,6 +12,7 @@ import { SqlClient } from "effect/sql"
 import { forkThrough } from "./forks.ts"
 import {
   DEFAULT_JUDGE,
+  JUDGE_ENDINGS,
   DEFAULT_LCM,
   DEFAULT_MODEL,
   DEFAULT_PERSONA,
@@ -322,6 +323,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         yield* putSetting(userId, DEFAULT_PRESET, locked ?? preset)
         if (defaults.lcm !== undefined) yield* putSetting(userId, DEFAULT_LCM, defaults.lcm)
         if (defaults.judge !== undefined) yield* putSetting(userId, DEFAULT_JUDGE, defaults.judge)
+        if (defaults.judgeEndings !== undefined) yield* putSetting(userId, JUDGE_ENDINGS, defaults.judgeEndings)
         return yield* readDefaults(sql, userId)
       }).pipe(transaction(sql, "SetGenerationDefaults")),
 
@@ -357,6 +359,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         if (change.model !== undefined) yield* putSetting(userId, DEFAULT_MODEL, change.model)
         if (change.preset !== undefined) yield* putSetting(userId, DEFAULT_PRESET, change.preset)
         if (change.judge !== undefined) yield* putSetting(userId, DEFAULT_JUDGE, change.judge)
+        if (change.judgeEndings !== undefined) yield* putSetting(userId, JUDGE_ENDINGS, change.judgeEndings)
         if (
           change.tail !== undefined ||
           change.fallback !== undefined ||

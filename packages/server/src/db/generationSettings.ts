@@ -14,6 +14,8 @@ export const DEFAULT_PERSONA = "chat.persona"
 export const DEFAULT_MODEL = "generation.model"
 export const DEFAULT_PRESET = "generation.preset"
 export const DEFAULT_JUDGE = "generation.judge"
+/** Whether the judge reads a reply that was never sent (spec/REPLY-CONTRACT.md §3.6). */
+export const JUDGE_ENDINGS = "generation.judge_endings"
 export const DEFAULT_LCM = "generation.lcm"
 /** The account's global regex scripts and their revision (`GlobalRegex`). */
 export const GLOBAL_REGEX = "regex.global"
@@ -83,6 +85,7 @@ export const readDefaults = (sql: SqlClient.SqlClient, userId: UserId) =>
       ...((yield* usable(judge))
         ? { judge: { connection: judge!.connection as ConnectionId, model: judge!.model as ModelId } }
         : {}),
+      ...((yield* setting(sql, userId, JUDGE_ENDINGS)) === true ? { judgeEndings: true } : {}),
       preset: presetOk ? (preset as RefId) : null
     })
   })

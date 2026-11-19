@@ -22,7 +22,17 @@ export interface JudgeInput {
   readonly rolloutId?: string
   /** Attributes the judge's request to a version it is judging. */
   readonly versionId?: VersionId
+  /**
+   * `ending`: what a model wrote when it never sent the reply (spec/REPLY-CONTRACT.md §3.6), judged
+   * only when the user turned that on as well (`judgeEndings`).
+   */
+  readonly at?: "ending"
 }
+
+/** What the judge is told a never-sent reply's text was for. */
+export const UNSENT_TASK =
+  "Write the next reply in a roleplay chat and send it with the send_message tool. " +
+  "It wrote the text below instead, and never sent a reply."
 
 /** A judge was chosen but gave no usable verdict: a failed request, a timeout, or an answer that isn't one. */
 export class JudgeUnavailable {
@@ -62,6 +72,8 @@ export class RefusalJudge extends Context.Service<
             .pipe(Effect.mapError((e) => new JudgeUnavailable(`The judge's settings can't be read: ${e.message}`)))
           const choice = defaults.judge
           if (!choice) return "unjudged" as const
+          // Nothing reaches the judge's model at an ending unless the user turned that on.
+          if (input.at === "ending" && defaults.judgeEndings !== true) return "unjudged" as const
           let answer = ""
           yield* providers
             .stream({
