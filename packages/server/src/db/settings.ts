@@ -12,7 +12,7 @@ import { CostRules } from "@dreamspan/shared/costFormulas.ts"
 import { DecisionPointSetting } from "@dreamspan/shared/decisions.ts"
 import { LcmDefaults, ModelChoice } from "@dreamspan/shared/lcmSettings.ts"
 import { GlobalScripts } from "@dreamspan/shared/regexScripts.ts"
-import { SubagentLimits, SubagentModels } from "@dreamspan/shared/subagents.ts"
+import { SubagentLimits, SubagentModels, SubagentTypes } from "@dreamspan/shared/subagents.ts"
 import { StaleWrite } from "@dreamspan/shared/errors.ts"
 import { StorageError } from "./ops.ts"
 
@@ -91,6 +91,17 @@ const definitions: ReadonlyArray<SettingDefinition> = [
   // agent's write (no `agent` entry).
   { id: "subagents.models", scope: "user", schema: SubagentModels },
   { id: "subagents.limits", scope: "user", schema: SubagentLimits },
+  // The user's subagent types (§10): the workshop agent may write them (`change_setting`), as a
+  // setup change with Undo. They hold no limits, so consent and spend stay the user's.
+  {
+    id: "subagents.types",
+    scope: "user",
+    schema: SubagentTypes,
+    agent: {
+      description:
+        "Your subagent types: a list of {id, label, description, instructions, tools (tool ids), defaultAlias, context: task|fork, off}. An entry with a built-in type's id changes that type."
+    }
+  },
   { id: "bin.limits", scope: "user", schema: BinLimits },
   { id: "sources", scope: "user", schema: SourcePrefs },
   { id: "sources.admin", scope: "app", schema: SourceAdminSettings },

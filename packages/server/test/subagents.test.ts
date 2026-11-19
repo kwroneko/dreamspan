@@ -9,7 +9,7 @@ import { Effect, Stream } from "effect"
 import type { RolloutStep } from "@dreamspan/shared/agent.ts"
 import type { Chat, VersionId } from "@dreamspan/shared/chat.ts"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
-import { subagentTypes } from "../src/agent/subagents.ts"
+import { ExecutionRegistry } from "../src/execution.ts"
 import { TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
 import { Reader } from "../src/db/Database.ts"
 import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
@@ -547,7 +547,7 @@ describe("subagents", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       // A type that may make cards, for this test only (types are registered parts, §10).
-      yield* subagentTypes.register({
+      yield* (yield* ExecutionRegistry).subagentTypes.register({
         id: "maker",
         label: "Make cards",
         description: "Makes cards.",

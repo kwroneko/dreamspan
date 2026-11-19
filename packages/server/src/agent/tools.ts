@@ -87,8 +87,9 @@ export interface OfferContext {
   readonly leafSlotId: SlotId | null
   /** The run's reply contract: `several` lets it go on after its subagents report (spec/SUBAGENTS.md §3.2). */
   readonly contract?: string
-  /** The chat's kind (`rp`, `workshop`): which subagent types it offers. Absent: a workshop's. */
+  /** The chat's kind, and the registries in effect: which subagent types it offers (§10). */
   readonly kind?: string
+  readonly execution?: import("../execution.ts").ExecutionRegistry["Service"]
 }
 
 /** The tools a new run offers, each as its `offerFor` makes it for this chat (absent: as registered). */
@@ -103,6 +104,11 @@ interface SubagentHost {
   readonly run: import("./session.ts").AgentRun
   /** The definitions the run was offered, as frozen: a child never gets more. */
   readonly offered: ReadonlyArray<FrozenTool>
+  /**
+   * The tool definitions the run's requests send, exactly as sent: a fork subagent (spec/SUBAGENTS.md
+   * §2.3) sends the same, so its request starts with the run's cached prefix.
+   */
+  readonly wireTools: ReadonlyArray<import("@earendil-works/pi-ai").Tool>
   /** Shows the child in the call's step as it runs; null takes it out. */
   readonly show: (row: SubagentRow | null) => void
   /** Shows the call waiting for the user's answer (a subagent that couldn't be resumed); null: no longer. */

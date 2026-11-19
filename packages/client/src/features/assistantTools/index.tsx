@@ -33,7 +33,7 @@ export const register = () => {
       label: "Assistant tools",
       group: "tools",
       order: 20,
-      description: "Models and limits for the assistant's subagents."
+      description: "Models, limits and kinds of the assistant's subagents."
     }
   })
 }

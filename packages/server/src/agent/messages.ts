@@ -45,6 +45,11 @@ declare module "@earendil-works/pi-agent-core" {
       readonly progress?: string
       /** A message the parent sent this subagent (`message_agent`, §4). */
       readonly fromParent?: true
+      /**
+       * A fork subagent's task (spec/SUBAGENTS.md §2.3): what comes before it is its parent's
+       * conversation, as the parent had it at the call; its own run starts here.
+       */
+      readonly fork?: true
     }
     /**
      * The text before it became a message of its own (contract `several`): the run's model ended
@@ -77,6 +82,15 @@ export const liveSuffix = (messages: ReadonlyArray<AgentMessage | Message>): Arr
       if (m.role === "assistant" || m.role === "toolResult" || m.role === "user") return [m]
       return []
     })
+}
+
+/**
+ * Where a fork subagent's own run starts in its transcript (spec/SUBAGENTS.md §2.3): its task,
+ * after its parent's conversation. 0 for every other run.
+ */
+export const forkStart = (messages: ReadonlyArray<AgentMessage>) => {
+  const at = messages.findIndex((m) => m.role === "rpApp" && (m as { fork?: unknown }).fork === true)
+  return at < 0 ? 0 : at
 }
 
 /** How many times this run has been asked to send its reply: the nudges in its transcript. */

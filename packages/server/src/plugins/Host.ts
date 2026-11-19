@@ -137,7 +137,8 @@ export class PluginHost extends Context.Service<
         requestTransforms: providers.transforms,
         responseObservers: providers.observers,
         costFormulas: providers.costs,
-        decisionPoints: decisions.points
+        decisionPoints: decisions.points,
+        subagentTypes: execution.subagentTypes
       }
       // Registration and restoration happen before pin writes. Revisions change in the
       // same synchronous step as the part, so that interval cannot authorize an Auto send.

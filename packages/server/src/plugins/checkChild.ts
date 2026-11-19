@@ -49,6 +49,7 @@ try {
     "costFormulas",
     "commands",
     "decisionPoints",
+    "subagentTypes",
     "storage"
   ]
   const worker = [

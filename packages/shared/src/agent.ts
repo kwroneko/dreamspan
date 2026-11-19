@@ -151,7 +151,9 @@ export const SubagentRow = Schema.Struct({
   /** It works in the background: the reply goes on, and its report reaches the reply later (§3.2). */
   background: Schema.optionalKey(Schema.Boolean),
   /** It carries a finished subagent on with the assistant's message (`message_agent`, §4). */
-  continued: Schema.optionalKey(Schema.Boolean)
+  continued: Schema.optionalKey(Schema.Boolean),
+  /** It started from the conversation up to its call, then its task (a fork, §2.3). */
+  forked: Schema.optionalKey(Schema.Boolean)
 })
 export type SubagentRow = typeof SubagentRow.Type
 

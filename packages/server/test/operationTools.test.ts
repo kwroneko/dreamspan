@@ -254,20 +254,43 @@ describe("operation tools", () => {
       const settings = JSON.parse((yield* f.run("read_settings", {})).text) as Array<{ key: string }>
       assert.deepStrictEqual(
         settings.map((s) => s.key),
-        ["display", "shell.pinsCollapsed"]
+        ["display", "shell.pinsCollapsed", "subagents.types"]
       )
       const change = yield* f.run("change_setting", { key: "shell.pinsCollapsed", value: true })
       assert.isUndefined(change.isError, change.text)
       const info = yield* f.reader.WorkshopOperationInfo({ userId: f.user.id })
       assert.strictEqual(info.settings.find((s) => s.key === "shell.pinsCollapsed")!.value, true)
-      for (const key of ["network", "workshop.grants", "plugins.user", "token_counting", "unknown"]) {
+      // The assistant may write subagent types (spec/SUBAGENTS.md §10), never subagent models or limits.
+      const typed = yield* f.run(
+        "change_setting",
+        {
+          key: "subagents.types",
+          value: [{ id: "checker", label: "Check names", instructions: "Synthetic checks.", tools: ["list_library"] }]
+        },
+        "types"
+      )
+      assert.isUndefined(typed.isError, typed.text)
+      assert.deepStrictEqual((yield* f.api.GetSubagentTypes({})).types.find((t) => t.id === "checker")?.tools, [
+        "list_library"
+      ])
+      for (const key of [
+        "network",
+        "workshop.grants",
+        "plugins.user",
+        "token_counting",
+        "subagents.models",
+        "subagents.limits",
+        "unknown"
+      ]) {
         const result = yield* f.run("change_setting", { key, value: {} }, `bad-${key}`)
         assert.isTrue(result.isError, result.text)
         assert.include(result.text, "not agent-changeable")
       }
       const bad = yield* f.run("change_setting", { key: "shell.pinsCollapsed", value: "true" }, "wrong-type")
       assert.isTrue(bad.isError)
-      const effect = (yield* f.api.ListRolloutEffects({ chatId: f.chat.id }))[0]!
+      const effect = (yield* f.api.ListRolloutEffects({ chatId: f.chat.id })).find((e) =>
+        JSON.stringify(e).includes("shell.pinsCollapsed")
+      )!
       yield* f.api.UndoRolloutEffect(effect)
       assert.strictEqual(
         (yield* f.reader.WorkshopOperationInfo({ userId: f.user.id })).settings.find(

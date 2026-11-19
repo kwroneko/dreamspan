@@ -106,7 +106,8 @@ export interface AgentRun {
   readonly permit?: (input: PermitInput) => Effect.Effect<PermitResult>
   /**
    * This run is a subagent (spec/SUBAGENTS.md): its tools get no host to start one of their own,
-   * its last request says `writeNow`, and it isn't summarized as it goes (that's SA7's).
+   * and its last request says `writeNow`. Its transcript is summarized as it goes, as a workshop
+   * reply's is (SA7).
    */
   readonly subagent?: {
     readonly writeNow: string
@@ -123,6 +124,12 @@ export interface AgentRun {
     /** Its `report_progress` line, shown in its row at once (spec/SUBAGENTS.md §4). */
     readonly onProgress?: (text: string) => void
   }
+  /**
+   * The tool definitions its requests send, in place of its own: a fork subagent's are its
+   * parent's, exactly as the parent sent them, so the provider reads the shared prefix from cache
+   * (spec/SUBAGENTS.md §2.3). A call to a tool the run doesn't have (`tools`) fails as an unknown tool.
+   */
+  readonly wireTools?: ReadonlyArray<Tool>
   /**
    * What reaches the run while it works (spec/SUBAGENTS.md §3.2, §4): a subagent's messages from
    * its parent. Absent: the run makes its own (its background subagents' reports).
@@ -411,6 +418,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         const transport = run.offered?.find((t) => t.name === CALL_TOOL)
         piTools = [...piTools, transport ? definition(transport) : dispatcherDefinition]
       }
+      if (run.wireTools) piTools = run.wireTools
       const deferredDefinitions = frozen.filter((t) => deferred.has(t.name)).map(definition)
       const emit = (chunk: GenerationChunk) => void Queue.offerUnsafe(queue, chunk)
       if (several) emit({ several: true })
@@ -718,6 +726,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 input,
                 run,
                 offered: frozen,
+                wireTools: piTools,
                 show: (row: SubagentRow | null) => {
                   if (row) children.set(toolCallId, row)
                   else children.delete(toolCallId)
@@ -1114,7 +1123,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               ]
         },
         prepareRequest: async ({ context }, signal) => {
-          if (!execution.chatKinds.get(run.kind ?? "")?.summaryTranscript || run.subagent) return
+          if (!execution.chatKinds.get(run.kind ?? "")?.summaryTranscript) return
           const compactor = execution.runCompactors.get("workshop")
           if (!compactor) throw new Error("Workshop summaries are unavailable.")
           try {

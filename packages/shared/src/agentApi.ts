@@ -24,7 +24,10 @@ import {
   SubagentPick,
   SubagentPicks,
   SubagentSettings,
-  SubagentSettingsRejected
+  SubagentSettingsRejected,
+  SubagentTypeEdit,
+  SubagentTypeId,
+  SubagentTypesView
 } from "./subagents.ts"
 
 /**
@@ -168,6 +171,20 @@ export class AgentApi extends RpcGroup.make(
       rows: Schema.optionalKey(Schema.Record(SubagentPick, SubagentModelRow)),
       limits: Schema.optionalKey(Schema.NullOr(SubagentLimits))
     },
+    success: Schema.Void,
+    error: Schema.Union([SubagentSettingsRejected, ServerError])
+  }),
+  /**
+   * The subagent types as they apply to the account (spec/SUBAGENTS.md §10): built in, from
+   * plugins and the user's own, and the tools a type may be given.
+   */
+  Rpc.make("GetSubagentTypes", { payload: {}, success: SubagentTypesView, error: ServerError }),
+  /**
+   * Saves one type of the user's, or their change to a built-in or plugin type (only what differs
+   * from it is kept); `edit` null deletes the user's type or drops the change.
+   */
+  Rpc.make("ChangeSubagentType", {
+    payload: { id: SubagentTypeId, edit: Schema.NullOr(SubagentTypeEdit) },
     success: Schema.Void,
     error: Schema.Union([SubagentSettingsRejected, ServerError])
   }),

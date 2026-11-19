@@ -1,4 +1,4 @@
-import { isNudge } from "./messages.ts"
+import { forkStart, isNudge } from "./messages.ts"
 // A transcript as the steps a version shows (spec/AGENTIC.md §5.1): the same projection live,
 // as the loop runs, and afterwards from the stored transcript.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
@@ -62,13 +62,20 @@ export interface PlacedStep {
   readonly part: number
 }
 
+/** Stands for a parent's message in a fork's transcript: no step, no message end. */
+const PARENT = { role: "rpParent", timestamp: 0 } as unknown as AgentMessage
+
 /** `stepsOf`, with each step's place (resume.ts edits a step there). */
 export const placedSteps = (
-  messages: ReadonlyArray<AgentMessage>,
+  all: ReadonlyArray<AgentMessage>,
   tools: ReadonlyArray<FrozenTool>,
   final: boolean,
   versionId?: string
 ): Array<PlacedStep> => {
+  // A fork subagent's transcript starts with its parent's conversation: never its steps. Its
+  // places keep their indexes, so Resume edits the same messages.
+  const own = forkStart(all)
+  const messages = own === 0 ? all : all.map((m, i) => (i < own ? PARENT : m))
   const bounds = versionId === undefined ? null : messageBounds(messages, versionId, final)
   const meta = new Map(tools.map((t) => [t.name, t]))
   // IDs may repeat in a later provider turn. A result answers its own assistant turn.

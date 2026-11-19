@@ -9,6 +9,7 @@ import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import { forkStart } from "../agent/messages.ts"
 import { stepsOf } from "../agent/steps.ts"
 import type { FrozenTool } from "../agent/tools.ts"
 import { transcriptEntries } from "./transcriptEntries.ts"
@@ -32,7 +33,16 @@ export interface SubagentSnapshot {
   /** The model's name as the row shows it. */
   readonly model: string
   readonly instructions: string
-  readonly context: "task"
+  /** What it sees (spec/SUBAGENTS.md §2.3): its task alone, or its parent's conversation and then its task. */
+  readonly context: "task" | "fork"
+  /**
+   * A fork's request as its parent's was sent: the parent's tool definitions on the wire and as
+   * frozen, so a resumed or continued fork sends the same prefix.
+   */
+  readonly fork?: {
+    readonly wireTools: ReadonlyArray<import("@earendil-works/pi-ai").Tool>
+    readonly offered: ReadonlyArray<FrozenTool>
+  }
   readonly spawnedBy: string
   readonly callId: string
   /** The parent's message that holds the call: where the child's chat state goes (§8). */
@@ -209,7 +219,8 @@ const statusOf = (status: string, steps: ReadonlyArray<ChildStep>, error: string
 
 /** The last text a transcript's model turns hold: what a subagent had of its report. */
 const lastText = (messages: ReadonlyArray<AgentMessage>): string | null => {
-  for (let i = messages.length - 1; i >= 0; i--) {
+  // A fork's own turns only: before its task is its parent's conversation (spec/SUBAGENTS.md §2.3).
+  for (let i = messages.length - 1; i >= forkStart(messages); i--) {
     const m = messages[i]!
     if (m.role !== "assistant") continue
     const text = m.content.flatMap((p) => (p.type === "text" && p.text.trim() ? [p.text] : [])).join("")
@@ -261,7 +272,8 @@ const rowOf = (r: ChildRecord, earlier: ReadonlyArray<ChildRecord> = []): Subage
     ...(earlier.length > 0 ? { resumed: true } : {}),
     ...(line ? { progress: line } : {}),
     ...(sub?.background ? { background: true } : {}),
-    ...(sub?.continued ? { continued: true } : {})
+    ...(sub?.continued ? { continued: true } : {}),
+    ...(sub?.context === "fork" ? { forked: true } : {})
   }
 }
 
@@ -440,7 +452,12 @@ export const makeSubagentReadHandlers = Effect.gen(function* () {
             effect: t.effect
           })),
           // The task is the first message after the request; it shows apart, as the row's.
-          entries: transcriptEntries(messages, tools.length, snapshot.agent?.turnCap ?? Number.MAX_SAFE_INTEGER),
+          // A fork's from its task on: before it is the reply's own conversation, shown with the reply.
+          entries: transcriptEntries(
+            messages.slice(forkStart(messages)),
+            tools.length,
+            snapshot.agent?.turnCap ?? Number.MAX_SAFE_INTEGER
+          ),
           requests: requests.map((r): InspectorUsage => ({
             id: r.id as InspectorUsage["id"],
             estimatedInput: r.estimated_input,

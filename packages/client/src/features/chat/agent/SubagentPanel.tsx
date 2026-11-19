@@ -90,6 +90,7 @@ export function SubagentPanel({ step, version, session }: StepActionProps) {
                   In the background
                 </span>
               )}
+              {row.forked && <span className="block text-muted">Started from this conversation</span>}
               {row.continued && <span className="block text-muted">Carried on with a message</span>}
               {row.resumed && <span className="block text-muted">Resumed where it stopped</span>}
               {row.progress && (
