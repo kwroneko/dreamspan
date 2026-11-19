@@ -36,6 +36,7 @@ import { makeWorkshopGrantReadHandlers } from "./workshopGrants.ts"
 import { makePersonaLockReadHandlers } from "./personaLocks.ts"
 import { makeWorkshopAttachReadHandlers } from "./workshopAttach.ts"
 import { ReadOps } from "./ops.ts"
+import { type OpsOf, serveOps } from "./opsOf.ts"
 import { makeProviderReadHandlers } from "./providerReads.ts"
 import { makeMcpReadHandlers } from "./mcpReads.ts"
 import { makeReadHandlers } from "./reads.ts"
@@ -45,10 +46,12 @@ import { makeStImportPlanReadHandlers } from "./stImportPlanReads.ts"
 const { dbPath, binLimits } = workerData as { readonly dbPath: string; readonly binLimits?: BinLimits }
 
 // A handler's defect answers its own request, so the pool (readerPool.ts) takes a Defect
-// message for the protocol failing.
-RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
+// message for the protocol failing. Typed through `OpsOf` and `serveOps`, never inferred against
+// the group (opsOf.ts).
+RpcServer.layer<OpsOf<typeof ReadOps>>(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
   Layer.provide(
-    ReadOps.toLayer(
+    serveOps(
+      ReadOps,
       Effect.flatMap(
         libraryMergePolicies.register(defaultLibraryMergePolicy).pipe(Effect.andThen(makeAssembler)),
         (assembler) =>

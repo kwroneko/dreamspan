@@ -16,7 +16,7 @@ import { type BinLimits, defaultBinLimits } from "@dreamspan/shared/bin.ts"
 import { acquireInstanceLock, checkFilesystem, databaseFile } from "./connection.ts"
 import { prepareDataDirectory } from "../dataDirectory.ts"
 import { ReadOps, WriteOps, type WriteOpsChat, type WriteOpsLibrary } from "./ops.ts"
-import type { OpsOf } from "./opsOf.ts"
+import { asGroup, type OpsOf } from "./opsOf.ts"
 import * as ReaderPool from "./readerPool.ts"
 import { stampMatches } from "./workerStamp.ts"
 import { ProviderDefinitions, providerDefinitionClient } from "../providers/definitions.ts"
@@ -294,8 +294,8 @@ export const layer = (options: DatabaseOptions) => {
       const providers = yield* ProviderDefinitions
       const WriterLive = Layer.effect(
         Writer,
-        // The union comes from `OpsOf`, not inferred against the group (TS2589 past ~400 operations).
-        Effect.map(RpcClient.make<OpsOf<typeof WriteOps>>(WriteOps), (calls) =>
+        // The union comes from `OpsOf`, not inferred against the group (opsOf.ts).
+        Effect.map(RpcClient.make<OpsOf<typeof WriteOps>>(asGroup(WriteOps)), (calls) =>
           providerDefinitionClient(stateModuleClient(calls, stateModules), providers)
         )
       ).pipe(

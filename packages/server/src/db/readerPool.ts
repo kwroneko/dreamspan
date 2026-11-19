@@ -4,7 +4,8 @@
 // stop a running query, so both sent reads to a busy or dead reader while another idled.
 // Here a reader stays busy until it answers, and a crashed reader gets nothing until it's back.
 import { Cause, Deferred, Effect, Exit, Layer, Option, Result, Schedule, Schema, type Stream } from "effect"
-import { type Rpc, RpcClient, RpcClientError, type RpcGroup, RpcMessage, type RpcSerialization } from "effect/rpc"
+import { type Rpc, RpcClient, RpcClientError, RpcMessage, type RpcSerialization } from "effect/rpc"
+import { asGroup, type OpsGroup, type OpsOf } from "./opsOf.ts"
 import { Worker, WorkerError } from "effect/workers"
 
 type Transferables = Parameters<RpcClient.Protocol["Service"]["send"]>[2]
@@ -70,11 +71,12 @@ const restoreClientError = (defect: unknown) =>
  * `RpcClient.make` over a pool: a request the pool failed fails with its typed
  * `RpcClientError`. Streaming rpcs, whose calls return a Stream, don't type-check.
  */
-export const client = <Rpcs extends Rpc.Any>(
-  group: RpcGroup.RpcGroup<Rpcs> &
-    ([Extract<Rpc.Success<Rpcs>, Stream.Stream<unknown, unknown, unknown>>] extends [never] ? unknown : never)
+export const client = <Group extends OpsGroup>(
+  group: Group &
+    ([Extract<Rpc.Success<OpsOf<Group>>, Stream.Stream<unknown, unknown, unknown>>] extends [never] ? unknown : never)
 ) =>
-  Effect.map(RpcClient.make(group), (calls) => {
+  // The union comes from `OpsOf`, not inferred against the group (opsOf.ts).
+  Effect.map(RpcClient.make<OpsOf<Group>>(asGroup(group)), (calls) => {
     type Call = (...args: Array<unknown>) => Effect.Effect<unknown, unknown>
     const typed: Record<string, Call> = {}
     for (const [tag, call] of Object.entries(calls as Record<string, Call>)) {

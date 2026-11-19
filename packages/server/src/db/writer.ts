@@ -26,8 +26,8 @@ import { RpcServer } from "effect/rpc"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "./connection.ts"
 import { Migrations } from "./migrations.ts"
-import { WriteOps, WriteOpsChat, WriteOpsLibrary } from "./ops.ts"
-import type { OpsOf } from "./opsOf.ts"
+import { WriteOps } from "./ops.ts"
+import { type OpsOf, serveOps } from "./opsOf.ts"
 import { defaultBinLimits, type BinLimits } from "@dreamspan/shared/bin.ts"
 import { makeAccountWriteHandlers } from "./accounts.ts"
 import { makeBin } from "./bin.ts"
@@ -147,7 +147,7 @@ const handlers = Layer.unwrap(
     )
     // Each says who is writing, for the Auto runs its writes reach (db/autoGuard.ts).
     const tracked = attributed(served)
-    return Layer.merge(WriteOpsChat.toLayer(Effect.succeed(tracked)), WriteOpsLibrary.toLayer(Effect.succeed(tracked)))
+    return serveOps(WriteOps, Effect.succeed(tracked))
   })
 )
 
