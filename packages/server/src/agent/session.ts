@@ -106,7 +106,8 @@ export interface AgentRun {
   readonly permit?: (input: PermitInput) => Effect.Effect<PermitResult>
   /**
    * This run is a subagent (spec/SUBAGENTS.md): its tools get no host to start one of their own,
-   * its last request says `writeNow`, and it isn't summarized as it goes (that's SA7's).
+   * and its last request says `writeNow`. Its transcript is summarized as it goes, as a workshop
+   * reply's is (SA7).
    */
   readonly subagent?: {
     readonly writeNow: string
@@ -1114,7 +1115,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               ]
         },
         prepareRequest: async ({ context }, signal) => {
-          if (!execution.chatKinds.get(run.kind ?? "")?.summaryTranscript || run.subagent) return
+          if (!execution.chatKinds.get(run.kind ?? "")?.summaryTranscript) return
           const compactor = execution.runCompactors.get("workshop")
           if (!compactor) throw new Error("Workshop summaries are unavailable.")
           try {
