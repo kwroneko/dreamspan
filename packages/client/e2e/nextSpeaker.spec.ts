@@ -14,7 +14,7 @@ import { expectLayout, layoutAudit } from "./support/layoutAudit.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { nextChip, nextReply } from "./support/strip.ts"
+import { nextChip } from "./support/strip.ts"
 
 // Decisions wait a minute here, not "Who replies next"'s 3 s: the tests hold one while they look
 // at the page, so a slow screenshot or audit can't let Auto's pick in. The real deadline has its

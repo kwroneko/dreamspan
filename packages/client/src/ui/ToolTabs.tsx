@@ -627,11 +627,7 @@ export function ToolTabs({
       </div>
       {end}
       {movable && (
-        <PointMenu
-          at={pointFor}
-          onClose={() => setPointFor(null)}
-          label={`Actions for ${pointTab?.label ?? ""}`}
-        >
+        <PointMenu at={pointFor} onClose={() => setPointFor(null)} label={`Actions for ${pointTab?.label ?? ""}`}>
           {pointTab ? orderMenu(pointTab, "more") : null}
         </PointMenu>
       )}

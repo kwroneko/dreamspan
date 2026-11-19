@@ -29,6 +29,8 @@ const result = await Effect.runPromise(
         endAt: summary.endAt,
         split: summary.split,
         preview: summary.preview,
+        // The stored macro behind a greeting-preview row (rowmacro2), read beside the preview.
+        previewMacro: summary.previewMacro,
         threads: summary.threads
       }
     ])

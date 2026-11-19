@@ -105,7 +105,9 @@ export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
         if (now === null || !recorded) return now
         // A position the paired branch doesn't show (a message copied with "As it is now", recorded
         // on the original branch past the fork point) falls back to the branch's end now.
-        const [fork] = yield* sql<{ tip_slot_id: string | null }>`SELECT tip_slot_id FROM forks WHERE id = ${now.forkId}`
+        const [fork] = yield* sql<{
+          tip_slot_id: string | null
+        }>`SELECT tip_slot_id FROM forks WHERE id = ${now.forkId}`
         const [place] = yield* sql<{ chain_id: string; depth: number }>`SELECT chain_id, depth FROM slots
           WHERE id = ${recorded.leaf} AND chat_id = ${now.chatId}`
         if (!fork || !place) return now

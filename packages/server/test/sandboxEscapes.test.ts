@@ -227,10 +227,23 @@ sandboxed("the Linux sandbox", () => {
     // The host's own IPv6 address is refused however the literal is spelled.
     const own = ownAddresses({
       synthetic: [
-        { address: "2606:4700:4700::1111", family: "IPv6", netmask: "", mac: "", internal: false, cidr: null, scopeid: 0 }
+        {
+          address: "2606:4700:4700::1111",
+          family: "IPv6",
+          netmask: "",
+          mac: "",
+          internal: false,
+          cidr: null,
+          scopeid: 0
+        }
       ]
     })
-    for (const spelling of ["2606:4700:4700::1111", "2606:4700:4700:0:0:0:0:1111", "2606:4700:4700:0000::1111", "2606:4700:4700::1111".toUpperCase()])
+    for (const spelling of [
+      "2606:4700:4700::1111",
+      "2606:4700:4700:0:0:0:0:1111",
+      "2606:4700:4700:0000::1111",
+      "2606:4700:4700::1111".toUpperCase()
+    ])
       expect(sandboxMayReach(spelling, own)).toBe(false)
     // A public name pointed at loopback (DNS rebinding) is refused; a mixed answer keeps the public one.
     expect(await reachableAddresses("rebind.example", async () => ["127.0.0.1"])).toEqual([])

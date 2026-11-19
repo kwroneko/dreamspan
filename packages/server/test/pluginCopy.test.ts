@@ -50,7 +50,10 @@ it("every unavailable story tool refuses both declared replacement and disable",
         const unavailable = execution.rolloutTools
           .list()
           .filter((tool) => !builtinCopies.some((part) => part.registry === "rolloutTools" && part.id === tool.id))
-        expect(unavailable).toHaveLength(37)
+        // 37 was the list before sandbox1's file and command tools (read_file, list_files,
+        // search_files, write_file, edit_file, bash) and subagents1's agent tool arrived: they
+        // declare shipped source like every other built-in, but have no copyable adapter yet.
+        expect(unavailable).toHaveLength(44)
         for (const original of unavailable) {
           expect(builtinReplacement(`rolloutTools:${original.id}`)).toBeUndefined()
           const registry = makeRegistry([original])

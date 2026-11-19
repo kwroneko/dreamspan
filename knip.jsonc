@@ -17,6 +17,12 @@
     "vue",
     "vue-router"
   ],
+  // The baseline is frozen forever (ARCHITECTURE.md, Migrations): no migration imports its
+  // `valueList` helper yet, and the file itself is never edited to unexport it. The helper is
+  // documented API — a future migration adds a value by recreating the two triggers it returns.
+  "ignoreIssues": {
+    "packages/server/src/db/baseline.ts": ["exports"]
+  },
   "workspaces": {
     // Versioned external plugin entry points, consumed by checked data-volume modules.
     "packages/plugin-api": { "includeEntryExports": false },

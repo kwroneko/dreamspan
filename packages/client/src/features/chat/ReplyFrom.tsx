@@ -48,9 +48,6 @@ export const replyDetail = (id: EntityId, muted: ReadonlyArray<EntityId>, away: 
       ? "Muted: replies only when picked"
       : "Replies next, for one reply"
 
-/** Whether there's anyone to choose between, for ▶. */
-export const hasReplyChoice = (reply: ReplyChoice) => reply.candidates.length >= 2
-
 export function NextReplyChip({
   candidates,
   muted,

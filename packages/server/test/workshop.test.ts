@@ -3,6 +3,7 @@ import { builtinOperationExposures } from "../src/agent/exposures/builtins.ts"
 import { parityTools } from "../src/agent/exposures/parity.ts"
 import { cardSourceExposures } from "../src/agent/exposures/cardSources.ts"
 import { PLUGIN_TOOLS } from "../src/agent/tools/plugins.ts"
+import { FILE_TOOLS } from "../src/agent/tools/files.ts"
 import { WORKSHOP_HISTORY_TOOLS } from "../src/agent/tools/runs.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { mainPrompt } from "@rp/shared/presetOrder.ts"
@@ -283,6 +284,8 @@ describe("workshop", () => {
           "agent",
           ...WORKSHOP_HISTORY_TOOLS,
           ...PLUGIN_TOOLS,
+          // The account's files and commands (FILES §5), as far as registered.
+          ...FILE_TOOLS,
           ...rewriteTools.map((tool) => tool.id),
           ...builtinOperationExposures.filter((e) => e.id !== "list_library").map((e) => e.id),
           ...cardSourceExposures.map((e) => e.id),
@@ -573,6 +576,8 @@ describe("workshop", () => {
           "agent",
           ...WORKSHOP_HISTORY_TOOLS,
           ...PLUGIN_TOOLS,
+          // The account's files and commands (FILES §5), as far as registered.
+          ...FILE_TOOLS,
           ...rewriteTools.map((tool) => tool.id),
           ...builtinOperationExposures.filter((e) => e.id !== "list_library").map((e) => e.id),
           ...cardSourceExposures.map((e) => e.id),

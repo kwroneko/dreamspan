@@ -114,7 +114,20 @@ it.live("loads a deferred tool mid-run without changing the declared tools", () 
     for (const body of bodies) assert.strictEqual(JSON.stringify(body.tools), JSON.stringify(tools))
     assert.deepStrictEqual(
       tools.filter((t) => !t.defer_loading).map((t) => t.name),
-      ["list_library", "agent", "tool_search", "load_skill", "send_message"]
+      [
+        "list_library",
+        "agent",
+        // A workshop works in a folder (FILES §2): the file and command tools are immediate.
+        "read_file",
+        "list_files",
+        "search_files",
+        "write_file",
+        "edit_file",
+        "bash",
+        "tool_search",
+        "load_skill",
+        "send_message"
+      ]
     )
     assert.isTrue(tools.find((t) => t.name === "read_card")?.defer_loading)
     // The built-in skills are the index in every workshop, whatever its card.

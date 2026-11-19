@@ -267,7 +267,8 @@ describe("file routes", () => {
     const bytes = (size: number) => "x".repeat(size)
     return Effect.gen(function* () {
       assert.strictEqual((yield* upload("/files/a.bin", bytes(500_000))).status, 200)
-      for (const name of ["x", "y", "z"]) assert.strictEqual((yield* upload(`/files/dir/${name}.bin`, bytes(150_000))).status, 200)
+      for (const name of ["x", "y", "z"])
+        assert.strictEqual((yield* upload(`/files/dir/${name}.bin`, bytes(150_000))).status, 200)
       assert.strictEqual((yield* upload("/files/more.bin", bytes(200_000))).status, 507)
       // A folder's files aren't versioned: all they hold comes off the figure at once.
       assert.strictEqual((yield* json("/files/delete", { path: "/files/dir" })).status, 200)

@@ -43,7 +43,9 @@ describe("Generations and the send queue", () => {
         } as unknown as Writer["Service"]),
         Layer.succeed(Reader)({
           GetSlot: () => Deferred.await(nextPublished).pipe(Effect.as({ entry: { slotId: "next" } })),
-          GetChat: () => Effect.succeed({ id: "chat" })
+          GetChat: () => Effect.succeed({ id: "chat" }),
+          // No story beside this chat (WORKSHOP-BRANCHES.md §2.2), so no story position.
+          WorkshopStoryPosition: () => Effect.succeed(null)
         } as unknown as Reader["Service"]),
         // A reply that ends as soon as it starts.
         Layer.succeed(Generator)(Option.some({ generate: () => Stream.make("An instant reply.") })),

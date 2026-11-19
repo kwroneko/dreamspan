@@ -4,7 +4,7 @@ import { cardNames } from "@rp/shared/cardNames.ts"
 // in the reader workers; every one touches only the acting user's rows.
 import { makeShellReadHandlers } from "./shellReads.ts"
 import type { Chat } from "@rp/shared/chat.ts"
-import { type CastCard, type ChatId, ChatSummary, type EntityId } from "@rp/shared/chat.ts"
+import { type ChatId, ChatSummary, type EntityId } from "@rp/shared/chat.ts"
 import { chatName } from "@rp/shared/chatName.ts"
 import { avatarCropField } from "@rp/shared/media.ts"
 import { CardDefinition, CardForChat, CardUsage, ChatCard, ChatGroup } from "@rp/shared/chatSetupApi.ts"

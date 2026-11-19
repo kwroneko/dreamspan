@@ -24,8 +24,6 @@ const markStale = () => {
   for (const listener of listeners) listener()
 }
 
-/** True once the server is known to serve a different build than this tab runs. */
-export const isStaleBuild = () => stale
 export const useStaleBuild = () =>
   useSyncExternalStore(
     (listener) => {
@@ -89,7 +87,7 @@ const storage = () => {
 }
 
 /** Reloads, after a short flush of open editors' server drafts. */
-export const reloadApp = async () => {
+const reloadApp = async () => {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     await Promise.race([

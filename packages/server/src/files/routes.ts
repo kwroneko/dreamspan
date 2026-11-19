@@ -503,7 +503,9 @@ export const filesRoutes = Layer.unwrap(
       const kept = info.isFile() ? yield* keepVersion(userId, root, segments, full, "delete") : 0
       const frees = info.isDirectory()
         ? (yield* Effect.tryPromise(() => measureTree(join(root, ...segments), undefined, undefined, true))).bytes
-        : info.isFile() && info.nlink === 1 ? Math.max(0, info.size - kept) : 0
+        : info.isFile() && info.nlink === 1
+          ? Math.max(0, info.size - kept)
+          : 0
       const freeToken = quota.freed(userId, frees)
       // A hard-linked file's bytes stay, and so does the version of it.
       if (info.isFile() && info.nlink > 1) quota.wrote(userId, kept)

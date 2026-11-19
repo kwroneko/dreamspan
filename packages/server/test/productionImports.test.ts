@@ -418,6 +418,50 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
       "createReadStream(path, { highWaterMark: 1 << 20 })",
       'readFile(full, "utf8")'
     ]
+  },
+
+  "packages/server/src/files/safePath.ts": {
+    reason:
+      "An account's own files in the configured data volume, walked one component at a time through /proc/self/fd: folders open O_DIRECTORY|O_NOFOLLOW, the final file O_NOFOLLOW|O_NONBLOCK and refused unless regular, a write made under a fresh name and renamed over (FILES §1.1).",
+    expressions: [
+      "open(root, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)",
+      "open(at(dir, name), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)",
+      "open(at(dir, name), O_RDONLY | O_NOFOLLOW | O_NONBLOCK)",
+      "open(at(dir, temporary), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, existing?.mode ?? 0o644)",
+      "readdir(`/proc/self/fd/${sub.fd}`)",
+      "readdir(`/proc/self/fd/${dir.fd}`)"
+    ]
+  },
+  "packages/server/src/files/routes.ts": {
+    reason:
+      "The file manager's routes over that same no-follow walk: a file's bytes for a Range download (a link is refused) and an upload's fresh temporary name inside the folder already opened (FILES §1.1, §8.1).",
+    expressions: [
+      "open(at(dir, name), O_RDONLY | O_NOFOLLOW | O_NONBLOCK)",
+      "open(at(dir, temporary), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)"
+    ]
+  },
+  "packages/server/src/files/quota.ts": {
+    reason:
+      "The account's Files and home folders walked for its usage (FILES §1.2): each entry is lstat'ed first, each inode counted once, and a folder's own names are read to walk it.",
+    expressions: ["readdir(path)"]
+  },
+  "packages/server/src/agent/tools/files.ts": {
+    reason:
+      "A file undo's earlier content, from the file-version store in the configured data volume; the stored media path is checked against the store's own paths first (FILES §7.1).",
+    expressions: ["readFile(join(deps.dataDir, version.mediaPath!))"]
+  },
+  "packages/server/src/sandbox/linuxBwrap.ts": {
+    reason:
+      "Command sandbox setup (FILES §5.1): the host's /etc names to bind read-only, this server's own run folders under the temporary directory to sweep, and the args and seccomp files this process just wrote, reopened to hand bubblewrap their descriptors.",
+    expressions: ['readdirSync("/etc")', "readdir(root)", 'open(path, "r")', 'open(join(runDir, "seccomp.bpf"), "r")']
+  },
+  "packages/server/src/sandbox/cgroupLimits.ts": {
+    reason:
+      "The command's own cgroup folder outside the data volume: which controllers it was delegated and whether memory.events records the memory cap stopping the command (FILES §5.1).",
+    expressions: [
+      'readFile(join(dir, "cgroup.subtree_control"), "utf8")',
+      'readFile(join(dir, "memory.events"), "utf8")'
+    ]
   }
 }
 

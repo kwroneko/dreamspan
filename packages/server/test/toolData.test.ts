@@ -264,7 +264,8 @@ it("a read_run page cut inside a raw original JSON result still scrubs escaped c
   // unbalanced fragment whose nested keys keep their backslash-escaped quotes.
   const original = JSON.stringify({
     extensions: { synthetic: JSON.stringify({ refresh_token: "synthetic-escaped-refresh" }) },
-    description: 'Lore. "api_key": "synthetic-escaped-key". \'password\': \'synthetic-escaped-pass\'. ' + "y".repeat(400)
+    description:
+      "Lore. \"api_key\": \"synthetic-escaped-key\". 'password': 'synthetic-escaped-pass'. " + "y".repeat(400)
   })
   const body = `${JSON.stringify({ call: "read-1", tool: "read_card" })}\n{"card":"k"}\n${original}`
   const page = toolDataPage(body, { limit: 500, more: () => "More: read_run." }).text
