@@ -37,6 +37,7 @@ test("beside the page: the groups, the first page at /settings, and a link lands
   await expect(nav.getByRole("link", { name: "Chats", exact: true })).toHaveAttribute("aria-current", "page")
   await page.goto(`${server().url}/settings/status`)
   await expect(page.getByRole("heading", { name: "Admin diagnostics" })).toBeVisible()
+  await expect(page.getByText("No problems found at start", { exact: true })).toBeVisible()
   // The page's own title, not the list's.
   await expect(page).toHaveTitle(/^Server status/)
   await context.close()

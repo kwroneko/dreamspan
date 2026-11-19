@@ -9,7 +9,7 @@ import { Effect, Exit } from "effect"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "../src/db/connection.ts"
 import { migrate, migrationDefinitions, type MigrationDefinition } from "../src/db/migrations.ts"
-import type { OutsideStep } from "../src/db/tableRebuild.ts"
+import type { OutsideStep, TableRebuild } from "../src/db/tableRebuild.ts"
 import { writeRebuildFixture, type RebuildShape } from "./support/rebuildFixture.ts"
 import { slowIt } from "./support/slow.ts"
 import { tempDir } from "./support/tempDir.ts"
@@ -266,7 +266,8 @@ describe("table rebuilds", () => {
         migrate(withSteps([{ table: "chats", create, columns: { owner_user_id: "'nobody'" } }]))
       )
       assert.isTrue(Exit.isFailure(exit))
-      assert.include(String(exit), "point at rows that don't exist")
+      assert.include(String(exit), "would leave")
+      assert.include(String(exit), "pointing at rows that don't exist")
       assert.include(String(exit), "in chats (pointing into users)")
       assert.notInclude(String(exit), "empty")
       assert.deepStrictEqual(yield* digests(), before)
@@ -276,6 +277,119 @@ describe("table rebuilds", () => {
       assert.deepStrictEqual(
         yield* sql`SELECT migration_id FROM effect_sql_migrations WHERE migration_id > ${newest}`,
         []
+      )
+    }).pipe(Effect.provide(layer()))
+  )
+
+  it.effect("refuse to keep a full-text index whose rows would change rowid, its content table named in any case", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      // A table keyed by text, so its rowids are its own, with gaps; the index names it `Notes`.
+      const notes = {
+        [nextKey("notes")]: {
+          statements: [
+            "CREATE TABLE notes (id TEXT PRIMARY KEY, body TEXT NOT NULL) STRICT",
+            "CREATE VIRTUAL TABLE notes_fts USING fts5(body, content='Notes', content_rowid='rowid')",
+            "INSERT INTO notes (id, body) VALUES ('a', 'amber lantern'), ('b', 'blue harbor'), ('c', 'cold glacier'), ('d', 'dim lantern')",
+            "DELETE FROM notes WHERE id IN ('a', 'c')",
+            "INSERT INTO notes_fts (rowid, body) SELECT rowid, body FROM notes"
+          ]
+        }
+      }
+      yield* migrate({ ...migrationDefinitions, ...notes })
+      const lanterns = (yield* sql<{ rowid: number }>`SELECT rowid FROM notes_fts WHERE notes_fts MATCH 'lantern'`).map(
+        (row) => row.rowid
+      )
+      assert.deepStrictEqual(lanterns, [4])
+      const rebuild = (step: Partial<TableRebuild>) => ({
+        ...migrationDefinitions,
+        ...notes,
+        [nextKey("rebuild", 2)]: {
+          outsideTransaction: [
+            {
+              table: "notes",
+              create: "CREATE TABLE notes (n INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, body TEXT NOT NULL) STRICT",
+              ...step
+            }
+          ]
+        }
+      })
+      // A new INTEGER PRIMARY KEY numbers the rows afresh (1, 2): the index would point at the wrong ones.
+      const renumbered = yield* Effect.exit(migrate(rebuild({})))
+      assert.isTrue(Exit.isFailure(renumbered))
+      assert.include(
+        String(renumbered),
+        "2 rows would change their rowid or the text the full-text index notes_fts reads"
+      )
+      // An indexed column that changes is seen through `content='Notes'` too.
+      const changed = yield* Effect.exit(migrate(rebuild({ columns: { n: "rowid", body: "upper(body)" } })))
+      assert.include(String(changed), "the full-text index notes_fts reads columns that change")
+      assert.strictEqual(yield* pragma("foreign_keys"), 1)
+      // Keyed by the old rowids, the index stays right as it is.
+      yield* migrate(rebuild({ columns: { n: "rowid" } }))
+      assert.deepStrictEqual(
+        (yield* sql<{
+          id: string
+        }>`SELECT id FROM notes WHERE n IN (SELECT rowid FROM notes_fts WHERE notes_fts MATCH 'lantern')`).map(
+          (row) => row.id
+        ),
+        ["d"]
+      )
+      assert.strictEqual(yield* pragma("integrity_check"), "ok")
+    }).pipe(Effect.provide(layer()))
+  )
+
+  it.effect("refuse a rebuild that leaves another table's trigger naming a column it drops", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const setup = {
+        [nextKey("notes")]: {
+          statements: [
+            "CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL, seen INTEGER NOT NULL DEFAULT 0) STRICT",
+            "CREATE TABLE note_reads (note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE) STRICT",
+            // Only an update's SET names `seen`: SQLite's own rename check doesn't read that far.
+            `CREATE TRIGGER note_reads_mark AFTER INSERT ON note_reads BEGIN
+              UPDATE notes SET seen = 1 WHERE id = new.note_id;
+            END`,
+            "INSERT INTO notes (id, body) VALUES (1, 'a')"
+          ]
+        }
+      }
+      yield* migrate({ ...migrationDefinitions, ...setup })
+      const schema = yield* schemaRows("")
+      const exit = yield* Effect.exit(
+        migrate({
+          ...migrationDefinitions,
+          ...setup,
+          [nextKey("rebuild", 2)]: {
+            outsideTransaction: [
+              { table: "notes", create: "CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL) STRICT" }
+            ]
+          }
+        })
+      )
+      assert.isTrue(Exit.isFailure(exit))
+      assert.include(String(exit), "the trigger note_reads_mark on note_reads no longer compiles")
+      assert.include(String(exit), "seen")
+      assert.deepStrictEqual(yield* schemaRows(""), schema)
+      // Replaced in the same migration, the rebuild goes through, and the trigger works.
+      yield* migrate({
+        ...migrationDefinitions,
+        ...setup,
+        [nextKey("rebuild", 2)]: {
+          outsideTransaction: [
+            "DROP TRIGGER note_reads_mark",
+            { table: "notes", create: "CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL) STRICT" },
+            `CREATE TRIGGER note_reads_mark AFTER INSERT ON note_reads BEGIN
+              UPDATE notes SET body = body || '.' WHERE id = new.note_id;
+            END`
+          ]
+        }
+      })
+      yield* sql`INSERT INTO note_reads (note_id) VALUES (1)`
+      assert.deepStrictEqual(
+        (yield* sql<{ body: string }>`SELECT body FROM notes`).map((row) => row.body),
+        ["a."]
       )
     }).pipe(Effect.provide(layer()))
   )

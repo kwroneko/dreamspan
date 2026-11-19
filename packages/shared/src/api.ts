@@ -114,6 +114,22 @@ export class Health extends Schema.Class<Health>("Health")({
   readers: Schema.Int
 }) {}
 
+/** Rows that point at a row that isn't there, by table and the table they point into. */
+export class BrokenReferences extends Schema.Class<BrokenReferences>("BrokenReferences")({
+  table: Schema.String,
+  parent: Schema.String,
+  rows: Schema.Int
+}) {}
+
+/**
+ * What the database writer found when it last started (ARCHITECTURE.md §3.7): the broken
+ * references it started with anyway, and the database changes it applied.
+ */
+export class DatabaseStartup extends Schema.Class<DatabaseStartup>("DatabaseStartup")({
+  broken: Schema.Array(BrokenReferences),
+  applied: Schema.Array(Schema.String)
+}) {}
+
 /** The result of checking a connection, with the route its request took. */
 export class ConnectionTest extends Schema.Class<ConnectionTest>("ConnectionTest")({
   ok: Schema.Boolean,
@@ -497,7 +513,13 @@ export class AuthenticatedStImportPlanApi extends StImportPlanApi.middleware(Aut
 
 export class AuthenticatedPluginApi extends PluginApi.middleware(Authentication) {}
 
+/** Admins only: what the database writer found when it last started (Settings → Server status). */
+export class DatabaseStatusApi extends RpcGroup.make(
+  Rpc.make("GetDatabaseStartup", { success: DatabaseStartup, error: Schema.Union([Forbidden, ServerError]) })
+).middleware(Authentication) {}
+
 export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
+  .merge(DatabaseStatusApi)
   .merge(AuthenticatedMoveApi)
   .merge(AuthenticatedPluginApi)
   .merge(AuthenticatedOwnTurnNoteApi)

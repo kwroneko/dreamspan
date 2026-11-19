@@ -8,6 +8,8 @@ import { Card, CardHeader } from "../ui/Surface.tsx"
 import { useTitle } from "./shell.tsx"
 
 const healthAtom = AppClient.query("Health", undefined)
+// Read once per visit: it changes only when the database writer starts again.
+const databaseStartupAtom = AppClient.query("GetDatabaseStartup", undefined)
 
 /** An event-loop delay that users feel. */
 const SLOW_MS = 50
@@ -74,9 +76,48 @@ function Status() {
                     <dt className="text-muted">Database readers</dt>
                     <dd>{health.readers}</dd>
                   </dl>
+                  <DatabaseCheck />
                 </Card>
               )}
             </>
+          )
+        }}
+      </AsyncView>
+    </div>
+  )
+}
+
+/** What the database's reference check found when the server last started. */
+function DatabaseCheck() {
+  return (
+    <div className="mt-4 text-sm">
+      <AsyncView atom={databaseStartupAtom} loading="Checking the database…">
+        {({ broken }) => {
+          const rows = broken.reduce((sum, row) => sum + row.rows, 0)
+          return (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1">
+              <dt className="text-muted">Database check</dt>
+              {rows === 0 ? (
+                <dd className="text-success">No problems found at start</dd>
+              ) : (
+                <dd className="flex min-w-0 flex-col gap-1">
+                  <span className="text-danger">
+                    {rows} {rows === 1 ? "record points at one that's" : "records point at ones that are"} missing
+                  </span>
+                  <span>
+                    The server started anyway, but items that use them may not open or save. Restore a backup from
+                    before this, or report it with the list below.
+                  </span>
+                  <ul className="text-muted break-words">
+                    {broken.map((row) => (
+                      <li key={`${row.table} ${row.parent}`}>
+                        {row.rows} in {row.table}, pointing into {row.parent}
+                      </li>
+                    ))}
+                  </ul>
+                </dd>
+              )}
+            </dl>
           )
         }}
       </AsyncView>

@@ -38,6 +38,20 @@ export interface TableRebuild {
 /** A step of a migration that runs outside the migrator's transaction: SQL, or a table rebuild. */
 export type OutsideStep = string | TableRebuild
 
+/**
+ * Bump when `rebuildTable` changes what it does to a table (how rows, rowids, saved objects or
+ * full-text indexes are carried, what it checks), so the fingerprint of every released migration
+ * with a rebuild step changes too (db/releases.ts `fingerprint`).
+ */
+export const TABLE_REBUILD_VERSION = 2
+
+/** SQLite's own words for a failed statement: the deepest cause under the client's error and its reason. */
+const reason = (error: unknown) => {
+  let deepest = error
+  while (deepest instanceof Error && deepest.cause !== undefined) deepest = deepest.cause
+  return deepest instanceof Error ? deepest.message : String(deepest)
+}
+
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`
 
 interface Column {
@@ -100,7 +114,8 @@ export const rebuildTable = (rebuild: TableRebuild) =>
     const readers = fts.flatMap((index) => {
       const options = index.sql.slice(index.sql.indexOf("(") + 1, index.sql.lastIndexOf(")"))
       const option = (key: string) => new RegExp(`\\b${key}\\s*=\\s*['"]?([A-Za-z0-9_]+)`, "i").exec(options)?.[1]
-      if (option("content") !== table) return []
+      // SQLite's names are case-insensitive, so `content=Version_Texts` reads version_texts.
+      if (option("content")?.toLowerCase() !== table.toLowerCase()) return []
       const columns = options
         .split(",")
         .map((part) => part.trim())
@@ -138,6 +153,22 @@ export const rebuildTable = (rebuild: TableRebuild) =>
     )
     const copiedRows = yield* count(temporary)
     if (copiedRows !== rows) return yield* fail(`copied ${copiedRows} of its ${rows} rows`)
+    // A full-text index left as it is stays right only if every row kept its rowid and the text it
+    // indexes. The checks above read the statements; this reads the rows, so a rowid the copy
+    // couldn't keep (a new INTEGER PRIMARY KEY, a key copied through an expression) is caught too.
+    for (const reader of readers) {
+      if (rebuild.refill?.[reader.name] !== undefined) continue
+      const read = [reader.rowid, ...reader.columns]
+        .map((name) => (name === "rowid" ? "rowid" : quote(name)))
+        .join(", ")
+      const [lost] = yield* sql.unsafe<{ n: number }>(
+        `SELECT count(*) AS n FROM (SELECT ${read} FROM ${quote(table)} EXCEPT SELECT ${read} FROM ${quote(temporary)})`
+      )
+      if (lost!.n > 0)
+        return yield* fail(
+          `${lost!.n} rows would change their rowid or the text the full-text index ${reader.name} reads: give its refill statements`
+        )
+    }
 
     // With foreign keys off this drops the table alone: no implicit delete, no cascades.
     yield* sql.unsafe(`DROP TABLE ${quote(table)}`)
@@ -159,5 +190,55 @@ export const rebuildTable = (rebuild: TableRebuild) =>
     for (const view of views)
       yield* sql
         .unsafe(`SELECT * FROM ${quote(view.name)} LIMIT 0`)
-        .pipe(Effect.catch((error) => fail(`the view ${view.name} no longer reads (${String(error)})`)))
+        .pipe(Effect.catch((error) => fail(`the view ${view.name} no longer reads (${reason(error)})`)))
+    // And every trigger must still compile, on any table: SQLite resolves a trigger's columns only
+    // when a statement that fires it is prepared, so one naming a dropped column would otherwise
+    // fail at its first use (inside a delete, say). EXPLAIN prepares a statement, with every
+    // trigger it fires, and runs none of it.
+    yield* compileTriggers(fail)
+  })
+
+/** The event a trigger fires on, from its statement. */
+const triggerEvent = (create: string) =>
+  /^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\]|\S+)\s+(?:BEFORE\s+|AFTER\s+|INSTEAD\s+OF\s+)?(DELETE|INSERT|UPDATE)\b/i
+    .exec(create)?.[1]
+    ?.toUpperCase()
+
+/**
+ * Prepares, without running, the statements that fire each trigger (an insert, an update of every
+ * column, a delete on its table or view), which compiles every trigger in the database. Fails
+ * with the first that names something that isn't there.
+ */
+const compileTriggers = (fail: (message: string) => Effect.Effect<never>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const triggers = yield* sql<{ name: string; tbl_name: string; sql: string }>`SELECT name, tbl_name, sql
+      FROM sqlite_master WHERE type = 'trigger' ORDER BY tbl_name, name`
+    const owners = new Map<string, Map<string, Array<string>>>()
+    for (const trigger of triggers) {
+      const events = owners.get(trigger.tbl_name) ?? new Map<string, Array<string>>()
+      owners.set(trigger.tbl_name, events)
+      // An event not read from the statement: try all three (the owner is then a table).
+      const read = triggerEvent(trigger.sql)
+      for (const event of read === undefined ? ["INSERT", "UPDATE", "DELETE"] : [read])
+        events.set(event, [...(events.get(event) ?? []), trigger.name])
+    }
+    for (const [owner, events] of owners) {
+      const name = quote(owner)
+      // Generated columns can't be set; a view's columns all can (through its INSTEAD OF triggers).
+      const columns = yield* sql<{ name: string }>`SELECT name FROM pragma_table_xinfo(${owner}) WHERE hidden = 0`
+      const statements: Record<string, string> = {
+        INSERT: `INSERT INTO ${name} DEFAULT VALUES`,
+        UPDATE: `UPDATE ${name} SET ${columns.map((column) => `${quote(column.name)} = ${quote(column.name)}`).join(", ")}`,
+        DELETE: `DELETE FROM ${name}`
+      }
+      for (const [event, names] of events)
+        yield* sql
+          .unsafe(`EXPLAIN ${statements[event]!}`)
+          .pipe(
+            Effect.catch((error) =>
+              fail(`the trigger ${names.join(" or ")} on ${owner} no longer compiles (${reason(error)})`)
+            )
+          )
+    }
   })
