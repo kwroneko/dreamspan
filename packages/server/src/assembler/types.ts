@@ -370,6 +370,11 @@ export interface ContextSnapshot {
   /** The `lore` decision point's input; AssembleContext takes it out before the snapshot is stored. */
   readonly loreDecision?: LoreDecisionInput
   readonly contextBudget?: ContextBudget
+  /**
+   * The preset's own "When the reply wasn't sent" text (spec/REPLY-CONTRACT.md §3.3), for an agent
+   * story reply; absent when the preset has none, and the run sends the default.
+   */
+  readonly sendNudge?: string
   /** The preset's reply-section setting a reply is parsed with; absent for summaries. */
   readonly replySections?: import("@rp/shared/replySections.ts").ReplySectionSettings
   /** What `{{summary}}` filled in, for the preset editor and the Notes tab. */

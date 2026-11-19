@@ -157,10 +157,13 @@ function VersionBody({
   parentSlotId,
   depth,
   placement,
+  speakerName,
   onResume
 }: {
   version: Version
   session: ChatSession
+  /** Who wrote it, for a pass's line ("Mira stays silent"). */
+  speakerName: string
   /** Its thinking the user hid from the model here (SetThinkingHidden). */
   hiddenThinking?: ReadonlyArray<ThinkingPart> | undefined
   parentSlotId: SlotId | null
@@ -187,6 +190,11 @@ function VersionBody({
       {text === "" && generating ? (
         <p className="text-sm text-muted" aria-live="polite">
           {waiting ? "Waiting for the cache…" : "Writing…"}
+        </p>
+      ) : version.mark === "silent" && text === "" ? (
+        // A pass (spec/REPLY-CONTRACT.md §3.1): never invisible, and another version is a reply.
+        <p data-silent className="text-sm text-muted italic">
+          {speakerName} stays silent
         </p>
       ) : (
         <BodyText
@@ -860,6 +868,7 @@ export const Message = memo(function Message({
       parentSlotId={entry.parentSlotId}
       depth={positionOf(entry)}
       placement={model ? 2 : 1}
+      speakerName={name}
       onResume={
         version.writer === "model" &&
         (version.status === "failed" || version.status === "interrupted" || version.status === "stopped")

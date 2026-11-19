@@ -1,6 +1,6 @@
 # REPLY-CONTRACT: send_message by default, nudges and how a reply ends
 
-**Status: Proposed** (sendmsg1, 2026-11-17). A study of reference-harness's send contract and its session-end mechanics, the pieces of ours that already correspond, and a delta design that makes `send_message` the default way a story reply is given. Nothing here is built yet; DESIGN §7.2 records the owner's decisions it follows.
+**Status: Proposed** (sendmsg1, 2026-11-17); **milestone 1 (§4.1) and `no_reply` for stories (§3.1) built** (replycontract2, 2026-11-18): those parts are obsolete here, documented in ARCHITECTURE §16 "The reply contract". Milestones 2 to 5 remain proposals. A study of reference-harness's send contract and its session-end mechanics, the pieces of ours that already correspond, and a delta design that makes `send_message` the default way a story reply is given. DESIGN §7.2 records the owner's decisions it follows.
 
 Sources: reference-harness branch `latest` (paths below are relative to its root), read 2026-11-17; the study notes with every line citation are in the job's report. Only source, config defaults and docs were read.
 
@@ -120,7 +120,7 @@ Everything below is **[P]** unless DESIGN marks it decided.
 
 `send_message` becomes the default contract for agentic story replies (the default planner's `chosen` when `output.contract` isn't set). `final_text` and `both` stay as choices, in This chat → Tools as a radio group ("Send tool", "Plain answer", "Either"), with the same hover explanation pattern. Send presence is unchanged: `required` already forces `send_message`.
 
-**[D]** (owner, 2026-11-17, "ok" to the coordinator's proposal, after the owner's point "Why would the automated reply order know better than the actual LLM? It's the same with the decision model") **Stories get `no_reply`: the replying character may pass.**
+**[D]** (owner, 2026-11-17, "ok" to the coordinator's proposal, after the owner's point "Why would the automated reply order know better than the actual LLM? It's the same with the decision model") **Stories get `no_reply`: the replying character may pass.** *(Built, replycontract2: offered beside `send_message` under the send contract only; stored as a complete, empty version marked `silent`.)*
 - A pass is never a failure and never invisible: the chat shows a small line "<Name> stays silent", which is swipeable like a message, so the user can get an actual reply from it.
 - In a group or round, the next character in the round then replies; with no round, the turn returns to the user.
 - In 1:1 the same line appears and the turn returns to the user.
@@ -173,7 +173,7 @@ The owner's reasoning (progress text between tool calls; copying context markup)
 
 ## 4. Milestones
 
-1. **Contract and nudge** (server): default `send_message`; no text into the body under it; nudge text as the `sendNudge` utility prompt with fallback; 3 nudges counted from the transcript; exhaustion fails the version with Resume; Steps label nudges; This chat's contract choice. Tests: text then send (only the send is the reply, the text a step); text, nudge, send; three nudges then the visible failure; Resume after a nudge never re-nudges a resolved turn and continues the count; the cache-marker tests for the appended nudge; byte-identical requests for chats that set `both`.
+1. **Contract and nudge** (server). *Built (replycontract2, 2026-11-18); obsolete here, see ARCHITECTURE §16 "The reply contract".* default `send_message`; no text into the body under it; nudge text as the `sendNudge` utility prompt with fallback; 3 nudges counted from the transcript; exhaustion fails the version with Resume; Steps label nudges; This chat's contract choice. Tests: text then send (only the send is the reply, the text a step); text, nudge, send; three nudges then the visible failure; Resume after a nudge never re-nudges a resolved turn and continues the count; the cache-marker tests for the appended nudge; byte-identical requests for chats that set `both`.
 2. **Mechanical records**: `contractAttempts` and the inspector's view of attempts and failure types.
 3. **Ending check**: the refusal judge at an exhausted ending, opt-in.
 4. **Per-model metrics**: nudged, recovered, exhausted per model in Settings → Models.

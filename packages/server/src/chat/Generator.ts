@@ -68,6 +68,8 @@ export interface GenerationRequest {
 export type GenerationChunk =
   | string
   | { readonly several: true }
+  /** The replying character passed (`no_reply`, spec/REPLY-CONTRACT.md §3.1): the version is the silent line. */
+  | { readonly silent: true }
   /** Finish this message through the ordinary parse/rewrite pipeline before the tool returns. */
   | {
       readonly post: {

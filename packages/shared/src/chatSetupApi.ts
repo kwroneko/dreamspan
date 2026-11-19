@@ -396,6 +396,11 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   sendPresence: Schema.optionalKey(Schema.Literals(["optional", "required"])),
   /** The most model requests an agent reply makes (`agent.request_cap`); absent: the default, 12. */
   requestCap: Schema.optionalKey(Schema.Number),
+  /**
+   * How an agent reply is given (`output.contract`, spec/REPLY-CONTRACT.md §3.1): absent, the send
+   * tool (`send_message`). `several` is a workshop's.
+   */
+  outputContract: Schema.optionalKey(Schema.Literals(["final_text", "send_message", "both", "several"])),
   /** The decision points this chat turns off (`decision.points`), by id; absent: none. */
   decisionsOff: Schema.optionalKey(Schema.Array(Schema.String)),
   /** MCP servers this branch turns on or off (`agent.mcp`), by connection id; absent: none chosen. */
@@ -468,6 +473,8 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("RequestCap", {
     cap: Schema.NullOr(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_REQUEST_CAP })))
   }),
+  /** How agent replies are given from here on (`output.contract`): the send tool, a plain answer, or either. */
+  Schema.TaggedStruct("OutputContract", { contract: Schema.Literals(["send_message", "final_text", "both"]) }),
   /** The decision points off in this chat from here on (`decision.points`), by id: the whole list. */
   Schema.TaggedStruct("DecisionPoints", {
     off: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(100))

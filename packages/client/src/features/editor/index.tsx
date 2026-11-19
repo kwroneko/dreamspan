@@ -15,6 +15,7 @@ import { CardSavedHost } from "./CardSavedHost.tsx"
 import { CARD_LOREBOOK_SECTION, cardEditorSections, lorebookEditorSections } from "./cardSections.ts"
 import { EmbeddedLorebook } from "./EmbeddedLorebook.tsx"
 import { EndOfRequest } from "./EndOfRequest.tsx"
+import { SendNudge } from "./SendNudge.tsx"
 import { ReplySectionsSettings } from "./ReplySectionsSettings.tsx"
 import { presetEditorSections } from "./presetSections.ts"
 import { registerPresetWarnings } from "./PromptDocument.tsx"
@@ -103,6 +104,7 @@ export const register = () => {
   registerLorebookTable()
   registerLorebookEntrySettings()
   presetEditorSections.register({ id: "preset.end-of-request", order: 100, component: EndOfRequest })
+  presetEditorSections.register({ id: "preset.send-nudge", order: 105, component: SendNudge })
   presetEditorSections.register({ id: "preset.reply-sections", order: 110, component: ReplySectionsSettings })
   presetEditorSections.register({ id: "preset.panels", order: 120, component: PresetPanelScripts })
   registerPresetWarnings()

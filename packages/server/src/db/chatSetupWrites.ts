@@ -873,7 +873,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         status,
         error,
         rewrite,
-        discardEmpty
+        discardEmpty,
+        mark
       }) =>
         Effect.gen(function* () {
           const row = yield* graph.ownedVersion(userId, versionId, false)
@@ -895,7 +896,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             rewrite_json = ${columns.rewrite_json},
             reply_sections = CASE WHEN ${replySections === undefined ? 1 : 0} THEN reply_sections
               ELSE ${replySections ? JSON.stringify(replySections) : null} END,
-            error_json = ${error === null ? null : JSON.stringify(error)}, updated_at = ${Date.now()}
+            error_json = ${error === null ? null : JSON.stringify(error)},
+            mark = CASE WHEN ${mark === undefined ? 1 : 0} THEN mark ELSE ${mark ?? null} END, updated_at = ${Date.now()}
             WHERE id = ${versionId}`
           const version = toVersion(yield* graph.ownedVersion(userId, versionId, false))
           const [slot] = yield* sql<{ chat_id: string }>`SELECT chat_id FROM slots WHERE id = ${row.slot_id}`

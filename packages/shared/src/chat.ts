@@ -259,9 +259,11 @@ export class Version extends Schema.Class<Version>("Version")({
   replySections: Schema.optionalKey(ReplySections),
   /**
    * A judge model read this version's text and found a refusal (spec/LCM.md §2.4). The text
-   * stays; a provider's own refusal makes a failed version instead.
+   * stays; a provider's own refusal makes a failed version instead. `silent`: the replying
+   * character passed (`no_reply`, spec/REPLY-CONTRACT.md §3.1): no text, shown as a line
+   * "<Name> stays silent", and another version of it is an actual reply.
    */
-  mark: Schema.NullOr(Schema.Literals(["refused"])),
+  mark: Schema.NullOr(Schema.Literals(["refused", "silent"])),
   /**
    * What regex scripts did to its text when it was written (ARCHITECTURE §12, "Rewrites"):
    * absent when none applied or failed.

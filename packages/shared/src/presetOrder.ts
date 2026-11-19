@@ -1,5 +1,13 @@
 import type { PresetPrompt, PromptOrderEntry } from "./docs/preset.ts"
+import { SEND_NUDGE_PROMPT } from "./agentInstructions.ts"
 import { endOfRequestText } from "./endOfRequest.ts"
+
+/**
+ * A prompt the app sends on its own, never from the order: the end-of-request texts (DESIGN
+ * §2.2) and the agent's "When the reply wasn't sent" (spec/REPLY-CONTRACT.md §3.3).
+ */
+export const outsideTheOrder = (identifier: string) =>
+  endOfRequestText(identifier) !== undefined || identifier === SEND_NUDGE_PROMPT.identifier
 
 /** Main always has a slot, even in files and old revisions that left it out. */
 export const mainPrompt: PresetPrompt = {
@@ -97,14 +105,14 @@ export const sentOutsideTheOrder = [
  * end-of-request texts are never in the order (DESIGN §2.2).
  */
 export function presetOrder(prompts: ReadonlyArray<PresetPrompt>, order: ReadonlyArray<PromptOrderEntry>) {
-  const next = withMain({ prompts, order }).order.filter((e) => !endOfRequestText(e.identifier))
+  const next = withMain({ prompts, order }).order.filter((e) => !outsideTheOrder(e.identifier))
   const included = new Set(next.map((e) => e.identifier))
   if (!included.has(newestMessage.identifier)) {
     const history = next.findIndex((e) => e.identifier === "chatHistory")
     next.splice(history < 0 ? next.length : history + 1, 0, { identifier: newestMessage.identifier, enabled: true })
     included.add(newestMessage.identifier)
   }
-  const outside = new Set(prompts.map((p) => p.identifier).filter((id) => !included.has(id) && !endOfRequestText(id)))
+  const outside = new Set(prompts.map((p) => p.identifier).filter((id) => !included.has(id) && !outsideTheOrder(id)))
   for (const identifier of sentOutsideTheOrder) if (outside.delete(identifier)) next.push({ identifier, enabled: true })
   for (const identifier of outside) next.push({ identifier, enabled: false })
   return next

@@ -6,8 +6,12 @@ import type { ReasoningDisplay } from "@rp/shared/chatApi.ts"
 import { Atom } from "effect/reactivity"
 import type { VersionId } from "@rp/shared/chat.ts"
 
-/** Tool calls: what "N steps" counts. Thinking and text between them are shown, not counted. */
-export const toolCount = (steps: ReadonlyArray<RolloutStep>) => steps.filter((s) => s.kind === "tool").length
+/**
+ * What "N steps" counts: tool calls, and the turns the app asked to be sent (spec/REPLY-CONTRACT.md
+ * §3.3). Other thinking and text between them are shown, not counted.
+ */
+export const toolCount = (steps: ReadonlyArray<RolloutStep>) =>
+  steps.filter((s) => s.kind === "tool" || s.asked === true).length
 
 /** "14 s", "2 min 5 s". */
 export const durationText = (ms: number) => {

@@ -38,6 +38,7 @@ import {
   type FrozenTool,
   frozenTool,
   type RolloutTool,
+  noReplyDefinition,
   sendMessageDefinition,
   sendMessageWithPresence,
   severalMessageDefinition,
@@ -222,6 +223,7 @@ export const layer = Layer.effect(
               ...(frozen.turnCap === undefined ? {} : { turnCap: frozen.turnCap })
             },
             mode: frozen.mode,
+            ...(snapshot.sendNudge === undefined ? {} : { sendNudge: snapshot.sendNudge }),
             checkpoints: (snapshot as ContinuousSnapshot).continuity?.breakpoints ?? [],
             recentPrefix: ((snapshot as ContinuousSnapshot).continuity?.prefix ?? snapshot).lcm?.measure?.recentNow,
             allowsOutside: profile.allowsOutside,
@@ -355,9 +357,21 @@ export const layer = Layer.effect(
             request.initial !== undefined ||
             (slot.entry.version.speakerEntityId !== null &&
               state.playedByMe.includes(slot.entry.version.speakerEntityId))
+          // Another version of a silent line asks for an actual reply (spec/REPLY-CONTRACT.md §3.1):
+          // a reply written where the character already passed may not pass again.
+          const passedHere =
+            !plainTurn && planned.plan.noReply === true && slot.entry.versionCount > 1
+              ? (yield* reader
+                  .ListVersions({ userId, slotId, forkId })
+                  .pipe(
+                    Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("ListVersions"))
+                  )).some((v) => v.id !== versionId && v.mark === "silent")
+              : false
           const plan = plainTurn
             ? { ...planned.plan, strategy: "reply", tools: [], contract: "final_text" as const }
-            : planned.plan
+            : passedHere
+              ? { ...planned.plan, noReply: false }
+              : planned.plan
           if (plan.sendPresence && plan.contract !== "final_text" && (state.contextPerSpeaker ?? "shared") === "shared")
             return yield* new GenerationFailed({
               class: "context_view",
@@ -434,7 +448,7 @@ export const layer = Layer.effect(
                           plan.assembly?.instructions(
                             tools.map((t) => t.id),
                             plan.contract,
-                            { off }
+                            { off, noReply: plan.noReply === true }
                           ) ?? "",
                         speakerCardOnly: plan.assembly?.speakerCardOnly ?? false,
                         ...(plan.assembly?.workshop ? { workshop: true } : {}),
@@ -541,7 +555,9 @@ export const layer = Layer.effect(
                     ? severalMessageDefinition
                     : plan.sendPresence
                       ? sendMessageWithPresence(plan.sendPresence)
-                      : sendMessageDefinition
+                      : sendMessageDefinition,
+                  // The pass beside the send (spec/REPLY-CONTRACT.md §3.1), frozen with it for Resume.
+                  ...(plan.noReply && plan.contract === "send_message" ? [noReplyDefinition] : [])
                 ]
           const frozenTools: ReadonlyArray<FrozenTool> = [
             ...frozenOffer(offer.tools, offer.deferred, frozenTool),
@@ -806,6 +822,7 @@ export const layer = Layer.effect(
               ? {
                   agent: {
                     plan,
+                    ...(snapshot.sendNudge === undefined ? {} : { sendNudge: snapshot.sendNudge }),
                     ...(seed ? { resume: { transcript: seed, historical: continuity?.historical ?? 0 } } : {}),
                     mode: planned.mode,
                     checkpoints: continuity?.breakpoints ?? [],

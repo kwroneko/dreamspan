@@ -10,6 +10,20 @@ import { useReplyTools } from "./replyTools.ts"
 
 type SendPresence = "off" | "optional" | "required"
 
+type Contract = "send_message" | "final_text" | "both"
+
+/** A workshop's several-message contract isn't a choice here; a story never sets it. */
+const contractOf = (stored: string | undefined): Contract =>
+  stored === "final_text" || stored === "both" ? stored : "send_message"
+
+/** What each way of giving the reply does, from when, and an example. */
+const CONTRACT_ABOUT =
+  "How the model hands over its reply, from the next reply on this branch. Send tool: only a message it sends with a tool is the reply, and it may stay silent instead; anything it writes along the way shows in the steps, and a model that keeps writing without sending is asked again, then the reply fails so you can resume or regenerate it. Plain answer: its last answer after any tools is the reply. Either: a sent message or its last answer. Example: a model that writes “Let me check the notes” before a lookup shows that line in the steps with Send tool, never in the message."
+
+/** Why only the send tool is a choice while every reply must say who's in the scene. */
+const FORCED =
+  "Replies must say who's in the scene, and they say it when they send the reply, so the send tool is used."
+
 /** What the setting does, when, and one example. */
 const PRESENT_ABOUT =
   "Requires Separate contexts. Let each reply say which characters are there for it, from the next reply on this branch. Anyone it leaves out is marked away starting with that message, and is back once a reply names them again. Example: Wren's reply has Mira walk out and names only Wren and Tobin, so Mira is away until a later reply names her. Your own character and a narrator never change this way."
@@ -75,6 +89,8 @@ export function ToolsSection({ session }: { session: ChatSession }) {
       ? "Choose Separate contexts before asking replies to say who's in the scene. One shared context lets every character read the whole chat."
       : null)
   const tools = cast.agentTools ?? available?.defaultTools ?? []
+  /** "Replies must say" makes the send tool the way (the reply names who's there with it). */
+  const forced = cast.sendPresence === "required"
   const write = async (change: CastChange) => {
     setPending(true)
     const outcome = await session.changeCast(change)
@@ -118,6 +134,36 @@ export function ToolsSection({ session }: { session: ChatSession }) {
         </Fieldset>
       )}
       {on && <McpServersFieldset session={session} choices={cast.agentMcp ?? {}} />}
+      {on && (
+        <Fieldset legend="How the reply is given" about={CONTRACT_ABOUT}>
+          <RadioGroup<Contract>
+            aria-label="How the reply is given"
+            value={forced ? "send_message" : contractOf(cast.outputContract)}
+            disabled={pending}
+            onValueChange={(contract) => void write({ _tag: "OutputContract", contract })}
+            options={[
+              {
+                value: "send_message",
+                label: "Send tool",
+                description: "Only a sent message is the reply; other text shows in the steps."
+              },
+              {
+                value: "final_text",
+                label: "Plain answer",
+                description: "The model's last answer is the reply.",
+                ...(forced ? { disabled: true, hint: FORCED } : {})
+              },
+              {
+                value: "both",
+                label: "Either",
+                description: "A sent message or the last answer.",
+                ...(forced ? { disabled: true, hint: FORCED } : {})
+              }
+            ]}
+          />
+          {forced && <p className="text-sm text-muted">Send tool only, while replies must say who's in the scene.</p>}
+        </Fieldset>
+      )}
       {on && (
         <RequestCapField
           cap={cast.requestCap ?? DEFAULT_REQUEST_CAP}

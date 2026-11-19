@@ -3049,6 +3049,8 @@ export class WriteOpsLibrary extends RpcGroup.make(
       versionId: VersionId,
       content: Schema.String,
       discardEmpty: Schema.optionalKey(Schema.Boolean),
+      /** `silent`: the character passed (`no_reply`, spec/REPLY-CONTRACT.md §3.1); absent: no mark. */
+      mark: Schema.optionalKey(Schema.Literal("silent")),
       /** The reasoning streamed; left as it is when absent. */
       reasoning: Schema.optionalKey(Schema.String),
       /** The reply's leading tagged sections; left as they are when absent. */

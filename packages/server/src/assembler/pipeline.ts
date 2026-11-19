@@ -43,6 +43,7 @@ import type {
   LoreDecisionInput
 } from "./types.ts"
 import { replySectionsOf } from "@rp/shared/replySections.ts"
+import { ownSendNudge } from "@rp/shared/agentInstructions.ts"
 import { ASSEMBLER_VERSION, AssemblyFailed, historyLeafOf } from "./types.ts"
 import type { LcmDefaults, ResolvedLcm } from "@rp/shared/lcmSettings.ts"
 import type { CalibrationSample, ImageTokenRule } from "@rp/shared/imageTokens.ts"
@@ -492,6 +493,10 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
       // How the reply's leading tagged sections are parsed (spec/REPLY-SECTIONS.md).
       ...(request.summaryJob ? {} : { replySections: replySectionsOf(preset.doc) }),
       ...(request.agent ? { agentAssembly: request.agent } : {}),
+      // The preset's own nudge, its macros expanded as the other prompts' (read-only: it's no piece).
+      ...(request.agent && !request.agent.workshop && ownSendNudge(preset.doc.prompts) !== null
+        ? { sendNudge: need(assembly, "macros").preview("preset:sendNudge", ownSendNudge(preset.doc.prompts)!) }
+        : {}),
       // The books an agent's lookup_lore reads: those this context's lore came from (AGENTIC §4.5).
       ...(request.agent && assembly.lorebooks?.length
         ? { agentLore: assembly.lorebooks.map(({ id, entity, revision }) => ({ id, entity, revision })) }

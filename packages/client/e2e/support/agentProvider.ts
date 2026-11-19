@@ -13,6 +13,11 @@ export const THINKING = "The traveler asked about the bridge; check what was sai
 
 const QUERIES = ["bridge", "lantern"]
 
+/** Whether the request offers the send tool: then the reply goes through it. */
+const sends = (body: { readonly tools?: unknown }) =>
+  Array.isArray(body.tools) &&
+  body.tools.some((t: { function?: { name?: string } }) => t.function?.name === "send_message")
+
 export const startAgentProvider = async () => {
   /** The tool results a request has when it's held or failed: QUERIES.length is the final answer. */
   let holding: number | null = null
@@ -99,14 +104,32 @@ export const startAgentProvider = async () => {
                 chunk({}, "tool_calls"),
                 chunk({}, null, usage)
               ])
-          : () =>
-              stream(res, [
-                ...AGENT_REPLY.match(/\S+\s*/g)!.map((t, i) =>
-                  chunk(i === 0 ? { role: "assistant", content: t } : { content: t })
-                ),
-                chunk({}, "stop"),
-                chunk({}, null, usage)
-              ])
+          : sends(body)
+            ? // The reply through the send tool, where it's offered (spec/REPLY-CONTRACT.md §3.1).
+              () =>
+                stream(res, [
+                  chunk({
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: `call_${done + 1}`,
+                        type: "function",
+                        function: { name: "send_message", arguments: JSON.stringify({ message: AGENT_REPLY }) }
+                      }
+                    ]
+                  }),
+                  chunk({}, "tool_calls"),
+                  chunk({}, null, usage)
+                ])
+            : () =>
+                stream(res, [
+                  ...AGENT_REPLY.match(/\S+\s*/g)!.map((t, i) =>
+                    chunk(i === 0 ? { role: "assistant", content: t } : { content: t })
+                  ),
+                  chunk({}, "stop"),
+                  chunk({}, null, usage)
+                ])
       if (holding === done) held.push(answer)
       else answer()
     })

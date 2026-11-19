@@ -219,17 +219,21 @@ function StepBox({ target, editing, id }: { target: StepTarget; editing: StepEdi
       </Box>
     )
   const open = editing.open === id
+  // A turn that wrote nothing has nothing to change; it can still be carried on from.
+  const editable = !(target.kind === "part" && target.part.type === "text" && target.part.text === "")
   const actions = open ? null : (
     <span className="flex gap-1">
-      <Button
-        variant="ghost"
-        className="h-7 px-2 text-xs"
-        hint="Change this step, then carry on from it as a new version."
-        disabled={editing.pending}
-        onClick={() => editing.setOpen(id)}
-      >
-        Edit
-      </Button>
+      {editable && (
+        <Button
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          hint="Change this step, then carry on from it as a new version."
+          disabled={editing.pending}
+          onClick={() => editing.setOpen(id)}
+        >
+          Edit
+        </Button>
+      )}
       <Button
         variant="ghost"
         className="h-7 px-2 text-xs"
@@ -341,7 +345,7 @@ function Added({
   return entry.role === "toolResult" ? (
     <StepBox target={{ kind: "result", entry }} editing={editing} id={id} />
   ) : (
-    <Box title="Added by the app">
+    <Box title={entry.nudge === undefined ? "Added by the app" : "The app asked for the reply to be sent"}>
       <Verbatim text={entry.text} />
     </Box>
   )

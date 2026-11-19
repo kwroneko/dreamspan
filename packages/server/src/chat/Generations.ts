@@ -45,6 +45,8 @@ const LIVE_RETRIES = 5
 interface Running {
   request: GenerationRequest
   several: boolean
+  /** The character passed (`no_reply`): the finished version is marked `silent`. */
+  silent?: boolean
   text: string
   /** The reasoning streamed so far (DESIGN §7.4), kept apart from the text. */
   reasoning: string
@@ -237,6 +239,7 @@ export class Generations extends Context.Service<
               status,
               error,
               ...(entry.several ? { discardEmpty: true } : {}),
+              ...(entry.silent && status === "complete" ? { mark: "silent" as const } : {}),
               ...(written.rewrite ? { rewrite: written.rewrite } : {})
             })
           )
@@ -261,7 +264,8 @@ export class Generations extends Context.Service<
           }
           if (!request.replyOnly && status === "complete" && entry.text.trim() !== "")
             yield* Effect.forkIn(markIfRefused(request, entry.text), scope)
-          if (!request.replyOnly && status === "complete" && Option.isSome(decisions))
+          // A pass said nothing, so there's nothing for a decision point to read after it.
+          if (!request.replyOnly && status === "complete" && !entry.silent && Option.isSome(decisions))
             yield* Effect.forkIn(
               decisions.value
                 .afterReply({
@@ -478,6 +482,10 @@ export class Generations extends Context.Service<
                 if (chunk === SAVE_TICK) return saveSoFar(entry)
                 if (typeof chunk === "object" && "several" in chunk) {
                   entry.several = true
+                  return Effect.void
+                }
+                if (typeof chunk === "object" && "silent" in chunk) {
+                  entry.silent = true
                   return Effect.void
                 }
                 if (typeof chunk === "object" && "post" in chunk)

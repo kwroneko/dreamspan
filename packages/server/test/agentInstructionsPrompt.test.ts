@@ -126,7 +126,7 @@ describe("the Agent instructions prompt", () => {
       const body = yield* firstRequest()
       const last = body.messages.at(-1)!
       assert.strictEqual(last.role, "user")
-      assert.isTrue(last.content.endsWith(`\n${agentInstructions(OFFERED, "both")}`), last.content)
+      assert.isTrue(last.content.endsWith(`\n${agentInstructions(OFFERED, "send_message")}`), last.content)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 

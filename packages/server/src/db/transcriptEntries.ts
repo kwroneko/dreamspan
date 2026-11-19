@@ -37,16 +37,20 @@ export const transcriptEntries = (
       return [
         {
           role: "assistant",
-          parts: m.content.flatMap((p, part): Array<TurnPart> => {
-            const step = index(stepAt.get(`${at}:${part}`))
-            return p.type === "thinking"
-              ? [{ type: "thinking", text: p.thinking, ...step }]
-              : p.type === "text"
-                ? [{ type: "text", text: p.text, ...step }]
-                : p.type === "toolCall"
-                  ? [{ type: "toolCall", id: p.id, name: p.name, args: p.arguments, ...step }]
-                  : []
-          }),
+          parts: [
+            ...m.content.flatMap((p, part): Array<TurnPart> => {
+              const step = index(stepAt.get(`${at}:${part}`))
+              return p.type === "thinking"
+                ? [{ type: "thinking", text: p.thinking, ...step }]
+                : p.type === "text"
+                  ? [{ type: "text", text: p.text, ...step }]
+                  : p.type === "toolCall"
+                    ? [{ type: "toolCall", id: p.id, name: p.name, args: p.arguments, ...step }]
+                    : []
+            }),
+            // A turn that wrote nothing is a step of its own (steps.ts), with no part to show it by.
+            ...(stepAt.has(`${at}:-1`) ? [{ type: "text" as const, text: "", step: stepAt.get(`${at}:-1`)! }] : [])
+          ],
           stopReason: m.stopReason,
           toolsOffered: ++request < turnCap && tools > 0,
           ...(m.errorMessage ? { error: m.errorMessage } : {})
@@ -76,7 +80,10 @@ export const transcriptEntries = (
       return [{ role: "app", text: m.message.content + (m.message.images?.length ? " [image]" : "") }]
     }
     const other = m as { readonly role: string; readonly content?: unknown }
-    if (other.role === "rpHarness" || other.role === "user") return [{ role: "app", text: textOf(other.content) }]
+    if (other.role === "rpHarness" || other.role === "user") {
+      const nudge = (m as { readonly nudge?: unknown }).nudge
+      return [{ role: "app", text: textOf(other.content), ...(typeof nudge === "number" ? { nudge } : {}) }]
+    }
     return []
   })
 }

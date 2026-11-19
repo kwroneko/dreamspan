@@ -265,6 +265,20 @@ export const sendMessageDefinition = {
   effect: "read"
 } satisfies FrozenTool
 
+/**
+ * A story reply's pass (spec/REPLY-CONTRACT.md §3.1 [D]): the replying character says nothing
+ * this turn. Offered beside `send_message` under the send contract; it ends the turn like a send,
+ * and the chat shows "<Name> stays silent" as a version of the reply.
+ */
+export const noReplyDefinition = {
+  name: "no_reply",
+  label: "Stayed silent",
+  description:
+    "Passes this turn: your character says nothing now. Call it instead of send_message when your character would stay silent; it ends your turn.",
+  parameters: Type.Object({}),
+  effect: "read"
+} satisfies FrozenTool
+
 /** What `present` tells the model: the argument's whole contract, since nothing else explains it. */
 const PRESENT_DESCRIPTION =
   "The names of the characters who are in the scene for this message, yours included. Leave out anyone who isn't there: they don't hear this message, and aren't picked to reply until they're back."

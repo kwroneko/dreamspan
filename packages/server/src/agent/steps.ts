@@ -1,4 +1,4 @@
-import type {} from "./messages.ts"
+import { isNudge } from "./messages.ts"
 // A transcript as the steps a version shows (spec/AGENTIC.md §5.1): the same projection live,
 // as the loop runs, and afterwards from the stored transcript.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
@@ -9,6 +9,12 @@ type Presentation = NonNullable<ApprovalPrompt["presentation"]>
 
 /** The contract's own tool: the message itself, never a step. */
 export const SEND_MESSAGE = "send_message"
+
+/** A story reply's pass (spec/REPLY-CONTRACT.md §3.1): the ending itself, never a step. */
+export const NO_REPLY = "no_reply"
+
+/** The calls that end the reply: the message, or the pass. */
+const endsReply = (name: string) => name === SEND_MESSAGE || name === NO_REPLY
 
 const resultText = (content: ReadonlyArray<{ readonly type: string; readonly text?: string }>) =>
   content.flatMap((p) => (p.type === "text" && p.text !== undefined ? [p.text] : [])).join("")
@@ -26,14 +32,16 @@ const title = (args: unknown, field?: string) => {
   return text.length > 80 ? `“${text.slice(0, 79)}…”` : text ? `“${text}”` : ""
 }
 
-/** Tool calls a transcript holds, the message's own call left out: what "N steps" counts. */
-export const countSteps = (messages: ReadonlyArray<AgentMessage>) =>
-  messages.reduce(
-    (n, m) =>
-      n +
-      (m.role === "assistant" ? m.content.filter((p) => p.type === "toolCall" && p.name !== SEND_MESSAGE).length : 0),
-    0
-  )
+/**
+ * What "N steps" counts: the tool calls a transcript holds, the message's own call (or the pass)
+ * left out, and the turns the app asked to be sent (spec/REPLY-CONTRACT.md §3.3), so a run whose
+ * stray text was nudged has steps to show. The same count the live steps give (`counted`).
+ */
+export const countSteps = (messages: ReadonlyArray<AgentMessage>) => counted(stepsOf(messages, [], true))
+
+/** The steps "N steps" counts: tool calls and the turns the app asked to be sent. */
+export const counted = (steps: ReadonlyArray<RolloutStep>) =>
+  steps.filter((s) => s.kind === "tool" || s.asked === true).length
 
 /**
  * The steps of a transcript. The last assistant turn without tool calls is the message (its
@@ -101,8 +109,17 @@ export const placedSteps = (
   // A turn cut off in its text (a stop, an error) was the message being written: never a step.
   const plain = messages.findLastIndex((m) => m.role === "assistant" && !m.content.some((p) => p.type === "toolCall"))
   const sent = messages.findLastIndex(
-    (m) => m.role === "assistant" && m.content.some((p) => p.type === "toolCall" && p.name === SEND_MESSAGE)
+    (m) => m.role === "assistant" && m.content.some((p) => p.type === "toolCall" && endsReply(p.name))
   )
+  // Under the send tool, text after the app asked for the reply to be sent is never the message,
+  // except the answer to the request cap's "write now" (spec/REPLY-CONTRACT.md §3.2, §3.5).
+  // A run under the send tool alone says so on its frozen request (`rpRequest.contract`): there no
+  // plain turn is the message, nudged or not (one stopped or failed before any nudge too), but the
+  // answer to the cap's "write now".
+  const sendOnly = (messages.find((m) => m.role === "rpRequest") as { contract?: string } | undefined)?.contract
+  const writeNowAnswer = messages[plain - 1]?.role === "rpHarness" && !isNudge(messages[plain - 1])
+  const stray =
+    plain >= 0 && !writeNowAnswer && (sendOnly === "send_message" || messages.slice(0, plain).some((m) => isNudge(m)))
   // A message sent after a plain turn (one the app asked to be sent) makes that turn a step.
   const noFinalText =
     messages.some((m) => m.role === "toolResult" && (m.details as { versionId?: string } | null)?.versionId) &&
@@ -110,14 +127,14 @@ export const placedSteps = (
     !(messages[plain] as import("@earendil-works/pi-ai").AssistantMessage).content.some(
       (p) => p.type === "text" && p.text.trim()
     )
-  const lastPlain = sent > plain || noFinalText ? -1 : plain
+  const lastPlain = sent > plain || noFinalText || stray ? -1 : plain
   const steps: Array<PlacedStep> = []
   messages.forEach((m, index) => {
     if (m.role !== "assistant" || index === lastPlain) return
     // A turn that sends the message first, with no text, keeps its thinking as the message's.
     const first = m.content.find((p) => p.type === "toolCall")
     const reasoningOfMessage =
-      first?.name === SEND_MESSAGE && !m.content.some((p) => p.type === "text" && p.text.trim())
+      first !== undefined && endsReply(first.name) && !m.content.some((p) => p.type === "text" && p.text.trim())
     m.content.forEach((part, at) => {
       const result = part.type === "toolCall" ? results.get(index)?.get(part.id) : undefined
       const place = (step: RolloutStep) => {
@@ -133,7 +150,7 @@ export const placedSteps = (
       if (part.type === "thinking" && part.thinking.trim() && !reasoningOfMessage)
         place({ kind: "thinking", text: part.thinking })
       else if (part.type === "text" && part.text.trim()) place({ kind: "text", text: part.text })
-      else if (part.type === "toolCall" && part.name !== SEND_MESSAGE) {
+      else if (part.type === "toolCall" && !endsReply(part.name)) {
         const tool = meta.get(part.name)
         const effect = tool?.effect ?? "read"
         const displayEffect = effect === "read" || effect === "chat_state" ? effect : "external"
@@ -153,6 +170,22 @@ export const placedSteps = (
         })
       }
     })
+  })
+  // A turn the app asked to be sent after (a nudge follows it) marks its last step, so the ask is
+  // counted where it shows; a turn that wrote nothing shows as an empty text step (part -1: no part).
+  messages.forEach((m, index) => {
+    if (!isNudge(m) || messages[index - 1]?.role !== "assistant") return
+    const turn = index - 1
+    if (bounds && (turn <= bounds.after || turn > bounds.through)) return
+    const last = steps.findLastIndex((p) => p.message === turn && p.step.kind !== "tool")
+    const placed = steps[last]
+    if (placed && placed.step.kind !== "tool") steps[last] = { ...placed, step: { ...placed.step, asked: true } }
+    else if (!steps.some((p) => p.message === turn)) {
+      const after = steps.findIndex((p) => p.message > turn)
+      const empty: PlacedStep = { step: { kind: "text", text: "", asked: true }, message: turn, part: -1 }
+      if (after < 0) steps.push(empty)
+      else steps.splice(after, 0, empty)
+    }
   })
   return steps
 }
@@ -175,7 +208,7 @@ export const callsFrom = (messages: ReadonlyArray<AgentMessage>, versionId?: str
     }
     for (const part of m.content) {
       const result = part.type === "toolCall" ? results.get(part.id) : undefined
-      if (part.type === "toolCall" && part.name !== SEND_MESSAGE && (result?.at ?? index) > after)
+      if (part.type === "toolCall" && !endsReply(part.name) && (result?.at ?? index) > after)
         calls.set(part.id, result?.text ?? null)
     }
   })

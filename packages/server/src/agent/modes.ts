@@ -12,6 +12,11 @@ export interface AgentPlan {
   /** `rolloutTools` ids, in the order offered. */
   readonly tools: ReadonlyArray<string>
   readonly contract: OutputContract
+  /**
+   * The replying character may pass with `no_reply` (spec/REPLY-CONTRACT.md §3.1): offered beside
+   * the send tool. Absent: it isn't.
+   */
+  readonly noReply?: boolean
   /** The send tool says who is present for the message (`agent.send_presence`); absent: it doesn't. */
   readonly sendPresence?: "optional" | "required"
   readonly continuity?: "fork" | "resume_previous"
@@ -30,7 +35,11 @@ export interface AgentPlan {
     readonly instructions: (
       offered: ReadonlyArray<string>,
       contract: OutputContract,
-      context?: { readonly off: ReadonlyArray<string> }
+      context?: {
+        readonly off: ReadonlyArray<string>
+        /** The reply may pass (`AgentPlan.noReply`); absent: as the contract says by default. */
+        readonly noReply?: boolean
+      }
     ) => string
     /** Card-swap: only the speaking character's card is sent, where the preset puts cards. */
     readonly speakerCardOnly: boolean
@@ -76,15 +85,21 @@ export const defaultMode: OrchestrationMode = {
   description: "Plans each reply from the chat settings.",
   plan: ({ state }) => {
     if (state.agentEnabled !== true) return { strategy: "reply", tools: [], contract: "final_text", turnCap: 1 }
-    const chosen = state.outputContract === "several" ? "both" : (state.outputContract ?? "both")
+    // The send tool by default (spec/REPLY-CONTRACT.md §3.1): text outside it is never the reply.
+    // A workshop's several messages are no story contract (§3.1: one reply, one message): the default.
+    const chosen =
+      state.outputContract == null || state.outputContract === "several" ? "send_message" : state.outputContract
     // Who is present can only be said through the tool: a chat that requires it asks for the
     // reply through the tool even when the older output preference was final text.
     const sendPresence =
       state.sendPresence === "required" ? "required" : chosen === "final_text" ? undefined : state.sendPresence
+    const contract = sendPresence === "required" ? "send_message" : chosen
     return {
       strategy: "agent",
       tools: state.agentTools ?? DEFAULT_TOOLS,
-      contract: sendPresence === "required" ? "send_message" : chosen,
+      contract,
+      // Under the send tool alone, the character may pass (§3.1 [D]); `both` and plain answers stay as they were.
+      ...(contract === "send_message" ? { noReply: true } : {}),
       ...(sendPresence ? { sendPresence } : {}),
       turnCap: state.requestCap ?? DEFAULT_REQUEST_CAP,
       assembly: { instructions: agentInstructions, speakerCardOnly: state.cardsRotation === true }

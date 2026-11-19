@@ -106,7 +106,7 @@ export function StepRow({
             ) : (
               <span className="min-w-0 [overflow-wrap:anywhere]">
                 <span className="font-medium text-text">{step.kind === "thinking" ? "Thought" : "Wrote"}</span>{" "}
-                {!open && excerpt(step.text)}
+                {!open && (step.text.trim() ? excerpt(step.text) : "nothing")}
               </span>
             )}
           </button>

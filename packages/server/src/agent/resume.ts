@@ -12,6 +12,7 @@ import {
   type ToolResultMessage
 } from "@earendil-works/pi-ai"
 import { isDeepStrictEqual } from "node:util"
+import { isNudge } from "./messages.ts"
 import { placedSteps } from "./steps.ts"
 import type { FrozenTool } from "./tools.ts"
 
@@ -119,6 +120,13 @@ export const planResume = (
   if (last?.role === "assistant" && !last.content.some((p) => p.type === "toolCall")) {
     cut = [kept.pop()!, ...cut]
     policy = continuation === undefined ? "resample" : policy
+    // The nudge it answered remembers it, so the text written stays counted (spec/REPLY-CONTRACT.md §3.4).
+    const asked = kept.at(-1)
+    if (isNudge(asked))
+      kept[kept.length - 1] = {
+        ...(asked as AgentMessage & { role: "rpHarness" }),
+        answersCut: ((asked as { answersCut?: number }).answersCut ?? 0) + 1
+      }
   }
   if (danglingCalls(kept).length > 0 && continuation === undefined) policy = "rerun"
   if (!kept.some((m) => m.role === "rpRequest")) return fresh(messages)
@@ -197,6 +205,9 @@ export const planStepResume = (
   let replayedCalls: ReadonlySet<string> = new Set()
   if (placed.step.kind !== "tool") {
     if (edit !== undefined && edit.kind !== "text") return new StepNotResumable("Only text can replace this step.")
+    // A turn that wrote nothing (steps.ts: no part of its own) has nothing to change.
+    if (edit !== undefined && placed.part < 0)
+      return new StepNotResumable("This step wrote nothing, so there's nothing to change. Resume from it instead.")
     const content = turn.content.map((p, i) => {
       if (i !== placed.part || edit === undefined) return p
       return p.type === "thinking" ? { ...p, thinking: edit.text } : p.type === "text" ? { ...p, text: edit.text } : p
