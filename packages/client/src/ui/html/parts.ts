@@ -2,7 +2,10 @@
 // replaceable or disableable by id, as plugins can do with any part:
 // - `html.inline`: the sanitizer schema for inline markup; disabled, HTML shows as text;
 // - `html.classifier`: which code blocks are documents (Tavern Helper's "frontend" test);
-// - `html.frame`: what renders a document block; disabled, it shows as its code block.
+// - `html.frame`: what renders a document block; disabled, it shows as its code block;
+// - `frames.tavernHelper`: what a panel's scripts may read (Tier B); disabled, they read nothing.
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import type { PanelData } from "@dreamspan/shared/panelDataApi.ts"
 import type { ComponentType } from "react"
 import type { Options as Schema } from "rehype-sanitize"
 import { makeRegistry } from "../../registry.ts"
@@ -42,6 +45,25 @@ export const documentRenderers = makeRegistry<{
  */
 export const isDocumentBlock = (code: string) => ["html>", "<head>", "<body"].some((tag) => code.includes(tag))
 
+/** Where a chat view's panels read from (features/chat/htmlDisplay.tsx): its own path and state. */
+export interface PanelDataSource {
+  /** What a panel in this message may read; null when it can't be read. */
+  readonly read: (slotId: SlotId) => Promise<PanelData | null>
+  /** Called when the chat's messages or state may have changed. */
+  readonly subscribe: (listener: () => void) => () => void
+}
+
+/**
+ * What a panel's scripts may read through the bridge (spec/HTML-MESSAGES.md §3.4, Tier B). Only a
+ * panel whose scripts run gets it; the frame answers Tavern Helper's read calls from it
+ * (frame/bootstrap.ts). A replacement may read less; nothing it returns can write.
+ */
+export const panelApis = makeRegistry<{
+  readonly id: string
+  readonly order: number
+  readonly read: (source: PanelDataSource, slotId: SlotId) => Promise<PanelData | null>
+}>()
+
 /** Everything the parts registries hold, bumped on any change, so renderers re-key their pipelines. */
 let revision = 0
 const bump = () => {
@@ -61,3 +83,4 @@ const effective = <A extends { readonly order: number }>(entries: ReadonlyArray<
 export const effectiveSchema = () => effective(htmlSchemas.snapshot().entries)
 export const effectiveClassifier = () => effective(htmlClassifiers.snapshot().entries)
 export const effectiveDocumentRenderer = () => effective(documentRenderers.snapshot().entries)
+export const effectivePanelApi = () => effective(panelApis.snapshot().entries)

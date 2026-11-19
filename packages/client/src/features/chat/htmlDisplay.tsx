@@ -16,26 +16,65 @@ import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import type { ChatSurfaceProps } from "./presentation.tsx"
+import type { PanelDataSource } from "../../ui/html/parts.ts"
+import type { ChatSession } from "./session.ts"
 
 type Entries = ReadonlyArray<{ readonly key: string; readonly text: string }>
 /** The viewer's setting and a stylesheet adopted while mounted, holding `entries`' styles. */
-function useHtml(entries: Entries, mediaRevision = "") {
+function useHtml(entries: Entries, mediaRevision = "", panelData?: PanelDataSource) {
   const { htmlFormatting: html, panelDepth } = useViewPrefs().prefs
   const settings = useMemo(() => ({ html, panelDepth }), [html, panelDepth])
-  const [chat] = useState<HtmlChat>(() => ({ styles: new MessageStyles(), frames: new FrameSlots() }))
-  useLayoutEffect(() => chat.styles.clearReports(), [chat, mediaRevision])
-  useEffect(() => chat.styles.attach(), [chat])
-  useEffect(() => chat.styles.setLoaded(html ? entries : []), [chat, html, entries])
+  const [styles] = useState(() => new MessageStyles())
+  const [frames] = useState(() => new FrameSlots())
+  const chat = useMemo<HtmlChat>(
+    () => ({ styles, frames, ...(panelData ? { panelData } : {}) }),
+    [styles, frames, panelData]
+  )
+  useLayoutEffect(() => styles.clearReports(), [styles, mediaRevision])
+  useEffect(() => styles.attach(), [styles])
+  useEffect(() => styles.setLoaded(html ? entries : []), [styles, html, entries])
   return { settings, chat }
 }
 
-export function HtmlProvider({ view, children }: ChatSurfaceProps) {
+/**
+ * What this chat view's panels may read (Tier B, `GetPanelData`): on the fork shown, so a
+ * panel reads the versions and state it's shown with. Changes to the chat's messages or state
+ * tell the live panels to read again.
+ */
+function panelSource(session: ChatSession): PanelDataSource {
+  return {
+    read: async (slotId) => {
+      const { forkId } = session.snapshot()
+      const result = await session.call((client) => client("GetPanelData", { chatId: session.chatId, forkId, slotId }))
+      return result.ok ? result.value : null
+    },
+    subscribe: (listener) => {
+      let revision = session.snapshot().pathRevision
+      let fork = session.snapshot().forkId
+      const stopView = session.subscribe(() => {
+        const view = session.snapshot()
+        if (view.pathRevision === revision && view.forkId === fork) return
+        revision = view.pathRevision
+        fork = view.forkId
+        listener()
+      })
+      const stopState = session.subscribePositions(listener)
+      return () => {
+        stopView()
+        stopState()
+      }
+    }
+  }
+}
+
+export function HtmlProvider({ session, view, children }: ChatSurfaceProps) {
   const entries = useMemo(
     () => view.entries.map((entry) => ({ key: entry.slotId, text: entry.version.content })),
     [view.entries]
   )
   const revision = useExternalMediaRevision()
-  const { settings, chat } = useHtml(entries, revision)
+  const panelData = useMemo(() => panelSource(session), [session])
+  const { settings, chat } = useHtml(entries, revision, panelData)
   return (
     <HtmlSettingsContext value={settings}>
       <HtmlChatContext value={chat}>{children}</HtmlChatContext>

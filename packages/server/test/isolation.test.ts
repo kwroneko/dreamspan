@@ -2875,6 +2875,19 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       })
   },
+  GetPanelData: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.GetPanelData({ chatId: owner.chat.chatId, forkId: null, slotId: owner.chat.slotId }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.GetPanelData({ chatId: actor.chat.chatId, forkId: null, slotId: owner.chat.slotId }),
+          "NotFound"
+        )
+      })
+  },
   ListChatCards: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

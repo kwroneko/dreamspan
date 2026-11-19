@@ -4,6 +4,8 @@ import type { MediaPermit } from "./media.ts"
 // the message a body belongs to, and the chat view's card styles in one constructed stylesheet.
 import { createContext } from "react"
 import type { FrameSlots } from "./frames.ts"
+import type { PanelDataSource } from "./parts.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
 
 /**
  * Scopes a text's CSS (css.ts). The renderer's lazy chunk sets it, so its CSS parser stays out
@@ -30,6 +32,8 @@ export const HtmlSettingsContext = createContext<HtmlSettings>({ html: true, pan
 export interface HtmlMessage {
   /** Its slot: the row, whichever version shows. */
   readonly key: string
+  /** The chat message's slot, for what its panels may read; absent outside a chat. */
+  readonly slotId?: SlotId
   readonly media?: MediaPermit
   /** Its reply is being written: its panels wait ("Panel loading"). */
   readonly streaming?: boolean
@@ -269,5 +273,7 @@ export interface HtmlChat {
   readonly styles: MessageStyles
   /** Its live panel frames (frames.ts). */
   readonly frames: FrameSlots
+  /** What its panels' scripts may read (Tier B); absent outside a chat view. */
+  readonly panelData?: PanelDataSource
 }
 export const HtmlChatContext = createContext<HtmlChat | null>(null)
