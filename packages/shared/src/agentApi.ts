@@ -5,6 +5,7 @@ import {
   ACTIVITY_PAGE,
   ActivityCursor,
   ActivityPage,
+  ModelBehaviour,
   NotResumable,
   ReplyTools,
   RolloutStep,
@@ -129,6 +130,11 @@ export class AgentApi extends RpcGroup.make(
     payload: { versionId: VersionId },
     success: RunTranscript,
     error: Schema.Union([NotFound, ServerError])
+  }),
+  /** Per model, how its story replies met the send tool's contract (spec/REPLY-CONTRACT.md §3.6). */
+  Rpc.make("GetModelBehaviour", {
+    success: Schema.Array(ModelBehaviour),
+    error: ServerError
   }),
   /**
    * A subagent's own run (spec/SUBAGENTS.md §7): `rolloutId` must be a subagent started by the run

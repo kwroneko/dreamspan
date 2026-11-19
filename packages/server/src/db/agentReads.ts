@@ -834,6 +834,45 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
             : {})
         }
       }).pipe(query("RolloutTranscript")),
+    // Every reply that reached an outcome (rollouts_contract), per model; a resumed reply counts
+    // once, in the run that carried it on (StartResumedVersion clears the one it resumed).
+    ModelBehaviour: ({ userId }) =>
+      sql<{
+        readonly connection_id: string
+        readonly connection_name: string
+        readonly model_id: string
+        readonly model_key: string
+        readonly replies: number
+        readonly nudged: number
+        readonly recovered: number
+        readonly gave_up: number
+        readonly exhausted: number
+        readonly nudges: number
+      }>`
+        SELECT r.connection_id, k.name AS connection_name, r.model_id, m.model_key, count(*) AS replies,
+          sum(r.contract_nudges > 0) AS nudged, sum(r.contract_outcome = 'recovered') AS recovered,
+          sum(r.contract_outcome = 'gave_up') AS gave_up, sum(r.contract_outcome = 'exhausted') AS exhausted,
+          coalesce(sum(r.contract_nudges), 0) AS nudges
+        FROM rollouts r JOIN chats c ON c.id = r.chat_id JOIN models m ON m.id = r.model_id
+          JOIN connections k ON k.id = r.connection_id
+        WHERE r.contract_outcome IS NOT NULL AND c.owner_user_id = ${userId} AND k.owner_user_id = ${userId}
+        GROUP BY r.model_id, r.connection_id ORDER BY replies DESC, m.model_key`.pipe(
+        Effect.map((rows) =>
+          rows.map((r) => ({
+            connectionId: r.connection_id,
+            connectionName: r.connection_name,
+            modelId: r.model_id,
+            modelKey: r.model_key,
+            replies: r.replies,
+            nudged: r.nudged,
+            recovered: r.recovered,
+            gaveUp: r.gave_up,
+            exhausted: r.exhausted,
+            nudges: r.nudges
+          }))
+        ),
+        query("ModelBehaviour")
+      ),
     ListActivity: ({ userId, chatId, before, limit }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ readonly id: string }>`

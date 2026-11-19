@@ -330,6 +330,26 @@ export const ContractRecord = Schema.Struct({
 })
 export type ContractRecord = typeof ContractRecord.Type
 
+/**
+ * How one model's story replies under the send tool met its contract (spec/REPLY-CONTRACT.md
+ * §3.6, milestone 4), over every reply that reached an outcome: how many the app had to ask to
+ * send, how many then sent, passed after asking, or never sent.
+ */
+export const ModelBehaviour = Schema.Struct({
+  connectionId: Schema.String,
+  connectionName: Schema.String,
+  modelId: Schema.String,
+  modelKey: Schema.String,
+  replies: Schema.Int,
+  nudged: Schema.Int,
+  recovered: Schema.Int,
+  gaveUp: Schema.Int,
+  exhausted: Schema.Int,
+  /** The asks to send, all of them. */
+  nudges: Schema.Int
+})
+export type ModelBehaviour = typeof ModelBehaviour.Type
+
 /** An agent run as the inspector shows it: the tools offered and every turn after the request. */
 export const RunTranscript = Schema.Struct({
   tools: Schema.Array(OfferedTool),

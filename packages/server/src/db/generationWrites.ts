@@ -233,11 +233,14 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         }
       }).pipe(transaction(sql, "RecordSentContext")),
 
-    SaveRolloutTranscript: ({ userId, rolloutId, transcript, steps }) =>
+    SaveRolloutTranscript: ({ userId, rolloutId, transcript, steps, contract }) =>
       Effect.gen(function* () {
         yield* ownedRollout(userId, rolloutId)
         yield* sql`UPDATE rollout_payloads SET transcript_json = ${transcript} WHERE rollout_id = ${rolloutId}`
         yield* sql`UPDATE rollouts SET step_count = ${steps}, updated_at = ${Date.now()} WHERE id = ${rolloutId}`
+        if (contract)
+          yield* sql`UPDATE rollouts SET contract_outcome = ${contract.outcome}, contract_nudges = ${contract.nudges}
+            WHERE id = ${rolloutId}`
       }).pipe(transaction(sql, "SaveRolloutTranscript")),
 
     FinishRollout: ({ userId, rolloutId, versionId, status, error }) =>
