@@ -15,6 +15,7 @@ import {
   SAME,
   SUMMARY,
   type SubagentCaps,
+  type ResolvedLimits,
   type SubagentLimits,
   type SubagentModelRow,
   type SubagentModels
@@ -47,7 +48,7 @@ export interface SubagentModelEntry {
 
 export interface SubagentModelsAt {
   readonly entries: ReadonlyArray<SubagentModelEntry>
-  readonly limits: Required<SubagentLimits>
+  readonly limits: ResolvedLimits
 }
 
 const stored = (sql: SqlClient.SqlClient, userId: string) =>

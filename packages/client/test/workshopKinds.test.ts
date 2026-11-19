@@ -70,7 +70,13 @@ describe("chat kind looks", () => {
 
   it("gives a workshop the capability chip in place of who replies; a story chat's strip is unchanged", () => {
     expect(strip("rp")).toEqual(["composer.model", "composer.preset", "composer.cache", "composer.next"])
-    expect(strip("workshop")).toEqual(["composer.model", "composer.preset", "composer.cache", "workshop.capabilities"])
+    expect(strip("workshop")).toEqual([
+      "composer.model",
+      "workshop.subagent-models",
+      "composer.preset",
+      "composer.cache",
+      "workshop.capabilities"
+    ])
   })
 
   it("enforces hidden controls on invocation and keeps story and workshop Send working", async () => {

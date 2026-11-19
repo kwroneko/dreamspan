@@ -28,6 +28,10 @@ const FORCED =
 const PRESENT_ABOUT =
   "Requires Separate contexts. Let each reply say which characters are there for it, from the next reply on this branch. Anyone it leaves out is marked away starting with that message, and is back once a reply names them again. Example: Wren's reply has Mira walk out and names only Wren and Tobin, so Mira is away until a later reply names her. Your own character and a narrator never change this way."
 
+/** Where a tool that starts subagents (the story helper) may send what it reads (spec/SUBAGENTS.md §5.2). */
+const SUBAGENT_CONSENT =
+  "It may send what it reads in this chat (messages, notes, lore) to the models picked for subagents, with the Subagents chip beside the model. By default that's only this chat's own model."
+
 /** What the request cap is, in requests and steps, never turns (a turn is a message here). */
 const CAP_ABOUT = `A reply that uses tools sends the model a request, gets back a tool call or the reply, and repeats. This caps how many requests one reply makes; the last one can't use tools, so the model writes the reply then. From 1 to ${MAX_REQUEST_CAP}; the default is ${DEFAULT_REQUEST_CAP}. Applies from the next reply on this branch. Example: at 3, a reply can look something up twice and must reply on the third request.`
 
@@ -118,7 +122,7 @@ export function ToolsSection({ session }: { session: ChatSession }) {
                 key={tool.id}
                 checked={tools.includes(tool.id)}
                 disabled={pending}
-                hint={`Click to ${tools.includes(tool.id) ? "disallow" : "allow"}: ${tool.explanation}.`}
+                hint={`Click to ${tools.includes(tool.id) ? "disallow" : "allow"}: ${tool.explanation}.${tool.subagents ? ` ${SUBAGENT_CONSENT}` : ""}`}
                 hintInline={false}
                 onCheckedChange={(next) =>
                   void write({
@@ -130,6 +134,11 @@ export function ToolsSection({ session }: { session: ChatSession }) {
                 {tool.explanation}
               </Checkbox>
             ))
+          )}
+          {available.tools.some((tool) => tool.subagents && tools.includes(tool.id)) && (
+            <p className="text-sm text-muted" data-subagent-consent="">
+              {SUBAGENT_CONSENT}
+            </p>
           )}
         </Fieldset>
       )}

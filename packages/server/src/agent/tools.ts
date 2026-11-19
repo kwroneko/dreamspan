@@ -87,6 +87,8 @@ export interface OfferContext {
   readonly leafSlotId: SlotId | null
   /** The run's reply contract: `several` lets it go on after its subagents report (spec/SUBAGENTS.md §3.2). */
   readonly contract?: string
+  /** The chat's kind (`rp`, `workshop`): which subagent types it offers. Absent: a workshop's. */
+  readonly kind?: string
 }
 
 /** The tools a new run offers, each as its `offerFor` makes it for this chat (absent: as registered). */
@@ -183,6 +185,12 @@ export interface RolloutTool<A = never> {
   readonly mcp?: McpToolRef
   /** False: never one of a story's reply tools (This chat's Tools list leaves it out), only a planner's. */
   readonly replyTool?: false
+  /**
+   * Its calls start subagents on the chat's subagent models (the story helper, spec/SUBAGENTS.md
+   * §9): This chat's Tools list says where it may send, and the subagent model chip shows while
+   * it's allowed.
+   */
+  readonly subagents?: true
   /** Model-facing, with its usage guidance: when to call it and when not to. */
   readonly description: string
   readonly parameters: TSchema

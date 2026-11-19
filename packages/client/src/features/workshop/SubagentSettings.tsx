@@ -9,6 +9,7 @@ import { AsyncResult } from "effect/reactivity"
 import { type FormEvent, useState } from "react"
 import {
   DEFAULT_LIMITS,
+  DEFAULT_STORY_CAPS,
   type ResolvedLimits,
   rowsFor,
   SAME,
@@ -105,7 +106,21 @@ const RUN_FIELDS: ReadonlyArray<RunField> = [
   }
 ]
 
-type LimitKey = CapField["key"] | RunField["key"]
+/** The story helper's own four, as the form's keys: "story.requests". */
+type StoryKey = `story.${CapField["key"]}`
+
+const STORY_FIELDS: ReadonlyArray<{ readonly key: StoryKey; readonly cap: CapField["key"] } & Omit<CapField, "key">> =
+  CAP_FIELDS.map((f) => ({
+    ...f,
+    key: `story.${f.key}` as StoryKey,
+    cap: f.key,
+    about:
+      f.key === "minutes"
+        ? "How long the story helper may run. The reply waits for it, so keep it short."
+        : f.about.replace("one subagent", "the story helper")
+  }))
+
+type LimitKey = CapField["key"] | RunField["key"] | StoryKey
 
 /** "30", or "" where it's the default. */
 const shown = (value: number | undefined) => (value === undefined ? "" : String(value))
@@ -127,9 +142,10 @@ const numbersOf = <K extends string>(
 
 function LimitsForm({ settings }: { settings: SubagentSettings }) {
   const action = useAction()
-  const initial = Object.fromEntries(
-    [...CAP_FIELDS, ...RUN_FIELDS].map((f) => [f.key, shown(settings.limits[f.key])])
-  ) as Draft<LimitKey>
+  const initial = Object.fromEntries([
+    ...[...CAP_FIELDS, ...RUN_FIELDS].map((f) => [f.key, shown(settings.limits[f.key])]),
+    ...STORY_FIELDS.map((f) => [f.key, shown(settings.limits.story?.[f.cap])])
+  ]) as Draft<LimitKey>
   const [draft, setDraft] = useState<Draft<LimitKey> | null>(null)
   const [saved, setSaved] = useState(false)
   const [invalid, setInvalid] = useState<string | null>(null)
@@ -149,23 +165,31 @@ function LimitsForm({ settings }: { settings: SubagentSettings }) {
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const { values: numbers, invalid: bad } = numbersOf(values, [...CAP_FIELDS, ...RUN_FIELDS])
-    if (bad) {
-      setInvalid(`${bad}: enter a number, or leave it empty for the default.`)
+    const { values: story, invalid: badStory } = numbersOf(values, STORY_FIELDS)
+    if (bad || badStory) {
+      setInvalid(`${bad ?? `Story helper, ${badStory}`}: enter a number, or leave it empty for the default.`)
       return
     }
-    void save(numbers as SubagentLimits)
+    const storyCaps = Object.fromEntries(
+      STORY_FIELDS.flatMap((f) => (story[f.key] === undefined ? [] : [[f.cap, story[f.key]]]))
+    )
+    void save({ ...numbers, ...(Object.keys(storyCaps).length ? { story: storyCaps } : {}) } as SubagentLimits)
   }
-  const field = (f: CapField | RunField) => (
-    <Field key={f.key} label={f.label} about={f.about} description={`Default: ${DEFAULT_LIMITS[f.key]}`}>
-      <Input
-        inputMode={f.integer ? "numeric" : "decimal"}
-        name={f.key}
-        value={values[f.key]}
-        placeholder={String(DEFAULT_LIMITS[f.key as keyof ResolvedLimits])}
-        onChange={(event) => edit(f.key, event.currentTarget.value)}
-      />
-    </Field>
-  )
+  const field = (f: (CapField | RunField | (typeof STORY_FIELDS)[number]) & { readonly key: LimitKey }) => {
+    const fallback =
+      "cap" in f ? DEFAULT_STORY_CAPS[f.cap] : DEFAULT_LIMITS[f.key as Exclude<keyof ResolvedLimits, "story">]
+    return (
+      <Field key={f.key} label={f.label} about={f.about} description={`Default: ${fallback}`}>
+        <Input
+          inputMode={f.integer ? "numeric" : "decimal"}
+          name={f.key}
+          value={values[f.key]}
+          placeholder={String(fallback)}
+          onChange={(event) => edit(f.key, event.currentTarget.value)}
+        />
+      </Field>
+    )
+  }
   return (
     <form onSubmit={submit} className="flex flex-col gap-4" data-subagent-limits="">
       <fieldset className="flex flex-col gap-3">
@@ -179,6 +203,14 @@ function LimitsForm({ settings }: { settings: SubagentSettings }) {
       <fieldset className="flex flex-col gap-3">
         <legend className="mb-2 text-sm font-medium text-text">Each reply and your account</legend>
         <div className="grid gap-3 sm:grid-cols-2">{RUN_FIELDS.map(field)}</div>
+      </fieldset>
+      <fieldset className="flex flex-col gap-3" data-subagent-story-limits="">
+        <legend className="mb-2 text-sm font-medium text-text">The story helper</legend>
+        <p className="text-sm text-muted">
+          In a story whose tools allow it, a reply can ask a helper to look something up or check its draft. The reply
+          waits for it, so its limits are lower. A model's own limits can only lower these.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">{STORY_FIELDS.map(field)}</div>
       </fieldset>
       {invalid && <Alert tone="danger">{invalid}</Alert>}
       <ErrorAlert error={action.error} title="Not saved" />
@@ -378,7 +410,7 @@ export function SubagentModelsSection() {
     <Card>
       <CardHeader
         title="Subagent models"
-        description="Pick them with the subagent chip beside the model chip in a workshop."
+        description="Pick them with the subagent chip beside the model chip in a workshop, or in a story whose tools allow the story helper."
         about="The assistant chooses one of the picked models for each subagent it starts, by its name, reading the line beside it. Picking a model lets subagents send what they read to its connection."
       />
       {settings ? <ModelsForm settings={settings} /> : <p className="text-sm text-muted">Loading…</p>}

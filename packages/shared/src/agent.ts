@@ -394,7 +394,12 @@ const ReplyToolInfo = Schema.Struct({
   label: Schema.String,
   /** What it lets the model do, for the user, as the settings' checkbox label: "Search the chat's earlier messages". */
   explanation: Schema.String,
-  effect: EffectClass
+  effect: EffectClass,
+  /**
+   * Its calls start subagents on the chat's subagent models (the story helper): allowing it lets
+   * them send what they read there, so the list says so and the subagent model chip shows.
+   */
+  subagents: Schema.optionalKey(Schema.Boolean)
 })
 
 export const ReplyTools = Schema.Struct({

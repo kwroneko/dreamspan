@@ -21,6 +21,7 @@ import { type ModelChoice, useModelChoiceList } from "../chat/modelChoices.ts"
 import { ChipText, chipClass, LoadingChip, PopoverRow } from "../chat/nextReplyStrip.tsx"
 import type { ChatSession } from "../chat/session.ts"
 import { PickerLockRow, PickerPopover, PickerSearch } from "../pickers/PickerParts.tsx"
+import { useReplyTools } from "../chat/agent/replyTools.ts"
 import {
   capabilitiesAtom,
   newCapabilitiesAtom,
@@ -287,6 +288,20 @@ export function SavedSubagentModelsChip({ session }: { session: ChatSession }) {
   const result = useAtomValue(capabilitiesAtom(session.chatId))
   if (!AsyncResult.isSuccess(result)) return <LoadingChip label="Subagent models" />
   return subagentsAllowed(result.value) ? <SubagentModelsChip session={session} /> : null
+}
+
+/**
+ * A story's chip (spec/SUBAGENTS.md §9): shown while its tools are on and allow a tool that starts
+ * subagents (the story helper), which is off by default.
+ */
+export function StorySubagentModelsChip({ session }: { session: ChatSession }) {
+  const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
+  const { tools } = useReplyTools(session)
+  if (!cast || cast.agentEnabled !== true || !tools) return null
+  const allowed = cast.agentTools ?? tools.defaultTools
+  return tools.tools.some((t) => t.subagents && allowed.includes(t.id)) ? (
+    <SubagentModelsChip session={session} />
+  ) : null
 }
 
 /** A workshop not made yet: the account's picks, shown while its pending grants leave subagents allowed. */

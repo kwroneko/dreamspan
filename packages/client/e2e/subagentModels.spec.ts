@@ -139,10 +139,10 @@ for (const width of [1440, 390])
 
       const limits = page.locator("[data-subagent-limits]")
       await limits.getByLabel("Running at once in your account", { exact: true }).fill("3")
-      await limits.getByLabel("Tokens", { exact: true }).fill("lots")
+      await limits.getByRole("group", { name: "Each subagent" }).getByLabel("Tokens", { exact: true }).fill("lots")
       await limits.getByRole("button", { name: "Save" }).click()
       await expect(limits.getByRole("alert")).toContainText("Tokens: enter a number")
-      await limits.getByLabel("Tokens", { exact: true }).fill("")
+      await limits.getByRole("group", { name: "Each subagent" }).getByLabel("Tokens", { exact: true }).fill("")
       await limits.getByRole("button", { name: "Save" }).click()
       await expect(limits.getByRole("status").filter({ hasText: "Saved." })).toBeVisible()
       expect(await admin((api) => Effect.map(api.GetSubagentSettings({}), (s) => s.limits))).toEqual({

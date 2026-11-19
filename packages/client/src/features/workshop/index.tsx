@@ -18,8 +18,8 @@ import { replyGuards } from "../chat/replyGuards.ts"
 import { appTools } from "../shell.tsx"
 import { CapabilityChip } from "./CapabilityChip.tsx"
 import { CHANGES } from "./effects.ts"
-import { CAPABILITY_CHIP, SUBAGENT_MODELS_CHIP, workshopLook } from "./kinds.ts"
-import { SavedSubagentModelsChip } from "./SubagentModelsChip.tsx"
+import { CAPABILITY_CHIP, STORY_SUBAGENT_MODELS_CHIP, SUBAGENT_MODELS_CHIP, workshopLook } from "./kinds.ts"
+import { SavedSubagentModelsChip, StorySubagentModelsChip } from "./SubagentModelsChip.tsx"
 import { SubagentLimitsSection, SubagentModelsSection } from "./SubagentSettings.tsx"
 import { assistantToolsSections } from "../assistantTools/index.tsx"
 import { askBeforeReply } from "./regenerateWarning.ts"
@@ -104,6 +104,20 @@ export const register = () => [
     placement: "strip",
     available: ({ view }) => kindShows(view.chat?.kind, SUBAGENT_MODELS_CHIP),
     component: ({ session }) => <SavedSubagentModelsChip session={session} />
+  }),
+  // In a story, the same place, while its tools allow the story helper (spec/SUBAGENTS.md §9).
+  composerControls.register({
+    id: STORY_SUBAGENT_MODELS_CHIP,
+    order: 15,
+    placement: "strip",
+    // Where the workshop's chip isn't, with tools on and a chosen tools list (the default list
+    // starts no subagents); the chip itself checks that an allowed tool does.
+    available: ({ view }) =>
+      view.chat != null &&
+      !kindShows(view.chat.kind, SUBAGENT_MODELS_CHIP) &&
+      view.cast?.agentEnabled === true &&
+      view.cast.agentTools != null,
+    component: ({ session }) => <StorySubagentModelsChip session={session} />
   }),
   // After the cache chip, where Next stands in a story chat.
   composerControls.register({

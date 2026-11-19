@@ -561,7 +561,8 @@ export const makeAgentHandlers = Effect.gen(function* () {
             id: tool.id,
             label: tool.label,
             explanation: tool.explanation ?? tool.label,
-            effect: tool.effect
+            effect: tool.effect,
+            ...(tool.subagents ? { subagents: true } : {})
           }))
         }
       }),
