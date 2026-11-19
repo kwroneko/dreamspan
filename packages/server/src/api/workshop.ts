@@ -18,7 +18,7 @@ import { Effect } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"
 import { ExecutionRegistry, toolForKind } from "../execution.ts"
-import { COMMANDS_UNSANDBOXED, MCP_CAPABILITY } from "../agent/capabilities.ts"
+import { COMMANDS_UNSANDBOXED, consentTarget, MCP_CAPABILITY } from "../agent/capabilities.ts"
 import { mcpHostOf } from "../agent/tools/mcp.ts"
 import { type ChatState, foldState } from "@dreamspan/shared/state.ts"
 import { capabilityView, SIDE_STORY_READ_MODE } from "../agent/capabilities.ts"
@@ -209,6 +209,13 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       const grants = new Map<string, CapabilityMode>(
         (yield* reader.WorkshopGrants({ userId, chatId, now: Date.now() })).map((g) => [g.capability, g.mode])
       )
+      // A choice that needs a consent counts only with the consent recorded for its text now.
+      for (const capability of [...grants.keys()]) {
+        const consent = consentTarget(execution, capability)
+        if (!consent || grants.get(capability) === "off") continue
+        const recorded = yield* reader.WorkshopGrants({ userId, chatId, now: Date.now(), target: consent })
+        if (!recorded.some((g) => g.capability === capability && g.mode === "allow")) grants.delete(capability)
+      }
       const story =
         state.workshopAttached === undefined
           ? null
@@ -255,7 +262,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         return yield* newCapabilitiesOf(userId, attachTo)
       }).pipe(internal("ListNewWorkshopCapabilities")),
     // Only the user's own request reaches this: no tool is given these operations.
-    SetWorkshopGrant: ({ chatId, capability, mode, target }) =>
+    SetWorkshopGrant: ({ chatId, capability, mode, target, consented }) =>
       Effect.gen(function* () {
         const userId = (yield* CurrentUser).id
         const offered = (yield* capabilitiesOf(userId, chatId)).find(
@@ -264,8 +271,22 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         if (!offered) return yield* new GrantRefused({ message: "This workshop doesn't offer that." })
         if (mode !== null && !offered.modes.includes(mode))
           return yield* new GrantRefused({ message: `“${offered.label}” can't be set that way.` })
-        yield* writer.SetWorkshopGrant({ userId, chatId, capability, mode, ...(target ? { target } : {}) })
+        // A row with a consent (§3.7) is turned on only with the user's agreement, recorded here.
+        const turnsOn = (mode ?? offered.defaultMode) !== "off"
+        const consent = offered.confirm && !target ? consentTarget(execution, capability) : null
+        if (offered.confirm && turnsOn && consented !== true)
+          return yield* new GrantRefused({ message: `Turning on “${offered.label}” needs your agreement first.` })
+        yield* writer.SetWorkshopGrant({
+          userId,
+          chatId,
+          capability,
+          mode,
+          ...(target ? { target } : {}),
+          ...(consent && turnsOn ? { consent } : {})
+        })
         if (mode === "off") cancelCapability(chatId, capability, target)
+        // Commands running with what this took away stop now.
+        yield* files.recheckCommands([userId])
         return yield* capabilitiesOf(userId, chatId)
       }).pipe(internal("SetWorkshopGrant")),
     AnswerToolApproval: ({ rolloutId, toolCallId, digest, answer, note }) =>

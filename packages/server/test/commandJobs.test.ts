@@ -5,7 +5,7 @@
 // one; a folder another account shared is bound read-only at /files/Shared/<owner>/<folder>,
 // readable by the file tools, never made in the account's own Files, and left out when its
 // owner swaps it for a link; Reset empties the home folder. Synthetic data and a scripted model.
-import { mkdir, readdir, rename, symlink, writeFile } from "node:fs/promises"
+import { mkdir, readdir, rename, stat, symlink, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { assert, it } from "@effect/vitest"
@@ -119,13 +119,15 @@ it.live.skipIf(!commands)(
         await mkdir(join(owner, "notes"), { recursive: true })
         await writeFile(join(owner, "notes/hello.txt"), "hello from mara\n")
       })
+      // A share is bound to its folder's inode (files/sharedFolders.ts).
+      const notesInode = (yield* Effect.promise(() => stat(join(owner, "notes")))).ino
       yield* fixtureSql(config.dataDir, [
         {
           sql: "INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('owner-mara', 'mara', 'Mara', 'user', 1)"
         },
         {
-          sql: "INSERT INTO file_shares (id, owner_user_id, path, inode, grantee_user_id, mode, created_at) VALUES ('share-1', 'owner-mara', '/files/notes', NULL, ?, 'view', 1)",
-          params: [me.id]
+          sql: "INSERT INTO file_shares (id, owner_user_id, path, inode, grantee_user_id, mode, created_at) VALUES ('share-1', 'owner-mara', '/files/notes', ?, ?, 'view', 1)",
+          params: [notesInode, me.id]
         }
       ])
       const chat = yield* api.CreateWorkshop({ title: "Jobs" })

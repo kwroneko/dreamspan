@@ -126,14 +126,20 @@ export interface Scan {
  * The account's tree as size, times and inode per path, within a budget. Each folder is opened
  * by the no-follow walk, so a link swapped in for a folder is never listed through.
  */
-export const scanTree = async (root: string, budgetMs = 2000, maxEntries = 50_000): Promise<Scan> => {
+export const scanTree = async (
+  root: string,
+  budgetMs = 2000,
+  maxEntries = 50_000,
+  /** The scanned folder's components below `root`, each walked without following links. */
+  base: ReadonlyArray<string> = []
+): Promise<Scan> => {
   const entries = new Map<string, Seen>()
   const deadline = Date.now() + budgetMs
   const queue: Array<ReadonlyArray<string>> = [[]]
   while (queue.length) {
     const segments = queue.shift()!
     if (Date.now() > deadline || entries.size >= maxEntries) return { entries, partial: true }
-    const listed = await listFolder(root, segments, maxEntries).catch(() => null)
+    const listed = await listFolder(root, [...base, ...segments], maxEntries).catch(() => null)
     if (!listed) continue
     for (const entry of listed.entries) {
       const path = [...segments, entry.name].join("/")

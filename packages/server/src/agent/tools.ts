@@ -193,6 +193,11 @@ export interface RolloutTool<A = never> {
   readonly effect: EffectClass
   /** Mandatory consent, or a separately validated reversible rollback. Off still refuses. */
   readonly approval?: "always" | "rollback"
+  /**
+   * These arguments always ask, whatever the capability's mode, and only this one call can be
+   * allowed (no "Allow in this workshop"): a commit of a server plugin's working copy.
+   */
+  readonly alwaysAsk?: (args: A) => boolean
   readonly adminOnly?: true
   /** A tool of an MCP server (spec/MCP.md §4.2): which, frozen with the offer. */
   readonly mcp?: McpToolRef
@@ -241,7 +246,10 @@ export interface RolloutTool<A = never> {
     context: ToolContext,
     args: A
   ) => Effect.Effect<
-    Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt" | "storyScope" | "plugin" | "presentation" | "rerun">,
+    Pick<
+      ApprovalPrompt,
+      "title" | "rows" | "changes" | "storyAt" | "storyScope" | "plugin" | "presentation" | "rerun" | "once"
+    >,
     unknown
   >
   readonly execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput>
@@ -277,6 +285,7 @@ export const USER_ONLY_WRITES = [
   "SetPluginPins",
   "CompletePluginUndo",
   "SetWorkshopGrant",
+  "ClearCapabilityGrants",
   "AnswerToolApproval",
   "RequestToolApproval",
   "SettleToolApproval"

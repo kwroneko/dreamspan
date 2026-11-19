@@ -306,7 +306,12 @@ export class WorkshopApi extends RpcGroup.make(
       capability: Schema.String,
       mode: Schema.NullOr(CapabilityMode),
       /** The row's `target` (an MCP server), when it has one. */
-      target: Schema.optionalKey(Schema.String)
+      target: Schema.optionalKey(Schema.String),
+      /**
+       * The user agreed to the row's `confirm` just now. Required to turn on a row that has one;
+       * the server records it with the grant.
+       */
+      consented: Schema.optionalKey(Schema.Boolean)
     },
     success: Schema.Array(WorkshopCapability),
     error: Schema.Union([NotFound, GrantRefused, ServerError])

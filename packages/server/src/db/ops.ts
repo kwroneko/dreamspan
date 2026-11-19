@@ -2869,7 +2869,9 @@ const WriteOpsLibraryOwn = RpcGroup.make(
           rolloutId: Schema.optionalKey(Schema.String),
           toolCallId: Schema.optionalKey(Schema.String)
         })
-      )
+      ),
+      /** The account that acted, when not the owner (a command through a folder shared to edit). */
+      actorUserId: Schema.optionalKey(UserId)
     },
     success: Schema.Array(Schema.String),
     error: StorageError
@@ -2987,10 +2989,24 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       capability: Schema.String,
       mode: Schema.NullOr(CapabilityMode),
       /** One target of the capability (an MCP server); absent: the capability's own standing. */
-      target: Schema.optionalKey(Schema.String)
+      target: Schema.optionalKey(Schema.String),
+      /**
+       * The user agreed to the capability's consent: recorded with the grant as a row of this
+       * target (capabilities.ts `consentTarget`). Any change of the standing forgets it.
+       */
+      consent: Schema.optionalKey(Schema.String)
     },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Forgets every workshop's grants of a capability, consents included (the server no longer
+   * allows it: ALLOW_UNSANDBOXED_COMMANDS withdrawn). Answers how many rows went.
+   */
+  Rpc.make("ClearCapabilityGrants", {
+    payload: { capability: Schema.String },
+    success: Schema.Int,
+    error: StorageError
   }),
   /** A tool call starts waiting for the user: its approval row, pending. */
   Rpc.make("RequestToolApproval", {

@@ -17,7 +17,7 @@ import { eventually, finished, generateReply } from "./support/generation.ts"
 import { unquoteToolData } from "./support/toolData.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { linuxBwrap } from "../src/sandbox/linuxBwrap.ts"
-import { makeHostFolders } from "../src/files/hostFolders.ts"
+import { appPlacesOf, makeHostFolders } from "../src/files/hostFolders.ts"
 
 it.live("keeps allowed roots only and refuses links, other places and the app's own folders", () =>
   Effect.promise(async () => {
@@ -53,6 +53,29 @@ it.live("keeps allowed roots only and refuses links, other places and the app's 
     assert.strictEqual((await folders.list(join(root, "project"))).parent, root)
     assert.isTrue(await folders.allows(join(root, "project/src/a.txt")))
     assert.isFalse(await folders.allows(join(data, "x")))
+  })
+)
+
+it.live("refuses the folders holding the app's secret files, wherever they are", () =>
+  Effect.promise(async () => {
+    const root = tempDir("hostsecret")
+    await mkdir(join(root, "srv/dreamspan"), { recursive: true })
+    await mkdir(join(root, "srv/other"), { recursive: true })
+    await mkdir(join(root, "opt/admin"), { recursive: true })
+    await writeFile(join(root, "srv/dreamspan/secret.key"), "k")
+    await writeFile(join(root, "opt/admin/password"), "p")
+    const places = appPlacesOf({
+      dataDir: tempDir("hostsecret-data"),
+      filesDir: tempDir("hostsecret-files"),
+      appRoot: tempDir("hostsecret-app"),
+      secretFiles: [join(root, "srv/dreamspan/secret.key"), join(root, "opt/admin/password"), null]
+    })
+    // A root around a secret's folder is left out; one beside it is kept.
+    const folders = makeHostFolders([join(root, "srv"), join(root, "srv/other"), join(root, "opt")], places)
+    assert.deepStrictEqual(await folders.roots(), [join(root, "srv/other")])
+    // Nor can the secret's folder itself be chosen.
+    const inside = makeHostFolders([join(root, "srv/dreamspan")], places)
+    assert.deepStrictEqual(await inside.roots(), [])
   })
 )
 
@@ -119,7 +142,19 @@ it.live.skipIf(!commands)(
             if (!step) return sse(res, completionChunks(["Done."], {}))
             if (done === 3)
               await Effect.runPromise(
-                api.SetWorkshopGrant({ chatId: chatId as never, capability: "commands.unsandboxed", mode: "allow" })
+                Effect.gen(function* () {
+                  // Without the user's agreement, the server refuses to turn it on (§3.7).
+                  const refused = yield* api
+                    .SetWorkshopGrant({ chatId: chatId as never, capability: "commands.unsandboxed", mode: "allow" })
+                    .pipe(Effect.flip)
+                  if (refused._tag !== "GrantRefused") throw new Error(`expected GrantRefused, got ${refused._tag}`)
+                  yield* api.SetWorkshopGrant({
+                    chatId: chatId as never,
+                    capability: "commands.unsandboxed",
+                    mode: "allow",
+                    consented: true
+                  })
+                })
               )
             sse(res, call(step[0], step[1], `host_${done}`))
           })

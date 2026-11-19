@@ -1,6 +1,6 @@
 // The Files usage line (spec/FILES-AND-ENVIRONMENT.md §1.2, §3.5, §3.6): "1.2 GB of 10 GB used",
 // opening a popover with what makes it up (files, earlier versions, the bin, the assistant's
-// home folder) and what commands moved over the internet, and Reset the home folder, which
+// home folder, its commands' kept output) and what commands moved over the internet, and Reset the home folder, which
 // empties the folder commands keep their installs and settings in (§3.6). Your files stay.
 import { useState } from "react"
 import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
@@ -23,6 +23,11 @@ const rows = (usage: FilesUsage) => [
     label: "Assistant's home folder",
     bytes: usage.homeBytes,
     about: "Where the assistant's commands keep what they install and their settings."
+  },
+  {
+    label: "Command output",
+    bytes: usage.outputBytes,
+    about: "What the assistant's commands printed, kept for a day so it can read it again."
   }
 ]
 

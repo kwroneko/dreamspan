@@ -14,6 +14,22 @@ const LIMITS = { file: 512 * 1024, bytes: 8 * 1024 * 1024, files: 256, depth: 24
 /** Left out of a commit from the copy: the agent's own Git and installed packages. */
 const LEFT_OUT: ReadonlySet<string> = new Set([".git", "node_modules"])
 
+/** Where instance plugins' working copies are, below the top of an admin's Files. */
+const SERVER_COPIES = ["Plugins", "Server"]
+
+/**
+ * Why a folder (its components below the top of Files) can't be shared with another account;
+ * null: it can. Not the whole Files, and nothing holding or inside the instance plugins' working
+ * copies: those become server code when committed (spec/FILES-AND-ENVIRONMENT.md §5.3).
+ */
+export const folderShareRefusal = (segments: ReadonlyArray<string>): string | null => {
+  if (segments.length === 0) return "Your whole files can't be shared. Share a folder in them."
+  const n = Math.min(segments.length, SERVER_COPIES.length)
+  if (segments.slice(0, n).every((name, i) => name === SERVER_COPIES[i]))
+    return "Plugins/Server holds the server plugins' working copies, so it can't be shared, nor any folder around or inside it."
+  return null
+}
+
 const copySegments = (target: PluginCopyTarget) =>
   target.scope === "instance" ? ["Plugins", "Server", target.id] : ["Plugins", target.id]
 

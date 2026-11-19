@@ -41,8 +41,8 @@ function CapabilityRow({
   error = null
 }: {
   capability: WorkshopCapability
-  /** A choice of mode; null goes back to the default. */
-  choose: (mode: CapabilityMode | null) => void
+  /** A choice of mode; null goes back to the default. `consented`: the user agreed to its consent. */
+  choose: (mode: CapabilityMode | null, consented?: boolean) => void
   pending?: boolean
   error?: ReactNode
 }) {
@@ -109,7 +109,7 @@ function CapabilityRow({
           confirmHint="Turns it on for this workshop."
           cancelLabel={capability.confirm.cancelLabel}
           onConfirm={() => {
-            if (asking !== null) choose(asking)
+            if (asking !== null) choose(asking, true)
             setAsking(null)
           }}
         />
@@ -121,14 +121,15 @@ function CapabilityRow({
 /** A saved workshop's row: each choice is its grant at once. */
 function SavedCapabilityRow({ chatId, capability }: { chatId: ChatId; capability: WorkshopCapability }) {
   const action = useAction()
-  const choose = (mode: CapabilityMode | null) =>
+  const choose = (mode: CapabilityMode | null, consented?: boolean) =>
     void action.run(
       (client) =>
         client("SetWorkshopGrant", {
           chatId,
           capability: capability.id,
           mode,
-          ...(capability.target ? { target: capability.target } : {})
+          ...(capability.target ? { target: capability.target } : {}),
+          ...(consented ? { consented } : {})
         }),
       [CAPABILITIES_KEY]
     )

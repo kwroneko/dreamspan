@@ -4,7 +4,7 @@
 // Files quota and version retention (files/quota.ts), the commands' refused public addresses
 // (sandbox/network.ts) and the sandbox's start (stale run folders, which cgroup limiter).
 import { join } from "node:path"
-import { Context, Duration, Effect, Layer, Schedule } from "effect"
+import { Context, Duration, Effect, Layer, Option, Schedule } from "effect"
 import type { User, UserId } from "@dreamspan/shared/domain.ts"
 import { FILES_TOP, foldersShowing } from "@dreamspan/shared/files.ts"
 import { Notices } from "../chat/Notices.ts"
@@ -13,7 +13,8 @@ import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { ExecutionRegistry } from "../execution.ts"
 import { MediaHolds } from "../importer/MediaHolds.ts"
-import { FILE_TOOLS, makeFileTools } from "../agent/tools/files.ts"
+import { DISK_RESERVE_BYTES, FILE_TOOLS, makeFileTools } from "../agent/tools/files.ts"
+import { COMMANDS_UNSANDBOXED } from "../agent/capabilities.ts"
 import { makeAddressSet } from "../net/addressSet.ts"
 import { parsePublicOrigins } from "../net/exposure.ts"
 import { commandSandboxes } from "../sandbox/registry.ts"
@@ -25,7 +26,7 @@ import { makeFilesQuota, parseByteSize, type FilesQuota } from "./quota.ts"
 import { prepareAppSource } from "./appSource.ts"
 import { makePluginCopies } from "./pluginCopies.ts"
 import { makeCommandOutputs } from "./commandOutput.ts"
-import { makeHostFolders, type HostFolders } from "./hostFolders.ts"
+import { appPlacesOf, makeHostFolders, type HostFolders } from "./hostFolders.ts"
 import { APP_ROOT } from "./appSource.ts"
 
 export class WorkshopFiles extends Context.Service<
@@ -64,6 +65,14 @@ export class WorkshopFiles extends Context.Service<
     readonly hostFolders: HostFolders
     /** ALLOW_UNSANDBOXED_COMMANDS is set and a `none` sandbox is registered (§3.7). */
     readonly unsandboxedAllowed: boolean
+    /**
+     * Checks the running commands (of these accounts, else all) again and stops at once those
+     * whose account, workshop grant, host folder or shared folders no longer allow them (§3.6,
+     * §3.7, §1.4). Call it after anything that takes one of those away: a grant turned off, an
+     * account disabled or no longer an admin, a share stopped (with the grantee's id). Each is
+     * checked every few seconds anyway.
+     */
+    readonly recheckCommands: (userIds?: ReadonlyArray<string>) => Effect.Effect<number>
   }
 >()("rp/files/WorkshopFiles") {
   static readonly layer = Layer.effect(
@@ -84,9 +93,19 @@ export class WorkshopFiles extends Context.Service<
         filesDir: config.filesDir || join(config.dataDir, "files"),
         homesDir: join(config.dataDir, "env-home")
       }
-      // Host folders (§3.7): never the app's data, Files or code.
-      const hostFolders = makeHostFolders(config.hostFolders, [config.dataDir, dirs.filesDir, APP_ROOT], (line) =>
-        Effect.runFork(Effect.logWarning(line))
+      // Host folders (§3.7): never the app's data, Files or code, nor the folders holding its
+      // secrets wherever they are configured (the key that encrypts connection secrets, the
+      // first admin's password) or the client it serves.
+      const hostFolders = makeHostFolders(
+        config.hostFolders,
+        appPlacesOf({
+          dataDir: config.dataDir,
+          filesDir: dirs.filesDir,
+          appRoot: APP_ROOT,
+          clientDist: config.clientDist,
+          secretFiles: [Option.getOrNull(config.secretKeyFile), Option.getOrNull(config.adminPasswordFile)]
+        }),
+        (line) => Effect.runFork(Effect.logWarning(line))
       )
       const quota = makeFilesQuota({
         reader,
@@ -94,7 +113,12 @@ export class WorkshopFiles extends Context.Service<
         defaultBytes,
         folders: (userId) => {
           const env = accountEnv(dirs, userId)
-          return { filesRoot: env.filesRoot, home: env.home, bin: join(dirs.filesDir, BIN_FOLDER, userId) }
+          return {
+            filesRoot: env.filesRoot,
+            home: env.home,
+            bin: join(dirs.filesDir, BIN_FOLDER, userId),
+            output: join(config.dataDir, "command-output", userId)
+          }
         }
       })
       /** A stored folder found again (workingFolder.ts), through the app's own moves too. */
@@ -132,7 +156,7 @@ export class WorkshopFiles extends Context.Service<
           }
         ))
       // Commands' whole output (§5.1), and what they moved over the internet (§3.5, counted only).
-      const outputs = makeCommandOutputs(config.dataDir)
+      const outputs = makeCommandOutputs(config.dataDir, { reserveBytes: DISK_RESERVE_BYTES })
       const networkSince = Date.now()
       const network = new Map<string, number>()
       const files = makeFileTools({
@@ -156,6 +180,21 @@ export class WorkshopFiles extends Context.Service<
       yield* execution.subagentWorkspaces.register(files.workspaces)
       // Background commands end with the app.
       yield* Effect.addFinalizer(() => Effect.sync(() => files.stopAll()))
+      // Running commands checked again every few seconds, whatever took their grants away; ended
+      // background commands forgotten with their output.
+      yield* files.recheckCommands().pipe(
+        Effect.catchCause((cause) => Effect.logWarning("checking running commands failed", cause)),
+        Effect.repeat(Schedule.spaced(Duration.seconds(5))),
+        Effect.forkScoped
+      )
+      // Without ALLOW_UNSANDBOXED_COMMANDS, earlier choices to run without a sandbox go, with
+      // their consents: setting it again later doesn't bring them back (§3.7).
+      if (!config.allowUnsandboxedCommands) {
+        const cleared = yield* writer
+          .ClearCapabilityGrants({ capability: COMMANDS_UNSANDBOXED })
+          .pipe(Effect.orElseSucceed(() => 0))
+        if (cleared > 0) yield* Effect.logInfo(`cleared ${cleared} choices to run commands without a sandbox`)
+      }
       // Plugin working copies in Files (§5.3), for the plugin tools.
       yield* execution.pluginWorkingCopies.register(
         makePluginCopies({
@@ -277,7 +316,15 @@ export class WorkshopFiles extends Context.Service<
             : locate(userId, stored),
         hostFolders,
         unsandboxedAllowed:
-          config.allowUnsandboxedCommands && commandSandboxes.list().some((sandbox) => sandbox.unsandboxed)
+          config.allowUnsandboxedCommands && commandSandboxes.list().some((sandbox) => sandbox.unsandboxed),
+        recheckCommands: (userIds) =>
+          files
+            .recheckCommands(userIds)
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("checking running commands failed", cause).pipe(Effect.as(0))
+              )
+            )
       }
     })
   )

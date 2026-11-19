@@ -2,13 +2,19 @@
 // and a tail; the app keeps the whole output, up to 16 MiB, so `bash_output` can page through it,
 // and a background command's output is read from here as it runs. Files live outside every
 // account's Files and outside the sandbox, at DATA_DIR/command-output/<userId>/<id>.log, and go
-// after a day (at most 200 per account, oldest first). Main-thread async file I/O only.
+// after a day (at most 200 per account, oldest first). They count in the account's Files quota
+// (files/quota.ts, `outputBytes`), and nothing more is kept while the data folder's disk is below
+// the commands' reserve. Main-thread async file I/O only.
 import { randomBytes } from "node:crypto"
-import { mkdir, open, readdir, rm, stat, truncate, type FileHandle } from "node:fs/promises"
+import { mkdir, open, readdir, rm, stat, statfs, truncate, type FileHandle } from "node:fs/promises"
 import { join } from "node:path"
 
 const OUTPUT_KEEP_BYTES = 16 * 2 ** 20
-const KEEP_MS = 24 * 3600_000
+/** How long a command's output is kept, and what the app remembers of a background command. */
+export const OUTPUT_KEEP_MS = 24 * 3600_000
+const KEEP_MS = OUTPUT_KEEP_MS
+/** While keeping, the disk's free space is looked at again after this many bytes. */
+const RECHECK_BYTES = 2 ** 20
 const KEEP_PER_ACCOUNT = 200
 const ID = /^cmd_[a-f0-9]{16}$/
 
@@ -32,8 +38,24 @@ export interface OutputPage {
   readonly cut: boolean
 }
 
-export const makeCommandOutputs = (dataDir: string) => {
+export interface CommandOutputOptions {
+  /** Free bytes kept on the data folder's disk: below it, no output is kept. Absent: none. */
+  readonly reserveBytes?: number
+  /** Free bytes on the disk holding `path` (a test seam). */
+  readonly freeBytes?: (path: string) => Promise<number>
+}
+
+const diskFree = async (path: string) => {
+  const fs = await statfs(path)
+  return fs.bavail * fs.bsize
+}
+
+export const makeCommandOutputs = (dataDir: string, options: CommandOutputOptions = {}) => {
   const base = join(dataDir, "command-output")
+  const freeBytes = options.freeBytes ?? diskFree
+  /** Whether the disk has room past the reserve; a failed check counts as room (the sandbox watches too). */
+  const roomy = async (path: string) =>
+    options.reserveBytes === undefined || (await freeBytes(path).catch(() => Infinity)) >= options.reserveBytes
   const folderOf = (userId: string) => {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(userId)) throw new Error("Unexpected user id.")
     return join(base, userId)
@@ -49,10 +71,23 @@ export const makeCommandOutputs = (dataDir: string) => {
     let kept = 0
     let chain: Promise<unknown> = Promise.resolve()
     let cut = false
+    // Below the disk's reserve nothing is kept; looked at again as the output grows.
+    let low = !(await roomy(folder))
+    let checkedAt = 0
     void prune(userId)
     return {
       id,
       write: (chunk) => {
+        if (!low && kept - checkedAt >= RECHECK_BYTES) {
+          checkedAt = kept
+          chain = chain.then(async () => {
+            if (!(await roomy(folder))) low = true
+          })
+        }
+        if (low) {
+          cut = true
+          return
+        }
         const room = OUTPUT_KEEP_BYTES - kept
         if (room <= 0) {
           cut = true
@@ -62,13 +97,24 @@ export const makeCommandOutputs = (dataDir: string) => {
         if (part.length < chunk.length) cut = true
         kept += part.length
         const copy = Buffer.from(part)
-        chain = chain.then(() => file.write(copy)).catch(() => undefined)
+        chain = chain
+          .then(() => {
+            // The disk went low after this was queued: it isn't kept.
+            if (low) {
+              cut = true
+              return
+            }
+            return file.write(copy)
+          })
+          .catch(() => undefined)
       },
       end: async (bytes) => {
         await chain
         await file.close().catch(() => undefined)
-        if (bytes < kept) await truncate(path, bytes).catch(() => undefined)
-        kept = Math.min(kept, bytes)
+        // What's on disk may be shorter than what was queued (the disk went low): never extended.
+        const size = (await stat(path).catch(() => null))?.size ?? 0
+        if (bytes < size) await truncate(path, bytes).catch(() => undefined)
+        kept = Math.min(size, bytes)
         cutAt.set(`${userId}/${id}`, cut || bytes > OUTPUT_KEEP_BYTES)
       },
       kept: () => kept

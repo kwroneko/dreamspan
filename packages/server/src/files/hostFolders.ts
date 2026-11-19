@@ -68,6 +68,25 @@ const appPlaces = (places: ReadonlyArray<string>) => ({
   around: [tmpdir(), process.env.DREAMSPAN_SANDBOX_RUNTIME ?? ""].filter((place) => place !== "")
 })
 
+/**
+ * The app's own places a host folder may not overlap: its data, Files and code, the client it
+ * serves, and the folders holding its secret files (the key that encrypts connection secrets,
+ * the first admin's password) wherever they are configured.
+ */
+export const appPlacesOf = (app: {
+  readonly dataDir: string
+  readonly filesDir: string
+  readonly appRoot: string
+  readonly clientDist?: string | null
+  readonly secretFiles: ReadonlyArray<string | null | undefined>
+}): ReadonlyArray<string> => [
+  app.dataDir,
+  app.filesDir,
+  app.appRoot,
+  ...(app.clientDist?.trim() ? [app.clientDist.trim()] : []),
+  ...app.secretFiles.flatMap((file) => (file?.trim() ? [dirname(file.trim())] : []))
+]
+
 export const makeHostFolders = (
   configured: ReadonlyArray<string>,
   /** The app's data folder, Files, its code: never a host folder, nor inside or around one. */

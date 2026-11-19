@@ -145,6 +145,15 @@ export interface CommandSandbox {
    * uses it.
    */
   readonly unsandboxed?: true
+  /**
+   * How an unsandboxed command's processes are held together so a stop, the timeout or the app's
+   * end reaches all of them, even those that left its process group (`setsid prog &`): a cgroup
+   * or scope, else a PID namespace. A reason when nothing reliable is available here; then
+   * background commands without a sandbox are refused.
+   */
+  readonly containment?: () => Promise<
+    { readonly ok: true; readonly how: string } | { readonly ok: false; readonly reason: string }
+  >
 }
 
 export const commandSandboxes = makeRegistry<CommandSandbox>([linuxBwrap, noSandbox])
