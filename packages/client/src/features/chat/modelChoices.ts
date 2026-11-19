@@ -1,5 +1,6 @@
 // The user's models as picker items, "connection · model", for the places that choose one.
 import { resolveModel, type Connection, type Model } from "@dreamspan/shared/providers.ts"
+import { supportedEfforts, type ReasoningEffort } from "@dreamspan/shared/modelSettings.ts"
 import { Cause, Effect, Exit } from "effect"
 import { useEffect, useMemo, useState } from "react"
 import { type ActionResult, useAction } from "../../actions.tsx"
@@ -18,6 +19,8 @@ export interface ModelChoice {
   readonly hidden?: boolean
   /** Its context window in tokens; `assumed` when nothing reports it (ASSUMED_CONTEXT). */
   readonly window?: { readonly tokens: number; readonly assumed: boolean }
+  /** The reasoning levels it takes (`supportedEfforts`); empty where it doesn't reason. */
+  readonly efforts?: ReadonlyArray<ReasoningEffort>
 }
 
 export const modelValue = (connection: string, model: string) => `${connection} ${model}`
@@ -95,19 +98,20 @@ export const readModelChoices = (client: AppClient["Service"]) =>
       connections: connections.length,
       models: lists.flatMap(({ connection, exit }) =>
         Exit.isSuccess(exit)
-          ? exit.value.map((model: Model) => ({
-              value: modelValue(connection.id, model.id),
-              label: `${connection.name} · ${model.key}`,
-              connectionId: connection.id,
-              connectionName: connection.name,
-              modelKey: model.key,
-              name: resolveModel(model.key, model.upstream, model.overrides).name.value,
-              window: (() => {
-                const { context } = resolveModel(model.key, model.upstream, model.overrides)
-                return { tokens: context.value, assumed: context.source === "unknown" }
-              })(),
-              hidden: model.hidden
-            }))
+          ? exit.value.map((model: Model) => {
+              const resolved = resolveModel(model.key, model.upstream, model.overrides)
+              return {
+                value: modelValue(connection.id, model.id),
+                label: `${connection.name} · ${model.key}`,
+                connectionId: connection.id,
+                connectionName: connection.name,
+                modelKey: model.key,
+                name: resolved.name.value,
+                window: { tokens: resolved.context.value, assumed: resolved.context.source === "unknown" },
+                efforts: supportedEfforts(resolved),
+                hidden: model.hidden
+              }
+            })
           : []
       ),
       failed: lists.flatMap(({ connection, exit }) =>

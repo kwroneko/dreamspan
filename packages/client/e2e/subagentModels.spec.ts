@@ -13,6 +13,8 @@ import { startSubagentProvider } from "./support/subagentProvider.ts"
 const server = serverPerFile(withAdmin)
 let provider: Awaited<ReturnType<typeof startSubagentProvider>>
 let extra = ""
+/** A model that reasons, but not at the two highest levels. */
+let thinker = ""
 const admin = <A>(use: (client: Client) => Effect.Effect<A, unknown>) =>
   asUser(server(), ADMIN.handle, ADMIN.password, use)
 
@@ -33,6 +35,12 @@ test.beforeAll(async () => {
       })
       const model = yield* api.AddUserModel({ connectionId: connection.id, key: "workshop-small", overrides: {} })
       const other = yield* api.AddUserModel({ connectionId: connection.id, key: "lookup-tiny", overrides: {} })
+      const thinking = yield* api.AddUserModel({
+        connectionId: connection.id,
+        key: "think-mini",
+        overrides: { reasoning: true, thinkingLevels: { xhigh: null, max: null } }
+      })
+      thinker = `${connection.id} ${thinking.id}`
       yield* api.SetGenerationDefaults({
         defaults: { model: { connection: connection.id, model: model.id }, preset: null }
       })
@@ -48,7 +56,15 @@ test.afterAll(async () => {
 test.describe.configure({ mode: "serial" })
 const reset = () =>
   admin((api) =>
-    api.ChangeSubagentSettings({ picks: ["same"], rows: { [extra]: { alias: "lookup-tiny", note: "" } }, limits: null })
+    api.ChangeSubagentSettings({
+      picks: ["same"],
+      rows: {
+        same: { alias: "same", note: "The model you're running on." },
+        [extra]: { alias: "lookup-tiny", note: "" },
+        [thinker]: { alias: "think-mini", note: "" }
+      },
+      limits: null
+    })
   )
 const chip = (page: Page) => page.getByRole("button", { name: /^Subagent models: / })
 
@@ -130,12 +146,18 @@ for (const width of [1440, 390])
       ).toBeDisabled()
       await row.getByLabel("Name", { exact: true }).fill("tiny")
       await row.getByLabel("What it's for", { exact: true }).fill("Quick lookups.")
+      // Effort only where the model reasons: Same tracks each chat's model, so it has every level;
+      // lookup-tiny doesn't reason, so it has none.
+      await expect(row.locator("[data-subagent-model-effort]")).toHaveCount(0)
+      const same = models.locator('[data-subagent-model-row="same"]')
+      await same.getByRole("combobox", { name: "Reasoning effort" }).click()
+      await page.getByRole("option", { name: "High", exact: true }).click()
+      await expect(same.getByRole("combobox", { name: "Reasoning effort" })).toContainText("High")
       await models.getByRole("button", { name: "Save" }).click()
       await expect(models.getByRole("status").filter({ hasText: "Saved." })).toBeVisible()
-      expect(await admin((api) => Effect.map(api.GetSubagentSettings({}), (s) => s.models.rows[extra]))).toEqual({
-        alias: "tiny",
-        note: "Quick lookups."
-      })
+      const rows = await admin((api) => Effect.map(api.GetSubagentSettings({}), (s) => s.models.rows))
+      expect(rows[extra]).toEqual({ alias: "tiny", note: "Quick lookups." })
+      expect(rows["same"]).toEqual({ alias: "same", note: "The model you're running on.", effort: "high" })
 
       const limits = page.locator("[data-subagent-limits]")
       await limits.getByLabel("Running at once in your account", { exact: true }).fill("3")
@@ -151,6 +173,25 @@ for (const width of [1440, 390])
       await expectLayout(page, info, `assistant-tools-${width}-${scheme}`)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 
-      await limits.getByRole("button", { name: "Use the defaults" }).click()
+      // A picked model that reasons offers the levels it takes, and no others.
+      await admin((api) => api.ChangeSubagentSettings({ picks: ["same", extra, thinker] }))
+      await page.reload()
+      const thinking = page.locator(`[data-subagent-model-row="${thinker}"]`)
+      const effort = thinking.getByRole("combobox", { name: "Reasoning effort" })
+      await expect(effort).toBeVisible({ timeout: 30_000 })
+      await expect(effort).toContainText("The model's own")
+      await effort.click()
+      await expect(page.getByRole("option", { name: "High", exact: true })).toBeVisible()
+      await expect(page.getByRole("option", { name: "Max", exact: true })).toHaveCount(0)
+      await expect(page.getByRole("option", { name: "Extra high", exact: true })).toHaveCount(0)
+      await expectLayout(page, info, `subagent-model-effort-${width}-${scheme}`)
+      await page.getByRole("option", { name: "Low", exact: true }).click()
+      await page.locator("[data-subagent-models]").getByRole("button", { name: "Save" }).click()
+      await expect
+        .poll(() => admin((api) => Effect.map(api.GetSubagentSettings({}), (s) => s.models.rows[thinker]?.effort)))
+        .toBe("low")
+      const limitsAgain = page.locator("[data-subagent-limits]")
+
+      await limitsAgain.getByRole("button", { name: "Use the defaults" }).click()
       await expect.poll(() => admin((api) => Effect.map(api.GetSubagentSettings({}), (s) => s.limits))).toEqual({})
     })

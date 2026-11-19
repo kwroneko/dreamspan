@@ -78,18 +78,30 @@ for (const width of [1440, 390])
       const edit = page.locator('[data-subagent-type-editor="research"]')
       await expect(edit.getByLabel("Id", { exact: true })).toBeDisabled()
       await edit.getByLabel("What it's for", { exact: true }).fill("Looks things up, briefly.")
+      // Its effort: every level, since it runs on whichever model is picked; used where that model has it.
+      const effort = edit.getByRole("combobox", { name: "Reasoning effort" })
+      await expect(effort).toContainText("Its model's")
+      await effort.click()
+      await page.getByRole("option", { name: "Medium", exact: true }).click()
+      await expect(effort).toContainText("Medium")
+      await expectLayout(page, info, `subagent-type-effort-${width}-${scheme}`, {
+        scope: '[data-subagent-type-editor="research"]'
+      })
       await edit.getByRole("button", { name: "Save" }).click()
       await expect(research).toContainText("Edited")
       await expect(research).toContainText("Looks things up, briefly.")
+      await expect(research).toContainText("Effort: Medium")
       expect(await admin((api) => Effect.map(api.GetSubagentSettings({}), (s) => s.types[1]))).toEqual({
         id: "research",
-        description: "Looks things up, briefly."
+        description: "Looks things up, briefly.",
+        effort: "medium"
       })
 
       // Restore drops the change; Delete removes the user's own type.
       await research.getByRole("button", { name: "Edit" }).click()
       await page.locator('[data-subagent-type-editor="research"]').getByRole("button", { name: "Restore" }).click()
       await expect(research).not.toContainText("Edited")
+      await expect(research).not.toContainText("Effort:")
       await mine.getByRole("button", { name: "Edit" }).click()
       await page
         .locator('[data-subagent-type-editor="check-names"]')

@@ -108,6 +108,11 @@ export interface SubagentTypeV1 {
   }
   /** A model alias from the user's subagent models, used when the assistant names none and it's picked. */
   readonly defaultAlias: string
+  /**
+   * The reasoning level it asks for, over the model row's, where its model takes that level;
+   * absent: the row's, else the model's own setting.
+   */
+  readonly effort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
   readonly instructions: string
   readonly context?: "task" | "fork"
   /** It works on files: in the reply's folder (`same`) or its own copy of it (`copy`). */

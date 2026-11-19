@@ -7,6 +7,7 @@ import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import { DEFAULT_RESPONSE, DEFAULT_SAMPLERS, ModelSettings } from "@dreamspan/shared/modelSettings.ts"
 import { Schema } from "effect"
 import { StSettingsImporter } from "./StSettingsImport.tsx"
+import { ReasoningEffortSelect } from "./ReasoningEffort.tsx"
 // A connection's models: what the provider lists, merged with the user's edits
 // (spec/PROVIDERS.md §3.1). Each field shows where its value came from.
 import type { ModelRefresh } from "@dreamspan/shared/api.ts"
@@ -581,6 +582,34 @@ export function ModelSettingsEditor({
         <div className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-3">
           {SETTING_FIELDS.map(([key, label, numeric]) => {
             const value = current?.samplers?.[key]
+            if (key === "reasoning_effort")
+              return (
+                <Field key={key} label={label}>
+                  <div data-model-field={key}>
+                    <ReasoningEffortSelect
+                      value={typeof value === "string" && value !== "auto" ? value : null}
+                      defaultLabel="Auto"
+                      defaultDescription="The model's own default."
+                      disabled={current === null}
+                      onValueChange={(level) => {
+                        if (current === null) return
+                        const { [key]: _, ...rest } = current.samplers ?? {}
+                        void _
+                        durable.setText(
+                          JSON.stringify({
+                            ...values,
+                            settings: JSON.stringify(
+                              { ...current, samplers: level === null ? rest : { ...rest, [key]: level } },
+                              null,
+                              2
+                            )
+                          })
+                        )
+                      }}
+                    />
+                  </div>
+                </Field>
+              )
             return (
               <Field key={key} label={label}>
                 <Input

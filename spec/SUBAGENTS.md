@@ -110,7 +110,7 @@ The child's report is generated text, so it comes back through the built worksho
 
 ### 2.5 Types
 
-*Obsolete as a proposal: built in SA7 and SA6 (ARCHITECTURE §16, "Subagent types from plugins and users", "Subagents that work on files"). Differences: `isolation` is `none`, `same` or `copy`; `code`'s tools are the file tools, `bash` and every read tool; `general` gets the reply's offered tools less those no subagent gets; there's no per-type `effort`; `explanation` was added in subagents9.*
+*Obsolete as a proposal: built in SA7 and SA6 (ARCHITECTURE §16, "Subagent types from plugins and users", "Subagents that work on files"). Differences: `isolation` is `none`, `same` or `copy`; `code`'s tools are the file tools, `bash` and every read tool; `general` gets the reply's offered tools less those no subagent gets; `explanation` was added in subagents9; per-type `effort` was added in subagents10 (ARCHITECTURE §16, "Subagent reasoning effort"): the type's level wins over its model row's, each used only where the model takes it, and a fork keeps the reply's.*
 
 A type (registry `subagentTypes`, §10) is `{ id, label, explanation, description, kinds, tools, defaultAlias, effort?, context, isolation?, caps, instructions }`. Built in:
 
@@ -161,7 +161,7 @@ Owner [D]: "Claude code can also message its agents continuously."
 
 ## 5. Choosing a model
 
-*Obsolete as a proposal: built in SA2 (ARCHITECTURE §16, "Subagent models"). Differences from the text below: the per-chat override is the chip's lock (the chat keeps its own picks, `subagents.models { picks }`), not per-alias on/off; per-row effort isn't built; `fast` is offered once the user picks it (the chip's default is Same alone, DESIGN §7.10 [D]).*
+*Obsolete as a proposal: built in SA2 (ARCHITECTURE §16, "Subagent models"). Differences from the text below: the per-chat override is the chip's lock (the chat keeps its own picks, `subagents.models { picks }`), not per-alias on/off; per-row effort was built in subagents10 (ARCHITECTURE §16, "Subagent reasoning effort"): a row's level is offered only where its model reasons, from the levels it takes, and a type's own level wins over it; `fast` is offered once the user picks it (the chip's default is Same alone, DESIGN §7.10 [D]).*
 
 Owner [D]: "the agent needs to be able to choose a different model for subagents if needed, but I am not sure if we want every single added model to be available."
 

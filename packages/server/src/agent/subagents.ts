@@ -26,7 +26,8 @@ import type {
   SubagentTypeEdit,
   SubagentTypes
 } from "@dreamspan/shared/subagents.ts"
-import { SAME, STORY_HELPER } from "@dreamspan/shared/subagents.ts"
+import { effectiveEffort, SAME, STORY_HELPER } from "@dreamspan/shared/subagents.ts"
+import { EFFORT_LABELS, isReasoningEffort, type ReasoningEffort } from "@dreamspan/shared/modelSettings.ts"
 import { LIMIT_STOP, type ResolvedLimits } from "@dreamspan/shared/subagents.ts"
 import { Cause, Deferred, Effect, Exit, Fiber, Option, Result, type Scope, Stream } from "effect"
 import type { AssembledRequest, Generation, ModelInput } from "../assembler/types.ts"
@@ -78,6 +79,11 @@ export interface SubagentType {
   readonly tools: SubagentToolRule | ((tool: RolloutTool<never>) => boolean)
   /** The model alias it runs on when the call names none, where that alias is allowed (§2.5). */
   readonly defaultAlias: string
+  /**
+   * The reasoning level its requests ask for, over its model row's, where the model takes it
+   * (`effectiveEffort`); absent: the row's, else the model's own setting.
+   */
+  readonly effort?: ReasoningEffort
   /** Its first message, before the task: the "Subagent instructions". */
   readonly instructions: string
   /**
@@ -172,6 +178,13 @@ const withIsolation = (type: SubagentType, isolation: SubagentIsolationChoice | 
   return { ...rest, ...isolationOf(isolation) }
 }
 
+/** A type with the user's reasoning level (§10): null takes its own away. */
+const withEffort = (type: SubagentType, effort: ReasoningEffort | null | undefined): SubagentType => {
+  if (effort === undefined) return type
+  const { effort: _own, ...rest } = type
+  return effort === null ? rest : { ...rest, effort }
+}
+
 /** A type as it applies to a user: where it came from and whether they changed or turned it off. */
 export interface EffectiveType extends SubagentType {
   readonly source: "builtin" | "plugin" | "user"
@@ -191,7 +204,7 @@ export const typesFor = (
   const changed = (type: SubagentType, edit: SubagentTypeEdit | undefined): SubagentType =>
     edit
       ? {
-          ...withIsolation(type, edit.isolation),
+          ...withEffort(withIsolation(type, edit.isolation), edit.effort),
           ...(edit.label !== undefined ? { label: edit.label } : {}),
           ...(edit.explanation !== undefined ? { explanation: edit.explanation } : {}),
           ...(edit.description !== undefined ? { description: edit.description } : {}),
@@ -224,6 +237,7 @@ export const typesFor = (
             kinds: ["workshop"],
             tools: { ids: edit.tools ?? [] },
             defaultAlias: edit.defaultAlias ?? SAME,
+            ...(edit.effort ? { effort: edit.effort } : {}),
             instructions: edit.instructions,
             context: edit.context ?? "task",
             ...isolationOf(edit.isolation),
@@ -432,6 +446,24 @@ const childTools = (
     ]
     return { tools: [...tools, ...extra], frozen }
   })
+
+/**
+ * The model with a subagent's reasoning level as its "Reasoning effort" setting, so each
+ * provider's request carries it as that setting would (assembler/wire.ts); null: unchanged.
+ */
+export const withReasoning = (model: ModelInput, effort: ReasoningEffort | null): ModelInput =>
+  effort === null
+    ? model
+    : {
+        ...model,
+        settings: { ...model.settings, samplers: { ...model.settings?.samplers, reasoning_effort: effort } }
+      }
+
+/** The level a subagent's requests ask for: its model's setting, where the model takes it; else none. */
+const sentEffort = (model: ModelInput, supported: ReadonlyArray<ReasoningEffort>) => {
+  const level = model.settings?.samplers?.reasoning_effort
+  return isReasoningEffort(level) && supported.includes(level) ? level : undefined
+}
 
 /** The model a call runs on: the alias it names, else its type's default, else `same`, else the first. */
 const chosenEntry = (entries: ReadonlyArray<SubagentModelEntry>, type: SubagentType | undefined, alias?: string) =>
@@ -797,8 +829,12 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
       return refuse(
         `A fork runs only on the model this chat uses (same): ${entry.alias} can't read this conversation from cache. Use context task to run on ${entry.alias}.`
       )
-    const model = entry.model ?? input.generation.model
-    if (model === null || model === undefined) return refuse("No model is chosen for this chat.")
+    const chosen = entry.model ?? input.generation.model
+    if (chosen === null || chosen === undefined) return refuse("No model is chosen for this chat.")
+    // Its reasoning level (§5.1, §2.5): the type's, else its model row's, where the model takes it.
+    // A fork sends the reply's own request (§2.3), so it keeps the reply's.
+    const model = withReasoning(chosen, fork ? null : effectiveEffort(type.effort, entry.effort, entry.efforts))
+    const effort = sentEffort(model, entry.efforts)
     // A fork's conversation: the reply's, as it was when it made this call.
     const seed = fork ? forkSeed(ctx.transcript?.() ?? [], ctx.toolCallId) : null
     if (fork && seed === null) return refuse("This conversation can't be forked here. Use context task.")
@@ -849,6 +885,7 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
       ...(name ? { name } : {}),
       alias: entry.alias,
       model: model.key,
+      ...(effort ? { effort } : {}),
       instructions: type.instructions,
       context,
       ...(forkWire ? { fork: { wireTools: forkWire.wireTools, offered: forkWire.offered } } : {}),
@@ -908,6 +945,7 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
         task,
         alias: entry.alias,
         model: model.key,
+        ...(effort ? { effort } : {}),
         status: "running",
         steps: [],
         count: 0,
@@ -1575,6 +1613,8 @@ export const agentTool: RolloutTool<AgentArgs> = {
       const type = typesFor(registered, at?.types).find((t) => t.id === args.type)
       const alias = typeof args.model === "string" && args.model.trim() ? args.model.trim().toLowerCase() : undefined
       const entry = at ? chosenEntry(at.entries, type, alias) : undefined
+      const fork = (args.context ?? type?.context) === "fork"
+      const effort = entry && !fork ? effectiveEffort(type?.effort, entry.effort, entry.efforts) : null
       return {
         title: `Start a subagent: ${type?.label ?? args.type}`,
         rows: [
@@ -1590,7 +1630,8 @@ export const agentTool: RolloutTool<AgentArgs> = {
                 ? `The model this chat uses (${entry.name})`
                 : `${entry.alias}: ${entry.name}`
               : (alias ?? "The model this chat uses")
-          }
+          },
+          ...(effort ? [{ label: "Reasoning effort", value: EFFORT_LABELS[effort] }] : [])
         ]
       }
     }),

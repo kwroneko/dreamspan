@@ -15,6 +15,7 @@ import { Spinner } from "../../../ui/Spinner.tsx"
 import { Badge } from "../../../ui/Surface.tsx"
 import { Tooltip } from "../../../ui/Tooltip.tsx"
 import { FILES_PAGE } from "../../files/href.ts"
+import { effortLabel } from "../../connections/ReasoningEffort.tsx"
 import { formatCost } from "../versionMetrics.tsx"
 import type { StepActionProps } from "./stepActions.ts"
 import { StepRow } from "./Steps.tsx"
@@ -46,9 +47,14 @@ export const subagentFacts = (row: SubagentRow) =>
     " · "
   )
 
-/** Its model as the row names it: "Same model · key", or the alias the assistant chose and the key. */
+/**
+ * Its model as the row names it: "Same model · key", or the alias the assistant chose and the key;
+ * then the reasoning effort its requests asked for, where they asked for one.
+ */
 const subagentModel = (row: SubagentRow) =>
-  row.alias === "same" ? `Same model · ${row.model}` : `${row.alias} · ${row.model}`
+  `${row.alias === "same" ? `Same model · ${row.model}` : `${row.alias} · ${row.model}`}${
+    row.effort ? ` · ${effortLabel(row.effort)} effort` : ""
+  }`
 
 export function SubagentPanel({ step, version, session }: StepActionProps) {
   const row = step.subagent

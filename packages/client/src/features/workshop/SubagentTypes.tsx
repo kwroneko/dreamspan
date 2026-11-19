@@ -14,6 +14,7 @@ import {
   type SubagentTypeView,
   type SubagentTypesView
 } from "@dreamspan/shared/subagents.ts"
+import { EFFORT_LABELS, type ReasoningEffort } from "@dreamspan/shared/modelSettings.ts"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { usePlaceParam } from "../../usePlaceParam.ts"
@@ -23,6 +24,7 @@ import { Field, Fieldset, Input, Textarea } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
+import { ReasoningEffortSelect } from "../connections/ReasoningEffort.tsx"
 import { SUBAGENT_SETTINGS_KEY, subagentSettingsAtom } from "./SubagentModelsChip.tsx"
 
 const TYPES_KEY = "subagent-types"
@@ -77,6 +79,7 @@ interface Draft {
   readonly instructions: string
   readonly tools: ReadonlyArray<string>
   readonly defaultAlias: string
+  readonly effort: ReasoningEffort | null
   readonly context: "task" | "fork"
   readonly isolation: "none" | "same" | "copy"
   readonly off: boolean
@@ -92,6 +95,7 @@ const draftOf = (type: SubagentTypeView | undefined): Draft =>
         instructions: type.instructions,
         tools: type.tools,
         defaultAlias: type.defaultAlias,
+        effort: type.effort,
         context: type.context,
         isolation: type.isolation,
         off: type.off
@@ -104,6 +108,7 @@ const draftOf = (type: SubagentTypeView | undefined): Draft =>
         instructions: "",
         tools: [],
         defaultAlias: SAME,
+        effort: null,
         context: "task",
         isolation: "none",
         off: false
@@ -158,6 +163,7 @@ function TypeEditor({
             instructions: draft.instructions.trim(),
             tools: [...draft.tools],
             defaultAlias: draft.defaultAlias,
+            effort: draft.effort,
             context: draft.context,
             isolation: draft.isolation,
             ...(draft.off ? { off: true } : {})
@@ -273,13 +279,27 @@ function TypeEditor({
             onValueChange={(value) => edit({ defaultAlias: value })}
           />
         </Field>
-        <Segmented
-          label="It sees"
-          options={CONTEXTS}
-          value={draft.context}
-          onValueChange={(value) => edit({ context: value })}
-        />
+        <Field
+          label="Reasoning effort"
+          about="How much it thinks before answering, over its model's own effort. A fork keeps the reply's."
+          description="Used where its model has that level."
+        >
+          <div data-subagent-type-effort="">
+            <ReasoningEffortSelect
+              value={draft.effort}
+              defaultLabel="Its model's"
+              defaultDescription="The effort set for its model under Subagent models, or the model's own."
+              onValueChange={(effort) => edit({ effort: effort as ReasoningEffort | null })}
+            />
+          </div>
+        </Field>
       </div>
+      <Segmented
+        label="It sees"
+        options={CONTEXTS}
+        value={draft.context}
+        onValueChange={(value) => edit({ context: value })}
+      />
       <Segmented
         label="Works in"
         options={FOLDERS}
@@ -343,11 +363,12 @@ function TypeRow({ type, open }: { type: SubagentTypeView; open: () => void }) {
         </span>
         <span className="text-sm text-muted [overflow-wrap:anywhere]">{type.description}</span>
         <span className="text-sm text-muted">
-          {type.id} · {type.tools.length === 1 ? "1 tool" : `${type.tools.length} tools`} · Model: {type.defaultAlias} ·
-          Sees: {type.context === "fork" ? "this conversation" : "its task"}
+          {type.id} · {type.tools.length === 1 ? "1 tool" : `${type.tools.length} tools`} · Model: {type.defaultAlias}
+          {type.effort ? ` · Effort: ${EFFORT_LABELS[type.effort]}` : ""} · Sees:{" "}
+          {type.context === "fork" ? "this conversation" : "its task"}
         </span>
       </div>
-      <Button hint="Changes this type's instructions, tools and model." onClick={open}>
+      <Button hint="Changes this type's instructions, tools, model and effort." onClick={open}>
         Edit
       </Button>
     </li>
