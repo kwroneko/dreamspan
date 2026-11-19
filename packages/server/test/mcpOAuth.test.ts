@@ -4,9 +4,16 @@
 // Never a third-party server.
 import { assert, describe, it } from "@effect/vitest"
 import type { McpConnectionSettings } from "@dreamspan/shared/mcp.ts"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
 import { McpConnections } from "../src/mcp/McpConnections.ts"
-import { briefSignInError, SIGN_IN_PENDING_PER_USER, signInTargets } from "../src/mcp/oauth.ts"
+import { createServer } from "node:http"
+import type { AddressInfo } from "node:net"
+import { briefSignInError, SIGN_IN_PENDING_PER_USER, signInTargets, typedAsLocal } from "../src/mcp/oauth.ts"
+import * as Database from "../src/db/Database.ts"
+import * as NetworkModule from "../src/net/Network.ts"
+import { makeSecrets, Secrets } from "../src/secrets.ts"
+import { testWorkers } from "./support/bundles.ts"
+import { tempDir } from "./support/tempDir.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { approveSignIn, startFakeAuthServer } from "./support/fakeAuthServer.ts"
 import { fakeTool, startFakeMcpServer } from "./support/fakeMcpServer.ts"
@@ -239,13 +246,19 @@ describe("where a sign-in's requests may go", () => {
   }
   const resolve = async (host: string) => dns[host] ?? []
   const mayReach = (ip: string) => ip.startsWith("93.")
-  const targets = (server: string) => signInTargets(new URL(server), resolve, mayReach)
+  const targets = (server: string, bypassed?: (host: string) => boolean) =>
+    signInTargets(new URL(server), { resolve, mayReach, ...(bypassed ? { bypassed } : {}) })
+  const refusedBy = async (check: ReturnType<typeof targets>, url: string) =>
+    check(new URL(url)).then(
+      () => assert.fail(`${url} was allowed`),
+      (error: Error) => assert.strictEqual(error.name, "SignInTargetRefused", url)
+    )
 
   it.effect("a public server's metadata may name public services only, checked after DNS", () =>
     Effect.promise(async () => {
       const check = targets("https://mcp.example/mcp?team=x")
-      // Its own origin is the user's choice: it goes where its calls go.
-      assert.isUndefined(await check(new URL("https://mcp.example/.well-known/oauth-protected-resource")))
+      // Its own origin is the user's choice: it goes where its calls go, pinned to what DNS said.
+      assert.deepStrictEqual(await check(new URL("https://mcp.example/.well-known/oauth-protected-resource")), [PUBLIC])
       assert.deepStrictEqual(await check(new URL("https://auth.example/token")), ["93.184.216.35"])
       for (const refused of [
         "http://127.0.0.1:8080/register",
@@ -259,18 +272,116 @@ describe("where a sign-in's requests may go", () => {
         "https://user:pass@auth.example/token",
         "file:///etc/passwd"
       ])
-        await check(new URL(refused)).then(
-          () => assert.fail(`${refused} was allowed`),
-          (error: Error) => assert.strictEqual(error.name, "SignInTargetRefused", refused)
-        )
+        await refusedBy(check, refused)
     })
   )
 
-  it.effect("a server on a local address may name a local sign-in service", () =>
+  it.effect("a server typed as local may name a local sign-in service", () =>
     Effect.promise(async () => {
-      const check = targets("http://127.0.0.1:3000/mcp")
-      assert.deepStrictEqual(await check(new URL("http://10.0.0.5/token")), ["10.0.0.5"])
+      assert.deepStrictEqual(await targets("http://127.0.0.1:3000/mcp")(new URL("http://10.0.0.5/token")), ["10.0.0.5"])
+      assert.deepStrictEqual(await targets("http://tools.localhost:3000/mcp")(new URL("https://lan.example/t")), [
+        "10.0.0.5"
+      ])
+      // A name the admin put on the proxy bypass list counts as typed local.
+      const onList = targets("http://gpu.lan/mcp", (host) => host === "gpu.lan")
+      assert.deepStrictEqual(await onList(new URL("http://10.0.0.5/token")), ["10.0.0.5"])
+      assert.isTrue(typedAsLocal(new URL("http://[::1]:8000/"), mayReach))
+      assert.isFalse(typedAsLocal(new URL("https://mixed.example/"), mayReach))
     })
+  )
+
+  it.effect("DNS answers never make a server local: mixed or private answers still count as public", () =>
+    Effect.promise(async () => {
+      // A public name that also answers with a LAN address, and one that answers only privately.
+      for (const server of ["https://mixed.example/mcp", "https://lan.example/mcp", "https://gpu.lan/mcp"]) {
+        const check = targets(server)
+        await refusedBy(check, "http://10.0.0.5/token")
+        await refusedBy(check, "http://169.254.169.254/latest/meta-data/")
+        await refusedBy(check, "http://127.0.0.1:8080/register")
+      }
+      // Its own origin still goes where it points: the user chose it.
+      assert.deepStrictEqual(
+        await targets("https://mixed.example/mcp")(new URL("https://mixed.example/.well-known/x")),
+        ["93.184.216.36", "192.168.1.2"]
+      )
+    })
+  )
+
+  it.effect("each name is looked up once: a rebinding answer is never used, redirects included", () =>
+    Effect.promise(async () => {
+      const lookups: Array<string> = []
+      // Public on the first lookup, loopback on every later one.
+      const rebinding = async (host: string) => {
+        lookups.push(host)
+        return lookups.filter((h) => h === host).length === 1 ? [PUBLIC] : ["127.0.0.1"]
+      }
+      const check = signInTargets(new URL("https://rebind.example/mcp"), { resolve: rebinding, mayReach })
+      for (const url of [
+        "https://rebind.example/.well-known/oauth-protected-resource",
+        "https://rebind.example/.well-known/oauth-authorization-server",
+        "https://rebind.example/register",
+        "https://rebind.example/token?redirected=1"
+      ])
+        assert.deepStrictEqual(await check(new URL(url)), [PUBLIC], url)
+      const service = signInTargets(new URL("https://mcp.example/mcp"), { resolve: rebinding, mayReach })
+      assert.deepStrictEqual(await service(new URL("https://meta.example/.well-known/x")), [PUBLIC])
+      assert.deepStrictEqual(await service(new URL("https://meta.example/token")), [PUBLIC])
+      assert.deepStrictEqual(lookups, ["rebind.example", "meta.example"])
+    })
+  )
+
+  it.live("a rebinding name's requests reach only the checked address, across a redirect", () =>
+    Effect.gen(function* () {
+      // Two servers on one port: 127.0.0.2 stands in for the public answer, 127.0.0.1 for the
+      // rebinding one.
+      const hits: Array<string> = []
+      const listen = (host: string, port: number) =>
+        Effect.acquireRelease(
+          Effect.promise(
+            () =>
+              new Promise<ReturnType<typeof createServer>>((done) => {
+                const server = createServer((request, response) => {
+                  hits.push(`${host} ${request.method} ${request.url} ${request.headers.host}`)
+                  if (request.url === "/start") response.writeHead(302, { location: "/next" }).end()
+                  else response.writeHead(200).end("ok")
+                })
+                server.listen(port, host, () => done(server))
+              })
+          ),
+          (server) => Effect.promise(() => new Promise<void>((done) => server.close(() => done())))
+        )
+      const checked = yield* listen("127.0.0.2", 0)
+      const port = (checked.address() as AddressInfo).port
+      yield* listen("127.0.0.1", port)
+      let lookups = 0
+      const check = signInTargets(new URL(`http://rebind.example:${port}/mcp`), {
+        resolve: async () => (++lookups === 1 ? ["127.0.0.2"] : ["127.0.0.1"]),
+        mayReach: (ip) => ip === "127.0.0.2"
+      })
+      const network = (yield* NetworkModule.Network).prepare({ mode: "inherit" }, () => {})
+      const fetch = network.fetchFor(undefined, check)
+      const base = `http://rebind.example:${port}`
+      for (const path of ["/start", "/register"]) {
+        const response = yield* Effect.promise(() => fetch(`${base}${path}`, { method: "POST", body: "{}" }))
+        assert.strictEqual(response.status, 200)
+      }
+      assert.strictEqual(lookups, 1)
+      assert.deepStrictEqual(hits, [
+        `127.0.0.2 POST /start rebind.example:${port}`,
+        `127.0.0.2 GET /next rebind.example:${port}`,
+        `127.0.0.2 POST /register rebind.example:${port}`
+      ])
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        NetworkModule.layer.pipe(
+          Layer.provideMerge(
+            Database.layer({ dataDir: tempDir("mcp-rebind"), readers: 1, allowNetworkFs: false, ...testWorkers })
+          ),
+          Layer.provide(Layer.succeed(Secrets)(makeSecrets("a server secret for tests")))
+        )
+      )
+    )
   )
 
   it("a service's answer isn't repeated in the error", () => {

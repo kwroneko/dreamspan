@@ -51,6 +51,8 @@ export interface RequestNetwork {
    */
   readonly fetchFor: (onRoute?: (route: Route, target: URL) => void, targetAddresses?: TargetAddresses) => typeof fetch
   readonly route: (target: URL) => Effect.Effect<Route>
+  /** Whether a host, by name or IP literal as given, is on the instance's bypass list; never resolved. */
+  readonly bypassed: (host: string) => boolean
 }
 
 export interface NetworkShape {
@@ -361,7 +363,8 @@ export const layer = Layer.effect(
         if (override.mode === "custom") registerSecret(override.url)
         return {
           fetchFor: (onRoute, targetAddresses) => fetchFor(override, onRoute, targetAddresses, undefined, settings),
-          route: (target) => Effect.promise(() => routeNow(target, override, settings))
+          route: (target) => Effect.promise(() => routeNow(target, override, settings)),
+          bypassed: (host) => bypasses(settings.bypass, host)
         }
       },
       fetchFor,

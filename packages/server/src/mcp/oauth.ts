@@ -311,40 +311,74 @@ class SignInTargetRefused extends Error {
   override readonly name = "SignInTargetRefused"
 }
 
+const bareHost = (hostname: string) =>
+  hostname
+    .replace(/^\[(.*)\]$/, "$1")
+    .replace(/\.$/, "")
+    .toLowerCase()
+
+/** `localhost` and its subdomains always mean this machine: never asked of DNS. */
+const LOOPBACK = ["127.0.0.1", "::1"]
+const isLocalhostName = (host: string) => host === "localhost" || host.endsWith(".localhost")
+
+/**
+ * Whether the server counts as local, from what the user typed only: an IP literal that isn't
+ * public, `localhost` or a name under it, or a name or address on the instance's bypass list.
+ * Never from DNS answers, which the server's operator controls.
+ */
+export const typedAsLocal = (
+  server: URL,
+  mayReach: (address: string) => boolean = (address) => sandboxMayReach(address),
+  bypassed: (host: string) => boolean = () => false
+) => {
+  const host = bareHost(server.hostname)
+  if (isIP(host) !== 0) return !mayReach(host) || bypassed(host)
+  return isLocalhostName(host) || bypassed(host)
+}
+
 /**
  * Where a sign-in's requests may go (discovery, registration, the code exchange, refresh), as
  * `Network.fetchFor`'s `targetAddresses`: checked at every hop, redirects included, and the
- * connection pinned to the addresses that passed, so DNS can't answer differently after.
+ * connection pinned to the addresses that passed. Each name is looked up once per step, and
+ * every later request and redirect to it uses those same addresses, so a DNS answer that
+ * changes between the check and the connection (rebinding) is never used.
  *
- * The server's own origin is the user's choice and goes where its calls go. Every other address
- * is chosen by that server (its metadata names the sign-in service and its endpoints), so it
- * must be public, as the sandbox's own proxy requires: never loopback, the LAN, link-local, a
- * cloud metadata address or this host. A server that is itself on a local address may name a
- * local sign-in service, as a self-hosted one does.
+ * The server's own origin is the user's choice and goes where its calls go, but pinned too.
+ * Every other address is chosen by that server (its metadata names the sign-in service and its
+ * endpoints), so all of its answers must be public, as the sandbox's own proxy requires: never
+ * loopback, the LAN, link-local, a cloud metadata address or this host. A server the user
+ * typed as local (`typedAsLocal`) may name a local sign-in service, as a self-hosted one does.
  */
 export const signInTargets = (
   server: URL,
-  resolve: (host: string) => Promise<ReadonlyArray<string>> = defaultResolve,
-  mayReach: (address: string) => boolean = (address) => sandboxMayReach(address)
+  options: {
+    readonly resolve?: (host: string) => Promise<ReadonlyArray<string>>
+    readonly mayReach?: (address: string) => boolean
+    /** Whether a host, as typed, is on the instance's proxy bypass list. */
+    readonly bypassed?: (host: string) => boolean
+  } = {}
 ): TargetAddresses => {
-  const addressesOf = async (target: URL) => {
-    const host = target.hostname
-      .replace(/^\[(.*)\]$/, "$1")
-      .replace(/\.$/, "")
-      .toLowerCase()
-    if (isIP(host) !== 0) return [host]
-    if (host === "localhost" || host.endsWith(".localhost")) return ["127.0.0.1"]
-    return resolve(host).catch(() => [] as ReadonlyArray<string>)
+  const resolve = options.resolve ?? defaultResolve
+  const mayReach = options.mayReach ?? ((address: string) => sandboxMayReach(address))
+  const serverIsLocal = typedAsLocal(server, mayReach, options.bypassed)
+  const looked = new Map<string, Promise<ReadonlyArray<string>>>()
+  const addressesOf = (target: URL) => {
+    const host = bareHost(target.hostname)
+    if (isIP(host) !== 0) return Promise.resolve([host])
+    if (isLocalhostName(host)) return Promise.resolve(LOOPBACK)
+    let found = looked.get(host)
+    if (found === undefined) {
+      found = resolve(host).catch(() => [] as ReadonlyArray<string>)
+      looked.set(host, found)
+    }
+    return found
   }
-  let serverIsLocal: Promise<boolean> | undefined
   return async (target) => {
     if (!/^https?:$/.test(target.protocol) || target.username !== "" || target.password !== "")
       throw new SignInTargetRefused(`the sign-in service's address ${target.origin} isn't allowed`)
-    if (target.origin === server.origin) return undefined
     const addresses = await addressesOf(target)
     if (addresses.length === 0) throw new SignInTargetRefused(`can't find ${target.hostname}`)
-    serverIsLocal ??= addressesOf(server).then((found) => found.length > 0 && found.some((ip) => !mayReach(ip)))
-    if (!(await serverIsLocal) && addresses.some((ip) => !mayReach(ip)))
+    if (target.origin !== server.origin && !serverIsLocal && addresses.some((ip) => !mayReach(ip)))
       throw new SignInTargetRefused(
         `the server named a sign-in service at ${target.origin}, which isn't a public address`
       )

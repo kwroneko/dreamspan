@@ -538,7 +538,8 @@ export const layer = Layer.effect(
     /**
      * One sign-in step (discovery, registration, the code exchange or a refresh) as a ledger row.
      * Its requests go through the connection's network, to the server's own origin or to public
-     * addresses only (`signInTargets`), and its failure never repeats what a service answered.
+     * addresses only unless the user typed the server as local (`signInTargets`), each pinned to
+     * the addresses checked, and its failure never repeats what a service answered.
      */
     const signInStep = <A>(
       userId: UserId,
@@ -549,13 +550,17 @@ export const layer = Layer.effect(
     ) => {
       const counts = { sent: 0, received: 0 }
       return recorded(userId, target, counts, { method: "oauth", tool: null }, CHECK, (signal) =>
-        step(signInFetch(network.fetchFor(undefined, signInTargets(server)), counts, signal)).catch(
-          (error: unknown) => {
-            throw Object.assign(new Error(briefSignInError(target.scrub(messageOf(error)))), {
-              code: httpCode(error)
-            })
-          }
-        )
+        step(
+          signInFetch(
+            network.fetchFor(undefined, signInTargets(server, { bypassed: network.bypassed })),
+            counts,
+            signal
+          )
+        ).catch((error: unknown) => {
+          throw Object.assign(new Error(briefSignInError(target.scrub(messageOf(error)))), {
+            code: httpCode(error)
+          })
+        })
       ).pipe(
         Effect.mapError((failure) =>
           failure instanceof McpRequestFailed
