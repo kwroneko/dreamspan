@@ -15,9 +15,12 @@ it.live(
       for (const [name, state] of Object.entries({
         plain: [],
         separate: [{ key: "context.per_speaker", value: "separate" }],
+        // An agent reply answered in plain text: the contract that takes it, so its requests stay
+        // the master catalogue's (the send tool, the default since replycontract2, would nudge it).
         tools: [
           { key: "agent.enabled", value: { on: true } },
-          { key: "agent.tools", value: { tools: [] } }
+          { key: "agent.tools", value: { tools: [] } },
+          { key: "output.contract", value: "both" }
         ],
         direction: [{ key: "context.per_speaker", value: "shared" }]
       } satisfies Record<string, ReadonlyArray<StateEventData>>)) {

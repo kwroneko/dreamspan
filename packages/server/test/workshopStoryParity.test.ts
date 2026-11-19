@@ -64,7 +64,8 @@ it.live("keeps story requests and persisted rows identical to the single-message
     )
     const user = yield* api.Whoami()
     const material = yield* (yield* Reader).RolloutMaterial({ userId: user.id, versionId: result.version.id })
-    assert.strictEqual(JSON.parse(material.snapshot).agent.contract, "both")
+    // A story's default contract is the send tool alone since replycontract2 (spec/REPLY-CONTRACT.md §3.1).
+    assert.strictEqual(JSON.parse(material.snapshot).agent.contract, "send_message")
     assert.isUndefined(JSON.parse(material.snapshot).continuity)
     const tables = [
       { sql: "SELECT * FROM slots WHERE chat_id = ? ORDER BY depth", params: [result.chat.id] },
