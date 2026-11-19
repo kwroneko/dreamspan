@@ -65,7 +65,14 @@ export const RolloutEffect = Schema.Struct({
   ...RolloutEffectRecord.fields,
   undoResult: Schema.NullOr(Schema.Record(Schema.String, Schema.Unknown)),
   undoneAt: Schema.NullOr(Schema.Number),
-  createdAt: Schema.Number
+  createdAt: Schema.Number,
+  /**
+   * Made by a subagent (spec/SUBAGENTS.md §8): its handle, and the reply's run and `agent` call
+   * that started it, so the change is listed and kept with that call.
+   */
+  subagent: Schema.optionalKey(
+    Schema.Struct({ handle: Schema.String, rolloutId: Schema.String, callId: Schema.String })
+  )
 })
 export type RolloutEffect = typeof RolloutEffect.Type
 /**

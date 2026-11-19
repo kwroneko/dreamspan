@@ -56,6 +56,7 @@ export function EffectRow({
     <div data-effect={effectId(current)} data-effect-kind={current.kind} className="flex flex-col gap-1 text-xs">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="min-w-0 font-medium [overflow-wrap:anywhere]">
+          {current.subagent && <span className="font-normal text-muted">{current.subagent.handle}: </span>}
           {current.undo?.storyScope ? (
             <>
               {String(current.undo.scopeTitle)} ·{" "}

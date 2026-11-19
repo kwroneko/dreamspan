@@ -99,6 +99,8 @@ interface SubagentHost {
   readonly offered: ReadonlyArray<FrozenTool>
   /** Shows the child in the call's step as it runs; null takes it out. */
   readonly show: (row: SubagentRow | null) => void
+  /** Shows the call waiting for the user's answer (a subagent that couldn't be resumed); null: no longer. */
+  readonly wait: (prompt: import("@dreamspan/shared/agent.ts").ApprovalPrompt | null) => void
 }
 
 /** What a tool returns to the model: text, or a failure the model can correct. */

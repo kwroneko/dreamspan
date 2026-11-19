@@ -12,7 +12,14 @@ import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { EFFECTS_KEY, effectId, effectKey, outstanding, type RolloutEffect } from "./effects.ts"
-import { warningEffects, useWarningRequest, warningText, type WarningRequest } from "./regenerateWarning.ts"
+import {
+  subagentLine,
+  warningEffects,
+  warningGroups,
+  useWarningRequest,
+  warningText,
+  type WarningRequest
+} from "./regenerateWarning.ts"
 
 function Warning({ asked }: { asked: WarningRequest }) {
   const call = useCaller()
@@ -71,17 +78,28 @@ function Warning({ asked }: { asked: WarningRequest }) {
       title="This reply changed things outside the chat"
       description={warningText(asked.request.action)}
     >
-      <ul
-        aria-label="Changes it made"
-        className="flex max-h-60 list-disc flex-col gap-0.5 overflow-y-auto pl-5 text-sm"
-      >
-        {standing.map((effect) => (
-          <li key={effectId(effect)} className="[overflow-wrap:anywhere]" data-warning-effect={effect.kind}>
-            {effect.title}
-            {effect.undo === null && <span className="text-muted"> (can’t be undone here)</span>}
-          </li>
+      <div className="flex max-h-60 flex-col gap-2 overflow-y-auto text-sm">
+        {warningGroups(standing).map((group) => (
+          <div
+            key={group.handle ?? ""}
+            className="flex flex-col gap-0.5"
+            data-warning-subagent={group.handle ?? undefined}
+          >
+            {group.handle !== null && <p className="text-muted">{subagentLine(group.handle, group.effects.length)}</p>}
+            <ul
+              aria-label={group.handle ? `Changes ${group.handle} made` : "Changes it made"}
+              className="flex list-disc flex-col gap-0.5 pl-5"
+            >
+              {group.effects.map((effect) => (
+                <li key={effectId(effect)} className="[overflow-wrap:anywhere]" data-warning-effect={effect.kind}>
+                  {effect.title}
+                  {effect.undo === null && <span className="text-muted"> (can’t be undone here)</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
         ))}
-      </ul>
+      </div>
       <ErrorAlert
         error={error}
         title={

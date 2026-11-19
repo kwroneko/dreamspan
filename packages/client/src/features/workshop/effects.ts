@@ -104,9 +104,11 @@ export interface ReplyChanges {
 export const groupByReply = (rows: ReadonlyArray<RolloutEffect>): ReadonlyArray<ReplyChanges> => {
   const groups = new Map<string, Array<RolloutEffect>>()
   for (const row of rows) {
-    const group = groups.get(row.rolloutId)
+    // A subagent's change is its reply's (spec/SUBAGENTS.md §8).
+    const reply = row.subagent?.rolloutId ?? row.rolloutId
+    const group = groups.get(reply)
     if (group) group.push(row)
-    else groups.set(row.rolloutId, [row])
+    else groups.set(reply, [row])
   }
   return [...groups].map(([rolloutId, effects]) => ({
     rolloutId,

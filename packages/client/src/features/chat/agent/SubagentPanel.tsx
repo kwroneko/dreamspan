@@ -54,6 +54,10 @@ export function SubagentPanel({ step, version, session }: StepActionProps) {
   const id = useId()
   if (!row) return null
   const live = row.status === "running" || row.status === "waiting" || row.status === "queued"
+  // A call of its waiting for the user shows even while the row is folded (spec/SUBAGENTS.md §6.1).
+  const asking = (row.steps ?? []).flatMap((child, i) =>
+    child.kind === "tool" && child.status === "waiting" ? [{ child, i }] : []
+  )
   const stop = () =>
     void action.run((client) => client("StopSubagent", { versionId: version.id, rolloutId: row.rolloutId }))
   return (
@@ -79,6 +83,7 @@ export function SubagentPanel({ step, version, session }: StepActionProps) {
               <span className="block text-muted">
                 {subagentModel(row)} · {subagentFacts(row)}
               </span>
+              {row.resumed && <span className="block text-muted">Resumed where it stopped</span>}
             </span>
           </button>
         </Tooltip>
@@ -109,6 +114,16 @@ export function SubagentPanel({ step, version, session }: StepActionProps) {
         </span>
       </div>
       {action.error && <ErrorAlert error={action.error} />}
+      {!open && asking.length > 0 && (
+        <div className="flex flex-col gap-1.5 pl-5" data-subagent-asking={row.handle}>
+          <p className="font-medium text-text">{row.handle} is waiting for you</p>
+          <ol className="flex flex-col gap-1" aria-label={`What ${row.handle} asks`}>
+            {asking.map(({ child, i }) => (
+              <StepRow key={i} step={child} index={i} version={version} session={session} />
+            ))}
+          </ol>
+        </div>
+      )}
       {open && (
         <div id={id} className="flex flex-col gap-1.5 pl-5">
           <p className="whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">

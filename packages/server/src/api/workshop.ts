@@ -295,7 +295,10 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
             chatId: input.chatId,
             rolloutId: input.rolloutId
           })
-          const rows = all.filter((e) => e.rolloutId === input.rolloutId && e.undoneAt === null)
+          // The reply's own changes and its subagents'.
+          const rows = all.filter(
+            (e) => (e.subagent?.rolloutId ?? e.rolloutId) === input.rolloutId && e.undoneAt === null
+          )
           if (!rows.some((e) => e.kind.startsWith("plugin."))) {
             const result = yield* writer.UndoRolloutEffects({ ...input, userId: user.id })
             yield* notifyUndo(user.id, result.undone)

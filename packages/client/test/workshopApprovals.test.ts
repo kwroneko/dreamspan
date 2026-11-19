@@ -24,7 +24,9 @@ import {
   askBeforeReply,
   keptCalls,
   mayWarn,
+  subagentLine,
   warningEffects,
+  warningGroups,
   warningText
 } from "../src/features/workshop/regenerateWarning.ts"
 
@@ -135,6 +137,28 @@ describe("the Changes tab's replies", () => {
 })
 
 describe("the regenerate warning", () => {
+  it("keeps a subagent's changes with the agent call that started it, and names them by its handle", () => {
+    const child = (handle: string, callId: string, toolCallId: string) =>
+      effect({ rolloutId: `child-${handle}`, toolCallId, subagent: { handle, rolloutId: "r1", callId } })
+    const kept = child("research-1", "c1", "child-a")
+    const later = child("research-2", "c9", "child-b")
+    const own = effect({ toolCallId: "c8" })
+    const steps = { ok: true as const, value: [tool("done")] }
+    // c1 (the kept `agent` call) keeps its subagent's change; the later call's are listed.
+    expect(warningEffects(request(), { ok: true, value: [kept, later, own] }, steps)).toEqual({
+      ok: true,
+      value: [later, own]
+    })
+    expect(warningGroups([later, own, child("research-10", "c10", "child-c")]).map((g) => g.handle)).toEqual([
+      null,
+      "research-2",
+      "research-10"
+    ])
+    expect(subagentLine("research-2", 3)).toBe("This reply's subagent research-2 made 3 changes:")
+    expect(subagentLine("research-2", 1)).toBe("This reply's subagent research-2 made 1 change:")
+    // Changes groups it under the reply whose call started it.
+    expect(groupByReply([kept, own]).map((g) => [g.rolloutId, g.effects.length])).toEqual([["r1", 2]])
+  })
   it("blocks regeneration when effects or retained steps cannot be read", () => {
     const failure = {
       ok: false as const,

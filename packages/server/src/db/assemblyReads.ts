@@ -356,8 +356,9 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             p.context_snapshot_json AS snapshot, p.sent_context_json
           FROM llm_requests q JOIN rollout_payloads p ON p.rollout_id = q.rollout_id
             -- A decision model's request (the scene check, say) is no chat request: its snapshot has
-            -- no request messages or breakpoints, and it warms no cache the next reply reads.
-            JOIN rollouts r ON r.id = q.rollout_id AND r.kind <> 'decision'
+            -- no request messages or breakpoints, and it warms no cache the next reply reads. Nor
+            -- does a subagent's: its own instructions and task make a prefix no reply shares.
+            JOIN rollouts r ON r.id = q.rollout_id AND r.kind <> 'decision' AND r.spawned_by_rollout_id IS NULL
           WHERE q.chat_id = ${chatId} AND q.owner_user_id = ${userId}
             AND (q.status IN ('running', 'complete') OR q.first_token_at IS NOT NULL)
           ORDER BY q.started_at DESC, q.id DESC LIMIT 1`

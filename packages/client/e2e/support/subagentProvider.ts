@@ -8,6 +8,7 @@ import type { AddressInfo } from "node:net"
 export const SUBAGENT_TASK = "List every card in the library and say which one is a lighthouse keeper."
 export const SUBAGENT_NAME = "lighthouse cards"
 export const PARENT_ANSWER = "The subagent looked through the library for me."
+export const SUBAGENT_REPORT = "Found the card of the lighthouse keeper."
 
 interface Body {
   readonly messages: ReadonlyArray<{ readonly role: string; readonly content?: unknown }>
@@ -17,6 +18,10 @@ interface Body {
 export const startSubagentProvider = async () => {
   const bodies: Array<Body> = []
   const held: Array<ServerResponse> = []
+  /** Once set, a subagent's request after its call reports instead of waiting. */
+  let reports = false
+  /** Set: the subagent reads this chat first (reading chats asks first), instead of the library. */
+  let reads: string | null = null
   const chunk = (delta: object, finish: string | null = null, usage?: object) =>
     `data: ${JSON.stringify({
       id: "subagent",
@@ -55,7 +60,11 @@ export const startSubagentProvider = async () => {
       const results = body.messages.filter((m) => m.role === "tool").length
       const child = JSON.stringify(body.messages[0]?.content ?? "").includes("You are a subagent")
       if (child) {
-        if (results === 0) return call(res, "child_1", "list_library", { kind: "card" })
+        if (results === 0)
+          return reads
+            ? call(res, "child_1", "read_chat", { chat: reads })
+            : call(res, "child_1", "list_library", { kind: "card" })
+        if (reports) return text(res, SUBAGENT_REPORT)
         // Waits for Stop (the connection closes) or release.
         held.push(res)
         return
@@ -73,6 +82,19 @@ export const startSubagentProvider = async () => {
   return {
     baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
     bodies,
+    /** From now on the subagent reports after its call (held requests stay held). */
+    report: () => {
+      reports = true
+    },
+    /** Back to the start: the subagent lists the library, then waits. */
+    reset: () => {
+      reports = false
+      reads = null
+    },
+    /** The subagent's first call reads this chat, which asks first. */
+    readChat: (chatId: string) => {
+      reads = chatId
+    },
     heldCount: () => held.filter((r) => !r.destroyed && !r.writableEnded).length,
     /** The tool results the last workshop request carried back. */
     lastResults: () =>

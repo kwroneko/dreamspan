@@ -148,7 +148,27 @@ export const makeRolloutWriteHandlers = (addSelectedVersion: AddSelectedVersion)
           }>`
             SELECT key, scope, value_json, origin, origin_ref, slot_chain_id, slot_depth
             FROM state_events e WHERE e.version_id = ${versionId} AND ${eventApplies(sql, added.forkId, "e")} ORDER BY e.seq`
-          const copied = events.filter((e) => !e.origin_ref?.startsWith(prefix) || kept.has(e.origin_ref))
+          // A subagent's events (`<child>:<call>`, spec/SUBAGENTS.md §8) go with its `agent` call.
+          const spawned = new Map(
+            (yield* sql<{ id: string; call: string }>`SELECT r.id, r.spawned_by_call_id AS call FROM rollouts r
+              WHERE r.spawned_by_rollout_id IN (
+                WITH RECURSIVE chain(id, depth) AS (
+                  SELECT ${source.rollout_id}, 0
+                  UNION ALL SELECT p.parent_rollout_id, chain.depth + 1 FROM rollouts p JOIN chain ON p.id = chain.id
+                  WHERE p.parent_rollout_id IS NOT NULL AND chain.depth < 100000)
+                SELECT id FROM chain)`).map((r) => [`${r.id}:`, r.call])
+          )
+          const keptIds = new Set(keptCalls)
+          const childCall = (ref: string | null) => {
+            if (ref === null) return undefined
+            const at = ref.indexOf(":")
+            return at < 0 ? undefined : spawned.get(ref.slice(0, at + 1))
+          }
+          const copied = events.filter((e) => {
+            const call = childCall(e.origin_ref)
+            if (call !== undefined) return keptIds.has(call)
+            return !e.origin_ref?.startsWith(prefix) || kept.has(e.origin_ref)
+          })
           if (copied.length > 0) {
             const [next] = yield* sql<{ n: number }>`
               SELECT coalesce(max(seq), -1) + 1 AS n FROM state_events

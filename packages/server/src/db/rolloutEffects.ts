@@ -75,7 +75,9 @@ export const makeRolloutEffectHandlers = (steps: LibrarySteps) => {
           readonly status: string
         }>`
           SELECT r.chat_id, r.fork_id, v.id AS version_id, v.slot_id, r.status
-          FROM rollouts r JOIN chats c ON c.id = r.chat_id JOIN versions v ON v.rollout_id = r.id
+          FROM rollouts r JOIN chats c ON c.id = r.chat_id
+          -- A subagent's state is its reply's (spec/SUBAGENTS.md §8): attached to that version.
+          JOIN versions v ON v.rollout_id = coalesce(r.spawned_by_rollout_id, r.id)
           WHERE r.id = ${rolloutId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND v.deleted_at IS NULL
           ORDER BY (v.status = 'generating') DESC, v.created_at DESC, v.id DESC LIMIT 1`
         if (!rollout) return yield* new NotFound({ entity: "rollout", id: rolloutId })

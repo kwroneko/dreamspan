@@ -1226,9 +1226,12 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
           const [inChat] =
             yield* sql`SELECT 1 FROM rollouts WHERE id = ${input.rolloutId} AND chat_id = ${input.chatId}`
           if (!inChat) return yield* new NotFound({ entity: "workshop rollout", id: input.rolloutId })
+          // The reply's own changes and its subagents' (spec/SUBAGENTS.md §8), newest first.
           const rows = yield* sql<EffectRow>`SELECT * FROM rollout_effects
-            WHERE rollout_id = ${input.rolloutId} AND undone_at IS NULL
-            ORDER BY created_at DESC, tool_call_id DESC, seq DESC`
+            WHERE (rollout_id = ${input.rolloutId}
+                OR rollout_id IN (SELECT id FROM rollouts WHERE spawned_by_rollout_id = ${input.rolloutId}))
+              AND undone_at IS NULL
+            ORDER BY created_at DESC, rollout_id DESC, tool_call_id DESC, seq DESC`
           const undone: Array<RolloutEffect> = []
           for (const [at, row] of rows.entries()) {
             const outcome = yield* sql.withTransaction(undoRow(input.userId, row)).pipe(

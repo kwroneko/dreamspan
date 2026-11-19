@@ -38,6 +38,7 @@ import { makeGenerationWriteHandlers } from "./generationWrites.ts"
 import { makeRolloutWriteHandlers } from "./rolloutWrites.ts"
 import { makeSubagentWriteHandlers } from "./subagents.ts"
 import { makeSubagentSettingWriteHandlers } from "./subagentSettings.ts"
+import { makeSubagentResumeHandlers } from "./subagentResume.ts"
 import { makeDecisionWriteHandlers } from "./decisions.ts"
 import { makeLibraryWriteHandlers } from "./libraryWrites.ts"
 import { makeAdoptWriteHandlers } from "./cardOrigins.ts"
@@ -139,6 +140,7 @@ const handlers = Layer.unwrap(
               // --- Subagents (spec/SUBAGENTS.md §11)
               ...(yield* makeSubagentWriteHandlers),
               ...(yield* makeSubagentSettingWriteHandlers),
+              ...(yield* makeSubagentResumeHandlers),
               ...adoption,
               ...(yield* makeDecisionWriteHandlers(bin))
             },

@@ -702,7 +702,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                   if (row) children.set(toolCallId, row)
                   else children.delete(toolCallId)
                   showSteps(false)
-                }
+                },
+                wait: (prompt: ApprovalPrompt | null) => waitingChanged(toolCallId, prompt)
               }
             }),
         progress: (text: string | null) => {

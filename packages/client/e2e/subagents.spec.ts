@@ -10,7 +10,13 @@ import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser, type Client } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { PARENT_ANSWER, startSubagentProvider, SUBAGENT_NAME, SUBAGENT_TASK } from "./support/subagentProvider.ts"
+import {
+  PARENT_ANSWER,
+  startSubagentProvider,
+  SUBAGENT_NAME,
+  SUBAGENT_REPORT,
+  SUBAGENT_TASK
+} from "./support/subagentProvider.ts"
 
 const server = serverPerFile(withAdmin)
 const shots = process.env.SCREENSHOT_DIR
@@ -41,6 +47,7 @@ test.beforeAll(async () => {
     })
   )
 })
+test.beforeEach(() => provider.reset())
 test.afterAll(async () => {
   await provider.stop()
 })
@@ -120,3 +127,60 @@ for (const width of [1440, 390])
     await shot("inspect")
     await expectLayout(page, info, `subagents-inspect-${width}`)
   })
+
+// SA4 (spec/SUBAGENTS.md §6.1, §8): a subagent's question shows while its row is folded, and a
+// reply stopped while its subagent works carries the subagent on when resumed.
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`a subagent asks while folded and carries on with Resume at ${width} ${theme}`, async ({ page }, info) => {
+      test.setTimeout(180_000)
+      const workshop = await admin((api) =>
+        Effect.gen(function* () {
+          // Reading a chat asks first, so the subagent's call waits for an answer.
+          const story = yield* api.CreateChat({ title: `Harbour ${width} ${theme}` })
+          provider.readChat(story.id)
+          return yield* api.CreateWorkshop({ title: `Subagents resume ${width} ${theme}` })
+        })
+      )
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ reducedMotion: "reduce", colorScheme: theme })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/chats/${workshop.id}`)
+      await expect(page.getByTestId("composer")).toBeVisible()
+      const held = provider.heldCount()
+      await page.getByLabel("Message", { exact: true }).fill("Find my lighthouse keeper again.")
+      await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+
+      // Folded, the row still shows what the subagent asks, and it's answered there.
+      const reply = page.getByRole("article").last()
+      const row = reply.locator("[data-subagent]")
+      await expect(row).toHaveAttribute("data-subagent-status", "waiting", { timeout: 30_000 })
+      const asking = row.locator("[data-subagent-asking]")
+      await expect(asking).toContainText("research-1 is waiting for you")
+      await expect(asking.locator("[data-approval]")).toBeVisible()
+      await expectLayout(page, info, `subagents-asking-${width}-${theme}`, { scope: "article:last-of-type" })
+      await asking.getByRole("button", { name: "Allow", exact: true }).click()
+      await expect.poll(() => provider.heldCount(), { timeout: 30_000 }).toBe(held + 1)
+
+      // Stopping the reply stops the subagent; Resume carries it on where it stopped.
+      await reply
+        .locator("button:not([data-subagent] *)", { hasText: /^Stop$/ })
+        .first()
+        .click()
+      await expect(reply.getByText("stopped", { exact: true })).toBeVisible({ timeout: 30_000 })
+      provider.report()
+      await reply.getByRole("button", { name: "Resume", exact: true }).first().click()
+      const done = page.getByRole("article").filter({ hasText: PARENT_ANSWER })
+      await expect(done).toHaveCount(1, { timeout: 30_000 })
+      expect(provider.lastResults().at(-1)).toContain(SUBAGENT_REPORT)
+      const badge = done.locator("[data-steps-badge]")
+      const resumed = done.locator("[data-subagent]")
+      await expect(async () => {
+        if ((await badge.getAttribute("aria-pressed")) !== "true") await badge.click()
+        await expect(resumed).toBeVisible({ timeout: 1_000 })
+      }).toPass({ timeout: 15_000 })
+      await expect(resumed).toHaveAttribute("data-subagent-status", "done")
+      await expect(resumed).toContainText("Resumed where it stopped")
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      await expectLayout(page, info, `subagents-resumed-${width}-${theme}`, { scope: "article:last-of-type" })
+    })
