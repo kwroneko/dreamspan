@@ -62,7 +62,7 @@ import {
   writeRegularFile
 } from "./safePath.ts"
 import { isMediaPath } from "../db/media.ts"
-import { isSharedFolder, shareMountNames } from "./sharedFolders.ts"
+import { birthOf, isSharedFolder, shareMountNames } from "./sharedFolders.ts"
 
 const { O_RDONLY, O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW, O_NONBLOCK } = constants
 
@@ -324,6 +324,7 @@ interface ShareWithMe {
   readonly createdAt: number
   readonly inode: number | null
   readonly device: number | null
+  readonly birthMs: number | null
   readonly suspendedAt: number | null
 }
 
@@ -394,6 +395,7 @@ export const filesRoutes = Layer.unwrap(
       readonly path: string
       readonly inode: number | null
       readonly device: number | null
+      readonly birthMs: number | null
       readonly suspendedAt: number | null
     }) =>
       Effect.gen(function* () {
@@ -1322,7 +1324,7 @@ export const filesRoutes = Layer.unwrap(
         const info = yield* Effect.tryPromise(() => statPath(placed.root, placed.segments))
         if (!info) return yield* Effect.fail(new Answer(404, "Not found. It may have been moved or deleted."))
         if (!info.isDirectory()) return yield* Effect.fail(new Answer(400, "Only a folder can be shared."))
-        return { ...placed, inode: info.ino, device: info.dev }
+        return { ...placed, inode: info.ino, device: info.dev, birthMs: birthOf(info) }
       })
 
     const toFolderShare = (
@@ -1387,6 +1389,7 @@ export const filesRoutes = Layer.unwrap(
         path: placed.full,
         inode: placed.inode,
         device: placed.device,
+        birthMs: placed.birthMs,
         handle,
         mode: body.mode
       })
@@ -1409,7 +1412,13 @@ export const filesRoutes = Layer.unwrap(
       if (!mine) return refuse(404, "That folder isn't shared any more.")
       const placed = yield* ownFolder(mine.path)
       const again = yield* writer
-        .RebindFolderShare({ userId: user.id, shareId: mine.id, inode: placed.inode, device: placed.device })
+        .RebindFolderShare({
+          userId: user.id,
+          shareId: mine.id,
+          inode: placed.inode,
+          device: placed.device,
+          birthMs: placed.birthMs
+        })
         .pipe(Effect.catchTag("NotFound", () => Effect.fail(new Answer(404, "That folder isn't shared any more."))))
       changed(again.granteeUserId, [`${FILES_TOP}/${SHARED_FOLDER}`])
       changed(user.id, [FILES_TOP, placed.full])

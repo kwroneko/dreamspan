@@ -15,6 +15,8 @@ export interface ShareOfFolder {
   readonly inode: number | null
   /** The device the folder was on when shared: with the inode, the folder's identity. */
   readonly device: number | null
+  /** Its birth time when the filesystem gave one: with inode and device, what makes a reused inode number another folder. */
+  readonly birthMs: number | null
   /** The folder went to the bin: the share stays off until its owner shares it again. */
   readonly suspendedAt: number | null
 }
@@ -23,15 +25,20 @@ export interface ShareOfFolder {
 const ownerSegment = (handle: string) =>
   /^[A-Za-z0-9_.-]{1,64}$/.test(handle) && !/^\.+$/.test(handle) ? handle : null
 
+/** A folder's birth time (statx btime), or null where the filesystem doesn't give one (Node then reports 0). */
+export const birthOf = (info: Pick<Stats, "birthtimeMs">) => (info.birthtimeMs > 0 ? info.birthtimeMs : null)
+
 /**
  * Whether a share's folder is the one it was shared as: a folder with the recorded inode and
- * device, not in the bin since. A share with no identity recorded never resolves. Shares of the
+ * device (and birth time, when one was recorded: a deleted and recreated folder can get the same
+ * inode number back, but not the same birth time), not in the bin since. A share with no identity
+ * recorded never resolves. Shares of the
  * whole Files, or of anything holding or inside the server plugins' working copies, never
  * resolve either (`folderShareRefusal`). An unavailable share keeps its name (`shareMountNames`)
  * but is mounted nowhere.
  */
 export const isSharedFolder = (
-  share: Pick<ShareOfFolder, "inode" | "device" | "suspendedAt">,
+  share: Pick<ShareOfFolder, "inode" | "device" | "birthMs" | "suspendedAt">,
   segments: ReadonlyArray<string>,
   info: Stats | null
 ) =>
@@ -42,6 +49,7 @@ export const isSharedFolder = (
   share.device !== null &&
   share.inode === info.ino &&
   share.device === info.dev &&
+  (share.birthMs === null || share.birthMs === birthOf(info)) &&
   folderShareRefusal(segments) === null
 
 /**

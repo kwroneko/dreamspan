@@ -27,7 +27,11 @@ export function PdfViewer({ url, name }: ViewerProps) {
         if (!live) throw new Error("closed")
         const loading = pdfjs.getDocument({
           url,
+          // A document is data, never code: no scripts, no XFA forms, nothing fetched by the worker
+          // or taken from the system. (pdf.js 6 has no eval path to turn off: test/pdfNoEval.test.ts.)
           enableXfa: false,
+          useWorkerFetch: false,
+          useSystemFonts: false,
           useWasm: false,
           isOffscreenCanvasSupported: false,
           withCredentials: true

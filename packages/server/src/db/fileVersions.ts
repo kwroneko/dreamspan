@@ -223,11 +223,12 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
         path: string
         inode: number | null
         device: number | null
+        birth_ms: number | null
         suspended_at: number | null
         created_at: number
         mode: string
       }>`
-        SELECT s.id, s.owner_user_id, u.handle, s.path, s.inode, s.device, s.suspended_at, s.created_at, s.mode
+        SELECT s.id, s.owner_user_id, u.handle, s.path, s.inode, s.device, s.birth_ms, s.suspended_at, s.created_at, s.mode
         FROM file_shares s JOIN users u ON u.id = s.owner_user_id
         WHERE s.grantee_user_id = ${userId} AND u.disabled_at IS NULL
         ORDER BY u.handle, s.path`.pipe(
@@ -239,6 +240,7 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
             path: row.path,
             inode: row.inode,
             device: row.device,
+            birthMs: row.birth_ms,
             suspendedAt: row.suspended_at,
             createdAt: row.created_at,
             mode: row.mode === "edit" ? ("edit" as const) : ("view" as const)

@@ -22,6 +22,7 @@ import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { CapabilityMode } from "@dreamspan/shared/workshopApi.ts"
 import { makeFileTools } from "../src/agent/tools/files.ts"
+import { birthOf } from "../src/files/sharedFolders.ts"
 import {
   capabilityDefaults,
   COMMANDS_UNSANDBOXED,
@@ -48,6 +49,7 @@ interface Share {
   path: string
   inode: number | null
   device: number | null
+  birthMs: number | null
   suspendedAt: number | null
   createdAt: number
   mode: "view" | "edit"
@@ -136,13 +138,14 @@ const world = (
       Effect.succeed(
         state.shares
           .filter((s) => s.grantee === userId && !state.disabled.has(s.ownerId))
-          .map(({ id, ownerId, ownerHandle, path, inode, device, suspendedAt, createdAt, mode }) => ({
+          .map(({ id, ownerId, ownerHandle, path, inode, device, birthMs, suspendedAt, createdAt, mode }) => ({
             id,
             ownerId,
             ownerHandle,
             path,
             inode,
             device,
+            birthMs,
             suspendedAt,
             createdAt,
             mode
@@ -258,6 +261,7 @@ const world = (
       path: `/files/${path}`,
       inode: (await stat(join(root("mara"), path))).ino,
       device: (await stat(join(root("mara"), path))).dev,
+      birthMs: birthOf(await stat(join(root("mara"), path))),
       suspendedAt: null,
       createdAt: Date.now(),
       mode
@@ -423,6 +427,14 @@ it.live.skipIf(!commands)(
       shared.device = (device ?? 0) + 1
       assert.isTrue((yield* w.run("ben", "read_file", { path: "/files/Shared/mara/notes/a.txt" })).isError)
       shared.device = device
+      assert.include((yield* w.run("ben", "read_file", { path: "/files/Shared/mara/notes/a.txt" })).text, "first")
+      // Recorded with another birth time (a recreated folder that got the same inode number): not the folder either.
+      const birth = shared.birthMs
+      if (birth !== null) {
+        shared.birthMs = birth + 1000
+        assert.isTrue((yield* w.run("ben", "read_file", { path: "/files/Shared/mara/notes/a.txt" })).isError)
+        shared.birthMs = birth
+      }
       assert.include((yield* w.run("ben", "read_file", { path: "/files/Shared/mara/notes/a.txt" })).text, "first")
       // Mara moves it and makes another folder of that name: neither the file tools nor commands see it.
       yield* Effect.promise(async () => {
