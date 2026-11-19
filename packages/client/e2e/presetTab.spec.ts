@@ -124,7 +124,7 @@ const open = async (page: Page, chatId: string) => {
 const theme = async (page: Page, width: number, scheme: "light" | "dark") => {
   await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
   await page.emulateMedia({ colorScheme: scheme })
-  await page.addInitScript((value) => localStorage.setItem("rp.theme", value), scheme)
+  await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), scheme)
 }
 
 const rowNames = (panel: Locator) =>
@@ -425,7 +425,7 @@ for (const width of [2560, 1440, 390])
     test(`the large editor's blocks, outline and options (${width}px ${scheme})`, async ({ page }) => {
       await page.setViewportSize({ width, height: width > 2000 ? 1440 : width < 600 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: scheme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), scheme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), scheme)
       const name = `Large ${width} ${scheme}`
       const { chatId } = await setUp(page, name)
       const panel = await open(page, chatId)

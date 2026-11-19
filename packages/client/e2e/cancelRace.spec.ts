@@ -19,7 +19,7 @@ const copies = (page: Page) =>
   page.evaluate(
     () =>
       new Promise<Array<Copy>>((resolve) => {
-        const open = indexedDB.open("rp-editor-copies", 1)
+        const open = indexedDB.open("dreamspan-editor-copies", 1)
         open.onsuccess = () => {
           const db = open.result
           const all = db.transaction("copies").objectStore("copies").getAll()

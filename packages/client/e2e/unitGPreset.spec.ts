@@ -89,7 +89,7 @@ for (const width of [1440, 390])
     test(`preset document walkthrough ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const fork = library.forks.find((f) => f.current && f.cast.length === 1)!
       await page.goto(`${server().url}/chats/${fork.chat.id}`)

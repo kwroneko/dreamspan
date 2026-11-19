@@ -151,7 +151,7 @@ for (const width of [390, 1024, 1440])
         test.setTimeout(180_000)
         await page.setViewportSize({ width, height: 1000 })
         await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-        await page.addInitScript((theme) => localStorage.setItem("rp.theme", theme), theme)
+        await page.addInitScript((theme) => localStorage.setItem("dreamspan.theme", theme), theme)
         const separator = cookie.indexOf("=")
         await page
           .context()

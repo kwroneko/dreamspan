@@ -327,7 +327,7 @@ it.live(
         me = yield* api.Whoami()
       const id = "post-check",
         files = {
-          "rp-plugin.json": JSON.stringify({
+          "dreamspan-plugin.json": JSON.stringify({
             id,
             name: "Fixture",
             api: 1,
@@ -470,7 +470,7 @@ it.live(
       const versions: Record<string, { first: string; second: string }> = {}
       for (const id of ["recover", "growth"]) {
         const files = (surfaces: ReadonlyArray<string>, comment: string) => ({
-          "rp-plugin.json": JSON.stringify({
+          "dreamspan-plugin.json": JSON.stringify({
             id,
             name: id,
             api: 1,
@@ -590,7 +590,7 @@ it.live(
       yield* api.CreatePlugin({
         ...target,
         files: {
-          "rp-plugin.json": JSON.stringify({
+          "dreamspan-plugin.json": JSON.stringify({
             id: target.id,
             name: "Journal fixture",
             api: 1,
@@ -690,7 +690,7 @@ for (const stage of ["probe", "tests"] as const)
         const id = `network-${stage}`
         const fetch = `await fetch("http://127.0.0.1:${address.port}/synthetic")`
         const files = {
-          "rp-plugin.json": JSON.stringify({
+          "dreamspan-plugin.json": JSON.stringify({
             id,
             name: "Network attack",
             api: 1,
@@ -755,7 +755,7 @@ it.live(
         scope: "user",
         id,
         files: {
-          "rp-plugin.json": JSON.stringify({
+          "dreamspan-plugin.json": JSON.stringify({
             id,
             name: "Scope fixture",
             api: 1,

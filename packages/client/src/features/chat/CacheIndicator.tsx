@@ -11,7 +11,7 @@ import { Popover } from "../../ui/Popover.tsx"
 import { chipClass } from "./nextReplyStrip.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
-const COUNTDOWN_KEY = "rp.cacheCountdown"
+const COUNTDOWN_KEY = "dreamspan.cacheCountdown"
 
 const countdownOn = () => {
   try {

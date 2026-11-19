@@ -14,7 +14,7 @@ import { Button } from "./ui/Button.tsx"
 import { flushOpenEditors, unsavedEditorRefs } from "./features/editor/openEditors.ts"
 
 const OWN_BUILD: string = import.meta.env.VITE_BUILD_ID
-const RELOADED_KEY = "rp:stale-build-reloaded"
+const RELOADED_KEY = "dreamspan:stale-build-reloaded"
 
 let stale = false
 const listeners = new Set<() => void>()

@@ -157,7 +157,7 @@ it.live(
               api_key: "synthetic-nested-secret",
               refresh_token: "synthetic-refresh-secret"
             }),
-            rp_harness: {
+            dreamspan: {
               skills: [
                 {
                   name: "unapproved",

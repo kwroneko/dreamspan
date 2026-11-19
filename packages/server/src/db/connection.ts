@@ -8,7 +8,7 @@ import { Effect, Layer, Predicate, Schema } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { StorageError } from "./ops.ts"
 
-export const databaseFile = (dataDir: string) => join(dataDir, "rp-harness.db")
+export const databaseFile = (dataDir: string) => join(dataDir, "dreamspan.db")
 
 /** The writer's connection: WAL, full durability, foreign keys. The only read-write connection. */
 export const writerConnection = (filename: string) =>

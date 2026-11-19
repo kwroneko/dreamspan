@@ -8,9 +8,9 @@
 import { useSyncExternalStore } from "react"
 
 export type ImageMode = "show" | "blur" | "hide"
-const MODE_KEY = "rp.images"
+const MODE_KEY = "dreamspan.images"
 /** The concealment the toggle switches to: the one last picked, blur at first. */
-const CONCEAL_KEY = "rp.images.conceal"
+const CONCEAL_KEY = "dreamspan.images.conceal"
 
 const get = (key: string) => {
   try {

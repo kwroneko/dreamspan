@@ -66,7 +66,7 @@ for (const [width, height] of sizes)
     }) => {
       await page.setViewportSize({ width, height })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const chatId = await setUp(page, `Plain ${width} ${theme}`)
       await page.goto(`${server().url}/chats/${chatId}`)
       const box = page.getByLabel("Message", { exact: true })

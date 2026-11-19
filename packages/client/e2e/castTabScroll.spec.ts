@@ -13,7 +13,7 @@ const server = serverPerFile({
 test("cast tabs open at the top of the panel", async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.emulateMedia({ colorScheme: "dark" })
-  await page.addInitScript(() => localStorage.setItem("rp.theme", "dark"))
+  await page.addInitScript(() => localStorage.setItem("dreamspan.theme", "dark"))
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const cards: EntityId[] = []
   for (const name of ["Alice", "Sam"]) {

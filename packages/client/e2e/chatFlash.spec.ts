@@ -75,7 +75,7 @@ for (const width of [1440, 390])
         await server().pause()
         execFileSync(process.execPath, [
           process.env.CHATFLASH_SCALE,
-          join(server().dataDir, "rp-harness.db"),
+          join(server().dataDir, "dreamspan.db"),
           JSON.stringify(ids)
         ])
         await server().restart()

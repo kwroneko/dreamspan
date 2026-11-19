@@ -26,7 +26,7 @@ import { startServer, withClient } from "./support.ts"
 const VERSION = 6
 /** A bounded full-length scroll review; the normal harness remains 100,000 messages. */
 const longCount = process.env.PERF_LONG_MESSAGES === "6000" ? 6000 : 100_000
-const DB = "rp-harness.db"
+const DB = "dreamspan.db"
 
 export interface Fixture {
   readonly shape: ReadonlyArray<{ chatId: string; slots: number; branches: number; versions: number }>

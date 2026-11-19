@@ -50,7 +50,7 @@ const frameUrl = (permit: PanelPermit | undefined) =>
 const clicked = () => navigator.userActivation?.isActive === true
 
 /**
- * Focus: a frame keeps it only after the user pressed in it (its bootstrap's signed `rp:focus`)
+ * Focus: a frame keeps it only after the user pressed in it (its bootstrap's signed `dreamspan:focus`)
  * or tabbed to it. A panel's script can focus its own document at any time, which would take the
  * keys typed in the composer. When the app's window loses focus while the page keeps it
  * (`hasFocus` counts frames), a frame took it, and unless the user chose that frame, focus goes
@@ -58,7 +58,7 @@ const clicked = () => navigator.userActivation?.isActive === true
  * - at once while the user is typing in the app, or when the frame isn't the one under the
  *   pointer (a press is always over it). Chrome doesn't always make a frame that focuses itself
  *   the app's active element, so which frame took it can't otherwise be relied on;
- * - otherwise after a moment, unless the press's `rp:focus` (posted on `pointerdown`, which comes
+ * - otherwise after a moment, unless the press's `dreamspan:focus` (posted on `pointerdown`, which comes
  *   before the focus moves) arrives first: sending it back at once would bounce focus on every
  *   press in a panel and lose the first key typed there.
  * Sending it back is late anyway (the frame runs in its own process, and `inert` doesn't stop its
@@ -78,7 +78,7 @@ const focusGuard = {
   hovered: null as HTMLIFrameElement | null,
   /** The app's own window has focus (not a frame in it). */
   windowFocused: true,
-  /** A frame under the pointer took focus: its press's `rp:focus` has this long. */
+  /** A frame under the pointer took focus: its press's `dreamspan:focus` has this long. */
   waiting: null as ReturnType<typeof setTimeout> | null,
   users: 0
 }
@@ -261,21 +261,21 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
       if (!target || event.source !== target || event.origin !== "null") return
       const data = parseBridgeMessage(event.data)
       if (data === null) return
-      if (data.type === "rp:ready") {
+      if (data.type === "dreamspan:ready") {
         if (delivered.current.has(target)) return
         delivered.current.set(target, data.token)
-        post({ type: "rp:render", html: source, vh: columnHeight(frame.current), theme: theme() })
-      } else if (data.type === "rp:height") {
+        post({ type: "dreamspan:render", html: source, vh: columnHeight(frame.current), theme: theme() })
+      } else if (data.type === "dreamspan:height") {
         const next = Math.max(0, Math.min(Math.ceil(data.height), window.innerHeight * 2))
         slots.heights.set(id, next)
         setHeight(next)
-      } else if (data.type === "rp:open") {
+      } else if (data.type === "dreamspan:open") {
         const link = bridgeLink(data.url)
         if (link !== null && data.token === delivered.current.get(target) && clicked())
           window.open(link, "_blank", "noopener,noreferrer")
-      } else if (data.type === "rp:copy" && data.token === delivered.current.get(target) && clicked())
+      } else if (data.type === "dreamspan:copy" && data.token === delivered.current.get(target) && clicked())
         void copyText(data.text).catch(() => {})
-      else if (data.type === "rp:focus" && data.token === delivered.current.get(target) && clicked()) {
+      else if (data.type === "dreamspan:focus" && data.token === delivered.current.get(target) && clicked()) {
         // A press in the frame: it may keep the focus it took, or get it back.
         focusGuard.granted = frame.current
         if (document.activeElement !== frame.current) frame.current?.focus({ preventScroll: true })
@@ -283,7 +283,7 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
     }
     const releaseFocus = watchFocus()
     window.addEventListener("message", onMessage)
-    const themeChanged = () => post({ type: "rp:theme", theme: theme() })
+    const themeChanged = () => post({ type: "dreamspan:theme", theme: theme() })
     const scheme = window.matchMedia("(prefers-color-scheme: dark)")
     scheme.addEventListener("change", themeChanged)
     const attributes = new MutationObserver(themeChanged)
@@ -291,7 +291,7 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
       attributes: true,
       attributeFilter: ["data-theme", "class", "style"]
     })
-    const resized = () => post({ type: "rp:vh", vh: columnHeight(frame.current) })
+    const resized = () => post({ type: "dreamspan:vh", vh: columnHeight(frame.current) })
     window.addEventListener("resize", resized)
     return () => {
       releaseFocus()

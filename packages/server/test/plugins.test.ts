@@ -32,7 +32,7 @@ describe("plugin source confinement", () => {
     const dir = tempDir("plugin-git"),
       folder = pluginFolder(dir, "", "tiny")
     const files = {
-      "rp-plugin.json": JSON.stringify(manifest()),
+      "dreamspan-plugin.json": JSON.stringify(manifest()),
       "index.ts": "export const activate = () => undefined",
       "package.json": JSON.stringify({
         scripts: { install: "touch SHOULD_NOT_EXIST", prepare: "touch SHOULD_NOT_EXIST" }

@@ -55,7 +55,7 @@ const setUp = async (page: Page, tag: string) => {
 const theme = async (page: Page, width: number, scheme: "light" | "dark") => {
   await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
   await page.emulateMedia({ colorScheme: scheme })
-  await page.addInitScript((value) => localStorage.setItem("rp.theme", value), scheme)
+  await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), scheme)
 }
 
 /** A field by its box's accessible name, with its label row and strip. */

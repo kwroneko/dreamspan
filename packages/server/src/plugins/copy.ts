@@ -64,7 +64,7 @@ export const prepareBuiltinCopy = async (registry: string, id: string, pluginId:
   )
   files["NOTICE.md"] =
     "Editable copy of shipped rp-harness source. The project has no declared redistribution licence. No third-party implementation is copied; React and Effect remain installed API dependencies under their own licences.\n"
-  files["rp-plugin.json"] = JSON.stringify(
+  files["dreamspan-plugin.json"] = JSON.stringify(
     {
       id: pluginId,
       name: part.label + " (editable)",
@@ -118,7 +118,7 @@ export const compareBuiltin = async (
 ): Promise<typeof BuiltinComparison.Type | null> => {
   const files = await commitFiles(pluginFolder(dataDir, owner, id), commit)
   const manifest = Schema.decodeUnknownSync(PluginManifest)(
-    JSON.parse(Buffer.from(files.get("rp-plugin.json")!).toString("utf8"))
+    JSON.parse(Buffer.from(files.get("dreamspan-plugin.json")!).toString("utf8"))
   )
   if (!manifest.base) return null
   const unavailable = { changed: true, available: false, files: [] }

@@ -338,7 +338,7 @@ test("unavailable attachment storage leaves text-only sending usable", async ({ 
   await page.addInitScript(() => {
     const original = IDBFactory.prototype.open
     IDBFactory.prototype.open = function (name, version) {
-      if (name === "rp.message-images") throw new Error("Synthetic attachment storage failure")
+      if (name === "dreamspan.message-images") throw new Error("Synthetic attachment storage failure")
       return original.call(this, name, version)
     }
   })
@@ -416,7 +416,7 @@ test("an image awaiting upload has a working local thumbnail under CSP", async (
 })
 
 test("hide images covers draft, message and full-size attachment surfaces", async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem("rp.images", "hide"))
+  await page.addInitScript(() => localStorage.setItem("dreamspan.images", "hide"))
   await openChat(page, "Concealed images")
   await page
     .getByLabel("Choose images")

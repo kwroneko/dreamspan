@@ -37,7 +37,7 @@ const PendingSave = Schema.Union([
 ])
 type PendingSave = typeof PendingSave.Type
 
-const DATABASE = "rp-editor-copies"
+const DATABASE = "dreamspan-editor-copies"
 const STORE = "copies"
 export interface Copy {
   readonly key: string
@@ -71,7 +71,7 @@ const database = () => {
 }
 
 // Completed IndexedDB mutations refresh recovery counts here and in other tabs.
-const copiesChanged = "rp-browser-copies"
+const copiesChanged = "dreamspan-browser-copies"
 let copiesChannel: BroadcastChannel | null = null
 const channel = () => {
   if (copiesChannel === null && typeof BroadcastChannel !== "undefined") {

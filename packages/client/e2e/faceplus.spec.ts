@@ -39,7 +39,7 @@ for (const theme of ["light", "dark"] as const)
     test(`cast count and names ${width} ${theme}`, async ({ page }, info) => {
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await page.goto(`${server().url}/chats/${chats[0]!.id}?side=chats`)
       if (width === 390) await expect(page.getByRole("button", { name: "Chats and menu", exact: true })).toBeVisible()
@@ -208,7 +208,7 @@ for (const theme of ["light", "dark"] as const)
   test(`overflow tile states ${theme}`, async ({ page }, info) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-    await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+    await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const chat = chats.find((chat) => chat.count === 6)!
     const measurements = []

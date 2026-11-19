@@ -94,7 +94,7 @@ test.describe("workshop plugin consent and dice", () => {
         const chat = await admin((api) => api.CreateWorkshop({ title: `Dice ${width} ${theme}` }))
         await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
         await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-        await page.addInitScript((v) => localStorage.setItem("rp.theme", v), theme)
+        await page.addInitScript((v) => localStorage.setItem("dreamspan.theme", v), theme)
         await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
         await page.goto(`${server().url}/chats/${chat.id}`)
         await page.getByLabel("Message", { exact: true }).fill("Add a dice-roll button to the composer.")

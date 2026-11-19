@@ -720,7 +720,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                   const safe = yield* Effect.try({
                     try: () => {
                       const doc = JSON.parse(String(file.docJson)) as Doc
-                      const ours = (doc.extensions as { rp_harness?: { skills?: unknown } } | undefined)?.rp_harness
+                      const ours = (doc.extensions as { dreamspan?: { skills?: unknown } } | undefined)?.dreamspan
                       if (ours?.skills !== undefined) return null
                       return encodeLibraryDoc(
                         safeAgentDocument(
@@ -793,7 +793,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                     const safe = yield* Effect.try({
                       try: () => {
                         const file = JSON.parse(String(value.docJson)) as Doc
-                        const ours = (file.extensions as { rp_harness?: { skills?: unknown } } | undefined)?.rp_harness
+                        const ours = (file.extensions as { dreamspan?: { skills?: unknown } } | undefined)?.dreamspan
                         if (kind === "note" || ours?.skills !== undefined) return null
                         const whole = kind === "preset" ? (JSON.parse(encodeLibraryDoc(file).json) as Doc) : file
                         return encodeLibraryDoc(

@@ -25,7 +25,7 @@ for (const width of [1440, 390])
     }) => {
       await page.setViewportSize({ width, height: 960 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
       const fixture = await admin((api) =>
         Effect.gen(function* () {
@@ -112,7 +112,7 @@ for (const width of [1440, 390])
     test(`message and summary history ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 960 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
       const fixture = await admin((api) =>
         Effect.gen(function* () {

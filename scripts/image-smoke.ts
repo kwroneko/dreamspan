@@ -309,7 +309,7 @@ export const smoke = async (base: string, container: string, password: string) =
       requireThat((yield* api.ListPlugins()).length === 0, "fresh image unexpectedly has plugins")
       pass("no-plugins startup")
       const pluginFiles = (id: string, broken: boolean) => ({
-        "rp-plugin.json": JSON.stringify({
+        "dreamspan-plugin.json": JSON.stringify({
           id,
           name: "Synthetic image plugin",
           api: 1,

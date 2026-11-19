@@ -14,7 +14,7 @@ const copies = (page: Page) =>
   page.evaluate(
     () =>
       new Promise<Copy[]>((resolve, reject) => {
-        const r = indexedDB.open("rp-editor-copies", 1)
+        const r = indexedDB.open("dreamspan-editor-copies", 1)
         r.onsuccess = () => {
           const d = r.result
           const q = d.transaction("copies").objectStore("copies").getAll()
@@ -30,7 +30,7 @@ const put = (page: Page, copy: Copy) =>
   page.evaluate(
     (copy) =>
       new Promise<void>((resolve) => {
-        const r = indexedDB.open("rp-editor-copies", 1)
+        const r = indexedDB.open("dreamspan-editor-copies", 1)
         r.onupgradeneeded = () => {
           const s = r.result.createObjectStore("copies", { keyPath: "key" })
           s.createIndex("userId", "userId")
@@ -42,7 +42,7 @@ const put = (page: Page, copy: Copy) =>
           t.objectStore("copies").put(copy)
           t.oncomplete = () => {
             d.close()
-            window.dispatchEvent(new Event("rp-browser-copies"))
+            window.dispatchEvent(new Event("dreamspan-browser-copies"))
             resolve()
           }
         }

@@ -58,7 +58,7 @@ for (const [width, theme, model, asCard] of [
     })
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme })
-    await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+    await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const name = `Mira ${width} ${theme}`
     const personaName = `Ana ${width} ${theme}`
@@ -262,7 +262,7 @@ test("a pending guidance action fits a long speaker name on a phone and desktop"
     for (const theme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme: theme })
       await page.evaluate((value) => {
-        localStorage.setItem("rp.theme", value)
+        localStorage.setItem("dreamspan.theme", value)
         document.documentElement.dataset.theme = value
       }, theme)
       const bounds = await generate.boundingBox()

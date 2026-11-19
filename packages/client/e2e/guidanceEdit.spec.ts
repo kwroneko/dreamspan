@@ -98,7 +98,7 @@ for (const width of [1440, 390]) {
       await settled(slotId, 1)
       await page.setViewportSize({ width, height: 844 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await page.goto(`${server().url}/chats/${chatId}`)
       await expect(toggle(page)).toBeEnabled()

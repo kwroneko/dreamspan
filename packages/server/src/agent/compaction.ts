@@ -151,7 +151,7 @@ export const transcriptData = (messages: ReadonlyArray<AgentMessage>): string =>
             }
           ]
         if (m.role === "rpUser") return [{ role: "user", content: summarySafeText(m.message.content) }]
-        if (m.role === "rpHarness" || m.role === "user") return [{ role: m.role, content: m.content }]
+        if (m.role === "rpApp" || m.role === "user") return [{ role: m.role, content: m.content }]
         if (m.role === "rpCompaction")
           return [{ role: "summary", content: m.content, from: m.from, through: m.through }]
         return []

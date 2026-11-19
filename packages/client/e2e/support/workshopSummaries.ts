@@ -52,7 +52,7 @@ export function workshopSummaryTests() {
           test.setTimeout(180_000)
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
           await page.emulateMedia({ colorScheme: theme })
-          await page.addInitScript((theme) => localStorage.setItem("rp.theme", theme), theme)
+          await page.addInitScript((theme) => localStorage.setItem("dreamspan.theme", theme), theme)
           await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
           const chat = await admin((api) =>
             Effect.gen(function* () {

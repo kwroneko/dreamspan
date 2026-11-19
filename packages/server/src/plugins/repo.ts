@@ -181,7 +181,7 @@ export const snapshot = async (
   }
   for (const reserved of ["server.mjs", "worker.mjs", "client.mjs", "worker-bridge.mjs", "check.json"])
     if (tree.has(reserved)) throw new Error("Reserved plugin build filename")
-  const raw = tree.get("rp-plugin.json")
+  const raw = tree.get("dreamspan-plugin.json")
   if (!raw) throw new Error("Missing plugin manifest")
   const manifest = Schema.decodeUnknownSync(PluginManifest)(JSON.parse(Buffer.from(raw).toString("utf8")))
   if (manifest.id !== id) throw new Error("Plugin id does not match folder")
@@ -261,7 +261,7 @@ export const checkoutCommit = async (dataDir: string, owner: string, id: string,
 
 export const readManifest = async (dataDir: string, folder: string) => {
   await confined(dataDir, folder)
-  const file = join(folder, "rp-plugin.json"),
+  const file = join(folder, "dreamspan-plugin.json"),
     info = await lstat(file)
   if (!info.isFile() || info.isSymbolicLink() || info.size > limits.file) throw new Error("Invalid plugin manifest")
   return Schema.decodeUnknownSync(PluginManifest)(JSON.parse(await readFile(file, "utf8")))
@@ -275,7 +275,7 @@ export const repoVersions = async (folder: string, extra: ReadonlyArray<string>)
     commits.map(async (commit) => {
       try {
         const files = await commitFiles(folder, commit)
-        const raw = files.get("rp-plugin.json")
+        const raw = files.get("dreamspan-plugin.json")
         const manifest = raw
           ? Schema.decodeUnknownSync(PluginManifest)(JSON.parse(Buffer.from(raw).toString("utf8")))
           : null
@@ -293,7 +293,7 @@ export const repoInfo = async (folder: string, selected?: string) => {
   const log = await repoLog(folder)
   const commit = log[0]?.commit ?? null
   const version = selected ?? commit
-  const raw = version ? (await commitFiles(folder, version)).get("rp-plugin.json") : null
+  const raw = version ? (await commitFiles(folder, version)).get("dreamspan-plugin.json") : null
   const manifest = raw ? Schema.decodeUnknownSync(PluginManifest)(JSON.parse(Buffer.from(raw).toString("utf8"))) : null
   return { commit, manifest }
 }

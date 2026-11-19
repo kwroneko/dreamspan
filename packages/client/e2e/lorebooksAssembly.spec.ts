@@ -119,7 +119,7 @@ test.afterAll(async () => {
 const setUp = async (page: Page, width: number, theme: "light" | "dark", login = true) => {
   await page.setViewportSize({ width, height: 1000 })
   await page.emulateMedia({ colorScheme: theme })
-  await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+  await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
   // Logins are rate-limited: a page logs in once.
   if (login) await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   return async (name: string) => {

@@ -99,7 +99,7 @@ const OUTCOMES = ["added", "updated", "failed"] as const
  * Where the folder browser starts: the folder this account last looked in on this device, else
  * the newest path import's. A preference per account (another account signing in here has its own).
  */
-const lastFolderKey = (userId: string) => `rp.st-import.folder.${userId}`
+const lastFolderKey = (userId: string) => `dreamspan.st-import.folder.${userId}`
 
 const lastFolder = (userId: string, jobs: ReadonlyArray<StImportJob>) => {
   try {

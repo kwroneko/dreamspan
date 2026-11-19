@@ -145,7 +145,7 @@ for (const width of [1440, 390])
         colorScheme: theme,
         ...(width === 390 ? { isMobile: true, hasTouch: true } : {})
       })
-      await context.addInitScript((theme) => localStorage.setItem("rp.theme", theme), theme)
+      await context.addInitScript((theme) => localStorage.setItem("dreamspan.theme", theme), theme)
       const page = await context.newPage()
       const chatId = await seed()
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)

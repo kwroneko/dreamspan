@@ -638,7 +638,7 @@ test.describe("the text of a summary's edit", () => {
     await page.evaluate(
       (copy) =>
         new Promise<void>((resolve) => {
-          const request = indexedDB.open("rp-editor-copies", 1)
+          const request = indexedDB.open("dreamspan-editor-copies", 1)
           request.onupgradeneeded = () => {
             const store = request.result.createObjectStore("copies", { keyPath: "key" })
             store.createIndex("userId", "userId")

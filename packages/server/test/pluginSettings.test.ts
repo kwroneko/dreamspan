@@ -8,7 +8,7 @@ import { Reader, Writer } from "../src/db/Database.ts"
 import { checkoutCommit, pluginFolder, saveFiles } from "../src/plugins/repo.ts"
 
 const files = (id: string, source = "export const activate = () => {}", server = false) => ({
-  "rp-plugin.json": JSON.stringify({
+  "dreamspan-plugin.json": JSON.stringify({
     id,
     name: "Synthetic",
     api: 1,
@@ -237,8 +237,8 @@ it(
           expect((yield* api.EnablePlugin({ ...target, commit, consent: true })).ok).toBe(true)
           yield* Effect.promise(() =>
             writeFile(
-              join(pluginFolder(config.dataDir, "", target.id), "rp-plugin.json"),
-              JSON.stringify({ ...JSON.parse(committed["rp-plugin.json"]), name: "Uncommitted", server: "server.ts" })
+              join(pluginFolder(config.dataDir, "", target.id), "dreamspan-plugin.json"),
+              JSON.stringify({ ...JSON.parse(committed["dreamspan-plugin.json"]), name: "Uncommitted", server: "server.ts" })
             )
           )
           const detail = yield* api.GetPlugin(target)
@@ -288,8 +288,8 @@ it(
             value: { [id]: { commit, enabledAt: 1, enabledBy: admin.id } }
           })
           const userApi = yield* client({ cookie: (yield* login(user.handle, "synthetic-user-password")).cookie })
-          const path = join(pluginFolder(config.dataDir, user.id, id), "rp-plugin.json")
-          yield* Effect.promise(() => writeFile(path, files(id)["rp-plugin.json"]))
+          const path = join(pluginFolder(config.dataDir, user.id, id), "dreamspan-plugin.json")
+          yield* Effect.promise(() => writeFile(path, files(id)["dreamspan-plugin.json"]))
           const target = { scope: "user" as const, id }
           expect((yield* userApi.DisablePlugin(target).pipe(Effect.exit))._tag).toBe("Failure")
           expect((yield* userApi.DeletePluginData(target).pipe(Effect.exit))._tag).toBe("Failure")
@@ -317,8 +317,8 @@ it(
             'import {Effect} from "@dreamspan/plugin-api/server"; export const activate = () => Effect.void',
             true
           )
-          serverFiles["rp-plugin.json"] = JSON.stringify({
-            ...JSON.parse(serverFiles["rp-plugin.json"]),
+          serverFiles["dreamspan-plugin.json"] = JSON.stringify({
+            ...JSON.parse(serverFiles["dreamspan-plugin.json"]),
             network: true
           })
           const first = yield* api.CreatePlugin({ ...target, files: serverFiles })

@@ -1017,7 +1017,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 ...(cap <= 1
                   ? [
                       {
-                        role: "rpHarness" as const,
+                        role: "rpApp" as const,
                         content: run.subagent?.writeNow ?? WRITE_NOW,
                         timestamp: Date.now()
                       }
@@ -1147,13 +1147,13 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           if (requests === cap - 1) {
             pendingNudge = undefined
             return {
-              messages: [{ role: "rpHarness", content: run.subagent?.writeNow ?? WRITE_NOW, timestamp: Date.now() }]
+              messages: [{ role: "rpApp", content: run.subagent?.writeNow ?? WRITE_NOW, timestamp: Date.now() }]
             }
           }
           if (pendingNudge === undefined) return undefined
           const nudge = pendingNudge
           pendingNudge = undefined
-          return { messages: [{ role: "rpHarness", content: nudgeText, nudge, timestamp: Date.now() }] }
+          return { messages: [{ role: "rpApp", content: nudgeText, nudge, timestamp: Date.now() }] }
         }
       })
 

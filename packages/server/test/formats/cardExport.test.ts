@@ -158,7 +158,7 @@ describe("card export", () => {
     expect(text).not.toContain(OWNER)
     const data = (JSON.parse(text) as { data: CardDoc }).data
     expect(data.extensions["depth_prompt"]).toEqual({ prompt: "She hums when nervous.", depth: 4, role: "system" })
-    expect(data.extensions["rp_harness"]).toEqual({
+    expect(data.extensions["dreamspan"]).toEqual({
       notes: [
         { id: "outfit", title: "Outfit", content: "Oilskin coat.", placement: placed, scan_lore: true },
         { id: "note-2", title: "Weather", content: "It is raining.", placement: placed }
@@ -186,7 +186,7 @@ describe("card export", () => {
       }
     ])
     // Our namespace is emptied into the notes, so a re-export doesn't double them.
-    expect(back.card.extensions).not.toHaveProperty("rp_harness")
+    expect(back.card.extensions).not.toHaveProperty("dreamspan")
   })
 
   it("gives a note without an id one no other note in the file has", async () => {
@@ -197,7 +197,7 @@ describe("card export", () => {
       cardNote({ title: "Third", content: "Three." })
     ])
     const data = (JSON.parse(new TextDecoder().decode(exported)) as { data: CardDoc }).data
-    const ids = (data.extensions["rp_harness"] as { notes: Array<{ id: string }> }).notes.map((n) => n.id)
+    const ids = (data.extensions["dreamspan"] as { notes: Array<{ id: string }> }).notes.map((n) => n.id)
     expect(ids).toEqual(["note-2", "note-1", "note-3"])
     expect(new Set(ids).size).toBe(3)
   })
@@ -227,7 +227,7 @@ describe("card export", () => {
       data: {
         ...old.data,
         extensions: {
-          rp_harness: {
+          dreamspan: {
             modules: [
               { id: "outfit", title: "Outfit", content: "Coat.", placement: placed, agent_editable: true },
               { id: "bad", title: "Bad", content: "Nowhere.", placement: { mode: "depth", depth: -1, role: "system" } },
@@ -426,7 +426,7 @@ for (const format of ["card-v2-json", "card-v3-json"] as const) {
       { use: "cards" },
       { name: "proofread", description: "Check spelling.", instructions: "List typos.", tools: ["read_card"] }
     ]
-    const card = { ...imported(stCardV2()), extensions: { rp_harness: { skills } } }
+    const card = { ...imported(stCardV2()), extensions: { dreamspan: { skills } } }
     const bytes = await Effect.runPromise(
       exportFile({
         format,
@@ -438,7 +438,7 @@ for (const format of ["card-v2-json", "card-v3-json"] as const) {
       })
     )
     const back = await parsed(bytes)
-    expect((back.card.extensions.rp_harness as { skills: unknown }).skills).toEqual(skills)
+    expect((back.card.extensions.dreamspan as { skills: unknown }).skills).toEqual(skills)
     expect(back.notes).toHaveLength(1)
   })
 }

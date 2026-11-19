@@ -58,7 +58,7 @@ const setUp = async (page: Page, name: string) => {
         ]
       },
       extensions: {
-        rp_harness: {
+        dreamspan: {
           notes: [
             note("n-depth", "Character's Note", { mode: "depth", depth: 2, role: "system" }),
             note("n-zero", "At depth zero", { mode: "depth", depth: 0, role: "system" }),
@@ -142,7 +142,7 @@ const observeFlash = (root: Locator) =>
 const theme = async (page: Page, width: number, scheme: "light" | "dark") => {
   await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
   await page.emulateMedia({ colorScheme: scheme })
-  await page.addInitScript((value) => localStorage.setItem("rp.theme", value), scheme)
+  await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), scheme)
 }
 
 const CACHE_EXPLANATION =

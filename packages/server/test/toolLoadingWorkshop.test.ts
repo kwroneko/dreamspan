@@ -261,7 +261,7 @@ for (const mode of ["off", "ask"] as const) {
         doc: {
           ...newCardDoc("Synthetic helper"),
           extensions: {
-            rp_harness: {
+            dreamspan: {
               skills: [
                 {
                   name: "proofread",

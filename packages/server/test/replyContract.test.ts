@@ -167,7 +167,7 @@ describe("reply contract", () => {
           { role: "assistant", content: "Plain words." },
           { role: "user", content: NUDGE }
         ])
-        const stored = transcriptOf(config.dataDir, version.id).filter((m) => m.role === "rpHarness")
+        const stored = transcriptOf(config.dataDir, version.id).filter((m) => m.role === "rpApp")
         assert.deepStrictEqual(
           stored.map((m) => m.nudge),
           [1]
@@ -288,7 +288,7 @@ describe("reply contract", () => {
       assert.strictEqual(resumed.status, "failed")
       assert.strictEqual(resumed.error?.class, "contract")
       assert.deepStrictEqual(
-        transcriptOf(config.dataDir, entry.version.id).flatMap((m) => (m.role === "rpHarness" ? [m.nudge] : [])),
+        transcriptOf(config.dataDir, entry.version.id).flatMap((m) => (m.role === "rpApp" ? [m.nudge] : [])),
         [1, 2, 3]
       )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))

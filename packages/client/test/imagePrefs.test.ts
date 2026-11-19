@@ -27,7 +27,7 @@ const browser = (values: Record<string, string> = {}, unavailable = false) => {
 }
 
 it("applies saved concealment before rendering, remembers the last concealment and follows other tabs", async () => {
-  const { stored, dataset, events } = browser({ "rp.images": "hide", "rp.avatarStyle": "square" })
+  const { stored, dataset, events } = browser({ "dreamspan.images": "hide", "dreamspan.avatarStyle": "square" })
   const prefs = await import("../src/ui/imagePrefs.ts")
   prefs.applyImagePrefs()
   expect(dataset).toEqual({ images: "hide" })
@@ -40,10 +40,10 @@ it("applies saved concealment before rendering, remembers the last concealment a
   prefs.toggleImages()
   prefs.toggleImages()
   expect(dataset.images).toBe("hide")
-  expect(stored.get("rp.images.conceal")).toBe("hide")
-  stored.set("rp.images", "show")
-  stored.set("rp.avatarStyle", "round")
-  events.get("storage")!({ key: "rp.images" })
+  expect(stored.get("dreamspan.images.conceal")).toBe("hide")
+  stored.set("dreamspan.images", "show")
+  stored.set("dreamspan.avatarStyle", "round")
+  events.get("storage")!({ key: "dreamspan.images" })
   expect(dataset).toEqual({ images: "show" })
   stored.clear()
   events.get("storage")!({ key: null })
@@ -51,7 +51,7 @@ it("applies saved concealment before rendering, remembers the last concealment a
 })
 
 it("validates corrupted values and works without localStorage, including the shortcut in a field", async () => {
-  const { dataset, events } = browser({ "rp.images": "bad", "rp.avatarStyle": "bad" })
+  const { dataset, events } = browser({ "dreamspan.images": "bad", "dreamspan.avatarStyle": "bad" })
   const prefs = await import("../src/ui/imagePrefs.ts")
   prefs.applyImagePrefs()
   expect(dataset).toEqual({ images: "show" })

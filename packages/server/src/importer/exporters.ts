@@ -44,7 +44,7 @@ const decode =
 /**
  * The card with its notes (DESIGN §4.1a): ST's Character's Note from the card's first note,
  * if it's exportable and in-chat; every other exportable note in our extension namespace
- * (`extensions.rp_harness.notes`), which ST ignores and an import reads back. Private notes
+ * (`extensions.dreamspan.notes`), which ST ignores and an import reads back. Private notes
  * never leave; a linked note goes as its shared note's text, which the caller put in it.
  * Conditions stay behind: they name cards by this library's ids.
  */
@@ -117,7 +117,7 @@ export class Exporters extends Context.Service<Exporters, Registry<Exporter>>()(
 
 /**
  * The avatar's chosen cutout (ARCHITECTURE.md §14.5c) in our namespace
- * (`extensions.rp_harness.avatar_crop`), which ST ignores, with the image's size, so an import
+ * (`extensions.dreamspan.avatar_crop`), which ST ignores, with the image's size, so an import
  * applies it only to the image it was chosen on (ST's own crop makes another). Only in a file
  * that holds the image; the image itself goes whole.
  */

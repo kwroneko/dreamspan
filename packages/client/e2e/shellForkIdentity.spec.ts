@@ -43,7 +43,7 @@ for (const width of [1440, 390])
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await page.goto(server().url)
       const pins = page.getByRole("main").getByRole("region", { name: "Pinned chats", exact: true })
       // Global pins are chats, represented once by the current branch.

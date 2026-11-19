@@ -20,11 +20,11 @@ const greeting = [
   "```html",
   "<!doctype html>",
   "<html><head><style>",
-  "body { margin: 0; color: var(--rp-text) } .box { padding: 8px; border: 2px solid var(--rp-accent) }",
+  "body { margin: 0; color: var(--dreamspan-text) } .box { padding: 8px; border: 2px solid var(--dreamspan-accent) }",
   "</style></head><body>",
   '<div class="box" id="panel">Board</div>',
   '<a id="out" href="https://example.com/out">Notice</a>',
-  '<button id="copy" onclick="rp.copy(\'HP 12/20\')">Copy</button>',
+  '<button id="copy" onclick="dreamspan.copy(\'HP 12/20\')">Copy</button>',
   '<pre id="results"></pre>',
   "<script>",
   "(async () => {",
@@ -57,7 +57,7 @@ for (const width of [1440, 390])
       test.setTimeout(180_000)
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const violations: string[] = []
       page.on("console", (message) => {
         // A panel's own refusals are the point; only the app's page counts.
@@ -296,9 +296,9 @@ test("the bridge cannot borrow a click from outside its frame", async ({ page })
               "if (event.data !== 'review:activation') return",
               "parent.postMessage({ type: 'review:state', active: navigator.userActivation.isActive }, new URL(location.href).origin)",
               "try { Object.defineProperty(Object.getPrototypeOf(navigator.userActivation), 'isActive', { get: () => true }) } catch {}",
-              "rp.copy('Panel text')",
-              "parent.postMessage({ type: 'rp:copy', text: 'Forged text', token: '0'.repeat(32) }, new URL(location.href).origin)",
-              "parent.postMessage({ type: 'rp:open', url: 'https://example.com/borrowed', token: '0'.repeat(32) }, new URL(location.href).origin)",
+              "dreamspan.copy('Panel text')",
+              "parent.postMessage({ type: 'dreamspan:copy', text: 'Forged text', token: '0'.repeat(32) }, new URL(location.href).origin)",
+              "parent.postMessage({ type: 'dreamspan:open', url: 'https://example.com/borrowed', token: '0'.repeat(32) }, new URL(location.href).origin)",
               "parent.postMessage({ type: 'review:complete' }, new URL(location.href).origin)",
               "}); document.body.dataset.activationReady='yes'</script>"
             ].join("\n")
@@ -590,7 +590,7 @@ test("a panel that takes focus gets neither the typing nor the bridge, and a cli
             [
               '<input id="field">',
               "<script>setInterval(() => document.getElementById('field').focus(), 30)",
-              "addEventListener('keydown', () => rp.copy('Panel text'), true)",
+              "addEventListener('keydown', () => dreamspan.copy('Panel text'), true)",
               "document.body.dataset.focusReady = 'yes'</script>"
             ].join("\n")
           )
@@ -646,7 +646,7 @@ test("a panel that takes focus gets neither the typing nor the bridge, and a cli
 
 // A press in a panel can reach the app before the pointer's arrival over it does (pointer moves
 // wait for the app's next frame; a busy host makes that late): the app then takes the focus
-// back at once, as from a frame the pointer isn't over, and the press's signed `rp:focus`
+// back at once, as from a frame the pointer isn't over, and the press's signed `dreamspan:focus`
 // gives it back. The press's own focus inside the panel must come back with it: the field the
 // user pressed in gets the typing, from its first key.
 test("a press the app sees before the pointer's arrival keeps its field's focus", async ({ page }) => {

@@ -30,7 +30,7 @@ for (const width of [1440, 390])
     test(`${width} ${theme}: overflow tiles stay rectangular and contained`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const shoot = async (name: string, region: Locator) => {
         const dir = process.env.OVERFLOW_CHIP_SHOTS

@@ -42,7 +42,7 @@ export const pluginCopyTests = () => {
         await page.setViewportSize({ width, height: 1000 })
         await page.emulateMedia({ colorScheme: theme })
         await context.addInitScript((theme) => {
-          localStorage.setItem("rp.theme", theme)
+          localStorage.setItem("dreamspan.theme", theme)
           Object.assign(window, { frequencies: [] })
           const create = AudioContext.prototype.createOscillator
           AudioContext.prototype.createOscillator = function () {
@@ -81,7 +81,7 @@ export const pluginCopyTests = () => {
         const user = await admin((api) => api.Whoami())
         const folder = pluginFolder(server().dataDir, user.id, pluginId)
         const helper = await readFile(join(folder, "src/part/completionSound.ts"), "utf8")
-        const manifest = JSON.parse(await readFile(join(folder, "rp-plugin.json"), "utf8"))
+        const manifest = JSON.parse(await readFile(join(folder, "dreamspan-plugin.json"), "utf8"))
         const base = JSON.parse(await readFile(join(folder, "builtin-base.json"), "utf8"))
         base.files[manifest.base.path] += "\n// Earlier shipped original\n"
         const sha = (s: string) => createHash("sha256").update(s).digest("hex")
@@ -92,7 +92,7 @@ export const pluginCopyTests = () => {
             ...target,
             files: {
               "src/part/completionSound.ts": helper.replace("660, at", "880, at"),
-              "rp-plugin.json": JSON.stringify(manifest),
+              "dreamspan-plugin.json": JSON.stringify(manifest),
               "builtin-base.json": JSON.stringify(base)
             },
             message: "Play a higher completion tone"
@@ -214,7 +214,7 @@ export const pluginCopyTests = () => {
       test(`a copied tool's saved access ${width} ${theme}`, async ({ page }, info) => {
         await page.setViewportSize({ width, height: 1000 })
         await page.emulateMedia({ colorScheme: theme })
-        await page.addInitScript((v) => localStorage.setItem("rp.theme", v), theme)
+        await page.addInitScript((v) => localStorage.setItem("dreamspan.theme", v), theme)
         await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
         const made = await admin((api) =>
           api.CopyBuiltin({
@@ -223,13 +223,13 @@ export const pluginCopyTests = () => {
             pluginId: `consent-presence-${width}-${theme}`
           })
         )
-        const file = join(pluginFolder(server().dataDir, "", made.id), "rp-plugin.json")
+        const file = join(pluginFolder(server().dataDir, "", made.id), "dreamspan-plugin.json")
         const manifest = JSON.parse(await readFile(file, "utf8"))
         manifest.surfaces.push("server:storage")
         await admin((api) =>
           api.CommitPlugin({
             ...made,
-            files: { "rp-plugin.json": JSON.stringify(manifest) },
+            files: { "dreamspan-plugin.json": JSON.stringify(manifest) },
             message: "Keep private plugin data"
           })
         )
@@ -322,7 +322,7 @@ export const copiedPresenceTests = () =>
           try {
             await page.setViewportSize({ width, height: 1000 })
             await page.emulateMedia({ colorScheme: theme })
-            await page.addInitScript((v) => localStorage.setItem("rp.theme", v), theme)
+            await page.addInitScript((v) => localStorage.setItem("dreamspan.theme", v), theme)
             await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
             await page.goto(`${server().url}/chats/${chat.id}`)
             await page

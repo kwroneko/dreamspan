@@ -70,7 +70,7 @@ test.afterAll(async () => {
 })
 
 const files = {
-  "rp-plugin.json": JSON.stringify({
+  "dreamspan-plugin.json": JSON.stringify({
     id: "display-everything",
     name: "Every display rule",
     api: 1,
@@ -148,7 +148,7 @@ for (const transport of ["every", "native", "dispatcher"] as const)
         const commit = yield* api.CreatePlugin({
           scope: "user",
           id,
-          files: { ...files, "rp-plugin.json": files["rp-plugin.json"].replace("display-everything", id) }
+          files: { ...files, "dreamspan-plugin.json": files["dreamspan-plugin.json"].replace("display-everything", id) }
         })
         const report = yield* api.CheckPlugin({ scope: "user", id, commit })
         return { story, sent: sent.entry, workshop, asked: asked.entry, commit, report }

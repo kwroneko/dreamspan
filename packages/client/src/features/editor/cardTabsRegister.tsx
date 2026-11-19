@@ -19,8 +19,8 @@ const top =
   (path: FieldPath) =>
     fields.includes(String(path[0]))
 
-/** A card's skills (`extensions.rp_harness`), which the Extra tab's Skills section edits. */
-const skills = (path: FieldPath) => path[0] === "extensions" && path[1] === "rp_harness"
+/** A card's skills (`extensions.dreamspan`), which the Extra tab's Skills section edits. */
+const skills = (path: FieldPath) => path[0] === "extensions" && path[1] === "dreamspan"
 
 type Panel = "definition" | "greetings" | "metadata" | "lorebook" | "notes" | "extra"
 

@@ -16,7 +16,7 @@ const browserCopy = (page: Page) =>
   page.evaluate(
     () =>
       new Promise<Array<{ content: string; at: number }>>((done, fail) => {
-        const opening = indexedDB.open("rp-editor-copies", 1)
+        const opening = indexedDB.open("dreamspan-editor-copies", 1)
         opening.onerror = () => fail(opening.error)
         opening.onsuccess = () => {
           const db = opening.result

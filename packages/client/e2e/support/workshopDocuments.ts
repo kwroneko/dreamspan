@@ -25,7 +25,7 @@ export function workshopDocumentTests() {
           test.setTimeout(180_000)
           await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await context.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await context.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
           const suffix = `${width} ${theme}`
           const preset = await admin((api) => api.CreatePreset({ label: `Draft preset ${suffix}` }))

@@ -93,7 +93,7 @@ const cardPng = () => {
           system_prompt: "",
           post_history_instructions: "",
           tags: ["fixture"],
-          creator: "rp-harness",
+          creator: "dreamspan",
           character_version: CARD_VERSION,
           alternate_greetings: [],
           extensions: {
@@ -152,7 +152,7 @@ const gatePng = (card: (typeof GATE_CARDS)[number]) => {
           ...fields,
           creator_notes: "",
           tags: ["fixture"],
-          creator: "rp-harness",
+          creator: "dreamspan",
           character_version: "1",
           alternate_greetings: [],
           extensions: { talkativeness: "0.5", fav: false, ...(depth_prompt ? { depth_prompt } : {}) }

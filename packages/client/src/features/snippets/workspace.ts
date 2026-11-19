@@ -63,7 +63,7 @@ export class SnippetWorkspace {
     }
   }
   private get recentKey() {
-    return `rp.snippetRecent.${this.user}`
+    return `dreamspan.snippetRecent.${this.user}`
   }
   private readRecent(): ReadonlyArray<RefId> {
     try {

@@ -19,7 +19,7 @@ for (const width of [1440, 390])
       test(`${kind} full save and history comparisons ${width} ${theme}`, async ({ page }) => {
         await page.setViewportSize({ width, height: 960 })
         await page.emulateMedia({ colorScheme: theme })
-        await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+        await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
         await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
         let id: string
         if (kind === "note") {

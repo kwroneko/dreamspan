@@ -121,7 +121,7 @@ it.live("resumes with the run's frozen skills and loads after a card with its ow
       doc: {
         ...newCardDoc("Synthetic helper"),
         extensions: {
-          rp_harness: {
+          dreamspan: {
             skills: [{ name: "proofread", description: "Checks spelling.", instructions: "List typos.", tools: [] }]
           }
         }

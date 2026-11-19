@@ -160,11 +160,11 @@ describe("JSON card import", () => {
 
   it("leaves the notes a previous export stored in its extension for the importer, which makes them card notes", () => {
     const card = stCardV2()
-    const rp_harness = { modules: [{ id: "m1", title: "Outfit", content: "Oilskin." }], other: 1 }
-    const extensions = { ...card.data.extensions, rp_harness }
+    const dreamspan = { modules: [{ id: "m1", title: "Outfit", content: "Oilskin." }], other: 1 }
+    const extensions = { ...card.data.extensions, dreamspan }
     const result = run(importCard(json({ ...card, data: { ...card.data, extensions } })))
     expect(result.card).not.toHaveProperty("modules")
-    expect(result.card.extensions.rp_harness).toEqual(rp_harness)
+    expect(result.card.extensions.dreamspan).toEqual(dreamspan)
     expect(codes(result)).toEqual([])
   })
 

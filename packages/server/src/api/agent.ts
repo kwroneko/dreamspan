@@ -324,7 +324,7 @@ const agentVersionResumer = Effect.gen(function* () {
           transcript: [
             ...planned.transcript,
             {
-              role: "rpHarness",
+              role: "rpApp",
               content: `Direction for the next message (replaces the earlier direction): ${options.direction.trim() || "None."}`,
               timestamp: Date.now()
             }

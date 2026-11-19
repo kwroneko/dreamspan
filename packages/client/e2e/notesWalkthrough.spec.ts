@@ -152,7 +152,7 @@ test.afterAll(async () => {
 const notesAt = async (page: Page, width: number, theme: "light" | "dark") => {
   await page.setViewportSize({ width, height: 1000 })
   await page.emulateMedia({ colorScheme: theme })
-  await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+  await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${inn.chatId}`)
   return openPanel(page, "Notes")

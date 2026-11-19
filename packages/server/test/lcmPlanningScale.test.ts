@@ -18,7 +18,7 @@ lcmTest(
           () =>
             new Promise<Record<string, number>>((resolve, reject) => {
               const worker = new Worker(new URL("./support/lcmPlanningFixtureWorker.ts", import.meta.url), {
-                workerData: { file: join(h.dataDir, "rp-harness.db"), chats: [h.chat.id], branches }
+                workerData: { file: join(h.dataDir, "dreamspan.db"), chats: [h.chat.id], branches }
               })
               let result: { shape: Record<string, number> } | undefined
               worker.once("message", (value: typeof result) => {

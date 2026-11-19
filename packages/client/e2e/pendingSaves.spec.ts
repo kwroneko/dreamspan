@@ -31,7 +31,7 @@ const copies = (page: Page) =>
   page.evaluate(
     () =>
       new Promise<Array<StoredCopy>>((resolve) => {
-        const request = indexedDB.open("rp-editor-copies", 1)
+        const request = indexedDB.open("dreamspan-editor-copies", 1)
         request.onsuccess = () => {
           const db = request.result
           const all = db.transaction("copies").objectStore("copies").getAll()

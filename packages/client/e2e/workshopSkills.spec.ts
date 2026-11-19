@@ -33,7 +33,7 @@ const importCard = async (page: Page, name: string) => {
     creator: "Synthetic",
     character_version: "1.0",
     extensions: {
-      rp_harness: {
+      dreamspan: {
         skills: [
           {
             name: "proofread",
@@ -61,7 +61,7 @@ for (const width of [1440, 390])
     test(`card skills and workshop start choices at ${width} ${theme}`, async ({ page }, info) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const shot = async (name: string) => {
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
@@ -117,8 +117,8 @@ for (const width of [1440, 390])
         .poll(async () => {
           const opened = await admin((api) => api.OpenEditor({ refId: ref.id }))
           const skills = (
-            opened.doc as { extensions?: { rp_harness?: { skills?: Array<{ name?: string; use?: string }> } } }
-          ).extensions?.rp_harness?.skills
+            opened.doc as { extensions?: { dreamspan?: { skills?: Array<{ name?: string; use?: string }> } } }
+          ).extensions?.dreamspan?.skills
           return skills?.map((s) => s.name ?? `use:${s.use}`)
         })
         .toEqual(["proofread", "use:cards", "tide-notes"])

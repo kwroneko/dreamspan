@@ -102,7 +102,7 @@ for (const mode of ["every", "auto", "dispatcher"] as const) {
         doc: {
           ...newCardDoc("Synthetic helper"),
           extensions: {
-            rp_harness: {
+            dreamspan: {
               skills: [
                 { name: "proofread", description: untrusted, instructions: secret, tools: ["read_card"] },
                 { use: "cards" }

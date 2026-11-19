@@ -8,9 +8,9 @@
 // scripts (the page's CSP would refuse them too). With it, the panel's source allowed its
 // scripts: the page's CSP lets inline scripts and `/frame/lib/` run, and this writes the
 // document with the vendored libraries first, as Tavern Helper injects them. Either way it
-// keeps `vh` to the chat column's height through `--rp-vh`, takes the theme's colours as CSS
+// keeps `vh` to the chat column's height through `--dreamspan-vh`, takes the theme's colours as CSS
 // variables, reports the document's height as it changes, and turns a click on an `http(s)`
-// link into a request to open it in a new tab (the bridge, ui/html/bridge.ts). `rp.copy(text)`
+// link into a request to open it in a new tab (the bridge, ui/html/bridge.ts). `dreamspan.copy(text)`
 // asks the app to copy text, on a click.
 
 interface Theme {
@@ -20,9 +20,9 @@ interface Theme {
   readonly scheme: "light" | "dark"
 }
 type Incoming =
-  | { readonly type: "rp:render"; readonly html: string; readonly vh: number; readonly theme: Theme }
-  | { readonly type: "rp:theme"; readonly theme: Theme }
-  | { readonly type: "rp:vh"; readonly vh: number }
+  | { readonly type: "dreamspan:render"; readonly html: string; readonly vh: number; readonly theme: Theme }
+  | { readonly type: "dreamspan:theme"; readonly theme: Theme }
+  | { readonly type: "dreamspan:vh"; readonly vh: number }
 
 const host = window.parent
 const hostOrigin = new URL(location.href).origin
@@ -64,9 +64,9 @@ const LIBRARIES: ReadonlyArray<readonly ["script" | "style", string]> = [
   ["script", "vue-router.global.prod.js"]
 ]
 
-/** `50vh` as `calc(var(--rp-vh) * 50)`: the frame's own viewport is only as tall as its content. */
+/** `50vh` as `calc(var(--dreamspan-vh) * 50)`: the frame's own viewport is only as tall as its content. */
 const viewportUnits = (css: string) =>
-  css.replace(/(-?(?:\d+\.?\d*|\.\d+))(?:d|s|l)?vh\b/gi, (_, amount: string) => `calc(var(--rp-vh) * ${amount})`)
+  css.replace(/(-?(?:\d+\.?\d*|\.\d+))(?:d|s|l)?vh\b/gi, (_, amount: string) => `calc(var(--dreamspan-vh) * ${amount})`)
 
 /** The block as a document: no base or refresh, and `vh` in the chat column's terms. */
 function parse(html: string) {
@@ -131,18 +131,18 @@ function report() {
   )
   if (height === reported) return
   reported = height
-  post({ type: "rp:height", height }, hostOrigin)
+  post({ type: "dreamspan:height", height }, hostOrigin)
 }
 
 function setTheme(theme: Theme, element: HTMLElement = document.documentElement) {
   const root = element.style
-  root.setProperty("--rp-text", theme.text)
-  root.setProperty("--rp-background", theme.background)
-  root.setProperty("--rp-accent", theme.accent)
+  root.setProperty("--dreamspan-text", theme.text)
+  root.setProperty("--dreamspan-background", theme.background)
+  root.setProperty("--dreamspan-accent", theme.accent)
   root.setProperty("color-scheme", theme.scheme)
 }
 const setViewport = (vh: number, element: HTMLElement = document.documentElement) =>
-  element.style.setProperty("--rp-vh", `${vh / 100}px`)
+  element.style.setProperty("--dreamspan-vh", `${vh / 100}px`)
 
 const XLINK = "http://www.w3.org/1999/xlink"
 
@@ -157,24 +157,24 @@ function onClick(event: MouseEvent) {
   event.preventDefault()
   if (event.type !== "click" || !event.isTrusted || !pressed()) return
   const href = (link.getAttribute("href") ?? link.getAttributeNS(XLINK, "href") ?? "").trim()
-  if (/^https?:\/\//i.test(href)) post({ type: "rp:open", url: href, token: actionToken }, hostOrigin)
+  if (/^https?:\/\//i.test(href)) post({ type: "dreamspan:open", url: href, token: actionToken }, hostOrigin)
 }
 
 function onMessage(event: MessageEvent<Incoming>) {
   if (event.source !== host || event.origin !== hostOrigin || typeof event.data !== "object" || event.data === null)
     return
   const message = event.data
-  if (message.type === "rp:render" && !rendered && typeof message.html === "string") {
+  if (message.type === "dreamspan:render" && !rendered && typeof message.html === "string") {
     rendered = true
     render(message.html, message.vh, message.theme)
-  } else if (message.type === "rp:theme" && rendered) setTheme(message.theme)
-  else if (message.type === "rp:vh" && rendered) setViewport(message.vh)
+  } else if (message.type === "dreamspan:theme" && rendered) setTheme(message.theme)
+  else if (message.type === "dreamspan:vh" && rendered) setViewport(message.vh)
 }
 
 /** Only a click in this frame grants its helpers activation; a parent click grants none. */
 const helpers = {
   copy: (text: unknown) => {
-    if (pressed()) post({ type: "rp:copy", text: String(text), token: actionToken }, hostOrigin)
+    if (pressed()) post({ type: "dreamspan:copy", text: String(text), token: actionToken }, hostOrigin)
   }
 }
 
@@ -188,12 +188,12 @@ function onPress(event: PointerEvent) {
   if (!event.isTrusted) return
   pressedAt = clock()
   if (event.type === "pointerdown") pressFocus = null
-  post({ type: "rp:focus", token: actionToken }, hostOrigin)
+  post({ type: "dreamspan:focus", token: actionToken }, hostOrigin)
 }
 
 /**
  * What a press focused here, kept a moment: the app may take focus back before the press's
- * `rp:focus` reaches it (its pointer events wait for its next frame, so on a busy host it can
+ * `dreamspan:focus` reaches it (its pointer events wait for its next frame, so on a busy host it can
  * see the focus move before the pointer's arrival) and gives it back once it does. Taking it
  * back blurs the press's field, and the frame gets the focus back without it, so the typing
  * would go nowhere: the frame's focus coming back that soon after the press puts it back there.
@@ -220,11 +220,11 @@ function listen() {
   document.addEventListener("pointerup", onPress, true)
   document.addEventListener("click", onClick, true)
   document.addEventListener("auxclick", onClick, true)
-  Object.assign(window, { rp: helpers })
+  Object.assign(window, { dreamspan: helpers })
 }
 
 listen()
-post({ type: "rp:ready", token: actionToken }, hostOrigin)
+post({ type: "dreamspan:ready", token: actionToken }, hostOrigin)
 
 // A module, so its names stay its own (it has no imports or exports when built).
 export {}

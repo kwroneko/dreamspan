@@ -224,7 +224,7 @@ for (const scheme of ["light", "dark"] as const)
         await toggle.click()
         await expect(toggle).toBeChecked()
         expect(await asked()).toBe(2)
-        expect(await page.evaluate(() => localStorage.getItem("rp.notifications.system"))).toBe("on")
+        expect(await page.evaluate(() => localStorage.getItem("dreamspan.notifications.system"))).toBe("on")
       }
     )
 

@@ -117,7 +117,7 @@ test("SVG panel links cannot navigate into an attacker document", async ({ page 
     requests.push(route.request().url())
     await route.fulfill({
       contentType: "text/html",
-      body: '<script>parent.postMessage({type:"rp:ready"},"*");addEventListener("message",e=>document.body.textContent=JSON.stringify(e.data))</script>'
+      body: '<script>parent.postMessage({type:"dreamspan:ready"},"*");addEventListener("message",e=>document.body.textContent=JSON.stringify(e.data))</script>'
     })
   })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -158,19 +158,19 @@ test("SVG panel links cannot navigate into an attacker document", async ({ page 
       [frame.contentWindow, location.origin],
       [window, "null"]
     ] as const)
-      dispatchEvent(new MessageEvent("message", { source, origin, data: { type: "rp:height", height: 1 } }))
+      dispatchEvent(new MessageEvent("message", { source, origin, data: { type: "dreamspan:height", height: 1 } }))
   })
   expect(await page.locator('iframe[title="Panel"]').evaluate((frame) => frame.style.height)).toBe(height)
   expect(
     await content.evaluate(() => {
       const root = document.documentElement.style
-      const before = root.getPropertyValue("--rp-vh")
+      const before = root.getPropertyValue("--dreamspan-vh")
       for (const [source, origin] of [
         [parent, "https://attacker.invalid"],
         [window, new URL(location.href).origin]
       ] as const)
-        dispatchEvent(new MessageEvent("message", { source, origin, data: { type: "rp:vh", vh: 1 } }))
-      return root.getPropertyValue("--rp-vh") === before
+        dispatchEvent(new MessageEvent("message", { source, origin, data: { type: "dreamspan:vh", vh: 1 } }))
+      return root.getPropertyValue("--dreamspan-vh") === before
     })
   ).toBe(true)
   const isolation = await content.evaluate(async (url) => {
@@ -208,10 +208,10 @@ test("SVG panel links cannot navigate into an attacker document", async ({ page 
   const deliveries = await content.evaluate(async () => {
     const received: unknown[] = []
     const listen = (event: MessageEvent) => {
-      if (event.data?.type === "rp:render") received.push(event.data)
+      if (event.data?.type === "dreamspan:render") received.push(event.data)
     }
     addEventListener("message", listen)
-    parent.postMessage({ type: "rp:ready" }, "*")
+    parent.postMessage({ type: "dreamspan:ready" }, "*")
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
     removeEventListener("message", listen)
     return received.length

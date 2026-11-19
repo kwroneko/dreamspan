@@ -114,7 +114,7 @@ for (const width of [1440, 390])
       })
 
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await page.setViewportSize({ width, height: 900 })
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await page.goto(`${server().url}/import/st`)
@@ -237,7 +237,7 @@ for (const width of [1440, 390])
     test(`${width} ${theme}: picked folders check, refuse and check again`, async ({ page }, info) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const main = `Bridge picked ${width} ${theme}`
       const root = mkdtempSync(join(base, "st-"))
       write(root, {

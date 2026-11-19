@@ -24,7 +24,7 @@ import {
   verifyPassword
 } from "./passwords.ts"
 
-export const SESSION_COOKIE = "rp_session"
+export const SESSION_COOKIE = "dreamspan_session"
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000
 /** Set by the server from the socket's address (server.ts); any copy a client sends is replaced. */
 export const PEER_HEADER = "x-rp-peer"

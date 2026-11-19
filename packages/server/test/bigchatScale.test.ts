@@ -43,7 +43,7 @@ for (const size of sizes) {
       const config = testConfig({ dbReaders: 2 })
       const restored = previous.find((row) => row.size === size)
       if (reuse && !restored) throw new Error(`No synthetic snapshot measurements for ${size}`)
-      if (reuse) copyFileSync(`${reuse}-${size}.db`, join(config.dataDir, "rp-harness.db"))
+      if (reuse) copyFileSync(`${reuse}-${size}.db`, join(config.dataDir, "dreamspan.db"))
       const fixture = restored
         ? {
             bytes: restored.bytes,
@@ -325,7 +325,7 @@ for (const size of sizes) {
             const db = new DatabaseSync(workerData.source, { readOnly: true })
             backup(db, workerData.destination).then(() => db.close())
           `,
-                  { eval: true, workerData: { source: join(config.dataDir, "rp-harness.db"), destination } }
+                  { eval: true, workerData: { source: join(config.dataDir, "dreamspan.db"), destination } }
                 )
                 worker.once("error", reject)
                 worker.once("exit", (code) =>

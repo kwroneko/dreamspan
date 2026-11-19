@@ -332,7 +332,7 @@ describe("notes and files tools: review", () => {
                 maxDepth: null
               }
             ],
-            rp_harness: { regex_approved: true, html_scripts_approved: true }
+            dreamspan: { regex_approved: true, html_scripts_approved: true }
           }
         }
       })

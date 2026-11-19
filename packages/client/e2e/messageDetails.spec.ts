@@ -98,7 +98,7 @@ const themes = async (page: Page, each: (width: number, theme: string) => Promis
     for (const theme of ["light", "dark"] as const) {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.evaluate((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.evaluate((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await page.reload()
       await each(width, theme)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
@@ -328,7 +328,7 @@ test("model labels use the free header width and hide the whole connection when 
     for (const theme of ["light", "dark"] as const) {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.evaluate((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.evaluate((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await page.reload()
       const head = lastReply(page).locator("header")
       const label = head.locator("[data-model-label]")

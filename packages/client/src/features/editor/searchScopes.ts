@@ -88,7 +88,7 @@ export const presetScopes: SearchScopes = {
   ]
 }
 
-const KEY = "rp.searchScope."
+const KEY = "dreamspan.searchScope."
 
 export const rememberedScope = (scopes: SearchScopes) => {
   try {

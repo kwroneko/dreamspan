@@ -77,7 +77,7 @@ export const useUnseen = (chatId: ChatId) => useSyncExternalStore(subscribe, () 
 
 // --- System notifications, the user's choice per browser
 
-const SYSTEM_KEY = "rp.notifications.system"
+const SYSTEM_KEY = "dreamspan.notifications.system"
 
 const systemWanted = () => {
   try {

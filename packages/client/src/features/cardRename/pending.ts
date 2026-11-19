@@ -14,7 +14,7 @@ const Pending = Schema.Struct({
 })
 const PendingList = Schema.Array(Pending)
 const listeners = new Set<() => void>()
-const key = (user: string, entity: string) => `rp.rename-history:${user}:${entity}`
+const key = (user: string, entity: string) => `dreamspan.rename-history:${user}:${entity}`
 const emit = () => listeners.forEach((listener) => listener())
 const read = (user: string, entity: string) => {
   try {

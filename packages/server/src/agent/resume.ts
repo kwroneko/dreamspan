@@ -124,7 +124,7 @@ export const planResume = (
     const asked = kept.at(-1)
     if (isNudge(asked))
       kept[kept.length - 1] = {
-        ...(asked as AgentMessage & { role: "rpHarness" }),
+        ...(asked as AgentMessage & { role: "rpApp" }),
         answersCut: ((asked as { answersCut?: number }).answersCut ?? 0) + 1
       }
   }
@@ -215,7 +215,7 @@ export const planStepResume = (
     kept = [...messages.slice(0, at), { ...turn, content }, ...resultsAfter((id) => calls.includes(id))]
     if (calls.length === 0) {
       // A plain turn the app then asked to be sent: its note comes with it.
-      const notes = messages.slice(at + 1).findIndex((m) => m.role !== "rpHarness")
+      const notes = messages.slice(at + 1).findIndex((m) => m.role !== "rpApp")
       const following = messages.slice(at + 1, notes < 0 ? undefined : at + 1 + notes)
       if (following.length === 0) return new StepNotResumable("The reply can't be carried on from its own text.")
       kept.push(...following)

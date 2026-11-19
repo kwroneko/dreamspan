@@ -85,7 +85,7 @@ export function workshopRewriteTests() {
             )
             await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
             await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-            await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+            await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
             await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
             await page.goto(`${server().url}/chats/${workshop.id}`)
             await page.getByLabel("Message", { exact: true }).fill("Rename Aria in the story and its summaries.")
@@ -225,7 +225,7 @@ function sideWriteTests() {
             )
             await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
             await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-            await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+            await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
             await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
             const url = (fork: string) =>
               `${server().url}/chats/${fixture.chat.id}?fork=${fork}&panel=workshop&workshop=${workshop.id}`

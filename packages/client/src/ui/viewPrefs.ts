@@ -13,7 +13,7 @@ import { PreferenceWrites } from "./preferenceWrites.ts"
 const channel =
   typeof window === "undefined" || typeof BroadcastChannel === "undefined"
     ? null
-    : new BroadcastChannel("rp.displayPrefs")
+    : new BroadcastChannel("dreamspan.displayPrefs")
 
 const writesFor = Atom.family((_userId: string) => Atom.make(new PreferenceWrites()))
 const prefsFor = Atom.family((userId: string) =>

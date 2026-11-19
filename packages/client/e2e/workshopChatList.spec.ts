@@ -64,7 +64,7 @@ for (const width of [1440, 390])
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       mkdirSync(shots, { recursive: true })
       const panel =
@@ -147,7 +147,7 @@ for (const width of [1440, 390])
       await page.evaluate(
         (id) =>
           localStorage.setItem(
-            `rp.chats.sidebar.${id}`,
+            `dreamspan.chats.sidebar.${id}`,
             JSON.stringify({ sideChatsShow: "workshops", sideChatsSort: "name", sideChatsReverse: true })
           ),
         userId
@@ -279,7 +279,7 @@ for (const width of [1440, 390])
         )
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       mkdirSync(shots, { recursive: true })
       await page.goto(`${server().url}/chats/${same.workshop}?sideChatsShow=all`)

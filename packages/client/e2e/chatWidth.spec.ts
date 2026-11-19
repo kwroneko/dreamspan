@@ -107,7 +107,7 @@ const noSideScroll = (page: Page) =>
 const open = async (page: Page, width: number, height: number, theme: "light" | "dark", chatId: ChatId) => {
   await page.setViewportSize({ width, height })
   await page.emulateMedia({ colorScheme: theme })
-  await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+  await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(box(page)).toBeEditable()

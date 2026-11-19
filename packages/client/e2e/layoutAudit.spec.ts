@@ -241,7 +241,7 @@ for (const width of [1440, 390])
         const user = await withCookie(server, "", (api) => api.Whoami())
         await page.evaluate(async (userId) => {
           const db = await new Promise<IDBDatabase>((resolve, reject) => {
-            const request = indexedDB.open("rp-editor-copies", 1)
+            const request = indexedDB.open("dreamspan-editor-copies", 1)
             request.onsuccess = () => resolve(request.result)
             request.onerror = () => reject(request.error)
           })
@@ -261,7 +261,7 @@ for (const width of [1440, 390])
             tx.oncomplete = () => resolve()
           })
           db.close()
-          window.dispatchEvent(new Event("rp-browser-copies"))
+          window.dispatchEvent(new Event("dreamspan-browser-copies"))
         }, user.id)
         await expect(warning).toHaveText("2 unsaved texts")
         const tiles = nav.locator("a").first()
@@ -2456,7 +2456,7 @@ test.describe("revision dialogs", () => {
         await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
         await page.setViewportSize({ width, height: 960 })
         await page.emulateMedia({ colorScheme: theme })
-        await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+        await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
         const findings: unknown[] = []
         const gaps: unknown[] = []
         const geometry: unknown[] = []

@@ -76,7 +76,7 @@ export interface Skill {
 /**
  * The skills a card carries: references to registered skills (`{ "use": "cards" }`) and skills
  * written in the card (`{ "name", "description", "instructions", "tools" }`), read from
- * `extensions.rp_harness.skills` by the shared rules (`@dreamspan/shared/cardSkills.ts`, which the card
+ * `extensions.dreamspan.skills` by the shared rules (`@dreamspan/shared/cardSkills.ts`, which the card
  * editor shows). Anything else, and entries past 16, are ignored, so a card made elsewhere is
  * read as an ordinary card.
  */
@@ -106,10 +106,10 @@ export const cardSkills = (
 
 /** Reading a card is not approval to activate its skills. Keep skill bodies behind load_skill. */
 export const withoutCardSkills = <T extends { readonly extensions?: Readonly<Record<string, unknown>> }>(doc: T): T => {
-  const ours = doc.extensions?.rp_harness
+  const ours = doc.extensions?.dreamspan
   if (!ours || typeof ours !== "object" || Array.isArray(ours) || !Object.hasOwn(ours, "skills")) return doc
   const { skills: _skills, ...rest } = ours as Record<string, unknown>
-  return { ...doc, extensions: { ...doc.extensions, rp_harness: rest } }
+  return { ...doc, extensions: { ...doc.extensions, dreamspan: rest } }
 }
 
 /**

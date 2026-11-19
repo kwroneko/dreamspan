@@ -2,7 +2,7 @@
 // The original draft/version travels with the keystroke; server acknowledgements remove it.
 import { pendingOf, type Copy } from "./backup.ts"
 
-const key = (userId: string, targetId: string) => `rp.pendingTyped:${userId}:${targetId}`
+const key = (userId: string, targetId: string) => `dreamspan.pendingTyped:${userId}:${targetId}`
 const hasTypedBackup = (targetId: string, field: string) =>
   field === "First message" &&
   (targetId.startsWith("pending-chat:") ||

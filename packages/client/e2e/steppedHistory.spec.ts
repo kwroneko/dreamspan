@@ -171,7 +171,7 @@ for (const width of [1440, 390])
     }) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       // Before the summarized test below, which summarizes these messages in this chat: here they're
       // only dropped. The imported branch, named.

@@ -1,6 +1,6 @@
 // Browser-local, as for system notifications. A notice never resumes suspended audio:
 // only an interaction does, so a blocked sound cannot play late after the user returns.
-const KEY = "rp.notifications.sound"
+const KEY = "dreamspan.notifications.sound"
 let audio: AudioContext | undefined
 
 export const soundWanted = () => {

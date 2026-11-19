@@ -128,7 +128,7 @@ const shoot = async (page: Page, name: string) => {
 const open = async (page: Page, width: number, height: number, theme: "light" | "dark" = "light", path?: string) => {
   await page.setViewportSize({ width, height })
   await page.emulateMedia({ colorScheme: theme })
-  await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+  await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}${path ?? `/chats/${chatId}`}`)
   // A loaded host can take a while to open the chat.

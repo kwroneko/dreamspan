@@ -66,7 +66,7 @@ export function cardexCreatorTests() {
             await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
             await page.setViewportSize({ width, height: 900 })
             await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-            await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+            await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
             await page.goto(server.url)
             const scope = await openCardex(page, place)
             const tiles = scope.locator("[data-remote-card]")

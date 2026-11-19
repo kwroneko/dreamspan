@@ -26,8 +26,8 @@ declare module "@earendil-works/pi-agent-core" {
      * user's and labelled as the app's. `nudge`: the run's nth ask to send (spec/REPLY-CONTRACT.md
      * §3.3), counted from the transcript so a resumed run goes on with the count.
      */
-    rpHarness: {
-      readonly role: "rpHarness"
+    rpApp: {
+      readonly role: "rpApp"
       readonly content: string
       readonly timestamp: number
       readonly nudge?: number
@@ -54,7 +54,7 @@ export const liveSuffix = (messages: ReadonlyArray<AgentMessage | Message>): Arr
             timestamp: m.timestamp
           }
         ]
-      if (m.role === "rpHarness") return [{ role: "user", content: m.content, timestamp: m.timestamp }]
+      if (m.role === "rpApp") return [{ role: "user", content: m.content, timestamp: m.timestamp }]
       if (m.role === "assistant" || m.role === "toolResult" || m.role === "user") return [m]
       return []
     })
@@ -62,7 +62,7 @@ export const liveSuffix = (messages: ReadonlyArray<AgentMessage | Message>): Arr
 
 /** How many times this run has been asked to send its reply: the nudges in its transcript. */
 export const nudgesIn = (messages: ReadonlyArray<AgentMessage>) =>
-  messages.filter((m) => m.role === "rpHarness" && typeof (m as { nudge?: unknown }).nudge === "number").length
+  messages.filter((m) => m.role === "rpApp" && typeof (m as { nudge?: unknown }).nudge === "number").length
 
 /** The plain turns that answered a nudge and were cut by a Resume (`answersCut`). */
 export const cutAnswersIn = (messages: ReadonlyArray<AgentMessage>) =>
@@ -78,4 +78,4 @@ export const sendOnlyTranscript = (messages: ReadonlyArray<AgentMessage>): Array
 
 /** Whether `message` is one of the app's asks to send the reply. */
 export const isNudge = (message: AgentMessage | undefined) =>
-  message?.role === "rpHarness" && typeof (message as { nudge?: unknown }).nudge === "number"
+  message?.role === "rpApp" && typeof (message as { nudge?: unknown }).nudge === "number"

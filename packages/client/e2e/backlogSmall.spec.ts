@@ -25,7 +25,7 @@ for (const width of [1440, 390])
     test(`create preset, bin capacities and sound ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const shot = async (name: string) => {
         if (shots) {
@@ -119,7 +119,7 @@ test("saved sound skips completions before interaction and touch activation neve
   const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
   try {
     await context.addInitScript(() => {
-      localStorage.setItem("rp.notifications.sound", "on")
+      localStorage.setItem("dreamspan.notifications.sound", "on")
       let played = 0
       Object.assign(window, { soundCount: () => played })
       const create = AudioContext.prototype.createOscillator

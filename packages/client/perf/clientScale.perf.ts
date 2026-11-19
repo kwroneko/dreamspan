@@ -27,7 +27,7 @@ test("six client actions with 500 branches, 3,000 messages and 30 swipes", async
       await server.stop()
       await new Promise<void>((done, reject) => {
         const worker = new Worker(new URL("./branchFixture.ts", import.meta.url), {
-          workerData: { file: join(data, "rp-harness.db"), chat: chats[0]!.id }
+          workerData: { file: join(data, "dreamspan.db"), chat: chats[0]!.id }
         })
         worker.once("error", reject)
         worker.once("exit", (code) => (code === 0 ? done() : reject(new Error(`fixture worker exited ${code}`))))

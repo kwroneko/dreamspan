@@ -87,9 +87,9 @@ export const workshopCompactor: RunCompactor = {
       if (!latest && settings.changes !== "[]" && prefix.messages.some((m) => m.content.includes("<summary "))) {
         const note = "[Saved Undo records override summary notes]\n" + settings.changes
         const at = messages.findIndex(
-          (m) => m.role === "rpHarness" && m.content.startsWith("[Saved Undo records override summary notes]")
+          (m) => m.role === "rpApp" && m.content.startsWith("[Saved Undo records override summary notes]")
         )
-        const entry: AgentMessage = { role: "rpHarness", content: note, timestamp: 0 }
+        const entry: AgentMessage = { role: "rpApp", content: note, timestamp: 0 }
         if (at < 0) messages.push(entry)
         else messages[at] = entry
       }

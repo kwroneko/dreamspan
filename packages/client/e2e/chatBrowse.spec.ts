@@ -103,7 +103,7 @@ for (const width of [1440, 390])
     await expect(page).toHaveURL(/sideChatsSort=name/)
     await expect(page).toHaveURL(/sideChatsReverse=true/)
     expect(await page.evaluate(() => history.length)).toBe(initialHistory)
-    const key = `rp.chats.sidebar.${userId}`
+    const key = `dreamspan.chats.sidebar.${userId}`
     expect(await page.evaluate((k) => localStorage.getItem(k), key)).toBeNull()
     await page.reload()
     await open()

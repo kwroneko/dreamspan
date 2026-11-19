@@ -1,10 +1,10 @@
-// A card's skills (spec/TOOL-LOADING.md §6), in `extensions.rp_harness.skills`: references to an
+// A card's skills (spec/TOOL-LOADING.md §6), in `extensions.dreamspan.skills`: references to an
 // installed skill (`{ "use": "id" }`) and skills written in the card. The server reads them with
 // these rules when a workshop's assistant is the card; the card editor shows the same rules, so
 // an entry that isn't offered says why instead of being skipped silently.
 
 /** Where a card keeps them: our extension namespace, which other apps keep and ignore. */
-export const CARD_SKILLS_NAMESPACE = "rp_harness"
+export const CARD_SKILLS_NAMESPACE = "dreamspan"
 
 export const CARD_SKILL_LIMITS = {
   entries: 16,

@@ -11,7 +11,7 @@ import { client, login, serverLayer, testConfig } from "./support/config.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 const fixture = (id: string, source: string, options: Record<string, unknown> = {}) => ({
-  "rp-plugin.json": JSON.stringify({
+  "dreamspan-plugin.json": JSON.stringify({
     id,
     name: "Synthetic plugin",
     api: 1,
@@ -708,7 +708,7 @@ it("ignores plugin build/package configuration and refuses WASM and native impor
 it("checks a JavaScript entry with the same API as TypeScript", async () => {
   const data = tempDir("plugin-javascript")
   const files = {
-    "rp-plugin.json": fixture("javascript", empty, { server: "index.js" })["rp-plugin.json"],
+    "dreamspan-plugin.json": fixture("javascript", empty, { server: "index.js" })["dreamspan-plugin.json"],
     "index.js": 'import {Effect} from "@dreamspan/plugin-api/server"; export const activate = () => Effect.void;'
   }
   const commit = await saveFiles(data, "", "javascript", files, true, "Synthetic JS")

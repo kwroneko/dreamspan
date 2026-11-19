@@ -86,7 +86,7 @@ export function workshopSideChatEffectsTests() {
           )
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
           await page.goto(`${server().url}/chats/${story.id}?panel=workshop&workshop=${workshop.id}`)
           const side = sidePanel(page).locator(`[data-side-chat="${workshop.id}"]`)
@@ -247,7 +247,7 @@ export function workshopSideChatTests() {
           const story = await makeStory(server, title)
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
           const shot = async (name: string) => {
             if (shots) {
@@ -454,7 +454,7 @@ export function workshopSideChatChangesTests() {
           )
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
           await page.goto(`${server().url}/chats/${story.id}?fork=${original}&panel=workshop&workshop=${workshop.id}`)
           const side = sidePanel(page).locator(`[data-side-chat="${workshop.id}"]`)

@@ -1572,7 +1572,7 @@ describe("provider registry", () => {
           registry.transforms.register({
             id: "tag-requests",
             appliesTo: (target) => target.kind === "my-gateway",
-            transform: (payload) => ({ ...payload, user: "rp-harness" })
+            transform: (payload) => ({ ...payload, user: "dreamspan" })
           })
         ])
       )
@@ -1592,7 +1592,7 @@ describe("provider registry", () => {
       )
       assert.strictEqual(events.at(-1)!.type, "done")
       const sent = server.requests().find((r) => r.path.endsWith("/chat/completions"))!
-      assert.strictEqual(sent.body!.user, "rp-harness")
+      assert.strictEqual(sent.body!.user, "dreamspan")
 
       // Closing the plugin's scope unregisters both; its connection becomes unusable.
       yield* Scope.close(plugin, Exit.void)

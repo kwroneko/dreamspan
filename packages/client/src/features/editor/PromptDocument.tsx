@@ -110,7 +110,7 @@ const firstLine = (content: string) =>
     .find((line) => line !== "") ?? ""
 
 /** Whether every prompt's options show, by default: this browser's choice. */
-const OPTIONS_KEY = "rp.presetOptionsOpen:"
+const OPTIONS_KEY = "dreamspan.presetOptionsOpen:"
 const readOptionsOpen = (userId: string) => {
   try {
     return localStorage.getItem(OPTIONS_KEY + userId) === "1"

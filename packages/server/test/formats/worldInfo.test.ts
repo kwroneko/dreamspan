@@ -73,7 +73,7 @@ describe("World Info import", () => {
       delay_until_recursion: 2,
       character_filter: { is_exclude: true, names: ["Wren.png"], tags: ["t1"] },
       decision_hint: "Is anyone at the harbor?",
-      extensions: { "some-plugin": { x: 1 }, rp_harness: { other: 2 } },
+      extensions: { "some-plugin": { x: 1 }, dreamspan: { other: 2 } },
       unknown_fields: { someNewStField: "kept" }
     })
   })
@@ -214,7 +214,7 @@ describe("character book and World Info", () => {
         delay: 4,
         match_persona_description: true,
         ignore_budget: true,
-        rp_harness: { decision_hint: "Is anyone at the harbor?", other: 2 }
+        dreamspan: { decision_hint: "Is anyone at the harbor?", other: 2 }
       }
     })
   })

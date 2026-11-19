@@ -1,6 +1,6 @@
 /** Synthetic source only. Used by browser tests and the image smoke. */
 export const pluginFiles = (id: string, body?: string, surfaces = ["composerControls", "chatPanels"]) => ({
-  "rp-plugin.json": JSON.stringify({
+  "dreamspan-plugin.json": JSON.stringify({
     id,
     name: id,
     api: 1,

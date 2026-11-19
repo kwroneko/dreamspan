@@ -190,7 +190,7 @@ for (const width of [1440, 390]) {
       await page.emulateMedia({ colorScheme: theme as "light" | "dark" })
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await page.addInitScript((theme) => {
-        localStorage.setItem("rp.theme", theme)
+        localStorage.setItem("dreamspan.theme", theme)
         document.documentElement.dataset.theme = theme
       }, theme)
       await page.goto(server().url)

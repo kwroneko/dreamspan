@@ -21,7 +21,7 @@ vi.mock("../src/plugins/repoTask.ts", async (original) => {
 })
 
 const files = (id: string, source = "export const activate = () => {}") => ({
-  "rp-plugin.json": JSON.stringify({
+  "dreamspan-plugin.json": JSON.stringify({
     id,
     name: "Synthetic",
     api: 1,

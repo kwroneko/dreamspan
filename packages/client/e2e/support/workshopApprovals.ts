@@ -71,7 +71,7 @@ export function workshopApprovalTests() {
           const workshop = await admin((api) => api.CreateWorkshop({ title: `Approvals ${width} ${theme}` }))
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
           const shot = async (name: string) => {
             if (shots) {

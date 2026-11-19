@@ -1,5 +1,5 @@
 // The card editor's Skills section (spec/TOOL-LOADING.md §6): the skills a workshop assistant
-// speaking as this card can load, kept in `extensions.rp_harness.skills`. Editing them here is
+// speaking as this card can load, kept in `extensions.dreamspan.skills`. Editing them here is
 // not approval: the server asks the user before a card's skill reaches the model, whatever the
 // text says. Each entry shows why the server would skip or shorten it (`cardSkillProblems`).
 import {

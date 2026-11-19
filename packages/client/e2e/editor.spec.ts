@@ -557,7 +557,7 @@ const storedCopies = (page: Page) =>
   page.evaluate(
     () =>
       new Promise<Array<Pick<StoredCopy, "refId">>>((resolve) => {
-        const request = indexedDB.open("rp-editor-copies", 1)
+        const request = indexedDB.open("dreamspan-editor-copies", 1)
         request.onupgradeneeded = () => {
           const store = request.result.createObjectStore("copies", { keyPath: "key" })
           store.createIndex("userId", "userId")
@@ -579,7 +579,7 @@ const leaveCopy = (page: Page, copy: StoredCopy) =>
   page.evaluate(
     (copy) =>
       new Promise<void>((resolve) => {
-        const request = indexedDB.open("rp-editor-copies", 1)
+        const request = indexedDB.open("dreamspan-editor-copies", 1)
         request.onupgradeneeded = () => {
           const store = request.result.createObjectStore("copies", { keyPath: "key" })
           store.createIndex("userId", "userId")

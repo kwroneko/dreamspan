@@ -49,7 +49,7 @@ import { Secrets } from "../secrets.ts"
 import { buildCatalog, serverInfoOf } from "./catalog.ts"
 
 /** What the app says it is to every server (spec/MCP.md §2.1): no capabilities declared. */
-const MCP_CLIENT_INFO = { name: "rp-harness", version: "0.0.0" }
+const MCP_CLIENT_INFO = { name: "dreamspan", version: "0.0.0" }
 
 const headersBinding = (connectionId: string) => `mcp:${connectionId}:headers`
 const proxyBinding = (connectionId: string) => `mcp:${connectionId}:proxy_url`

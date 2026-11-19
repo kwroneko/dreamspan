@@ -25,7 +25,7 @@ for (const status of ["failed", "stopped"] as const)
       test(`a ${status} plain reply resumes from the visible button at ${width} ${theme}`, async ({ page }, info) => {
         await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
         await page.emulateMedia({ colorScheme: theme })
-        await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+        await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
         await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
         const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
           Effect.gen(function* () {

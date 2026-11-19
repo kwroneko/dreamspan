@@ -411,7 +411,7 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
           target: Target = { scope: server ? "instance" : "user", id: String(args.id) },
           owner = ownerOf(actor, target)
         const files = {
-          "rp-plugin.json": JSON.stringify(
+          "dreamspan-plugin.json": JSON.stringify(
             {
               id: target.id,
               name: args.name,

@@ -18,7 +18,7 @@ for (const width of [1440, 1024, 390])
     test(`history preview, replace and undo at ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const [name, ...value] = cookie.split("=")
       await page.context().addCookies([{ name: name!, value: value.join("="), url: server().url }])
       const chat = await withCookie(server(), cookie, (api) =>
@@ -91,7 +91,7 @@ for (const width of [1440, 1024, 390])
     test(`a summary item can be undone without undoing its message at ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
       const [name, ...value] = cookie.split("=")
       await page.context().addCookies([{ name: name!, value: value.join("="), url: server().url }])
       const { chat, entry } = await withCookie(server(), cookie, (api) =>

@@ -130,7 +130,7 @@ export function stateMarkerTests() {
   const look = async (page: Page, width: number, theme: "light" | "dark") => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await page.emulateMedia({ colorScheme: theme })
-    await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+    await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await admin((api) => api.SetDisplayPrefs({ prefs: { chatDensity: density } }))
   }
@@ -365,7 +365,7 @@ export function stateMarkerTests() {
         const made = await new Promise<{ last: SlotId }>((resolve, reject) => {
           const worker = new Worker(new URL("./stateMarkerFixtureWorker.ts", import.meta.url), {
             workerData: {
-              dbPath: join(server().dataDir, "rp-harness.db"),
+              dbPath: join(server().dataDir, "dreamspan.db"),
               chatId: chat.id,
               forkId: chat.currentForkId,
               count: 5100

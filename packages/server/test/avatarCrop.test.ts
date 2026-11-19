@@ -216,7 +216,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.strictEqual(parsed.card.name, "Picture crop")
       const meta = yield* Effect.promise(() => sharp(Buffer.from(parsed.avatar!.bytes)).metadata())
       assert.deepStrictEqual([meta.width, meta.height], [300, 600])
-      assert.deepStrictEqual((parsed.card.extensions.rp_harness as { avatar_crop: unknown }).avatar_crop, {
+      assert.deepStrictEqual((parsed.card.extensions.dreamspan as { avatar_crop: unknown }).avatar_crop, {
         x: 0,
         y: 0,
         width: 1,
@@ -260,7 +260,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.strictEqual(exported.status, 200)
       const bytes = new Uint8Array(yield* Effect.promise(() => exported.arrayBuffer()))
       const parsed = yield* importCard(bytes)
-      const ours = parsed.card.extensions.rp_harness as { avatar_crop: unknown }
+      const ours = parsed.card.extensions.dreamspan as { avatar_crop: unknown }
       assert.deepStrictEqual(ours.avatar_crop, {
         x: 0.5,
         y: 0,
@@ -296,7 +296,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         height: 0.75
       })
       assert.isUndefined(
-        (back.doc.extensions as Record<string, unknown>).rp_harness,
+        (back.doc.extensions as Record<string, unknown>).dreamspan,
         "the cutout moved out of the extension"
       )
 
@@ -311,7 +311,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
           data: {
             ...card2.data,
             extensions: {
-              rp_harness: {
+              dreamspan: {
                 avatar_crop: { x: 0.5, y: 0, width: 0.5, height: 0.75, image_width: 600, image_height: 600 }
               }
             }
@@ -320,7 +320,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       )
       const other = yield* importFile(resized, "resized.png")
       assert.isUndefined(other.doc.avatar_crop)
-      assert.isUndefined((other.doc.extensions as Record<string, unknown>).rp_harness)
+      assert.isUndefined((other.doc.extensions as Record<string, unknown>).dreamspan)
     })
   )
 })

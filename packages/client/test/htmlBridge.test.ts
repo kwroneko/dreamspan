@@ -11,16 +11,16 @@ const token = "a".repeat(32)
 
 describe("the bridge", () => {
   it("takes its five message types, each by its schema", () => {
-    expect(parseBridgeMessage({ type: "rp:ready", token })).toEqual({ type: "rp:ready", token })
-    expect(parseBridgeMessage({ type: "rp:height", height: 120 })).toEqual({ type: "rp:height", height: 120 })
-    expect(parseBridgeMessage({ type: "rp:open", token, url: "https://example.com/" })).toEqual({
-      type: "rp:open",
+    expect(parseBridgeMessage({ type: "dreamspan:ready", token })).toEqual({ type: "dreamspan:ready", token })
+    expect(parseBridgeMessage({ type: "dreamspan:height", height: 120 })).toEqual({ type: "dreamspan:height", height: 120 })
+    expect(parseBridgeMessage({ type: "dreamspan:open", token, url: "https://example.com/" })).toEqual({
+      type: "dreamspan:open",
       token,
       url: "https://example.com/"
     })
-    expect(parseBridgeMessage({ type: "rp:focus", token })).toEqual({ type: "rp:focus", token })
-    expect(parseBridgeMessage({ type: "rp:copy", token, text: "HP 12/20" })).toEqual({
-      type: "rp:copy",
+    expect(parseBridgeMessage({ type: "dreamspan:focus", token })).toEqual({ type: "dreamspan:focus", token })
+    expect(parseBridgeMessage({ type: "dreamspan:copy", token, text: "HP 12/20" })).toEqual({
+      type: "dreamspan:copy",
       token,
       text: "HP 12/20"
     })
@@ -29,30 +29,30 @@ describe("the bridge", () => {
   it("drops unknown types, wrong shapes and oversized ones", () => {
     for (const data of [
       null,
-      { type: "rp:ready" },
-      { type: "rp:ready", token: 1 },
-      { type: "rp:ready", token: "short" },
-      { type: "rp:copy", text: "Missing token" },
-      { type: "rp:focus" },
-      { type: "rp:focus", token: "short" },
-      { type: "rp:open", url: "https://example.com/" },
-      "rp:ready",
+      { type: "dreamspan:ready" },
+      { type: "dreamspan:ready", token: 1 },
+      { type: "dreamspan:ready", token: "short" },
+      { type: "dreamspan:copy", text: "Missing token" },
+      { type: "dreamspan:focus" },
+      { type: "dreamspan:focus", token: "short" },
+      { type: "dreamspan:open", url: "https://example.com/" },
+      "dreamspan:ready",
       42,
-      { type: "rp:render", html: "<b>x</b>" },
+      { type: "dreamspan:render", html: "<b>x</b>" },
       { type: "rp:rpc", method: "DeleteChat" },
       { type: "getChatMessages" },
-      { type: "rp:height", height: "120" },
-      { type: "rp:height", height: Number.POSITIVE_INFINITY },
-      { type: "rp:open", token },
-      { type: "rp:open", token, url: 1 },
-      { type: "rp:copy", token, text: "x".repeat(MAX_BRIDGE_COPY + 1) },
-      { type: "rp:copy", token, text: { toString: () => "x" } }
+      { type: "dreamspan:height", height: "120" },
+      { type: "dreamspan:height", height: Number.POSITIVE_INFINITY },
+      { type: "dreamspan:open", token },
+      { type: "dreamspan:open", token, url: 1 },
+      { type: "dreamspan:copy", token, text: "x".repeat(MAX_BRIDGE_COPY + 1) },
+      { type: "dreamspan:copy", token, text: { toString: () => "x" } }
     ])
       expect(parseBridgeMessage(data), JSON.stringify(data)).toBe(null)
   })
 
   it("keeps nothing but the fields of the type", () => {
-    expect(parseBridgeMessage({ type: "rp:ready", token, extra: "secret" })).toEqual({ type: "rp:ready", token })
+    expect(parseBridgeMessage({ type: "dreamspan:ready", token, extra: "secret" })).toEqual({ type: "dreamspan:ready", token })
   })
 
   it("opens http(s) links only", () => {

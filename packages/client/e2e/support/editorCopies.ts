@@ -7,7 +7,7 @@ export const unsentEditorCopies = (page: Page) =>
   page.evaluate(
     () =>
       new Promise<number>((resolve) => {
-        const request = indexedDB.open("rp-editor-copies", 1)
+        const request = indexedDB.open("dreamspan-editor-copies", 1)
         request.onsuccess = () => {
           const db = request.result
           const count = db.transaction("copies").objectStore("copies").count()

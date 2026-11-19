@@ -14,7 +14,7 @@ const setup = async () => {
     "fixture",
     {
       "a.ts": "one\ntwo\n",
-      "rp-plugin.json": JSON.stringify({
+      "dreamspan-plugin.json": JSON.stringify({
         id: "fixture",
         name: "Fixture",
         api: 1,

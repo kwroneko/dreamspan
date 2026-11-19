@@ -100,7 +100,7 @@ for (const mode of ["every", "auto", "dispatcher"] as const) {
         schemaVersion: 1,
         origin: "import",
         sourcePath: null,
-        doc: { ...newCardDoc("Synthetic helper"), extensions: { rp_harness: { skills: [skill(first)] } } }
+        doc: { ...newCardDoc("Synthetic helper"), extensions: { dreamspan: { skills: [skill(first)] } } }
       })
       const workshop = Effect.gen(function* () {
         const chat = yield* api.CreateWorkshop({ card: helper.ref.entityId })
@@ -198,7 +198,7 @@ for (const mode of ["every", "auto", "dispatcher"] as const) {
       // shows the new words, and declined, they never reach the model.
       const refId = helper.ref.id as RefId
       const opened = yield* api.OpenEditor({ refId })
-      const field = valueField(["extensions", "rp_harness"])
+      const field = valueField(["extensions", "dreamspan"])
       const draft = yield* api.SaveEditorDraft({
         refId,
         field,

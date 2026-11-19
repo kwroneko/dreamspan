@@ -20,7 +20,7 @@ import type { ChatSurfaceProps } from "./presentation.tsx"
 const channel =
   typeof window === "undefined" || typeof BroadcastChannel === "undefined"
     ? null
-    : new BroadcastChannel("rp.externalMedia")
+    : new BroadcastChannel("dreamspan.externalMedia")
 const prefsFor = Atom.family((_userId: string) =>
   AppClient.query("GetExternalMediaPrefs", {}, { reactivityKeys: ["externalMedia"] })
 )

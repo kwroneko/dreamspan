@@ -264,7 +264,7 @@ describe("notes and files tools", () => {
       assert.isAbove((formats.formats as ReadonlyArray<unknown>).length, 0)
       const file = cardFile("Keeper Ines", {
         description: "See ![the lamp](https://example.invalid/lamp.png) and <script>alert(1)</script>.",
-        extensions: { rp_harness: { agent_editable_fields: ["description"] } }
+        extensions: { dreamspan: { agent_editable_fields: ["description"] } }
       })
       const imported = yield* f.run("import_library_file", { name: "../../ines.json", content: file })
       assert.isUndefined(imported.isError, imported.text)
@@ -300,16 +300,16 @@ describe("notes and files tools", () => {
         {
           name: "skilled.json",
           content: cardFile("Skilled", {
-            extensions: { rp_harness: { skills: [{ id: "x", description: "y", instructions: "z", tools: [] }] } }
+            extensions: { dreamspan: { skills: [{ id: "x", description: "y", instructions: "z", tools: [] }] } }
           })
         },
         "skilled"
       )
       if (skilled.isError !== true) {
         const doc = (yield* f.api.OpenEditor({ refId: JSON.parse(skilled.text).id })).doc as {
-          extensions?: { rp_harness?: { skills?: unknown } }
+          extensions?: { dreamspan?: { skills?: unknown } }
         }
-        assert.isUndefined(doc.extensions?.rp_harness?.skills)
+        assert.isUndefined(doc.extensions?.dreamspan?.skills)
       }
       // The writer itself refuses a new version of an existing entry or a file with media.
       const target = yield* f.api.CreateCard({ label: "Existing", name: "Existing" })

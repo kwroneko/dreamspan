@@ -19,7 +19,7 @@ export const ST_VERSION = "1.19.0"
 export const ST_IMAGE =
   "ghcr.io/sillytavern/sillytavern@sha256:eef27ff0c7961f1a2f488400f581f48ff38f8b910c5d3b8d389138d71791bb14"
 
-const LABEL = "rp-harness.st-diff.owner"
+const LABEL = "dreamspan.st-diff.owner"
 const NAME_PREFIX = "rp-st-diff-"
 const PID_NAMESPACE = readlinkSync("/proc/self/ns/pid")
 

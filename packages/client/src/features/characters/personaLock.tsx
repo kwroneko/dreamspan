@@ -4,7 +4,7 @@
 // switch row as the pickers' Lock for this chat); shown, and cleared, in the character's own
 // tab in the chat panel. A lock never changes a chat that has started. Both parts are
 // registered slot entries, so a plugin can replace or drop either. A lock is account data, so
-// another browser tab follows a change at once (the `rp.personaLock` channel) and on focus, as
+// another browser tab follows a change at once (the `dreamspan.personaLock` channel) and on focus, as
 // display preferences and external media do (ARCHITECTURE §5 "Client state").
 import type { CastCard, EntityId } from "@dreamspan/shared/chat.ts"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
@@ -35,7 +35,7 @@ const lockAtom = Atom.family((entityId: string) =>
 const channel =
   typeof window === "undefined" || typeof BroadcastChannel === "undefined"
     ? null
-    : new BroadcastChannel("rp.personaLock")
+    : new BroadcastChannel("dreamspan.personaLock")
 
 /** The persona locked to a character, once read (null: none, or not read yet); read again when another tab changes a lock. */
 const usePersonaLock = (entityId: EntityId | null) => {

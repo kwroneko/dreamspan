@@ -49,7 +49,7 @@ for (const width of [1440, 390])
         await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
         await page.setViewportSize({ width, height: 900 })
         await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-        await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+        await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
 
         // The fork's page lists the card it came from; the user's own is marked.
         const added = await admin((api) => api.AdoptRemoteCard({ sourceId: "cardex", remoteId: parent }))

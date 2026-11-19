@@ -88,9 +88,9 @@ export function workshopChatTests() {
           const title = `Tidy up ${width} ${theme}`
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
           await page.addInitScript(() => {
-            localStorage.setItem("rp.notifications.system", "on")
+            localStorage.setItem("dreamspan.notifications.system", "on")
             const notices: Array<{ title: string; body: string | undefined }> = []
             Object.assign(window, { workshopNotices: notices })
             Object.defineProperty(window, "Notification", {

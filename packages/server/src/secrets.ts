@@ -53,7 +53,7 @@ export class Secrets extends Context.Service<Secrets, SecretsShape>()("rp/Secret
 
 /** The AES-256-GCM key, derived from the server secret so any string works as SECRET_KEY. */
 const deriveKey = (secret: string) =>
-  Buffer.from(hkdfSync("sha256", Buffer.from(secret, "utf8"), "rp-harness", "connection-secrets v1", 32))
+  Buffer.from(hkdfSync("sha256", Buffer.from(secret, "utf8"), "dreamspan", "connection-secrets v1", 32))
 
 export const makeSecrets = (secret: string): SecretsShape => {
   const key = deriveKey(secret)
@@ -61,7 +61,7 @@ export const makeSecrets = (secret: string): SecretsShape => {
   const signingKey = (purpose: string) => {
     let derived = signingKeys.get(purpose)
     if (!derived) {
-      derived = Buffer.from(hkdfSync("sha256", Buffer.from(secret, "utf8"), "rp-harness", `sign ${purpose} v1`, 32))
+      derived = Buffer.from(hkdfSync("sha256", Buffer.from(secret, "utf8"), "dreamspan", `sign ${purpose} v1`, 32))
       signingKeys.set(purpose, derived)
     }
     return derived

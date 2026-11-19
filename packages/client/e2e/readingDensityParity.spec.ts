@@ -145,7 +145,7 @@ for (const width of [1440, 390])
           reducedMotion: "reduce",
           permissions: ["local-network-access"]
         })
-        await context.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+        await context.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
         await apiLogin(context.request, server(), ADMIN.handle, ADMIN.password)
         const page = await context.newPage()
         await page.route("**/healthz", async (route) => {
