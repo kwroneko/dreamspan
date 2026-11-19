@@ -6,6 +6,7 @@ import { filesMigration } from "./migrationFiles.ts"
 import { previewMacroMigration } from "./migrationPreviewMacro.ts"
 import { subagentSchema } from "./subagentSchema.ts"
 import { workshopBranchesMigration } from "./migrationWorkshopBranches.ts"
+import { personaLocksMigration } from "./migrationPersonaLocks.ts"
 
 /** node:sqlite prepares one statement at a time, so DDL is kept as a list of statements. */
 const runAll = (statements: ReadonlyArray<string>) =>
@@ -25,7 +26,9 @@ export const migrations = {
   // spec/WORKSHOP-BRANCHES.md §7: workshop branches paired with story branches.
   "0004_workshop_branches": runAll(workshopBranchesMigration),
   // Greeting previews with macros replaced: one nullable column on the stored fork summaries.
-  "0005_preview_macro": runAll(previewMacroMigration)
+  "0005_preview_macro": runAll(previewMacroMigration),
+  // DESIGN §2.2 (owner, 2026-11-18): the persona a character's new single chats start with.
+  "0006_persona_locks": runAll(personaLocksMigration)
 }
 
 /**

@@ -15,7 +15,8 @@ export function Tabs<Value extends string>({
   wrap = false,
   end,
   rowClassName = "",
-  rowOverlay
+  rowOverlay,
+  panelClassName = ""
 }: {
   tabs: ReadonlyArray<{
     readonly value: Value
@@ -42,6 +43,8 @@ export function Tabs<Value extends string>({
   rowClassName?: string
   /** Why the row may cover what scrolls under it (a sticky row), for the layout audit. */
   rowOverlay?: string | undefined
+  /** Added to each panel: `flex flex-col` lets a scrolling list in it shrink with a bounded container. */
+  panelClassName?: string
 }) {
   const { tracker, dirty } = useUnsavedTabs()
   const list = (
@@ -103,7 +106,7 @@ export function Tabs<Value extends string>({
           key={tab.value}
           value={tab.value}
           keepMounted={keepMounted}
-          className={`min-h-0 outline-none ${fill ? "flex-1 overflow-y-auto px-4 py-4" : ""}`}
+          className={`min-h-0 outline-none ${fill ? "flex-1 overflow-y-auto px-4 py-4" : ""} ${panelClassName}`}
         >
           <UnsavedScope tracker={tracker} tab={tab.value}>
             {tab.panel}

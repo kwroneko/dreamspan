@@ -4,6 +4,8 @@
 // message column, composer), which read it as a `ChatView` with no chat (`view`), and the side
 // panel's tabs change it through these methods, as a saved chat's tabs change its session.
 import { greetingPick, offeredGreetings } from "@rp/shared/greetings.ts"
+import { remoteOf } from "@rp/shared/cardSources.ts"
+import { startingPersona } from "@rp/shared/personaLock.ts"
 import type { CastCard, ChatId, EntityId } from "@rp/shared/chat.ts"
 import type { CardForChat } from "@rp/shared/chatSetupApi.ts"
 import type { Caller } from "../editor/caller.ts"
@@ -53,6 +55,17 @@ export class PendingChat {
     return this.availableCards
   }
   readonly group: PendingGroup | null
+  /**
+   * The one character of a new single chat as it stands now, whose persona lock (DESIGN §2.2)
+   * can be set from its persona picker; null for a group's chat, one with no character or with
+   * several (a character added in the Cast tab), or a card source's card not yet the user's.
+   */
+  lockCard(state = this.state): CastCard | null {
+    if (this.group !== null) return null
+    const characters = state.greeters.filter((item) => item.card.entityId !== state.persona)
+    const only = characters.length === 1 ? characters[0]!.card : null
+    return only !== null && remoteOf(only.entityId) === null ? only : null
+  }
   private readonly call: Caller
 
   constructor(
@@ -61,14 +74,22 @@ export class PendingChat {
     group: PendingGroup | null,
     call: Caller,
     defaultPersona: EntityId | null = null,
-    guidance = false
+    guidance = false,
+    /** The persona locked to the chat's one character, if any. */
+    lock: EntityId | null = null
   ) {
     this.availableCards = cards
     this.group = group
     this.call = call
-    const persona =
-      [...cards, ...greeters.map((item) => item.card)].find((card) => card.entityId === defaultPersona && card.persona)
-        ?.entityId ?? null
+    const only = greeters.length === 1 ? greeters[0]!.card : null
+    const single = group === null && only !== null && remoteOf(only.entityId) === null
+    const known = [...cards, ...greeters.map((item) => item.card)]
+    const persona = startingPersona({
+      single,
+      lock,
+      defaultPersona,
+      live: (id) => known.some((card) => card.entityId === id && card.persona)
+    })
     const state = { greeters, persona }
     this.state = {
       ...state,

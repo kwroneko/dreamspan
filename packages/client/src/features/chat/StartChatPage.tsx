@@ -650,11 +650,14 @@ function PendingFor({
   greeters,
   group,
   defaultPersona,
+  lock = null,
   empty = null
 }: {
   card: CardForChat | null
   empty?: EmptyStart | null
   defaultPersona: EntityId | null
+  /** The persona locked to a single chat's character (DESIGN §2.2), if any. */
+  lock?: EntityId | null
   cards: ReadonlyArray<CastCard>
   greeters: ReadonlyArray<CardForChat>
   group: { name: string; chatId: ChatId; members: ReadonlyArray<string> } | null
@@ -669,7 +672,8 @@ function PendingFor({
         group && { name: group.name, chatId: group.chatId },
         call,
         defaultPersona,
-        search.guidance === "on"
+        search.guidance === "on",
+        lock
       )
   )
   return <Pending pending={pending} card={card} groupMembers={group?.members ?? null} empty={empty} />
@@ -682,6 +686,7 @@ export function StartChatPage() {
   const [loaded, setLoaded] = useState<{
     card: CardForChat
     defaultPersona: EntityId | null
+    lock: EntityId | null
     cards: ReadonlyArray<CastCard>
   } | null>(null)
   useTitle(loaded ? loaded.card.card.name : "New chat")
@@ -697,7 +702,8 @@ export function StartChatPage() {
         Effect.all({
           card: client("GetCardForChat", { entityId }),
           cards: client("ListCards", undefined),
-          defaults: client("GetGenerationDefaults", undefined)
+          defaults: client("GetGenerationDefaults", undefined),
+          lock: client("GetPersonaLock", { entityId })
         })
       )
       .then((result) => {
@@ -705,7 +711,8 @@ export function StartChatPage() {
           setLoaded({
             card: result.value.card,
             cards: result.value.cards.filter((c) => c.entityId !== entityId),
-            defaultPersona: result.value.defaults.persona ?? null
+            defaultPersona: result.value.defaults.persona ?? null,
+            lock: result.value.lock?.entityId ?? null
           })
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per card and attempt
@@ -720,6 +727,7 @@ export function StartChatPage() {
           greeters={[loaded.card]}
           group={null}
           defaultPersona={loaded.defaultPersona}
+          lock={loaded.lock}
         />
       ) : action.error ? (
         <div className="chat-column pt-4">
@@ -747,6 +755,7 @@ export function RemoteStartChatPage() {
   const [loaded, setLoaded] = useState<{
     card: CardForChat
     defaultPersona: EntityId | null
+    lock: EntityId | null
     cards: ReadonlyArray<CastCard>
   } | null>(null)
   useTitle(loaded ? loaded.card.card.name : "New chat")
@@ -766,7 +775,9 @@ export function RemoteStartChatPage() {
           })
           const held = remote.summary.held?.entityId as EntityId | undefined
           const card = held === undefined ? remote.card : yield* client("GetCardForChat", { entityId: held })
-          return { card, cards: cards.filter((c) => c.entityId !== held), defaults }
+          // Only a card of the user's has a persona lock.
+          const lock = held === undefined ? null : yield* client("GetPersonaLock", { entityId: held })
+          return { card, cards: cards.filter((c) => c.entityId !== held), defaults, lock }
         })
       )
       .then((result) => {
@@ -774,7 +785,8 @@ export function RemoteStartChatPage() {
           setLoaded({
             card: result.value.card,
             cards: result.value.cards,
-            defaultPersona: result.value.defaults.persona ?? null
+            defaultPersona: result.value.defaults.persona ?? null,
+            lock: result.value.lock?.entityId ?? null
           })
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per card and attempt
@@ -789,6 +801,7 @@ export function RemoteStartChatPage() {
           greeters={[loaded.card]}
           group={null}
           defaultPersona={loaded.defaultPersona}
+          lock={loaded.lock}
         />
       ) : action.error ? (
         <div className="chat-column pt-4">

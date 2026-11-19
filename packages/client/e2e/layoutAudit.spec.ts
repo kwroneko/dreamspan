@@ -25,6 +25,7 @@ import { cardexCreatorTests } from "./support/cardexCreators.ts"
 import { cardexLorebookTests } from "./support/cardexLorebooks.ts"
 import { exercisePhoneFooters } from "./support/phoneFooters.ts"
 import { newflowTests } from "./support/newflows.ts"
+import { personaLockTests } from "./support/personaLock.ts"
 import { seedSplitChats } from "./support/splitChats.ts"
 import { centerHeaderTests } from "./support/centerHeaders.ts"
 import { seedCardArchive } from "./support/cardArchive.ts"
@@ -94,6 +95,7 @@ if (process.env.LAYOUT_AUDIT_CARDEX_ONLY === "1") {
 }
 if (process.env.LAYOUT_AUDIT_CARDEX_UPDATES_ONLY === "1") cardSourceUpdateTests()
 if (process.env.LAYOUT_AUDIT_NEWFLOWS_ONLY === "1") newflowTests()
+if (process.env.LAYOUT_AUDIT_PERSONALOCK_ONLY === "1") personaLockTests()
 if (process.env.LAYOUT_AUDIT_WORKSHOP_ONLY === "1") {
   workshopBoundaryTests()
   workshopChatTests()

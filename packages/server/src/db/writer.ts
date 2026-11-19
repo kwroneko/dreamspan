@@ -2,6 +2,7 @@ import { makePluginWriteHandlers } from "./pluginData.ts"
 import { makeFileVersionWriteHandlers } from "./fileVersions.ts"
 import { makeWorkshopEffectHandlers } from "./workshopEffects.ts"
 import { makeWorkshopGrantWriteHandlers } from "./workshopGrants.ts"
+import { makePersonaLockWriteHandlers } from "./personaLocks.ts"
 import { installStorageKindValidation } from "./storageKinds.ts"
 import { makeStImportPrefix, stImportPrefixHandlers } from "./stImportPrefix.ts"
 import { stateModuleHandlers } from "./stateModules.ts"
@@ -121,6 +122,7 @@ const handlers = Layer.unwrap(
                 bin
               )),
               ...(yield* makeWorkshopGrantWriteHandlers),
+              ...(yield* makePersonaLockWriteHandlers),
               ...(yield* makePluginWriteHandlers),
               ...(yield* makeFileVersionWriteHandlers),
               ...stImport,

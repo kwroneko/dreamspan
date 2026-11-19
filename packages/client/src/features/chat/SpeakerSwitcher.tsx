@@ -116,7 +116,7 @@ function CardOptions({
   }, [active, cards, virtualizer])
   if (cards.length === 0) return <p className="px-1 py-2 text-sm text-muted">{empty}</p>
   return (
-    <div ref={list} id={id} role="listbox" aria-label="Cards" className="max-h-64 overflow-y-auto p-2">
+    <div ref={list} id={id} role="listbox" aria-label="Cards" className="max-h-64 min-h-0 overflow-y-auto p-2">
       <div className="relative" style={{ height: cards.length * CARD_ROW_HEIGHT }}>
         {virtualizer.getVirtualItems().map((item) => {
           const index = item.index
@@ -247,7 +247,8 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   trigger,
   personas,
   onAddToChat,
-  compact = false
+  compact = false,
+  header
 }: {
   /** The library's cards, which the persona is picked from. */
   listCards?: () => Promise<Outcome<ReadonlyArray<CastCard>>>
@@ -273,6 +274,8 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   onAddToChat?: () => void
   /** The trigger shows the portrait alone (the name is its label and tooltip). */
   compact?: boolean
+  /** Rows above the search field, as a picker's lock switch (the persona lock, DESIGN §2.2). */
+  header?: ReactNode
 }) {
   const view = useCast()
   const defaultPersona = useDefaultPersona()
@@ -558,6 +561,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
           )
         }
       >
+        {header}
         <Input
           ref={search}
           type="search"
@@ -586,6 +590,8 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
         {persona ? (
           <Tabs
             label="Cards to play as"
+            // The list shrinks to the popover's height, scrolling, rather than running under its buttons.
+            panelClassName="flex flex-col"
             value={tab}
             onValueChange={(next) => {
               setTab(next)

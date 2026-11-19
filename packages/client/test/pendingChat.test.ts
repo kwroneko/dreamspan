@@ -98,3 +98,43 @@ it("keeps a joined character available to play as after refreshing the persona p
   await pending.listCards()
   expect(pending.cards).toEqual([guest, keeper])
 })
+
+it("starts a single chat with the persona locked to its character, a group's with the default", () => {
+  const host = card("host")
+  const guest = card("guest")
+  const pilot = card("pilot", true)
+  const mapmaker = card("mapmaker", true)
+  const greeter = (c: CastCard) =>
+    new CardForChat({ card: c, greetings: ["Hi."], groupGreetings: [], description: "", personality: "", scenario: "" })
+  const call: Caller = async () => ({ ok: true, value: undefined as never })
+  const start = (greeters: ReadonlyArray<CastCard>, lock: EntityId | null, group = false) =>
+    new PendingChat(
+      [pilot, mapmaker],
+      greeters.map(greeter),
+      group ? { name: "Voyage", chatId: "chat" as never } : null,
+      call,
+      mapmaker.entityId,
+      false,
+      lock
+    )
+  const single = start([host], pilot.entityId)
+  expect(single.snapshot().persona).toBe(pilot.entityId)
+  expect(single.lockCard()).toEqual(host)
+  expect(start([host], null).snapshot().persona).toBe(mapmaker.entityId)
+  // A lock naming a card that is no longer a persona falls back to the default.
+  expect(start([host], guest.entityId).snapshot().persona).toBe(mapmaker.entityId)
+  const group = start([host, guest], pilot.entityId, true)
+  expect(group.snapshot().persona).toBe(mapmaker.entityId)
+  expect(group.lockCard()).toBeNull()
+  // A character joining the single chat makes it no longer single; leaving makes it single again.
+  const joined = single.snapshot()
+  single.change((current) => ({
+    ...current,
+    greeters: [...current.greeters, greeter(guest)],
+    picks: [...current.picks, 0]
+  }))
+  expect(single.lockCard()).toBeNull()
+  single.remove(host.entityId)
+  expect(single.lockCard()).toEqual(guest)
+  expect(single.lockCard(joined)).toEqual(host)
+})

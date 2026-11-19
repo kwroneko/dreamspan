@@ -346,18 +346,39 @@ export function ChatLock({
 }) {
   if (!lock) return null
   return (
-    <div className="border-b border-border pb-2">
-      <Switch
-        checked={lock.locked}
-        disabled={lock.disabled}
-        onCheckedChange={lock.change}
-        hint={
-          lock.disabled
-            ? `Choose a ${kind} before locking this chat.`
-            : `This chat keeps this ${kind} when you change it elsewhere.`
-        }
-      >
-        Lock for this chat
+    <PickerLockRow
+      checked={lock.locked}
+      disabled={lock.disabled}
+      onCheckedChange={lock.change}
+      hint={
+        lock.disabled
+          ? `Choose a ${kind} before locking this chat.`
+          : `This chat keeps this ${kind} when you change it elsewhere.`
+      }
+    >
+      Lock for this chat
+    </PickerLockRow>
+  )
+}
+
+/** A picker's lock switch, above its search with a divider below (Lock for this chat, the persona lock). */
+export function PickerLockRow({
+  checked,
+  disabled,
+  onCheckedChange,
+  hint,
+  children
+}: {
+  checked: boolean
+  disabled: boolean
+  onCheckedChange: (checked: boolean) => void
+  hint: string
+  children: ReactNode
+}) {
+  return (
+    <div className="shrink-0 border-b border-border pb-2">
+      <Switch checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} hint={hint}>
+        {children}
       </Switch>
     </div>
   )

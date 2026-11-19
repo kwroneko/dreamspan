@@ -103,6 +103,8 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   GetAwayMarks: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetBinLimits: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetCardForChat: "Not in W6's first exposures; use the bounded workshop read tools.",
+  GetPersonaLock: "Not in W6's first exposures; use the bounded workshop read tools.",
+  SetPersonaLock: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   GetCardGallery: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetCardPromptUse: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetCasts: "Not in W6's first exposures; use the bounded workshop read tools.",
