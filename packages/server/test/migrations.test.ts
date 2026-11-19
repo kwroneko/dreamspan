@@ -33,6 +33,14 @@ const messages = (error: unknown): string => {
 
 const layer = () => writerConnection(join(tempDir("mig"), "db.sqlite"))
 
+/** Fake migrations for the tests below, numbered after the newest real one, so new real ones never collide. */
+const newestReal = Math.max(...Object.keys(migrationDefinitions).map((key) => Number(key.slice(0, 4))))
+const fakeKey = (name: string, offset = 1) => `${String(newestReal + offset).padStart(4, "0")}_${name}`
+/** The real migrations after 0005, which the tests below leave pending on a database at 0005. */
+const after5 = Object.keys(migrationDefinitions)
+  .filter((key) => Number(key.slice(0, 4)) > 5)
+  .sort()
+
 const upTo = (id: number) =>
   Object.fromEntries(Object.entries(migrationDefinitions).filter(([key]) => Number(key.slice(0, 4)) <= id))
 
@@ -294,7 +302,7 @@ describe("the migrator", () => {
       yield* orphanPins(["gone"])
       const report = yield* migrate(migrationDefinitions)
       assert.deepStrictEqual(report, {
-        applied: ["0006_persona_locks"],
+        applied: after5,
         broken: [{ table: "chat_pins", parent: "chats", rows: 1 }]
       })
       assert.strictEqual((yield* sql`SELECT name FROM sqlite_master WHERE name = 'persona_locks'`).length, 1)
@@ -312,7 +320,7 @@ describe("the migrator", () => {
         const exit = yield* Effect.exit(
           migrate({
             ...migrationDefinitions,
-            "0007_breaks": {
+            [fakeKey("breaks")]: {
               statements: [
                 "PRAGMA defer_foreign_keys = ON",
                 "INSERT INTO chat_pins (user_id, chat_id) VALUES ('u', 'new1'), ('u', 'new2')"
@@ -323,7 +331,8 @@ describe("the migrator", () => {
         assert.isTrue(Exit.isFailure(exit))
         assert.strictEqual(
           messages(Cause.squash((exit as Exit.Failure<unknown, unknown>).cause)),
-          "Dreamspan won't start: this update's database changes 0006_persona_locks, 0007_breaks would leave 2 rows pointing at rows that don't exist: 2 in chat_pins (pointing into chats). " +
+          `Dreamspan won't start: this update's database changes ${[...after5, fakeKey("breaks")].join(", ")} would leave` +
+            " 2 rows pointing at rows that don't exist: 2 in chat_pins (pointing into chats). " +
             "So these database changes were undone, and the data is not served. " +
             "Nothing else was changed: the data is as the version you ran before left it. Go back to that version, or restore the backup taken before this update, and report this problem."
         )
@@ -341,25 +350,28 @@ describe("the migrator", () => {
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'rp', 'active', 0)`
       yield* sql`INSERT INTO chat_pins (user_id, chat_id) VALUES ('u', 'c')`
-      // 0006 and 0007 commit as one run; 0008, outside a transaction with foreign keys off, deletes a pinned chat.
+      // The real ones after 0005 and a fake one commit as one run; the next, outside a transaction
+      // with foreign keys off, deletes a pinned chat.
       const exit = yield* Effect.exit(
         migrate({
           ...migrationDefinitions,
-          "0007_fine": { statements: ["CREATE TABLE fine_table (id INTEGER PRIMARY KEY) STRICT"] },
-          "0008_breaks": { outsideTransaction: ["DELETE FROM chats WHERE id = 'c'"] }
+          [fakeKey("fine")]: { statements: ["CREATE TABLE fine_table (id INTEGER PRIMARY KEY) STRICT"] },
+          [fakeKey("breaks", 2)]: { outsideTransaction: ["DELETE FROM chats WHERE id = 'c'"] }
         })
       )
       assert.isTrue(Exit.isFailure(exit))
       const message = messages(Cause.squash((exit as Exit.Failure<unknown, unknown>).cause))
       assert.strictEqual(
         message,
-        "Dreamspan won't start: this update's database change 0008_breaks would leave 3 rows pointing at rows that don't exist: 1 in chat_pins (pointing into chats), 1 in fork_labels (pointing into chats), 1 in forks (pointing into chats). " +
+        `Dreamspan won't start: this update's database change ${fakeKey("breaks", 2)} would leave` +
+          " 3 rows pointing at rows that don't exist: 1 in chat_pins (pointing into chats), 1 in fork_labels (pointing into chats), 1 in forks (pointing into chats). " +
           "So this database change was undone, and the data is not served. " +
-          "The changes before it at this start (0006_persona_locks, 0007_fine) passed the same check and were kept, so the version you ran before can't open this data any more: restore the backup taken before this update, and report this problem."
+          `The changes before it at this start (${[...after5, fakeKey("fine")].join(", ")}) passed the same check` +
+          " and were kept, so the version you ran before can't open this data any more: restore the backup taken before this update, and report this problem."
       )
       assert.notInclude(message, "Go back")
       assert.notInclude(message, "empty")
-      assert.strictEqual(yield* newestRecorded, 7)
+      assert.strictEqual(yield* newestRecorded, newestReal + 1)
       assert.strictEqual((yield* sql`SELECT id FROM chats`).length, 1)
       assert.strictEqual(yield* pragmaValue("foreign_keys"), 1)
     }).pipe(Effect.provide(layer()))
@@ -371,12 +383,12 @@ describe("the migrator", () => {
       const exit = yield* Effect.exit(
         migrate({
           ...migrationDefinitions,
-          "0007_a": { statements: ["CREATE TABLE a (id INTEGER PRIMARY KEY) STRICT"] },
-          "0007_b": { statements: ["CREATE TABLE b (id INTEGER PRIMARY KEY) STRICT"] }
+          [fakeKey("a")]: { statements: ["CREATE TABLE a (id INTEGER PRIMARY KEY) STRICT"] },
+          [fakeKey("b")]: { statements: ["CREATE TABLE b (id INTEGER PRIMARY KEY) STRICT"] }
         })
       )
       assert.isTrue(Exit.isFailure(exit))
-      assert.include(String(exit), "share a number (0007_a and 0007_b)")
+      assert.include(String(exit), `share a number (${fakeKey("a")} and ${fakeKey("b")})`)
       assert.deepStrictEqual(yield* sql`SELECT name FROM sqlite_master`, [])
     }).pipe(Effect.provide(layer()))
   )
