@@ -6,6 +6,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./layoutAudit.ts"
 import { openPanel, panelTab } from "./panel.ts"
+import { addToCast } from "./cast.ts"
 import { loginCookie, withCookie } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 
@@ -131,5 +132,82 @@ export function personaLockTests() {
           await expect(playing(page, `${name(mapmaker)} (default)`)).toBeVisible()
         })
       }
+    for (const width of [1440, 390])
+      test(`only a single chat offers or shows the lock; another tab follows a change ${width}`, async ({
+        page,
+        context
+      }) => {
+        const tag = `${width}S`
+        const { harbor, partner, pilot, group, started } = await admin((api) =>
+          Effect.gen(function* () {
+            const harbor = yield* api.CreateCard({ label: `Harbor ${tag}`, name: `Harbor ${tag}` })
+            const partner = yield* api.CreateCard({ label: `Navigator ${tag}`, name: `Navigator ${tag}` })
+            const pilot = yield* api.CreateCard({ label: `Pilot ${tag}`, name: `Pilot ${tag}` })
+            yield* api.SetPersona({ entityId: pilot.entityId, persona: true })
+            // No default: the new chat plays Pilot through the lock alone.
+            yield* api.ChangeGenerationDefaults({ change: { persona: null } })
+            yield* api.SetPersonaLock({ entityId: harbor.entityId, persona: pilot.entityId })
+            const group = yield* api.StartChat({
+              cards: [harbor.entityId, partner.entityId],
+              persona: pilot.entityId,
+              greeting: null,
+              first: { _tag: "Send", content: "Group fixture.", speakerEntityId: null },
+              title: `Voyage ${tag}`
+            })
+            const started = yield* api.StartChat({
+              cards: [harbor.entityId],
+              persona: pilot.entityId,
+              greeting: null,
+              first: { _tag: "Send", content: "Single fixture.", speakerEntityId: null },
+              title: `Single ${tag}`
+            })
+            return { harbor, partner, pilot, group: group.chat, started: started.chat }
+          })
+        )
+        await page.setViewportSize({ width, height: 900 })
+        await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+        const toggle = page.getByRole("switch", { name: `Always play as this with ${harbor.label}`, exact: true })
+
+        // A character joining the new chat makes it a group: the picker no longer offers the lock.
+        await page.goto(`${server().url}/cards/${harbor.entityId}/chat`)
+        await openPanel(page, "Cast")
+        await playing(page, pilot.label).click()
+        await expect(toggle).toBeChecked()
+        await page.keyboard.press("Escape")
+        await addToCast(page, partner.label)
+        await playing(page, pilot.label).click()
+        await expect(page.getByRole("dialog", { name: "Your persona" })).toBeVisible()
+        await expect(toggle).toHaveCount(0)
+        await page.keyboard.press("Escape")
+
+        // A group chat's character tab doesn't show it; the single chat's does.
+        const row = page.locator("[data-persona-lock]")
+        await page.goto(`${server().url}/chats/${group.id}`)
+        await openPanel(page, "Cast")
+        await panelTab(page, harbor.label)
+        await expect(page.getByRole("tabpanel", { name: harbor.label })).toContainText(`New chat with ${harbor.label}`)
+        await expect(row).toHaveCount(0)
+
+        // Another tab showing the lock follows a change made here, without a reload.
+        const other = await context.newPage()
+        await other.setViewportSize({ width, height: 900 })
+        for (const view of [page, other]) {
+          await view.goto(`${server().url}/chats/${started.id}`)
+          await openPanel(view, "Cast")
+          await panelTab(view, harbor.label)
+          await expect(view.locator("[data-persona-lock]")).toContainText(
+            `You play ${pilot.label} with ${harbor.label}`
+          )
+        }
+        await page.locator("[data-persona-lock]").getByRole("button", { name: "Clear", exact: true }).click()
+        await expect(row).toHaveCount(0)
+        await expect(other.locator("[data-persona-lock]")).toHaveCount(0)
+        // And a lock set elsewhere appears.
+        await admin((api) => api.SetPersonaLock({ entityId: harbor.entityId, persona: pilot.entityId }))
+        await page.bringToFront()
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")))
+        await expect(row).toContainText(`You play ${pilot.label} with ${harbor.label}`)
+        await other.close()
+      })
   })
 }

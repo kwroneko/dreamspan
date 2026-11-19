@@ -242,6 +242,9 @@ function CardPanel({
   const alone =
     pending !== null &&
     view.cast?.participants.every((id) => id === card.entityId || view.cast?.playedByMe.includes(id))
+  // The chat's only character is this one: what isn't the user's persona, at the branch shown.
+  const others = (view.cast?.participants ?? []).filter((id) => !view.cast?.playedByMe.includes(id))
+  const single = others.length === 1 && others[0] === card.entityId
   const [searching, setSearching] = useState(false)
   const [searchMatch, setSearchMatch] = useState<SearchMatch | null>(null)
   const searchButton = useRef<HTMLButtonElement>(null)
@@ -316,7 +319,7 @@ function CardPanel({
             <SlotOutlet slot={chatCardActions} except={["card.edit"]} props={{ session, card, info, persona }} />
           )}
         </div>
-        {!remote && <SlotOutlet slot={chatCharacterRows} props={{ card, persona }} />}
+        {!remote && <SlotOutlet slot={chatCharacterRows} props={{ card, persona, single }} />}
         {state.loadError && <ErrorAlert error={state.loadError} />}
         {!state.snapshot && !state.loadError && <p className="text-sm text-muted">Loading the card…</p>}
         {state.snapshot && (

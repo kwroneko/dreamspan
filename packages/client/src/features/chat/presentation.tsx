@@ -45,6 +45,8 @@ export const pendingPersonaPickerRows = defineSlot<{ pending: import("./pendingC
 export const chatCharacterRows = defineSlot<{
   card: import("@rp/shared/chat.ts").CastCard
   persona: boolean
+  /** The chat's only character is this card (no other character at the branch shown). */
+  single: boolean
 }>("chat.character-rows")
 /** Actions in an opened chat note's row, above its editor; `onChanged` reads the notes again. */
 export const chatNoteActions = defineSlot<{ note: ChatNote; session: ChatSession; onChanged: () => void }>(

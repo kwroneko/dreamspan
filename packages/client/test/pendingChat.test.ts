@@ -119,11 +119,22 @@ it("starts a single chat with the persona locked to its character, a group's wit
     )
   const single = start([host], pilot.entityId)
   expect(single.snapshot().persona).toBe(pilot.entityId)
-  expect(single.lockCard).toEqual(host)
+  expect(single.lockCard()).toEqual(host)
   expect(start([host], null).snapshot().persona).toBe(mapmaker.entityId)
   // A lock naming a card that is no longer a persona falls back to the default.
   expect(start([host], guest.entityId).snapshot().persona).toBe(mapmaker.entityId)
   const group = start([host, guest], pilot.entityId, true)
   expect(group.snapshot().persona).toBe(mapmaker.entityId)
-  expect(group.lockCard).toBeNull()
+  expect(group.lockCard()).toBeNull()
+  // A character joining the single chat makes it no longer single; leaving makes it single again.
+  const joined = single.snapshot()
+  single.change((current) => ({
+    ...current,
+    greeters: [...current.greeters, greeter(guest)],
+    picks: [...current.picks, 0]
+  }))
+  expect(single.lockCard()).toBeNull()
+  single.remove(host.entityId)
+  expect(single.lockCard()).toEqual(guest)
+  expect(single.lockCard(joined)).toEqual(host)
 })

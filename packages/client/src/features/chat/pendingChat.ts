@@ -56,11 +56,16 @@ export class PendingChat {
   }
   readonly group: PendingGroup | null
   /**
-   * The one character of a new single chat, whose persona lock (DESIGN §2.2) chose who the
-   * user starts as and can be set from its persona picker; null for a group's chat, one with no
-   * character, or a card source's card not yet the user's.
+   * The one character of a new single chat as it stands now, whose persona lock (DESIGN §2.2)
+   * can be set from its persona picker; null for a group's chat, one with no character or with
+   * several (a character added in the Cast tab), or a card source's card not yet the user's.
    */
-  readonly lockCard: CastCard | null
+  lockCard(state = this.state): CastCard | null {
+    if (this.group !== null) return null
+    const characters = state.greeters.filter((item) => item.card.entityId !== state.persona)
+    const only = characters.length === 1 ? characters[0]!.card : null
+    return only !== null && remoteOf(only.entityId) === null ? only : null
+  }
   private readonly call: Caller
 
   constructor(
@@ -77,10 +82,10 @@ export class PendingChat {
     this.group = group
     this.call = call
     const only = greeters.length === 1 ? greeters[0]!.card : null
-    this.lockCard = group === null && only !== null && remoteOf(only.entityId) === null ? only : null
+    const single = group === null && only !== null && remoteOf(only.entityId) === null
     const known = [...cards, ...greeters.map((item) => item.card)]
     const persona = startingPersona({
-      single: this.lockCard !== null,
+      single,
       lock,
       defaultPersona,
       live: (id) => known.some((card) => card.entityId === id && card.persona)
