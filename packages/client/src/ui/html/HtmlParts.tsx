@@ -119,10 +119,10 @@ export function BlockedMediaNote() {
  */
 function Video(props: Props) {
   const queued = useQueuedMediaProps(props, "video")
-  const { node, ...dom } = queued
+  const { node: _node, ...dom } = queued
   const sources = [
     String(props.src ?? ""),
-    ...(node?.children ?? []).map((child) =>
+    ...(props.node?.children ?? []).map((child) =>
       child.type === "element" && child.tagName === "source" ? String(child.properties?.src ?? "") : ""
     )
   ].join(" ")
