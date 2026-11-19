@@ -524,6 +524,35 @@ describe.skipIf(skipReason !== null || "none" in limiter)("the Linux sandbox wit
     expect(fine.memoryCapped).toBeUndefined()
   }, 120_000)
 
+  it("leaves $ in a command to bash inside the sandbox, never the host's wrapper", async () => {
+    // systemd-run would otherwise expand ${NAME}, a whole-argument $NAME and $$ with the
+    // host's values before bash sees the command.
+    const result = await run(
+      `printf '%s|' "\${HOME}" "$HOME" "\${UNSET:-x}" '$$' "$$" '\${HOME}' "\${XDG_RUNTIME_DIR:-none}"`
+    )
+    const [braced, plain, fallback, literal, pid, quoted, runtime] = output(result).split("|")
+    expect([braced, plain, fallback, literal, quoted, runtime]).toEqual([
+      "/home/user",
+      "/home/user",
+      "x",
+      "$$",
+      "${HOME}",
+      "none"
+    ])
+    expect(pid).toMatch(/^\d+$/)
+    expect(output(result)).not.toContain(process.env.HOME ?? "~")
+  }, 60_000)
+
+  it("passes a wrapped program's arguments through unchanged", async () => {
+    if ("none" in limiter) return
+    const group = await limiter.open({ memoryBytes: 256 * 2 ** 20, processes: 32 })
+    const args = ["${HOME}", "$HOME", "${UNSET:-x}", "$$", "a$$b", "$XDG_RUNTIME_DIR"]
+    const start = group.wrap("/bin/sh", ["-c", "printf '%s\\n' \"$@\"", "probe", ...args])
+    const text = execFileSync(start.file, start.args, { encoding: "utf8", timeout: 10_000, env: { ...group.env } })
+    await group.finish()
+    expect(text.trimEnd().split("\n")).toEqual(args)
+  }, 30_000)
+
   it("caps processes for the whole command", async () => {
     const result = await run("for i in $(seq 1 100); do sleep 5 & done 2>&1 | head -1; wait; echo done", {
       limits: { ...capped, processes: 32 }

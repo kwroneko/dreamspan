@@ -10,7 +10,12 @@
 //   gets a child folder; a small shell joins it, then becomes bubblewrap.
 // - `systemd-scope`: on a host with a systemd user manager (a development server),
 //   `systemd-run --user --scope` puts bubblewrap in a transient scope with the same limits. The
-//   scope runs bubblewrap in place, so its parent is still this process.
+//   scope runs bubblewrap in place, so its parent is still this process. systemd-run expands
+//   `${NAME}`, a whole-argument `$NAME` and `$$` in the command's arguments on the host (newer
+//   releases do it for scopes too), which would rewrite a command's text before bash sees it and put
+//   the host's values in it: `--expand-environment=no` turns that off where systemd-run has it
+//   (254 on). The probe checks that arguments arrive unchanged; where they wouldn't, the limiter
+//   isn't used.
 import { execFile, spawnSync } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { constants, existsSync } from "node:fs"
@@ -152,10 +157,26 @@ const userBusEnv = (): Record<string, string> => {
   }
 }
 
-const scopeArgs = (limits: CgroupLimits, unit: string, collect: boolean) => [
+/** Whether systemd-run has `--expand-environment` (systemd 254 on); asked once per binary. */
+const expandOptionKnown = new Map<string, boolean>()
+const hasExpandOption = (systemdRun: string) => {
+  let known = expandOptionKnown.get(systemdRun)
+  if (known === undefined) {
+    const help = spawnSync(systemdRun, ["--help"], { encoding: "utf8", timeout: 5000, env: userBusEnv() })
+    known = help.status === 0 && help.stdout.includes("--expand-environment")
+    expandOptionKnown.set(systemdRun, known)
+  }
+  return known
+}
+
+/** Arguments the probe passes through; they must come back exactly as given. */
+const LITERAL_ARGS = ["${XDG_RUNTIME_DIR}", "$XDG_RUNTIME_DIR", "a$$b"] as const
+
+const scopeArgs = (limits: CgroupLimits, unit: string, collect: boolean, noExpand: boolean) => [
   "--user",
   "--scope",
   "--quiet",
+  ...(noExpand ? ["--expand-environment=no"] : []),
   ...(collect ? ["--collect"] : []),
   `--unit=${unit}`,
   "-p",
@@ -182,11 +203,14 @@ const systemdScope: CgroupLimiter = {
         ...scopeArgs(
           { memoryBytes: 64 * 2 ** 20, processes: 16 },
           `dreamspan-probe-${randomBytes(6).toString("hex")}`,
-          true
+          true,
+          hasExpandOption(systemdRun)
         ),
         "/bin/sh",
         "-c",
-        'd=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); cat "$d/memory.max" "$d/pids.max"'
+        'd=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); cat "$d/memory.max" "$d/pids.max"; printf \'%s\\n\' "$@"',
+        "dreamspan-probe",
+        ...LITERAL_ARGS
       ],
       { encoding: "utf8", timeout: 10_000, env: userBusEnv() }
     )
@@ -195,9 +219,11 @@ const systemdScope: CgroupLimiter = {
         ok: false,
         reason: `systemd-run can't make a user scope here (${(probe.stderr || String(probe.error ?? "")).trim().slice(0, 200)}).`
       }
-    const [memory, pids] = probe.stdout.trim().split("\n")
+    const [memory, pids, ...passed] = probe.stdout.trim().split("\n")
     if (memory !== String(64 * 2 ** 20) || pids !== "16")
       return { ok: false, reason: "The systemd user manager doesn't apply memory and process limits to its scopes." }
+    if (passed.join("\n") !== LITERAL_ARGS.join("\n"))
+      return { ok: false, reason: "systemd-run here rewrites $ in commands and can't be told not to." }
     return { ok: true }
   },
   open: async (limits) => {
@@ -205,10 +231,11 @@ const systemdScope: CgroupLimiter = {
     if (!systemdRun) throw new Error("systemd-run isn't installed.")
     const unit = `dreamspan-cmd-${randomBytes(8).toString("hex")}`
     const env = userBusEnv()
+    const noExpand = hasExpandOption(systemdRun)
     return {
       env,
       // Not collected on failure, so its result can be read after; reset below.
-      wrap: (file, args) => ({ file: systemdRun, args: [...scopeArgs(limits, unit, false), file, ...args] }),
+      wrap: (file, args) => ({ file: systemdRun, args: [...scopeArgs(limits, unit, false, noExpand), file, ...args] }),
       // A scope that ran out of memory ends as failed with the result `oom-kill`; one that
       // ended normally is gone (its result reads as `success`).
       finish: async () => {
