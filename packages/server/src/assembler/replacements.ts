@@ -5,9 +5,9 @@
 // text in its target's place (`replacedText`), or leaves the target out when the note goes at
 // its own position. Anything that wants a prompt replaced in a chat, an agent tool among them
 // (Phase 4), writes such a note: nothing else needs to know.
-import { readReplaceTarget, type ReplaceTarget, targetCard } from "@rp/shared/docs/note.ts"
-import { presetOrder, withMain } from "@rp/shared/presetOrder.ts"
-import { type FoldableEvent, swappedCard } from "@rp/shared/state.ts"
+import { readReplaceTarget, type ReplaceTarget, targetCard } from "@dreamspan/shared/docs/note.ts"
+import { presetOrder, withMain } from "@dreamspan/shared/presetOrder.ts"
+import { type FoldableEvent, swappedCard } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { type AssemblerStage, type Assembly, need } from "./pipeline.ts"
 import { noteCard, type NoteInput, type NoteReplacement, type ResolvedTarget } from "./types.ts"

@@ -6,7 +6,7 @@
 // counted once per model (cached here and on the server). Until a count comes, the last one
 // stays shown.
 import { useAtomValue } from "@effect/atom-react"
-import { COUNT_TOKENS_CHARS, COUNT_TOKENS_TEXTS, type TokenizerInfo } from "@rp/shared/generation.ts"
+import { COUNT_TOKENS_CHARS, COUNT_TOKENS_TEXTS, type TokenizerInfo } from "@dreamspan/shared/generation.ts"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useId, useState, useSyncExternalStore } from "react"
 import { AppClient } from "../../rpc.ts"

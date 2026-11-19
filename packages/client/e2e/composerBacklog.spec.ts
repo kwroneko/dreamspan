@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import type { ChatId, EntityId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { pickPendingPersona } from "./support/cast.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"

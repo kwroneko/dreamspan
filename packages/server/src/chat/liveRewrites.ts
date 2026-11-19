@@ -2,7 +2,7 @@
 // through the scripts its finish runs, as ST's streaming runs them on the text so far at every
 // update. An entry of `ExecutionRegistry.liveRewrites`; Generations takes them in order and
 // shows the texts as they are when none is registered or none can change anything.
-import type { TextRewrite } from "@rp/shared/regexScripts.ts"
+import type { TextRewrite } from "@dreamspan/shared/regexScripts.ts"
 import { type Context, Effect } from "effect"
 import type { Reader } from "../db/Database.ts"
 import type { GenerationRequest } from "./Generator.ts"

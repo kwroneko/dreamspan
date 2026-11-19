@@ -4,7 +4,7 @@
 // Synthetic card; the connection is local and never called.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { openSummarySettings } from "./support/panel.ts"

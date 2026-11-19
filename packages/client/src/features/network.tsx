@@ -1,6 +1,6 @@
 // The instance's outbound network settings, for admins (spec/PROVIDERS.md §6.2). The
 // proxy is shown only as the server returns it: scheme, host and port.
-import type { NetworkSettings } from "@rp/shared/api.ts"
+import type { NetworkSettings } from "@dreamspan/shared/api.ts"
 import { type FormEvent, useId, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../actions.tsx"
 import { routes } from "../routes.tsx"

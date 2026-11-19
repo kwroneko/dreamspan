@@ -8,10 +8,10 @@ import {
   ruleEstimate,
   type ImageEstimate,
   type ImageTarget
-} from "@rp/shared/imageTokens.ts"
+} from "@dreamspan/shared/imageTokens.ts"
 import { Effect } from "effect"
 import { AssemblySources, need, type AssemblerStage, type ImageTokenFacts } from "./pipeline.ts"
-import type { ContextImage } from "@rp/shared/inspectorApi.ts"
+import type { ContextImage } from "@dreamspan/shared/inspectorApi.ts"
 import type { AssembledRequest, ModelInput, RequestImage, RequestMessage, WireContext } from "./types.ts"
 import { newestImages } from "./images.ts"
 

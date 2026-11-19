@@ -1,7 +1,7 @@
 // The preset and model pickers' lists (the owner, 2026-11-01): the text filters every view,
 // Name, Modified and Used leave archived presets out, Archived shows only them, latest archived
 // first, and the line under each name says when it was edited, used or archived.
-import { LibraryRef } from "@rp/shared/library.ts"
+import { LibraryRef } from "@dreamspan/shared/library.ts"
 import { describe, expect, it } from "vitest"
 import { matchesModel, modelDetail, modelRows, modelsInOrder } from "../src/features/pickers/modelList.ts"
 import { presetDetail, presetsInView, selectablePresets } from "../src/features/pickers/presetList.ts"

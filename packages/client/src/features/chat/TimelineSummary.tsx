@@ -1,8 +1,8 @@
 // The selected layer in the timeline, with lazy, recursive expansion. ReadPath stays
 // paged even for an imported summary spanning thousands of original messages.
 import { positionOf } from "./position.ts"
-import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
-import type { LcmSummary, Summary } from "@rp/shared/lcm.ts"
+import type { PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
+import type { LcmSummary, Summary } from "@dreamspan/shared/lcm.ts"
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"

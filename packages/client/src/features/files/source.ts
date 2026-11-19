@@ -1,8 +1,8 @@
 // Where the file manager reads and changes files (spec/FILES-AND-ENVIRONMENT.md §1, §8.1): a
 // registered, replaceable part (owner rule: every feature a registered part), so a plugin can put
 // another store behind the same panel. The built-in source speaks the HTTP contract in
-// `@rp/shared/files.ts`; the first registered source by order is the one used.
-import { Changed, Deleted, FILES_ROUTES, FolderListing, UploadOutcome, type UploadConflict } from "@rp/shared/files.ts"
+// `@dreamspan/shared/files.ts`; the first registered source by order is the one used.
+import { Changed, Deleted, FILES_ROUTES, FolderListing, UploadOutcome, type UploadConflict } from "@dreamspan/shared/files.ts"
 import { Schema } from "effect"
 import { useSyncExternalStore } from "react"
 import { makeRegistry } from "../../registry.ts"

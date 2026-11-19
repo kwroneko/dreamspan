@@ -2,8 +2,8 @@
 // older history. Read backwards in windows only until a character's last turn is found, unless
 // the messages shown already reach the tip with one in them. Either way the entries run to the
 // tip, whose message Auto's pick reads (replyPolicy.ts).
-import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
-import type { Cast } from "@rp/shared/chatSetupApi.ts"
+import type { PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
+import type { Cast } from "@dreamspan/shared/chatSetupApi.ts"
 import { useEffect, useState } from "react"
 import type { ChatSession, ChatView } from "./session.ts"
 

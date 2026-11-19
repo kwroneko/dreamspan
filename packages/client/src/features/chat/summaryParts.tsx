@@ -1,7 +1,7 @@
 // What the summary screens show alike (the Summaries tab, the summaries in the chat): a
 // summary's state as small badges that say what they mean on hover or focus, and its text
 // cut to a few lines with a control to show the rest.
-import type { LcmSummary } from "@rp/shared/lcm.ts"
+import type { LcmSummary } from "@dreamspan/shared/lcm.ts"
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"

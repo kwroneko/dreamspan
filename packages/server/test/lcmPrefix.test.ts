@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { Effect, Layer, Stream } from "effect"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { Providers } from "../src/providers/Providers.ts"
 import { Summarizer } from "../src/lcm/Summarizer.ts"

@@ -1,8 +1,8 @@
 // Trusted commands share the RPC workflows; imported content never registers executable code.
 import { Context, Effect, Layer, Schema } from "effect"
-import { CurrentUser } from "@rp/shared/api.ts"
-import { HistoryRejected } from "@rp/shared/historyApi.ts"
-import { NotFound, ServerError } from "@rp/shared/errors.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import { HistoryRejected } from "@dreamspan/shared/historyApi.ts"
+import { NotFound, ServerError } from "@dreamspan/shared/errors.ts"
 import { makeRegistry, type Registry } from "./registry.ts"
 import { toServerError } from "./api/internal.ts"
 

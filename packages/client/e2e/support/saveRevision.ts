@@ -2,7 +2,7 @@
 // Save asks nothing; "Save with message…" takes one line, Enter saving it. Either way Save
 // goes back to not actionable once nothing changed since the new revision.
 import { expect, type Locator, type Page } from "@playwright/test"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import type { Client } from "./rpc.ts"
 

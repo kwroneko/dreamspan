@@ -1,6 +1,6 @@
 // Deterministic study requests come from the product assembler, never hand-built prompts.
 import { Effect, Schema, Scope, Exit } from "effect"
-import { Summary } from "@rp/shared/lcm.ts"
+import { Summary } from "@dreamspan/shared/lcm.ts"
 import { providerRequest } from "../../src/assembler/wire.ts"
 import { importStPreset } from "../../src/formats/preset.ts"
 import { cachePrefixDigests, placeBreakpoints, summaryLevelOf } from "../../src/assembler/breakpoints.ts"

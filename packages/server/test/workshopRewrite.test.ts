@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber } from "effect"
-import { NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
-import type { ApprovalPrompt } from "@rp/shared/agent.ts"
+import { NewVersion, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
+import type { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
@@ -9,7 +9,7 @@ import { makePermit } from "../src/agent/approvals.ts"
 import { client, serverLayer, testConfig, outcome } from "./support/config.ts"
 import { completeFixture, fixtureSql } from "./support/lcmFixtures.ts"
 import { eventually } from "./support/generation.ts"
-import { newChatNote } from "@rp/shared/editing.ts"
+import { newChatNote } from "@dreamspan/shared/editing.ts"
 import { toolData } from "../src/agent/toolData.ts"
 
 const said = (content: string) =>

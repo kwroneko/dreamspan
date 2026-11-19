@@ -4,8 +4,8 @@ import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 // The chats as a page (DESIGN §2.1): the sidebar's list, full width, for phones, where the
 // sidebar is folded away. Chats with characters start from the character grid; this page
 // also starts one without any, and whatever else is registered (a workshop).
-import type { Chat } from "@rp/shared/chat.ts"
-import { importState } from "@rp/shared/stImportApi.ts"
+import type { Chat } from "@dreamspan/shared/chat.ts"
+import { importState } from "@dreamspan/shared/stImportApi.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type FormEvent, type ReactNode, useEffect } from "react"
 import { defineSlot, SlotOutlet } from "../../slots.tsx"

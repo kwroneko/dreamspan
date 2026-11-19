@@ -1,6 +1,6 @@
 // Exercise shipped editable policies through real declared replacement handles.
 import { Effect } from "effect"
-import { makeRegistry } from "@rp/shared/registry.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { declaredHandles } from "../../src/plugins/handles.ts"
 import type { RolloutTool } from "../../src/agent/tools.ts"
 import { historyTools } from "../../src/agent/tools/history.ts"

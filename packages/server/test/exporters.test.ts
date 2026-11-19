@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
-import { ExportFormatInfo, ImportResult } from "@rp/shared/libraryImport.ts"
+import { ExportFormatInfo, ImportResult } from "@dreamspan/shared/libraryImport.ts"
 import { AppConfig } from "../src/config.ts"
 import { PasswordCost } from "../src/auth/passwords.ts"
 import * as ContextGenerator from "../src/chat/ContextGenerator.ts"

@@ -1,6 +1,6 @@
 // The composer's next-reply strip (fcomposer): the cache chip's states, and controls whose
 // placement follows the width, as a plugin's can.
-import type { CacheWarmth } from "@rp/shared/inspectorApi.ts"
+import type { CacheWarmth } from "@dreamspan/shared/inspectorApi.ts"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cacheNotes, cacheState, compactTokens } from "../src/features/chat/CacheIndicator.tsx"
 import {

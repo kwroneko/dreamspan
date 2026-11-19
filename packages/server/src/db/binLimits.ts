@@ -1,5 +1,5 @@
-import { defaultBinLimits, type BinLimits } from "@rp/shared/bin.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { defaultBinLimits, type BinLimits } from "@dreamspan/shared/bin.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Context, Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 

@@ -2,8 +2,8 @@
 // it, never one per branch; unselected swipes, deleted messages and deleted chats aren't hits;
 // a branch's own replaced text is its own hit; pages go on from their cursor.
 import { assert, describe, it } from "@effect/vitest"
-import { NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import type { MessageSearchPage } from "@rp/shared/messageSearch.ts"
+import { NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { MessageSearchPage } from "@dreamspan/shared/messageSearch.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

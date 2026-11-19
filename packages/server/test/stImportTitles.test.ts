@@ -1,6 +1,6 @@
 // Synthetic ST groups only: default names, renamed groups and user-named chat files.
 import { assert, layer } from "@effect/vitest"
-import { chatName } from "@rp/shared/chatName.ts"
+import { chatName } from "@dreamspan/shared/chatName.ts"
 import { Effect } from "effect"
 import { Reader } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

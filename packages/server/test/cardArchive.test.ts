@@ -1,5 +1,5 @@
-import { newCardDoc } from "@rp/shared/editing.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
+import { newCardDoc } from "@dreamspan/shared/editing.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { Reader } from "../src/db/Database.ts"

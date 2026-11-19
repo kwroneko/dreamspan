@@ -1,4 +1,4 @@
-import { macroParts } from "@rp/shared/macros/catalog.ts"
+import { macroParts } from "@dreamspan/shared/macros/catalog.ts"
 // Shipped-source allowlist. Never interpret a manifest's base.path as a filesystem path.
 const baseCopies = [
   {
@@ -11,8 +11,8 @@ const baseCopies = [
     files: ["packages/client/src/features/completionSoundPart.tsx", "packages/client/src/features/completionSound.ts"],
     surfaces: ["client:noticeChannels"],
     imports: {
-      "packages/client/src/ui/Choice.tsx": "@rp/plugin-api/client",
-      "packages/client/src/ui/Surface.tsx": "@rp/plugin-api/client"
+      "packages/client/src/ui/Choice.tsx": "@dreamspan/plugin-api/client",
+      "packages/client/src/ui/Surface.tsx": "@dreamspan/plugin-api/client"
     }
   },
   {
@@ -24,7 +24,7 @@ const baseCopies = [
     entry: "presencePart",
     files: ["packages/server/src/agent/tools/presencePart.ts"],
     surfaces: ["server:rolloutTools", "server:presence"],
-    imports: { "packages/plugin-api/src/server.ts": "@rp/plugin-api/server" }
+    imports: { "packages/plugin-api/src/server.ts": "@dreamspan/plugin-api/server" }
   }
 ] as const
 const macroCopies = macroParts
@@ -67,7 +67,7 @@ const macroCopies = macroParts
           "packages/shared/src/macros/hash.ts",
           "packages/shared/src/macros/time.ts",
           "packages/plugin-api/src/macros.ts"
-        ].map((p) => [p, "@rp/plugin-api/worker"])
+        ].map((p) => [p, "@dreamspan/plugin-api/worker"])
       )
     }
   })
@@ -80,7 +80,7 @@ const reverseCopy = {
   entry: "reverseMacro",
   files: ["packages/shared/src/macros/builtins/reverse.ts"],
   surfaces: ["worker:macros"],
-  imports: { "packages/plugin-api/src/macros.ts": "@rp/plugin-api/worker" }
+  imports: { "packages/plugin-api/src/macros.ts": "@dreamspan/plugin-api/worker" }
 }
 const historyCopies = ["search_chat", "read_messages", "expand_summary", "search_summaries"].map((id, i) => ({
   registry: "rolloutTools",
@@ -91,7 +91,7 @@ const historyCopies = ["search_chat", "read_messages", "expand_summary", "search
   entry: ["searchChat", "readMessages", "expandSummary", "searchSummaries"][i]!,
   files: ["packages/server/src/agent/tools/historyPart.ts"],
   surfaces: ["server:rolloutTools", "server:history"],
-  imports: { "packages/plugin-api/src/server.ts": "@rp/plugin-api/server" }
+  imports: { "packages/plugin-api/src/server.ts": "@dreamspan/plugin-api/server" }
 }))
 const noteCopies = ["list_notes", "switch_note"].map((id, i) => ({
   registry: "rolloutTools",
@@ -102,7 +102,7 @@ const noteCopies = ["list_notes", "switch_note"].map((id, i) => ({
   entry: i === 0 ? "listNotes" : "switchNote",
   files: ["packages/server/src/agent/tools/notesPart.ts"],
   surfaces: ["server:rolloutTools", "server:notes"],
-  imports: { "packages/plugin-api/src/server.ts": "@rp/plugin-api/server" }
+  imports: { "packages/plugin-api/src/server.ts": "@dreamspan/plugin-api/server" }
 }))
 const displayCopies = [
   ["timelineTransforms", "timeline.merges", "Merged chat rows", "timelineParts.ts", "mergeTimeline"],
@@ -142,9 +142,9 @@ const displayCopies = [
   files: [`packages/client/src/features/chat/${file}`],
   surfaces: [`client:${registry}`],
   imports: {
-    "packages/plugin-api/src/display.ts": "@rp/plugin-api/display",
-    "packages/client/src/features/chat/macros.ts": "@rp/plugin-api/display",
-    "packages/client/src/features/chat/displayRegex.ts": "@rp/plugin-api/display"
+    "packages/plugin-api/src/display.ts": "@dreamspan/plugin-api/display",
+    "packages/client/src/features/chat/macros.ts": "@dreamspan/plugin-api/display",
+    "packages/client/src/features/chat/displayRegex.ts": "@dreamspan/plugin-api/display"
   }
 }))
 export const builtinCopies = [
@@ -176,7 +176,7 @@ export const missingBuiltinAdapter = (id: string): string => {
 }
 
 /** Keep every supported identity inside the existing tool-result budget. */
-export const builtinCopyListing = (parts: ReadonlyArray<typeof import("@rp/shared/plugins.ts").BuiltinPart.Type>) =>
+export const builtinCopyListing = (parts: ReadonlyArray<typeof import("@dreamspan/shared/plugins.ts").BuiltinPart.Type>) =>
   [...new Set(parts.map((p) => p.registry))].flatMap((registry) =>
     [true, false].flatMap((copyable) => {
       const group = parts.filter((p) => p.registry === registry && p.copyable === copyable)

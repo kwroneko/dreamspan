@@ -1,6 +1,6 @@
 // The built-in card editor tabs (`cardTabs.ts`), each loaded with the editor that shows it.
 import { lazy, Suspense } from "react"
-import type { FieldPath } from "@rp/shared/editing.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
 import { Loading } from "../../ui/Spinner.tsx"
 import {
   CARD_TAB_DEFINITION,

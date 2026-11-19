@@ -1,7 +1,7 @@
 // Fine-grained chat surfaces. Defaults and plugins use the same reversible registries.
 import { useSyncExternalStore, type ComponentProps, type ComponentType, type ReactNode } from "react"
-import type { PathEntry } from "@rp/shared/chat.ts"
-import type { ChatNote } from "@rp/shared/chatSetupApi.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
+import type { ChatNote } from "@dreamspan/shared/chatSetupApi.ts"
 import { makeRegistry } from "../../registry.ts"
 import { defineSlot, SlotOutlet } from "../../slots.tsx"
 import type { ChatCardActionProps } from "./CardForkDialogs.tsx"
@@ -14,7 +14,7 @@ import type { ChatSession, ChatView } from "./session.ts"
 
 export const chatCardActions = defineSlot<ChatCardActionProps>("chat.card-actions")
 /** Navigation immediately after Write as in a cast member's menu. */
-export const castMemberNavigation = defineSlot<{ session: ChatSession; card: import("@rp/shared/chat.ts").CastCard }>(
+export const castMemberNavigation = defineSlot<{ session: ChatSession; card: import("@dreamspan/shared/chat.ts").CastCard }>(
   "chat.cast-member-navigation"
 )
 export function ChatCardActions(props: ChatCardActionProps) {
@@ -25,7 +25,7 @@ export const chatSettingSections = defineSlot<{ session: ChatSession }>("chat.se
  * Sections of the request inspector after the context and what it left out (ContextPage.tsx): an
  * agent reply's tools and steps (agent/RunSteps.tsx), the run behind the request.
  */
-export const runInspectorSections = defineSlot<{ readonly run: import("@rp/shared/inspectorApi.ts").RunContext }>(
+export const runInspectorSections = defineSlot<{ readonly run: import("@dreamspan/shared/inspectorApi.ts").RunContext }>(
   "inspector.run-sections"
 )
 /** Sections of the Cast tab under the cast itself: Add characters (CastAdd.tsx). */
@@ -43,7 +43,7 @@ export const pendingPersonaPickerRows = defineSlot<{ pending: import("./pendingC
  * persona locked to them (DESIGN §2.2). `persona`: the tab is of the card the user plays.
  */
 export const chatCharacterRows = defineSlot<{
-  card: import("@rp/shared/chat.ts").CastCard
+  card: import("@dreamspan/shared/chat.ts").CastCard
   persona: boolean
   /** The chat's only character is this card (no other character at the branch shown). */
   single: boolean
@@ -67,7 +67,7 @@ export const messageHeaderDetails = defineSlot<{ entry: PathEntry; session: Chat
 )
 /** In a reply's reasoning header, beside its toggle: Copy reasoning, Collapse all (Reasoning.tsx). */
 export interface ReasoningActionProps {
-  readonly version: import("@rp/shared/chat.ts").Version
+  readonly version: import("@dreamspan/shared/chat.ts").Version
   /** The reasoning as stored, or as streamed so far: never the rendered Markdown. */
   readonly text: string
   readonly streaming: boolean
@@ -85,7 +85,7 @@ export const reasoningActions = defineSlot<ReasoningActionProps>("message.reason
  * own tagged sections ("Thinking in the reply", spec/REPLY-SECTIONS.md), each an entry here.
  */
 export const reasoningPanels = defineSlot<{
-  readonly version: import("@rp/shared/chat.ts").Version
+  readonly version: import("@dreamspan/shared/chat.ts").Version
   readonly session: ChatSession
 }>("message.reasoning-panels")
 /**
@@ -161,7 +161,7 @@ export function ChatSurfaceProviders(props: ChatSurfaceProps) {
 export const chatColumns = defineSlot<{ wide: boolean }>("chat.columns")
 export const chatOverlays = defineSlot<{ session: ChatSession; view: ChatView }>("chat.overlays")
 /** Actions beside a failed version's error, such as saving a context size its error states. */
-export const versionFailureActions = defineSlot<{ version: import("@rp/shared/chat.ts").Version }>(
+export const versionFailureActions = defineSlot<{ version: import("@dreamspan/shared/chat.ts").Version }>(
   "message.failure-actions"
 )
 /**
@@ -183,14 +183,14 @@ export const chatHeaderActions = defineSlot<import("./ChatHeader.tsx").ChatHeade
 export const chatHeaderAbout = defineSlot<{ readonly view: import("./session.ts").ChatView }>("chat.header-about")
 /** The same beside a chat's name in the sidebar's rows and the chat lists. */
 export const chatRowAbout = defineSlot<{
-  readonly chat: Pick<import("@rp/shared/chat.ts").Chat, "id" | "kind">
+  readonly chat: Pick<import("@dreamspan/shared/chat.ts").Chat, "id" | "kind">
 }>("chat.row-about")
 /** The same buttons in a chat not made yet (before the first send): the panel. */
 export const pendingChatHeaderActions =
   defineSlot<import("./ChatHeader.tsx").PendingHeaderActionProps>("chat.pending-header-actions")
 export const messagePreviews = defineSlot<{ entry: PathEntry; session: ChatSession }>("message.previews")
-export const summaryPreviews = defineSlot<{ summary: import("@rp/shared/lcm.ts").LcmSummary; session: ChatSession }>(
+export const summaryPreviews = defineSlot<{ summary: import("@dreamspan/shared/lcm.ts").LcmSummary; session: ChatSession }>(
   "summary.previews"
 )
 
-export const queuedPreviews = defineSlot<{ queued: import("@rp/shared/chat.ts").QueuedMessage }>("chat.queued-previews")
+export const queuedPreviews = defineSlot<{ queued: import("@dreamspan/shared/chat.ts").QueuedMessage }>("chat.queued-previews")

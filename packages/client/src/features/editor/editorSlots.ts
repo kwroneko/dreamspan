@@ -1,5 +1,5 @@
 // Places in every library editor, full and side-panel alike, that features add to.
-import type { Revision } from "@rp/shared/library.ts"
+import type { Revision } from "@dreamspan/shared/library.ts"
 import { defineSlot } from "../../slots.tsx"
 import type { EditorStore } from "./store.ts"
 

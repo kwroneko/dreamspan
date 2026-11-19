@@ -8,7 +8,7 @@ import { withConditionalGets } from "../src/sources/httpCache.ts"
 import { makeSourceHttp } from "../src/sources/guard.ts"
 import { makeLimiter } from "../src/sources/limiter.ts"
 import { fakeCardexAdapter, startFakeArchive } from "./support/fakeArchive.ts"
-import { emptySourceQuery } from "@rp/shared/cardSources.ts"
+import { emptySourceQuery } from "@dreamspan/shared/cardSources.ts"
 
 it.effect(
   "expired pages, opened cards and pictures validate without transferring unchanged bodies, per user and across restart",

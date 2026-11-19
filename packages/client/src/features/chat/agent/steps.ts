@@ -1,10 +1,10 @@
 // What an agent reply's steps element and header badge show (spec/AGENTIC.md §5.1), apart from
 // React so it's tested on its own: the live steps while the reply is written, the version's
 // summary (`Version.steps`) once it's done.
-import type { RolloutStep, StepsSummary, TranscriptEntry } from "@rp/shared/agent.ts"
-import type { ReasoningDisplay } from "@rp/shared/chatApi.ts"
+import type { RolloutStep, StepsSummary, TranscriptEntry } from "@dreamspan/shared/agent.ts"
+import type { ReasoningDisplay } from "@dreamspan/shared/chatApi.ts"
 import { Atom } from "effect/reactivity"
-import type { VersionId } from "@rp/shared/chat.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
 
 /**
  * What "N steps" counts: tool calls, and the turns the app asked to be sent (spec/REPLY-CONTRACT.md

@@ -6,7 +6,7 @@ import { test, expect } from "@playwright/test"
 import { createServer } from "node:http"
 import type { AddressInfo } from "node:net"
 import { Effect } from "effect"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { withCookie, loginCookie } from "./support/rpc.ts"
 
@@ -87,7 +87,7 @@ const files = {
     network: false,
     base: null
   }),
-  "client.tsx": `import type { Activate } from "@rp/plugin-api/client"
+  "client.tsx": `import type { Activate } from "@dreamspan/plugin-api/client"
 export const activate: Activate = host => {
   host.registries.displayTransforms!.register({ api: 1, id: "display.macros", order: 10,
     transform: input => ({ text: input.text + " [display only]", issues: [] }) })

@@ -2,7 +2,7 @@
 // estimated usage, images/tools and failed requests never train the correction.
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 
 export const readTextCalibration = (
   sql: SqlClient.SqlClient,

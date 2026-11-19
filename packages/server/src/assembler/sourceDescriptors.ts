@@ -1,8 +1,8 @@
 // Source descriptors are pure presentation over pinned provenance and owner-scoped lookups.
-import type { ContextSource } from "@rp/shared/inspectorApi.ts"
-import type { SlotId } from "@rp/shared/chat.ts"
-import { CONDITION_LABELS } from "@rp/shared/presetConditions.ts"
-import { endOfRequestText } from "@rp/shared/endOfRequest.ts"
+import type { ContextSource } from "@dreamspan/shared/inspectorApi.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import { CONDITION_LABELS } from "@dreamspan/shared/presetConditions.ts"
+import { endOfRequestText } from "@dreamspan/shared/endOfRequest.ts"
 import type { Source } from "./types.ts"
 
 interface SourceLabels {

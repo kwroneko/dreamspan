@@ -1,8 +1,8 @@
 // Parallel threads in the client (spec/THREADS.md §5.1, §13, TH3): what the dialog decides and
 // says, which forks the branch list leaves out, the shared reads of a fork's sets, and the
 // registered parts that read them. Synthetic ids only.
-import type { ChatId, EntityId, Fork, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { ThreadSet } from "@rp/shared/threads.ts"
+import type { ChatId, EntityId, Fork, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { ThreadSet } from "@dreamspan/shared/threads.ts"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { branchControlParts } from "../src/features/chat/branchParts.ts"
 import type { ChatSession, ChatView } from "../src/features/chat/session.ts"

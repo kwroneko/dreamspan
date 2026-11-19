@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { Effect, Schema } from "effect"
-import { SummaryId } from "@rp/shared/lcm.ts"
+import { SummaryId } from "@dreamspan/shared/lcm.ts"
 import { level1 } from "./support/summaries.ts"
 import { join } from "node:path"
 import { mkdir } from "node:fs/promises"

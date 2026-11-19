@@ -2,7 +2,7 @@
 // from the home folder or a folder the page names (the last one used), opened by clicking. Opening one fills
 // the path field; folders that look like ST's are marked.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import { Forbidden } from "@rp/shared/errors.ts"
+import { Forbidden } from "@dreamspan/shared/errors.ts"
 import { Cause } from "effect"
 import { AsyncResult } from "effect/reactivity"
 import { useMemo, useState } from "react"

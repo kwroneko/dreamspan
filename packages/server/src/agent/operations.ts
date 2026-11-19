@@ -1,13 +1,13 @@
 import { toolResultFrame } from "./toolData.ts"
-import type { RolloutEffectRecord } from "@rp/shared/workshopApi.ts"
+import type { RolloutEffectRecord } from "@dreamspan/shared/workshopApi.ts"
 import { WriteOps } from "../db/ops.ts"
 import { operationExclusions, commandExclusions } from "./exposures/exclusions.ts"
 // Registered, capability-bound adapters for the same operations the UI uses.
-import { AppApi, CurrentUser } from "@rp/shared/api.ts"
+import { AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
 import { Effect, Context, Schema } from "effect"
 import type { TSchema } from "@earendil-works/pi-ai"
 import { validateToolArguments } from "@earendil-works/pi-ai"
-import { makeRegistry } from "@rp/shared/registry.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { runCommand, makeCommand, type Command } from "../commands.ts"
 import type { Registry } from "../registry.ts"
@@ -55,7 +55,7 @@ export interface OperationExposure {
   readonly describe?: (
     payload: Record<string, unknown>,
     ctx: ToolContext
-  ) => Effect.Effect<Pick<import("@rp/shared/agent.ts").ApprovalPrompt, "title" | "rows" | "changes"> | null, unknown>
+  ) => Effect.Effect<Pick<import("@dreamspan/shared/agent.ts").ApprovalPrompt, "title" | "rows" | "changes"> | null, unknown>
   readonly render?: (result: unknown, args: Record<string, unknown>) => string
   readonly effects?: (result: unknown, args: Record<string, unknown>) => ReadonlyArray<RolloutEffectRecord>
   readonly summarize?: (args: Record<string, unknown>) => string
@@ -156,14 +156,14 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
                 chat?: {
                   title: string
                   model?: {
-                    connection: import("@rp/shared/providers.ts").ConnectionId
-                    model: import("@rp/shared/providers.ts").ModelId
+                    connection: import("@dreamspan/shared/providers.ts").ConnectionId
+                    model: import("@dreamspan/shared/providers.ts").ModelId
                   }
                 }
-                storyAt?: import("@rp/shared/chat.ts").StoryAt
+                storyAt?: import("@dreamspan/shared/chat.ts").StoryAt
                 upTo?: number
                 branchLabel?: string
-                branchNaming?: import("@rp/shared/branchNaming.ts").BranchNaming
+                branchNaming?: import("@dreamspan/shared/branchNaming.ts").BranchNaming
                 chats?: ReadonlyArray<{ id: string; title: string }>
               }
             | undefined

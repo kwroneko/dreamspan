@@ -6,10 +6,10 @@
 // header badge (`StepsBadge`) opens the same element. A call waiting for the user keeps the element
 // open, and the badge says so; what a step offers under its row is registered (`stepActions`).
 import { useAtom, useAtomValue } from "@effect/atom-react"
-import type { RolloutStep } from "@rp/shared/agent.ts"
-import type { PathEntry, Version } from "@rp/shared/chat.ts"
-import type { ReasoningDisplay } from "@rp/shared/chatApi.ts"
-import { displayToolData } from "@rp/shared/toolData.ts"
+import type { RolloutStep } from "@dreamspan/shared/agent.ts"
+import type { PathEntry, Version } from "@dreamspan/shared/chat.ts"
+import type { ReasoningDisplay } from "@dreamspan/shared/chatApi.ts"
+import { displayToolData } from "@dreamspan/shared/toolData.ts"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useId, useState } from "react"
 import { Icon, type IconName } from "../../../ui/Icon.tsx"

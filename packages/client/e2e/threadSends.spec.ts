@@ -5,7 +5,7 @@
 // other copy too. Synthetic chats only; the fake generator replies.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { showActions } from "./support/message.ts"
 import { asUser } from "./support/rpc.ts"

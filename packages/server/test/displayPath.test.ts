@@ -7,7 +7,7 @@
 import { join } from "node:path"
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "../src/db/connection.ts"

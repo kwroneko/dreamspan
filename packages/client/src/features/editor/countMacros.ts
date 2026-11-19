@@ -4,8 +4,8 @@
 // the user plays in the open chat (the chat's cast), else "User" as in ST; `{{char}}` is the
 // card's own name for chats; `{{description}}` and the like read the card's own fields, as the
 // display's expansion does (chat/macros.ts).
-import { cardNames } from "@rp/shared/cardNames.ts"
-import type { CardFields } from "@rp/shared/macros/context.ts"
+import { cardNames } from "@dreamspan/shared/cardNames.ts"
+import type { CardFields } from "@dreamspan/shared/macros/context.ts"
 import { useMemo } from "react"
 import { useCast } from "../chat/cast.ts"
 import { type DisplayNames, expandForDisplay } from "../chat/macros.ts"

@@ -1,6 +1,6 @@
 // Structural boundaries; provider matching rules are capabilities, not wire-API guesses.
 import { createHash } from "node:crypto"
-import type { CacheLayout } from "@rp/shared/providers.ts"
+import type { CacheLayout } from "@dreamspan/shared/providers.ts"
 import type { Stability } from "./st.ts"
 import type { AssembledRequest, RequestMessage, Piece } from "./types.ts"
 

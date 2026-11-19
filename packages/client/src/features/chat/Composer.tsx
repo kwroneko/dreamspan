@@ -17,8 +17,8 @@ import {
 //
 // The text is a server draft per branch tip (composerDraft.ts), held in a store of its own,
 // so typing re-renders nothing else.
-import type { CastCard, EntityId, MessageImages } from "@rp/shared/chat.ts"
-import type { DraftState } from "@rp/shared/drafts.ts"
+import type { CastCard, EntityId, MessageImages } from "@dreamspan/shared/chat.ts"
+import type { DraftState } from "@dreamspan/shared/drafts.ts"
 import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { useSession } from "../../session.ts"

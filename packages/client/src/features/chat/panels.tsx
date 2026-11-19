@@ -1,7 +1,7 @@
 // Chat panel contributions use the client registry's reversible registration scope.
-import type { EditorSnapshot } from "@rp/shared/editorApi.ts"
-import type { EntityId, SlotId } from "@rp/shared/chat.ts"
-import type { AvatarCrop } from "@rp/shared/media.ts"
+import type { EditorSnapshot } from "@dreamspan/shared/editorApi.ts"
+import type { EntityId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { AvatarCrop } from "@dreamspan/shared/media.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { Component, lazy, Suspense, useCallback, useSyncExternalStore, type ComponentType } from "react"
 import { makeRegistry } from "../../registry.ts"

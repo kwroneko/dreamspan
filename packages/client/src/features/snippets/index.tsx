@@ -2,9 +2,9 @@
 // Each is a block as a note is (ui/Block): its name renamed in place, Copy, and its text, saved as
 // it's typed with its edit history, Save cutting a revision; for this chat (every branch of it)
 // or all chats, by a switch. A note can show one; any editor sends its text to one.
-import type { RefId } from "@rp/shared/library.ts"
-import { textField } from "@rp/shared/editing.ts"
-import type { Snippet } from "@rp/shared/snippetsApi.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
+import type { Snippet } from "@dreamspan/shared/snippetsApi.ts"
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { appTools } from "../shell.tsx"
 import { useSession } from "../../session.ts"

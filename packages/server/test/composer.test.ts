@@ -3,8 +3,8 @@
 // committed with the send that took their text (posted or queued), and saved by a closing
 // page through POST /library/drafts. Cross-user access is in the isolation matrix.
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import { type Draft, DraftHistoryPolicy } from "@rp/shared/drafts.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import { type Draft, DraftHistoryPolicy } from "@dreamspan/shared/drafts.ts"
 import { Effect } from "effect"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import {

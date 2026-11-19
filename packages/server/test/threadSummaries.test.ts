@@ -5,9 +5,9 @@
 // never hold the Lantern, Mira's never the docks, and their replies read their own. A together
 // join keeps one shared chain. Synthetic data only.
 import { assert, describe } from "@effect/vitest"
-import { type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import type { MergeTimelines } from "@rp/shared/mergeApi.ts"
-import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
+import { type EntityId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { MergeTimelines } from "@dreamspan/shared/mergeApi.ts"
+import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { cardDoc } from "./support/docs.ts"

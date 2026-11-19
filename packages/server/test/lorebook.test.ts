@@ -1,4 +1,4 @@
-import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
+import type { LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
 import { describe, expect, it } from "vitest"
 import { loreEffectsAt, loreEntryKey, loreIdentity } from "../src/assembler/loreTiming.ts"
 import { matchLorebooks } from "../src/assembler/lorebook.ts"

@@ -1,7 +1,7 @@
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { beforeEach, expect, it, vi } from "vitest"
-import { DEFAULT_DISPLAY_PREFS } from "@rp/shared/chatApi.ts"
+import { DEFAULT_DISPLAY_PREFS } from "@dreamspan/shared/chatApi.ts"
 import { MessageColorSettings } from "../src/features/chat/MessageColors.tsx"
 
 const state = vi.hoisted(() => ({ viewer: vi.fn() }))

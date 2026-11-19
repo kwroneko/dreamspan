@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest"
-import type { PathEntry, Version } from "@rp/shared/chat.ts"
+import type { PathEntry, Version } from "@dreamspan/shared/chat.ts"
 import { messageVersions } from "../src/features/chat/presentation.tsx"
 import { invokeVersionStep, stepVersion } from "../src/features/chat/versionNavigation.ts"
 import type { MessageActionContext } from "../src/features/chat/messageActions.tsx"

@@ -11,12 +11,12 @@ import {
 // the one being generated, in the generation's fork, with each message as that fork shows it.
 // A join is read row by row, as the messages and summaries it brought (spec/THREADS.md §11).
 import { createHash } from "node:crypto"
-import { forkLabel } from "@rp/shared/branchNaming.ts"
+import { forkLabel } from "@dreamspan/shared/branchNaming.ts"
 import { Type } from "@earendil-works/pi-ai"
-import type { ChatId, EntityId, PathEntry, SlotId } from "@rp/shared/chat.ts"
-import type { LcmSummary, Summary } from "@rp/shared/lcm.ts"
-import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
-import { foldState } from "@rp/shared/state.ts"
+import type { ChatId, EntityId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
+import type { LcmSummary, Summary } from "@dreamspan/shared/lcm.ts"
+import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { viewedJoin } from "../../assembler/mergeKnowledge.ts"
 import type { MergeRow } from "../../assembler/types.ts"
@@ -712,7 +712,7 @@ interface StoryPlace {
   readonly title: string | null
   /** The branch's own name; "Original" for the story's first branch; null for another unnamed one. */
   readonly branch: string | null
-  readonly naming?: import("@rp/shared/branchNaming.ts").BranchNaming
+  readonly naming?: import("@dreamspan/shared/branchNaming.ts").BranchNaming
   /** The newest message's number on that branch (from 1); 0 with none. */
   readonly upTo: number
 }

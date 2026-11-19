@@ -1,6 +1,6 @@
 // The Prompt preset tab's unsaved bar says what the drafts change (owner, 2026-11-01), and
 // unnamed prompts are named by their first words.
-import { textField, valueField } from "@rp/shared/editing.ts"
+import { textField, valueField } from "@dreamspan/shared/editing.ts"
 import { describe, expect, it } from "vitest"
 import { describePresetChanges } from "../src/features/editor/presetChanges.ts"
 import { promptLabel } from "../src/features/editor/promptLabel.ts"

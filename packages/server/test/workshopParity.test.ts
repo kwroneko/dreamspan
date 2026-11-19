@@ -2,8 +2,8 @@
 // operation, under its capability, with a receipt, Undo and a data-only result.
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import type { SlotId, VersionId } from "@rp/shared/chat.ts"
-import { newCardDoc } from "@rp/shared/editing.ts"
+import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import { newCardDoc } from "@dreamspan/shared/editing.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext, ToolOutput } from "../src/agent/tools.ts"

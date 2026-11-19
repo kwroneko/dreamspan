@@ -1,6 +1,6 @@
 // A join's readable text, shared by assembly and the history tools. Frozen rows keep the
 // source knowledge boundary; edits wholly inside a row follow that row's audience.
-import { editedSpans } from "@rp/shared/merge.ts"
+import { editedSpans } from "@dreamspan/shared/merge.ts"
 import { leftOutNote, mergedRowText } from "./merges.ts"
 import type { MergeRow } from "./types.ts"
 

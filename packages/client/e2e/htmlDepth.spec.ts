@@ -4,7 +4,7 @@
 // the layout audit. What the model then sees is the assembler's (server/test/assembler.test.ts).
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { stCardV2 } from "../../server/test/formats/support.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"

@@ -2,7 +2,7 @@ import { isNudge } from "./messages.ts"
 // A transcript as the steps a version shows (spec/AGENTIC.md §5.1): the same projection live,
 // as the loop runs, and afterwards from the stored transcript.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { ApprovalPrompt, RolloutStep, SubagentRow } from "@rp/shared/agent.ts"
+import type { ApprovalPrompt, RolloutStep, SubagentRow } from "@dreamspan/shared/agent.ts"
 import type { FrozenTool } from "./tools.ts"
 
 type Presentation = NonNullable<ApprovalPrompt["presentation"]>

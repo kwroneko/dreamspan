@@ -1,8 +1,8 @@
 // One browser profile, with the editors and workshop open in separate tabs. Synthetic only.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { PresetDoc } from "@rp/shared/docs/preset.ts"
-import { textField } from "@rp/shared/editing.ts"
+import type { PresetDoc } from "@dreamspan/shared/docs/preset.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { loginCookie, withCookie, type Client } from "./rpc.ts"
 import { startWorkshopProvider, WORKSHOP_ANSWER } from "./workshopProvider.ts"

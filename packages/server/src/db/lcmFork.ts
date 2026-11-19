@@ -1,7 +1,7 @@
 import { lineageCte } from "./forkLabels.ts"
 import { withFork } from "./forkState.ts"
 // Summary material is shared; choices and requests use the same frozen lineage as messages.
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { effectiveOverride, inFork, viewAt, writeOverride } from "./forkState.ts"

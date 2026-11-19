@@ -10,8 +10,8 @@ import {
   type LoreRole,
   PlacementOverride,
   type SelectiveLogic
-} from "@rp/shared/docs/lorebook.ts"
-import type { ReportBuilder } from "@rp/shared/importReport.ts"
+} from "@dreamspan/shared/docs/lorebook.ts"
+import type { ReportBuilder } from "@dreamspan/shared/importReport.ts"
 import { Predicate, Schema } from "effect"
 import { enumByIndex, Fields, hasKeys, isFiniteNumber, isSafeInt, present } from "./fields.ts"
 import { fail, type Limits, type Path } from "./safety.ts"

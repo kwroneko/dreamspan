@@ -5,7 +5,7 @@
 // Redirects are followed only within the origin (Network.fetchFor).
 import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
-import { SourceFailed } from "@rp/shared/cardSources.ts"
+import { SourceFailed } from "@dreamspan/shared/cardSources.ts"
 import { Effect } from "effect"
 import type { NetworkShape } from "../net/Network.ts"
 import { DEFAULT_BYPASS, parseBypass } from "../net/route.ts"

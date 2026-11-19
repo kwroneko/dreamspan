@@ -1,7 +1,7 @@
 // Resolve summary destinations in one place. Only a missing model falls through; other
 // read failures retain their ordinary error. This performs local reads, never inference.
 import { Effect } from "effect"
-import type { ChatState } from "@rp/shared/state.ts"
+import type { ChatState } from "@dreamspan/shared/state.ts"
 import type { AssemblySources } from "./pipeline.ts"
 
 export const resolveSummaryModel = Effect.fnUntraced(function* (

@@ -8,7 +8,7 @@
 // textarea/script bodies split where the browser splits them. Markdown's code spans and fences
 // are found as before. Output is a pure function of the text: same history, same bytes.
 import { Tokenizer, TokenizerMode, type Token } from "parse5"
-import type { HtmlDepth } from "@rp/shared/state.ts"
+import type { HtmlDepth } from "@dreamspan/shared/state.ts"
 
 /** Tavern Helper's test (`is_frontend.ts`), as the client's renderer has it (ui/html/parts.ts). */
 const isDocument = (code: string) => ["html>", "<head>", "<body"].some((tag) => code.includes(tag))

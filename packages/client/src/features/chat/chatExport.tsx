@@ -2,7 +2,7 @@
 // server writes while it reads the chat (ARCHITECTURE.md §13b). SillyTavern's .jsonl carries
 // every version of each message, which one is shown, hidden messages and reasoning; plain
 // text reads like ST's .txt export ("Name: text").
-import { formatByteSize } from "@rp/shared/byteSize.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import { useEffect, useRef, useState } from "react"
 import { Alert } from "../../ui/Surface.tsx"
 import { Button } from "../../ui/Button.tsx"

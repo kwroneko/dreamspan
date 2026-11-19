@@ -1,7 +1,7 @@
 // The unsaved fields of an entry by name, for the export's question: "Description", "Prompt
 // “Main Prompt”: content". A preset's held changes are one line. Each name once, in order.
-import { isHeldField, parseField } from "@rp/shared/editing.ts"
-import type { Doc, EntityKind } from "@rp/shared/library.ts"
+import { isHeldField, parseField } from "@dreamspan/shared/editing.ts"
+import type { Doc, EntityKind } from "@dreamspan/shared/library.ts"
 import { fieldLabel } from "../editor/fields.ts"
 
 export const HELD_LABEL = "Prompts or lorebooks added, deleted or moved"

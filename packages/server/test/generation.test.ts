@@ -3,7 +3,7 @@
 // assembled, the reply streams into the version, and the rollout, its snapshot and the
 // ledger record it. No real keys: the Anthropic one is made up, and goes only to the mock.
 import { assert, describe, it } from "@effect/vitest"
-import type { VersionId } from "@rp/shared/chat.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import type { ContextSnapshot } from "../src/assembler/types.ts"

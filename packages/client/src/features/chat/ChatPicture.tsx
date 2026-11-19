@@ -2,7 +2,7 @@
 // shown wherever the chat is listed or headed in place of its characters' faces. A registered
 // section of This chat (`chatSettingSections`), under who you play. The picture is the chat's,
 // as its name is: every branch of the chat shows it, and a chat split off has its own.
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { useRef, useState, useSyncExternalStore } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"

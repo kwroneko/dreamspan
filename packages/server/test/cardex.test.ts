@@ -3,7 +3,7 @@
 // No request ever goes to cardex.zip: the adapter is pointed at the fake's origin, and the
 // pure checks make none.
 import { afterAll, assert, describe, it } from "@effect/vitest"
-import { emptySourceQuery, SourceFailed, type SourceSuggestions } from "@rp/shared/cardSources.ts"
+import { emptySourceQuery, SourceFailed, type SourceSuggestions } from "@dreamspan/shared/cardSources.ts"
 import { Effect } from "effect"
 import type { SourceHttp } from "../src/sources/adapter.ts"
 import {
@@ -451,7 +451,7 @@ describe("v1 as card sources", () => {
       const c = archive.cards[0]!
       const identity = `${c.site}/${c.creator}`
       const cases: ReadonlyArray<
-        readonly [Record<string, import("@rp/shared/cardSources.ts").SourceFilterValue>, (slug: string) => boolean]
+        readonly [Record<string, import("@dreamspan/shared/cardSources.ts").SourceFilterValue>, (slug: string) => boolean]
       > = [
         [{ fields: ["name"] }, () => true],
         [{ kind: "character_lorebook" }, (slug) => archive.cards.find((x) => x.slug === slug)!.hasLorebook],

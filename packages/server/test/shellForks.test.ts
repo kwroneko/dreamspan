@@ -2,7 +2,7 @@
 // rows a screen shows (GetShellForks), each list's first rows and its size. They agree with
 // the whole read (GetShellLibrary), and a write is never hidden by the reader's kept
 // computation.
-import type { Chat } from "@rp/shared/chat.ts"
+import type { Chat } from "@dreamspan/shared/chat.ts"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"

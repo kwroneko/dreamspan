@@ -3,10 +3,10 @@
 // the arrows; "Regenerate with…" records the model chosen. Cross-user access is in the
 // isolation matrix.
 import { assert, describe, it } from "@effect/vitest"
-import type { Chat, EntityId, SlotId } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { CardDoc } from "@rp/shared/docs/card.ts"
+import type { Chat, EntityId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
 import { Effect, Stream } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"

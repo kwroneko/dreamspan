@@ -5,8 +5,8 @@
 // local fake MCP server only.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { McpConnectionId } from "@rp/shared/mcp.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { McpConnectionId } from "@dreamspan/shared/mcp.ts"
 import { stCardV2 } from "../../server/test/formats/support.ts"
 import { type FakeMcpServer, fakeTool, startFakeMcpServer } from "../../server/test/support/fakeMcpServer.ts"
 import { expectLayout } from "./support/layoutAudit.ts"

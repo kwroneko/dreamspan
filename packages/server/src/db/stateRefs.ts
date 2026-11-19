@@ -1,10 +1,10 @@
 // What a state event's value refers to (DATA-MODEL §5.3), as its key declares it
-// (`stateKeyIds` in @rp/shared/state.ts). The writer checks it against the acting user
+// (`stateKeyIds` in @dreamspan/shared/state.ts). The writer checks it against the acting user
 // before the event is written: an id the user doesn't own is NotFound, as everywhere
 // else, and so is a deleted one, except when the event removes it. Reads leave out what
 // a purge removed for good.
-import type { UserId } from "@rp/shared/domain.ts"
-import type { EntityKind } from "@rp/shared/library.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { EntityKind } from "@dreamspan/shared/library.ts"
 import {
   type FoldableEvent,
   isStateRole,
@@ -12,7 +12,7 @@ import {
   type WritableStateEvent,
   type StateKeyDeclaration,
   stateKeys
-} from "@rp/shared/state.ts"
+} from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { NotFound, StorageError } from "./ops.ts"

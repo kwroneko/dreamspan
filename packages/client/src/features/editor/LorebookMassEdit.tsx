@@ -3,8 +3,8 @@
 // greyed with the value the entries share or "Mixed"; ticked, its value goes on every selected
 // entry, and an empty text or number clears it. Several settings apply at once, as unsaved
 // changes like any edit (lorebookMass.ts).
-import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
-import type { FieldPath } from "@rp/shared/editing.ts"
+import type { LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
 import { useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"

@@ -3,11 +3,11 @@ import { nextReceiptTime, pendingOperationReceipt, recoveredOperationText } from
 // attached to the version being generated so they hold only while it's shown (a swipe reverses
 // them), written with the call's receipt in one transaction. A call already receipted writes
 // nothing again and answers with what it answered the first time: a resume re-runs it harmlessly.
-import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
-import { parsePresence, presenceOf } from "@rp/shared/knowledge.ts"
-import { NOTE_SCHEMA_VERSION } from "@rp/shared/docs/note.ts"
-import type { Doc } from "@rp/shared/library.ts"
-import { type FoldableEvent, foldState, type StoredStateEventData } from "@rp/shared/state.ts"
+import type { ChatId, EntityId, SlotId } from "@dreamspan/shared/chat.ts"
+import { parsePresence, presenceOf } from "@dreamspan/shared/knowledge.ts"
+import { NOTE_SCHEMA_VERSION } from "@dreamspan/shared/docs/note.ts"
+import type { Doc } from "@dreamspan/shared/library.ts"
+import { type FoldableEvent, foldState, type StoredStateEventData } from "@dreamspan/shared/state.ts"
 
 type EventData = typeof StoredStateEventData.Type
 import { Effect } from "effect"

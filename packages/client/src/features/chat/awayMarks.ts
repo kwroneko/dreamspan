@@ -4,8 +4,8 @@
 // (`GetAwayMarks`); only the changes become rows, so a mark that repeats what holds already (the
 // user's own "back" an Undo writes in place of the scene check's, say) shows nothing. One read a
 // branch, leaf and state change, shared by every row on screen.
-import type { EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { AwayMark } from "@rp/shared/contextsApi.ts"
+import type { EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { AwayMark } from "@dreamspan/shared/contextsApi.ts"
 import type { ChatSession } from "./session.ts"
 
 export interface AwayRow {

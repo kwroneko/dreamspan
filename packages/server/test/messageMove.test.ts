@@ -5,9 +5,9 @@
 // forks at any message matches an array oracle at a few hundred messages.
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
-import { type ChatId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { MoveStep } from "@rp/shared/messagesApi.ts"
+import { type ChatId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { MoveStep } from "@dreamspan/shared/messagesApi.ts"
 import { Effect, Exit } from "effect"
 import { SqlClient } from "effect/sql"
 import { databaseFile } from "../src/db/connection.ts"

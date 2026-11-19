@@ -2,8 +2,8 @@
 // (DESIGN §5.5), and if not, what changed first. Pieces keep their ids from one assembly
 // to the next (`preset:main`, `card:<entity>:description`, `message:<version>`), so the
 // first piece of the first differing message whose text differs says why.
-import type { ContextSource } from "@rp/shared/inspectorApi.ts"
-import { canonicalJson } from "@rp/shared/editing.ts"
+import type { ContextSource } from "@dreamspan/shared/inspectorApi.ts"
+import { canonicalJson } from "@dreamspan/shared/editing.ts"
 import { tokensOf } from "./st.ts"
 import { wireImages } from "./imageTokens.ts"
 import { wireContext, wireDigest } from "./wire.ts"

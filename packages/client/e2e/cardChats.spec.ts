@@ -4,8 +4,8 @@
 // when its chat started and how long it is, even on a phone; a card's definition folds
 // anew when the window changes width.
 import { expect, type Page, test } from "@playwright/test"
-import type { ChatId, EntityId } from "@rp/shared/chat.ts"
-import { textField } from "@rp/shared/editing.ts"
+import type { ChatId, EntityId } from "@dreamspan/shared/chat.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { Effect } from "effect"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { asUser } from "./support/rpc.ts"

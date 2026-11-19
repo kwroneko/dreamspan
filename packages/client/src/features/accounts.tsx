@@ -1,6 +1,6 @@
 // Your account, and for admins everyone's (DESIGN §10.1). The rules (the last admin,
 // an admin without a password) are the server's: this shows its answers.
-import type { UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
+import type { UserAccount, UserId, UserRole } from "@dreamspan/shared/domain.ts"
 import { type FormEvent, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../actions.tsx"
 import { routes } from "../routes.tsx"

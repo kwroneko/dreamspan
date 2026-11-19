@@ -2,7 +2,7 @@
 // for the virtualizer, and the reader's place, noted before the spacing changes and found again
 // after, so the text being read stays where it is on screen.
 import type { VirtualItem, Virtualizer } from "@tanstack/react-virtual"
-import type { DisplayPrefs } from "@rp/shared/chatApi.ts"
+import type { DisplayPrefs } from "@dreamspan/shared/chatApi.ts"
 
 export type ChatDensity = DisplayPrefs["chatDensity"]
 

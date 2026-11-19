@@ -1,9 +1,9 @@
 // A chat session's window against events that arrive while a read is in flight: the
 // server may answer the read from before them, and the reply mustn't undo them.
-import type { Chat, ChatId, ForkId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
-import type { LcmState } from "@rp/shared/lcm.ts"
-import type { ChatEvent, PathWindow } from "@rp/shared/chatApi.ts"
-import { Cast } from "@rp/shared/chatSetupApi.ts"
+import type { Chat, ChatId, ForkId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "@dreamspan/shared/chat.ts"
+import type { LcmState } from "@dreamspan/shared/lcm.ts"
+import type { ChatEvent, PathWindow } from "@dreamspan/shared/chatApi.ts"
+import { Cast } from "@dreamspan/shared/chatSetupApi.ts"
 import { AtomRegistry } from "effect/reactivity"
 import { describe, expect, it, vi } from "vitest"
 import { AUTO_POLICY, planReply, replyPolicies } from "../src/features/chat/replyPolicy.ts"

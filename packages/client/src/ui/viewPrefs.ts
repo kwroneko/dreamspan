@@ -1,7 +1,7 @@
 // Account-owned viewer choices. Each account has its own query, including when users
 // sign out and back in in the same tab. Writes patch one choice in the writer transaction.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import { DEFAULT_DISPLAY_PREFS, type DisplayPrefsChange } from "@rp/shared/chatApi.ts"
+import { DEFAULT_DISPLAY_PREFS, type DisplayPrefsChange } from "@dreamspan/shared/chatApi.ts"
 import { useEffect, useSyncExternalStore } from "react"
 import { Effect } from "effect"
 import { AsyncResult, Atom } from "effect/reactivity"

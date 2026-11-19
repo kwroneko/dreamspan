@@ -3,12 +3,12 @@ import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { selectablePresets } from "../pickers/presetList.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { useEffect } from "react"
 // One connection's page. Its sections are entries in the `connection.sections` slot, so a
 // plugin's provider can add its own.
-import { providerBaseUrl } from "@rp/shared/providerDefinitions.ts"
+import { providerBaseUrl } from "@dreamspan/shared/providerDefinitions.ts"
 import type {
   Connection,
   Credential,
@@ -16,8 +16,8 @@ import type {
   ProviderInfo,
   ProviderKindInfo,
   ProxyMode
-} from "@rp/shared/providers.ts"
-import { originOf } from "@rp/shared/providers.ts"
+} from "@dreamspan/shared/providers.ts"
+import { originOf } from "@dreamspan/shared/providers.ts"
 import { Link, useNavigate, useParams } from "@tanstack/react-router"
 import { type FormEvent, useId, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"

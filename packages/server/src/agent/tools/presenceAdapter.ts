@@ -1,7 +1,7 @@
 import { savedToolResult } from "../toolData.ts"
 // Credential-free adapter shared by the built-in and its editable replacements.
-import type { EntityId } from "@rp/shared/chat.ts"
-import { foldState } from "@rp/shared/state.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import type { PresenceContext } from "../../../../plugin-api/src/server.ts"
 import type { ToolContext } from "../tools.ts"

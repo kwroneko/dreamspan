@@ -5,8 +5,8 @@
 // made, before anything can be made from it. So every fork made from a writer later inherits its
 // event, which is the fork-scoped event rule (db/forkLabels.ts) for this key, read structurally:
 // up the fork's parents, or down from the writers through forks that wrote none.
-import type { ChatId, ForkId, SlotId, StoryAt } from "@rp/shared/chat.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import type { ChatId, ForkId, SlotId, StoryAt } from "@dreamspan/shared/chat.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { displayEndOf } from "./displayPath.ts"

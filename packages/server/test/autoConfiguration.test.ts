@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { autoConfigurationStamp, configurationRevision, trackAutoConfiguration } from "../src/chat/autoConfiguration.ts"
-import { makeRegistry } from "@rp/shared/registry.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
 
 it.effect("unversioned mutable request registries cannot authorize automatic dispatch", () =>
   Effect.scoped(

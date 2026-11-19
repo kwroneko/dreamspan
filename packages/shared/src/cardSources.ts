@@ -308,7 +308,7 @@ export type RecentRemote = typeof RecentRemote.Type
 /** A remote card opened: its parsed document as the importer reads it, and what the source said. */
 const RemoteCard = Schema.Struct({
   summary: RemoteSummary,
-  /** The card document as JSON text (`@rp/shared/docs/card.ts`), or null when it couldn't be read. */
+  /** The card document as JSON text (`@dreamspan/shared/docs/card.ts`), or null when it couldn't be read. */
   docJson: Schema.NullOr(Schema.String),
   /** The parser's report lines, for a card that couldn't be read. */
   problems: Schema.Array(Schema.String)

@@ -12,7 +12,7 @@ import {
   MERGE_LAYOUT_DEFAULT,
   MERGE_SECTION_DEFAULT,
   fillMergeTemplate
-} from "@rp/shared/mergeApi.ts"
+} from "@dreamspan/shared/mergeApi.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { need, type Assembly, type AssemblerStage, type AssemblyTransform, type ProjectedEntry } from "./pipeline.ts"
 import type { HistoryEntry, HistoryMerge } from "./types.ts"

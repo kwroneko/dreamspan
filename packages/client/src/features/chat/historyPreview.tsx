@@ -1,9 +1,9 @@
 import { isPanelTab, useChatPanels } from "./panels.tsx"
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import type { ChatSession } from "./session.ts"
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
-import type { HistoryHit } from "@rp/shared/historyApi.ts"
-import type { LcmSummary } from "@rp/shared/lcm.ts"
+import type { HistoryHit } from "@dreamspan/shared/historyApi.ts"
+import type { LcmSummary } from "@dreamspan/shared/lcm.ts"
 
 export const HistoryPreviewContext = createContext<{
   hits: ReadonlyArray<HistoryHit>

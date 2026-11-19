@@ -122,7 +122,7 @@ it("never takes consent metadata from a changed working copy", { timeout: 60_000
           ...target,
           files: files(
             target.id,
-            'import {Effect} from "@rp/plugin-api/server"; export const activate = () => Effect.void',
+            'import {Effect} from "@dreamspan/plugin-api/server"; export const activate = () => Effect.void',
             true
           ),
           message: "Adds server code"
@@ -314,7 +314,7 @@ it(
             target = { scope: "instance" as const, id: "rollback-access" }
           const serverFiles = files(
             target.id,
-            'import {Effect} from "@rp/plugin-api/server"; export const activate = () => Effect.void',
+            'import {Effect} from "@dreamspan/plugin-api/server"; export const activate = () => Effect.void',
             true
           )
           serverFiles["rp-plugin.json"] = JSON.stringify({

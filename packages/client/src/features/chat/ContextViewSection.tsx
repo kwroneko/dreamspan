@@ -3,7 +3,7 @@
 // character wasn't present for it, in the same row as "Not sent this turn". The gap lines that
 // stand in for them are labelled among the messages ("Gap line: …"), and summaries withheld are
 // in "Notes on this context". A `runInspectorSections` entry, so a plugin can replace it.
-import type { RunContext } from "@rp/shared/inspectorApi.ts"
+import type { RunContext } from "@dreamspan/shared/inspectorApi.ts"
 import { Link, useSearch } from "@tanstack/react-router"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 

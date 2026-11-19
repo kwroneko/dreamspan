@@ -4,7 +4,7 @@
 // range, the split link, the bin's branch links) ends as the URL's `slot`, and the list then
 // flashes that message with the shared flash (ui/reveal.ts `flashItem`), once, and leaves it
 // unmarked. A message just inserted flashes the same way.
-import type { SlotId } from "@rp/shared/chat.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
 import { flashItem } from "../../ui/reveal.ts"
 
 declare module "@tanstack/react-router" {

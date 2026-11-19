@@ -1,7 +1,7 @@
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { expect, it } from "vitest"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { register } from "../src/features/cardForks/index.tsx"
 import { cardContributions, CardSurface } from "../src/features/cardForks/surfaces.tsx"
 

@@ -3,9 +3,9 @@
 // was, how it ended, the model, when, its tokens and cost, and links to where it can be looked at
 // (a summary's request, or the reply a judgment was about). Agent replies are reached from their
 // message instead. Read in pages of 50 (`ListActivity`), again whenever the summaries change.
-import type { ActivityCursor, ActivityRow } from "@rp/shared/agent.ts"
-import type { SlotId } from "@rp/shared/chat.ts"
-import type { RequestStatus } from "@rp/shared/usage.ts"
+import type { ActivityCursor, ActivityRow } from "@dreamspan/shared/agent.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import type { RequestStatus } from "@dreamspan/shared/usage.ts"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { Button } from "../../../ui/Button.tsx"

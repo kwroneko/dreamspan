@@ -1,6 +1,6 @@
 import { assert, layer } from "@effect/vitest"
-import { type ForkId, NewVersion } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { type ForkId, NewVersion } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"

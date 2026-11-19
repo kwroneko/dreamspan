@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest"
-import type { ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import type { ChatSession as Session } from "../src/features/chat/session.ts"
 const { toast } = vi.hoisted(() => ({ toast: vi.fn() }))
 vi.mock("../src/ui/Toast.tsx", () => ({ showToast: toast }))

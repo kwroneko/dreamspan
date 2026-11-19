@@ -1,10 +1,10 @@
 // Text search across many things at once (TextSearchApi): message text in all of the user's
 // chats (db/messageSearch.ts), and search and replace across the library, which the reader plans
 // and the writer stores (db/libraryReplace.ts, db/libraryReplaceWrites.ts).
-import { CurrentUser } from "@rp/shared/api.ts"
-import { LIBRARY_EDITS_LISTED, libraryEditTitle } from "@rp/shared/libraryReplace.ts"
-import { MESSAGE_PAGE } from "@rp/shared/messageSearch.ts"
-import type { TextSearchApi } from "@rp/shared/textSearchApi.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import { LIBRARY_EDITS_LISTED, libraryEditTitle } from "@dreamspan/shared/libraryReplace.ts"
+import { MESSAGE_PAGE } from "@dreamspan/shared/messageSearch.ts"
+import type { TextSearchApi } from "@dreamspan/shared/textSearchApi.ts"
 import { Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"

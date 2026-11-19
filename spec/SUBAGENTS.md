@@ -258,7 +258,7 @@ Checked against DESIGN §7.1: a **per-character agent** (one rollout per charact
 
 ## 10. Types from plugins and users (self-customizable)
 
-- **`subagentTypes`** is a scoped server registry (`@rp/shared/registry.ts`), like `rolloutTools`: a plugin adds, replaces or disables types; a disabled built-in type isn't offered and its running children finish. Each type's instructions text is an ordinary prompt the user can edit.
+- **`subagentTypes`** is a scoped server registry (`@dreamspan/shared/registry.ts`), like `rolloutTools`: a plugin adds, replaces or disables types; a disabled built-in type isn't offered and its running children finish. Each type's instructions text is an ordinary prompt the user can edit.
 - **User types**: Settings → Assistant tools → Subagents lists the types with Edit and **New type** (label, explanation, instructions, tools from a checklist of what the kinds offer, default alias, context, isolation, caps). They're stored in the settings registry (`subagents.types`), so no table. A user type can't name a tool its kinds don't have, and its tools still narrow to the parent's (§6.1).
 - **The workshop agent can write a type** through `change_setting` (WORKSHOP §3.2) if the setting opts in, as a `setup` effect with Undo, but the model list (§5) and the caps are excluded from agent writes: those are consent and spend, which only the user changes.
 - The `agent` and `message_agent` tools, the runner and the row are registered parts too (`rolloutTools`, `stepActions`, `reasoningPanels`), replaceable like the rest.

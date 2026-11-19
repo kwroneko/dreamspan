@@ -4,10 +4,10 @@ import { recordHistoryReduction } from "./historyChanges.ts"
 // What the writer's chat operations share (writes.ts, chatSetupWrites.ts): ownership
 // checks, inserting versions, slots and state events, and appending a message. Each runs
 // inside the calling operation's transaction.
-import type { ChatId, EntityId, ForkId, NewVersion, SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import { branchOwned, foldState, type FoldableEvent, type WritableStateEvent } from "@rp/shared/state.ts"
+import type { ChatId, EntityId, ForkId, NewVersion, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import { branchOwned, foldState, type FoldableEvent, type WritableStateEvent } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
@@ -83,7 +83,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
           source
         )
 
-  const checkImages = (userId: string, images: import("@rp/shared/chat.ts").MessageImages) =>
+  const checkImages = (userId: string, images: import("@dreamspan/shared/chat.ts").MessageImages) =>
     Effect.forEach(
       images,
       (image) =>

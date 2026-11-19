@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import { editingOrigin } from "@rp/shared/draftDeletions.ts"
+import { editingOrigin } from "@dreamspan/shared/draftDeletions.ts"
 import { Effect, Exit } from "effect"
 import { vi } from "vitest"
 import type { Copy } from "../../../client/src/features/editor/backup.ts"

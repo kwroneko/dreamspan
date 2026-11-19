@@ -1,6 +1,6 @@
 // Settings → Media sites (spec/SAVED-MEDIA.md §3.2): the sites this account saves card media
 // from without asking. Removing one doesn't delete what was saved from it.
-import { isHostName, normalizeHost, type MediaHosts } from "@rp/shared/savedMedia.ts"
+import { isHostName, normalizeHost, type MediaHosts } from "@dreamspan/shared/savedMedia.ts"
 import { useEffect, useState, type FormEvent } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"

@@ -4,8 +4,8 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 // whose rows open to every field of the entry here. Every edit is a field draft in the owning
 // entry's EditorStore.
 import { useState } from "react"
-import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
-import type { FieldPath } from "@rp/shared/editing.ts"
+import type { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
 import { Button } from "../../ui/Button.tsx"
 import { NumberField, TextField } from "./controls.tsx"
 import { InheritedSwitch } from "./LorebookEntryDetails.tsx"

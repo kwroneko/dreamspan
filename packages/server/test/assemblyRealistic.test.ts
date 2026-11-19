@@ -2,7 +2,7 @@
 // path, then the next context of a one-card chat and of a three-card group chat, under the
 // folder's 128K preset, its global lorebook and a card with jailbreak-style prompts.
 import { assert, describe, it } from "@effect/vitest"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"

@@ -2,7 +2,7 @@
 // contacts a source), and the calls that do, each cancellable, so a superseded search is
 // dropped on the server too (the server drops its upstream request when nobody waits on it).
 import { RegistryContext } from "@effect/atom-react"
-import type { SourceFailure } from "@rp/shared/cardSources.ts"
+import type { SourceFailure } from "@dreamspan/shared/cardSources.ts"
 import { Cause, Context, Effect, Exit } from "effect"
 import { Atom, AtomRegistry } from "effect/reactivity"
 import { useNavigate } from "@tanstack/react-router"
@@ -13,8 +13,8 @@ import { showToast } from "../../ui/Toast.tsx"
 import { makeRegistry } from "../../registry.ts"
 import { AppClient } from "../../rpc.ts"
 import type { ReactNode } from "react"
-import type { RemoteSummary } from "@rp/shared/cardSources.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RemoteSummary } from "@dreamspan/shared/cardSources.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { askMediaApproval } from "../savedMedia/approval.ts"
 
 /** The reactivity key of everything card sources show from the server. */

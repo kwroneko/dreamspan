@@ -5,9 +5,9 @@ import { createHash } from "node:crypto"
 // summary). A chat file can be far larger than any card, so it arrives in parts cut at line
 // ends (ARCHITECTURE.md §13), and each part is read on its own: lines are separate JSON
 // documents, each under the shared JSON caps. Pure: no database, no files.
-import { formatByteSize } from "@rp/shared/byteSize.ts"
-import { editableThinking, originalReply, type ReplySections, sectionsDisplay } from "@rp/shared/replySections.ts"
-import { ReportBuilder, shownText } from "@rp/shared/importReport.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
+import { editableThinking, originalReply, type ReplySections, sectionsDisplay } from "@dreamspan/shared/replySections.ts"
+import { ReportBuilder, shownText } from "@dreamspan/shared/importReport.ts"
 import { Predicate } from "effect"
 import { defaultLimits, fail, type Limits, parseJson } from "./safety.ts"
 

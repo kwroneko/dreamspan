@@ -1,5 +1,5 @@
-import { canonicalJson } from "@rp/shared/editing.ts"
-import type { FoldableEvent } from "@rp/shared/state.ts"
+import { canonicalJson } from "@dreamspan/shared/editing.ts"
+import type { FoldableEvent } from "@dreamspan/shared/state.ts"
 import { createHash } from "node:crypto"
 
 /** A bounded stamp of the state read before a decision, including who last changed presence. */

@@ -1,7 +1,7 @@
 // Scale-only helper: time the real StartRollout transaction in a worker, excluding startup,
 // message transfer and context preparation. The server writer is idle during these calls.
 import { parentPort, workerData } from "node:worker_threads"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "../../src/db/connection.ts"

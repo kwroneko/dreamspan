@@ -1,7 +1,7 @@
 // Fetching a connection's model list from its upstream (spec/PROVIDERS.md §3.3). Each
 // kind's API is used as that upstream defines it; the base URL moves the whole API.
 // What a list reports beats pi-ai's catalog, because it describes the endpoint in use.
-import type { ModelEndpoint, ModelUpstream, Price } from "@rp/shared/providers.ts"
+import type { ModelEndpoint, ModelUpstream, Price } from "@dreamspan/shared/providers.ts"
 import { Effect, Schema } from "effect"
 
 export class ModelListError extends Schema.TaggedError<ModelListError>()("ModelListError", {

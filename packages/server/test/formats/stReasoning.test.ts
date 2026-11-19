@@ -3,8 +3,8 @@
 // version's reasoning; its reasoning formatting becomes the imported presets' reply-section
 // setting. Synthetic files only.
 import { describe, expect, it } from "@effect/vitest"
-import { ReportBuilder } from "@rp/shared/importReport.ts"
-import { originalReply } from "@rp/shared/replySections.ts"
+import { ReportBuilder } from "@dreamspan/shared/importReport.ts"
+import { originalReply } from "@dreamspan/shared/replySections.ts"
 import { parseStChatPart, stReasoningExtra, type StMessage } from "../../src/formats/stChat.ts"
 import { parseStSettings } from "../../src/formats/stData.ts"
 import { compilePairs, parseReply } from "../../src/chat/replySections.ts"

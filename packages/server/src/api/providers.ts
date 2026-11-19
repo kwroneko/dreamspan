@@ -1,9 +1,9 @@
 // Client RPC handlers for connections, models, network settings and usage
 // (spec/PROVIDERS.md). Every handler acts as the authenticated user; storage enforces
 // ownership, so another user's ids are NotFound.
-import { type AppApi, ConnectionTest, CurrentUser, ModelRefresh, NetworkSettings } from "@rp/shared/api.ts"
-import { Forbidden, ServerError } from "@rp/shared/errors.ts"
-import type { ModelId } from "@rp/shared/providers.ts"
+import { type AppApi, ConnectionTest, CurrentUser, ModelRefresh, NetworkSettings } from "@dreamspan/shared/api.ts"
+import { Forbidden, ServerError } from "@dreamspan/shared/errors.ts"
+import type { ModelId } from "@dreamspan/shared/providers.ts"
 import { Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"

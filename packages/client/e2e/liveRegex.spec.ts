@@ -10,7 +10,7 @@ import type { AddressInfo } from "node:net"
 import { join } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 

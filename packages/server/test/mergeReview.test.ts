@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
+import { NewVersion, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
 import { generationOf } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
 import { historyTools } from "../src/agent/tools/history.ts"
@@ -7,8 +7,8 @@ import { listNotes } from "../src/agent/tools/notes.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { Effect, Exit } from "effect"
-import type { LibraryRef } from "@rp/shared/library.ts"
-import { textField, valueField } from "@rp/shared/editing.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
+import { textField, valueField } from "@dreamspan/shared/editing.ts"
 import { runMergeStory, sentText } from "./support/mergeOrigin.ts"
 
 // Real reader/assembler request proofs; all documents and model output are synthetic.

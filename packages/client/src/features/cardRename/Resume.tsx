@@ -1,6 +1,6 @@
 import type { CardSaved } from "../editor/cardSaved.ts"
 import { useState, useSyncExternalStore } from "react"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { useSession } from "../../session.ts"
 import { MenuAction } from "../../ui/Menu.tsx"
 import { usePending } from "./pending.ts"

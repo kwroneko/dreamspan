@@ -5,7 +5,7 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, test, type Locator } from "@playwright/test"
-import { originalReply, sectionsDisplay } from "@rp/shared/replySections.ts"
+import { originalReply, sectionsDisplay } from "@dreamspan/shared/replySections.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { expectLayout } from "./support/layoutAudit.ts"

@@ -1,4 +1,4 @@
-import type { LorebookDoc, LorebookEntry } from "@rp/shared/docs/lorebook.ts"
+import type { LorebookDoc, LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
 export const loreEntry = (fields: Partial<LorebookEntry> = {}, uid = 0): LorebookEntry => ({
   uid,
   keys: [],

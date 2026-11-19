@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest"
 import { Effect, Exit, Schema } from "effect"
-import { textField, validateDoc } from "@rp/shared/editing.ts"
-import { DisplayPrefsChange, DEFAULT_DISPLAY_PREFS } from "@rp/shared/chatApi.ts"
+import { textField, validateDoc } from "@dreamspan/shared/editing.ts"
+import { DisplayPrefsChange, DEFAULT_DISPLAY_PREFS } from "@dreamspan/shared/chatApi.ts"
 import { client, testConfig, withServer } from "./support/config.ts"
 
 it.live("creates empty editable lorebooks, independent library notes and persona cards for their owner", () =>

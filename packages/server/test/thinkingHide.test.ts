@@ -5,8 +5,8 @@
 // Anthropic's own 400 messages. Synthetic chats only; nothing reaches a real provider.
 import { assert, describe, it } from "@effect/vitest"
 import { Type } from "@earendil-works/pi-ai"
-import type { VersionId } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { Effect } from "effect"
 import type { ServerResponse } from "node:http"
 import type { RolloutTool } from "../src/agent/tools.ts"

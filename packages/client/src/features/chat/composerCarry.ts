@@ -1,6 +1,6 @@
 // A durable handoff of text typed while StartChat was on its way. It stays in the
 // browser until the new chat's composer replaces it with a draft-addressed copy.
-import type { Draft } from "@rp/shared/drafts.ts"
+import type { Draft } from "@dreamspan/shared/drafts.ts"
 import { type Copy, makeCopy } from "../editor/backup.ts"
 
 export const composerCarryCopy = (

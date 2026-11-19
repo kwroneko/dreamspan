@@ -1,11 +1,11 @@
 // Freezing the random and time macros of text kept as a template (DESIGN §5.6): a greeting
 // draws them once, when its chat is made, and keeps the values. Runs on the main thread, as
 // assembly will; expand()'s limits bound the work (ARCHITECTURE §10).
-import type { CardFields } from "@rp/shared/macros/context.ts"
-import { expand, type FrozenValues } from "@rp/shared/macros/expand.ts"
-import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
-import { makeMacroRegistry } from "@rp/shared/macros/registry.ts"
-import { FrozenMacros } from "@rp/shared/chat.ts"
+import type { CardFields } from "@dreamspan/shared/macros/context.ts"
+import { expand, type FrozenValues } from "@dreamspan/shared/macros/expand.ts"
+import { registerBuiltinMacros } from "@dreamspan/shared/macros/builtins.ts"
+import { makeMacroRegistry } from "@dreamspan/shared/macros/registry.ts"
+import { FrozenMacros } from "@dreamspan/shared/chat.ts"
 import { Effect, Schema, Scope } from "effect"
 
 const registry = (() => {

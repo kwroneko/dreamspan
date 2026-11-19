@@ -8,11 +8,11 @@ import { usePlaceParam } from "../../usePlaceParam.ts"
 // it goes and when; opening it shows its text, with its settings folded away under it. Several
 // can be open, each remembers whether it is, and a short list opens them all. Whoever lists
 // notes (a chat's Notes tab, a card's editor) picks which and supplies what's theirs.
-import type { BinItem } from "@rp/shared/bin.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
-import { textField } from "@rp/shared/editing.ts"
-import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
-import type { Doc, LibraryRef, RefId } from "@rp/shared/library.ts"
+import type { BinItem } from "@dreamspan/shared/bin.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
+import type { ChatNotePosition } from "@dreamspan/shared/editorApi.ts"
+import type { Doc, LibraryRef, RefId } from "@dreamspan/shared/library.ts"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"

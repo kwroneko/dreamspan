@@ -4,8 +4,8 @@
 // with a checkbox that shows it as a button on the message too: the user's choices are kept
 // by action id with the account's display preferences, over each action's own default, so a
 // plugin's action can be pinned like a built-in one.
-import type { BinItem } from "@rp/shared/bin.ts"
-import type { ForkId, PathEntry, VersionId } from "@rp/shared/chat.ts"
+import type { BinItem } from "@dreamspan/shared/bin.ts"
+import type { ForkId, PathEntry, VersionId } from "@dreamspan/shared/chat.ts"
 import {
   cloneElement,
   Fragment,

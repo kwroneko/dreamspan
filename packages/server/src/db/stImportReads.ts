@@ -1,8 +1,8 @@
 // Read handlers for the ST data folder import (ARCHITECTURE.md §13): what earlier imports
 // made, so a re-run updates it instead of importing it twice.
-import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { EntityKind, RefId } from "@rp/shared/library.ts"
-import { StCount, StImportJob, type StImportStatus } from "@rp/shared/stImportApi.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { EntityKind, RefId } from "@dreamspan/shared/library.ts"
+import { StCount, StImportJob, type StImportStatus } from "@dreamspan/shared/stImportApi.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps, ST_CHAT_RECORD } from "./ops.ts"

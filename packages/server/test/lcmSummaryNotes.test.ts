@@ -2,7 +2,7 @@
 // when the chat says so, and a `{{summary}}` prompt reading a conditioned summary note is never
 // inside a cached prefix. Synthetic cards and notes only.
 import { assert, it } from "@effect/vitest"
-import type { NoteDoc } from "@rp/shared/docs/note.ts"
+import type { NoteDoc } from "@dreamspan/shared/docs/note.ts"
 import { Effect } from "effect"
 import { importStPreset } from "../src/formats/preset.ts"
 import { assembleFixture, type AssemblyFixture } from "./support/assemblySources.ts"

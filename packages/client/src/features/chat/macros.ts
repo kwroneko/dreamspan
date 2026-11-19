@@ -1,8 +1,8 @@
 // Macros in displayed text (DESIGN §5.6, ARCHITECTURE §10): a greeting keeps `{{user}}`
 // and `{{char}}` unresolved, so it follows the chat's state. Only `expand()` decides what
 // expands: a message's stored macro mode and the explicit display-only opt-in.
-import type { CardFields } from "@rp/shared/macros/context.ts"
-import { expand, type FrozenValues } from "@rp/shared/macros/expand.ts"
+import type { CardFields } from "@dreamspan/shared/macros/context.ts"
+import { expand, type FrozenValues } from "@dreamspan/shared/macros/expand.ts"
 import { macroRegistry as registry } from "../../macros.ts"
 
 export { registry }

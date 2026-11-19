@@ -1,7 +1,7 @@
 import { Worker } from "node:worker_threads"
 import { Effect } from "effect"
-import { uuidv7 } from "@rp/shared/id.ts"
-import type { Summary } from "@rp/shared/lcm.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import type { Summary } from "@dreamspan/shared/lcm.ts"
 import { databaseFile } from "../../src/db/connection.ts"
 import type { Writer } from "../../src/db/Database.ts"
 

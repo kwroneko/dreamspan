@@ -1,7 +1,7 @@
 // A context-length error that states the model's limit: one click saves it as the model's
 // learned context size (its own source, shown as learned; never applied without the user).
-import type { Version } from "@rp/shared/chat.ts"
-import type { ModelId } from "@rp/shared/providers.ts"
+import type { Version } from "@dreamspan/shared/chat.ts"
+import type { ModelId } from "@dreamspan/shared/providers.ts"
 import { useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"

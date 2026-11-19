@@ -1,8 +1,8 @@
 // Users, passwords and sessions (DESIGN §10.1). Writes run in the writer worker, each as
 // one transaction; passwords arrive already hashed, and session tokens as their hash.
-import { UserAccount, type UserId, type UserRole } from "@rp/shared/domain.ts"
-import { AccountRejected, NotFound } from "@rp/shared/errors.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { UserAccount, type UserId, type UserRole } from "@dreamspan/shared/domain.ts"
+import { AccountRejected, NotFound } from "@dreamspan/shared/errors.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { type ReadOps, UserDisabled, type WriteOps } from "./ops.ts"

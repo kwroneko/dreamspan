@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, test } from "@playwright/test"
-import { AppApi } from "@rp/shared/api.ts"
+import { AppApi } from "@dreamspan/shared/api.ts"
 import { Effect } from "effect"
 import { RpcSchema } from "effect/rpc"
 import { asUser } from "./support/rpc.ts"

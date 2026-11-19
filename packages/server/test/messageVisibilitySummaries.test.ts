@@ -12,8 +12,8 @@ it.live("hiding makes covering L1 and L2 summaries stale, unhiding makes them fr
       writer = yield* Writer,
       user = yield* api.Whoami()
     const chat = yield* api.CreateChat({ title: "Summary visibility review" })
-    let parent = null as import("@rp/shared/chat.ts").SlotId | null
-    const entries: import("@rp/shared/chat.ts").PathEntry[] = []
+    let parent = null as import("@dreamspan/shared/chat.ts").SlotId | null
+    const entries: import("@dreamspan/shared/chat.ts").PathEntry[] = []
     for (let i = 0; i < 6; i++) {
       const sent = yield* api.SendMessage({
         chatId: chat.id,

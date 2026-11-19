@@ -2,7 +2,7 @@
 // proxy, through a connection's own proxy, or direct. Pure, so every rule is testable
 // without a network.
 import { BlockList, isIP } from "node:net"
-import type { RequestRoute } from "@rp/shared/usage.ts"
+import type { RequestRoute } from "@dreamspan/shared/usage.ts"
 import { addAddressRange, inAddresses } from "./addresses.ts"
 
 /**

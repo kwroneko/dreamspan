@@ -3,9 +3,9 @@
 // says what was undone, what was refused and why, and what was left.
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import type { SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
-import { textField } from "@rp/shared/editing.ts"
+import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext } from "../src/agent/tools.ts"

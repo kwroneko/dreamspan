@@ -6,7 +6,7 @@
 // it in …". Synthetic chats only; no model is asked anything.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { messageMenu } from "./support/message.ts"
 import { openPanel } from "./support/panel.ts"

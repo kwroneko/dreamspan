@@ -7,7 +7,7 @@
 // chat with separate contexts the preview shows what each character reads, and Mira's next
 // request has nothing of the docks while Wren's has it all. Synthetic data only.
 import { assert, describe, it } from "@effect/vitest"
-import type { EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { EntityId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { outcome } from "./support/config.ts"
 import { runStory as run } from "./support/threadStory.ts"

@@ -1,7 +1,7 @@
 // The prompt preset the open chat's next reply is built with: the context estimate's, or, in
 // a chat without one yet (a chat with no messages has none), the account's selected preset.
 // The Prompt preset tab edits it; the Lorebooks tab lists the books it sends.
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
 import { defaultsAtom, useRefreshOnContext } from "../pickers/defaults.ts"

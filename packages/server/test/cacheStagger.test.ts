@@ -1,7 +1,7 @@
 // Actual generation RPCs, assembly, SDK HTTP, worker ledger and chat subscriptions.
 import { assert, describe, it } from "@effect/vitest"
 import type { ServerResponse } from "node:http"
-import type { VersionId } from "@rp/shared/chat.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect, Stream } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"

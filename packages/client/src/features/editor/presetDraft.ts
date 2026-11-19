@@ -1,5 +1,5 @@
-import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
-import { mainPrompt, newestMessage, presetOrder } from "@rp/shared/presetOrder.ts"
+import type { PresetPrompt, PromptOrderEntry } from "@dreamspan/shared/docs/preset.ts"
+import { mainPrompt, newestMessage, presetOrder } from "@dreamspan/shared/presetOrder.ts"
 import type { EditorStore } from "./store.ts"
 
 /** Materialize Main and the newest-message marker when editing an older virtual order. */

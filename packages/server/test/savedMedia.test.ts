@@ -4,7 +4,7 @@
 // unless the fetcher accepts them, as Network does.
 import { createServer, type Server } from "node:http"
 import { assert, describe, it } from "@effect/vitest"
-import { DEFAULT_MEDIA_HOSTS, mediaKey } from "@rp/shared/savedMedia.ts"
+import { DEFAULT_MEDIA_HOSTS, mediaKey } from "@dreamspan/shared/savedMedia.ts"
 import { Effect } from "effect"
 import { SavedMedia, makeSavedMediaFetcher } from "../src/api/savedMedia.ts"
 import { Reader, Writer } from "../src/db/Database.ts"

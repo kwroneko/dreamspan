@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { BinItem } from "@rp/shared/bin.ts"
+import { BinItem } from "@dreamspan/shared/bin.ts"
 import { formatDay } from "../src/features/chat/chatTitle.ts"
 import { binTitle, recoveredSource } from "../src/features/bin/titles.ts"
 

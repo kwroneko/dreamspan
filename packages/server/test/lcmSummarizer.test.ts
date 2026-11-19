@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { PAIRS_8K } from "./support/lcmHarness.ts"
-import { NewVersion } from "@rp/shared/chat.ts"
+import { NewVersion } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, posted } from "./support/config.ts"

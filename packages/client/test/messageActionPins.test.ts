@@ -2,7 +2,7 @@
 // the pinned ones (Edit, Continue, Branch from here and Delete until the user chooses) show
 // as buttons on the message, in the menu's order, when available there. A generic part of
 // the registry, so a plugin's action pins the same way and an unknown id is ignored.
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import { createElement, type ReactNode } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"

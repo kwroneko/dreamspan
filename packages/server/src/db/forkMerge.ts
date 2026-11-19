@@ -1,12 +1,12 @@
 // Library ancestry/merge reads, shared by reader previews and the writer transaction.
 import { Effect } from "effect"
-import { HELD_FIELD } from "@rp/shared/editing.ts"
+import { HELD_FIELD } from "@dreamspan/shared/editing.ts"
 import type { SqlClient } from "effect/sql"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { Doc, RefId, RevisionId } from "@rp/shared/library.ts"
-import { Revision } from "@rp/shared/library.ts"
-import { libraryMergePolicies } from "@rp/shared/forkMerge.ts"
-import type { MergeRecord } from "@rp/shared/forkMerge.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { Doc, RefId, RevisionId } from "@dreamspan/shared/library.ts"
+import { Revision } from "@dreamspan/shared/library.ts"
+import { libraryMergePolicies } from "@dreamspan/shared/forkMerge.ts"
+import type { MergeRecord } from "@dreamspan/shared/forkMerge.ts"
 import { makeLibraryQueries, toLibraryRef, type RefRow } from "./library.ts"
 import { RefOperationRefused } from "./ops.ts"
 

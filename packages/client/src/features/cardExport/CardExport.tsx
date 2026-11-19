@@ -4,7 +4,7 @@
 // shows here too. A file is always a saved revision: with
 // unsaved changes, the export asks first (`requestExport`, owner 2026-11-02).
 import { useAtomValue } from "@effect/atom-react"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"

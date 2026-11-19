@@ -1,6 +1,6 @@
-import type { GenerationTarget } from "@rp/shared/generationTarget.ts"
+import type { GenerationTarget } from "@dreamspan/shared/generationTarget.ts"
 import { Effect, Exit, Stream } from "effect"
-import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
+import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
 import type { AssembledRequest, Generation } from "../assembler/types.ts"
 import { providerRequest } from "../assembler/wire.ts"
 import type { Providers } from "../providers/Providers.ts"

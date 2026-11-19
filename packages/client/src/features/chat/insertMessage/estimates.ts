@@ -1,7 +1,7 @@
 // What the insertion editor tells the user before they commit (spec/MESSAGE-INSERT.md §4.2): one
 // line each, registered, so a plugin can add, replace or disable one. Each reads the open chat's
 // view, the message it goes below and the position the new message takes.
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import { makeRegistry } from "../../../registry.ts"
 import { lcmCursor, positionOf } from "../position.ts"
 import type { ChatView } from "../session.ts"

@@ -1,9 +1,9 @@
 // How a chat is named in lists and headers (DESIGN §2.1: never a file name, never just the
 // first character's name): the card or group name, with the day ST started it beside it
-// (`@rp/shared/chatName.ts`, which the server groups chats by too).
+// (`@dreamspan/shared/chatName.ts`, which the server groups chats by too).
 
-import { chatName } from "@rp/shared/chatName.ts"
-import { importState } from "@rp/shared/stImportApi.ts"
+import { chatName } from "@dreamspan/shared/chatName.ts"
+import { importState } from "@dreamspan/shared/stImportApi.ts"
 import type { ChatView } from "./session.ts"
 
 export { chatName }

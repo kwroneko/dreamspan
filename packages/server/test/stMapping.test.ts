@@ -1,10 +1,10 @@
 // Empty author's notes still govern attached personas and lore; personas' notes (ARCHITECTURE §13).
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
-import { ReportBuilder } from "@rp/shared/importReport.ts"
+import { ReportBuilder } from "@dreamspan/shared/importReport.ts"
 import { parseStChatPart } from "../src/formats/stChat.ts"
 import { parseStSettings } from "../src/formats/stData.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import {
   type CardInfo,
   chatStateChange,

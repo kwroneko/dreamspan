@@ -1,7 +1,7 @@
 // Account RPC handlers (DESIGN §10.1). Managing other users takes an admin; the rules
 // themselves live in auth/Accounts.ts.
-import { type AppApi, CurrentUser, Session } from "@rp/shared/api.ts"
-import { AccountRejected, Forbidden } from "@rp/shared/errors.ts"
+import { type AppApi, CurrentUser, Session } from "@dreamspan/shared/api.ts"
+import { AccountRejected, Forbidden } from "@dreamspan/shared/errors.ts"
 import { Effect } from "effect"
 import { Accounts } from "../auth/Accounts.ts"
 

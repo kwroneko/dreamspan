@@ -1,5 +1,5 @@
 // A field-only edit through the same change handler as typing, preserving edit history.
-import { getAt, textField, type FieldPath } from "@rp/shared/editing.ts"
+import { getAt, textField, type FieldPath } from "@dreamspan/shared/editing.ts"
 import { useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"

@@ -1,11 +1,11 @@
 // Worker-side validation shared by rewrite and operation transactions.
-import { forkLabel } from "@rp/shared/branchNaming.ts"
+import { forkLabel } from "@dreamspan/shared/branchNaming.ts"
 import { chatForkSummaries } from "./forkSummaries.ts"
 import type { ForkRow } from "./rows.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import type { StoryAt } from "@rp/shared/chat.ts"
-import { HistoryRejected } from "@rp/shared/historyApi.ts"
+import type { StoryAt } from "@dreamspan/shared/chat.ts"
+import { HistoryRejected } from "@dreamspan/shared/historyApi.ts"
 import { historyFork } from "./historyShared.ts"
 import { pathPieces, displaySlots, displayLength } from "./displayPath.ts"
 

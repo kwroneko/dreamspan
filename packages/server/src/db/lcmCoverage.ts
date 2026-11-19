@@ -1,4 +1,4 @@
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { lineageValidator } from "./lcmLayer.ts"

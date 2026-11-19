@@ -1,6 +1,6 @@
 // Settings → MCP servers: the list, and the form for a new server (spec/MCP.md §13.1).
-import { MCP_TIMEOUT_DEFAULT_S, type McpConnectionSettings, type RemoteMcpTransport } from "@rp/shared/mcp.ts"
-import { originOf } from "@rp/shared/providers.ts"
+import { MCP_TIMEOUT_DEFAULT_S, type McpConnectionSettings, type RemoteMcpTransport } from "@dreamspan/shared/mcp.ts"
+import { originOf } from "@dreamspan/shared/providers.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"

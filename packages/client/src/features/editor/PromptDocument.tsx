@@ -17,10 +17,10 @@ import { usePlaceExpansion, usePlaceNotice, usePlaceParam } from "../../usePlace
 // The preset's prompt order as one document (DESIGN §6.2a). Each prompt is a bounded block: a
 // header (handle, switch, name renamed in place, how it's sent, tokens, its options and actions)
 // above its text in the code-editor box. Options fold away per prompt, or all at once.
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { addPresetPrompt, writePresetOrder } from "./presetDraft.ts"
-import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
-import type { PresetContext } from "@rp/shared/inspectorApi.ts"
+import type { PresetPrompt, PromptOrderEntry } from "@dreamspan/shared/docs/preset.ts"
+import type { PresetContext } from "@dreamspan/shared/inspectorApi.ts"
 import {
   agentInstructionsPrompt,
   charDefinitions,
@@ -28,14 +28,14 @@ import {
   ownTurnNotes,
   perFieldMarkers,
   presetOrder
-} from "@rp/shared/presetOrder.ts"
-import { WORKSHOP_PIECE_IDS } from "@rp/shared/workshopPreset.ts"
-import { agentInstructions } from "@rp/shared/agentInstructions.ts"
-import { CONDITION_LABELS, conditionOf, presetWarnings, TRIGGERS } from "@rp/shared/presetConditions.ts"
-import { DIRECTION_PROMPT } from "@rp/shared/endOfRequest.ts"
-import { type FieldPath, textField } from "@rp/shared/editing.ts"
+} from "@dreamspan/shared/presetOrder.ts"
+import { WORKSHOP_PIECE_IDS } from "@dreamspan/shared/workshopPreset.ts"
+import { agentInstructions } from "@dreamspan/shared/agentInstructions.ts"
+import { CONDITION_LABELS, conditionOf, presetWarnings, TRIGGERS } from "@dreamspan/shared/presetConditions.ts"
+import { DIRECTION_PROMPT } from "@dreamspan/shared/endOfRequest.ts"
+import { type FieldPath, textField } from "@dreamspan/shared/editing.ts"
 import { Link } from "@tanstack/react-router"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"

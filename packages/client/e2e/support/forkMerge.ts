@@ -1,7 +1,7 @@
 // Synthetic library forks with parent changes since the fork, for the merge review specs.
 import type { APIRequestContext } from "@playwright/test"
-import { textField, valueField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import { textField, valueField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { asUser, type Client } from "./rpc.ts"
 import { ADMIN, type TestServer } from "./server.ts"

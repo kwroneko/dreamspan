@@ -5,14 +5,14 @@ import { Type } from "@earendil-works/pi-ai"
 import { readFile, writeFile } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import { join } from "node:path"
-import { builtinReplacement, builtinCopyStem } from "@rp/shared/builtinParts.ts"
+import { builtinReplacement, builtinCopyStem } from "@dreamspan/shared/builtinParts.ts"
 import { builtinCopies, builtinCopyListing, missingBuiltinAdapter } from "../src/plugins/builtins.ts"
 import { prepareBuiltinCopy, compareBuiltin, copyBuiltin } from "../src/plugins/copy.ts"
 import { rewriteImports } from "../src/plugins/importPolicy.ts"
 import { saveFiles, pluginFolder, commitFiles } from "../src/plugins/repo.ts"
 import { tempDir } from "./support/tempDir.ts"
-import { makeMacroRegistry } from "@rp/shared/macros/registry.ts"
-import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
+import { makeMacroRegistry } from "@dreamspan/shared/macros/registry.ts"
+import { registerBuiltinMacros } from "@dreamspan/shared/macros/builtins.ts"
 import { setPresence } from "../src/agent/tools/presence.ts"
 import { presenceContext } from "../src/agent/tools/presenceAdapter.ts"
 import { appSource } from "../src/plugins/reference.ts"
@@ -20,10 +20,10 @@ import { frozenTool, type ToolContext } from "../src/agent/tools.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
 import { installPluginToolDefinitions } from "./support/pluginToolDefinitions.ts"
 import { declaredHandles } from "../src/plugins/handles.ts"
-import { PluginManifest } from "@rp/shared/plugins.ts"
+import { PluginManifest } from "@dreamspan/shared/plugins.ts"
 import { Schema } from "effect"
-import { pluginConsent, pluginAccessGrows } from "@rp/shared/pluginConsent.ts"
-import { makeRegistry } from "@rp/shared/registry.ts"
+import { pluginConsent, pluginAccessGrows } from "@dreamspan/shared/pluginConsent.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
 
 it("all built-in tools, including generated tools, declare shipped source; only allowlisted adapters copy", async () => {
   await Effect.runPromise(
@@ -156,12 +156,12 @@ it.each(builtinCopies.filter((part, index) => builtinCopies.findIndex((p) => p.p
 
 it("rewrites syntax only and refuses path tricks, re-exports, type imports, dynamic imports and require", () => {
   const allowed = (s: string) =>
-    s === "./helper.ts" ? s : s === "../ui/Choice.tsx" ? "@rp/plugin-api/client" : undefined
+    s === "./helper.ts" ? s : s === "../ui/Choice.tsx" ? "@dreamspan/plugin-api/client" : undefined
   const source = `// import nope from 'node:fs'\nconst literal = "../ui/Choice.tsx"; import {Switch} from "../ui/Choice.tsx";export {x} from './helper.ts'`
   const result = rewriteImports(source, "part.tsx", allowed)
   expect(result.unsupported).toEqual([])
   expect(result.text).toContain('const literal = "../ui/Choice.tsx"')
-  expect(result.text).toContain('from "@rp/plugin-api/client"')
+  expect(result.text).toContain('from "@dreamspan/plugin-api/client"')
   for (const attack of [
     'import "../../../plugins/other/client.ts"',
     'export * from "node:fs"',

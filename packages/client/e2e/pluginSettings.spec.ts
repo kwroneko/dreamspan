@@ -78,7 +78,7 @@ for (const width of [1440, 390])
       await shot(page, info, "detail-on")
       const updated = {
         ...plain(id),
-        "server.ts": 'import { Effect } from "@rp/plugin-api/server"; export const activate = () => Effect.void'
+        "server.ts": 'import { Effect } from "@dreamspan/plugin-api/server"; export const activate = () => Effect.void'
       }
       updated["rp-plugin.json"] = JSON.stringify({
         ...JSON.parse(updated["rp-plugin.json"]),
@@ -327,7 +327,7 @@ test("local enable syncs routes, explains reload and retains the composer draft"
   const id = "settings-live"
   const files = pluginFiles(
     id,
-    `import { type Activate } from "@rp/plugin-api/client"; export const activate: Activate = host => { host.registries.routes!.register({ id: "settings-live.page", path: "/extensions/settings-live", component: () => <p>Synthetic extension page</p> }); };`,
+    `import { type Activate } from "@dreamspan/plugin-api/client"; export const activate: Activate = host => { host.registries.routes!.register({ id: "settings-live.page", path: "/extensions/settings-live", component: () => <p>Synthetic extension page</p> }); };`,
     ["routes"]
   )
   await admin((api) => api.CreatePlugin({ scope: "instance", id, files }))

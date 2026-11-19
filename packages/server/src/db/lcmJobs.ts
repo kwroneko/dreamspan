@@ -1,7 +1,7 @@
-import { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import { UserId } from "@rp/shared/domain.ts"
-import { SummaryId, SummaryInput } from "@rp/shared/lcm.ts"
-import { ModelChoice } from "@rp/shared/lcmSettings.ts"
+import { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import { UserId } from "@dreamspan/shared/domain.ts"
+import { SummaryId, SummaryInput } from "@dreamspan/shared/lcm.ts"
+import { ModelChoice } from "@dreamspan/shared/lcmSettings.ts"
 import { Schema } from "effect"
 
 export const SummaryJob = Schema.Struct({

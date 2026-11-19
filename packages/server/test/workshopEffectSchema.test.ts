@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { newCardDoc } from "@rp/shared/editing.ts"
+import { newCardDoc } from "@dreamspan/shared/editing.ts"
 import { Writer } from "../src/db/Database.ts"
 import { StateModules } from "../src/db/stateModules.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

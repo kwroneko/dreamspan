@@ -6,7 +6,7 @@
 // plugin adds, replaces or disables one, and the Interface settings list a switch for every
 // detail registered, defaulting to shown (ST's Chat Timestamps, Model Icons, Message IDs,
 // Message Timer and Message Token Count). The choices are the account's (`messageDetails`).
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import { type ComponentProps, type ComponentType, useLayoutEffect, useRef, useSyncExternalStore } from "react"
 import { makeRegistry } from "../../registry.ts"
 import { Switch } from "../../ui/Choice.tsx"

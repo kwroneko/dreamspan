@@ -1,17 +1,17 @@
-import type { ForkId } from "@rp/shared/chat.ts"
-import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import { TextTooLong } from "@rp/shared/composerApi.ts"
-import { DraftKey } from "@rp/shared/drafts.ts"
+import type { ForkId } from "@dreamspan/shared/chat.ts"
+import { type AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
+import { TextTooLong } from "@dreamspan/shared/composerApi.ts"
+import { DraftKey } from "@dreamspan/shared/drafts.ts"
 import {
   type BackfillCounts,
   type BackfillEstimate,
   LcmEstimateChanged,
   LcmBackfill,
   LcmEnableOffer
-} from "@rp/shared/lcm.ts"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
-import { NotFound } from "@rp/shared/errors.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+} from "@dreamspan/shared/lcm.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"

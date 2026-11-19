@@ -3,7 +3,7 @@
 // kept facts equals one read afresh.
 import { assert } from "@effect/vitest"
 import { Effect } from "effect"
-import { NewVersion, type ForkId, type SlotId } from "@rp/shared/chat.ts"
+import { NewVersion, type ForkId, type SlotId } from "@dreamspan/shared/chat.ts"
 import { lcmHarness, lcmTest } from "./support/lcmHarness.ts"
 import { completeFixture, fixtureSql } from "./support/lcmFixtures.ts"
 

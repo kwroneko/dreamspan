@@ -1,7 +1,7 @@
 // Where verbatim history starts (DESIGN §8.1): a divider in the message list, always there
 // with LCM on, saying what stands in for the messages above it. It opens the summaries.
 import { SummaryTabs } from "./SummaryTabs.tsx"
-import type { LcmState } from "@rp/shared/lcm.ts"
+import type { LcmState } from "@dreamspan/shared/lcm.ts"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { boundaryText, countsOf, jobText } from "./lcm.ts"

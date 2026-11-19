@@ -4,7 +4,7 @@ import { readFile, lstat } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 import { join, dirname, posix, resolve, sep } from "node:path"
 import { Schema } from "effect"
-import { PluginManifest, type BuiltinComparison } from "@rp/shared/plugins.ts"
+import { PluginManifest, type BuiltinComparison } from "@dreamspan/shared/plugins.ts"
 import { builtinCopy, type builtinCopies } from "./builtins.ts"
 import { rewriteImports } from "./importPolicy.ts"
 import { commitFiles, confined, pluginFolder, validPath } from "./repo.ts"
@@ -44,7 +44,7 @@ export const prepareBuiltinCopy = async (registry: string, id: string, pluginId:
   for (const [path, text] of Object.entries(originals)) {
     const rewritten = rewriteImports(text, path, (value) => {
       if (value === "react" && part.side === "client") return value
-      if (value === "effect" && part.side !== "client") return `@rp/plugin-api/${part.side}`
+      if (value === "effect" && part.side !== "client") return `@dreamspan/plugin-api/${part.side}`
       if (!value.startsWith(".")) return undefined
       const target = posix.normalize(posix.join(posix.dirname(path), value))
       const api = (part.imports as Readonly<Record<string, string>>)[target]
@@ -84,7 +84,7 @@ export const prepareBuiltinCopy = async (registry: string, id: string, pluginId:
     null,
     2
   )
-  const api = `@rp/plugin-api/${part.side}`
+  const api = `@dreamspan/plugin-api/${part.side}`
   files[`src/${part.side}.${part.side === "client" ? "tsx" : "ts"}`] =
     `import { ${part.side === "worker" ? "Effect, registerMacro, " : part.side === "server" ? "Effect, " : ""}type Activate } from "${api}"\n` +
     `import { ${part.entry} } from "./part/${posix.basename(part.path)}"\n` +

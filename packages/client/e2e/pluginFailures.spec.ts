@@ -42,7 +42,7 @@ const component = (kind: string) =>
 for (const kind of failures) {
   test(`${kind} failure leaves the app usable and reports once`, async ({ page }) => {
     const id = `failure-${kind}`
-    const body = `import { ui, use, useEffect, useLayoutEffect, useState, type Activate } from "@rp/plugin-api/client";
+    const body = `import { ui, use, useEffect, useLayoutEffect, useState, type Activate } from "@dreamspan/plugin-api/client";
 const pending = new Promise<void>(() => {});
 ${kind === "import" ? 'throw new Error("synthetic import")' : kind === "never-import" ? "await new Promise(() => {});" : ""}
 export const activate: Activate = ${
@@ -115,7 +115,7 @@ test("plugin recovery stays visible on login and unknown deep links", async ({ p
 test("distinct route ids cannot collide on the same URL and prevent startup", async ({ page }) => {
   const ids = ["duplicate-route-first", "duplicate-route-second"]
   for (const id of ids) {
-    const source = `import {type Activate} from "@rp/plugin-api/client"; export const activate: Activate = host => {host.registries.routes!.register({id:"${id}",path:"/extensions/duplicate",component:()=> <p>${id}</p>})}`
+    const source = `import {type Activate} from "@dreamspan/plugin-api/client"; export const activate: Activate = host => {host.registries.routes!.register({id:"${id}",path:"/extensions/duplicate",component:()=> <p>${id}</p>})}`
     const commit = await admin((api) =>
       api.CreatePlugin({ scope: "instance", id, files: pluginFiles(id, source, ["routes"]) })
     )
@@ -166,7 +166,7 @@ test("a regular user can recover without being offered an admin-only disable", a
 
 test("reports once for each registry entry even when their local ids match", async ({ page }) => {
   const id = "same-local-id"
-  const source = `import {type Activate} from "@rp/plugin-api/client";
+  const source = `import {type Activate} from "@dreamspan/plugin-api/client";
 const Broken = () => {throw new Error("synthetic internal entry detail")};
 export const activate: Activate = host => {
 host.registries.appBanners!.register({id:"same.local",order:0,component:Broken});
@@ -190,7 +190,7 @@ host.registries.routes!.register({id:"same.local",path:"/extensions/double-failu
 })
 test("two plugins claiming the same slot name preserve the first and undo the failed plugin", async ({ page }) => {
   for (const id of ["claim-first", "claim-second"]) {
-    const body = `import { type Activate } from "@rp/plugin-api/client"; export const activate: Activate = host => { host.registries.appBanners!.register({ id: "shared.banner", order: 0, component: () => <p>${id} owns this</p> }) };`
+    const body = `import { type Activate } from "@dreamspan/plugin-api/client"; export const activate: Activate = host => { host.registries.appBanners!.register({ id: "shared.banner", order: 0, component: () => <p>${id} owns this</p> }) };`
     const commit = await admin((api) =>
       api.CreatePlugin({ scope: "instance", id, files: pluginFiles(id, body, ["appBanners"]) })
     )
@@ -238,7 +238,7 @@ test("failure and reload banners fit at 1440 and 390 in both themes", async ({ p
 
 test("a pending action rejected during disable cannot report into the next scope", async ({ page }) => {
   const id = "late-rejection"
-  const source = `import {ui,type Activate} from "@rp/plugin-api/client";
+  const source = `import {ui,type Activate} from "@dreamspan/plugin-api/client";
 let reject: (reason?: unknown) => void = () => undefined;
 export const activate: Activate = host => {
   host.onDispose(() => reject(new Error("synthetic disposal")));

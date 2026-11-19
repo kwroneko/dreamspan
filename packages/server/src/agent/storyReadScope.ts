@@ -1,5 +1,5 @@
 // A side workshop's reading grant names its immutable attachment, never every chat.
-import { foldState } from "@rp/shared/state.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { ToolInputRefused, type ToolContext } from "./tools.ts"
 

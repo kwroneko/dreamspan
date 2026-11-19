@@ -2,7 +2,7 @@
 // built-in, new chats copying the default, field-by-field changes, the two pairs driving the
 // planner and assembly, the fit check, "when it runs", and requests without the preset.
 import { assert, it } from "@effect/vitest"
-import { BUILTIN_SUMMARY_INSTRUCTION } from "@rp/shared/lcmSettings.ts"
+import { BUILTIN_SUMMARY_INSTRUCTION } from "@dreamspan/shared/lcmSettings.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { estimateBackfill } from "../src/lcm/backfill.ts"

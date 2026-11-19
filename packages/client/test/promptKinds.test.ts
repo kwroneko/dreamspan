@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { mainPrompt } from "@rp/shared/presetOrder.ts"
+import { mainPrompt } from "@dreamspan/shared/presetOrder.ts"
 import { placeholderHelp, promptKind, volatileMacros } from "../src/features/editor/promptKinds.tsx"
 
 test("volatile warnings use the registry, parsed nested calls and actual aliases", () => {

@@ -2,8 +2,8 @@
 // "Join a thread here…" (after it) or ⋯ "Join threads…" (after the newest). Its picker lists the
 // other threads of every set this fork is in, innermost first, each with its characters and what
 // joining it brings ("10 messages since #40", "3 new since the last join"); several can be ticked.
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { ChatMergePreview } from "@rp/shared/mergeApi.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { ChatMergePreview } from "@dreamspan/shared/mergeApi.ts"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Checkbox } from "../../ui/Choice.tsx"

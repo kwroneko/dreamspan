@@ -3,10 +3,10 @@
 // playing Tobin; and "Docks", the source, with Kai and Lio. Helpers to write messages, marks and
 // notes, to merge, and to capture the exact request of a reply by any character at any fork's
 // tip. Synthetic data only.
-import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { MergeTimelines } from "@rp/shared/mergeApi.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
+import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { MergeTimelines } from "@dreamspan/shared/mergeApi.ts"
+import type { StateEventData } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../../src/assembler/types.ts"
 import { Reader, Writer } from "../../src/db/Database.ts"

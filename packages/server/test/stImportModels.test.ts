@@ -4,7 +4,7 @@
 // ST 1.19 writes them (public/script.js `saveReply`, `syncMesToSwipe`, the streaming
 // processor's swipe_info, a Continue's moved `gen_started`).
 import { assert, layer } from "@effect/vitest"
-import type { Version } from "@rp/shared/chat.ts"
+import type { Version } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { serverLayer, testConfig } from "./support/config.ts"
 import { card, header, jsonl } from "./support/stFolder.ts"

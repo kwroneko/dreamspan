@@ -1,18 +1,18 @@
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { displayEndOf } from "./displayPath.ts"
 import { forkAt } from "./forkState.ts"
-import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
+import { type FoldableEvent, foldState } from "@dreamspan/shared/state.ts"
 import { withoutPurged } from "./stateRefs.ts"
-import { cardNames, modelName } from "@rp/shared/cardNames.ts"
-import { avatarCropField } from "@rp/shared/media.ts"
-import { talkativenessOf } from "@rp/shared/naturalOrder.ts"
+import { cardNames, modelName } from "@dreamspan/shared/cardNames.ts"
+import { avatarCropField } from "@dreamspan/shared/media.ts"
+import { talkativenessOf } from "@dreamspan/shared/naturalOrder.ts"
 // Cards as chats see them: display name, model name, version and greetings from the
 // selected card revision, and whether it is a persona. Shared by
 // the readers and the writer (chatSetupReads.ts, chatSetupWrites.ts).
-import { CastCard, type ChatId, type EntityId, type SlotId } from "@rp/shared/chat.ts"
+import { CastCard, type ChatId, type EntityId, type SlotId } from "@dreamspan/shared/chat.ts"
 import { makeLibraryQueries } from "./library.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 

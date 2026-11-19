@@ -1,6 +1,6 @@
 // Message details and model marks (msgmeta): what's registered where, which lab's mark a
 // model gets, and how a message's time reads.
-import { DEFAULT_DISPLAY_PREFS, type DisplayPrefs } from "@rp/shared/chatApi.ts"
+import { DEFAULT_DISPLAY_PREFS, type DisplayPrefs } from "@dreamspan/shared/chatApi.ts"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"

@@ -1,7 +1,7 @@
-import type { VersionId } from "@rp/shared/chat.ts"
-import { versionMetricsOf, type RequestFigures } from "@rp/shared/inspectorApi.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
+import { versionMetricsOf, type RequestFigures } from "@dreamspan/shared/inspectorApi.ts"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { DEFAULT_DISPLAY_PREFS } from "@rp/shared/chatApi.ts"
+import { DEFAULT_DISPLAY_PREFS } from "@dreamspan/shared/chatApi.ts"
 
 vi.mock("../src/ui/viewPrefs.ts", () => ({ useViewPrefs: () => ({ prefs: DEFAULT_DISPLAY_PREFS }) }))
 import { messageDetails } from "../src/features/chat/messageDetails.tsx"

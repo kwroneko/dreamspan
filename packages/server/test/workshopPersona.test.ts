@@ -1,9 +1,9 @@
 // The workshop's own card and persona (spec/WORKSHOP-CONTEXT.md §4.3), apart from the story
 // defaults both ways, and converting a story preset to a workshop one (§4.4). Synthetic cards only.
 import { assert, describe, it } from "@effect/vitest"
-import type { Chat, EntityId } from "@rp/shared/chat.ts"
-import { foldState } from "@rp/shared/state.ts"
-import type { PresetDoc } from "@rp/shared/docs/preset.ts"
+import type { Chat, EntityId } from "@dreamspan/shared/chat.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
+import type { PresetDoc } from "@dreamspan/shared/docs/preset.ts"
 import { Effect } from "effect"
 import { cardDoc, presetDoc } from "./support/docs.ts"
 import { Reader, Writer } from "../src/db/Database.ts"

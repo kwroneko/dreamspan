@@ -11,8 +11,8 @@ import { forgetThinking, messageEditorThinking, thinkingKey } from "./editThinki
 // re-renders the body.
 import { positionOf } from "./position.ts"
 import { useAtomValue } from "@effect/atom-react"
-import type { BinItem } from "@rp/shared/bin.ts"
-import type { ForkId, PathEntry, SlotId, ThinkingPart, Version } from "@rp/shared/chat.ts"
+import type { BinItem } from "@dreamspan/shared/bin.ts"
+import type { ForkId, PathEntry, SlotId, ThinkingPart, Version } from "@dreamspan/shared/chat.ts"
 import {
   memo,
   type MouseEvent,

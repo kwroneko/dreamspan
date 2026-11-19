@@ -1,5 +1,5 @@
-import type { ChatId } from "@rp/shared/chat.ts"
-import { Draft, DraftKey } from "@rp/shared/drafts.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import { Draft, DraftKey } from "@dreamspan/shared/drafts.ts"
 import { Effect } from "effect"
 import { expect, it, vi } from "vitest"
 import { MessageDraft } from "../src/features/chat/messageDraft.ts"

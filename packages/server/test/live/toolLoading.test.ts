@@ -4,8 +4,8 @@
 // Providers without a measured loading wire send every tool from the start; for them the same run
 // shows the tool loop caches with the full tool list.
 import { describe } from "@effect/vitest"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { VersionId } from "@rp/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect, Stream } from "effect"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"

@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import type { SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { historyTools } from "../src/agent/tools/history.ts"
 import type { ToolContext } from "../src/agent/tools.ts"

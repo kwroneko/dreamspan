@@ -1,6 +1,6 @@
 // Where the context budget's numbers come from, in words, and the action that changes them:
 // the model's settings, opened at the field (the budget note's and the refusal's).
-import type { BudgetOrigins } from "@rp/shared/inspectorApi.ts"
+import type { BudgetOrigins } from "@dreamspan/shared/inspectorApi.ts"
 import { lazy, Suspense, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import type { ModelField } from "../connections/models.tsx"

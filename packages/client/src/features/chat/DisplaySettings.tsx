@@ -2,12 +2,12 @@ import { ExternalMediaDefault } from "./externalMedia.tsx"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { positionOf } from "./position.ts"
 import { AsyncResult, Atom } from "effect/reactivity"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { Cast } from "@rp/shared/chatSetupApi.ts"
-import type { EditorSnapshot } from "@rp/shared/editorApi.ts"
-import type { RefId } from "@rp/shared/library.ts"
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
-import type { GlobalRegex } from "@rp/shared/regexScripts.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { Cast } from "@dreamspan/shared/chatSetupApi.ts"
+import type { EditorSnapshot } from "@dreamspan/shared/editorApi.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
+import type { GlobalRegex } from "@dreamspan/shared/regexScripts.ts"
 import { createContext, useContext, useMemo, useEffect, useState, useSyncExternalStore, type ReactNode } from "react"
 import { AppClient } from "../../rpc.ts"
 import { RadioGroup, Switch } from "../../ui/Choice.tsx"
@@ -23,7 +23,7 @@ import { displayTransforms } from "./displayPipeline.ts"
 import { timelineTransforms } from "./timelineContributions.tsx"
 import { displayScriptLists } from "./displayScripts.ts"
 import { Tooltip } from "../../ui/Tooltip.tsx"
-import { builtinReplacement } from "@rp/shared/builtinParts.ts"
+import { builtinReplacement } from "@dreamspan/shared/builtinParts.ts"
 import { approvedScripts, CardScripts } from "./displayScripts.ts"
 import type { ChatSurfaceProps } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
@@ -323,7 +323,7 @@ function ReplacedDisplayRules() {
   const transforms = useSyncExternalStore(displayTransforms.subscribe, displayTransforms.snapshot)
   const lists = useSyncExternalStore(displayScriptLists.subscribe, displayScriptLists.snapshot)
   const timeline = useSyncExternalStore(timelineTransforms.subscribe, timelineTransforms.snapshot)
-  // The names consent and the copy picker use for the same parts (@rp/shared/builtinParts.ts).
+  // The names consent and the copy picker use for the same parts (@dreamspan/shared/builtinParts.ts).
   const replaced = (
     [
       ["displayTransforms", transforms.entries],

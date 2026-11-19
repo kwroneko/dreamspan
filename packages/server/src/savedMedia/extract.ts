@@ -4,7 +4,7 @@
 // string of the document is looked at, whatever its field. Pure and bounded: it runs in a
 // reader worker.
 import { tokenize, TokenType, type CSSToken } from "@csstools/css-tokenizer"
-import { mediaKey, type MediaKind } from "@rp/shared/savedMedia.ts"
+import { mediaKey, type MediaKind } from "@dreamspan/shared/savedMedia.ts"
 import { Tokenizer, TokenizerMode, type Token } from "parse5"
 
 export interface FoundMedia {

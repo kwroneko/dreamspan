@@ -1,11 +1,11 @@
 // A real generation for server tests: a chat with Mira, the user playing Tobin, a greeting,
 // the user's message and a reply generated through the model the test's mock provider serves.
-import { type Chat, type EntityId, NewVersion, type VersionId } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { CardDoc } from "@rp/shared/docs/card.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { ModelOverrides, ProviderSettings } from "@rp/shared/providers.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
+import { type Chat, type EntityId, NewVersion, type VersionId } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { ModelOverrides, ProviderSettings } from "@dreamspan/shared/providers.ts"
+import type { StateEventData } from "@dreamspan/shared/state.ts"
 import { Effect, Stream } from "effect"
 import { Writer } from "../../src/db/Database.ts"
 import { importCard } from "../../src/formats/cardImport.ts"
@@ -53,7 +53,7 @@ export const generateReply = (
     /** Fields of our preset document, over the imported ST preset's (ones ST has no field for). */
     readonly presetFields?: Record<string, unknown>
     readonly content?: string
-    readonly images?: import("@rp/shared/chat.ts").MessageImages
+    readonly images?: import("@dreamspan/shared/chat.ts").MessageImages
     readonly example?: string
     readonly greeting?: string
     readonly personality?: string
@@ -70,7 +70,7 @@ export const generateReply = (
     /** Of those, the ones the user muted. */
     readonly muted?: ReadonlyArray<string>
     /** A lorebook the chat reads. */
-    readonly lorebook?: import("@rp/shared/docs/lorebook.ts").LorebookDoc
+    readonly lorebook?: import("@dreamspan/shared/docs/lorebook.ts").LorebookDoc
     /** The reply as Auto asks for it: its speaker (by card name) and the round after it, Auto's picks. */
     readonly auto?: { readonly speaker: string; readonly round?: ReadonlyArray<string> }
     /** Called once the chat is set up, before anything is sent, with the `characters`' ids in order. */

@@ -5,7 +5,7 @@
 // a join's frozen summary rows under the same rule. Mira at the Lantern, Wren at the docks,
 // Nara the narrator in both. Synthetic data only.
 import { assert, describe, it } from "@effect/vitest"
-import { type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import { type EntityId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { type ContextSnapshot, generationOf } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"

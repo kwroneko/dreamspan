@@ -6,8 +6,8 @@
 // light and dark. Every card and message here is made up.
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import type { ChatId, EntityId, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
+import type { ChatId, EntityId, ForkId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { Effect } from "effect"
 import { messageMenu, showActions } from "./support/message.ts"
 import { loginCookie, withCookie, type Client as Api } from "./support/rpc.ts"

@@ -3,9 +3,9 @@
 // file: the import that writes batch by batch (`StImports.writeBatch`, `finishChat`) and the
 // confirmed re-import that writes a whole file in one transaction (`StImportCommitChat`).
 import { createHash } from "node:crypto"
-import type { EntityId, SlotId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
-import { foldState, type StateEventData } from "@rp/shared/state.ts"
+import type { EntityId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import { foldState, type StateEventData } from "@dreamspan/shared/state.ts"
 import type { StImportNote } from "./ops.ts"
 import type { StBatchPlan } from "./stImportPlanOps.ts"
 

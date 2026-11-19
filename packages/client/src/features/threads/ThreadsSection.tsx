@@ -3,8 +3,8 @@
 // it's outside, so another thread is never listed as a branch (DESIGN §3.3 [D]). A row opens its
 // thread (a link: a middle-click opens it in a new tab), shows its characters' faces, the start
 // of its last message and when that was, and renames it; each set has its Undo.
-import type { EntityId, Fork, ForkId } from "@rp/shared/chat.ts"
-import type { ThreadInfo, ThreadSet } from "@rp/shared/threads.ts"
+import type { EntityId, Fork, ForkId } from "@dreamspan/shared/chat.ts"
+import type { ThreadInfo, ThreadSet } from "@dreamspan/shared/threads.ts"
 import { Link, useRouter } from "@tanstack/react-router"
 import { useState } from "react"
 import { Avatar, PortraitOverflow } from "../../ui/Avatar.tsx"

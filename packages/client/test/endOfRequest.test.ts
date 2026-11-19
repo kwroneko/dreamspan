@@ -4,9 +4,9 @@
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
-import type { FieldPath } from "@rp/shared/editing.ts"
-import type { PresetPrompt } from "@rp/shared/docs/preset.ts"
-import { CONTINUE_TEXT, DIRECTION_TEXT, TURN_TEXT } from "@rp/shared/endOfRequest.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
+import type { PresetPrompt } from "@dreamspan/shared/docs/preset.ts"
+import { CONTINUE_TEXT, DIRECTION_TEXT, TURN_TEXT } from "@dreamspan/shared/endOfRequest.ts"
 import type { EditorStore } from "../src/features/editor/store.ts"
 
 vi.hoisted(() => {

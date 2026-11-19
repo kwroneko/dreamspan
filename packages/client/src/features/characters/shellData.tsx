@@ -2,7 +2,7 @@ import { useCardGrouping } from "./cardGrouping.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useAtomValue } from "@effect/atom-react"
-import type { CastCard, EntityId } from "@rp/shared/chat.ts"
+import type { CastCard, EntityId } from "@dreamspan/shared/chat.ts"
 import type {
   ShellCard,
   ShellCards,
@@ -10,14 +10,14 @@ import type {
   ShellForks,
   ShellForksView,
   ShellSection
-} from "@rp/shared/chatSetupApi.ts"
+} from "@dreamspan/shared/chatSetupApi.ts"
 import { Link, useNavigate, useRouter, useSearch } from "@tanstack/react-router"
 import { openOnPlainClick } from "../../ui/links.ts"
 import { OPEN_BESIDE_HINT, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
 import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { Effect, Schedule, Stream } from "effect"
-import { applyShellCards, applyShellForks } from "@rp/shared/shellUpdates.ts"
+import { applyShellCards, applyShellForks } from "@dreamspan/shared/shellUpdates.ts"
 import { createContext, type DragEvent, type ReactNode, useContext, useState } from "react"
 import { CARD_DRAG, carryOnDrag } from "../../ui/appDrags.ts"
 import { AppClient } from "../../rpc.ts"

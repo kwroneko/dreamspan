@@ -24,9 +24,9 @@ import {
 } from "../lcm/instructionPolicies.ts"
 // The assembler with its built-in stages and macros registered (ARCHITECTURE §15).
 import { withAssemblyModules } from "./modules.ts"
-import { builtinImageTokenRules, type ImageTokenRule } from "@rp/shared/imageTokens.ts"
-import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
-import { makeMacroRegistry, type MacroRegistry } from "@rp/shared/macros/registry.ts"
+import { builtinImageTokenRules, type ImageTokenRule } from "@dreamspan/shared/imageTokens.ts"
+import { registerBuiltinMacros } from "@dreamspan/shared/macros/builtins.ts"
+import { makeMacroRegistry, type MacroRegistry } from "@dreamspan/shared/macros/registry.ts"
 import { Context, Effect, type Scope } from "effect"
 import type { AssemblySources, SourceError } from "./pipeline.ts"
 import {
@@ -52,7 +52,7 @@ import {
   unchanged
 } from "./scriptSources.ts"
 import { makeScriptRunner, PLACEMENT, REGEX_MS, REGEX_OUTPUT } from "./regex.ts"
-import type { TextRewrite } from "@rp/shared/regexScripts.ts"
+import type { TextRewrite } from "@dreamspan/shared/regexScripts.ts"
 
 export interface Assembler {
   readonly sourceDescriptors: Registry<SourceDescriptor>

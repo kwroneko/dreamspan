@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
 import type { DisplayInput } from "./features/chat/displayPipeline.ts"
 import type { DisplayListContext } from "./features/chat/displayScripts.ts"
 import type { DisplayResultV1, TimelineRowV1 } from "../../plugin-api/src/display.ts"

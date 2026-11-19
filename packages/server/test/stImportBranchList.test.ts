@@ -3,7 +3,7 @@
 // with the latest message; no fork is named after its file; the chat is named by its group or
 // root chat, never a branch file; each fork says where it splits off and when its last message is.
 import { assert, layer } from "@effect/vitest"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Reader } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"

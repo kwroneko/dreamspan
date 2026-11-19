@@ -4,8 +4,8 @@
 // or an update changed meanwhile open a dialog, to pick per field. A card's nickname asks about past messages where it's renamed (`CardNameHeader`),
 // never after a save. Every editor uses it: the library page, the chat's tabs, a card's or
 // chat's notes.
-import { parseField } from "@rp/shared/editing.ts"
-import { EditConflict, type SavedRef } from "@rp/shared/editorApi.ts"
+import { parseField } from "@dreamspan/shared/editing.ts"
+import { EditConflict, type SavedRef } from "@dreamspan/shared/editorApi.ts"
 import { useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"

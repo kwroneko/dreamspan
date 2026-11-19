@@ -55,7 +55,7 @@ test("startup with no plugins and ten checked modules", async ({ browser }, info
   const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(current(), ADMIN.handle, ADMIN.password, use)
   for (let i = 0; i < 10; i++) {
     const id = `startup-${i}`
-    const source = `import {type Activate} from "@rp/plugin-api/client"; export const activate: Activate = host => { host.registries.appBanners!.register({id:"${id}",order:${i},component:()=> <p>${id} loaded</p>}) };`
+    const source = `import {type Activate} from "@dreamspan/plugin-api/client"; export const activate: Activate = host => { host.registries.appBanners!.register({id:"${id}",order:${i},component:()=> <p>${id} loaded</p>}) };`
     const commit = await admin((api) =>
       api.CreatePlugin({ scope: "instance", id, files: pluginFiles(id, source, ["appBanners"]) })
     )

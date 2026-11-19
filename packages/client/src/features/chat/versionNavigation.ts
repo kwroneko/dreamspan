@@ -1,5 +1,5 @@
 // Buttons, touch gestures and registered keyboard commands share version selection.
-import type { PathEntry, Version } from "@rp/shared/chat.ts"
+import type { PathEntry, Version } from "@dreamspan/shared/chat.ts"
 import { messageVersions } from "./presentation.tsx"
 import { stepFrom } from "./VersionControls.tsx"
 import type { MessageActionContext } from "./messageActions.tsx"

@@ -1,5 +1,5 @@
 // Immutable summary ancestry and path reads, shared by assembly and the chat editor.
-import type { Doc } from "@rp/shared/library.ts"
+import type { Doc } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 

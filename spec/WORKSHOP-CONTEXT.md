@@ -18,8 +18,8 @@ The owner, 2026-11-12, on this work (the brief's quotes; these are the only **[D
 
 ### 1.1 What the code does (verified 2026-11-12, master `44c46181`)
 
-- The budget's context size is `min(preset samplers.openai_max_context, model window)` (`assembler/budget.ts`), but the preset's own samplers never reach it: `withModelSettings` (`@rp/shared/modelSettings.ts`) replaces them with `DEFAULT_SAMPLERS`, then the model's window (`openai_max_context = window`), then the model's own settings. So a workshop and a story both use **the chosen model's window**, unless the model's settings lower it ("Context to send", whose placeholder reads "All of its window").
-- The window comes from `resolveModel` (`@rp/shared/providers.ts`): the user's value, a limit learned from a provider error, the provider's model list, a catalog match, else **`ASSUMED_CONTEXT` = 128,000 tokens**, with source `unknown`. The model editor shows that value as "(assumed)", and the context inspector's budget origin says "assumed: nothing reports this model's size".
+- The budget's context size is `min(preset samplers.openai_max_context, model window)` (`assembler/budget.ts`), but the preset's own samplers never reach it: `withModelSettings` (`@dreamspan/shared/modelSettings.ts`) replaces them with `DEFAULT_SAMPLERS`, then the model's window (`openai_max_context = window`), then the model's own settings. So a workshop and a story both use **the chosen model's window**, unless the model's settings lower it ("Context to send", whose placeholder reads "All of its window").
+- The window comes from `resolveModel` (`@dreamspan/shared/providers.ts`): the user's value, a limit learned from a provider error, the provider's model list, a catalog match, else **`ASSUMED_CONTEXT` = 128,000 tokens**, with source `unknown`. The model editor shows that value as "(assumed)", and the context inspector's budget origin says "assumed: nothing reports this model's size".
 - **Where 4,095 came from.** The server test helper `generateReply` (`test/support/generation.ts`) writes a whole imported ST preset's samplers into the fixture model's settings, ST's default `openai_max_context: 4095` included ("Explicit fixture model settings preserve the old test scenarios; production imports never do this"). Workshop tests that set up their model with it inherit 4,095; W6's note and the W5 fixtures' explicit 32,768 both come from there. In production a model only carries a context setting the user set, or one imported from an ST preset file that has the key (`formats/presetSettings.ts` copies only keys the file has).
 - **RP chats** use the same path, so they don't have a defect of their own. Nothing in RP behaviour changes here.
 
@@ -40,7 +40,7 @@ The owner's question ("Why would we ever limit context to 4096 by default?") set
 
 | Where | What it was | Now |
 |---|---|---|
-| `@rp/shared/modelSettings.ts` `DEFAULT_SAMPLERS.openai_max_context` | 4,095, replaced by the model's window before use | 128,000 (`ASSUMED_CONTEXT`'s size), still replaced by the window; no path reads it uncapped |
+| `@dreamspan/shared/modelSettings.ts` `DEFAULT_SAMPLERS.openai_max_context` | 4,095, replaced by the model's window before use | 128,000 (`ASSUMED_CONTEXT`'s size), still replaced by the window; no path reads it uncapped |
 | `formats/presetSettings.ts` (an ST preset file imported onto a model) | The file's `openai_max_context` copied as the model's "Context to send" | **[P]** A file whose value is exactly ST's default, 4,095, is taken as nobody's choice: the key is dropped and the import report says "The preset's context size was SillyTavern's default (4,095 tokens), so the model's own window is used." Any other value is the user's and is kept. Example: an exported preset with 4,095 leaves a 200k model at 200k; one with 16,384 sets 16,384 |
 | `server/formats/preset.ts` `DEFAULT_SAMPLERS` | A preset document's samplers, 4,095 | Unchanged: preset samplers never reach assembly (§1.1), and ST export writes them back as ST expects |
 | `test/support/generation.ts` `generateReply` | Writes a full ST preset's samplers (4,095 included) into fixture models | Unchanged: it preserves the old scenarios, and new workshop tests set models up without it |
@@ -148,7 +148,7 @@ The seeded **Workshop** preset is an ordinary library preset (`entity_revisions.
 | History | The conversation | `chatHistory`, `newestMessage` |
 | Workshop instructions | Tools, contract, what's turned off | The `workshop-instructions` stage |
 
-The pieces are ordinary prompt entries a preset can move, turn off or leave out (`workshopPieces` in `@rp/shared/workshopPreset.ts`). The seeded preset is now `builtin:workshop-preset@2`, with the four added pieces present and **off**, so what it sends is what @1 sent; users who already have @1 keep it (seeds are made once). A story preset bound in a workshop still works: its card slots fill from the workshop's card.
+The pieces are ordinary prompt entries a preset can move, turn off or leave out (`workshopPieces` in `@dreamspan/shared/workshopPreset.ts`). The seeded preset is now `builtin:workshop-preset@2`, with the four added pieces present and **off**, so what it sends is what @1 sent; users who already have @1 keep it (seeds are made once). A story preset bound in a workshop still works: its card slots fill from the workshop's card.
 
 ### 4.3 The workshop's card and persona [P]
 

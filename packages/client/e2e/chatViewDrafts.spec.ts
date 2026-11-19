@@ -6,7 +6,7 @@ import { expectTextBox } from "./support/textbox.ts"
 // streamed so far when it's copied, and, on a phone, the start of why it isn't sent when a
 // tap reveals its actions.
 import { expect, type Page, test } from "@playwright/test"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { card, header, jsonl, message } from "../../server/test/support/stFolder.ts"
 import { type Copy, makeCopy } from "../src/features/editor/backup.ts"

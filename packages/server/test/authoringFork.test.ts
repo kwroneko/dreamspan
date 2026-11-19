@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import { NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import { NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { Reader, Writer } from "../src/db/Database.ts"

@@ -5,8 +5,8 @@
 // (sandbox/network.ts) and the sandbox's start (stale run folders, which cgroup limiter).
 import { join } from "node:path"
 import { Context, Duration, Effect, Layer, Schedule } from "effect"
-import type { User } from "@rp/shared/domain.ts"
-import type { RolloutEffect } from "@rp/shared/workshopApi.ts"
+import type { User } from "@dreamspan/shared/domain.ts"
+import type { RolloutEffect } from "@dreamspan/shared/workshopApi.ts"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { ExecutionRegistry } from "../execution.ts"

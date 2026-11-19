@@ -3,7 +3,7 @@
 // multi-region and the regional endpoints charge 1.1x (every listed model, checked row by row).
 // Not here: Claude Opus 4.1, Opus 4 and Sonnet 4, which Anthropic says remain on Vertex but the
 // pricing page doesn't list; the Mythos models, which it doesn't list either.
-import type { Price } from "@rp/shared/providers.ts"
+import type { Price } from "@dreamspan/shared/providers.ts"
 import { claude } from "./anthropic.ts"
 import type { PriceEntry, PriceTable } from "./types.ts"
 

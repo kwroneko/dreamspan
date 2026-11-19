@@ -6,7 +6,7 @@
 // registered slot entries, so a plugin can replace or drop either. A lock is account data, so
 // another browser tab follows a change at once (the `rp.personaLock` channel) and on focus, as
 // display preferences and external media do (ARCHITECTURE §5 "Client state").
-import type { CastCard, EntityId } from "@rp/shared/chat.ts"
+import type { CastCard, EntityId } from "@dreamspan/shared/chat.ts"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { useEffect, useSyncExternalStore } from "react"

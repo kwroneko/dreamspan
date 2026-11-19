@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { SlotId } from "@rp/shared/chat.ts"
-import type { StateMarkEvent, StateMarks } from "@rp/shared/contextsApi.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import type { StateMarkEvent, StateMarks } from "@dreamspan/shared/contextsApi.ts"
 import {
   marksOf,
   registerStateMarkerKinds,

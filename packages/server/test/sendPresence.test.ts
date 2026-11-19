@@ -5,10 +5,10 @@
 // character's later request has only what it was there for, in a plain group chat and after
 // threads were joined; a wrong name is refused and corrected; the write happens once.
 import { assert, describe, it } from "@effect/vitest"
-import { NewVersion, type EntityId, type ForkId, type SlotId, type VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { awayAt } from "@rp/shared/knowledge.ts"
-import { foldState, type StateEventData } from "@rp/shared/state.ts"
+import { NewVersion, type EntityId, type ForkId, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { awayAt } from "@dreamspan/shared/knowledge.ts"
+import { foldState, type StateEventData } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import { databaseFile } from "../src/db/connection.ts"

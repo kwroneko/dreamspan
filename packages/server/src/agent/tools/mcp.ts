@@ -12,9 +12,9 @@
 // classes (one class, `mcp`, enabled is the consent); a client opened per call rather than a pool;
 // a call is never retried behind the model's back.
 import { Type } from "@earendil-works/pi-ai"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
-import { MCP_DESCRIPTION_LIMIT, type McpConnection, mcpToolAllowed, type McpTool } from "@rp/shared/mcp.ts"
-import type { CapabilityMode } from "@rp/shared/workshopApi.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
+import { MCP_DESCRIPTION_LIMIT, type McpConnection, mcpToolAllowed, type McpTool } from "@dreamspan/shared/mcp.ts"
+import type { CapabilityMode } from "@dreamspan/shared/workshopApi.ts"
 import { Effect } from "effect"
 import type { McpConnectionsShape } from "../../mcp/McpConnections.ts"
 import { MCP_CAPABILITY } from "../capabilities.ts"

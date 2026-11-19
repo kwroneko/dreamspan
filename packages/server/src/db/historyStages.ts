@@ -3,8 +3,8 @@
 import { createHash, type Hash } from "node:crypto"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { HistoryRejected, type HistoryEdit } from "@rp/shared/historyApi.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { HistoryRejected, type HistoryEdit } from "@dreamspan/shared/historyApi.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { historyFork } from "./historyShared.ts"
 import type { makeBulkHistory } from "./historyBulk.ts"
 

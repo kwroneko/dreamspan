@@ -1,7 +1,7 @@
 // A per-user computation shared within a writer invalidation epoch. SQLite and
 // folding remain in the reader worker; publication never waits for persistence.
 import { Deferred, Effect, Exit } from "effect"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 
 const MAX_COMPLETED = 16
 

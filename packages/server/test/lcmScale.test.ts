@@ -1,5 +1,5 @@
 import { assert } from "@effect/vitest"
-import type { SlotId } from "@rp/shared/chat.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { lcmHarness, lcmTest } from "./support/lcmHarness.ts"

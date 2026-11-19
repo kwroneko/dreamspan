@@ -1,7 +1,7 @@
 // Which of the path's images a request sends, and why the others aren't (ARCHITECTURE §15).
 import { Effect } from "effect"
-import type { SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { ImageLeftOut } from "@rp/shared/inspectorApi.ts"
+import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { ImageLeftOut } from "@dreamspan/shared/inspectorApi.ts"
 import { need, type AssemblerStage, type Assembly } from "./pipeline.ts"
 import type { HistoryImage, RequestMessage } from "./types.ts"
 

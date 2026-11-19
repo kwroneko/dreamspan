@@ -3,8 +3,8 @@
 // doesn't claim a skill is installed, and start choices that live in the URL: Back restores the
 // previous one, and an id the library doesn't have is dropped rather than sent. Made-up cards only.
 import { expect, type Page, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { saveRevision } from "./support/saveRevision.ts"

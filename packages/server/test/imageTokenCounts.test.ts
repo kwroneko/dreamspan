@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest"
 import { Deferred, Effect, Layer } from "effect"
 import { TestClock } from "effect/testing"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { ImageTokenCounts, type UncountedImages } from "../src/chat/ImageTokenCounts.ts"
 import { Providers } from "../src/providers/Providers.ts"
 import { Reader, Writer } from "../src/db/Database.ts"

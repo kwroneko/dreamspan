@@ -1,7 +1,7 @@
 // The page side of the display worker treats every worker message as hostile: the plugin
 // shares the worker's global, so it can post anything, at any time, in any amount.
 import { afterEach, expect, it, vi } from "vitest"
-import type { ClientPlugin } from "@rp/shared/pluginClient.ts"
+import type { ClientPlugin } from "@dreamspan/shared/pluginClient.ts"
 import { startDisplayPlugin } from "../src/displayPlugin.ts"
 import { clientPluginHost, loadClientPlugin } from "../src/plugins.tsx"
 import { timelineResult, displayListResult } from "../src/displayAdapter.ts"
@@ -9,7 +9,7 @@ import { displayTransforms } from "../src/features/chat/displayPipeline.ts"
 import { displayScriptLists, builtinDisplayScriptLists } from "../src/features/chat/displayScripts.ts"
 import { messageRows, timelineRows, type TimelineContext } from "../src/features/chat/timelineContributions.tsx"
 import type { ChatView } from "../src/features/chat/session.ts"
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 
 it("a retained message row keeps its own message, range and anchor whatever the copy says", () => {
   const entries = [0, 1].map((depth) => ({ slotId: `slot-${depth}`, depth, version: null })) as unknown as PathEntry[]

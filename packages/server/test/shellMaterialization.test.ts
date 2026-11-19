@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { Deferred, Effect, Exit, Fiber, Semaphore } from "effect"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { storeStaleParts } from "../src/db/Database.ts"
 import { makeShellMaterialization } from "../src/db/shellMaterialization.ts"
 

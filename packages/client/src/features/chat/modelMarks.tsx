@@ -8,8 +8,8 @@
 // (MIT, vendored below; owner approved, importreport 2026-11-02). ST's icons are AGPL-3.0 and
 // this app is not, so none of those is copied. Each mark is a
 // registry entry (spec/PLUGINS.md §8): a plugin adds a lab, or replaces a mark, by id.
-import type { ModelRef } from "@rp/shared/chat.ts"
-import { stApiLabel } from "@rp/shared/stApis.ts"
+import type { ModelRef } from "@dreamspan/shared/chat.ts"
+import { stApiLabel } from "@dreamspan/shared/stApis.ts"
 import type { ComponentType } from "react"
 import { useSyncExternalStore } from "react"
 import { makeRegistry } from "../../registry.ts"

@@ -4,7 +4,7 @@
 // `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` "are still accepted ... served by the
 // DeepSeek-V4.1-Flash-1017 model and billed at the Flash price". Not here: `deepseek-chat` and
 // `deepseek-reasoner`, announced as discontinued on 2026-07-24.
-import type { Price } from "@rp/shared/providers.ts"
+import type { Price } from "@dreamspan/shared/providers.ts"
 import type { OffPeak, PriceEntry, PriceTable } from "./types.ts"
 
 const source = "https://api-docs.deepseek.com/quick_start/pricing"

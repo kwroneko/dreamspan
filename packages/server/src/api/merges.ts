@@ -1,9 +1,9 @@
 // Merging another chat into this one (spec/CHAT-MERGE.md §8; owner decisions DESIGN §3.3,
 // 2026-11-05). `MergeChat` dispatches through the registered command `chat.merge`, so a plugin
 // can replace it and the in-app agent merges the same way.
-import { CurrentUser } from "@rp/shared/api.ts"
-import { PathEntry } from "@rp/shared/chat.ts"
-import { StaleWrite } from "@rp/shared/errors.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import { PathEntry } from "@dreamspan/shared/chat.ts"
+import { StaleWrite } from "@dreamspan/shared/errors.ts"
 import {
   JoinedThreads,
   JoinThreadsInput,
@@ -12,7 +12,7 @@ import {
   MergedChat,
   MergeRefused,
   type MergeRequest
-} from "@rp/shared/mergeApi.ts"
+} from "@dreamspan/shared/mergeApi.ts"
 import { Effect } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Commands, makeCommand, runCommand } from "../commands.ts"

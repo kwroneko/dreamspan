@@ -1,5 +1,5 @@
-import { deletedSince, observeDeletion, type ObservedDeletion } from "@rp/shared/drafts.ts"
-import type { MessageImages } from "@rp/shared/chat.ts"
+import { deletedSince, observeDeletion, type ObservedDeletion } from "@dreamspan/shared/drafts.ts"
+import type { MessageImages } from "@dreamspan/shared/chat.ts"
 // The text of a message editor (DESIGN §6.2): an edit of a version, or a version of a
 // message the user is writing. Typed into a server draft like a summary's (summaryDraft.ts),
 // keyed by the version edited or the slot written to, so it outlives the row (the message
@@ -10,9 +10,9 @@ import type { MessageImages } from "@rp/shared/chat.ts"
 // As for summaries, text typed is copied into this browser (`editor/backup.ts`) until the
 // server has it: a save that fails, a closed tab or a reload leaves the copy, filed under
 // the chat, which opening the chat again replays, with the draft it was typed on.
-import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import { EDIT_THINKING_FIELD, type MessageDraftSave, type MessageDraftTarget } from "@rp/shared/chatApi.ts"
-import { type Draft, DraftHistoryPolicy } from "@rp/shared/drafts.ts"
+import type { ChatId, ForkId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import { EDIT_THINKING_FIELD, type MessageDraftSave, type MessageDraftTarget } from "@dreamspan/shared/chatApi.ts"
+import { type Draft, DraftHistoryPolicy } from "@dreamspan/shared/drafts.ts"
 import type { AppError } from "../../errors.ts"
 import { type Copy, dropCopy, keepCopy, makeCopy, pendingOf, type ReplayConflict } from "../editor/backup.ts"
 import type { ChatSession, Outcome } from "./session.ts"

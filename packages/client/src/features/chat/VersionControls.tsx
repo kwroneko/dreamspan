@@ -1,4 +1,4 @@
-import type { PathEntry, Version } from "@rp/shared/chat.ts"
+import type { PathEntry, Version } from "@dreamspan/shared/chat.ts"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import { VersionPicker } from "./VersionPicker.tsx"
 

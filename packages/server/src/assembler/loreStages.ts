@@ -1,11 +1,11 @@
-import { replacingBook } from "@rp/shared/lorebookLink.ts"
-import { modelName } from "@rp/shared/cardNames.ts"
-import { canonicalJson } from "@rp/shared/editing.ts"
+import { replacingBook } from "@dreamspan/shared/lorebookLink.ts"
+import { modelName } from "@dreamspan/shared/cardNames.ts"
+import { canonicalJson } from "@dreamspan/shared/editing.ts"
 import { createHash } from "node:crypto"
 // Lorebook reads and keyword activation, in the reader worker's registered pipeline.
 import { Effect } from "effect"
 import { loreIdentity, loreEntryKey } from "./loreTiming.ts"
-import { characterFilterPasses } from "@rp/shared/lorebookFilters.ts"
+import { characterFilterPasses } from "@dreamspan/shared/lorebookFilters.ts"
 import { matchLorebooks } from "./lorebook.ts"
 import { loreAllowance, loreBudget } from "./budget.ts"
 import { estimateTokens } from "./st.ts"
@@ -14,7 +14,7 @@ import { projectedScript, AssemblySources, type AssemblerStage, need } from "./p
 import { characterNoteText, historyLeafOf, type LorebookInput, type LoreRecord, noteCard } from "./types.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
 import { applyScripts, PLACEMENT } from "./regex.ts"
-import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
+import type { LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
 
 /** A separate stream: probability never consumes the macros' random draws. */
 const randomFor = (input: string) => {

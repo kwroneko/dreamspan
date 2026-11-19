@@ -2,12 +2,12 @@ import { CenterHeaderContent, compactHeaderControls } from "../../ui/CenterHeade
 import { useSearchHighlights } from "./searchHighlights.ts"
 // The shared four-row card header (owner, 2026-11-03): name/version/save, nickname,
 // Persona and chats/token counts (Persona last in the side panel). Names retain their rename questions.
-import { renameQuestion } from "@rp/shared/cardNames.ts"
+import { renameQuestion } from "@dreamspan/shared/cardNames.ts"
 import { useAtomValue } from "@effect/atom-react"
-import { cardTokenTexts, sumCardTokens } from "@rp/shared/cardTokens.ts"
-import { ChatId, type EntityId, ForkId } from "@rp/shared/chat.ts"
-import { textField } from "@rp/shared/editing.ts"
-import type { NoteEntry } from "@rp/shared/editorApi.ts"
+import { cardTokenTexts, sumCardTokens } from "@dreamspan/shared/cardTokens.ts"
+import { ChatId, type EntityId, ForkId } from "@dreamspan/shared/chat.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
+import type { NoteEntry } from "@dreamspan/shared/editorApi.ts"
 import { useSearch } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { AsyncResult } from "effect/reactivity"
@@ -89,7 +89,7 @@ const subscribeLiveNotes = (refIds: ReadonlyArray<string>) => (listener: () => v
 
 /**
  * The card's total and permanent token counts, as ST's character panel has them
- * (@rp/shared/cardTokens.ts), with the chat model's tokenizer, counted as you type.
+ * (@dreamspan/shared/cardTokens.ts), with the chat model's tokenizer, counted as you type.
  */
 function CardTokens({ store }: { store: EditorStore }) {
   const notes = useDefaultNotes(store.refId)

@@ -4,7 +4,7 @@ import { Summarizer } from "../src/lcm/Summarizer.ts"
 // them, even when the reply a queue posted ends at once and publishes the next queue while
 // the first is still publishing what it posted.
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { Deferred, Effect, Layer, Option, Stream } from "effect"
 import { ChatHub } from "../src/chat/ChatHub.ts"
 import { Generations } from "../src/chat/Generations.ts"

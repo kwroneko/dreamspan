@@ -1,8 +1,8 @@
 // Whom the insertion editor speaks as when it opens (spec/MESSAGE-INSERT.md §4.2): a convenience,
 // registered so a plugin can change it; the user picks in the editor's switcher. The entry with
 // the lowest order decides.
-import type { EntityId, PathEntry } from "@rp/shared/chat.ts"
-import type { Cast } from "@rp/shared/chatSetupApi.ts"
+import type { EntityId, PathEntry } from "@dreamspan/shared/chat.ts"
+import type { Cast } from "@dreamspan/shared/chatSetupApi.ts"
 import { makeRegistry } from "../../../registry.ts"
 import { messageSide } from "../cast.ts"
 

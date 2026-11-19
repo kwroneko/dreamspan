@@ -1,10 +1,10 @@
-// Several messages at once (@rp/shared/messageSelectionApi.ts): a multi-delete and its Undo. What
+// Several messages at once (@dreamspan/shared/messageSelectionApi.ts): a multi-delete and its Undo. What
 // follows each is what follows DeleteMessage and RestoreBinItem (api/chats.ts, api/bin.ts): the
 // chat's tabs read it again, generations under what went stop, the cache estimate is refreshed.
-import { CurrentUser } from "@rp/shared/api.ts"
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { MessageSelectionApi } from "@rp/shared/messageSelectionApi.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { MessageSelectionApi } from "@dreamspan/shared/messageSelectionApi.ts"
 import { Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"

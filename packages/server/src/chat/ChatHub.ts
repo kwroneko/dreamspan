@@ -1,7 +1,7 @@
 // Live updates to chats (CLIENT-FRAMEWORK §5): every change to a chat is published here,
 // and each subscriber gets the chat's events in batches, one per frame at most.
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { type Cause, Context, Effect, Layer, Queue, type Scope } from "effect"
 
 type Batch = ReadonlyArray<ChatEvent>

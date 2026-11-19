@@ -4,9 +4,9 @@
 // its replies, its condensations, a correction of who was there, an edit and the backfill
 // estimate all keep to that view. A shared chat plans and sends exactly what it did before.
 import { assert, describe } from "@effect/vitest"
-import { type EntityId, NewVersion } from "@rp/shared/chat.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
+import { type EntityId, NewVersion } from "@dreamspan/shared/chat.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import type { StateEventData } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { cardDoc } from "./support/docs.ts"
@@ -14,8 +14,8 @@ import { fixtureSql } from "./support/lcmFixtures.ts"
 import { lcmHarness, lcmTest } from "./support/lcmHarness.ts"
 import { historyTools } from "../src/agent/tools/history.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
-import type { ForkId } from "@rp/shared/chat.ts"
-import type { HistoryCursor, HistoryHit } from "@rp/shared/historyApi.ts"
+import type { ForkId } from "@dreamspan/shared/chat.ts"
+import type { HistoryCursor, HistoryHit } from "@dreamspan/shared/historyApi.ts"
 import type { Recorded } from "./support/mockProvider.ts"
 
 /** The stretch Wren was away for. */

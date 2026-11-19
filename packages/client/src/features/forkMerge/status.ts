@@ -1,6 +1,6 @@
 // What a fork can take from its parent (or a card from its newer files), read once per ref.
-import type { MergeStatus } from "@rp/shared/forkMerge.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { MergeStatus } from "@dreamspan/shared/forkMerge.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { AppClient } from "../../rpc.ts"
 
 type Status = typeof MergeStatus.Type

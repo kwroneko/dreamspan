@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { isDirectOpenAI } from "@rp/shared/providerDefinitions.ts"
+import { isDirectOpenAI } from "@dreamspan/shared/providerDefinitions.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
 import { loadingWireFor } from "../src/agent/loadingPlan.ts"
 import type { ModelInput } from "../src/assembler/types.ts"

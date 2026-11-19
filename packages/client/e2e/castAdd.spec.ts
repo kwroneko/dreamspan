@@ -5,7 +5,7 @@
 // Every card is made up.
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { openPanel } from "./support/panel.ts"

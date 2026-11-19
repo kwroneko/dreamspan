@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { contextChoices, JOINS_READ_WHOLE } from "../src/features/chat/contextChoices.ts"
 import { replyDetail } from "../src/features/chat/ReplyFrom.tsx"
 

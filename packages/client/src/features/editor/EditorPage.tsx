@@ -8,12 +8,12 @@ import { useCast } from "../chat/cast.ts"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useCardNameCheck } from "./cardNameCheck.ts"
-import type { PresetContext } from "@rp/shared/inspectorApi.ts"
+import type { PresetContext } from "@dreamspan/shared/inspectorApi.ts"
 // A library entry's editor (ARCHITECTURE.md §14): which entry and scope you're editing, how
 // many chats the change reaches, and the save cluster (DESIGN §10.1).
 import { useAtomValue } from "@effect/atom-react"
-import type { SavedRef } from "@rp/shared/editorApi.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { SavedRef } from "@dreamspan/shared/editorApi.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Link, useParams, useSearch } from "@tanstack/react-router"
 import {
   CARD_LOREBOOK_FOCUS,

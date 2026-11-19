@@ -1,5 +1,5 @@
 // Bin labels use the whole chat title, including quotes inside a group name.
-import type { BinItem, RecoveredText } from "@rp/shared/bin.ts"
+import type { BinItem, RecoveredText } from "@dreamspan/shared/bin.ts"
 import { readableChatTitle } from "../chat/chatTitle.ts"
 
 export const binTitle = (item: BinItem) => {

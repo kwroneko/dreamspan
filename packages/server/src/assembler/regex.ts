@@ -1,12 +1,12 @@
-import { run, OutputLimit } from "@rp/shared/regexReplace.ts"
-export { run } from "@rp/shared/regexReplace.ts"
+import { run, OutputLimit } from "@dreamspan/shared/regexReplace.ts"
+export { run } from "@dreamspan/shared/regexReplace.ts"
 // A preset's prompt-only regex scripts, as ST 1.19 runs them when it builds a prompt
 // (extensions/regex/engine.js), on V8's linear-time engine and within a time and output
 // budget (ARCHITECTURE §15).
 import { setFlagsFromString } from "node:v8"
 import { createContext, Script } from "node:vm"
-import type { RegexScript } from "@rp/shared/docs/preset.ts"
-import { OUT_OF_TIME, type ScriptFailure, type ScriptRef, type TextRewrite } from "@rp/shared/regexScripts.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/preset.ts"
+import { OUT_OF_TIME, type ScriptFailure, type ScriptRef, type TextRewrite } from "@dreamspan/shared/regexScripts.ts"
 import type { Assembly } from "./pipeline.ts"
 
 setFlagsFromString("--enable-experimental-regexp-engine")

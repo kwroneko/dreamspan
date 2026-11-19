@@ -2,10 +2,10 @@
 // edit changes every slot; unlinking makes the slot its own copy, a chat's on its branch only;
 // a shared note in the bin sends nothing. Cross-user access is in the isolation matrix.
 import { assert, it } from "@effect/vitest"
-import { type ChatId, type EntityId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { textField, valueField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import { type ChatId, type EntityId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { textField, valueField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { Generator } from "../src/chat/Generator.ts"

@@ -1,16 +1,16 @@
 import { expect, it, vi } from "vitest"
-import { Version, type SlotId, type VersionId } from "@rp/shared/chat.ts"
-import { DEFAULT_DISPLAY_PREFS } from "@rp/shared/chatApi.ts"
-import type { RegexScript } from "@rp/shared/docs/preset.ts"
-import { expand } from "@rp/shared/macros/expand.ts"
-import { makeMacroRegistry } from "@rp/shared/macros/registry.ts"
+import { Version, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
+import { DEFAULT_DISPLAY_PREFS } from "@dreamspan/shared/chatApi.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/preset.ts"
+import { expand } from "@dreamspan/shared/macros/expand.ts"
+import { makeMacroRegistry } from "@dreamspan/shared/macros/registry.ts"
 import {
   applyDisplayTransforms,
   displayTransforms,
   macroDisplay,
   type DisplayInput
 } from "../src/features/chat/displayPipeline.ts"
-import { run, OutputLimit } from "@rp/shared/regexReplace.ts"
+import { run, OutputLimit } from "@dreamspan/shared/regexReplace.ts"
 import { runDisplayRegex } from "../src/features/chat/displayRegex.ts"
 
 const version = new Version({

@@ -1,9 +1,9 @@
 // Replacement ownership is checked in the writer transaction, including off notes and stale tabs.
 import { assert, layer } from "@effect/vitest"
-import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
-import { valueField } from "@rp/shared/editing.ts"
-import type { ReplaceTarget } from "@rp/shared/docs/note.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
+import type { ChatNotePosition } from "@dreamspan/shared/editorApi.ts"
+import { valueField } from "@dreamspan/shared/editing.ts"
+import type { ReplaceTarget } from "@dreamspan/shared/docs/note.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"

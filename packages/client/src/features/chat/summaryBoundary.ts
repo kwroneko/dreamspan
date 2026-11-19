@@ -1,5 +1,5 @@
 // Where summarized history ends in the message list (DESIGN §8), compared by display position.
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import type { ChatView } from "./session.ts"
 
 /**

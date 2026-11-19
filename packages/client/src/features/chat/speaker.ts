@@ -4,8 +4,8 @@
 // (ST-GRIPES D8). A change made in any tab is published to every tab of the chat.
 //
 // One store per open chat, so the composer and the Cast tab read and change the same choice.
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { ComposerChoice } from "@rp/shared/composerApi.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { ComposerChoice } from "@dreamspan/shared/composerApi.ts"
 import { useSyncExternalStore } from "react"
 import { focusComposer } from "./composerFocus.ts"
 import type { ChatSession, Outcome } from "./session.ts"

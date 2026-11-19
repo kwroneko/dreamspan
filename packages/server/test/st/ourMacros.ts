@@ -1,10 +1,10 @@
-// Our macro engine as the ST harness calls it (`@rp/shared/macros/`, ARCHITECTURE §10), with
+// Our macro engine as the ST harness calls it (`@dreamspan/shared/macros/`, ARCHITECTURE §10), with
 // the context ST's page has: the vector's names and variables, the fixture card and chat,
 // ST's settings, the fixed clock.
-import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
-import type { CardFields, ChatMessage } from "@rp/shared/macros/context.ts"
-import { expand } from "@rp/shared/macros/expand.ts"
-import { makeMacroRegistry } from "@rp/shared/macros/registry.ts"
+import { registerBuiltinMacros } from "@dreamspan/shared/macros/builtins.ts"
+import type { CardFields, ChatMessage } from "@dreamspan/shared/macros/context.ts"
+import { expand } from "@dreamspan/shared/macros/expand.ts"
+import { makeMacroRegistry } from "@dreamspan/shared/macros/registry.ts"
 import { Effect, Scope } from "effect"
 import type { MacroContextInput, MacroOutcome } from "./macroVectors.ts"
 
@@ -29,7 +29,7 @@ interface OurMacroInput {
 }
 
 /** The engine's name in the report. */
-export const OUR_ENGINE = "@rp/shared/macros expand(), built-in macros"
+export const OUR_ENGINE = "@dreamspan/shared/macros expand(), built-in macros"
 export const OUR_ENGINE_IS_STUB = false
 
 // The built-ins stay registered for the whole run: the scope is never closed.

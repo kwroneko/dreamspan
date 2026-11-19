@@ -1,4 +1,4 @@
-import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
+import { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { cardToJson } from "../../src/formats/cardExport.ts"
@@ -6,7 +6,7 @@ import { importCard } from "../../src/formats/cardImport.ts"
 import { defaultLimits } from "../../src/formats/safety.ts"
 import { exportLorebook, importLorebook } from "../../src/formats/worldInfo.ts"
 import { mapLorebookFilters } from "../../src/formats/lorebookFilters.ts"
-import { characterFilterPasses } from "@rp/shared/lorebookFilters.ts"
+import { characterFilterPasses } from "@dreamspan/shared/lorebookFilters.ts"
 import { failure, json, run, stCardV2, worldInfo } from "./support.ts"
 
 /** Every key and value of `expected` is in `actual`. */

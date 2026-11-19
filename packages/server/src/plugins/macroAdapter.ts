@@ -1,9 +1,9 @@
 import { Predicate } from "effect"
-import { isMacroLimit } from "@rp/shared/macros/expand.ts"
+import { isMacroLimit } from "@dreamspan/shared/macros/expand.ts"
 // API v1's cooperative call boundary. VM timeout bounds synchronous callbacks, not trust.
 import { createContext, Script } from "node:vm"
-import type { MacroCall, MacroEntry, MacroVariablesV1 } from "@rp/shared/macros/registry.ts"
-import type { ChatMessage } from "@rp/shared/macros/context.ts"
+import type { MacroCall, MacroEntry, MacroVariablesV1 } from "@dreamspan/shared/macros/registry.ts"
+import type { ChatMessage } from "@dreamspan/shared/macros/context.ts"
 
 const invoke = new Script("invoke()", { filename: "plugin-macro" })
 // Bound plugin-produced text before it can enter assembly or a frozen draw.

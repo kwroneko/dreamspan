@@ -12,9 +12,9 @@
 // route rule, stored with the model's upstream and applied only when the model's routing pins one
 // of them (`routedUpstream` in the shared resolution, so the assembly applies it at send and the
 // model page shows it). Its payload rewrite applies when the request's own routing pins one.
-import { type FixedCapability, type ModelUpstream, pinnedRoute, type RouteRule } from "@rp/shared/providers.ts"
+import { type FixedCapability, type ModelUpstream, pinnedRoute, type RouteRule } from "@dreamspan/shared/providers.ts"
 import type { RequestTarget } from "./registry.ts"
-import type { ProviderError } from "@rp/shared/errors.ts"
+import type { ProviderError } from "@dreamspan/shared/errors.ts"
 import { portableParameters } from "./toolSchemas.ts"
 
 interface ShimRequest {

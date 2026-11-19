@@ -2,14 +2,14 @@
 // ARCHITECTURE.md §13): listing the files the import reads, and reading one of them, a chat
 // in parts cut at line ends as the browser upload sends it. Plain file reads on the main
 // thread; parsing stays in the format workers.
-import { formatByteSize } from "@rp/shared/byteSize.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import { createHash } from "node:crypto"
 import { createReadStream } from "node:fs"
 import { open, opendir, readdir, readFile, realpath, stat } from "node:fs/promises"
 import { dirname, isAbsolute, join } from "node:path"
-import { classifyStPath, ST_CHAT_PART_BYTES } from "@rp/shared/stFolder.ts"
-import { ST_HEAD_BYTES, stMainChat } from "@rp/shared/stPlan.ts"
-import { FolderListing, StFolderEntry, StFolderUnreadable } from "@rp/shared/stImportApi.ts"
+import { classifyStPath, ST_CHAT_PART_BYTES } from "@dreamspan/shared/stFolder.ts"
+import { ST_HEAD_BYTES, stMainChat } from "@dreamspan/shared/stPlan.ts"
+import { FolderListing, StFolderEntry, StFolderUnreadable } from "@dreamspan/shared/stImportApi.ts"
 import { Effect } from "effect"
 import { defaultLimits } from "../formats/safety.ts"
 

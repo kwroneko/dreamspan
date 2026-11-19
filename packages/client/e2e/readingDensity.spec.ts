@@ -10,7 +10,7 @@
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test, type TestInfo } from "@playwright/test"
-import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { messageMenu } from "./support/message.ts"

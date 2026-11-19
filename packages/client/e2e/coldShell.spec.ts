@@ -39,7 +39,7 @@ for (const width of [1440, 390])
       const fixture = await admin((api) =>
         Effect.gen(function* () {
           const chat = yield* api.CreateChat({ title: `Cold navigation ${width} ${theme}` })
-          let parent = null as import("@rp/shared/chat.ts").SlotId | null
+          let parent = null as import("@dreamspan/shared/chat.ts").SlotId | null
           let linked = parent
           for (let n = 0; n < 12; n++) {
             const sent = yield* api.SendMessage({

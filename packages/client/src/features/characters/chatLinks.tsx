@@ -1,5 +1,5 @@
 // Entry points share the sidebar's existing URL scope; they never open another chat.
-import type { CastCard, EntityId } from "@rp/shared/chat.ts"
+import type { CastCard, EntityId } from "@dreamspan/shared/chat.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useSyncExternalStore } from "react"
 import { MenuItem } from "../../ui/Menu.tsx"

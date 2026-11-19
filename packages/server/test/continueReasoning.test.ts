@@ -4,7 +4,7 @@
 // version as it was; to a model that takes no prefill, it sends the reply as the model's own
 // message and the continue nudge after it (owner, 2026-10-31).
 import { assert, describe, it } from "@effect/vitest"
-import type { Version } from "@rp/shared/chat.ts"
+import type { Version } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"

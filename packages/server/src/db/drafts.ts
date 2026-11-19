@@ -1,6 +1,6 @@
-import type { EditingOrigin } from "@rp/shared/drafts.ts"
+import type { EditingOrigin } from "@dreamspan/shared/drafts.ts"
 // Draft storage shared by the writer and the readers (DESIGN §6.2). See
-// @rp/shared/drafts.ts for the patch model.
+// @dreamspan/shared/drafts.ts for the patch model.
 import {
   beforeDeletion,
   deletionMap,
@@ -8,8 +8,8 @@ import {
   reconcileForm,
   trackDeletions,
   type DeletionBase
-} from "@rp/shared/draftDeletions.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+} from "@dreamspan/shared/draftDeletions.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import {
   applyPatch,
   composerKey,
@@ -26,13 +26,13 @@ import {
   parseDraftTarget,
   type Patch,
   type ObservedDeletion
-} from "@rp/shared/drafts.ts"
-import { getAt, isHeldField, parseField } from "@rp/shared/editing.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import type { MessageImages, EntityId } from "@rp/shared/chat.ts"
-import { ComposerChoice } from "@rp/shared/composerApi.ts"
-import { EDIT_THINKING_FIELD } from "@rp/shared/chatApi.ts"
-import { editableThinking, type ReplySections } from "@rp/shared/replySections.ts"
+} from "@dreamspan/shared/drafts.ts"
+import { getAt, isHeldField, parseField } from "@dreamspan/shared/editing.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import type { MessageImages, EntityId } from "@dreamspan/shared/chat.ts"
+import { ComposerChoice } from "@dreamspan/shared/composerApi.ts"
+import { EDIT_THINKING_FIELD } from "@dreamspan/shared/chatApi.ts"
+import { editableThinking, type ReplySections } from "@dreamspan/shared/replySections.ts"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 import { DraftTooLarge, NotFound, StaleWrite } from "./ops.ts"

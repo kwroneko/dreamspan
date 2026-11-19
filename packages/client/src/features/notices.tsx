@@ -13,8 +13,8 @@ import {
   receiveNoticeChannels
 } from "./noticeContributions.tsx"
 import { RegistryContext } from "@effect/atom-react"
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { Notice } from "@rp/shared/noticeApi.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { Notice } from "@dreamspan/shared/noticeApi.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { Cause, Context, Effect, Fiber, Schedule, Stream } from "effect"
 import { AtomRegistry } from "effect/reactivity"

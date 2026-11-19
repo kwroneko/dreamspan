@@ -2,9 +2,9 @@
 // N messages", that opens to the messages it brought in, read-only and paged, with a link to the
 // chat they came from. The copy is frozen at the merge: the other chat can change or go. Another
 // thread of this chat joined here reads "Joined “At the docks”" (spec/THREADS.md §7.1).
-import type { BinItem } from "@rp/shared/bin.ts"
-import type { PathEntry } from "@rp/shared/chat.ts"
-import type { MergedMessage, MergeInfo } from "@rp/shared/mergeApi.ts"
+import type { BinItem } from "@dreamspan/shared/bin.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
+import type { MergedMessage, MergeInfo } from "@dreamspan/shared/mergeApi.ts"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"

@@ -8,7 +8,7 @@
 import { createServer, type Server } from "node:http"
 import type { AddressInfo } from "node:net"
 import { expect, type Page, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { expectLayout, layoutAudit } from "./support/layoutAudit.ts"
 import { closePanel, openPanel } from "./support/panel.ts"

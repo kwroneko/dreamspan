@@ -3,7 +3,7 @@
 // widest the column gets; everything aligned to it uses the `chat-column` utility (styles.css),
 // which also keeps a gutter and fills narrower screens. While the slider is dragged the value
 // shows at once from a preview in this tab, and it's saved once, when the slider is let go.
-import { CHAT_WIDTH } from "@rp/shared/chatApi.ts"
+import { CHAT_WIDTH } from "@dreamspan/shared/chatApi.ts"
 import { useEffect, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Slider } from "../../ui/Slider.tsx"

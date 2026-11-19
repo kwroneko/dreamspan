@@ -5,7 +5,7 @@
 // Every card and chat here is made up. SCREENSHOT_DIR keeps the screenshots; the browser is
 // launched with its scrollbars shown (headless Chromium hides them by default).
 import { join } from "node:path"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { showActions } from "./support/message.ts"

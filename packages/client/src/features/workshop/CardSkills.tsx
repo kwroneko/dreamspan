@@ -9,8 +9,8 @@ import {
   cardSkillProblems,
   duplicateSkillNames,
   isSkillReference
-} from "@rp/shared/cardSkills.ts"
-import { valueField } from "@rp/shared/editing.ts"
+} from "@dreamspan/shared/cardSkills.ts"
+import { valueField } from "@dreamspan/shared/editing.ts"
 import { useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"

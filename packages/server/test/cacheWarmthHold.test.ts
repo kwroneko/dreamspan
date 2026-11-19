@@ -4,8 +4,8 @@
 // out from what's stored when it runs.
 import { assert, it } from "@effect/vitest"
 import { Effect, Fiber, Layer } from "effect"
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { CacheWarmth } from "../src/chat/CacheWarmth.ts"
 import { ChatHub } from "../src/chat/ChatHub.ts"
 import { Reader } from "../src/db/Database.ts"

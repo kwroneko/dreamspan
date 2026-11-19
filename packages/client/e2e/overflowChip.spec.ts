@@ -3,7 +3,7 @@
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, test } from "@playwright/test"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { openPanel, closePanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"

@@ -1,5 +1,5 @@
 import { configurationRevision, trackAutoConfiguration } from "../chat/autoConfiguration.ts"
-import { stateKeys } from "@rp/shared/state.ts"
+import { stateKeys } from "@dreamspan/shared/state.ts"
 import { settingsRegistry } from "../db/settings.ts"
 import { storageKinds } from "../db/storageKinds.ts"
 // Full-trust server plugins, scoped registrations and worker bridges. Consent is never inferred.
@@ -16,9 +16,9 @@ import {
   type BuiltinPart,
   type BuiltinComparison,
   type CopyBuiltinResult
-} from "@rp/shared/plugins.ts"
-import type { User, UserId } from "@rp/shared/domain.ts"
-import { hasServerCode, pluginAccessGrows } from "@rp/shared/pluginConsent.ts"
+} from "@dreamspan/shared/plugins.ts"
+import type { User, UserId } from "@dreamspan/shared/domain.ts"
+import { hasServerCode, pluginAccessGrows } from "@dreamspan/shared/pluginConsent.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { AppConfig } from "../config.ts"
 import { ExecutionRegistry } from "../execution.ts"
@@ -32,7 +32,7 @@ import { Network } from "../net/Network.ts"
 import { checkPlugin, readBuild, readClientBuild, readRuntimeBuild } from "./check.ts"
 import { declaredHandles, type RegistrationRegistry } from "./handles.ts"
 import { makePluginAuthoring } from "../agent/tools/plugins.ts"
-import type { RolloutEffect } from "@rp/shared/workshopApi.ts"
+import type { RolloutEffect } from "@dreamspan/shared/workshopApi.ts"
 import { repoTask } from "./repoTask.ts"
 import type { Activate, ServerHost } from "../../../plugin-api/src/server.ts"
 import { builtinCopies, builtinCopy, missingBuiltinAdapter, unavailableDisplayBodies } from "./builtins.ts"
@@ -40,7 +40,7 @@ import { builtinCopies, builtinCopy, missingBuiltinAdapter, unavailableDisplayBo
 type Target = { readonly scope: "instance" | "user"; readonly id: string }
 type Version = Target & { readonly commit: string; readonly expectedRevision?: number }
 type Failure = PluginRejected
-import type { ClientPlugin } from "@rp/shared/pluginClient.ts"
+import type { ClientPlugin } from "@dreamspan/shared/pluginClient.ts"
 const attempt = <A>(run: () => Promise<A>) =>
   Effect.tryPromise({
     try: run,

@@ -1,5 +1,5 @@
 // The user's models as picker items, "connection · model", for the places that choose one.
-import { resolveModel, type Connection, type Model } from "@rp/shared/providers.ts"
+import { resolveModel, type Connection, type Model } from "@dreamspan/shared/providers.ts"
 import { Cause, Effect, Exit } from "effect"
 import { useEffect, useMemo, useState } from "react"
 import { type ActionResult, useAction } from "../../actions.tsx"

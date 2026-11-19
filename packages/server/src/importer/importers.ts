@@ -4,8 +4,8 @@ import { importPromptPreset } from "../formats/presetSettings.ts"
 // run in a format worker (Formats.ts), never on the main thread, so this registry lives
 // in that worker.
 import { createHash } from "node:crypto"
-import type { CardDoc } from "@rp/shared/docs/card.ts"
-import { LoreRole } from "@rp/shared/docs/lorebook.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import { LoreRole } from "@dreamspan/shared/docs/lorebook.ts"
 import {
   ReplaceTarget,
   MAX_NOTE_DEPTH,
@@ -13,10 +13,10 @@ import {
   noteDepth,
   type NoteDoc,
   Placement
-} from "@rp/shared/docs/note.ts"
-import { PRESET_SCHEMA_VERSION } from "@rp/shared/docs/preset.ts"
-import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
-import type { Doc, EntityKind } from "@rp/shared/library.ts"
+} from "@dreamspan/shared/docs/note.ts"
+import { PRESET_SCHEMA_VERSION } from "@dreamspan/shared/docs/preset.ts"
+import { ImportIssue, ImportReport } from "@dreamspan/shared/importReport.ts"
+import type { Doc, EntityKind } from "@dreamspan/shared/library.ts"
 import { Context, Effect, Layer, Predicate, Schema } from "effect"
 import { importCard } from "../formats/cardImport.ts"
 import { isStPresetFile } from "../formats/preset.ts"
@@ -28,8 +28,8 @@ import { makeRegistry, type Registry } from "../registry.ts"
 import { type Sniffed, sniff } from "./detect.ts"
 import { ParsedFile, ParsedMedia } from "./ops.ts"
 import { describeImage } from "./images.ts"
-import { validateDoc } from "@rp/shared/editing.ts"
-import { AvatarCrop, snapCrop } from "@rp/shared/media.ts"
+import { validateDoc } from "@dreamspan/shared/editing.ts"
+import { AvatarCrop, snapCrop } from "@dreamspan/shared/media.ts"
 
 /** A file that came with an imported one: a card's avatar or an embedded asset. */
 interface ImportedFile {

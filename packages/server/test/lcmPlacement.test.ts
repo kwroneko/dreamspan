@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
-import { Summary } from "@rp/shared/lcm.ts"
-import type { NoteDoc } from "@rp/shared/docs/note.ts"
+import { Summary } from "@dreamspan/shared/lcm.ts"
+import type { NoteDoc } from "@dreamspan/shared/docs/note.ts"
 import { Effect, Schema } from "effect"
 import { importStPreset } from "../src/formats/preset.ts"
 import { assembleFixture, type AssemblyFixture } from "./support/assemblySources.ts"

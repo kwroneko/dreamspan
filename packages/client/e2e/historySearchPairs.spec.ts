@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { Effect, Schema } from "effect"
-import { SummaryId } from "@rp/shared/lcm.ts"
+import { SummaryId } from "@dreamspan/shared/lcm.ts"
 import { level1 } from "./support/summaries.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"

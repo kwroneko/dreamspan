@@ -1,6 +1,6 @@
 // A chat's tab in the workbench's strip shows the chat's own picture, else its first
 // character's face (features/workbench).
-import type { CastCard } from "@rp/shared/chat.ts"
+import type { CastCard } from "@dreamspan/shared/chat.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 
 export const tabPortrait = (

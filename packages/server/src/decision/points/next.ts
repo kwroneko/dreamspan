@@ -5,10 +5,10 @@
 // was; below the threshold, on a timeout, an error or a malformed answer, Auto's pick stays. It
 // runs for each reply of a round too, at its turn, so a round follows the scene as it goes. A pick
 // under Next, No one, Generate and Speak now never come here: their versions aren't Auto's pick.
-import type { EntityId, Version } from "@rp/shared/chat.ts"
-import type { DecisionQuestion } from "@rp/shared/decisions.ts"
-import { awayAt } from "@rp/shared/knowledge.ts"
-import { foldState } from "@rp/shared/state.ts"
+import type { EntityId, Version } from "@dreamspan/shared/chat.ts"
+import type { DecisionQuestion } from "@dreamspan/shared/decisions.ts"
+import { awayAt } from "@dreamspan/shared/knowledge.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import type { DecisionPoint } from "../engine.ts"
 

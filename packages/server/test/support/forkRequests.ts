@@ -1,7 +1,7 @@
 // The request each fork of each chat would send next: a model turn appended at the fork's tip
 // and assembled at a fixed clock, as a generation would. Keyed by chat title and the fork's
 // place among the chat's forks by creation, so two databases of the same import compare.
-import { NewVersion, type ChatId, type ForkId, type SlotId } from "@rp/shared/chat.ts"
+import { NewVersion, type ChatId, type ForkId, type SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../../src/db/Database.ts"
 import { client } from "./config.ts"

@@ -2,12 +2,12 @@
 // this scene?"). The left panel's chat search widens from names to message text with a pressed
 // toggle beside the field; the URL says so (`sideIn=messages`) and holds the text (`sideQ`), so a
 // reload shows the same results. A result is one message as written, with the branches that
-// show it (SearchMessages, @rp/shared/messageSearch.ts), and opens the chat on its first branch
+// show it (SearchMessages, @dreamspan/shared/messageSearch.ts), and opens the chat on its first branch
 // at that message (`fork` and `slot` in the URL). Each page of results is its own query: a
 // changed text unmounts the old ones, which stops their reads on the server.
 import { useAtomValue } from "@effect/atom-react"
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { Excerpt, MessageCursor, MessageHit } from "@rp/shared/messageSearch.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { Excerpt, MessageCursor, MessageHit } from "@dreamspan/shared/messageSearch.ts"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect, useMemo, useState } from "react"

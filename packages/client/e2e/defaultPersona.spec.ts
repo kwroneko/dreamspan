@@ -1,7 +1,7 @@
 // Synthetic personas only: the account default starts new chats; a pending/chat selection
 // stays local. Menus, badges and the same single/group pending flow at both widths.
 import { expect, test, type Page } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { openPanel, closePanel } from "./support/panel.ts"

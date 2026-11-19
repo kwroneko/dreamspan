@@ -28,7 +28,7 @@ export const readTypedBackup = (userId: string, targetId: string): Copy | null =
         save: {
           kind: "userDraft",
           payload: {
-            ownerId: userId as import("@rp/shared/domain.ts").UserId,
+            ownerId: userId as import("@dreamspan/shared/domain.ts").UserId,
             targetId,
             field: "First message",
             content: copy.content,

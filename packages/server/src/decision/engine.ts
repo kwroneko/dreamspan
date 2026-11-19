@@ -6,12 +6,12 @@
 // connection (owner rule: provider sends are opt-in per connection). Each call is a rollout of
 // kind `decision` with its ledger rows, so the Activity panel lists it with tokens and cost.
 // Points are a registry: a plugin adds one, or replaces or removes a built-in, by its id.
-import type { ChatId, ForkId, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
-import { type DecisionAnswers, type DecisionQuestion, parseAnswers } from "@rp/shared/decisions.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import { type ChatState, type FoldableEvent, foldState } from "@rp/shared/state.ts"
-import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
+import type { ChatId, ForkId, SlotId, Version, VersionId } from "@dreamspan/shared/chat.ts"
+import { type DecisionAnswers, type DecisionQuestion, parseAnswers } from "@dreamspan/shared/decisions.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import { type ChatState, type FoldableEvent, foldState } from "@dreamspan/shared/state.ts"
+import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
 import { Cause, Context, Effect, Exit, Layer, Option } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { Providers } from "../providers/Providers.ts"

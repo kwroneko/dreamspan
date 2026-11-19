@@ -6,8 +6,8 @@
 // (stated in ARCHITECTURE §12): every page under 1 s, the median of repeated reads, here on a
 // shared host; the first page of a rare word, and of a common one, well under that.
 import { assert, describe, it } from "@effect/vitest"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { MessageCursor, MessageSearchPage } from "@rp/shared/messageSearch.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { MessageCursor, MessageSearchPage } from "@dreamspan/shared/messageSearch.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

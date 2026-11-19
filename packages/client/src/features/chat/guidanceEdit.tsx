@@ -5,7 +5,7 @@
 // submit makes a new version of that reply with the box's text, and the text stays for the
 // next one; that reply's swipes use the box as it is. ✕ gives the box back to new turns, with
 // the draft it held before. The composer's own draft is never written meanwhile (Composer.tsx).
-import type { EntityId, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
+import type { EntityId, ForkId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
 import { useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"

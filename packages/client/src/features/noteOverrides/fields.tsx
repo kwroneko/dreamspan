@@ -3,7 +3,7 @@
 // replaced" first, its box glowing blue and its edits going to the note, which is named and
 // linked under it; "Original", the card's or preset's own text, edited as usual. A field no note
 // replaces has "Replace with a note in this chat" in its box's strip, shown on hover and focus.
-import type { NoteReplacementView, PresetContext } from "@rp/shared/inspectorApi.ts"
+import type { NoteReplacementView, PresetContext } from "@dreamspan/shared/inspectorApi.ts"
 import { useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"

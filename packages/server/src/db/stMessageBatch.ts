@@ -1,7 +1,7 @@
 // Prepare a new suffix before entering its writer transaction. Matching and re-imports
 // still use the positional path; a suffix known to be new needs only two inserts.
-import type { EntityId, SlotId } from "@rp/shared/chat.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import type { EntityId, SlotId } from "@dreamspan/shared/chat.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { StMessage } from "../formats/stChat.ts"

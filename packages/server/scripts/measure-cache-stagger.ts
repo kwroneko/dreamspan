@@ -6,7 +6,7 @@ import { parseArgs } from "node:util"
 import { randomUUID } from "node:crypto"
 import { Effect, Layer, Schema, Stream } from "effect"
 import { NodeRuntime } from "@effect/platform-node"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { AssembledRequest, ModelInput } from "../src/assembler/types.ts"
 import { scrubProviderEnvironment } from "../src/providerEnvironment.ts"
 

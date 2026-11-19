@@ -1,5 +1,5 @@
 import { escapeToolData } from "./toolData.ts"
-import { decodeToolData } from "@rp/shared/toolData.ts"
+import { decodeToolData } from "@dreamspan/shared/toolData.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { Message } from "@earendil-works/pi-ai"
 

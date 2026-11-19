@@ -6,9 +6,9 @@ import type { Api, Message, Model, ProviderStreams } from "@earendil-works/pi-ai
 import { Context, Effect, Layer } from "effect"
 import { makeRegistry, type Registry } from "../registry.ts"
 import type { ListedModel, ListRequest, ModelListError } from "./modelLists.ts"
-import type { Price, ProviderSettings } from "@rp/shared/providers.ts"
-import type { ProviderDefinition } from "@rp/shared/providerDefinitions.ts"
-import type { Cost, TokenCounts } from "@rp/shared/usage.ts"
+import type { Price, ProviderSettings } from "@dreamspan/shared/providers.ts"
+import type { ProviderDefinition } from "@dreamspan/shared/providerDefinitions.ts"
+import type { Cost, TokenCounts } from "@dreamspan/shared/usage.ts"
 import type { UserPricing } from "./userCosts.ts"
 import type { Capture } from "./usage.ts"
 import type { ImageTokenCounter } from "./imageCounters.ts"
@@ -85,7 +85,7 @@ export interface DecisionWire {
     readonly body: {
       readonly model: string
       readonly state: unknown
-      readonly questions: Readonly<Record<string, import("@rp/shared/decisions.ts").DecisionQuestion>>
+      readonly questions: Readonly<Record<string, import("@dreamspan/shared/decisions.ts").DecisionQuestion>>
     }
     readonly signal: AbortSignal
   }) => Promise<{
@@ -133,7 +133,7 @@ export interface RequestTransform {
       readonly messages: ReadonlyArray<Message>
       readonly breakpoints: ReadonlyArray<number>
       readonly preserveBreakpoints?: boolean
-      readonly cacheLayout?: import("@rp/shared/providers.ts").CacheLayout
+      readonly cacheLayout?: import("@dreamspan/shared/providers.ts").CacheLayout
       /** Set for the automatic layout (no explicit breakpoints) when the assembly has an endpoint. */
       readonly stable?: StableEndpoint
       readonly cacheRetention?: "none" | "short" | "long"

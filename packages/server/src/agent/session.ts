@@ -21,7 +21,7 @@ import {
   type Tool,
   Type
 } from "@earendil-works/pi-ai"
-import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
+import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
 import { Cause, Effect, Exit, Fiber, Option, Queue, Result, Stream } from "effect"
 import type { AssembledRequest, Generation } from "../assembler/types.ts"
 import { providerRequest } from "../assembler/wire.ts"
@@ -32,9 +32,9 @@ import type { Providers, ProviderError } from "../providers/Providers.ts"
 import { ProviderRegistry } from "../providers/registry.ts"
 import type { AgentPlan } from "./modes.ts"
 import { countSteps, NO_REPLY, SEND_MESSAGE, stepsOf } from "./steps.ts"
-import { SEND_NUDGES, sendNudgeText } from "@rp/shared/agentInstructions.ts"
+import { SEND_NUDGES, sendNudgeText } from "@dreamspan/shared/agentInstructions.ts"
 import { danglingCalls } from "./resume.ts"
-import type { ApprovalPrompt, SubagentRow } from "@rp/shared/agent.ts"
+import type { ApprovalPrompt, SubagentRow } from "@dreamspan/shared/agent.ts"
 import type { PermitInput, PermitResult } from "./approvals.ts"
 import {
   budgetResult,
@@ -75,7 +75,7 @@ export interface AgentRun {
   readonly tools: ReadonlyArray<RolloutTool<never>>
   readonly reader: Reader["Service"]
   readonly writer: Writer["Service"]
-  readonly onChanged?: (chatId: import("@rp/shared/chat.ts").ChatId) => void
+  readonly onChanged?: (chatId: import("@dreamspan/shared/chat.ts").ChatId) => void
   readonly onState?: () => void
   /** The tool definitions to offer as frozen into the snapshot; absent: `tools`' own. */
   readonly offered?: ReadonlyArray<FrozenTool>
@@ -656,7 +656,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         rolloutId,
         toolCallId,
         transcript: () => agent.state.messages,
-        leafSlotId: generation.leafSlotId as import("@rp/shared/chat.ts").SlotId | null,
+        leafSlotId: generation.leafSlotId as import("@dreamspan/shared/chat.ts").SlotId | null,
         viewers: generation.viewers,
         speaker: generation.speaker ?? null,
         ...(request.storyAt === undefined ? {} : { storyAt: request.storyAt }),
@@ -1053,7 +1053,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                     : null
                 ).concat(sends ? [sendTool as unknown as FrozenTool] : []),
                 reserve: generation.request.samplers.max_tokens,
-                leafSlotId: generation.leafSlotId as import("@rp/shared/chat.ts").SlotId | null
+                leafSlotId: generation.leafSlotId as import("@dreamspan/shared/chat.ts").SlotId | null
               }),
               { signal }
             )

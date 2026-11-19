@@ -1,7 +1,7 @@
 // A saved card and a failed history action are separate outcomes. Keep the latter
 // per account in this browser so closing/reloading the dialog doesn't lose its names.
 import { Schema } from "effect"
-import { ChatId, EntityId, ForkId } from "@rp/shared/chat.ts"
+import { ChatId, EntityId, ForkId } from "@dreamspan/shared/chat.ts"
 import { useSyncExternalStore } from "react"
 import type { CardSaved } from "../editor/cardSaved.ts"
 

@@ -1,11 +1,11 @@
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 // "Merge another chat into this one" (spec/CHAT-MERGE.md §7; owner decisions DESIGN §3.3,
 // 2026-11-05). One dialog for both entry points, the ⋯ menu (after the newest message) and a
 // message's actions (after that message): pick the chat or branch to bring in, see what comes in
 // and how the model will read it, and merge. Nothing is sent to a model here; the preview is
 // computed by the server from what's stored. Its thread mode (spec/THREADS.md §7.1, "Join
 // threads") takes its sources from a picker the threads feature passes, several at once.
-import type { ChatId, EntityId, Fork, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, Fork, ForkId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
 import {
   type ChatMergePreview,
   fillMergeTemplate,
@@ -13,7 +13,7 @@ import {
   MERGE_SECTION_DEFAULT,
   type MergeNote,
   type MergeTimelines
-} from "@rp/shared/mergeApi.ts"
+} from "@dreamspan/shared/mergeApi.ts"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useChatPlaceKey } from "./chatPlace.ts"
 import { useNavigate } from "@tanstack/react-router"

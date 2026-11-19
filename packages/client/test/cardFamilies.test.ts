@@ -1,4 +1,4 @@
-import type { ShellCard } from "@rp/shared/chatSetupApi.ts"
+import type { ShellCard } from "@dreamspan/shared/chatSetupApi.ts"
 import { expect, test } from "vitest"
 import { groupFamilies } from "../src/features/characters/cardFamilies.ts"
 import { readHomeSearch, writeHomeSearch } from "../src/features/characters/homeSearch.ts"

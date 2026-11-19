@@ -4,10 +4,10 @@
 // preset's and a card's only once the user allowed them (`regex_approved`). The display
 // runner then keeps only enabled `markdown_only` ones for the placement (with `prompt_only` too, they run in
 // both, as in ST).
-import type { Cast } from "@rp/shared/chatSetupApi.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { Doc, RefId } from "@rp/shared/library.ts"
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import type { Cast } from "@dreamspan/shared/chatSetupApi.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { Doc, RefId } from "@dreamspan/shared/library.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
 import { makeRegistry } from "../../registry.ts"
 import { globalDisplayScripts, presetDisplayScripts, characterDisplayScripts } from "./displayListParts.ts"
 

@@ -1,7 +1,7 @@
 import { join } from "node:path"
 import { Effect } from "effect"
 import { expect, test } from "@playwright/test"
-import type { ChatId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, VersionId } from "@dreamspan/shared/chat.ts"
 import { png } from "../../server/test/formats/support.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
 import { startProvider, type FakeProvider, REPLY } from "./support/provider.ts"

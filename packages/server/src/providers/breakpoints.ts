@@ -7,7 +7,7 @@
 // transcript with the payload in order, by role and text. pi-ai keeps user, assistant
 // and tool-result messages in order, but drops empty ones and merges consecutive tool
 // results, so a plain index mapping would break.
-import type { CacheLayout } from "@rp/shared/providers.ts"
+import type { CacheLayout } from "@dreamspan/shared/providers.ts"
 import type { Message } from "@earendil-works/pi-ai"
 import { Predicate } from "effect"
 

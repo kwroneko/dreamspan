@@ -5,10 +5,10 @@
 // Check for a newer version, the newer file, Add as a separate card), against the fake
 // archive's synthetic cards. No real archive is contacted.
 import { afterAll, assert, describe, it, layer } from "@effect/vitest"
-import { emptySourceQuery, remoteEntityId, SourceFailed } from "@rp/shared/cardSources.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
-import { textField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import { emptySourceQuery, remoteEntityId, SourceFailed } from "@dreamspan/shared/cardSources.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect, Exit, Fiber, Layer } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"

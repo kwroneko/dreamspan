@@ -2,7 +2,7 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { ConnectionForRequest, type ReadOps } from "./ops.ts"
-import { type CredentialId, ModelUse } from "@rp/shared/providers.ts"
+import { type CredentialId, ModelUse } from "@dreamspan/shared/providers.ts"
 import {
   connectionColumns,
   connectionFrom,
@@ -39,7 +39,7 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
           row
             ? {
                 revision: row.revision,
-                rules: JSON.parse(row.value_json) as import("@rp/shared/costFormulas.ts").CostSettings["rules"]
+                rules: JSON.parse(row.value_json) as import("@dreamspan/shared/costFormulas.ts").CostSettings["rules"]
               }
             : { revision: 0, rules: [] }
         ),

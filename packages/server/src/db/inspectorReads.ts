@@ -8,16 +8,16 @@ import { contextImage, wireImages } from "../assembler/imageTokens.ts"
 // The request inspector's reads (DESIGN §7.4; ARCHITECTURE §15): a version's context as it
 // was sent, from its rollout's stored snapshot, with each piece's source named for the user.
 import { createHash } from "node:crypto"
-import type { ChatId, SlotId, SpeakerPick, VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { NotFound } from "@rp/shared/errors.ts"
+import type { ChatId, SlotId, SpeakerPick, VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
 import {
   type ContextMessage,
   type ContextSource,
   type RequestFigures,
   RunContext,
   versionMetricsOf
-} from "@rp/shared/inspectorApi.ts"
+} from "@dreamspan/shared/inspectorApi.ts"
 import { separateContextOf } from "./inspectorContexts.ts"
 import type { Assembler } from "../assembler/assembler.ts"
 import { withAssemblyModules } from "../assembler/modules.ts"
@@ -35,7 +35,7 @@ import type {
 import { builtinPreset } from "./assemblySources.ts"
 import type { ReadOps } from "./ops.ts"
 import type { LlmRequestRow } from "./providers.ts"
-import type { InspectorUsage } from "@rp/shared/inspectorApi.ts"
+import type { InspectorUsage } from "@dreamspan/shared/inspectorApi.ts"
 import { query } from "./tx.ts"
 
 const unique = <A>(list: ReadonlyArray<A>) => [...new Set(list)]
@@ -343,7 +343,7 @@ const decisionsOffOf = (snapshot: unknown) => {
 export const makeInspectorReadHandlers = Effect.gen(function* () {
   const assembler = yield* WorkerAssembler
   const sql = yield* SqlClient.SqlClient
-  const readRun = (userId: import("@rp/shared/domain.ts").UserId, versionId: VersionId) => {
+  const readRun = (userId: import("@dreamspan/shared/domain.ts").UserId, versionId: VersionId) => {
     return Effect.gen(function* () {
       const [row] = yield* sql<{
         chat_id: string

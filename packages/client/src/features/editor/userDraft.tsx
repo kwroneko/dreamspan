@@ -1,8 +1,8 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
-import { mapEditingOrigin, editingOrigin, reconcileDeletedFields, reconcileForm } from "@rp/shared/draftDeletions.ts"
+import { mapEditingOrigin, editingOrigin, reconcileDeletedFields, reconcileForm } from "@dreamspan/shared/draftDeletions.ts"
 // Private non-secret text drafts. Explicit Save stays separate from saving the draft.
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import {
   type EditingOrigin,
   observeDeletion,
@@ -11,8 +11,8 @@ import {
   type Draft,
   type DraftDisplacement,
   type DraftState
-} from "@rp/shared/drafts.ts"
-import type { UserDraftSave } from "@rp/shared/editorApi.ts"
+} from "@dreamspan/shared/drafts.ts"
+import type { UserDraftSave } from "@dreamspan/shared/editorApi.ts"
 import { useAction } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { userNoticeReceivers } from "../noticeContributions.tsx"

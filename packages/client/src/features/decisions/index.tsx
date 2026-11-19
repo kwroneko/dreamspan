@@ -4,8 +4,8 @@
 // provider without the user's opt-in per connection), and a lorebook entry's question for the
 // decision model.
 import { useAtomValue } from "@effect/atom-react"
-import type { ConnectionDecisions, DecisionPointInfo, DecisionPointSetting } from "@rp/shared/decisions.ts"
-import { type Model, resolveModel } from "@rp/shared/providers.ts"
+import type { ConnectionDecisions, DecisionPointInfo, DecisionPointSetting } from "@dreamspan/shared/decisions.ts"
+import { type Model, resolveModel } from "@dreamspan/shared/providers.ts"
 import { AsyncResult } from "effect/reactivity"
 import { useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"

@@ -1,6 +1,6 @@
-import { CurrentUser } from "@rp/shared/api.ts"
-import { PluginRejected, type PluginApi } from "@rp/shared/plugins.ts"
-import { ServerError, StaleWrite } from "@rp/shared/errors.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import { PluginRejected, type PluginApi } from "@dreamspan/shared/plugins.ts"
+import { ServerError, StaleWrite } from "@dreamspan/shared/errors.ts"
 import { Effect } from "effect"
 import { PluginHost } from "../plugins/Host.ts"
 // Never log plugin-controlled failures: their text is untrusted and may contain credentials.

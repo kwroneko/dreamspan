@@ -9,8 +9,8 @@ import { calibrateText } from "./textCalibration.ts"
 // cached per model and text, so typing re-counts only the field typed in. Never part of a send:
 // the context budget keeps the assembler's estimate (§15 "Token counts").
 import { createHash } from "node:crypto"
-import type { UserId } from "@rp/shared/domain.ts"
-import { TokenizerInfo } from "@rp/shared/generation.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { TokenizerInfo } from "@dreamspan/shared/generation.ts"
 import { Context, Effect, Layer, Option, Semaphore } from "effect"
 import { Reader } from "../db/Database.ts"
 import { countingVia } from "../db/tokenCounting.ts"

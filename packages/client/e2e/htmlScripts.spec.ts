@@ -6,8 +6,8 @@
 // The card editor's Panels switches show the same approval; with the internet allowed the panel
 // reaches other sites. At 1440 and 390, light and dark, with the layout audit.
 import { expect, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"

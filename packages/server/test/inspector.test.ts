@@ -1,8 +1,8 @@
 // The request inspector and the cache-warmth estimate (ARCHITECTURE §15) over a real
 // server, its workers and a socket, with a reply generated through a mock provider.
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { CacheWarmth } from "@rp/shared/inspectorApi.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { CacheWarmth } from "@dreamspan/shared/inspectorApi.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"

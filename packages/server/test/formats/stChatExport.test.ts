@@ -1,6 +1,6 @@
 // A chat's lines as SillyTavern files (formats/stChatExport.ts) and the streamed zip that holds
 // every branch (formats/zipStream.ts). Synthetic messages only.
-import type { Chat, Fork, PathEntry, Version } from "@rp/shared/chat.ts"
+import type { Chat, Fork, PathEntry, Version } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { chatFiles, type ReaderService } from "../../src/importer/chatExport.ts"
 import { describe, expect, it } from "vitest"

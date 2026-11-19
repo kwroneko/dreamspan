@@ -1,9 +1,9 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { NotFound } from "@rp/shared/errors.ts"
-import { HistoryRejected } from "@rp/shared/historyApi.ts"
-import { EffectUndoRefused } from "@rp/shared/workshopApi.ts"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
+import { HistoryRejected } from "@dreamspan/shared/historyApi.ts"
+import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
 import { historyFork, historySummaryRevision } from "./historyShared.ts"
 import { pathPieces, displaySlots, displayLength, displayEndOf } from "./displayPath.ts"
@@ -119,6 +119,6 @@ export const agentHistorySnapshot = Effect.fnUntraced(function* (
     dependents,
     stamp: row!.stamp,
     name: row!.name,
-    leaf: (yield* displayEndOf(sql, chatId, fork)) as import("@rp/shared/chat.ts").SlotId | null
+    leaf: (yield* displayEndOf(sql, chatId, fork)) as import("@dreamspan/shared/chat.ts").SlotId | null
   }
 })

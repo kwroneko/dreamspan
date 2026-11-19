@@ -5,9 +5,9 @@
 //   LOOPBACK_REQUIRES_LOGIN is off, which acts as the oldest enabled admin.
 import { createHash, randomBytes } from "node:crypto"
 import { readFileSync } from "node:fs"
-import { Authentication, CurrentUser, type Session, Unauthorized } from "@rp/shared/api.ts"
-import type { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
-import { AccountRejected, Forbidden, NotFound, ServerError } from "@rp/shared/errors.ts"
+import { Authentication, CurrentUser, type Session, Unauthorized } from "@dreamspan/shared/api.ts"
+import type { User, UserAccount, UserId, UserRole } from "@dreamspan/shared/domain.ts"
+import { AccountRejected, Forbidden, NotFound, ServerError } from "@dreamspan/shared/errors.ts"
 import { Context, Data, Effect, Layer, Option, Predicate, Redacted, Semaphore } from "effect"
 import { Cookies } from "effect/http"
 import type { RpcClientError } from "effect/rpc"

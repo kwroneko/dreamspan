@@ -1,7 +1,7 @@
 import { autoConfigurationStamp } from "../chat/autoConfiguration.ts"
 import { OperationCall } from "../agent/operations.ts"
 import { regenerateSeveral } from "./agent.ts"
-// Chat RPC handlers (@rp/shared/chatApi.ts). Every handler acts as the authenticated user;
+// Chat RPC handlers (@dreamspan/shared/chatApi.ts). Every handler acts as the authenticated user;
 // storage enforces ownership, so another user's ids are NotFound. Each change is published
 // to the chat's subscribers, from every tab of the user, after it's committed.
 import {
@@ -10,8 +10,8 @@ import {
   type ReplySections,
   sectionsWithThinking,
   thinkingInSections
-} from "@rp/shared/replySections.ts"
-import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
+} from "@dreamspan/shared/replySections.ts"
+import { type AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
 import {
   Fork,
   PathEntry,
@@ -20,15 +20,15 @@ import {
   type ForkId,
   type NewVersion,
   type SlotId
-} from "@rp/shared/chat.ts"
-import { BranchSwitch, GenerationUnavailable, messageDraftKey, NotContinuable } from "@rp/shared/chatApi.ts"
-import { TextTooLong } from "@rp/shared/composerApi.ts"
-import { NotFound } from "@rp/shared/errors.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { DraftHistoryPolicy } from "@rp/shared/drafts.ts"
-import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
-import { conditionOf } from "@rp/shared/presetConditions.ts"
-import { foldState, swappedCard } from "@rp/shared/state.ts"
+} from "@dreamspan/shared/chat.ts"
+import { BranchSwitch, GenerationUnavailable, messageDraftKey, NotContinuable } from "@dreamspan/shared/chatApi.ts"
+import { TextTooLong } from "@dreamspan/shared/composerApi.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { DraftHistoryPolicy } from "@dreamspan/shared/drafts.ts"
+import type { PresetPrompt, PromptOrderEntry } from "@dreamspan/shared/docs/preset.ts"
+import { conditionOf } from "@dreamspan/shared/presetConditions.ts"
+import { foldState, swappedCard } from "@dreamspan/shared/state.ts"
 import { Effect, Option, Stream } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { shownModel } from "../chat/shownModel.ts"
@@ -186,7 +186,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       readonly branch: boolean
       readonly kind: "message" | "generate"
       readonly imageDraftIds?: readonly string[]
-      readonly images?: import("@rp/shared/chat.ts").MessageImages
+      readonly images?: import("@dreamspan/shared/chat.ts").MessageImages
       readonly content: string
       readonly speakerEntityId: EntityId | null
       readonly replySpeakerEntityId: EntityId | null
@@ -253,8 +253,8 @@ export const makeChatHandlers = Effect.gen(function* () {
                 proof?: {
                   chat?: {
                     model?: {
-                      connection: import("@rp/shared/providers.ts").ConnectionId
-                      model: import("@rp/shared/providers.ts").ModelId
+                      connection: import("@dreamspan/shared/providers.ts").ConnectionId
+                      model: import("@dreamspan/shared/providers.ts").ModelId
                     }
                   }
                 }
@@ -293,7 +293,7 @@ export const makeChatHandlers = Effect.gen(function* () {
     user: UserId,
     slotId: SlotId,
     forkId: ForkId | null | undefined,
-    versionId: import("@rp/shared/chat.ts").VersionId,
+    versionId: import("@dreamspan/shared/chat.ts").VersionId,
     content: string,
     /** Thinking typed in the edit: the reasoning scripts that run on edits rewrite it too. */
     thinking: ThinkingChange = KEPT

@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { loadavg } from "node:os"
 import { assert } from "@effect/vitest"
 import { Effect } from "effect"
-import { NewVersion } from "@rp/shared/chat.ts"
+import { NewVersion } from "@dreamspan/shared/chat.ts"
 import { lcmHarness, lcmTest } from "./support/lcmHarness.ts"
 
 lcmTest(

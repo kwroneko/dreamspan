@@ -4,7 +4,7 @@
 // provider does with caching, reasoning, tools, prefill and images. Real money: counts against
 // RP_LIVE_OPENROUTER_CAP with the rest of the OpenRouter checks.
 import { describe } from "@effect/vitest"
-import type { Model } from "@rp/shared/providers.ts"
+import type { Model } from "@dreamspan/shared/providers.ts"
 import { Effect } from "effect"
 import { findings, liveEnabled, solidPng } from "./support/live.ts"
 import { checkTurn, liveTest, type Profile, ref, startChat, totalInput } from "./support/scenarios.ts"

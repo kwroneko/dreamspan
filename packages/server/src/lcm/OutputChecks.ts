@@ -1,8 +1,8 @@
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Context, Effect, Layer } from "effect"
 import { makeRegistry, type Registry } from "../registry.ts"
-import type { ProviderError } from "@rp/shared/errors.ts"
+import type { ProviderError } from "@dreamspan/shared/errors.ts"
 import type { JudgeUnavailable } from "../decision/RefusalJudge.ts"
 
 /**

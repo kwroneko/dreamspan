@@ -5,7 +5,7 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { assert, layer } from "@effect/vitest"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { client, post, serverLayer, testConfig } from "./support/config.ts"
 import { stFolder } from "./support/stFolder.ts"

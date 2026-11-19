@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs"
 import { request } from "node:http"
 import { assert, layer } from "@effect/vitest"
-import { ImportResult } from "@rp/shared/libraryImport.ts"
+import { ImportResult } from "@dreamspan/shared/libraryImport.ts"
 import { Effect, Schema } from "effect"
 import { client, login, serverLayer, serverPort, testConfig } from "./support/config.ts"
 

@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import { ForkId } from "@rp/shared/chat.ts"
+import { ForkId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { layer as fakeGenerator } from "../src/dev/fakeGenerator.ts"

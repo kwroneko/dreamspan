@@ -1,7 +1,7 @@
 // Synthetic ST folders through HTTP; deletion, paths and composers through the same RPCs
 // the client uses. No owner data or main-thread SQLite.
 import { assert, layer } from "@effect/vitest"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Reader } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig, typeInto } from "./support/config.ts"

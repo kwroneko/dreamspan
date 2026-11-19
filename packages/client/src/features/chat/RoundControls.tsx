@@ -6,7 +6,7 @@
 // turn comes, so the strip names the turns already chosen and only counts the rest: Auto's plan
 // for them is only a fallback. A `composerControls` entry (`composer.round`), so a plugin can
 // replace it.
-import type { PathEntry, QueuedMessage, SlotId } from "@rp/shared/chat.ts"
+import type { PathEntry, QueuedMessage, SlotId } from "@dreamspan/shared/chat.ts"
 import { useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Badge } from "../../ui/Surface.tsx"

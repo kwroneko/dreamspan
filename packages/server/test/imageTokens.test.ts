@@ -13,7 +13,7 @@ import {
   openAIImageTokens,
   openAIPatchTokens,
   ruleEstimate
-} from "@rp/shared/imageTokens.ts"
+} from "@dreamspan/shared/imageTokens.ts"
 import { describeImage } from "../src/importer/images.ts"
 import { builtinImageCounters } from "../src/providers/imageCounters.ts"
 import { imageSample, payloadImages, reportedImageTokens } from "../src/providers/imageSamples.ts"

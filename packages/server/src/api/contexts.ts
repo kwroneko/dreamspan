@@ -1,9 +1,9 @@
-// RPC handlers for separate contexts in the app (@rp/shared/contextsApi.ts; spec/CHARACTER-CONTEXT.md
+// RPC handlers for separate contexts in the app (@dreamspan/shared/contextsApi.ts; spec/CHARACTER-CONTEXT.md
 // §9.2 unit CU3): the timeline's away rows and Undo of a scene check's mark (writer
 // `CorrectPresence`, unit C9). Every handler acts as the authenticated user; storage enforces
 // ownership, so another user's ids are NotFound.
-import { CurrentUser } from "@rp/shared/api.ts"
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Reader, Writer } from "../db/Database.ts"

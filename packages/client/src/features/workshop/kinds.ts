@@ -1,5 +1,5 @@
 // The workshop's look (spec/WORKSHOP.md §2.1, §2.5): what tells a workshop from a story wherever it
-// shows. Its behaviour is the shared `workshop` profile (`@rp/shared/chatKinds.ts`).
+// shows. Its behaviour is the shared `workshop` profile (`@dreamspan/shared/chatKinds.ts`).
 import type { ChatKindLook } from "../chat/kindLooks.ts"
 import { FILES_TAB } from "../files/ids.ts"
 

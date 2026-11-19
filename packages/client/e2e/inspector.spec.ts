@@ -5,8 +5,8 @@ import type { WireContext } from "../../server/src/assembler/types.ts"
 // production server, which generates through the context assembler and the provider
 // layer, here a fake OpenAI-compatible provider on loopback. The card is made up.
 import { join } from "node:path"
-import type { ChatId, EntityId, VersionId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { ChatId, EntityId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { type FakeProvider, REPLY, startProvider } from "./support/provider.ts"

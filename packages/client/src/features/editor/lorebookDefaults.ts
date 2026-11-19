@@ -1,4 +1,4 @@
-import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@rp/shared/docs/lorebook.ts"
+import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
 
 export const emptyBook = (): LorebookDoc => ({
   schema_version: LOREBOOK_SCHEMA_VERSION,
@@ -11,4 +11,4 @@ export const emptyBook = (): LorebookDoc => ({
   entries: []
 })
 
-export { newLorebookEntry as emptyEntry } from "@rp/shared/docs/lorebook.ts"
+export { newLorebookEntry as emptyEntry } from "@dreamspan/shared/docs/lorebook.ts"

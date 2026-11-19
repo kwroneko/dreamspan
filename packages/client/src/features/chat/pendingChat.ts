@@ -3,11 +3,11 @@
 // the chat. The pending page renders it with the saved chat's parts (header, side panel,
 // message column, composer), which read it as a `ChatView` with no chat (`view`), and the side
 // panel's tabs change it through these methods, as a saved chat's tabs change its session.
-import { greetingPick, offeredGreetings } from "@rp/shared/greetings.ts"
-import { remoteOf } from "@rp/shared/cardSources.ts"
-import { startingPersona } from "@rp/shared/personaLock.ts"
-import type { CastCard, ChatId, EntityId } from "@rp/shared/chat.ts"
-import type { CardForChat } from "@rp/shared/chatSetupApi.ts"
+import { greetingPick, offeredGreetings } from "@dreamspan/shared/greetings.ts"
+import { remoteOf } from "@dreamspan/shared/cardSources.ts"
+import { startingPersona } from "@dreamspan/shared/personaLock.ts"
+import type { CastCard, ChatId, EntityId } from "@dreamspan/shared/chat.ts"
+import type { CardForChat } from "@dreamspan/shared/chatSetupApi.ts"
 import type { Caller } from "../editor/caller.ts"
 import type { ChatView, Outcome } from "./session.ts"
 

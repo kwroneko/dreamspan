@@ -2,8 +2,8 @@
 // registered display transforms, macros then display regex, with the scripts of the registered
 // lists for its placement. Its body, its reasoning and its "Thinking in the reply" panel all
 // display through here, while they stream too, as ST formats a message on every update.
-import type { SlotId, Version } from "@rp/shared/chat.ts"
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import type { SlotId, Version } from "@dreamspan/shared/chat.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { castView, modelNameOf, useCast } from "./cast.ts"

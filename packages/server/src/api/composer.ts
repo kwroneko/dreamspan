@@ -1,9 +1,9 @@
-// The composer's drafts (@rp/shared/composerApi.ts): one per fork of a chat, on the
+// The composer's drafts (@dreamspan/shared/composerApi.ts): one per fork of a chat, on the
 // draft store every text field shares (ARCHITECTURE §3.10). A closing page sends its unsaved
 // text to POST /library/drafts with the editors' (importer/routes.ts).
-import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import { TextTooLong } from "@rp/shared/composerApi.ts"
-import { composerKey } from "@rp/shared/drafts.ts"
+import { type AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
+import { TextTooLong } from "@dreamspan/shared/composerApi.ts"
+import { composerKey } from "@dreamspan/shared/drafts.ts"
 import { Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"

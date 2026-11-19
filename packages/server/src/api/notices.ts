@@ -1,7 +1,7 @@
-import { ServerError } from "@rp/shared/errors.ts"
+import { ServerError } from "@dreamspan/shared/errors.ts"
 // The caller's notices: initial private-draft sync and durable plugin suspension reports.
-import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import type { Notice } from "@rp/shared/noticeApi.ts"
+import { type AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
+import type { Notice } from "@dreamspan/shared/noticeApi.ts"
 import { Effect, Stream } from "effect"
 import { Notices } from "../chat/Notices.ts"
 import { Reader } from "../db/Database.ts"

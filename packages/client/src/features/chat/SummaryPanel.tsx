@@ -6,8 +6,8 @@ import { summaryEditorTools, summaryTextEditor } from "./editorHistory.tsx"
 // range, each with its state and what can be done to it. Nothing here generates: asking for
 // a summary to be made again is a request the planner finds with the next reply.
 import { useSyncExternalStore, useEffect, useMemo, useRef, useState } from "react"
-import type { SlotId } from "@rp/shared/chat.ts"
-import type { LcmBackfill, LcmJob, LcmState, LcmSummary, SummaryRevision } from "@rp/shared/lcm.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import type { LcmBackfill, LcmJob, LcmState, LcmSummary, SummaryRevision } from "@dreamspan/shared/lcm.ts"
 import type { AppError } from "../../errors.ts"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"

@@ -774,7 +774,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE version_texts (
     version_seq INTEGER PRIMARY KEY REFERENCES versions(seq) ON DELETE CASCADE,
     cast_json TEXT CHECK (cast_json IS NULL OR (json_valid(cast_json) AND json_type(cast_json) = 'array')),
-    -- Who of the cast was away and who was a narrator when it was written (@rp/shared/knowledge.ts,
+    -- Who of the cast was away and who was a narrator when it was written (@dreamspan/shared/knowledge.ts,
     -- spec/CHARACTER-CONTEXT.md §9.1): {"away": [ids], "narrators": [ids]}; NULL when neither.
     presence_json TEXT CHECK (presence_json IS NULL OR (json_valid(presence_json) AND json_type(presence_json) = 'object')),
     content TEXT NOT NULL DEFAULT '',

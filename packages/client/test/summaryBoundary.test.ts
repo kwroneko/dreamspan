@@ -1,5 +1,5 @@
-import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
-import type { LcmState } from "@rp/shared/lcm.ts"
+import type { PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
+import type { LcmState } from "@dreamspan/shared/lcm.ts"
 import { describe, expect, it } from "vitest"
 import { boundaryIndex } from "../src/features/chat/summaryBoundary.ts"
 import type { ChatView } from "../src/features/chat/session.ts"

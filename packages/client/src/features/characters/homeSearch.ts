@@ -1,5 +1,5 @@
 import type { CardBrowse } from "./cardBrowse.tsx"
-import type { SourceFilterValue } from "@rp/shared/cardSources.ts"
+import type { SourceFilterValue } from "@dreamspan/shared/cardSources.ts"
 
 /** The characters' filters, in their order (`cardBrowse.tsx`), here so the URL's parsing needs no UI. */
 export const CARD_FILTERS = ["all", "used", "unused", "favourites", "personas", "groups", "archived"] as const

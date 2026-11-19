@@ -1,6 +1,6 @@
 // An agent run's transcript after its request, as the run inspector lists it (agentReads.ts, subagents.ts).
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { TranscriptEntry, TurnPart } from "@rp/shared/agent.ts"
+import type { TranscriptEntry, TurnPart } from "@dreamspan/shared/agent.ts"
 import type { PlacedStep } from "../agent/steps.ts"
 
 const textOf = (content: unknown) =>

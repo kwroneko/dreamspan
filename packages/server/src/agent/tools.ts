@@ -1,12 +1,12 @@
-import type { RolloutEffectRecord } from "@rp/shared/workshopApi.ts"
-import type { ApprovalPrompt, SubagentRow } from "@rp/shared/agent.ts"
+import type { RolloutEffectRecord } from "@dreamspan/shared/workshopApi.ts"
+import type { ApprovalPrompt, SubagentRow } from "@dreamspan/shared/agent.ts"
 // The tools a rollout may offer (spec/AGENTIC.md §4.1): a registered catalog, each tool with
 // its effect class (DESIGN §7.3). Tools run on the main thread and reach storage only through
 // the reader and writer operations, owner-scoped and causal: nothing at or after the slot
 // being generated is visible to them.
 import { Type, type TSchema } from "@earendil-works/pi-ai"
-import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { ChatId, ForkId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import type { Reader, Writer } from "../db/Database.ts"
 
@@ -55,7 +55,7 @@ export interface ToolContext {
    */
   /** Workshop replay consults the live catalog without freezing metadata into model definitions. */
   readonly storyReadOf?: (id: string) => WorkshopStoryRead | undefined
-  readonly storyAt?: import("@rp/shared/chat.ts").StoryAt
+  readonly storyAt?: import("@dreamspan/shared/chat.ts").StoryAt
   /**
    * The run's frozen offer and what of it is loaded at this call (spec/TOOL-LOADING.md), for the
    * loading tools. Absent outside an agent run.

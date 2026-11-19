@@ -3,7 +3,7 @@ import { useSearchHighlights } from "./searchHighlights.ts"
 import { FieldRevert, linesText } from "./FieldRevert.tsx"
 // Everything a lorebook entry holds, as the table's opened row shows it (LorebookTable.tsx):
 // its text, then its settings form (lorebookSettings.ts). Every edit is a field draft.
-import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
+import type { LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
 import {
   Fragment,
   type ReactNode,
@@ -19,7 +19,7 @@ import { AboutHint } from "../../ui/AboutHint.tsx"
 import { BlockSection } from "../../ui/Block.tsx"
 import { MultiSelect } from "../../ui/MultiSelect.tsx"
 import { useLoreFilterCards } from "./libraryLorebooks.ts"
-import { type FieldPath, textField, valueField } from "@rp/shared/editing.ts"
+import { type FieldPath, textField, valueField } from "@dreamspan/shared/editing.ts"
 import { useEditorFocus } from "../../textActions.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Field, Fieldset, Input, Textarea } from "../../ui/Field.tsx"

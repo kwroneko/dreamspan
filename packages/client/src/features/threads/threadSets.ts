@@ -4,8 +4,8 @@
 // chat's row version (a split, a rename and an Undo bump it, here or in another tab) and the
 // branch lists' count (`forksChanged`). The registered transforms and the branch control read
 // it synchronously and hear when a read lands (`timelineInputsChanged`, `branchPartsChanged`).
-import type { ChatId, ForkId } from "@rp/shared/chat.ts"
-import type { ThreadSet } from "@rp/shared/threads.ts"
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
+import type { ThreadSet } from "@dreamspan/shared/threads.ts"
 import { useEffect, useSyncExternalStore } from "react"
 import { branchPartsChanged } from "../chat/branchParts.ts"
 import { useForksVersion } from "../chat/forks.ts"

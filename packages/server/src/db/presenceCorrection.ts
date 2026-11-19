@@ -1,8 +1,8 @@
 // A branch's correction of a scene check. All work runs in the calling writer transaction;
 // shared versions, summaries, and existing child branches retain their original records.
-import type { ChatId, EntityId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import type { ChatId, EntityId, ForkId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { displayLength, pathPieces, positionOf, slotPlace } from "./displayPath.ts"

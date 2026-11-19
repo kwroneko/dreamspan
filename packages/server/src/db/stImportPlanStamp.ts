@@ -12,7 +12,7 @@
 // move on appends, which change matching, so it can't stand in for this one; this reads only
 // columns the baseline already has, so the two don't touch.)
 import { createHash } from "node:crypto"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { ST_CHAT_RECORD } from "./ops.ts"

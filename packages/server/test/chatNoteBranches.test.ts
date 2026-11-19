@@ -2,9 +2,9 @@
 // text, a change applies from the branch's latest message on, and History says where each change
 // took effect. Synthetic text only.
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
-import { textField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { ChatNotePosition } from "@dreamspan/shared/editorApi.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { client, posted, testConfig, withServer } from "./support/config.ts"
 

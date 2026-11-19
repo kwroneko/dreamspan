@@ -1,9 +1,9 @@
 // The lorebook editor's table (DESIGN §1.3, "Standalone lorebook authoring"): what its columns,
 // sort orders and row actions are, as registries a plugin can add to, replace or disable
 // (spec/PLUGINS.md §8). The defaults are registered in lorebookColumns.tsx.
-import type { LorebookDoc, LorebookEntry, LorePosition, LoreRole } from "@rp/shared/docs/lorebook.ts"
+import type { LorebookDoc, LorebookEntry, LorePosition, LoreRole } from "@dreamspan/shared/docs/lorebook.ts"
 import { emptyBook, emptyEntry } from "./lorebookDefaults.ts"
-import type { FieldPath } from "@rp/shared/editing.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
 import type { ComponentType } from "react"
 import { makeRegistry } from "../../registry.ts"
 import type { IconName } from "../../ui/Icon.tsx"

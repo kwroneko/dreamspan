@@ -1,5 +1,5 @@
 // The entire historical display is scrubbed on the main thread, with the effective request inventory.
-import type { ContextSource, SourceActivation } from "@rp/shared/inspectorApi.ts"
+import type { ContextSource, SourceActivation } from "@dreamspan/shared/inspectorApi.ts"
 import type { AssembledRequest, InspectionInputs, InspectionNode, WireContext } from "./types.ts"
 
 const activationOf = (

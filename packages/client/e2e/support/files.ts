@@ -1,7 +1,7 @@
 // Seeding and checking an account's Files from a browser test, over the server's own file routes
-// (`@rp/shared/files.ts` FILES_ROUTES), as the logged-in request context. Synthetic files only.
+// (`@dreamspan/shared/files.ts` FILES_ROUTES), as the logged-in request context. Synthetic files only.
 import type { APIRequestContext } from "@playwright/test"
-import { FILES_ROUTES, FILES_TOP, joinPath, type FolderListing } from "@rp/shared/files.ts"
+import { FILES_ROUTES, FILES_TOP, joinPath, type FolderListing } from "@dreamspan/shared/files.ts"
 
 /** A one-pixel PNG. */
 export const PIXEL = Buffer.from(

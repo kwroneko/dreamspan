@@ -4,7 +4,7 @@
 // all back. Cancel ends it with nothing deleted. At 1440 and 390 px, light and dark, with the
 // layout audit on the chat with the bar shown. Synthetic messages only; no provider.
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { join } from "node:path"
 import { expectLayout } from "./support/layoutAudit.ts"

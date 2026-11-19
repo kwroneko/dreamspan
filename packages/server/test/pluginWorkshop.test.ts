@@ -4,8 +4,8 @@ import { TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
 import { expect } from "vitest"
 import { assert, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { ApprovalPrompt } from "@rp/shared/agent.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
 import { pluginDocumentation } from "../../plugin-api/src/docs.ts"
 import { client, posted, serverLayer, testConfig, outcome, login } from "./support/config.ts"
 import { completionChunks, sse, startMockProvider, type Recorded } from "./support/mockProvider.ts"
@@ -704,7 +704,7 @@ for (const stage of ["probe", "tests"] as const)
             network: false
           }),
           "server.ts": `${stage === "probe" ? fetch + ";" : ""}
-          import { Effect, type Activate } from "@rp/plugin-api/server";
+          import { Effect, type Activate } from "@dreamspan/plugin-api/server";
           export const activate: Activate = () => Effect.void;`,
           ...(stage === "tests"
             ? { "test/attack.test.ts": `import test from "node:test"; test("network", async () => { ${fetch}; });` }

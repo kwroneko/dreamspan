@@ -1,11 +1,11 @@
 // Presentation of the server-owned capability list (spec/WORKSHOP.md §3.4): how each stands in
 // this workshop, the choices it offers, and the chip's words.
 import { Atom } from "effect/reactivity"
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { CapabilityMode, WorkshopCapability, WorkshopGrantChoice } from "@rp/shared/workshopApi.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { CapabilityMode, WorkshopCapability, WorkshopGrantChoice } from "@dreamspan/shared/workshopApi.ts"
 import { AppClient } from "../../rpc.ts"
 
-export type { WorkshopCapability } from "@rp/shared/workshopApi.ts"
+export type { WorkshopCapability } from "@dreamspan/shared/workshopApi.ts"
 
 /** What the server's answers and grants invalidate. */
 export const CAPABILITIES_KEY = "workshop-capabilities"

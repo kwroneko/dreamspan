@@ -3,7 +3,7 @@ import { libraryListAtom } from "../library/queries.ts"
 // a saved chat reads it with `ListChatCards`, which needs the chat; before the first send it
 // comes from the library's lists, each card at its latest revision.
 import { useAtomValue } from "@effect/atom-react"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { AsyncResult } from "effect/reactivity"
 import { useCallback } from "react"
 import { shellAtom } from "../characters/shellData.tsx"

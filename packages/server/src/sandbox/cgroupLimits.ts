@@ -16,7 +16,7 @@ import { randomBytes } from "node:crypto"
 import { constants, existsSync } from "node:fs"
 import { access, mkdir, readFile, rmdir, writeFile } from "node:fs/promises"
 import { delimiter, join } from "node:path"
-import { makeRegistry } from "@rp/shared/registry.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { serverEnvironment } from "../serverEnvironment.ts"
 import type { Availability } from "./registry.ts"
 

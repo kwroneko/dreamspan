@@ -2,8 +2,8 @@
 // registers the answer to a call waiting for the user, the workshop its changes' Undo and Open.
 // A plugin can add, replace or disable one; a registration with nothing for a step renders
 // nothing.
-import type { RolloutStep } from "@rp/shared/agent.ts"
-import type { Version } from "@rp/shared/chat.ts"
+import type { RolloutStep } from "@dreamspan/shared/agent.ts"
+import type { Version } from "@dreamspan/shared/chat.ts"
 import { useSyncExternalStore, type ComponentType } from "react"
 import { makeRegistry } from "../../../registry.ts"
 import type { ChatSession } from "../session.ts"

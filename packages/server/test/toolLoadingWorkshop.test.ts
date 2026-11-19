@@ -2,8 +2,8 @@ import { TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
 // A workshop run on Anthropic's API with deferred tools (spec/TOOL-LOADING.md): an unloaded tool is
 // refused, tool_search loads it, and every request declares the same tools with the same bytes.
 import { assert, it } from "@effect/vitest"
-import type { Chat } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { Chat } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { Effect, Stream } from "effect"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
@@ -249,7 +249,7 @@ for (const mode of ["off", "ask"] as const) {
       const chat = yield* api.CreateWorkshop({})
       const user = yield* api.Whoami()
       const { Writer } = yield* Effect.promise(() => import("../src/db/Database.ts"))
-      const { newCardDoc } = yield* Effect.promise(() => import("@rp/shared/editing.ts"))
+      const { newCardDoc } = yield* Effect.promise(() => import("@dreamspan/shared/editing.ts"))
       const helper = yield* (yield* Writer).CreateEntity({
         userId: user.id,
         kind: "card",

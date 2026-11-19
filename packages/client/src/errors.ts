@@ -1,9 +1,9 @@
-// Errors as the user reads them. Each tag the server sends (@rp/shared/errors.ts) gets a
+// Errors as the user reads them. Each tag the server sends (@dreamspan/shared/errors.ts) gets a
 // sentence; the server's own messages are shown as given, since they name the problem.
-import { PluginRejected } from "@rp/shared/plugins.ts"
-import { LcmEstimateChanged } from "@rp/shared/lcm.ts"
-import { BinChanged, CannotDeleteLastFork } from "@rp/shared/bin.ts"
-import { InvalidNetworkSettings, Unauthorized } from "@rp/shared/api.ts"
+import { PluginRejected } from "@dreamspan/shared/plugins.ts"
+import { LcmEstimateChanged } from "@dreamspan/shared/lcm.ts"
+import { BinChanged, CannotDeleteLastFork } from "@dreamspan/shared/bin.ts"
+import { InvalidNetworkSettings, Unauthorized } from "@dreamspan/shared/api.ts"
 import {
   AccountRejected,
   AutoRefused,
@@ -14,14 +14,14 @@ import {
   ProviderError,
   ServerError,
   StaleWrite
-} from "@rp/shared/errors.ts"
-import { ForkNotesChanged, GenerationUnavailable, NotAmendable } from "@rp/shared/chatApi.ts"
-import { EditConflict, EditRefused, InvalidDocument } from "@rp/shared/editorApi.ts"
-import { StFolderUnreadable } from "@rp/shared/stImportApi.ts"
-import { StImportPlanChanged } from "@rp/shared/stReimportPlan.ts"
-import { MergeChanged, MergeRefused } from "@rp/shared/mergeApi.ts"
-import { NotResumable } from "@rp/shared/agent.ts"
-import { ApprovalRefused, EffectUndoRefused, GrantRefused } from "@rp/shared/workshopApi.ts"
+} from "@dreamspan/shared/errors.ts"
+import { ForkNotesChanged, GenerationUnavailable, NotAmendable } from "@dreamspan/shared/chatApi.ts"
+import { EditConflict, EditRefused, InvalidDocument } from "@dreamspan/shared/editorApi.ts"
+import { StFolderUnreadable } from "@dreamspan/shared/stImportApi.ts"
+import { StImportPlanChanged } from "@dreamspan/shared/stReimportPlan.ts"
+import { MergeChanged, MergeRefused } from "@dreamspan/shared/mergeApi.ts"
+import { NotResumable } from "@dreamspan/shared/agent.ts"
+import { ApprovalRefused, EffectUndoRefused, GrantRefused } from "@dreamspan/shared/workshopApi.ts"
 import { Cause } from "effect"
 import { RpcClientError } from "effect/rpc"
 

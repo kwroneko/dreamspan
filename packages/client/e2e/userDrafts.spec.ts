@@ -10,7 +10,7 @@ import { chooseCustomServer } from "./support/provider.ts"
 const server = serverPerFile(withAdmin)
 test.describe.configure({ mode: "serial" })
 let cookie = ""
-let ownerId: import("@rp/shared/domain.ts").UserId
+let ownerId: import("@dreamspan/shared/domain.ts").UserId
 const api = <A>(use: (client: Client) => Effect.Effect<A, unknown>) => withCookie(server(), cookie, use)
 test.beforeAll(async () => {
   cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
@@ -278,7 +278,7 @@ for (const scope of ["account", "fork"] as const)
       expect(
         await api((client) =>
           Effect.map(
-            client.GetLcmSettings({ chatId: chatId as import("@rp/shared/chat.ts").ChatId, leafSlotId: null }),
+            client.GetLcmSettings({ chatId: chatId as import("@dreamspan/shared/chat.ts").ChatId, leafSlotId: null }),
             (view) => view.resolved.tail
           )
         )
@@ -337,7 +337,7 @@ test("creation and rename forms keep non-secret text without copying a typed key
   const model = await api((client) =>
     Effect.map(
       client.ListModels({
-        connectionId: connectionId as import("@rp/shared/providers.ts").ConnectionId,
+        connectionId: connectionId as import("@dreamspan/shared/providers.ts").ConnectionId,
         includeHidden: true
       }),
       (models) => models.find((model) => model.key === "unfinished-model")!
@@ -406,7 +406,7 @@ test("creation and rename forms keep non-secret text without copying a typed key
     .toBe("committed")
   const refId = new URL(page.url()).pathname.split("/").at(-1)!
   const ref = await api((client) =>
-    Effect.map(client.OpenEditor({ refId: refId as import("@rp/shared/library.ts").RefId }), (opened) => opened.ref)
+    Effect.map(client.OpenEditor({ refId: refId as import("@dreamspan/shared/library.ts").RefId }), (opened) => opened.ref)
   )
   // A lone chat renames in place (Enter renames, Escape keeps the name); the rename dialog,
   // and its draft, is for a chat in a group of several: two chats with the same two characters.

@@ -1,4 +1,4 @@
-import type { FieldPath } from "@rp/shared/editing.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
 import { createContext, useContext } from "react"
 
 /** A fresh object for each visit, including repeated visits to the same match. */

@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
-import { promptPreset } from "@rp/shared/docs/preset.ts"
+import { promptPreset } from "@dreamspan/shared/docs/preset.ts"
 import { exportStPreset, importStPreset } from "../src/formats/preset.ts"
 import { assembleFixture } from "./support/assemblySources.ts"
 import { cardDoc } from "./support/docs.ts"

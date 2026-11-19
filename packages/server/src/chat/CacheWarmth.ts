@@ -6,8 +6,8 @@
 // path: while a reply is being prepared or written in a chat (`hold`), its changes wait,
 // and one estimate follows when it ends. A read of the next context (`next`) waits the same
 // way, then is worked out from what's stored then.
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Context, Effect, FiberSet, Layer, Option, type Scope } from "effect"
 import { ImageTokenCounts } from "./ImageTokenCounts.ts"
 import { Reader } from "../db/Database.ts"

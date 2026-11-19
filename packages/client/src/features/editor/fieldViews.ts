@@ -2,7 +2,7 @@
 // field's store and path and renders the field through `render`, passing controls for its strip
 // (`tools`), or something around it. The note-overrides feature registers one that shows a field
 // a note replaces in the open chat; a plugin adds, overrides or disables views by id.
-import type { FieldPath } from "@rp/shared/editing.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
 import type { ComponentType, ReactNode } from "react"
 import { makeRegistry } from "../../registry.ts"
 import { defineSlot } from "../../slots.tsx"

@@ -19,7 +19,7 @@ test.beforeAll(async () => {
   chat = (await admin((api) => api.CreateChat({ title: "Synthetic plugin chat" }))).id
   await admin((api) =>
     api.SendMessage({
-      chatId: chat as import("@rp/shared/chat.ts").ChatId,
+      chatId: chat as import("@dreamspan/shared/chat.ts").ChatId,
       parentSlotId: null,
       branch: false,
       content: "Synthetic root"
@@ -290,7 +290,7 @@ test("routes load before the router, live controls apply while routes request re
   await open(page)
   const id = "route-fixture"
   const source =
-    'import {type Activate} from "@rp/plugin-api/client"; export const activate: Activate = host => { host.registries.routes!.register({id:"route.fixture",path:"/extensions/fixture",component:()=> <p>Synthetic plugin route</p>}); host.registries.appBanners!.register({id:"route.banner",order:0,component:()=> <p>Route plugin activated</p>}) };'
+    'import {type Activate} from "@dreamspan/plugin-api/client"; export const activate: Activate = host => { host.registries.routes!.register({id:"route.fixture",path:"/extensions/fixture",component:()=> <p>Synthetic plugin route</p>}); host.registries.appBanners!.register({id:"route.banner",order:0,component:()=> <p>Route plugin activated</p>}) };'
   const commit = await admin((api) =>
     api.CreatePlugin({ scope: "instance", id, files: pluginFiles(id, source, ["routes", "appBanners"]) })
   )

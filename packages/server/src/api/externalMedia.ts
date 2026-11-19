@@ -1,9 +1,9 @@
 // Authenticated, owner-scoped media proxy. Consent is checked on every read; no browser,
 // shared or disk cache can outlive its revocation. The transport is a replaceable part.
-import { CurrentUser } from "@rp/shared/api.ts"
-import { ExternalMediaApi } from "@rp/shared/externalMedia.ts"
-import { ChatId, EntityId } from "@rp/shared/chat.ts"
-import { makeRegistry } from "@rp/shared/registry.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import { ExternalMediaApi } from "@dreamspan/shared/externalMedia.ts"
+import { ChatId, EntityId } from "@dreamspan/shared/chat.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { Accounts } from "../auth/Accounts.ts"

@@ -6,7 +6,7 @@
 // Not here: gemini-3.5-flash and gemini-3.7-flash (deprecated; requests route to 3.6/3.8 Flash and
 // the page doesn't say at which price), gemini-flash-latest and gemini-flash-lite-latest (the page
 // doesn't say which model they name), and audio-only, image, TTS, embedding and Live models.
-import type { Price } from "@rp/shared/providers.ts"
+import type { Price } from "@dreamspan/shared/providers.ts"
 import type { PriceEntry, PriceTable } from "./types.ts"
 
 const source = "https://aistudio.google.com/docs/pricing"

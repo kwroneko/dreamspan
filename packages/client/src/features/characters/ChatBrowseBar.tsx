@@ -1,4 +1,4 @@
-import { CHAT_FILTERS, CHAT_SORTS, type ChatBrowse, type ChatFilterCounts } from "@rp/shared/chatBrowse.ts"
+import { CHAT_FILTERS, CHAT_SORTS, type ChatBrowse, type ChatFilterCounts } from "@dreamspan/shared/chatBrowse.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuCheckboxItem } from "../../ui/Menu.tsx"

@@ -4,8 +4,8 @@ import { databaseFile } from "../src/db/connection.ts"
 // rows of forks not read yet are `pending`, never wrong, and the pass reads each chat's current
 // fork first, then the forks nearest it in its branch list. Synthetic fixtures, real workers.
 import { assert, describe, it } from "@effect/vitest"
-import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import type { ShellForksView } from "@rp/shared/chatSetupApi.ts"
+import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { ShellForksView } from "@dreamspan/shared/chatSetupApi.ts"
 import { Effect, Exit, Stream } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { forksView, libraryView, snapshotState, wire } from "../src/db/shellViews.ts"

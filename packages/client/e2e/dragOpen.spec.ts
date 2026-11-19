@@ -9,7 +9,7 @@
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test, type TestInfo } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { openCastAdd } from "./support/cast.ts"
 import { expectLayout } from "./support/layoutAudit.ts"

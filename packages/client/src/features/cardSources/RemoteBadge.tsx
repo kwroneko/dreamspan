@@ -2,8 +2,8 @@
 // in the draft chat's header naming the source, and the line at the top of the card's tab
 // with Add to my cards. Both go once the card is the user's.
 import { useAtomValue } from "@effect/atom-react"
-import { remoteOf } from "@rp/shared/cardSources.ts"
-import type { CastCard } from "@rp/shared/chat.ts"
+import { remoteOf } from "@dreamspan/shared/cardSources.ts"
+import type { CastCard } from "@dreamspan/shared/chat.ts"
 import { AsyncResult } from "effect/reactivity"
 import { useState } from "react"
 import { Button } from "../../ui/Button.tsx"

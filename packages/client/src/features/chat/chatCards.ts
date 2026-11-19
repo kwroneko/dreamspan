@@ -1,7 +1,7 @@
 // The Cast tab and each character tab read the same live definitions at the viewed tip.
 import { useAtomValue } from "@effect/atom-react"
-import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { ChatCard } from "@rp/shared/chatSetupApi.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { ChatCard } from "@dreamspan/shared/chatSetupApi.ts"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { useSyncExternalStore } from "react"
 import { AppClient } from "../../rpc.ts"

@@ -5,7 +5,7 @@
 // entry here is made up.
 import { mkdirSync } from "node:fs"
 import { expect, type Locator, type Page, test, type TestInfo } from "@playwright/test"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { saveField, seedPresetFork } from "./support/forkMerge.ts"
 import { expectLayout } from "./support/layoutAudit.ts"

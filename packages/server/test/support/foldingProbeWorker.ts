@@ -3,8 +3,8 @@
 import { parentPort, workerData } from "node:worker_threads"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { readerConnection } from "../../src/db/connection.ts"
 import { makeShellReadHandlers } from "../../src/db/shellReads.ts"
 

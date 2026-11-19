@@ -1,7 +1,7 @@
 // Import advisories describe the ended run, never the incomplete folder. All files here
 // are synthetic; controlled uploads pause before the selected preset and before finishing.
 import { assert, describe, it } from "@effect/vitest"
-import { classifyStPath } from "@rp/shared/stFolder.ts"
+import { classifyStPath } from "@dreamspan/shared/stFolder.ts"
 import { Effect } from "effect"
 import { Reader } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

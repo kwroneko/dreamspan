@@ -2,8 +2,8 @@
 // have (ARCHITECTURE §16): the browser tests need them, and no model is asked. The rows
 // follow the triggers' rules, so a malformed fixture fails here, not silently in the UI.
 import { Effect } from "effect"
-import type { ChatId, PathEntry } from "@rp/shared/chat.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import type { ChatId, PathEntry } from "@dreamspan/shared/chat.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { fixtureSql } from "../../../server/test/support/lcmFixtures.ts"
 
 export interface FixtureSummary {

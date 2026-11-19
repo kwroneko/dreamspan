@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
 import { toolData } from "../src/agent/toolData.ts"
 import { Reader, Writer } from "../src/db/Database.ts"

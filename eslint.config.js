@@ -62,7 +62,7 @@ export default tseslint.config(
             "CallExpression[callee.property.value=/^(brand|fromBrand)$/]",
             "CallExpression[callee.name=/^(brand|fromBrand)$/]"
           ].join(", "),
-          message: "Make id schemas with idSchema (@rp/shared/id.ts)."
+          message: "Make id schemas with idSchema (@dreamspan/shared/id.ts)."
         }
       ],
       // A rule of its own name, so the blocks below that restrict other imports don't replace it.
@@ -73,7 +73,7 @@ export default tseslint.config(
             {
               name: "effect/Schema",
               importNames: ["brand", "fromBrand"],
-              message: "Make id schemas with idSchema (@rp/shared/id.ts)."
+              message: "Make id schemas with idSchema (@dreamspan/shared/id.ts)."
             }
           ]
         }

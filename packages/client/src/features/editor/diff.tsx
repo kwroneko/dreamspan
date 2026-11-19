@@ -1,6 +1,6 @@
 // How a field changed, as one stretch of removed and inserted text with a little context
 // around it: linear in the text's length, so a 50 KB description compares at once.
-import { diffPatch } from "@rp/shared/drafts.ts"
+import { diffPatch } from "@dreamspan/shared/drafts.ts"
 import { RevisionDiff } from "../../ui/RevisionDiff.tsx"
 
 /** Characters of unchanged text shown on each side of the change. */

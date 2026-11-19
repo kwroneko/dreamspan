@@ -1,11 +1,11 @@
 // Model-shaped edits over the canonical preset and lorebook schemas. A call applies in
 // order to one saved document and either saves all of it or saves nothing.
 import { Schema } from "effect"
-import { PresetDoc, PresetPrompt } from "@rp/shared/docs/preset.ts"
-import { LorebookDoc, LorebookEntry, newLorebookEntry } from "@rp/shared/docs/lorebook.ts"
-import { mainPrompt } from "@rp/shared/presetOrder.ts"
-import { validateDoc } from "@rp/shared/editing.ts"
-import type { Doc } from "@rp/shared/library.ts"
+import { PresetDoc, PresetPrompt } from "@dreamspan/shared/docs/preset.ts"
+import { LorebookDoc, LorebookEntry, newLorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
+import { mainPrompt } from "@dreamspan/shared/presetOrder.ts"
+import { validateDoc } from "@dreamspan/shared/editing.ts"
+import type { Doc } from "@dreamspan/shared/library.ts"
 import { safeAgentDocument } from "../../db/agentDocuments.ts"
 import { workshopLimits as limits } from "../../workshopLimits.ts"
 

@@ -6,7 +6,7 @@
 // the card source is the fake archive.
 import { createServer } from "node:net"
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, startServer, type TestServer, withAdmin } from "./support/server.ts"

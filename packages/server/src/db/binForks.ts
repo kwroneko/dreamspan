@@ -1,6 +1,6 @@
 // The warning and the purge use the same fork view; the writer rechecks it before erasing.
-import { BinBranch, BinForkShown } from "@rp/shared/bin.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { BinBranch, BinForkShown } from "@dreamspan/shared/bin.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { type PathPiece, displaySlots, pathPieces, positionOf, slotPlace } from "./displayPath.ts"

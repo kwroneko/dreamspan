@@ -1,5 +1,5 @@
-import type { VersionId } from "@rp/shared/chat.ts"
-import { MAX_METRICS_VERSIONS, type VersionMetrics } from "@rp/shared/inspectorApi.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
+import { MAX_METRICS_VERSIONS, type VersionMetrics } from "@dreamspan/shared/inspectorApi.ts"
 import type { ChatSession } from "./session.ts"
 
 /** One batched read per microtask for the messages that asked; again when a version's status changes. */

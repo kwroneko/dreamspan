@@ -1,4 +1,4 @@
-import { deletedSince, observeDeletion, type ObservedDeletion } from "@rp/shared/drafts.ts"
+import { deletedSince, observeDeletion, type ObservedDeletion } from "@dreamspan/shared/drafts.ts"
 // The text of a summary being edited (ARCHITECTURE §3.10, §16): typed into a server draft
 // that keeps its undo history, and saved as a revision only when the user says so. The
 // rules are the other fields': the draft a save names is the one this tab last saw
@@ -8,8 +8,8 @@ import { deletedSince, observeDeletion, type ObservedDeletion } from "@rp/shared
 // As in the library's fields, text typed is copied into this browser (`editor/backup.ts`)
 // until the server has it: a save that fails, a closed tab or panel, or a reload leaves the
 // copy, which opening the edit again replays, with the base it was typed on.
-import { type Draft, DraftHistoryPolicy } from "@rp/shared/drafts.ts"
-import type { LcmSummary } from "@rp/shared/lcm.ts"
+import { type Draft, DraftHistoryPolicy } from "@dreamspan/shared/drafts.ts"
+import type { LcmSummary } from "@dreamspan/shared/lcm.ts"
 import type { AppError } from "../../errors.ts"
 import { type Copy, copiesOf, dropCopy, keepCopy, makeCopy, pendingOf } from "../editor/backup.ts"
 import type { ChatSession, Outcome } from "./session.ts"

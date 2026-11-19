@@ -1,8 +1,8 @@
 // The account's card-source choices (spec/CARD-SOURCES.md §5.2, §4.1): the per-source switch,
 // the credential holding each source's key, the last content rating, and the recently viewed
 // list. One row per user in `settings`, key `sources`, merged in the writer's transaction.
-import { DEFAULT_SOURCE_PREFS, RECENT_REMOTE_MAX, SourcePrefs } from "@rp/shared/cardSources.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { DEFAULT_SOURCE_PREFS, RECENT_REMOTE_MAX, SourcePrefs } from "@dreamspan/shared/cardSources.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import type { ReadOps, WriteOps } from "./ops.ts"

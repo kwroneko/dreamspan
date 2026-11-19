@@ -5,7 +5,7 @@
 // SQL first); {{char}} everywhere previews in under 3 s and is replaced in all 2,000 cards and
 // 40 books in under 10 s (measured 0.07 s, 0.85 s and 3.2 s).
 import { assert, describe, it } from "@effect/vitest"
-import type { LibrarySearch } from "@rp/shared/libraryReplace.ts"
+import type { LibrarySearch } from "@dreamspan/shared/libraryReplace.ts"
 import { Effect } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

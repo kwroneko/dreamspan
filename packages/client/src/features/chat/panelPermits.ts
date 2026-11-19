@@ -4,8 +4,8 @@
 // that card's own scripts; applicable preset display scripts count too, since captures or
 // multiple replacements can assemble scripts. The user's global scripts are the user's own.
 // A message with no character (a user's in a group) runs none and asks nothing.
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { useCallback, useMemo, useSyncExternalStore } from "react"
 import type { PanelPermit } from "../../ui/html/messageHtml.ts"
 import { useDisplayContext } from "./DisplaySettings.tsx"

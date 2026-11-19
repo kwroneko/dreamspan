@@ -1,4 +1,4 @@
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { createContext, useContext, useState } from "react"
 import { defineSlot } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"

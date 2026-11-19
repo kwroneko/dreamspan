@@ -1,7 +1,7 @@
 // Selecting messages to delete together (job msgactions1): ticks, Shift and Select range, the
 // still-generating message, the limit, and that a range of 500 is quick. Synthetic entries only.
-import { MULTI_DELETE_LIMIT } from "@rp/shared/bin.ts"
-import type { ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
+import { MULTI_DELETE_LIMIT } from "@dreamspan/shared/bin.ts"
+import type { ForkId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
 import { expect, it } from "vitest"
 import type { ChatSession } from "../src/features/chat/session.ts"
 import { MessageSelection } from "../src/features/chat/selection/store.ts"

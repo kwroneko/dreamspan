@@ -1,21 +1,21 @@
 import { importStPreset } from "../formats/preset.ts"
 // Library documents back out as files (ARCHITECTURE.md §11.4), in the format worker: a
 // large lorebook takes as long to write as to read.
-import { CardDoc } from "@rp/shared/docs/card.ts"
-import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
-import { NoteDoc } from "@rp/shared/docs/note.ts"
-import { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
+import { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
+import { NoteDoc } from "@dreamspan/shared/docs/note.ts"
+import { LegacyPresetDoc as PresetDoc } from "@dreamspan/shared/docs/preset.ts"
 import { Context, Effect, Layer, Option, Predicate, Schema } from "effect"
 import { exportCardCharx, exportCardJson, exportCardPng } from "../formats/cardExport.ts"
 import { exportPromptPreset } from "../formats/presetSettings.ts"
 import { exportLorebook } from "../formats/worldInfo.ts"
 import { OUR_EXTENSION } from "../formats/lorebook.ts"
-import type { ExportFormatInfo } from "@rp/shared/libraryImport.ts"
+import type { ExportFormatInfo } from "@dreamspan/shared/libraryImport.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { type ExportInput, ExportRefused } from "./ops.ts"
 import { describeImage } from "./images.ts"
 import { renderPicture } from "./thumbnail.ts"
-import { avatarCropOf, snapCrop, WHOLE_PICTURE } from "@rp/shared/media.ts"
+import { avatarCropOf, snapCrop, WHOLE_PICTURE } from "@dreamspan/shared/media.ts"
 
 /** A 1×1 PNG for a card without an avatar, since a PNG card needs an image to live in. */
 const PLACEHOLDER_PNG = Buffer.from(

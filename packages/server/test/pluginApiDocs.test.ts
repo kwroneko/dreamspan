@@ -73,7 +73,7 @@ for (const [name, change] of [
         network: false,
         ...change
       }),
-      "client.tsx": `import type {Activate} from "@rp/plugin-api/client"\nexport const activate:Activate=()=>{}`,
+      "client.tsx": `import type {Activate} from "@dreamspan/plugin-api/client"\nexport const activate:Activate=()=>{}`,
       "server.ts": `export const activate=()=>{}`,
       "worker.ts": `export const activate=()=>{}`
     }

@@ -2,7 +2,7 @@ import { Tooltip } from "../ui/Tooltip.tsx"
 // The login page (ARCHITECTURE §4). It shows the form only when the server says a
 // session is required; otherwise it says why no login is needed.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import type { Session } from "@rp/shared/api.ts"
+import type { Session } from "@dreamspan/shared/api.ts"
 import { Link, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type FormEvent, useEffect, useState } from "react"

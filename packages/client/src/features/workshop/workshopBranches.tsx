@@ -3,9 +3,9 @@
 // side panel (which shows the shown story branch's workshop branches only), the header link
 // back to the story, and the branch list in the workshop's own pane, which names each branch's
 // story branch.
-import type { ChatId, ForkId } from "@rp/shared/chat.ts"
-import { forkLabel } from "@rp/shared/branchNaming.ts"
-import type { WorkshopBranch } from "@rp/shared/workshopApi.ts"
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
+import { forkLabel } from "@dreamspan/shared/branchNaming.ts"
+import type { WorkshopBranch } from "@dreamspan/shared/workshopApi.ts"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { useEffect, useRef } from "react"

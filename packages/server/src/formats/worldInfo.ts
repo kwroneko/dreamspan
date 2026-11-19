@@ -1,9 +1,9 @@
 // SillyTavern's standalone World Info files, to and from our lorebook document. Entry fields
 // and their defaults are ST's `newWorldInfoEntryDefinition` (public/scripts/world-info.js);
 // a file must have `entries`, as ST's import requires (src/endpoints/worldinfo.js).
-import { formatByteSize } from "@rp/shared/byteSize.ts"
-import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@rp/shared/docs/lorebook.ts"
-import { type ImportReport, ReportBuilder, shownText } from "@rp/shared/importReport.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
+import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
+import { type ImportReport, ReportBuilder, shownText } from "@dreamspan/shared/importReport.ts"
 import { Context, type Effect, Predicate } from "effect"
 import { enumByIndex, Fields, isSafeInt, present } from "./fields.ts"
 import {

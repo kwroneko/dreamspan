@@ -1,13 +1,13 @@
 // The card-source RPCs (spec/CARD-SOURCES.md §6.1), the image route (§3.4) and the newer
 // file's route (§3.8): authenticated and owner-scoped like every RPC. The source is reached
 // only through the CardSources service.
-import { CurrentUser } from "@rp/shared/api.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
 import {
   type CardSourcesApi,
   REMOTE_VERSION_HEADER,
   SOURCE_LINK_HEADER,
   SOURCE_VERSION_RECEIPT_HEADER
-} from "@rp/shared/cardSources.ts"
+} from "@dreamspan/shared/cardSources.ts"
 import { Effect, Layer, Option } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { Accounts } from "../auth/Accounts.ts"

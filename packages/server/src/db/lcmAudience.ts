@@ -14,12 +14,12 @@ import { type ForkRef, shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } f
 import { displaySlots } from "./displayPath.ts"
 import { pathView } from "./lcmDisplay.ts"
 import { isStretchView, knowsSql } from "./knowers.ts"
-import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
+import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 import { stretchesAt } from "./threadStretches.ts"
-import { type ChatState, type FoldableEvent, foldState } from "@rp/shared/state.ts"
+import { type ChatState, type FoldableEvent, foldState } from "@dreamspan/shared/state.ts"
 import { identitiesOf } from "../assembler/knowledge.ts"
 import { stateEventsThrough } from "./stateRead.ts"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 
 /** A view's audience: its identities, in the stored canonical form. */
 export const audienceKey = (identities: ReadonlyArray<string>) => JSON.stringify([...new Set(identities)].sort())

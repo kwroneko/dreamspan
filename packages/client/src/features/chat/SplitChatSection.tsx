@@ -1,5 +1,5 @@
-import type { ChatId, ForkSplit } from "@rp/shared/chat.ts"
-import type { SplitChatLink } from "@rp/shared/splitChat.ts"
+import type { ChatId, ForkSplit } from "@dreamspan/shared/chat.ts"
+import type { SplitChatLink } from "@dreamspan/shared/splitChat.ts"
 import { Link, useParams, useSearch } from "@tanstack/react-router"
 import { useState } from "react"
 import { AboutHint } from "../../ui/AboutHint.tsx"

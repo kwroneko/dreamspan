@@ -18,7 +18,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Worker } from "node:worker_threads"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { startServer, withClient } from "./support.ts"
 

@@ -6,8 +6,8 @@
 // a workshop or story branch where it's off (by default or by its own Off) and a call there send
 // it nothing. A local fake server only.
 import { assert, describe, it } from "@effect/vitest"
-import type { Chat } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { Chat } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { Effect, Stream } from "effect"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { fakeTool, startFakeMcpServer } from "./support/fakeMcpServer.ts"

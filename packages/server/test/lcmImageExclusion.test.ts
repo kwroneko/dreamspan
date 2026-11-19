@@ -3,7 +3,7 @@
 // planning estimates image tokens from, and the summary request. Another fork still has it.
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { assert } from "@effect/vitest"
-import type { ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { databaseFile } from "../src/db/connection.ts"

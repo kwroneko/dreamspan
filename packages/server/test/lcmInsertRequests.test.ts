@@ -4,7 +4,7 @@
 // display order. Inside a range, at a seam, above the first message, and with the layer's cursor
 // on an inserted message.
 import { assert } from "@effect/vitest"
-import type { SlotId } from "@rp/shared/chat.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"

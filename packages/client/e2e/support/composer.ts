@@ -1,7 +1,7 @@
 // A composer's text set up over RPC, as the client types it: the composer of a fork opened,
 // then text saved onto the draft that names (composerDraft.ts).
-import type { ChatId, ForkId } from "@rp/shared/chat.ts"
-import type { Draft } from "@rp/shared/drafts.ts"
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
+import type { Draft } from "@dreamspan/shared/drafts.ts"
 import { Effect } from "effect"
 import type { Client } from "./rpc.ts"
 

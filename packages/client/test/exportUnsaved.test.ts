@@ -1,6 +1,6 @@
 // Export with unsaved changes asks first (owner, 2026-11-02): the question names each unsaved
 // field once, a preset's held changes as one line.
-import { HELD_FIELD, textField, valueField } from "@rp/shared/editing.ts"
+import { HELD_FIELD, textField, valueField } from "@dreamspan/shared/editing.ts"
 import { describe, expect, it } from "vitest"
 import { HELD_LABEL, unsavedFieldNames } from "../src/features/cardExport/unsaved.ts"
 

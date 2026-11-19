@@ -1,7 +1,7 @@
 // Unlinking a note from what it replaces (DESIGN §4.2: one note per target; a second offers to
 // unlink the other): its `replaces` and `own_position` go, through its editor store, so an open
 // editor of it shows the change.
-import type { ChatNote } from "@rp/shared/chatSetupApi.ts"
+import type { ChatNote } from "@dreamspan/shared/chatSetupApi.ts"
 import type { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import type { EditorStore } from "../editor/store.ts"
 import type { ReplaceChat } from "./chat.tsx"

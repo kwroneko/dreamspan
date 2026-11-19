@@ -3,7 +3,7 @@
 // under it, each a link to the chat it went into. Errors come first, then warnings, each the
 // rarest first, so a one-off isn't buried under one that's on every chat. Nothing is left out:
 // what the report couldn't hold is said, with why.
-import type { StImportJobDetail, StIssue } from "@rp/shared/stImportApi.ts"
+import type { StImportJobDetail, StIssue } from "@dreamspan/shared/stImportApi.ts"
 import { Link } from "@tanstack/react-router"
 import { Badge, Card, CardHeader, Disclosure } from "../../ui/Surface.tsx"
 import { Button } from "../../ui/Button.tsx"

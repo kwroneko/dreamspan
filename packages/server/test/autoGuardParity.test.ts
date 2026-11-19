@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
-import type { StateEventData } from "@rp/shared/state.ts"
+import type { StateEventData } from "@dreamspan/shared/state.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"

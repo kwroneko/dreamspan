@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { HistoryRejected } from "@rp/shared/historyApi.ts"
+import { HistoryRejected } from "@dreamspan/shared/historyApi.ts"
 import { checkWorkshopAccess, agentHistorySnapshot } from "./agentHistoryShared.ts"
 import { historyFork } from "./historyShared.ts"
 import { pathPieces, displaySlots, displayLength } from "./displayPath.ts"

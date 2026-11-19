@@ -5,10 +5,10 @@ import { editorNotices } from "../editor/editorSlots.ts"
 // layout, sharing the workspace's store, so an edit in either shows in the other. What's typed
 // and switched is used by the next reply as it's made (live text, owner 2026-11-01), and Save
 // with its message cuts a revision; moving, deleting or adding a prompt and attaching or taking
-// off a lorebook wait behind the floating bar's Save and Revert (@rp/shared/presetHeld.ts;
+// off a lorebook wait behind the floating bar's Save and Revert (@dreamspan/shared/presetHeld.ts;
 // owner 2026-11-02), a prompt's on/off switch excepted.
-import { endOfRequestText } from "@rp/shared/endOfRequest.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import { endOfRequestText } from "@dreamspan/shared/endOfRequest.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { SlotOutlet } from "../../slots.tsx"

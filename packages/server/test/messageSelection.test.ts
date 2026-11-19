@@ -1,8 +1,8 @@
 // Several messages deleted as one change, and its Undo (job msgactions1), through the real workers:
 // each exactly as DeleteMessage deletes one, branch-local, atomic, restored together.
 import { assert, describe, it } from "@effect/vitest"
-import { type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import { newCardNote } from "@rp/shared/editing.ts"
+import { type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import { newCardNote } from "@dreamspan/shared/editing.ts"
 import { Effect, Exit } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { testWorkers } from "./support/bundles.ts"

@@ -5,8 +5,8 @@
 // and folders by the pickers or a drop; new folder, rename, delete, download, copy path; the
 // working folder's mark and Set as working folder where the chat has one. A folder tree joins the
 // list once the component is wide enough (a page, a wide panel). Opening a file shows it in place.
-import { formatByteSize } from "@rp/shared/byteSize.ts"
-import { formatMoment } from "@rp/shared/branchNaming.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
+import { formatMoment } from "@dreamspan/shared/branchNaming.ts"
 import {
   crumbsOf,
   isTop,
@@ -19,9 +19,9 @@ import {
   type FileEntry,
   type FileSort,
   type FolderListing
-} from "@rp/shared/files.ts"
+} from "@dreamspan/shared/files.ts"
 import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react"
-import type { FilesUsage } from "@rp/shared/filesQuotaApi.ts"
+import type { FilesUsage } from "@dreamspan/shared/filesQuotaApi.ts"
 import { useAction } from "../../actions.tsx"
 import { copyText } from "../../copyText.ts"
 import { isAppDrag } from "../../ui/appDrags.ts"

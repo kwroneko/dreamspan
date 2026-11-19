@@ -3,10 +3,10 @@
 // tags and notes, and only the relationship ties the two. Cross-user probes are in
 // isolation.test.ts; the triggers on a bare connection in schema.test.ts.
 import { assert, layer } from "@effect/vitest"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { textField, valueField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { textField, valueField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"

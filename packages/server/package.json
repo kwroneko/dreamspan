@@ -1,5 +1,5 @@
 {
-  "name": "@rp/server",
+  "name": "@dreamspan/server",
   "private": true,
   "type": "module",
   "dependencies": {

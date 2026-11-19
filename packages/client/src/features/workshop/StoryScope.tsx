@@ -1,7 +1,7 @@
 // Branch naming in an approval or saved change follows the branch menu after a rename.
 // A deleted branch keeps its last saved display name; its identity is never printed.
-import type { ChatId, StoryAt } from "@rp/shared/chat.ts"
-import { storyScopeText, type StoryScope as Scope } from "@rp/shared/branchNaming.ts"
+import type { ChatId, StoryAt } from "@dreamspan/shared/chat.ts"
+import { storyScopeText, type StoryScope as Scope } from "@dreamspan/shared/branchNaming.ts"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { useEffect } from "react"

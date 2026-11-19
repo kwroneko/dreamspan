@@ -1,7 +1,7 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 // Account selections: the strip's model and preset chips, and their side panel tabs.
-import { BUILTIN_PRESET_LABEL, type GenerationDefaults } from "@rp/shared/generation.ts"
-import type { Model } from "@rp/shared/providers.ts"
+import { BUILTIN_PRESET_LABEL, type GenerationDefaults } from "@dreamspan/shared/generation.ts"
+import type { Model } from "@dreamspan/shared/providers.ts"
 import { Icon } from "../../ui/Icon.tsx"
 import { Link } from "@tanstack/react-router"
 import { useAtomValue } from "@effect/atom-react"

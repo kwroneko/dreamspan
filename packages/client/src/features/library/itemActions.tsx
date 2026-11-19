@@ -1,8 +1,8 @@
 // What a library item offers: a direct action or two beside it and an overflow menu for the
 // rest, each a registered entry a plugin can replace, disable or add to. A card's menu also
 // lists the card contributions' menu items (fork, forks, compare, mark as a fork of…).
-import type { LibraryRef } from "@rp/shared/library.ts"
-import type { ExportFormatInfo } from "@rp/shared/libraryImport.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
+import type { ExportFormatInfo } from "@dreamspan/shared/libraryImport.ts"
 import { useState, useSyncExternalStore, type ComponentType } from "react"
 import { makeRegistry } from "../../registry.ts"
 import { Icon } from "../../ui/Icon.tsx"

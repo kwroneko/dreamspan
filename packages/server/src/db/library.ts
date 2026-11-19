@@ -1,9 +1,9 @@
 // Library logic shared by the writer and the readers: ref rows, documents, and merge
 // planning (DATA-MODEL §3.2). Merge planning is pure given the three documents, so the
 // reader's preview and the writer's merge always agree.
-import { bookSourceName } from "@rp/shared/lorebookLink.ts"
-import type { ChatId, EntityId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { bookSourceName } from "@dreamspan/shared/lorebookLink.ts"
+import type { ChatId, EntityId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import {
   CardFamily,
   type Doc,
@@ -15,10 +15,10 @@ import {
   type MergeOutcome,
   type RefId,
   type RevisionId
-} from "@rp/shared/library.ts"
-import { hasSchema, validateDoc } from "@rp/shared/editing.ts"
-import { modelName } from "@rp/shared/cardNames.ts"
-import { merge3 } from "@rp/shared/merge.ts"
+} from "@dreamspan/shared/library.ts"
+import { hasSchema, validateDoc } from "@dreamspan/shared/editing.ts"
+import { modelName } from "@dreamspan/shared/cardNames.ts"
+import { merge3 } from "@dreamspan/shared/merge.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { docHash } from "./documents.ts"

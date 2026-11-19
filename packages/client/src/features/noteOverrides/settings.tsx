@@ -1,7 +1,7 @@
 // A note's Replaces control and its position switch (DESIGN §4.2; spec/NOTE-OVERRIDES.md §2.3),
 // first in its settings, and "Copy its current text" in its ⋯ menu.
-import { REPLACEABLE_CARD_FIELDS, type Placement, readNoteCondition } from "@rp/shared/docs/note.ts"
-import { valueField } from "@rp/shared/editing.ts"
+import { REPLACEABLE_CARD_FIELDS, type Placement, readNoteCondition } from "@dreamspan/shared/docs/note.ts"
+import { valueField } from "@dreamspan/shared/editing.ts"
 import { Predicate } from "effect"
 import { useState } from "react"
 import { Button } from "../../ui/Button.tsx"

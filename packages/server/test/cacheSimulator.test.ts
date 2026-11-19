@@ -177,7 +177,7 @@ it("suppresses explicit OpenAI-compatible markers when cache retention is off", 
 })
 
 it("accepts configured Chat budgets above four while retaining the Responses ceiling", async () => {
-  const { CacheLayout } = await import("@rp/shared/providers.ts")
+  const { CacheLayout } = await import("@dreamspan/shared/providers.ts")
   const { Schema } = await import("effect")
   expect(Schema.decodeUnknownSync(CacheLayout)({ maxMarkers: 5 })).toEqual({ maxMarkers: 5 })
   for (const responses of [false, true]) {

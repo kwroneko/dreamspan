@@ -3,7 +3,7 @@
 // recorded generation, its reasoning, and whether it's hidden from the context. Shapes from
 // ST's public source (`public/global.d.ts`, `script.js`: `saveReply`, `syncMesToSwipe`).
 // Pure: the reads are chatExport.ts's.
-import type { PathEntry, Version } from "@rp/shared/chat.ts"
+import type { PathEntry, Version } from "@dreamspan/shared/chat.ts"
 import { stReasoningExtra, stReasoningType } from "./stChat.ts"
 
 /** Who a message is from, as ST names it. */

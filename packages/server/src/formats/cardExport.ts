@@ -1,6 +1,6 @@
 // Card export: our card document flattened to a standard V2 or V3 card, as JSON, inside a
 // PNG, or as CHARX. The card's notes are added before (importer/exporters.ts).
-import type { CardAsset, CardDoc } from "@rp/shared/docs/card.ts"
+import type { CardAsset, CardDoc } from "@dreamspan/shared/docs/card.ts"
 import type { Effect } from "effect"
 import { type CardFile, embeddedPath } from "./cardImport.ts"
 import { present } from "./fields.ts"

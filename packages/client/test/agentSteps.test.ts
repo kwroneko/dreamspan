@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { RolloutStep, TranscriptEntry } from "@rp/shared/agent.ts"
+import type { RolloutStep, TranscriptEntry } from "@dreamspan/shared/agent.ts"
 import {
   durationText,
   excerpt,

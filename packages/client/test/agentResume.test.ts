@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { TranscriptEntry, TurnPart } from "@rp/shared/agent.ts"
-import type { Version } from "@rp/shared/chat.ts"
+import type { TranscriptEntry, TurnPart } from "@dreamspan/shared/agent.ts"
+import type { Version } from "@dreamspan/shared/chat.ts"
 import { editableText, resumeOffer, schemaProblem, stepEdit } from "../src/features/chat/agent/resume.ts"
 
 const version = (fields: Partial<Version>) =>

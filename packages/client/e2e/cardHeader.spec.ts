@@ -7,7 +7,7 @@
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { DISPLAY_HINT, NICKNAME_HINT } from "../src/features/editor/cardNameHints.ts"
 import { cardFieldsTab } from "./support/cardEditor.ts"
 import { portraitPng } from "./support/portrait.ts"

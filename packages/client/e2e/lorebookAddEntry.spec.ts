@@ -5,7 +5,7 @@
 // editor and the side panel's book, at 1440 and 390. Synthetic books and chat only.
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"

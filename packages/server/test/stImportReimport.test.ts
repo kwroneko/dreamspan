@@ -1,6 +1,6 @@
 // Old messages changed in ST 1.19, using only synthetic JSONL through the real upload.
 import { assert, layer } from "@effect/vitest"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { vi } from "vitest"
 import { stImportGraph } from "./support/stImportGraph.ts"

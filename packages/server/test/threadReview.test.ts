@@ -1,8 +1,8 @@
 // Adversarial join regressions; all story text is synthetic.
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import type { ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
+import type { ForkId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 import { generationOf } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
 import { historyTools } from "../src/agent/tools/history.ts"

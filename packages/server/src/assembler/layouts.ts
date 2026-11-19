@@ -1,4 +1,4 @@
-import { modelName } from "@rp/shared/cardNames.ts"
+import { modelName } from "@dreamspan/shared/cardNames.ts"
 // The Definitions marker's card blocks (DESIGN §5.0, §5.2, §5.3; ARCHITECTURE §15).
 import type { Names } from "./macros.ts"
 import { type Assembly, need } from "./pipeline.ts"

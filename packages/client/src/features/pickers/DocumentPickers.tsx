@@ -9,8 +9,8 @@
 // "New …". The bodies are registered slot entries (`card.picker`, `document.picker`), so a
 // plugin can replace them.
 import { useAtomValue } from "@effect/atom-react"
-import type { CardSwitcherView, DocumentSort } from "@rp/shared/chatApi.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { CardSwitcherView, DocumentSort } from "@dreamspan/shared/chatApi.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useId, useRef, useState } from "react"
 import { SlotOutlet, defineSlot } from "../../slots.tsx"

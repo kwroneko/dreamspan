@@ -2,8 +2,8 @@
 // to see the full genealogy tree with links to each of them you'd be able to click or open in
 // new tabs"). Cards have theirs in the card's Forks (cardForks). Every member is a real link;
 // one only for a chat, binned or gone isn't. Members with forks fold, for long trees on a phone.
-import type { LibraryGenealogy } from "@rp/shared/forkMerge.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { LibraryGenealogy } from "@dreamspan/shared/forkMerge.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Link } from "@tanstack/react-router"
 import { useContext, useMemo, useState } from "react"
 import { AsyncView } from "../../actions.tsx"

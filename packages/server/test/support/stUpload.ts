@@ -1,8 +1,8 @@
 // Uploads an ST folder the way the client does (features/library/stImport.ts): picks the
 // user folder, starts an import, sends the files in order with chats in parts cut at line
 // ends, and sends deferred branches again at the end.
-import { classifyStPath, findStRoots, orderStChats, ST_FILE_ORDER } from "@rp/shared/stFolder.ts"
-import { StFileResult } from "@rp/shared/stImportApi.ts"
+import { classifyStPath, findStRoots, orderStChats, ST_FILE_ORDER } from "@dreamspan/shared/stFolder.ts"
+import { StFileResult } from "@dreamspan/shared/stImportApi.ts"
 import { Effect, Schema } from "effect"
 import { client, serverPort } from "./config.ts"
 

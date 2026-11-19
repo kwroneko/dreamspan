@@ -5,7 +5,7 @@
 // region; GovCloud (`us-gov.`) differs and isn't priced here. Model IDs are from the model cards,
 // lifecycle from the legacy lifecycle page: Claude Sonnet 4 reached EOL on 2026-10-14 and Claude
 // 3.x except 3 Haiku on 2026-11-13; Claude Opus 4 has no model card.
-import type { Price } from "@rp/shared/providers.ts"
+import type { Price } from "@dreamspan/shared/providers.ts"
 import { claude } from "./anthropic.ts"
 import { scalePrice } from "./scale.ts"
 import type { PriceEntry } from "./types.ts"

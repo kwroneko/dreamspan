@@ -1,4 +1,4 @@
-import type { CostRule, CostSettings, CostRates } from "@rp/shared/costFormulas.ts"
+import type { CostRule, CostSettings, CostRates } from "@dreamspan/shared/costFormulas.ts"
 import type { CostFormula } from "./registry.ts"
 
 export interface UserPricing {

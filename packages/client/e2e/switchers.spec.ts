@@ -6,7 +6,7 @@
 // card rows have portraits, and kinds with a way to make one end with a New row.
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"

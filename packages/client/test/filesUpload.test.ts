@@ -1,7 +1,7 @@
 // Uploads into Files (spec/FILES-AND-ENVIRONMENT.md §1.1): one question for the whole batch when
 // names are taken, folders kept, and what Undo may take back. Synthetic files only.
 import { describe, expect, it } from "vitest"
-import type { UploadConflict } from "@rp/shared/files.ts"
+import type { UploadConflict } from "@dreamspan/shared/files.ts"
 import { NameTaken } from "../src/features/files/source.ts"
 import { itemsFromInput, uploadAll, type UploadItem } from "../src/features/files/upload.ts"
 

@@ -11,7 +11,7 @@ import { expectTextBox } from "./support/textbox.ts"
 import { asUser } from "./support/rpc.ts"
 import { level1 } from "./support/summaries.ts"
 import { choices, modelChip, modelName } from "./support/strip.ts"
-import type { SummaryId } from "@rp/shared/lcm.ts"
+import type { SummaryId } from "@dreamspan/shared/lcm.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60" })
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)

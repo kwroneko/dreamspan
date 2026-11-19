@@ -1,6 +1,6 @@
 import { Cause } from "effect"
 import { expect, it } from "vitest"
-import { PluginRejected } from "@rp/shared/plugins.ts"
+import { PluginRejected } from "@dreamspan/shared/plugins.ts"
 import { describeCause } from "../src/errors.ts"
 it("shows the host's fixed plugin refusal instead of an unknown error", () => {
   expect(

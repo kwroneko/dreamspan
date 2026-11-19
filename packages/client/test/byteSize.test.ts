@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatByteSize, SIZE_UNITS } from "@rp/shared/byteSize.ts"
+import { formatByteSize, SIZE_UNITS } from "@dreamspan/shared/byteSize.ts"
 import { editableByteSize, parseByteSize } from "../src/ui/byteSize.ts"
 
 describe("byte sizes", () => {

@@ -1,7 +1,7 @@
 // The panel bridge's allowlist (spec/HTML-MESSAGES.md §3.4, §3.7 check 3) and whose approval a
 // panel's scripts follow (§3.4 "Approval").
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { describe, expect, it, vi } from "vitest"
 import { panelPermit, writesScripts } from "../src/features/chat/panelPermits.ts"
 import { bridgeLink, MAX_BRIDGE_COPY, parseBridgeMessage } from "../src/ui/html/bridge.ts"

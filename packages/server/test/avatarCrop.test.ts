@@ -2,7 +2,7 @@
 // one is another file and ETag), the default for an image without one, who may set it, and the
 // round trip through our PNG export. Synthetic images only.
 import { assert, layer } from "@effect/vitest"
-import { ImportResult } from "@rp/shared/libraryImport.ts"
+import { ImportResult } from "@dreamspan/shared/libraryImport.ts"
 import { Effect, Schema } from "effect"
 import sharp from "sharp"
 import { importCard } from "../src/formats/cardImport.ts"

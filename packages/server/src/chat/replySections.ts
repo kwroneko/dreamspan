@@ -8,7 +8,7 @@ import {
   type ReplySectionSettings,
   literalPattern,
   sectionUnclosed
-} from "@rp/shared/replySections.ts"
+} from "@dreamspan/shared/replySections.ts"
 import { Stream } from "effect"
 import type { Generation } from "../assembler/types.ts"
 import { compileLinear } from "../assembler/regex.ts"

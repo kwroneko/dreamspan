@@ -1,6 +1,6 @@
 import { assert, layer } from "@effect/vitest"
 import { Effect } from "effect"
-import type { SlotId } from "@rp/shared/chat.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { serverLayer, testConfig } from "./support/config.ts"

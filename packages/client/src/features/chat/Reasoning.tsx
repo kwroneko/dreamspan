@@ -11,9 +11,9 @@
 // tag has come and the body starts (owner, 2026-11-02); open or folded as the user prefers.
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useAtomValue } from "@effect/atom-react"
-import type { SlotId, ThinkingPart, Version } from "@rp/shared/chat.ts"
-import type { ReasoningDisplay } from "@rp/shared/chatApi.ts"
-import { sectionsDisplay, sectionUnclosed } from "@rp/shared/replySections.ts"
+import type { SlotId, ThinkingPart, Version } from "@dreamspan/shared/chat.ts"
+import type { ReasoningDisplay } from "@dreamspan/shared/chatApi.ts"
+import { sectionsDisplay, sectionUnclosed } from "@dreamspan/shared/replySections.ts"
 import { useId, useState, useSyncExternalStore } from "react"
 import { Icon } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"

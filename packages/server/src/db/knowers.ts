@@ -1,8 +1,8 @@
 // Who knew a message, read from the database (spec/CHARACTER-CONTEXT.md §9.1): its version's
 // cast less those away, and its speaker; a merge's join, those who knew all of it; nothing
 // recorded, everyone. Shared by assembly (`assemblySources.ts`) and the agent's read tools
-// (`agentReads.ts`), so both leave out the same messages. The pure rule is `@rp/shared/knowledge.ts`.
-import { knowersOf, parsePresence, STRETCH_VIEW } from "@rp/shared/knowledge.ts"
+// (`agentReads.ts`), so both leave out the same messages. The pure rule is `@dreamspan/shared/knowledge.ts`.
+import { knowersOf, parsePresence, STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 import { Effect } from "effect"
 import { viewedJoin } from "../assembler/mergeKnowledge.ts"
 import type { SqlClient } from "effect/sql"

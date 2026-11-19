@@ -11,11 +11,11 @@
 // The child runs in a fiber of the call's own, so "Open as thread" (§14) can later read the same
 // rollout and transcript without changing how it runs.
 import { Type } from "@earendil-works/pi-ai"
-import type { ChildStep, RolloutStep, SubagentRow } from "@rp/shared/agent.ts"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
-import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import { makeRegistry } from "@rp/shared/registry.ts"
+import type { ChildStep, RolloutStep, SubagentRow } from "@dreamspan/shared/agent.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect"
 import type { AssembledRequest, Generation } from "../assembler/types.ts"
 import { GenerationFailed, type GenerationRequest } from "../chat/Generator.ts"

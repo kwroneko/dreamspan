@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest"
-import type { ClientPlugin } from "@rp/shared/pluginClient.ts"
+import type { ClientPlugin } from "@dreamspan/shared/pluginClient.ts"
 import { clientPluginHost, loadClientPlugin, pluginsOff, CLIENT_PLUGIN_TIMEOUT_MS } from "../src/plugins.tsx"
 import { composerControls } from "../src/features/chat/composerControls.tsx"
 import { chatPanels } from "../src/features/chat/panels.tsx"

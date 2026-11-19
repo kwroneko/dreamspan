@@ -1,5 +1,5 @@
 import { CardSurface } from "../cardForks/surfaces.tsx"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { type EditorStore, useEditorState } from "../editor/store.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"

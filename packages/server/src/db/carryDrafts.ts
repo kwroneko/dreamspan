@@ -6,12 +6,12 @@
 // (`carryChatNoteDrafts`, from graphWrites' fork paths), a card's fork for the card's notes
 // (`carryFieldDrafts`, from cardForkWrites). Each runs inside the writer transaction that
 // makes the fork.
-import type { ChatId } from "@rp/shared/chat.ts"
-import { DraftKey, entityDraftTarget, parseDraftTarget } from "@rp/shared/drafts.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { isHeldField } from "@rp/shared/editing.ts"
-import type { Doc } from "@rp/shared/library.ts"
-import { editedDoc } from "@rp/shared/presetConditions.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import { DraftKey, entityDraftTarget, parseDraftTarget } from "@dreamspan/shared/drafts.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { isHeldField } from "@dreamspan/shared/editing.ts"
+import type { Doc } from "@dreamspan/shared/library.ts"
+import { editedDoc } from "@dreamspan/shared/presetConditions.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { fieldContent, type makeDraftStore } from "./drafts.ts"

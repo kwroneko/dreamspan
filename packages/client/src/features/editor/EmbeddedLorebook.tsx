@@ -1,4 +1,4 @@
-import { valueField } from "@rp/shared/editing.ts"
+import { valueField } from "@dreamspan/shared/editing.ts"
 import { Card, CardHeader } from "../../ui/Surface.tsx"
 import { FieldTools } from "./controls.tsx"
 import { LorebookForm } from "./LorebookForm.tsx"

@@ -1,6 +1,6 @@
 // Copying saved chat notes keeps the destination's saved text reachable in History.
 import { assert, it } from "@effect/vitest"
-import { textField } from "@rp/shared/editing.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { Effect } from "effect"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 

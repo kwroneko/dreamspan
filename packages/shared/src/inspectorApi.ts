@@ -86,7 +86,7 @@ export type ContextSource = typeof ContextSource.Type
 /** Why a cache breakpoint follows a message: the end of the preset's prefix, or of the stable history. */
 const BreakpointReason = Schema.Literals(["prefix", "summary", "history", "pinned"])
 
-/** Where an image's token figure comes from (DESIGN §10.2a; `@rp/shared/imageTokens.ts`). */
+/** Where an image's token figure comes from (DESIGN §10.2a; `@dreamspan/shared/imageTokens.ts`). */
 const ImageTokenBasis = Schema.Literals(["counted", "formula", "calibrated", "unknown"])
 
 /** One sent image's token estimate, as the context view shows it. */

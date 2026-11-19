@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
-import { newCardDoc, newCardNote } from "@rp/shared/editing.ts"
+import { newCardDoc, newCardNote } from "@dreamspan/shared/editing.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { speakerPrefixChange } from "../src/assembler/warmth.ts"
 import { importStPreset } from "../src/formats/preset.ts"

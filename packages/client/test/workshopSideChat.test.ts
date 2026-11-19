@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import type { Chat, ForkId } from "@rp/shared/chat.ts"
+import type { Chat, ForkId } from "@dreamspan/shared/chat.ts"
 import { chatPlaceKey } from "../src/features/chat/chatPlace.ts"
 import { availableCommands, type ChatCommandContext } from "../src/features/chat/commands.tsx"
 import { takesSideChat } from "../src/features/chat/kindLooks.ts"
@@ -22,7 +22,7 @@ import {
 } from "../src/features/workshop/sideChat.ts"
 import { WorkshopSidePanel } from "../src/features/workshop/SidePanel.tsx"
 import { pairedWith, storyBranchName } from "../src/features/workshop/workshopBranches.tsx"
-import type { WorkshopBranch } from "@rp/shared/workshopApi.ts"
+import type { WorkshopBranch } from "@dreamspan/shared/workshopApi.ts"
 
 vi.hoisted(() => {
   vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })

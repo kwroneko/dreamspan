@@ -10,8 +10,8 @@ import {
   REMOTE_VERSION_HEADER,
   SOURCE_LINK_HEADER,
   SOURCE_VERSION_RECEIPT_HEADER
-} from "@rp/shared/cardSources.ts"
-import type { RefId, RevisionId } from "@rp/shared/library.ts"
+} from "@dreamspan/shared/cardSources.ts"
+import type { RefId, RevisionId } from "@dreamspan/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
 import { lazy, Suspense, useContext, useMemo, useState } from "react"
 import { invalidateKeys, useAction } from "../../actions.tsx"

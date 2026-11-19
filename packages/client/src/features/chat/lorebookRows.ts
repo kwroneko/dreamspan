@@ -1,4 +1,4 @@
-import { replacingBook } from "@rp/shared/lorebookLink.ts"
+import { replacingBook } from "@dreamspan/shared/lorebookLink.ts"
 
 // The Lorebooks tab's one list (owner, 2026-11-01: rows mustn't appear, vanish or show twice):
 // each member card's own book, the books added to this chat in the order they were added, then

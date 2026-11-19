@@ -1,7 +1,7 @@
 // Measure the actual CSS box, including grid/collage cells and resizable panels. No
 // initial guessed URL: the first request uses rendered width × the screen's density.
-import { remoteMediaOf } from "@rp/shared/cardSources.ts"
-import { cropKey, type AvatarCrop, mediaWidth } from "@rp/shared/media.ts"
+import { remoteMediaOf } from "@dreamspan/shared/cardSources.ts"
+import { cropKey, type AvatarCrop, mediaWidth } from "@dreamspan/shared/media.ts"
 import { useCallback, useState } from "react"
 
 export const mediaUrl = (id: string, width?: number) => {

@@ -1,10 +1,10 @@
 import { Effect } from "effect"
-import type { Summary } from "@rp/shared/lcm.ts"
-import { resolveLcm } from "@rp/shared/lcmSettings.ts"
+import type { Summary } from "@dreamspan/shared/lcm.ts"
+import { resolveLcm } from "@dreamspan/shared/lcmSettings.ts"
 import { AssemblySources, need, type AssemblerStage } from "./pipeline.ts"
 import { historyLeafOf } from "./types.ts"
 import { layerKnown } from "./knowledge.ts"
-import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
+import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 
 /** One summary as its own message's text (DESIGN §8: separate blocks placed like the history). */
 export const summaryBlock = (s: Pick<Summary, "level" | "from" | "to" | "content">) =>

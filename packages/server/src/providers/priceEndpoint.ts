@@ -1,6 +1,6 @@
 // The opt-in price endpoint (spec/PRICES.md §4): `GET {base}/v1/prices` on a connection whose
 // user turned on `priceEndpoint`. Nothing here runs for any other connection.
-import type { Price, PriceFeed } from "@rp/shared/providers.ts"
+import type { Price, PriceFeed } from "@dreamspan/shared/providers.ts"
 import { Predicate } from "effect"
 
 /** `{base}` without a trailing `/v1`, so `https://gw.example/v1` and `https://gw.example` both probe the same path. */

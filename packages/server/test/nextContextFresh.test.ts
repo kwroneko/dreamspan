@@ -2,7 +2,7 @@
 // (chat/CacheWarmth.ts `next`), over a real server: an edit, a new branch, a deleted message
 // and the user's default preset, each read at once, without waiting for the pushed estimate.
 import { assert, it } from "@effect/vitest"
-import type { SlotId } from "@rp/shared/chat.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"

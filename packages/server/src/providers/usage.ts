@@ -5,8 +5,8 @@
 // routed upstream and refusal details for the ledger.
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai"
 import { estimateContextTokens, estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate"
-import type { Price } from "@rp/shared/providers.ts"
-import { type Cost, type PricedRates, type TokenCounts, unknownCounts, type UsageSource } from "@rp/shared/usage.ts"
+import type { Price } from "@dreamspan/shared/providers.ts"
+import { type Cost, type PricedRates, type TokenCounts, unknownCounts, type UsageSource } from "@dreamspan/shared/usage.ts"
 import { Option, Predicate, Schema } from "effect"
 import type { CostFormula, PriceSources, RequestTarget } from "./registry.ts"
 import { userCostFormula, userGeneralCostFormula } from "./userCosts.ts"

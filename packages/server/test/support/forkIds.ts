@@ -1,5 +1,5 @@
 // The fork a test built a line for: the one whose tip is the line's last message.
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import type { client } from "./config.ts"
 

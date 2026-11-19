@@ -1,7 +1,7 @@
 // Consent in the existing message note, chat settings, Interface and card editor. Synthetic
 // media responses are intercepted at the app route; server tests exercise the actual proxy.
 import { expect, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { SYNTHETIC_TTF } from "./support/syntheticFont.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"

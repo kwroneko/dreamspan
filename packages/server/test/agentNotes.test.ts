@@ -3,10 +3,10 @@
 // notes, the chat's override), and a card's field changed through notes in the owner's costume
 // example, each attached to the reply so a swipe takes it back.
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { textField, valueField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { ChatId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { textField, valueField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import type { ServerResponse } from "node:http"
 import { Reader, Writer } from "../src/db/Database.ts"

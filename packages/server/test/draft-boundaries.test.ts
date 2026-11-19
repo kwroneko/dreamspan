@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { textField } from "@rp/shared/editing.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { client, posted, outcome, testConfig, withServer, typeInto, takenFrom } from "./support/config.ts"
 import { sendStFile } from "./support/stUpload.ts"
 

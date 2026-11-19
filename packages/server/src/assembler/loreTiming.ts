@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
+import type { LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
 
 export const loreEntryKey = (book: string, entry: Pick<LorebookEntry, "uid">) => JSON.stringify([book, entry.uid])
 

@@ -1,18 +1,18 @@
-// The editors' RPC handlers (@rp/shared/editorApi.ts). Every handler acts as the
+// The editors' RPC handlers (@dreamspan/shared/editorApi.ts). Every handler acts as the
 // authenticated user, and storage enforces ownership, so another user's ids are NotFound.
 // Documents from the client are validated against their kind's schema here or in the writer.
-import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import { PRESET_SCHEMA_VERSION, type PresetDoc, promptPreset } from "@rp/shared/docs/preset.ts"
-import { convertToWorkshop } from "@rp/shared/workshopPreset.ts"
+import { type AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
+import { PRESET_SCHEMA_VERSION, type PresetDoc, promptPreset } from "@dreamspan/shared/docs/preset.ts"
+import { convertToWorkshop } from "@dreamspan/shared/workshopPreset.ts"
 import { builtinPreset } from "../db/assemblySources.ts"
-import { CARD_SCHEMA_VERSION } from "@rp/shared/docs/card.ts"
-import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@rp/shared/docs/lorebook.ts"
-import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
-import { newCardDoc, parseField, validateDoc } from "@rp/shared/editing.ts"
-import { EditRefused, type ForkMergeApi, InvalidDocument, SavedRef } from "@rp/shared/editorApi.ts"
-import { NotFound, ServerError } from "@rp/shared/errors.ts"
-import type { RefId } from "@rp/shared/library.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { CARD_SCHEMA_VERSION } from "@dreamspan/shared/docs/card.ts"
+import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
+import { DraftKey, entityDraftTarget } from "@dreamspan/shared/drafts.ts"
+import { newCardDoc, parseField, validateDoc } from "@dreamspan/shared/editing.ts"
+import { EditRefused, type ForkMergeApi, InvalidDocument, SavedRef } from "@dreamspan/shared/editorApi.ts"
+import { NotFound, ServerError } from "@dreamspan/shared/errors.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { RpcClientError } from "effect/rpc"
 import { Notices } from "../chat/Notices.ts"
@@ -20,12 +20,12 @@ import { ChatHub } from "../chat/ChatHub.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { DraftTooLarge, type RefChange, RefOperationRefused, StorageError } from "../db/ops.ts"
-import { remoteEntityId, remoteOf, SourceFailed } from "@rp/shared/cardSources.ts"
-import { cardNames } from "@rp/shared/cardNames.ts"
-import { EditorSnapshot } from "@rp/shared/editorApi.ts"
-import { type Doc, LibraryRef, type RevisionId } from "@rp/shared/library.ts"
-import { editedDoc } from "@rp/shared/presetConditions.ts"
-import type { User } from "@rp/shared/domain.ts"
+import { remoteEntityId, remoteOf, SourceFailed } from "@dreamspan/shared/cardSources.ts"
+import { cardNames } from "@dreamspan/shared/cardNames.ts"
+import { EditorSnapshot } from "@dreamspan/shared/editorApi.ts"
+import { type Doc, LibraryRef, type RevisionId } from "@dreamspan/shared/library.ts"
+import { editedDoc } from "@dreamspan/shared/presetConditions.ts"
+import type { User } from "@dreamspan/shared/domain.ts"
 import { Option } from "effect"
 import { CardSources } from "../sources/CardSources.ts"
 
@@ -104,7 +104,7 @@ export const makeEditorHandlers = Effect.gen(function* () {
     )
   const draftChanged =
     (id: UserId) =>
-    <E, R>(effect: Effect.Effect<import("@rp/shared/drafts.ts").Draft, E, R>) =>
+    <E, R>(effect: Effect.Effect<import("@dreamspan/shared/drafts.ts").Draft, E, R>) =>
       Effect.tap(effect, (draft) => Effect.sync(() => notices.publish(id, { _tag: "UserDraftChanged", draft })))
   // A card on a card source before it's added (spec/CARD-SOURCES.md §4.3): its editor opens
   // under the placeholder id (`src:<source>:<remote>`) on the cached document, and its edits are
@@ -608,7 +608,7 @@ export const makeWorkshopPresetHandlers = Effect.gen(function* () {
         })
         return ref
       }).pipe(settle("ConvertPresetToWorkshop"))
-  } satisfies Parameters<typeof import("@rp/shared/editorApi.ts").WorkshopPresetApi.of>[0]
+  } satisfies Parameters<typeof import("@dreamspan/shared/editorApi.ts").WorkshopPresetApi.of>[0]
 })
 
 /** ForkMergeApi's handlers, served by their own layer (AppCoreApi's note). */
@@ -662,7 +662,7 @@ export const makeGalleryHandlers = Effect.gen(function* () {
         Effect.map(saved),
         settle("ChangeCardAsset")
       )
-  } satisfies Parameters<typeof import("@rp/shared/editorApi.ts").GalleryApi.of>[0]
+  } satisfies Parameters<typeof import("@dreamspan/shared/editorApi.ts").GalleryApi.of>[0]
 })
 
 export const makePanelApprovalHandlers = Effect.gen(function* () {
@@ -682,7 +682,7 @@ export const makePanelApprovalHandlers = Effect.gen(function* () {
           })
           .pipe(Effect.tap(() => warmth.refreshUser(id)))
       ).pipe(Effect.map(saved), settle("SetHtmlApproval"))
-  } satisfies Parameters<typeof import("@rp/shared/editorApi.ts").PanelApprovalApi.of>[0]
+  } satisfies Parameters<typeof import("@dreamspan/shared/editorApi.ts").PanelApprovalApi.of>[0]
 })
 
 export const makeCardArchiveHandlers = Effect.gen(function* () {
@@ -702,7 +702,7 @@ export const makeCardArchiveHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => writer.UndoCardArchive({ userId: id, entityIds, archivedAt })).pipe(
         settle("UndoCardArchive")
       )
-  } satisfies Parameters<typeof import("@rp/shared/editorApi.ts").CardArchiveApi.of>[0]
+  } satisfies Parameters<typeof import("@dreamspan/shared/editorApi.ts").CardArchiveApi.of>[0]
 })
 
 /** The move has its own small handler group, as the gallery and workshop conversion do. */
@@ -714,5 +714,5 @@ export const makeOwnTurnNoteHandlers = Effect.gen(function* () {
       Effect.flatMap(CurrentUser, (user) =>
         writer.MoveToOwnTurnNote({ userId: user.id, ...args }).pipe(Effect.tap(() => warmth.refreshUser(user.id)))
       ).pipe(settle("MoveToOwnTurnNote"))
-  } satisfies Parameters<typeof import("@rp/shared/editorApi.ts").OwnTurnNoteApi.of>[0]
+  } satisfies Parameters<typeof import("@dreamspan/shared/editorApi.ts").OwnTurnNoteApi.of>[0]
 })

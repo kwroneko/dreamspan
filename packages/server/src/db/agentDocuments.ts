@@ -1,9 +1,9 @@
 // Pure document policy shared by approval previews and the writer. Executable changes
 // stay off until the user approves them through the ordinary editor controls.
-import { canonicalJson } from "@rp/shared/editing.ts"
-import type { Doc, EntityKind } from "@rp/shared/library.ts"
-import type { PresetDoc } from "@rp/shared/docs/preset.ts"
-import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
+import { canonicalJson } from "@dreamspan/shared/editing.ts"
+import type { Doc, EntityKind } from "@dreamspan/shared/library.ts"
+import type { PresetDoc } from "@dreamspan/shared/docs/preset.ts"
+import type { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
 
 const differs = (a: unknown, b: unknown) => canonicalJson(a) !== canonicalJson(b)
 const opaque = (value: unknown) => value !== null && typeof value === "object" && Object.keys(value).length > 0

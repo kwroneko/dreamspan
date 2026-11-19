@@ -7,8 +7,8 @@
 // forkVersionsMigration.test.ts.
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
-import { type ChatId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { type ChatId, type ForkId, NewVersion, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { databaseFile } from "../src/db/connection.ts"

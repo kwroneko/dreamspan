@@ -2,7 +2,7 @@
 // left out, and the group chat as a group's tile among them (homeGroups.spec.ts has more); one click continues a character's latest chat, or opens a never-used one's
 // greeting without making a chat; Inspect shows the card and every chat it's in.
 import { expect, test } from "@playwright/test"
-import type { ChatId, EntityId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId } from "@dreamspan/shared/chat.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 

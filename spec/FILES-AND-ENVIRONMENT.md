@@ -56,7 +56,7 @@
   - *Accidental damage.* File-tool changes have Undo, and changes made by commands have Restore from versions (§7). A wall wouldn't stop a command in the working folder from damaging that folder either.
   - *Other users.* Separating accounts is a different matter, and it stays required. It is enforced by mounts: an account's sandbox contains only its own tree and the folders shared with it (§3.6). The file tools check the same ownership in the app.
   - If a real need appears later, a folder flag such as "The assistant can't see this" could be added as a mount exclusion. It is not proposed now.
-- **Where it's stored.** The working folder is a branch-owned state key, `workshop.folder { path, inode }`, registered in `@rp/shared/state.ts` and written as a state event at the branch's current position, like the This chat settings (DESIGN §3.4). This follows the existing rules:
+- **Where it's stored.** The working folder is a branch-owned state key, `workshop.folder { path, inode }`, registered in `@dreamspan/shared/state.ts` and written as a state event at the branch's current position, like the This chat settings (DESIGN §3.4). This follows the existing rules:
   - A reply uses the folder in effect before it (causal order).
   - A new branch inherits the folder as of its fork point.
   - Changing it on one branch never changes another (DESIGN §3.2 [D]).

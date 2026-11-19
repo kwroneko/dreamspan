@@ -1,5 +1,5 @@
-import type { CardAsset } from "@rp/shared/docs/card.ts"
-import { AssetKind, type AssetChange, assetGroup, galleryAssets } from "@rp/shared/gallery.ts"
+import type { CardAsset } from "@dreamspan/shared/docs/card.ts"
+import { AssetKind, type AssetChange, assetGroup, galleryAssets } from "@dreamspan/shared/gallery.ts"
 import { useLayoutEffect, useRef, useState } from "react"
 import { Effect } from "effect"
 import { isAppDrag } from "../../ui/appDrags.ts"

@@ -3,7 +3,7 @@ import { readFile, readdir, rename, rm, lstat } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Schema } from "effect"
-import { type PluginReport, PluginManifest } from "@rp/shared/plugins.ts"
+import { type PluginReport, PluginManifest } from "@dreamspan/shared/plugins.ts"
 import { runPluginChild } from "./process.ts"
 import { confined, pluginFolder } from "./repo.ts"
 

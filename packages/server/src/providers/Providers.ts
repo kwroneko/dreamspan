@@ -28,9 +28,9 @@ import type {
   ThinkingLevel
 } from "@earendil-works/pi-ai"
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript"
-import type { ChatId, VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import type { ChatId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import {
   type Connection,
   type ConnectionId,
@@ -53,17 +53,17 @@ import {
   type ProxyMode,
   originOf,
   resolveModel
-} from "@rp/shared/providers.ts"
+} from "@dreamspan/shared/providers.ts"
 import {
   findProvider,
   type ProviderDefinition,
   providerBaseUrl,
   providerChanges,
   resolveProviderSettings
-} from "@rp/shared/providerDefinitions.ts"
-import type { Cost, LlmRequestId, RequestPurpose, RequestRoute, TokenCounts } from "@rp/shared/usage.ts"
+} from "@dreamspan/shared/providerDefinitions.ts"
+import type { Cost, LlmRequestId, RequestPurpose, RequestRoute, TokenCounts } from "@dreamspan/shared/usage.ts"
 import { createHash, timingSafeEqual } from "node:crypto"
-import { ServerError, StaleWrite } from "@rp/shared/errors.ts"
+import { ServerError, StaleWrite } from "@dreamspan/shared/errors.ts"
 import { Cause, Context, Effect, Exit, Layer, Option, Queue, Semaphore, Stream } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { Network, type ProxyOverride, type RequestNetwork, RedirectRefused } from "../net/Network.ts"
@@ -108,7 +108,7 @@ const sourcesOf = (
     model,
     Date.now()
   )
-import { readDecisionUsage, unwrapEnvelope } from "@rp/shared/decisions.ts"
+import { readDecisionUsage, unwrapEnvelope } from "@dreamspan/shared/decisions.ts"
 
 export { ProviderError } from "./errors.ts"
 
@@ -197,7 +197,7 @@ interface DecideRequest {
   readonly connectionId: ConnectionId
   readonly modelId: ModelId
   readonly state: unknown
-  readonly questions: Readonly<Record<string, import("@rp/shared/decisions.ts").DecisionQuestion>>
+  readonly questions: Readonly<Record<string, import("@dreamspan/shared/decisions.ts").DecisionQuestion>>
   readonly attribution: {
     readonly chatId: ChatId | null
     readonly rolloutId: string | null

@@ -6,7 +6,7 @@
 // sent"): it opens the workshop not made yet (`/new/workshop`, StartWorkshopPage.tsx) with these
 // choices and the title, where they can still change, and its first message makes it.
 import { useAtomValue } from "@effect/atom-react"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect } from "react"
 import { SlotOutlet } from "../../slots.tsx"

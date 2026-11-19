@@ -5,8 +5,8 @@ export const pluginDocumentation = [
     side: "client",
     types: ["ClientHost", "ClientRegistry"],
     description:
-      "Browser-only DisplayTransformV1 (read displayRules for fields). Text stages run in order on streaming and finished text. A worker enforces 50 ms per call; a throw, invalid output or timeout restores the original for that call and turns this plugin off in the tab. Output goes through the existing sanitiser and content sandbox. Model requests, stored text, editing and copying stay unchanged. Display plugins use only display surfaces; import pure helpers from @rp/plugin-api/display, client only for types.",
-    example: `import type {Activate} from "@rp/plugin-api/client"
+      "Browser-only DisplayTransformV1 (read displayRules for fields). Text stages run in order on streaming and finished text. A worker enforces 50 ms per call; a throw, invalid output or timeout restores the original for that call and turns this plugin off in the tab. Output goes through the existing sanitiser and content sandbox. Model requests, stored text, editing and copying stay unchanged. Display plugins use only display surfaces; import pure helpers from @dreamspan/plugin-api/display, client only for types.",
+    example: `import type {Activate} from "@dreamspan/plugin-api/client"
 export const activate:Activate=host=>{ host.registries.displayTransforms!.register({api:1,id:"example.display",order:90,transform:input=>({text:input.text+" (display only)",issues:[]})}) }`
   },
   {
@@ -15,7 +15,7 @@ export const activate:Activate=host=>{ host.registries.displayTransforms!.regist
     types: ["ClientHost", "ClientRegistry"],
     description:
       "Browser-only DisplayScriptListV1 (read displayRules for fields). Lists receive only global and approved preset/card scripts. Lists run by order before text transforms; scope, placement, display-only and depth checks remain in the regex runner. Same worker, deadline and restoration as displayTransforms.",
-    example: `import type {Activate} from "@rp/plugin-api/client"
+    example: `import type {Activate} from "@dreamspan/plugin-api/client"
 export const activate:Activate=host=>{ host.registries.displayScriptLists!.register({api:1,id:"example.scripts",order:90,scripts:input=>input.character}) }`
   },
   {
@@ -24,7 +24,7 @@ export const activate:Activate=host=>{ host.registries.displayScriptLists!.regis
     types: ["ClientHost", "ClientRegistry"],
     description:
       "Browser-only TimelineTransformV1 (read displayRules for fields). Receives plain row, summary-range, thread and divider data. Returns rows using host-owned bodies or literal text; never React, sessions or model-request services. Host keeps paging, scrolling and link anchoring. Original rows show while waiting. Same 50 ms deadline and restoration as text rules, at most 2000 rows. Display plugins cannot mix page controls or server code.",
-    example: `import type {Activate} from "@rp/plugin-api/client"
+    example: `import type {Activate} from "@dreamspan/plugin-api/client"
 export const activate:Activate=host=>{ host.registries.timelineTransforms!.register({api:1,id:"example.rows",order:90,transform:input=>[...input.rows,{key:"example-notice",estimate:40,from:Infinity,to:-1,body:{kind:"text",text:"A display-only notice"}}]}) }`
   },
   {
@@ -33,9 +33,9 @@ export const activate:Activate=host=>{ host.registries.timelineTransforms!.regis
     types: [],
     surfaces: ["client:displayTransforms"],
     description:
-      "The versioned text, script-list and timeline field contracts. Import their types and pure helpers from @rp/plugin-api/display. These callbacks run in a browser worker; no session, credentials or RPC is supplied. Full-trust browser consent still applies.",
-    example: `import type {Activate} from "@rp/plugin-api/client"
-import {expandForDisplay} from "@rp/plugin-api/display"
+      "The versioned text, script-list and timeline field contracts. Import their types and pure helpers from @dreamspan/plugin-api/display. These callbacks run in a browser worker; no session, credentials or RPC is supplied. Full-trust browser consent still applies.",
+    example: `import type {Activate} from "@dreamspan/plugin-api/client"
+import {expandForDisplay} from "@dreamspan/plugin-api/display"
 export const activate:Activate=host=>{host.registries.displayTransforms!.register({api:1,id:"example.names",order:10,transform:input=>({text:expandForDisplay(input.text,input.version.macroMode,input.names,input.card,input.version.frozenMacros??{}).text,issues:[]})})}`
   },
   {
@@ -44,7 +44,7 @@ export const activate:Activate=host=>{host.registries.displayTransforms!.registe
     types: ["DraftControl", "ComposerContext", "ComposerEntry", "ClientRegistry", "ClientHost", "ButtonProps"],
     description:
       "client:composerControls. tools places controls beside the composer's tools; banner and strip are also available. Use draft.append(text). Full-trust page code runs as the signed-in user.",
-    example: `import { ui, type Activate } from "@rp/plugin-api/client"
+    example: `import { ui, type Activate } from "@dreamspan/plugin-api/client"
 export const activate: Activate = host => {
   host.registries.composerControls!.register({ id: "dice-roller.roll", order: 60, placement: "tools",
     component: ({ draft }) => <ui.IconButton hint="Rolls a d20 and adds the result to your message" onClick={() => draft.append("🎲 " + (1 + Math.floor(Math.random() * 20)))}>🎲</ui.IconButton> })
@@ -55,7 +55,7 @@ export const activate: Activate = host => {
     side: "client",
     types: ["PanelContext", "PanelEntry", "ClientRegistry"],
     description: "client:chatPanels. A saved chat's panel; active, chatId and nullable forkId are supplied.",
-    example: `import { type Activate } from "@rp/plugin-api/client"
+    example: `import { type Activate } from "@dreamspan/plugin-api/client"
 export const activate: Activate = host => { host.registries.chatPanels!.register({ id: "example.panel", label: "Example", description: "Shows a small example panel.", order: 80, component: ({ active }) => active ? <p>Example</p> : null }) }`
   },
   {
@@ -63,7 +63,7 @@ export const activate: Activate = host => { host.registries.chatPanels!.register
     side: "client",
     types: ["RouteEntry", "ClientRegistry"],
     description: "client:routes. Pages below /extensions/. Changed pages need a reload; layouts cannot be replaced.",
-    example: `import { type Activate } from "@rp/plugin-api/client"
+    example: `import { type Activate } from "@dreamspan/plugin-api/client"
 export const activate: Activate = host => { host.registries.routes!.register({ id: "example.page", path: "/extensions/example", component: () => <p>Example</p> }) }`
   },
   {
@@ -72,7 +72,7 @@ export const activate: Activate = host => { host.registries.routes!.register({ i
     types: ["BannerEntry", "ClientRegistry"],
     description:
       "client:appBanners. A notice in the existing app banner slot. Recovery contributions cannot be replaced.",
-    example: `import { type Activate } from "@rp/plugin-api/client"
+    example: `import { type Activate } from "@dreamspan/plugin-api/client"
 export const activate: Activate = host => { host.registries.appBanners!.register({ id: "example.banner", order: 80, component: () => <p>Example notice</p> }) }`
   },
   {
@@ -81,7 +81,7 @@ export const activate: Activate = host => { host.registries.appBanners!.register
     types: ["NoticeChannelEntry", "ClientRegistry"],
     description:
       "client:noticeChannels. Optional completion sounds and settings. Callbacks receive no account data. A failing replacement is off in this tab and the original returns. Use plugin_copy_builtin to start from the shipped sound.",
-    example: `import {type Activate} from "@rp/plugin-api/client"
+    example: `import {type Activate} from "@dreamspan/plugin-api/client"
 export const activate: Activate = host => {host.registries.noticeChannels!.register({id:"example.alert",component:()=> <p>Example alert</p>,activate:()=>{},receive:()=>{}})}`
   },
   {
@@ -92,7 +92,7 @@ export const activate: Activate = host => {host.registries.noticeChannels!.regis
     replaces: ["rolloutTools:set_presence"],
     description:
       "server:rolloutTools plus server:presence, replaces rolloutTools:set_presence. Only this tool receives causal cast data and a validated presence write, preserving receipts and narrator rules. Other tools receive data-only context. Read the shipped copy before editing it. Full server trust still applies.",
-    example: `import {Effect,type PresenceTool,type Activate} from "@rp/plugin-api/server"
+    example: `import {Effect,type PresenceTool,type Activate} from "@dreamspan/plugin-api/server"
 const tool:PresenceTool={id:"set_presence",label:"Presence",description:"Marks presence",effect:"chat_state",parameters:{type:"object",properties:{}},summarize:()=>"Presence",execute:context=>Effect.map(context.cast,cards=>({text:cards.map(c=>c.name).join(", ")}))}
 export const activate:Activate=host=>host.registries.rolloutTools!.register(tool)`
   },
@@ -102,7 +102,7 @@ export const activate:Activate=host=>host.registries.rolloutTools!.register(tool
     types: ["PluginToolContext", "PluginTool", "StoryToolV1", "HistoryContextV1", "NotesContextV1", "NoteToolV1"],
     description:
       "server:rolloutTools. StoryToolV1 uses server:history for causal viewer-filtered messages/summaries; NoteToolV1 uses server:notes for speaker-filtered notes and validated switches. The host retains the original effect/capability/approval/snapshot and receipt/Undo rules. Other tools use data-only call context, no database/service/credential handles. Tools with outside effects need a registered capability. Server code has full access, including stored keys and network; handles are not containment.",
-    example: `import { Effect, type Activate } from "@rp/plugin-api/server"
+    example: `import { Effect, type Activate } from "@dreamspan/plugin-api/server"
 export const activate: Activate = host => host.registries.rolloutTools!.register({ id: "example_read", label: "Read example", description: "Returns a constant example.", effect: "read", parameters: { type: "object", properties: {}, additionalProperties: false }, execute: () => Effect.succeed({ text: "Example" }) })`
   },
   {
@@ -113,7 +113,7 @@ export const activate: Activate = host => host.registries.rolloutTools!.register
     replaces: ["rolloutTools:read_messages"],
     description:
       "Editable history policy. Host snapshots preserve private addresses across Resume. Reads cannot choose a branch or viewer; results cannot invent effects or receipts. Read-only tools need no Undo; state tools retain branch-local version effects. Ask-first and capabilities are fixed by the host.",
-    example: `import {Effect,type StoryToolV1,type Activate} from "@rp/plugin-api/server"
+    example: `import {Effect,type StoryToolV1,type Activate} from "@dreamspan/plugin-api/server"
 const tool:StoryToolV1={id:"read_messages",label:"Read earlier messages",description:"Reads known earlier messages",effect:"read",parameters:{type:"object",properties:{}},execute:context=>Effect.map(context.messages,rows=>({text:rows.map(r=>r.content).join("\\n")}))}
 export const activate:Activate=host=>host.registries.rolloutTools!.register(tool)`
   },
@@ -123,7 +123,7 @@ export const activate:Activate=host=>host.registries.rolloutTools!.register(tool
     types: ["WorkerHost"],
     description:
       "worker:stateKeys. Namespaced Effect Schema keys; branch or chat scope. Replacing a built-in requires replaces. WorkerHost passes the actual worker registry.",
-    example: `import { Schema, type Activate } from "@rp/plugin-api/worker"
+    example: `import { Schema, type Activate } from "@dreamspan/plugin-api/worker"
 export const activate: Activate = host => host.registries.stateKeys!.register({ id: "example/flag", value: Schema.Boolean, ids: { ids: {} }, scope: "branch" })`
   },
   {
@@ -132,7 +132,7 @@ export const activate: Activate = host => host.registries.stateKeys!.register({ 
     types: ["WorkerHost", "MacroContractV1", "MacroCall", "MacroContext"],
     description:
       "worker:macros. MacroContractV1 (the v1 MacroSpec) provides causal data (see macroContext for field types), resolve/expandTemplate, metadata lookup, budgeted work, variable overlays, once and injected random. volatile:true freezes draws; clock freezes time; pick uses chat/text/offset. All copied macros conservatively mark their segment as changing, reducing prompt cache reuse even without declared volatility. Text (including frozen draws) is capped at 262,144 characters; accepts returns boolean and work/charge must be finite and nonnegative. Invalid results, a throw or the 100ms synchronous deadline fail that assembly and suspend the plugin; later assemblies use the original, including a reply after a failed preflight. Retained calls refuse after Turn off. No settings, credentials or other-branch queries are supplied. Approved server code still has ambient process/file/network access; this contract and its deadline are not a sandbox.",
-    example: `import { registerMacro, type Activate } from "@rp/plugin-api/worker"
+    example: `import { registerMacro, type Activate } from "@dreamspan/plugin-api/worker"
 export const activate: Activate = host => registerMacro(host.registries.macros!, { kind: "value", name: "example", args: [{name:"text"}], handler: call => call.resolve(call.args[0]!).toUpperCase() })`
   },
   {
@@ -142,7 +142,7 @@ export const activate: Activate = host => registerMacro(host.registries.macros!,
     surfaces: ["worker:macros"],
     description:
       "MacroContractV1 context fields. Read alongside macros for resolver, variables, work and freezing. Messages precede the expansion on the current visible path. No branch selector, settings, own-turn-note lookup or credentials are supplied. Variable methods affect only the current expansion overlay.",
-    example: `import {registerMacro,type Activate} from "@rp/plugin-api/worker"
+    example: `import {registerMacro,type Activate} from "@dreamspan/plugin-api/worker"
 export const activate:Activate=host=>registerMacro(host.registries.macros!,{kind:"value",name:"example",handler:call=>call.context.names.char})`
   },
   {
@@ -151,7 +151,7 @@ export const activate:Activate=host=>registerMacro(host.registries.macros!,{kind
     types: ["PrivateStorage"],
     description:
       "server:storage or worker:storage. Per-plugin/account private JSON, revision-checked; values at most 512 KiB, 1,000 keys/8 MiB per namespace. Disabling keeps data.",
-    example: `import { Effect, type Activate } from "@rp/plugin-api/server"
+    example: `import { Effect, type Activate } from "@dreamspan/plugin-api/server"
 export const activate: Activate = host => Effect.gen(function* () { const prior = yield* host.storage!.get("example"); yield* host.storage!.set("example", { count: 1 }, prior?.revision ?? 0) })`
   }
 ] as const

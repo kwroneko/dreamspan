@@ -3,9 +3,9 @@
 // No real archive is contacted.
 import { afterAll, assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber } from "effect"
-import type { SourceCapabilities } from "@rp/shared/cardSources.ts"
-import type { ApprovalPrompt } from "@rp/shared/agent.ts"
-import type { SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { SourceCapabilities } from "@dreamspan/shared/cardSources.ts"
+import type { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
+import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext } from "../src/agent/tools.ts"

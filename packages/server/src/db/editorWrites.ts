@@ -5,8 +5,8 @@ import { makeSnippetWrites } from "./snippetWrites.ts"
 // The editors' write handlers (ARCHITECTURE.md "Editing the library"). They run in the
 // writer worker, each as one transaction, through the library's own steps (libraryWrites.ts),
 // so every change flows on to the refs that follow the edited one.
-import { OWN_TURN_FRAMING, ownTurnSelectionError, cutOwnTurnText, NOTE_SCHEMA_VERSION } from "@rp/shared/docs/note.ts"
-import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
+import { OWN_TURN_FRAMING, ownTurnSelectionError, cutOwnTurnText, NOTE_SCHEMA_VERSION } from "@dreamspan/shared/docs/note.ts"
+import { DraftKey, entityDraftTarget } from "@dreamspan/shared/drafts.ts"
 import {
   applyDrafts,
   canonicalJson,
@@ -22,18 +22,18 @@ import {
   parseField,
   validateDoc,
   withoutGrantedAgentEdits
-} from "@rp/shared/editing.ts"
-import { type ChatNotePosition, EditConflict, InvalidDocument } from "@rp/shared/editorApi.ts"
-import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { Doc, EntityKind } from "@rp/shared/library.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import { CardDoc } from "@rp/shared/docs/card.ts"
+} from "@dreamspan/shared/editing.ts"
+import { type ChatNotePosition, EditConflict, InvalidDocument } from "@dreamspan/shared/editorApi.ts"
+import type { ChatId, EntityId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { Doc, EntityKind } from "@dreamspan/shared/library.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import { CardDoc } from "@dreamspan/shared/docs/card.ts"
 import { Schema } from "effect"
 import type { Bin } from "./bin.ts"
-import { snapCrop } from "@rp/shared/media.ts"
-import { editedDoc } from "@rp/shared/presetConditions.ts"
-import { heldPromptPaths, parseHeld } from "@rp/shared/presetHeld.ts"
+import { snapCrop } from "@dreamspan/shared/media.ts"
+import { editedDoc } from "@dreamspan/shared/presetConditions.ts"
+import { heldPromptPaths, parseHeld } from "@dreamspan/shared/presetHeld.ts"
 import { Effect, Predicate } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 import { fieldContent, type makeDraftStore } from "./drafts.ts"

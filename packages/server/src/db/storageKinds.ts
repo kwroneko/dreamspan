@@ -1,7 +1,7 @@
 // Storage discriminants are extensible; the baseline keeps only kernel enums as CHECKs.
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { makeRegistry } from "@rp/shared/registry.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { StorageError } from "./ops.ts"
 
 interface StorageKind {

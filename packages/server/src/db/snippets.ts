@@ -1,11 +1,11 @@
 // Snippets (DESIGN §4.1): shared notes kept beside chats. One is for "All chats" (`owner.shared`
 // "global") or for one chat, every branch of it ("This chat", owner 2026-11-01: not inherited by
 // forks); its text is the library head and the live text of its drafts, as every library field's.
-import type { UserId } from "@rp/shared/domain.ts"
-import type { ChatId, ForkId } from "@rp/shared/chat.ts"
-import { DraftKey } from "@rp/shared/drafts.ts"
-import { textField } from "@rp/shared/editing.ts"
-import { Snippet } from "@rp/shared/snippetsApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
+import { DraftKey } from "@dreamspan/shared/drafts.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
+import { Snippet } from "@dreamspan/shared/snippetsApi.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { makeDraftStore } from "./drafts.ts"

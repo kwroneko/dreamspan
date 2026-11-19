@@ -8,8 +8,8 @@
 // stretch is someone else's storyline. Its own stage, after `merge-layout`, registered and
 // replaceable like the others.
 import { Effect } from "effect"
-import { modelName } from "@rp/shared/cardNames.ts"
-import { ABSENT_GAP_DEFAULT, ABSENT_JOIN_DEFAULT } from "@rp/shared/knowledge.ts"
+import { modelName } from "@dreamspan/shared/cardNames.ts"
+import { ABSENT_GAP_DEFAULT, ABSENT_JOIN_DEFAULT } from "@dreamspan/shared/knowledge.ts"
 import { AssemblySources, need, type AssemblerStage, type Assembly, type ProjectedEntry } from "./pipeline.ts"
 import type { SourceDescriptor } from "./sourceDescriptors.ts"
 import { ownLine } from "./merges.ts"

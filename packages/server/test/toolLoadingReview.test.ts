@@ -11,7 +11,7 @@ import {
   type Skill
 } from "../src/agent/toolLoading.ts"
 import { previousRun, type ContinuousSnapshot } from "../src/agent/continuity.ts"
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import { ASSEMBLER_VERSION } from "../src/assembler/types.ts"
 import { planToolLoading } from "../src/agent/loadingPlan.ts"
 import type { ToolContext } from "../src/agent/tools.ts"

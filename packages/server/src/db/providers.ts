@@ -1,8 +1,8 @@
 // Connections, models and the usage ledger in storage (spec/PROVIDERS.md §2, §3, §9):
 // row shapes and their mapping, shared by the writer and the readers.
-import type { ChatId, VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { ChatId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import {
   Compat,
   Connection,
@@ -17,14 +17,14 @@ import {
   ProviderSettings,
   type ProxyMode,
   type WireApi
-} from "@rp/shared/providers.ts"
+} from "@dreamspan/shared/providers.ts"
 import {
   LlmRequest,
   type LlmRequestId,
   type RequestPurpose,
   type RequestStatus,
   type UsageSource
-} from "@rp/shared/usage.ts"
+} from "@dreamspan/shared/usage.ts"
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/sql"
 import { NotFound } from "./ops.ts"

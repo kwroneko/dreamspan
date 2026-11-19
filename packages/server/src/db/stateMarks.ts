@@ -4,8 +4,8 @@
 // suppression and version rules as every state read, `stateRead.ts`), where each was written,
 // and the names of what they name. Display only: nothing here is read by assembly, summaries or
 // exports. The cost is the path's segments and those events, then one lookup per kind of id.
-import type { StateMarks } from "@rp/shared/contextsApi.ts"
-import { stateKeyDeclaration } from "@rp/shared/state.ts"
+import type { StateMarks } from "@dreamspan/shared/contextsApi.ts"
+import { stateKeyDeclaration } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps } from "./ops.ts"

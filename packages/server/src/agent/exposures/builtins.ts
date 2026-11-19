@@ -1,26 +1,26 @@
 import { storyWriteChat } from "../storyWriteScope.ts"
 import { checkStoryReadScope } from "../storyReadScope.ts"
 import { documentDiff, documentChangeRows, safeAgentDocument, executableNotice } from "../../db/agentDocuments.ts"
-import { promptPreset } from "@rp/shared/docs/preset.ts"
+import { promptPreset } from "@dreamspan/shared/docs/preset.ts"
 import { builtinPreset } from "../../db/assemblySources.ts"
-import type { RefId, RevisionId } from "@rp/shared/library.ts"
+import type { RefId, RevisionId } from "@dreamspan/shared/library.ts"
 import { workshopLimits } from "../../workshopLimits.ts"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
-import { chatCursor } from "@rp/shared/chatApi.ts"
-import type { Chat } from "@rp/shared/chat.ts"
-import { AppApi } from "@rp/shared/api.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
+import { chatCursor } from "@dreamspan/shared/chatApi.ts"
+import type { Chat } from "@dreamspan/shared/chat.ts"
+import { AppApi } from "@dreamspan/shared/api.ts"
 import { Schema, Effect } from "effect"
-import { CastChange } from "@rp/shared/chatSetupApi.ts"
-import type { EntityKind, LibraryRef } from "@rp/shared/library.ts"
+import { CastChange } from "@dreamspan/shared/chatSetupApi.ts"
+import type { EntityKind, LibraryRef } from "@dreamspan/shared/library.ts"
 import type { ToolContext, WorkshopStoryRead } from "../tools.ts"
 import type { OperationExposure } from "../operations.ts"
 import { resolveLibrary } from "../tools/library.ts"
 import { chatNotesAt } from "../../chat/chatNotesAt.ts"
-import type { ChatNote } from "@rp/shared/chatSetupApi.ts"
-import type { SharedNote } from "@rp/shared/editorApi.ts"
-import type { ExportFormatInfo } from "@rp/shared/libraryImport.ts"
-import type { StImportJob, StImportReport } from "@rp/shared/stImportApi.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { ChatNote } from "@dreamspan/shared/chatSetupApi.ts"
+import type { SharedNote } from "@dreamspan/shared/editorApi.ts"
+import type { ExportFormatInfo } from "@dreamspan/shared/libraryImport.ts"
+import type { StImportJob, StImportReport } from "@dreamspan/shared/stImportApi.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { escapeToolData } from "../toolData.ts"
 
 const name = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))
@@ -820,7 +820,7 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
         }),
       after: (result, _args, ctx) =>
         Effect.gen(function* () {
-          const reply = result as { _tag: string; entry?: { version: { id: import("@rp/shared/chat.ts").VersionId } } }
+          const reply = result as { _tag: string; entry?: { version: { id: import("@dreamspan/shared/chat.ts").VersionId } } }
           if (!reply.entry) return { text: "The reply could not be started without queueing it.", isError: true }
           let version = yield* ctx.reader.GetVersion({ userId: ctx.userId, versionId: reply.entry.version.id })
           while (version.status === "generating") {

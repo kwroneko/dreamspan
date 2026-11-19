@@ -1,9 +1,9 @@
 // A small zip reader for CHARX files: the central directory, and stored or deflated entries.
 // Every size is checked against a cap before anything is inflated, and inflating stops at
 // the size the archive declares, so a lying header can't make it allocate more.
-import { formatByteSize } from "@rp/shared/byteSize.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import { crc32, deflateRawSync, inflateRawSync } from "node:zlib"
-import { shownText } from "@rp/shared/importReport.ts"
+import { shownText } from "@dreamspan/shared/importReport.ts"
 import { fail, type Limits } from "./safety.ts"
 
 interface ZipEntry {

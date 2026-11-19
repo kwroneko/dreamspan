@@ -3,8 +3,8 @@
 // and delete for good, recovered text, and a reply finishing in a chat not being looked at.
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { Effect } from "effect"
 import { typeInto } from "./support/composer.ts"
 import { asUser } from "./support/rpc.ts"

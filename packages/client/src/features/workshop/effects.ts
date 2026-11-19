@@ -1,11 +1,11 @@
 // What a workshop run changed outside the chat (spec/WORKSHOP.md §3.6), as the step rows, the
 // Changes tab and the regenerate warning show it: where each change opens, whether it can still be
 // undone, and the undo itself. Apart from React, so it's tested on its own.
-import type { RolloutEffect } from "@rp/shared/workshopApi.ts"
+import type { RolloutEffect } from "@dreamspan/shared/workshopApi.ts"
 import { Atom } from "effect/reactivity"
 import { AppClient } from "../../rpc.ts"
 
-export type { RolloutEffect } from "@rp/shared/workshopApi.ts"
+export type { RolloutEffect } from "@dreamspan/shared/workshopApi.ts"
 
 /** The Changes tab's id, and what a kind shows to have it and the step rows' Undo and Open. */
 export const CHANGES = "workshop.changes"

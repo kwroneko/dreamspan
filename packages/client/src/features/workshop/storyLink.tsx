@@ -1,8 +1,8 @@
 // The way back from a workshop to the story it's about (owner, 2026-11-17: "there's no way to go
 // from Workshop -> branch or chat it is connected to *at all*"): a link under the workshop's
 // header title, wherever it's shown as a chat, and the story's name beside its rows in the lists.
-import type { Chat, ChatId, ForkId } from "@rp/shared/chat.ts"
-import type { WorkshopStory } from "@rp/shared/workshopApi.ts"
+import type { Chat, ChatId, ForkId } from "@dreamspan/shared/chat.ts"
+import type { WorkshopStory } from "@dreamspan/shared/workshopApi.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { useNavigate } from "@tanstack/react-router"
 import { AsyncResult, Atom } from "effect/reactivity"

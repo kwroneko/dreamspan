@@ -8,7 +8,7 @@ import type { AddressInfo } from "node:net"
 import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Effect } from "effect"
-import type { SlotId } from "@rp/shared/chat.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { withCookie, loginCookie } from "./support/rpc.ts"
 
@@ -122,7 +122,7 @@ test("whatever a display copy returns is sanitised exactly as stored text is, an
       ["displayTransforms", "timelineTransforms"],
       ["displayTransforms:display.macros", "timelineTransforms:timeline.merges"]
     ),
-    "client.tsx": `import type { Activate } from "@rp/plugin-api/client"
+    "client.tsx": `import type { Activate } from "@dreamspan/plugin-api/client"
 const payload = ${JSON.stringify(payload)}
 export const activate: Activate = host => {
   host.registries.displayTransforms!.register({ api: 1, id: "display.macros", order: 10,
@@ -197,7 +197,7 @@ test("the worker of a display copy reaches no other site, cannot evaluate text a
       id: "importing",
       files: {
         "rp-plugin.json": manifest("importing", ["displayTransforms"], ["displayTransforms:display.macros"]),
-        "client.tsx": `import type { Activate } from "@rp/plugin-api/client"
+        "client.tsx": `import type { Activate } from "@dreamspan/plugin-api/client"
 export const activate: Activate = async () => { const url = "${outside.url}/module.mjs"; await import(url) }`
       }
     })
@@ -208,7 +208,7 @@ export const activate: Activate = async () => { const url = "${outside.url}/modu
   })
   await approve("worker-reach", {
     "rp-plugin.json": manifest("worker-reach", ["displayTransforms"], ["displayTransforms:display.macros"]),
-    "client.tsx": `import type { Activate } from "@rp/plugin-api/client"
+    "client.tsx": `import type { Activate } from "@dreamspan/plugin-api/client"
 const g = globalThis as unknown as Record<string, any>
 const found: string[] = []
 const attempt = async (name: string, run: () => unknown) => {
@@ -287,7 +287,7 @@ test("a display copy that hangs, floods or forges answers is turned off and the 
     await test.step(name, async () => {
       await approve("misbehaving", {
         "rp-plugin.json": manifest("misbehaving", ["displayTransforms"], ["displayTransforms:display.macros"]),
-        "client.tsx": `import type { Activate } from "@rp/plugin-api/client"
+        "client.tsx": `import type { Activate } from "@dreamspan/plugin-api/client"
 const post = (message: unknown) => (globalThis as unknown as { postMessage: (message: unknown) => void }).postMessage(message)
 export const activate: Activate = host => {
   host.registries.displayTransforms!.register({ api: 1, id: "display.macros", order: 10, ${rule} })
@@ -317,7 +317,7 @@ test("only the approved build of a display copy runs: later edits, a tampered bu
   const chatUrl = `${server().url}/chats/${made.chat.id}`
   const source = (marker: string) => ({
     "rp-plugin.json": manifest("approved-display", ["displayTransforms"], ["displayTransforms:display.macros"]),
-    "client.tsx": `import type { Activate } from "@rp/plugin-api/client"
+    "client.tsx": `import type { Activate } from "@dreamspan/plugin-api/client"
 export const activate: Activate = host => {
   host.registries.displayTransforms!.register({ api: 1, id: "display.macros", order: 10,
     transform: input => ({ text: input.text + " ${marker}", issues: [] }) })

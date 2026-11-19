@@ -1,5 +1,5 @@
 // The file manager's HTTP routes (spec/FILES-AND-ENVIRONMENT.md §1.1, §8.1; the contract is
-// `@rp/shared/files.ts` FILES_ROUTES): list a folder, upload (streamed, to a temporary name, then
+// `@dreamspan/shared/files.ts` FILES_ROUTES): list a folder, upload (streamed, to a temporary name, then
 // renamed), serve a file's bytes (Range requests, never as the app's own content), make a folder,
 // rename or move, and delete. Every access goes through the account's own tree and the no-follow
 // walk (safePath.ts), never through a path as given: links and special files are listed and
@@ -10,8 +10,8 @@ import { lstat, mkdir, open, rename, unlink, type FileHandle } from "node:fs/pro
 import { join } from "node:path"
 import { Transform, Writable } from "node:stream"
 import { pipeline } from "node:stream/promises"
-import { CurrentUser } from "@rp/shared/api.ts"
-import { formatByteSize } from "@rp/shared/byteSize.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import {
   FILES_ROUTES,
   FILES_TOP,
@@ -21,7 +21,7 @@ import {
   UploadConflict,
   type FolderListing,
   type UploadOutcome
-} from "@rp/shared/files.ts"
+} from "@dreamspan/shared/files.ts"
 import { NodeHttpServerRequest } from "@effect/platform-node"
 import { ByteSize, Cause, Effect, Layer, Option, Schema, Stream } from "effect"
 import { HttpIncomingMessage, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"

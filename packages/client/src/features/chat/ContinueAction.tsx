@@ -5,7 +5,7 @@
 // other gets the reply as its own last message and is asked to write only what follows (owner,
 // 2026-10-31). Before the next context arrives, the action waits for it. Without a model,
 // or if its capability remains unresolved, the disabled button explains why on hover and focus.
-import { originalReply } from "@rp/shared/replySections.ts"
+import { originalReply } from "@dreamspan/shared/replySections.ts"
 import { useSyncExternalStore } from "react"
 import type { ChatSession } from "./session.ts"
 

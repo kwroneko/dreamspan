@@ -1,8 +1,8 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { MessageImages } from "@rp/shared/chat.ts"
-import type { ComposerImage } from "@rp/shared/composerApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { MessageImages } from "@dreamspan/shared/chat.ts"
+import type { ComposerImage } from "@dreamspan/shared/composerApi.ts"
 import { NotFound, StorageError } from "./ops.ts"
 
 export const composerImages = (sql: SqlClient.SqlClient) => {

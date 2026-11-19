@@ -1,7 +1,7 @@
 // A card's version (its subtitle, `character_version`) under its name where a chat lists cards:
 // the Cast tab and the speaker and persona pickers (CARD-FORKS surface 5; audit item 016), so two
 // cards with the same name, a card and its fork say, can be told apart, as on the home grid.
-import type { CastCard } from "@rp/shared/chat.ts"
+import type { CastCard } from "@dreamspan/shared/chat.ts"
 
 export function CardVersion({ card, truncate = false }: { card: CastCard; truncate?: boolean }) {
   const version = card.subtitle?.trim() ?? ""

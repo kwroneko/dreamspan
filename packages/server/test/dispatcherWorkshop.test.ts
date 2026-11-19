@@ -1,8 +1,8 @@
 import { TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
 // Real loop, canonical persistence/consent/receipt/Undo and transport switches. Fake provider only.
 import { assert, it } from "@effect/vitest"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { ApprovalPrompt } from "@rp/shared/agent.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
 import { Effect, Stream } from "effect"
 import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"

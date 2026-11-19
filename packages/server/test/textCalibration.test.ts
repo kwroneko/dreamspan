@@ -4,7 +4,7 @@ import { Reader } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { generateReply } from "./support/generation.ts"
 import { startMockProvider, completionChunks, sse } from "./support/mockProvider.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 
 it.live(
   "a submitted request records its estimate and reported cached input, calibrating later local counts",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { Cast } from "@rp/shared/chatSetupApi.ts"
-import type { LcmSummary } from "@rp/shared/lcm.ts"
+import type { Cast } from "@dreamspan/shared/chatSetupApi.ts"
+import type { LcmSummary } from "@dreamspan/shared/lcm.ts"
 import { railRows } from "../src/features/chat/CoverageRail.tsx"
 import { audienceName, summaryViewers } from "../src/features/chat/SummaryViewer.tsx"
 

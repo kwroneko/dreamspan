@@ -3,7 +3,7 @@
 // fetched off the hot path. Synthetic images and a mock provider only: no network.
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { eventually, generateReply, finished } from "./support/generation.ts"
 import { sizedPng } from "./formats/support.ts"

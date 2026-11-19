@@ -1,10 +1,10 @@
 import { counted, stepsOf } from "../agent/steps.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { FrozenTool } from "../agent/tools.ts"
-import type { StepsSummary } from "@rp/shared/agent.ts"
+import type { StepsSummary } from "@dreamspan/shared/agent.ts"
 // Row shapes and their mapping to domain types, shared by the writer and readers.
-import type { StoredRewrite, VersionRewrite } from "@rp/shared/regexScripts.ts"
-import type { ReplySections } from "@rp/shared/replySections.ts"
+import type { StoredRewrite, VersionRewrite } from "@dreamspan/shared/regexScripts.ts"
+import type { ReplySections } from "@dreamspan/shared/replySections.ts"
 import {
   Chat,
   type ChatId,
@@ -19,9 +19,9 @@ import {
   Version,
   type VersionId,
   versionInContext
-} from "@rp/shared/chat.ts"
-import { User, type UserId } from "@rp/shared/domain.ts"
-import { recordedModelLabel } from "@rp/shared/stApis.ts"
+} from "@dreamspan/shared/chat.ts"
+import { User, type UserId } from "@dreamspan/shared/domain.ts"
+import { recordedModelLabel } from "@dreamspan/shared/stApis.ts"
 import { Schema } from "effect"
 
 /**

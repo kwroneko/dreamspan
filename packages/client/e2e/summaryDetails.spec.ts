@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -31,7 +31,7 @@ for (const scheme of ["light", "dark"] as const)
             }
           })
           const chat = yield* api.CreateChat({ title: `Summary details ${width}` })
-          let parent = null as import("@rp/shared/chat.ts").SlotId | null
+          let parent = null as import("@dreamspan/shared/chat.ts").SlotId | null
           for (let i = 0; i < 4; i++) {
             const sent = yield* api.SendMessage({
               chatId: chat.id,

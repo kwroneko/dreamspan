@@ -2,7 +2,7 @@
 // level, absorbing into a neighbour when the layer is over its budget, and re-summarizing stale
 // summaries that the path uses (spec/LCM.md §2.2, ref §2 and §5). Pure: it reads summaries as the
 // reader loaded them and says what to enqueue, so the planner's choices can be tested apart from SQL.
-import type { Summary } from "@rp/shared/lcm.ts"
+import type { Summary } from "@dreamspan/shared/lcm.ts"
 
 interface MaintenanceSettings {
   readonly fanout: number

@@ -9,7 +9,7 @@
 // periods across the join on both sides, own-turn notes, a branch merged together beside it.
 // Synthetic data only.
 import { assert, describe, it } from "@effect/vitest"
-import { type ChatId, type EntityId, type ForkId, NewVersion } from "@rp/shared/chat.ts"
+import { type ChatId, type EntityId, type ForkId, NewVersion } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { cardDoc } from "./support/docs.ts"

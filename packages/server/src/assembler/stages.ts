@@ -3,11 +3,11 @@ import { cardSkills as readCardSkills, cardSkillsText, offeredSkills, skillsInde
 import { prepareTextTokens } from "./textTokens.ts"
 import { mergeLayoutStage } from "./merges.ts"
 import { gapLinesStage } from "./gapLines.ts"
-import { budgetTokens } from "@rp/shared/imageTokens.ts"
-import { replySectionsOf, sectionsPrefix } from "@rp/shared/replySections.ts"
-import { modelName } from "@rp/shared/cardNames.ts"
-import { DEFAULT_RESPONSE, withModelSettings } from "@rp/shared/modelSettings.ts"
-import { fitPair, resolveLcm, summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
+import { budgetTokens } from "@dreamspan/shared/imageTokens.ts"
+import { replySectionsOf, sectionsPrefix } from "@dreamspan/shared/replySections.ts"
+import { modelName } from "@dreamspan/shared/cardNames.ts"
+import { DEFAULT_RESPONSE, withModelSettings } from "@dreamspan/shared/modelSettings.ts"
+import { fitPair, resolveLcm, summaryMacroPrompts } from "@dreamspan/shared/lcmSettings.ts"
 import {
   agentInstructionsPlace,
   agentInstructionsPrompt,
@@ -16,9 +16,9 @@ import {
   ownTurnNotes,
   presetOrder,
   withMain
-} from "@rp/shared/presetOrder.ts"
-import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type PresetPrompt, type PromptCondition } from "@rp/shared/docs/preset.ts"
-import { conditionOf, triggersFor } from "@rp/shared/presetConditions.ts"
+} from "@dreamspan/shared/presetOrder.ts"
+import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type PresetPrompt, type PromptCondition } from "@dreamspan/shared/docs/preset.ts"
+import { conditionOf, triggersFor } from "@dreamspan/shared/presetConditions.ts"
 import {
   CONTINUE_NUDGE,
   CONTINUE_TEXT,
@@ -27,7 +27,7 @@ import {
   FALLBACK_TEXT,
   GROUP_NUDGE,
   IMPERSONATION_PROMPT
-} from "@rp/shared/endOfRequest.ts"
+} from "@dreamspan/shared/endOfRequest.ts"
 import { schemaPrefillBudget } from "./prefill.ts"
 import { lcmStage, summaryBlock } from "./lcm.ts"
 import { knowledgeStage, withoutUnknown } from "./knowledge.ts"
@@ -35,9 +35,9 @@ import { imageTokensStage, limitImageEstimates } from "./imageTokens.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
 import { contextBudget, targetBudget, loreAllowance, loreBudget } from "./budget.ts"
 // The built-in assembler stages, in registration order (ARCHITECTURE §15 lists them).
-import type { ChatMessage } from "@rp/shared/macros/context.ts"
-import type { CardFields } from "@rp/shared/macros/context.ts"
-import type { VariableEffect } from "@rp/shared/macros/variables.ts"
+import type { ChatMessage } from "@dreamspan/shared/macros/context.ts"
+import type { CardFields } from "@dreamspan/shared/macros/context.ts"
+import type { VariableEffect } from "@dreamspan/shared/macros/variables.ts"
 import {
   branchOwned,
   type ChatState,
@@ -45,10 +45,10 @@ import {
   foldState,
   noteSwitches,
   swappedCard
-} from "@rp/shared/state.ts"
+} from "@dreamspan/shared/state.ts"
 import { htmlDepthForm } from "./htmlDepth.ts"
-import { anyOf, noteCondition } from "@rp/shared/docs/note.ts"
-import { AWAY_ACTS_AS_MUTED, awayAt } from "@rp/shared/knowledge.ts"
+import { anyOf, noteCondition } from "@dreamspan/shared/docs/note.ts"
+import { AWAY_ACTS_AS_MUTED, awayAt } from "@dreamspan/shared/knowledge.ts"
 import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
@@ -68,8 +68,8 @@ import {
   type ScriptRunner
 } from "./regex.ts"
 import { builtinScriptSources, type ScriptSource } from "./scriptSources.ts"
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
-import type { ScriptRef } from "@rp/shared/regexScripts.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
+import type { ScriptRef } from "@dreamspan/shared/regexScripts.ts"
 import {
   projectedScript,
   projectedScriptKey,

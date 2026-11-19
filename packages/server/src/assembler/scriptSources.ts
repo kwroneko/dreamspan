@@ -3,8 +3,8 @@
 // scripts, wraps or replaces one, or disables it, and does the same with a rewrite. ST 1.19
 // runs its lists in this order: global, preset, then the character's (engine.js SCRIPT_TYPES),
 // which is the built-ins' registration order.
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
-import type { ScriptScope, TextRewrite } from "@rp/shared/regexScripts.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
+import type { ScriptScope, TextRewrite } from "@dreamspan/shared/regexScripts.ts"
 import { Effect } from "effect"
 import { type Assembly, AssemblySources, need, type SourceError } from "./pipeline.ts"
 import type { CardInput } from "./types.ts"

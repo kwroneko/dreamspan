@@ -2,8 +2,8 @@
 // where it was with the chat state on it, and a chat's leaf (and composer) back on it;
 // deleting for good, and the recovered text. Cross-user access is in the isolation matrix.
 import { assert, describe, it } from "@effect/vitest"
-import type { Chat, ChatId, SlotId } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { Chat, ChatId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { Effect, Stream } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { cardDoc } from "./support/docs.ts"

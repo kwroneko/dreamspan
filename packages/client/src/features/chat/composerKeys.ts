@@ -1,4 +1,4 @@
-import type { DisplayPrefs } from "@rp/shared/chatApi.ts"
+import type { DisplayPrefs } from "@dreamspan/shared/chatApi.ts"
 import type { KeyboardEvent } from "react"
 
 type EnterSends = DisplayPrefs["enterSends"]

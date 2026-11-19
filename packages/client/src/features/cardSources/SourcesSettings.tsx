@@ -1,8 +1,8 @@
 // Settings → Card sources (spec/CARD-SOURCES.md §5.2): per source, the user's switch, the
 // admin's switch for every account, the API key (write-only) and clearing what's cached; for
 // admins, the instance's cache cap. Nothing here contacts a source.
-import type { SourceInfo, SourceList } from "@rp/shared/cardSources.ts"
-import { formatByteSize } from "@rp/shared/byteSize.ts"
+import type { SourceInfo, SourceList } from "@dreamspan/shared/cardSources.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import { useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { useSession } from "../../session.ts"

@@ -1,5 +1,5 @@
 // Search and replace across the library, the reads (ARCHITECTURE §14.6 "Across the library";
-// @rp/shared/libraryReplace.ts). Every live, unarchived card, lorebook, preset and note of the
+// @dreamspan/shared/libraryReplace.ts). Every live, unarchived card, lorebook, preset and note of the
 // user's of the kinds asked for is searched as its editor shows it: its head with its unsaved
 // changes (active drafts) on it, through the fields the editors search (libraryText.ts), with the
 // matcher the chat's Search and replace uses (historyScan.ts, in a VM with a deadline). A chat's
@@ -9,9 +9,9 @@
 // (its head, row version and drafts); the plan for a replace reads the chosen entries again,
 // refuses one whose stamp moved, and works out the documents the writer stores
 // (libraryReplaceWrites.ts), so the writer's transaction does no matching.
-import type { UserId } from "@rp/shared/domain.ts"
-import { canonicalJson, applyDrafts, type FieldPath, isHeldField, textField, withValues } from "@rp/shared/editing.ts"
-import type { Doc } from "@rp/shared/library.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { canonicalJson, applyDrafts, type FieldPath, isHeldField, textField, withValues } from "@dreamspan/shared/editing.ts"
+import type { Doc } from "@dreamspan/shared/library.ts"
 import {
   AROUND,
   LIBRARY_UNSAVED_REASON,
@@ -24,9 +24,9 @@ import {
   type LibraryReplaceKind,
   type LibrarySearch,
   type LibrarySkipped
-} from "@rp/shared/libraryReplace.ts"
-import { libraryReplaceKinds, libraryTextFields, type Searchable } from "@rp/shared/libraryText.ts"
-import { editedDoc } from "@rp/shared/presetConditions.ts"
+} from "@dreamspan/shared/libraryReplace.ts"
+import { libraryReplaceKinds, libraryTextFields, type Searchable } from "@dreamspan/shared/libraryText.ts"
+import { editedDoc } from "@dreamspan/shared/presetConditions.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { scanHistory } from "./historyScan.ts"

@@ -6,11 +6,11 @@ import { putUserSetting } from "./settings.ts"
 // its snapshot, its answers and verdict its transcript, and its ledger rows roll up onto it, so
 // the Activity panel lists it with tokens and cost. The presence point's state events attach to
 // the reply's version with the decision rollout as their origin, so a swipe takes them back.
-import type { ConnectionDecisions } from "@rp/shared/decisions.ts"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
-import type { FoldableEvent } from "@rp/shared/state.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
+import type { ConnectionDecisions } from "@dreamspan/shared/decisions.ts"
+import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { FoldableEvent } from "@dreamspan/shared/state.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"

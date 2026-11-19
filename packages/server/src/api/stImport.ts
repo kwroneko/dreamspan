@@ -2,8 +2,8 @@
 // its path is imported on the server as a job (StImportJobs); a browser's files go over
 // HTTP (importer/routes.ts). These start an import, list and read the jobs, and act on a
 // report.
-import { type AppApi, type AuthenticatedStImportPlanApi, CurrentUser } from "@rp/shared/api.ts"
-import { Forbidden, ServerError } from "@rp/shared/errors.ts"
+import { type AppApi, type AuthenticatedStImportPlanApi, CurrentUser } from "@dreamspan/shared/api.ts"
+import { Forbidden, ServerError } from "@dreamspan/shared/errors.ts"
 import { homedir } from "node:os"
 import { Effect, Option } from "effect"
 import { AppConfig } from "../config.ts"
@@ -11,8 +11,8 @@ import { ChatHub } from "../chat/ChatHub.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { StImportJobs } from "../importer/StImportJobs.ts"
 import { StImportPlans, stFolderPlanFiles } from "../importer/StImportPlans.ts"
-import { findStRoots } from "@rp/shared/stFolder.ts"
-import { StFolderUnreadable } from "@rp/shared/stImportApi.ts"
+import { findStRoots } from "@dreamspan/shared/stFolder.ts"
+import { StFolderUnreadable } from "@dreamspan/shared/stImportApi.ts"
 import { StImports } from "../importer/StImports.ts"
 import { visibleReport } from "../importer/stReport.ts"
 import { listFolder, previewStFiles, scanStFolder } from "../importer/stFolderDisk.ts"

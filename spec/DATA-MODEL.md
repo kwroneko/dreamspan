@@ -134,7 +134,7 @@ users ──< user_prefs, drafts       └──  jobs (summarization, idle-time
   - `exportable`
 - **preset_overlay**: `ops[]` applied to whatever preset is active: `toggle(identifier, on)`, `replace(identifier, content)`, `append(identifier, text)`, `insert(after_identifier, prompt)`. It's attached to a card (the owner) and applied under a condition (DESIGN §6.3). It's stored as operations rather than a snapshot, because it has to apply to presets it has never seen.
 
-The documents are validated with Effect Schema (reference-harness uses TypeBox; this codebase uses Effect throughout). Each document has a `schema_version` so it can be migrated. Card and lorebook schemas are in `@rp/shared/docs/` (ARCHITECTURE.md §8).
+The documents are validated with Effect Schema (reference-harness uses TypeBox; this codebase uses Effect throughout). Each document has a `schema_version` so it can be migrated. Card and lorebook schemas are in `@dreamspan/shared/docs/` (ARCHITECTURE.md §8).
 
 ---
 

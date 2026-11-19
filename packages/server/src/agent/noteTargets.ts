@@ -1,9 +1,9 @@
 // How an agent reply changes a card field or prompt in a chat without editing it (spec/AGENTIC.md
 // §4.6): through a note that replaces the target there, the note-overrides mechanism
 // (spec/NOTE-OVERRIDES.md §3). The edit tools reach that mechanism only through these.
-import type { EntityId } from "@rp/shared/chat.ts"
-import { NOTE_SCHEMA_VERSION, type ReplaceTarget, readReplaceTarget, targetCard } from "@rp/shared/docs/note.ts"
-import type { Doc } from "@rp/shared/library.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { NOTE_SCHEMA_VERSION, type ReplaceTarget, readReplaceTarget, targetCard } from "@dreamspan/shared/docs/note.ts"
+import type { Doc } from "@dreamspan/shared/library.ts"
 import type { Writer } from "../db/Database.ts"
 import type { NoteView } from "./tools/notes.ts"
 

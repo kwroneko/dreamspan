@@ -4,8 +4,8 @@
 // asked closing (owner, 2026-11-02: "If someone is exporting after edits it's likely they
 // forgot to save and they can't even check after export"). Kept apart from the dialog, so a
 // trigger doesn't load the editor's store.
-import type { RefId } from "@rp/shared/library.ts"
-import type { ExportFormat } from "@rp/shared/libraryImport.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import type { ExportFormat } from "@dreamspan/shared/libraryImport.ts"
 import { useSyncExternalStore } from "react"
 
 export interface ExportRequest {

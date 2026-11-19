@@ -1,10 +1,10 @@
 // Projection of the already assembled next request. All reads stay in its reader transaction.
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { PresetContext } from "@rp/shared/inspectorApi.ts"
-import type { RefId } from "@rp/shared/library.ts"
-import type { Placement, ReplaceableCardField } from "@rp/shared/docs/note.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { PresetContext } from "@dreamspan/shared/inspectorApi.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import type { Placement, ReplaceableCardField } from "@dreamspan/shared/docs/note.ts"
 import type { ContextSnapshot, Piece } from "../assembler/types.ts"
 import { estimateTokens } from "../assembler/st.ts"
 

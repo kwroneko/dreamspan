@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react"
 import { useState } from "react"
 import { AsyncResult, Atom } from "effect/reactivity"
-import { ArchiveCriteria, cardArchiveCriteria, type ArchiveCandidate } from "@rp/shared/cardArchive.ts"
+import { ArchiveCriteria, cardArchiveCriteria, type ArchiveCandidate } from "@dreamspan/shared/cardArchive.ts"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { sourcesAtom } from "../cardSources/remote.ts"
 import { AppClient } from "../../rpc.ts"

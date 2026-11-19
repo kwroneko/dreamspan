@@ -1,7 +1,7 @@
 // A model's context size is never a silent guess (owner report 2026-10-31): the model list says
 // where each window comes from and marks an assumed one; a budget refusal sits in the composer's
 // column, names its numbers' sources and opens the model's settings at the field. Synthetic data.
-import { CHAT_WIDTH } from "@rp/shared/chatApi.ts"
+import { CHAT_WIDTH } from "@dreamspan/shared/chatApi.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { mkdirSync } from "node:fs"

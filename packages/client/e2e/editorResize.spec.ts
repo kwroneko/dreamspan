@@ -2,7 +2,7 @@ import { replaceEditorText } from "./support/textbox.ts"
 // The large editor must survive the breakpoint that turns the chat panel into a modal
 // phone sheet. All fixtures are synthetic; the lorebook has forty entries expanded.
 import { readFileSync } from "node:fs"
-import type { LibraryRef } from "@rp/shared/library.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"

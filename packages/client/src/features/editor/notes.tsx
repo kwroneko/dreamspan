@@ -2,7 +2,7 @@ import { textActions } from "../../textActions.tsx"
 // Notes (DESIGN §4.1): a note's settings and fields, how its header says them, and the picker of
 // shared named notes, used by the card editor, a note's own page and a chat's notes.
 import { useAtomValue } from "@effect/atom-react"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import {
   anyOf,
   conditionCards,
@@ -10,13 +10,13 @@ import {
   type Placement,
   readNoteCondition,
   replacesInPlace
-} from "@rp/shared/docs/note.ts"
+} from "@dreamspan/shared/docs/note.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { noteSettingSections } from "./fieldViews.ts"
 import { type NoteTargetNames, noteTarget, targetLabel } from "./noteTargets.ts"
-import { type FieldPath, valueField } from "@rp/shared/editing.ts"
-import type { ChatNotePosition, SharedNote } from "@rp/shared/editorApi.ts"
-import type { Doc } from "@rp/shared/library.ts"
+import { type FieldPath, valueField } from "@dreamspan/shared/editing.ts"
+import type { ChatNotePosition, SharedNote } from "@dreamspan/shared/editorApi.ts"
+import type { Doc } from "@dreamspan/shared/library.ts"
 import { Link } from "@tanstack/react-router"
 import { usePresetWorkspace } from "./PresetWorkspace.tsx"
 import { SNIPPET_FOCUS } from "./workspaceViews.ts"

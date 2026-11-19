@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { textField } from "@rp/shared/editing.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { client, outcome, post, testConfig, withServer, typeInto } from "./support/config.ts"
 it.live("foreign draft and revision metadata are rejected independently of the target", () =>
   Effect.gen(function* () {

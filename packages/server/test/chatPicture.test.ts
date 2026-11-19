@@ -1,8 +1,8 @@
 // A chat's own picture (audit item 010; ARCHITECTURE.md §12 "A chat's own picture") and the
 // shell's fork families (item 015), at the real boundary. Cross-user probes are in isolation.test.ts.
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatId, EntityId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { ChatId, EntityId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"

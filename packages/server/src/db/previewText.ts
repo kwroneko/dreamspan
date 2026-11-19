@@ -2,9 +2,9 @@
 // The stored start is the message as written. A template message (a greeting) shows its macros
 // replaced, as the chat shows it: `{{user}}` is the persona the fork plays, `{{char}}` the
 // message's speaker, by the names the cards have now. Pure, so a reader worker can run it.
-import { expand } from "@rp/shared/macros/expand.ts"
-import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
-import { makeMacroRegistry } from "@rp/shared/macros/registry.ts"
+import { expand } from "@dreamspan/shared/macros/expand.ts"
+import { registerBuiltinMacros } from "@dreamspan/shared/macros/builtins.ts"
+import { makeMacroRegistry } from "@dreamspan/shared/macros/registry.ts"
 import { Effect, Scope } from "effect"
 
 /** Who a template preview's names follow, by card id; null: nobody (`User`, `Character`). */

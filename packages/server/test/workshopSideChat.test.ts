@@ -2,12 +2,12 @@
 // tools at the story's position (its current branch, up to that branch's newest message), never
 // another branch, chat or user, and nothing of it reaches the story's requests or rows.
 import { assert, describe, it } from "@effect/vitest"
-import type { Chat, EntityId, StoryAt, VersionId } from "@rp/shared/chat.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { ApprovalPrompt } from "@rp/shared/agent.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { Chat, EntityId, StoryAt, VersionId } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { writeFileSync } from "node:fs"
-import { foldState } from "@rp/shared/state.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect, Stream } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { storyTools } from "../src/agent/tools/history.ts"

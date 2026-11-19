@@ -4,11 +4,11 @@
 // through the reasoning scripts, and the stored text is what the last frame showed. The mock
 // provider streams the reply in small pieces, a few milliseconds apart. Synthetic text only.
 import { assert, it } from "@effect/vitest"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { VersionId } from "@rp/shared/chat.ts"
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
-import { sectionsDisplay } from "@rp/shared/replySections.ts"
-import { OUT_OF_TIME } from "@rp/shared/regexScripts.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
+import { sectionsDisplay } from "@dreamspan/shared/replySections.ts"
+import { OUT_OF_TIME } from "@dreamspan/shared/regexScripts.ts"
 import { Effect, Layer } from "effect"
 import { regexToSt } from "../src/formats/preset.ts"
 import { ExecutionRegistry } from "../src/execution.ts"

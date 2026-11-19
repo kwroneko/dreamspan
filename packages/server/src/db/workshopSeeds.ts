@@ -2,11 +2,11 @@
 // extendable set. Each is created once per user as an ordinary editable library entry; the
 // entry marked `default` of each kind is what new workshops start with. More assistant cards
 // can be registered (the owner: "We will likely supply some default ones of our own").
-import { newCardDoc } from "@rp/shared/editing.ts"
-import { promptPreset, type PresetDoc } from "@rp/shared/docs/preset.ts"
-import { charDefinitions, mainPrompt, newestMessage } from "@rp/shared/presetOrder.ts"
-import { makeRegistry } from "@rp/shared/registry.ts"
-import { workshopPieces } from "@rp/shared/workshopPreset.ts"
+import { newCardDoc } from "@dreamspan/shared/editing.ts"
+import { promptPreset, type PresetDoc } from "@dreamspan/shared/docs/preset.ts"
+import { charDefinitions, mainPrompt, newestMessage } from "@dreamspan/shared/presetOrder.ts"
+import { makeRegistry } from "@dreamspan/shared/registry.ts"
+import { workshopPieces } from "@dreamspan/shared/workshopPreset.ts"
 import { builtinPreset } from "./assemblySources.ts"
 
 export interface WorkshopSeed {

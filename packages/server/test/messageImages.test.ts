@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
-import { NewVersion } from "@rp/shared/chat.ts"
+import { NewVersion } from "@dreamspan/shared/chat.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { Generator } from "../src/chat/Generator.ts"
 import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"

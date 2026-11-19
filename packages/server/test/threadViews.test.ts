@@ -6,7 +6,7 @@
 // together join reads as merges always have, and a request before the join never sees the docks.
 // Synthetic data only.
 import { assert, describe, it } from "@effect/vitest"
-import { type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import { type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { runStory, sentText, type ThreadStory } from "./support/threadStory.ts"

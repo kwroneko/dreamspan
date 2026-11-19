@@ -1,5 +1,5 @@
-import { RegexScript } from "@rp/shared/docs/regexScript.ts"
-import { type GlobalRegex, MAX_GLOBAL_SCRIPTS } from "@rp/shared/regexScripts.ts"
+import { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
+import { type GlobalRegex, MAX_GLOBAL_SCRIPTS } from "@dreamspan/shared/regexScripts.ts"
 import { Schema } from "effect"
 import { useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"

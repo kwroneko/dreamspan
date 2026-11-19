@@ -1,7 +1,7 @@
 // A VM deadline interrupts even a single catastrophic RegExp.exec. This module is used
 // only by the reader worker; neither SQL nor regular expressions run on the main thread.
 import { runInNewContext } from "node:vm"
-import { HistoryRejected, type HistorySearch } from "@rp/shared/historyApi.ts"
+import { HistoryRejected, type HistorySearch } from "@dreamspan/shared/historyApi.ts"
 import { Effect } from "effect"
 
 /** `timeout`: milliseconds the scan of `texts` may take before it's refused. */

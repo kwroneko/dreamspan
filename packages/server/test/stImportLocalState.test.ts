@@ -1,7 +1,7 @@
 // Re-import is addressed to a file's fork, and must preserve that fork's local state.
 import { assert, layer } from "@effect/vitest"
-import { textField } from "@rp/shared/editing.ts"
-import { foldState } from "@rp/shared/state.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { serverLayer, testConfig } from "./support/config.ts"

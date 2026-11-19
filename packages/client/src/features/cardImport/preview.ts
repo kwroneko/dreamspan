@@ -1,9 +1,9 @@
 // What "Import a new version…" will do, worked out from the preview before anything is
 // stored: the fields that change, and, in words, what's kept from the card and what's
-// replaced. The server writes the same document (`replacementDoc`, @rp/shared/cardReplace.ts).
-import { type CardReplacePreview, PICTURE_FIELDS, replacementDoc } from "@rp/shared/cardReplace.ts"
-import { canonicalJson } from "@rp/shared/editing.ts"
-import type { Doc } from "@rp/shared/library.ts"
+// replaced. The server writes the same document (`replacementDoc`, @dreamspan/shared/cardReplace.ts).
+import { type CardReplacePreview, PICTURE_FIELDS, replacementDoc } from "@dreamspan/shared/cardReplace.ts"
+import { canonicalJson } from "@dreamspan/shared/editing.ts"
+import type { Doc } from "@dreamspan/shared/library.ts"
 import { changedFields, type FieldChange, fieldLabel } from "../editor/fields.ts"
 
 type PictureChange =

@@ -4,9 +4,9 @@
 // reproduces it, no summary covering what it missed is used (unit C7 reads its own); a shared context (the setting
 // absent or "shared") is unchanged, byte for byte.
 import { assert, describe, it } from "@effect/vitest"
-import { type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { foldState, type StateEventData } from "@rp/shared/state.ts"
+import { type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { foldState, type StateEventData } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { type ContextSnapshot, generationOf } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"

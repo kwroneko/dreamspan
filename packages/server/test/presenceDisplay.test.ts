@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
-import { type EntityId, NewVersion } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { type EntityId, NewVersion } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { Writer } from "../src/db/Database.ts"

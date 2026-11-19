@@ -4,8 +4,8 @@ import { ChatLock } from "./PickerParts.tsx"
 // when it was edited under its name; an archive button on each row (un-archive in Archived)
 // that neither chooses it nor closes the list; and New preset at the end. The body is the
 // registered `preset.picker` entry, so a plugin can replace it.
-import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
+import { BUILTIN_PRESET_LABEL } from "@dreamspan/shared/generation.ts"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { type ReactNode, useId, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"

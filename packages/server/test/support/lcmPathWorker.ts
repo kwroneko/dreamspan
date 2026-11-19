@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite"
 import { parentPort, workerData } from "node:worker_threads"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { readerConnection } from "../../src/db/connection.ts"
 import { lcmPath } from "../../src/db/lcmPath.ts"
 

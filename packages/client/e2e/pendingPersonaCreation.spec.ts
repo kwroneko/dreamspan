@@ -72,7 +72,7 @@ for (const width of [1440, 390])
       await page.getByRole("button", { name: /^Send(?: as .+)?$/ }).click()
       await expect(page).toHaveURL(/\/chats\//)
       const created = (await admin((api) => api.ListCards())).find((card) => card.name === secondName)!
-      const chatId = new URL(page.url()).pathname.split("/")[2] as import("@rp/shared/chat.ts").ChatId
+      const chatId = new URL(page.url()).pathname.split("/")[2] as import("@dreamspan/shared/chat.ts").ChatId
       expect((await admin((api) => api.GetCast({ chatId, slotId: null }))).playedByMe).toEqual([created.entityId])
       expect((await admin((api) => api.GetGenerationDefaults())).persona).toBeNull()
       await openPanel(page, "Cast")

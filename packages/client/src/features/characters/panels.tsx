@@ -1,6 +1,6 @@
 import { cardChoiceLabel } from "../chat/CardVersion.tsx"
-import type { CastCard, EntityId } from "@rp/shared/chat.ts"
-import { remoteOf } from "@rp/shared/cardSources.ts"
+import type { CastCard, EntityId } from "@dreamspan/shared/chat.ts"
+import { remoteOf } from "@dreamspan/shared/cardSources.ts"
 import { lazy, Suspense } from "react"
 import { chatPanels, lazyPanel, type PanelTabEntry, type PendingPanelProps } from "../chat/panels.tsx"
 import { Loading } from "../../ui/Spinner.tsx"

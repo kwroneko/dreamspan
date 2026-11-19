@@ -7,7 +7,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import { seedCardArchive } from "./support/cardArchive.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, startServer, type TestServer, withAdmin } from "./support/server.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 
 test.setTimeout(180_000)
 let server: TestServer

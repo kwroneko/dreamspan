@@ -1,4 +1,4 @@
-import { TransportApi, TransportJson, type TransportRpcs } from "@rp/shared/transportApi.ts"
+import { TransportApi, TransportJson, type TransportRpcs } from "@dreamspan/shared/transportApi.ts"
 // Setting up state for a browser test without clicking through it: the same RPCs the
 // client uses, over a WebSocket carrying a session cookie.
 import { Effect, Exit, Layer } from "effect"

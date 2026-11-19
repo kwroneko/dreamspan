@@ -2,8 +2,8 @@
 // changed in one thread doesn't change the others (DESIGN §4 [D] 2026-11-01), so this offers it
 // as the user's explicit act. It copies the note as this thread has it saved, to the other
 // thread's newest message on (`CopyNoteToBranch`). Registered in `chatNoteActions`.
-import type { ForkId } from "@rp/shared/chat.ts"
-import type { ChatNote } from "@rp/shared/chatSetupApi.ts"
+import type { ForkId } from "@dreamspan/shared/chat.ts"
+import type { ChatNote } from "@dreamspan/shared/chatSetupApi.ts"
 import { useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { showToast } from "../../ui/Toast.tsx"

@@ -1,8 +1,8 @@
 export { type NextInTurn } from "./replyPolicy.ts"
 // Who's in the open chat, as message rows and the composer read it: names by card, and who
 // the user plays. Rows read it from context; it only changes when the cast does.
-import type { CastCard, EntityId, PathEntry } from "@rp/shared/chat.ts"
-import type { Cast } from "@rp/shared/chatSetupApi.ts"
+import type { CastCard, EntityId, PathEntry } from "@dreamspan/shared/chat.ts"
+import type { Cast } from "@dreamspan/shared/chatSetupApi.ts"
 import { createContext, useContext } from "react"
 
 export interface CastView {

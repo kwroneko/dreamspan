@@ -1,7 +1,7 @@
 // What a search and replace looks through (SearchDialog's "Look in"; owner, 2026-11-01): a
 // lorebook's entry text, its keys, or both, a preset's prompt text, its prompt names, or both,
 // and in either everything else as well. A scope picks fields by their path.
-import type { FieldPath } from "@rp/shared/editing.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
 
 interface SearchScope {
   readonly value: string

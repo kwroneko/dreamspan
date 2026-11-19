@@ -1,9 +1,9 @@
 // Saved card media (spec/SAVED-MEDIA.md) in the workers. Reads list what queued revisions name
 // (parsing their documents here, never on the main thread) and answer lookups; writes record
 // addresses, results and approvals, each in one transaction with no network inside.
-import type { UserId } from "@rp/shared/domain.ts"
-import { NotFound } from "@rp/shared/errors.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import {
   DEFAULT_MEDIA_HOSTS,
   hostApproved,
@@ -14,8 +14,8 @@ import {
   type MediaChoice,
   type MediaKind,
   type SavedMediaStatus
-} from "@rp/shared/savedMedia.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+} from "@dreamspan/shared/savedMedia.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { documentMedia } from "../savedMedia/extract.ts"

@@ -12,7 +12,7 @@ import {
   modelPrice,
   resolveModel,
   routedPrice
-} from "@rp/shared/providers.ts"
+} from "@dreamspan/shared/providers.ts"
 import { endpointsPath } from "../src/providers/modelLists.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { json, startMockProvider, type Handler, type Recorded } from "./support/mockProvider.ts"

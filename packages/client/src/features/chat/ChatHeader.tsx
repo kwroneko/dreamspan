@@ -10,10 +10,10 @@ import { chatBranchControls, chatHeaderAbout, chatHeaderActions, pendingChatHead
 // contributions (`chatBranchControls`, `chatHeaderActions`). On a phone it replaces the app's
 // top bar (shell.tsx), with ← to the chats. While the chat loads it shows placeholders, not
 // a name it doesn't know yet.
-import type { CastCard, Chat, SlotId } from "@rp/shared/chat.ts"
-import type { ChatName } from "@rp/shared/chatName.ts"
-import type { ChatGroup } from "@rp/shared/chatSetupApi.ts"
-import { importState } from "@rp/shared/stImportApi.ts"
+import type { CastCard, Chat, SlotId } from "@dreamspan/shared/chat.ts"
+import type { ChatName } from "@dreamspan/shared/chatName.ts"
+import type { ChatGroup } from "@dreamspan/shared/chatSetupApi.ts"
+import { importState } from "@dreamspan/shared/stImportApi.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import type { AppError } from "../../errors.ts"

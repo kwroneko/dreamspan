@@ -1,6 +1,6 @@
 // Deleting a snippet (DESIGN §6.2): to the bin, with the usual toast and its Undo. A snippet
 // other notes show is said so first, since those notes then send nothing until it's back.
-import type { Snippet } from "@rp/shared/snippetsApi.ts"
+import type { Snippet } from "@dreamspan/shared/snippetsApi.ts"
 import { useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { ConfirmDialog } from "../../ui/Dialog.tsx"

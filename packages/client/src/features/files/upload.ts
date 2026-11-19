@@ -1,7 +1,7 @@
 // Uploads into Files (spec/FILES-AND-ENVIRONMENT.md §1.1): files and whole folders, from the
 // pickers or a drop, keeping subfolders. When a name is taken the user answers once for the
 // batch: Keep both, Replace or Skip.
-import { joinPath, type UploadConflict, type UploadOutcome } from "@rp/shared/files.ts"
+import { joinPath, type UploadConflict, type UploadOutcome } from "@dreamspan/shared/files.ts"
 import { NameTaken, NoRoom, type FilesSource } from "./source.ts"
 
 /** One thing to upload: a file at a path relative to the folder it goes into, or an empty folder. */

@@ -1,12 +1,12 @@
 // What the editors call a document's fields: their labels, which hold text to search, and
 // which differ between two versions of a document.
-// The fields themselves are @rp/shared/libraryText.ts's, which the library-wide search reads too.
-import { canonicalJson, type FieldPath, parseField } from "@rp/shared/editing.ts"
-import type { Doc, EntityKind } from "@rp/shared/library.ts"
-import { builtinSearchable, fieldLabel, type Searchable } from "@rp/shared/libraryText.ts"
+// The fields themselves are @dreamspan/shared/libraryText.ts's, which the library-wide search reads too.
+import { canonicalJson, type FieldPath, parseField } from "@dreamspan/shared/editing.ts"
+import type { Doc, EntityKind } from "@dreamspan/shared/library.ts"
+import { builtinSearchable, fieldLabel, type Searchable } from "@dreamspan/shared/libraryText.ts"
 import { makeRegistry } from "../../registry.ts"
 
-export { fieldLabel, regexScriptFields, type Searchable } from "@rp/shared/libraryText.ts"
+export { fieldLabel, regexScriptFields, type Searchable } from "@dreamspan/shared/libraryText.ts"
 
 /** A draft field's label. */
 export const draftLabel = (kind: EntityKind, doc: Doc, field: string) => {

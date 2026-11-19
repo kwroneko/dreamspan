@@ -5,8 +5,8 @@
 // point N (§3.2), or at its tip where the user chose "As it is now" (§4). Nothing is copied: one
 // `forks` row, its placement rows (`placeAsShown`) and one `workshop.paired` event per workshop.
 // The same cut answers the fork dialog's rows (`previewForkWorkshops`).
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { ForkWorkshop } from "@rp/shared/chatApi.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { ForkWorkshop } from "@dreamspan/shared/chatApi.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { displayEndOf, displayLength, displaySlots, pathPieces, positionOf } from "./displayPath.ts"

@@ -1,9 +1,9 @@
 // Connections, models and the usage ledger (spec/PROVIDERS.md), through the real workers.
 import { assert, describe, it } from "@effect/vitest"
-import type { UserId } from "@rp/shared/domain.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import { type ConnectionId, type ConnectionSettings, type CredentialId, resolveModel } from "@rp/shared/providers.ts"
-import { type LlmRequest, type LlmRequestId, unknownCounts } from "@rp/shared/usage.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import { type ConnectionId, type ConnectionSettings, type CredentialId, resolveModel } from "@dreamspan/shared/providers.ts"
+import { type LlmRequest, type LlmRequestId, unknownCounts } from "@dreamspan/shared/usage.ts"
 import { Effect, Exit } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { tempDir } from "./support/tempDir.ts"

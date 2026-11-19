@@ -3,8 +3,8 @@
 // the confirmed import is checked against chat by chat. The matcher is the writer's own
 // (`placeStMessages`), and so is the count of what it did (`planCounter`); here its writes
 // only count, so what the preview shows is what the writer decides, with nothing stored.
-import type { ChatId } from "@rp/shared/chat.ts"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps, ST_CHAT_RECORD } from "./ops.ts"
@@ -20,7 +20,7 @@ import {
   type RecordPayload,
   StPlacedMessages
 } from "./stImportPlace.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { slotDeletedIn } from "./forkState.ts"
 import { computeForkSummaries, FORK_SUMMARY_FORMAT, summaryStamps } from "./forkSummaries.ts"
 import { planCounter } from "./stImportPlanCount.ts"

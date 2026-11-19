@@ -2,9 +2,9 @@
 // parses the file and stores nothing; `replace` makes its content the card's next revision,
 // if the card's head is still the one the preview showed; `merge` puts the file on the card's
 // import line without changing the card, for the merge review to take its changes from.
-import { CardReplacePreview } from "@rp/shared/cardReplace.ts"
-import type { RefId, RevisionId } from "@rp/shared/library.ts"
-import { ImportResult } from "@rp/shared/libraryImport.ts"
+import { CardReplacePreview } from "@dreamspan/shared/cardReplace.ts"
+import type { RefId, RevisionId } from "@dreamspan/shared/library.ts"
+import { ImportResult } from "@dreamspan/shared/libraryImport.ts"
 import { Schema } from "effect"
 import { failure, type UploadOutcome } from "../library/files.ts"
 

@@ -1,8 +1,8 @@
 // Library entries and inherited History at owner scale, using synthetic presets only.
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { promptPreset } from "@rp/shared/docs/preset.ts"
-import type { RevisionId } from "@rp/shared/library.ts"
+import { promptPreset } from "@dreamspan/shared/docs/preset.ts"
+import type { RevisionId } from "@dreamspan/shared/library.ts"
 import * as Database from "../src/db/Database.ts"
 import { presetDoc } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"

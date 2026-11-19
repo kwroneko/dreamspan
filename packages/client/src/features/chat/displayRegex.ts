@@ -1,9 +1,9 @@
 // Executed only inside a terminable worker; never run imported patterns on the UI thread.
-import type { RegexScript } from "@rp/shared/docs/preset.ts"
-import { run } from "@rp/shared/regexReplace.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/preset.ts"
+import { run } from "@dreamspan/shared/regexReplace.ts"
 import { expandForDisplay, type DisplayNames } from "./macros.ts"
-import { parse } from "@rp/shared/macros/parse.ts"
-import type { CardFields } from "@rp/shared/macros/context.ts"
+import { parse } from "@dreamspan/shared/macros/parse.ts"
+import type { CardFields } from "@dreamspan/shared/macros/context.ts"
 import type { DisplayResult } from "./displayPipeline.ts"
 
 export interface RegexJob {

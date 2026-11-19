@@ -2,13 +2,13 @@
 // chat files or plain text, read from the reader workers a window at a time and written to
 // the response as it's read, so neither the server nor the browser holds a whole chat. The
 // library archive (libraryArchive.ts) writes every chat the same way.
-import type { CastCard, Chat, EntityId, Fork, PathEntry, RecordedGeneration, Version } from "@rp/shared/chat.ts"
-import type { PathWindow } from "@rp/shared/chatApi.ts"
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chatPosition.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { NotFound } from "@rp/shared/errors.ts"
-import { foldState } from "@rp/shared/state.ts"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import type { CastCard, Chat, EntityId, Fork, PathEntry, RecordedGeneration, Version } from "@dreamspan/shared/chat.ts"
+import type { PathWindow } from "@dreamspan/shared/chatApi.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chatPosition.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { Effect, Schema } from "effect"
 import type { Reader } from "../db/Database.ts"
 import { fileStem, stHeader, stLine, type StSpeaker, stStamp, textLine } from "../formats/stChatExport.ts"

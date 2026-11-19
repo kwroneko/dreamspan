@@ -1,4 +1,4 @@
-import { uuidv7 } from "@rp/shared/id.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { currentForkSql, replacedIn, selectedInSql } from "./forkState.ts"
 import type { SqlClient } from "effect/sql"

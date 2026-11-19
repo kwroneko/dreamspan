@@ -4,11 +4,11 @@
 // changeset group; `library_edit_items` records each entry's revisions before and after, so the
 // whole replace is undone at once. An entry that moved since the plan, or has unsaved changes, is
 // left as it is.
-import { withHtmlApprovals, withoutGrantedAgentEdits } from "@rp/shared/editing.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import type { Doc } from "@rp/shared/library.ts"
-import { LIBRARY_UNSAVED_REASON, type LibrarySkipped } from "@rp/shared/libraryReplace.ts"
+import { withHtmlApprovals, withoutGrantedAgentEdits } from "@dreamspan/shared/editing.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import type { Doc } from "@dreamspan/shared/library.ts"
+import { LIBRARY_UNSAVED_REASON, type LibrarySkipped } from "@dreamspan/shared/libraryReplace.ts"
 import { Effect } from "effect"
 import type { LibrarySteps } from "./editorWrites.ts"
 import { NotFound, type LibraryReplaceEntry } from "./ops.ts"

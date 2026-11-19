@@ -5,7 +5,7 @@
 // of the user's connections used only for counting. The explanation names the provider that
 // receives what is counted.
 import { useAtomValue } from "@effect/atom-react"
-import type { Connection, ConnectionId } from "@rp/shared/providers.ts"
+import type { Connection, ConnectionId } from "@dreamspan/shared/providers.ts"
 import { AsyncResult } from "effect/reactivity"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"

@@ -3,8 +3,8 @@
 // cause. Each test plays the Auto tab as a client whose notifications never arrive: it only
 // ever knows what its own calls returned. A refused turn makes no provider request.
 import { assert, it } from "@effect/vitest"
-import type { EntityId, SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { EntityId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect, Layer, type Scope } from "effect"
 import * as ProviderBuiltins from "../src/providers/builtins.ts"
 import { ProviderRegistry } from "../src/providers/registry.ts"

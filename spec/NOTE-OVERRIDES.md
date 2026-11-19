@@ -6,7 +6,7 @@ This completes DESIGN §4.2's **[O] Still to design**: the UI on every surface, 
 
 ## 1. The model
 
-- **[P] A note's target** is `replaces` on the note document (`@rp/shared/docs/note.ts`, `ReplaceTarget`):
+- **[P] A note's target** is `replaces` on the note document (`@dreamspan/shared/docs/note.ts`, `ReplaceTarget`):
   - `{ kind: "preset_prompt", identifier }`: a preset prompt by its identifier, resolved in whichever preset the chat uses (DESIGN §4.2 [P], preset updates). Markers (where the chat or the cards go) and the end-of-request texts aren't targets: they have no text of their own to replace.
   - `{ kind: "card_field", field, card? }`: one of the card's prompt fields (`description`, `personality`, `scenario`, `mes_example`, `system_prompt`, `post_history_instructions`; a persona has only `description`). `card` names the character's place in the chat; a card's own note leaves it out for its own card.
 - **[P] Its own position** is `own_position: true`. Absent, the note goes where its target goes and its `placement` is ignored (DESIGN §4.2 [D] placement). On, the note goes at its `placement` as any note, and the target is left out.

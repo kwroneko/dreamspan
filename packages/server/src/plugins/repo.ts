@@ -5,7 +5,7 @@ import { lstat, mkdir, readdir, readFile, realpath, writeFile, rm } from "node:f
 import { join, resolve, sep } from "node:path"
 import git from "isomorphic-git"
 import { Schema } from "effect"
-import { PluginCommit, PluginId, PluginManifest } from "@rp/shared/plugins.ts"
+import { PluginCommit, PluginId, PluginManifest } from "@dreamspan/shared/plugins.ts"
 
 export const limits = { file: 512 * 1024, bytes: 8 * 1024 * 1024, files: 256 }
 export const validPath = (path: string) => {

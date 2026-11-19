@@ -4,9 +4,9 @@
 // drafts the server keeps for an entry's fields, one set per entry and user whichever tab typed
 // them, so a second tab's editor sees the same ones. Synthetic documents only.
 import { assert, describe, it } from "@effect/vitest"
-import { textField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
-import { LIBRARY_UNSAVED_REASON, type LibraryPreview, type LibrarySearch } from "@rp/shared/libraryReplace.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import { LIBRARY_UNSAVED_REASON, type LibraryPreview, type LibrarySearch } from "@dreamspan/shared/libraryReplace.ts"
 import { Effect } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"

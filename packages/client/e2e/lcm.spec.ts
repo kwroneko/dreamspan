@@ -4,9 +4,9 @@ import { expectTextBox } from "./support/textbox.ts"
 // history starts, the panel it opens (edit through a draft, revisions, asking for a summary
 // again), the distinct marks on summarized, dropped and hidden messages, the coverage rail,
 // the chat setting, and the context view. Each viewport runs the same flows.
-import type { ChatId, ForkId, PathEntry } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
-import type { VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, PathEntry } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
+import type { VersionId } from "@dreamspan/shared/chat.ts"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { type FakeProvider, startProvider } from "./support/provider.ts"

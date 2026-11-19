@@ -1,6 +1,6 @@
 import { EditorState } from "@codemirror/state"
 import { expect, it } from "vitest"
-import { highlightMacros } from "@rp/shared/macros/highlight.ts"
+import { highlightMacros } from "@dreamspan/shared/macros/highlight.ts"
 import { macroRegistry } from "../src/macros.ts"
 import { macroTokens } from "../src/ui/macroHighlight.ts"
 

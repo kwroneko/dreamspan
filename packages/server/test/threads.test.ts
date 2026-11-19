@@ -5,10 +5,10 @@
 // in a sibling made before. Fork independence, the away marks, the composers, rename, Undo and
 // restore through the bin, refusals and another user's probes. Synthetic data only.
 import { assert, describe, it } from "@effect/vitest"
-import { type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { textField } from "@rp/shared/editing.ts"
-import { foldState } from "@rp/shared/state.ts"
+import { type EntityId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { storyTools } from "../src/agent/tools/history.ts"
 import type { ToolContext, RolloutTool } from "../src/agent/tools.ts"

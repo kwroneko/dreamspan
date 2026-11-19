@@ -1,4 +1,4 @@
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { expect, it, vi } from "vitest"

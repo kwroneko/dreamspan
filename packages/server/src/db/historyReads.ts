@@ -1,7 +1,7 @@
 import { contextExcludedIn } from "./lcmVisibility.ts"
-import { HistoryRejected, type HistoryEdit, type HistoryHit } from "@rp/shared/historyApi.ts"
-import { NotFound } from "@rp/shared/errors.ts"
-import { foldState, type FoldableEvent } from "@rp/shared/state.ts"
+import { HistoryRejected, type HistoryEdit, type HistoryHit } from "@dreamspan/shared/historyApi.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
+import { foldState, type FoldableEvent } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import {
@@ -23,7 +23,7 @@ import { withoutPurged } from "./stateRefs.ts"
 import { query } from "./tx.ts"
 import { audienceScope, firstUnknownPosition, inputsKnown, viewerAudience } from "./lcmAudience.ts"
 import type { ReadOps } from "./ops.ts"
-import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 
 export const makeHistoryReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient

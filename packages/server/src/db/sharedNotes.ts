@@ -1,9 +1,9 @@
 // Shared named notes (DESIGN §4.1): note entities with a global or chat-scoped `owner.shared`, the text
 // a note slot can link to. Queries both workers use.
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { LinkedNote } from "@rp/shared/chatSetupApi.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { LinkedNote } from "@dreamspan/shared/chatSetupApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 

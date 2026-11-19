@@ -1,8 +1,8 @@
 // Who is in the scene for the message `send_message` sends (`present`; DESIGN §3.5, §7.2):
 // the names resolved against the cast the message was written for, then recorded with the
 // message in one write keyed by the tool call (`DeclareRolloutPresence`).
-import type { EntityId } from "@rp/shared/chat.ts"
-import { foldState } from "@rp/shared/state.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import type { ToolContext } from "../tools.ts"
 

@@ -3,7 +3,7 @@
 // shows the task and the subagent's own steps, with the same rows (and answers to calls that ask
 // first) as the reply's. Stop ends it alone, and the assistant carries on with what it had;
 // Inspect opens its own run in the run inspector.
-import type { SubagentRow, SubagentStatus } from "@rp/shared/agent.ts"
+import type { SubagentRow, SubagentStatus } from "@dreamspan/shared/agent.ts"
 import { Link } from "@tanstack/react-router"
 import { useId, useState } from "react"
 import { ErrorAlert, useAction } from "../../../actions.tsx"

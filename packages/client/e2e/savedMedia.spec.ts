@@ -2,7 +2,7 @@
 // site, its media is saved on the server (FAKE_SAVED_MEDIA: a synthetic file, no download), and
 // viewing its chat makes no request to any other site, with media from other sites blocked.
 import { expect, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"

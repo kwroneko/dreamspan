@@ -4,12 +4,12 @@ import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
 import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
-import { DEFAULT_RESPONSE, DEFAULT_SAMPLERS, ModelSettings } from "@rp/shared/modelSettings.ts"
+import { DEFAULT_RESPONSE, DEFAULT_SAMPLERS, ModelSettings } from "@dreamspan/shared/modelSettings.ts"
 import { Schema } from "effect"
 import { StSettingsImporter } from "./StSettingsImport.tsx"
 // A connection's models: what the provider lists, merged with the user's edits
 // (spec/PROVIDERS.md §3.1). Each field shows where its value came from.
-import type { ModelRefresh } from "@rp/shared/api.ts"
+import type { ModelRefresh } from "@dreamspan/shared/api.ts"
 import {
   type CatalogMatch,
   ENDPOINTS_RETRY_MS,
@@ -22,7 +22,7 @@ import {
   resolveModel,
   routedPrice,
   routedUpstream
-} from "@rp/shared/providers.ts"
+} from "@dreamspan/shared/providers.ts"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"

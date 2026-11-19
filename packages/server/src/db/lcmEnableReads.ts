@@ -1,6 +1,6 @@
 import { planningContext, summaryChunkRoom } from "./lcmModelBudget.ts"
 import { resolveSummaryModel } from "../assembler/summaryModel.ts"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { workshopTranscript } from "./workshopTranscript.ts"
 import { prepareTextTokens } from "../assembler/textTokens.ts"
 import { requireSummaries } from "./chatKindPolicy.ts"
@@ -9,10 +9,10 @@ import { contextExcludedIn } from "./lcmVisibility.ts"
 // imported summary that could stand in for its hidden run, and the work the planner would do
 // from the first message or after that summary. The counts are priced on the main thread, where
 // the cost formulas are.
-import { foldState, noteSwitches } from "@rp/shared/state.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
+import { foldState, noteSwitches } from "@dreamspan/shared/state.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { inFork, shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
-import type { BackfillCounts } from "@rp/shared/lcm.ts"
+import type { BackfillCounts } from "@dreamspan/shared/lcm.ts"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 import { WorkerAssembler } from "../assembler/assembler.ts"
@@ -32,8 +32,8 @@ import { lcmPath } from "./lcmPath.ts"
 import { NotFound, type ReadOps, StorageError } from "./ops.ts"
 import { query } from "./tx.ts"
 import { readDefaults } from "./generationSettings.ts"
-import { chunkSize, lcmMisfits, resolveLcm } from "@rp/shared/lcmSettings.ts"
-import { endOfRequestText } from "@rp/shared/endOfRequest.ts"
+import { chunkSize, lcmMisfits, resolveLcm } from "@dreamspan/shared/lcmSettings.ts"
+import { endOfRequestText } from "@dreamspan/shared/endOfRequest.ts"
 
 /** The speed of the model's last requests, for how long the work takes; null without any. */
 const recentSpeed = (sql: SqlClient.SqlClient, userId: string, modelId: string) =>

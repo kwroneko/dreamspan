@@ -3,8 +3,8 @@
 // `name` means V1. The specs: github.com/malfoyslastname/character-card-spec-v2 and
 // github.com/kwaroran/character-card-spec-v3.
 import { parseStCreatedAt } from "./stCreatedAt.ts"
-import { CARD_SCHEMA_VERSION, CardAsset, type CardDoc } from "@rp/shared/docs/card.ts"
-import type { ReportBuilder } from "@rp/shared/importReport.ts"
+import { CARD_SCHEMA_VERSION, CardAsset, type CardDoc } from "@dreamspan/shared/docs/card.ts"
+import type { ReportBuilder } from "@dreamspan/shared/importReport.ts"
 import { Predicate, Schema } from "effect"
 import { Fields, isFiniteNumber } from "./fields.ts"
 import { lorebookFromCharacterBook } from "./lorebook.ts"

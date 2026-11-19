@@ -1,7 +1,7 @@
 import { inFork, viewAt, writeOverride } from "./forkState.ts"
 // The summary UI's one write of its own (ARCHITECTURE §16): asking for a summary, or a job that
 // gave up, to be done again with the next reply. A request is a row the planner finds.
-import { uuidv7 } from "@rp/shared/id.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { ownedModel } from "./generationSettings.ts"

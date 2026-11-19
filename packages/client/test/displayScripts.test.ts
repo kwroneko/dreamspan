@@ -1,8 +1,8 @@
 import { expect, it, vi } from "vitest"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
-import { DEFAULT_DISPLAY_PREFS } from "@rp/shared/chatApi.ts"
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import { DEFAULT_DISPLAY_PREFS } from "@dreamspan/shared/chatApi.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
 import { runDisplayRegex } from "../src/features/chat/displayRegex.ts"
 import {
   approvedScripts,

@@ -286,7 +286,7 @@ it("anchors the LCM divider after a plugin clones message entries", () => {
 it("the history preview uses its registered body and disappears when History is disabled", async () => {
   const { HistoryPreviewContext } = await import("../src/features/chat/historyPreview.tsx")
   const { chatPanels } = await import("../src/features/chat/panels.tsx")
-  const entry = { version: { id: "synthetic-version" } } as unknown as import("@rp/shared/chat.ts").PathEntry
+  const entry = { version: { id: "synthetic-version" } } as unknown as import("@dreamspan/shared/chat.ts").PathEntry
   const session = {
     snapshot: () => ({ cast: null })
   } as unknown as import("../src/features/chat/session.ts").ChatSession
@@ -295,7 +295,7 @@ it("the history preview uses its registered body and disappears when History is 
     beforeId: "synthetic-version",
     before: "A synthetic sentence",
     matches: [{ start: 2, end: 11, replacement: "replacement" }]
-  } as unknown as import("@rp/shared/historyApi.ts").HistoryHit
+  } as unknown as import("@dreamspan/shared/historyApi.ts").HistoryHit
   const render = () =>
     renderToStaticMarkup(
       createElement(
@@ -327,14 +327,14 @@ it("summary previews retain skipped matches across tabs and reject obsolete revi
   const session = {
     snapshot: () => ({ cast: null })
   } as unknown as import("../src/features/chat/session.ts").ChatSession
-  const summary = { id: "summary", revisionId: "revision" } as unknown as import("@rp/shared/lcm.ts").LcmSummary
+  const summary = { id: "summary", revisionId: "revision" } as unknown as import("@dreamspan/shared/lcm.ts").LcmSummary
   const hit = {
     kind: "summary_revision",
     targetId: "summary",
     beforeId: "revision",
     before: "bridge and bridge",
     matches: [{ start: 11, end: 17, replacement: "pier" }]
-  } as unknown as import("@rp/shared/historyApi.ts").HistoryHit
+  } as unknown as import("@dreamspan/shared/historyApi.ts").HistoryHit
   const render = (revisionId = "revision") =>
     renderToStaticMarkup(
       createElement(

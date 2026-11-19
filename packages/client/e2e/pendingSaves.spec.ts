@@ -1,7 +1,7 @@
 import { replaceEditorText } from "./support/textbox.ts"
 import { expectTextBox } from "./support/textbox.ts"
 import { expect, type Page, test } from "@playwright/test"
-import { textField } from "@rp/shared/editing.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { Effect } from "effect"
 import { readFile } from "node:fs/promises"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"

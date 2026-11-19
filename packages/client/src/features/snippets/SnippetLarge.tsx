@@ -7,8 +7,8 @@ import { SNIPPET_FOCUS } from "../editor/workspaceViews.ts"
 // for the snippet, the one its block in Snippets uses, so both show the same text, the same
 // "edited" marker and the same Save. Over a chat it's the workspace's overlay (`editor`, `focus`
 // in the URL); outside one, the snippet's library page with the same focus.
-import { textField } from "@rp/shared/editing.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useRef, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"

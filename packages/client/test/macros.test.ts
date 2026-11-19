@@ -1,6 +1,6 @@
 // Macros in displayed text (features/chat/macros.ts): a greeting's random and time macros
 // show what they drew when it was first shown, whatever the clock says later (DESIGN §5.6).
-import { FrozenMacros } from "@rp/shared/chat.ts"
+import { FrozenMacros } from "@dreamspan/shared/chat.ts"
 import { Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { displayText, expandForDisplay } from "../src/features/chat/macros.ts"

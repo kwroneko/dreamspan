@@ -2,7 +2,7 @@
 // and a worker parser in a scope as it would, they take effect, and the built-ins are back
 // when the scope closes.
 import { assert, describe, it, layer } from "@effect/vitest"
-import { StFileResult } from "@rp/shared/stImportApi.ts"
+import { StFileResult } from "@dreamspan/shared/stImportApi.ts"
 import { Effect, Exit, Scope } from "effect"
 import { inject } from "vitest"
 import { StImports, type StFolderCall } from "../src/importer/StImports.ts"

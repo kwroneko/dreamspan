@@ -1,6 +1,6 @@
 import { assert } from "@effect/vitest"
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { Summary, SummaryDetails } from "@rp/shared/lcm.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { Summary, SummaryDetails } from "@dreamspan/shared/lcm.ts"
 import { Effect } from "effect"
 import { environment } from "./support/backfillReview.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"

@@ -1,7 +1,7 @@
 // The budget note, the refusal and a context-length error say where each number comes from
 // and offer the action that changes it (owner report 2026-10-31). Synthetic views only.
-import type { BudgetOrigins } from "@rp/shared/inspectorApi.ts"
-import type { Version } from "@rp/shared/chat.ts"
+import type { BudgetOrigins } from "@dreamspan/shared/inspectorApi.ts"
+import type { Version } from "@dreamspan/shared/chat.ts"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"

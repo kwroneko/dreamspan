@@ -3,7 +3,7 @@
 // recorded as recently viewed, with Add to my cards (§4.5); a card the user already has from
 // there says so and links to theirs. Starting a chat with it comes with trying (§4.2).
 import { RegistryContext } from "@effect/atom-react"
-import type { RemoteSummary } from "@rp/shared/cardSources.ts"
+import type { RemoteSummary } from "@dreamspan/shared/cardSources.ts"
 import { Link, useParams } from "@tanstack/react-router"
 import { useContext, useEffect, useState } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"

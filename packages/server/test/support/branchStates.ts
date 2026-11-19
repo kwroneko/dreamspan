@@ -3,8 +3,8 @@
 // (stBranchStates.ts), after a first import or a confirmed re-import that brings branch files
 // new since. Shared by stBranchInheritedState.test.ts and its scale run.
 import { assert } from "@effect/vitest"
-import type { EntityId } from "@rp/shared/chat.ts"
-import { foldState } from "@rp/shared/state.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { Reader } from "../../src/db/Database.ts"
 import { client } from "./config.ts"

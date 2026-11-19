@@ -1,9 +1,9 @@
 // Explicit preview before applying only the selected part of a shared ST preset.
-import type { StSettingsImport } from "@rp/shared/modelSettings.ts"
+import type { StSettingsImport } from "@dreamspan/shared/modelSettings.ts"
 import { useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { formatByteSize } from "@rp/shared/byteSize.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 

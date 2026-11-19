@@ -2,15 +2,15 @@
 // Grants are the owner's rows, one a workshop, capability and target; approvals bind an answer to
 // one call (its rollout, id and arguments' digest). Only the owner's own RPCs write either: the
 // agent session hands its tools a writer without these operations (agent/tools.ts).
-import { User } from "@rp/shared/domain.ts"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
-import { ApprovalRefused } from "@rp/shared/workshopApi.ts"
+import { User } from "@dreamspan/shared/domain.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
+import { ApprovalRefused } from "@dreamspan/shared/workshopApi.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
 import { displayEndOf } from "./displayPath.ts"
-import type { StoryAt } from "@rp/shared/chat.ts"
+import type { StoryAt } from "@dreamspan/shared/chat.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { callsFrom } from "../agent/steps.ts"

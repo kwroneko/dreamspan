@@ -3,12 +3,12 @@
 // state, and RebuildContext reproduces them; a preset's lorebooks go with it while on, and
 // only the preset owner's own books are read.
 import { assert, describe, it } from "@effect/vitest"
-import { NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import type { CardDoc } from "@rp/shared/docs/card.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
-import type { ConnectionId } from "@rp/shared/providers.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
+import { NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import type { ConnectionId } from "@dreamspan/shared/providers.ts"
+import type { StateEventData } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
 import { readFileSync } from "node:fs"
 import { generationOf, type ContextSnapshot } from "../src/assembler/types.ts"

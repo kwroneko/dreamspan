@@ -1,4 +1,4 @@
-import { CardDoc } from "@rp/shared/docs/card.ts"
+import { CardDoc } from "@dreamspan/shared/docs/card.ts"
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { cardToJson } from "../../src/formats/cardExport.ts"

@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { editingOrigin } from "@rp/shared/draftDeletions.ts"
+import { editingOrigin } from "@dreamspan/shared/draftDeletions.ts"
 import { Generator } from "../src/chat/Generator.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 it.live("a cleared array input stays deleted when an offline snapshot reordered its items", () =>

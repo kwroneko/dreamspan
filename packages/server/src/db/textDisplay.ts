@@ -2,8 +2,8 @@
 // Uses the assembler's replaceable local text counters; never a provider endpoint.
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import type { UserId } from "@rp/shared/domain.ts"
-import { TokenizerInfo } from "@rp/shared/generation.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { TokenizerInfo } from "@dreamspan/shared/generation.ts"
 import type { Assembler } from "../assembler/assembler.ts"
 import type { ModelInput } from "../assembler/types.ts"
 import { withAssemblyModules } from "../assembler/modules.ts"

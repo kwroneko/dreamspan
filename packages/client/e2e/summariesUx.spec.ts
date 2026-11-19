@@ -6,8 +6,8 @@
 // summary lands on the message also on a phone, where the layer arrives after the window.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { SlotId } from "@rp/shared/chat.ts"
-import type { SendResult } from "@rp/shared/chatApi.ts"
+import type { SlotId } from "@dreamspan/shared/chat.ts"
+import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { condensed, level1 } from "./support/summaries.ts"

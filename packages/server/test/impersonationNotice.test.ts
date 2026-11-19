@@ -3,8 +3,8 @@
 // order sent only when the model writes as {{user}}. ST's impersonation prompt is the
 // end-of-request text "when your card speaks", outside the order, so it doesn't count.
 import { assert, describe, it } from "@effect/vitest"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { Writer } from "../src/db/Database.ts"

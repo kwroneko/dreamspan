@@ -3,9 +3,9 @@
 // it used changed since the last one, switching presets loses nothing, a field's edit history
 // is append-only past its revisions, and settings never go to the bin as JSON.
 import { assert, describe, it } from "@effect/vitest"
-import { HELD_FIELD, textField, valueField } from "@rp/shared/editing.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import { HELD_FIELD, textField, valueField } from "@dreamspan/shared/editing.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { importStPreset } from "../src/formats/preset.ts"

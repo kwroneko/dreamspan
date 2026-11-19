@@ -1,6 +1,6 @@
 // Full-folder arrival evidence is separate from edit times. Metadata beats chat evidence,
 // then file times, then import time; repeated evidence of one kind keeps its earliest date.
-import type { StArrival } from "@rp/shared/stImportApi.ts"
+import type { StArrival } from "@dreamspan/shared/stImportApi.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 

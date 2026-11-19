@@ -1,7 +1,7 @@
 // Why the next reply can't be prepared, above the composer and aligned with it. A budget refusal
 // is a calm notice, not an error: it says what takes the room, where each number comes from,
 // and opens the model's settings at the context size.
-import type { NextContext } from "@rp/shared/inspectorApi.ts"
+import type { NextContext } from "@dreamspan/shared/inspectorApi.ts"
 import { Alert } from "../../ui/Surface.tsx"
 import { ChangeContextSize, contextOrigin, reserveOrigin, withOrigin } from "./budgetSources.tsx"
 

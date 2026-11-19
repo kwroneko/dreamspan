@@ -3,11 +3,11 @@
 // 2026-10-30): a generated inserted message is assembled like a mid-history regenerate, from
 // the fork's display path up to the anchor, and the model never sees what follows it.
 import { assert, describe, it } from "@effect/vitest"
-import type { EntityId, ForkId, PathEntry, VersionId } from "@rp/shared/chat.ts"
-import { CurrentUser } from "@rp/shared/api.ts"
-import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { InsertBody } from "@rp/shared/messagesApi.ts"
+import type { EntityId, ForkId, PathEntry, VersionId } from "@dreamspan/shared/chat.ts"
+import { CurrentUser } from "@dreamspan/shared/api.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { InsertBody } from "@dreamspan/shared/messagesApi.ts"
 import { Effect, Stream } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { Generator } from "../src/chat/Generator.ts"

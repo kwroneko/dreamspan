@@ -1,8 +1,8 @@
 export * from "./common.ts"
 import type { Effect, Scope } from "effect"
 import type { Handle, PrivateStorage } from "./common.ts"
-import type { MacroEntry } from "@rp/shared/macros/registry.ts"
-import type { PluginStateKey, StateKeyRegistrationError } from "@rp/shared/state.ts"
+import type { MacroEntry } from "@dreamspan/shared/macros/registry.ts"
+import type { PluginStateKey, StateKeyRegistrationError } from "@dreamspan/shared/state.ts"
 import type { Registration } from "./server.ts"
 export interface WorkerRegistries {
   readonly stateKeys: {
@@ -37,8 +37,8 @@ export type Activate = (host: WorkerHost) => Effect.Effect<void, unknown, Scope.
  * server code retains ambient process/file/network access. The deadline is not a sandbox.
  */
 export type { MacroCall, MacroInfo, MacroContractV1, MacroContext, CardFields, ChatMessage } from "./macros.ts"
-export type { VarScope } from "@rp/shared/macros/variables.ts"
-export { normalize } from "@rp/shared/macros/variables.ts"
-export { ELSE_MARKER, isFalse, trimScoped } from "@rp/shared/macros/expand.ts"
-export { stringHash } from "@rp/shared/macros/hash.ts"
-export { atOffset, formatMoment, humanize, inZone, MAX_FORMAT_GROWTH, parseMoment } from "@rp/shared/macros/time.ts"
+export type { VarScope } from "@dreamspan/shared/macros/variables.ts"
+export { normalize } from "@dreamspan/shared/macros/variables.ts"
+export { ELSE_MARKER, isFalse, trimScoped } from "@dreamspan/shared/macros/expand.ts"
+export { stringHash } from "@dreamspan/shared/macros/hash.ts"
+export { atOffset, formatMoment, humanize, inZone, MAX_FORMAT_GROWTH, parseMoment } from "@dreamspan/shared/macros/time.ts"

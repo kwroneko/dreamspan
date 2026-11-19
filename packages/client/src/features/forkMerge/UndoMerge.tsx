@@ -2,7 +2,7 @@
 // nothing is unsaved. It adds a revision with the content from before the merge and offers the
 // merged revisions again; after later edits, Restore brings back earlier content instead.
 import { useAtomValue } from "@effect/atom-react"
-import type { Revision } from "@rp/shared/library.ts"
+import type { Revision } from "@dreamspan/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
 import { useState } from "react"
 import type { AppError } from "../../errors.ts"

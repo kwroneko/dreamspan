@@ -1,5 +1,5 @@
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
-import type { FieldPath } from "@rp/shared/editing.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
 
 /**
  * Where "Add a script" writes a new script: as an element of the document's `regex` list, by its

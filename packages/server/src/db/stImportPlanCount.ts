@@ -4,7 +4,7 @@
 // preview's dry run (`StImportPlanBatch`) and the confirmed import's write
 // (`StImportCommitChat`), which refuses, rolling back, unless its digest is the preview's.
 import { createHash } from "node:crypto"
-import { PLAN_TEXT_CHARS, type StPlanCounts, StPlanMessage } from "@rp/shared/stReimportPlan.ts"
+import { PLAN_TEXT_CHARS, type StPlanCounts, StPlanMessage } from "@dreamspan/shared/stReimportPlan.ts"
 import type { PlaceEvent, StPlacedMessage } from "./stImportPlace.ts"
 
 /** The start of a message's text for a detail row, on one line. */

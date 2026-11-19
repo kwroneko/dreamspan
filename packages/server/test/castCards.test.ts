@@ -2,9 +2,9 @@
 // GetCast), checked against an actual assembled request. Synthetic cards,
 // a real server and the database workers.
 import { assert, describe, it } from "@effect/vitest"
-import { NewVersion, type EntityId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import type { RefId, RevisionId } from "@rp/shared/library.ts"
+import { NewVersion, type EntityId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { RefId, RevisionId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { Reader, Writer } from "../src/db/Database.ts"

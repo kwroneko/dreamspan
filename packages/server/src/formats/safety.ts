@@ -1,9 +1,9 @@
 // What every format parser shares: its error, the caps on untrusted input, and JSON parsing
 // that can't hand a prototype key, unbounded nesting or millions of objects to the code after
 // it. Imported files are data only: nothing in them is ever executed or rendered.
-import { formatByteSize } from "@rp/shared/byteSize.ts"
-import type { ReportBuilder } from "@rp/shared/importReport.ts"
-import { MAX_IMPORT_BYTES } from "@rp/shared/libraryImport.ts"
+import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
+import type { ReportBuilder } from "@dreamspan/shared/importReport.ts"
+import { MAX_IMPORT_BYTES } from "@dreamspan/shared/libraryImport.ts"
 import { Effect, Schema } from "effect"
 
 /** A file that can't be imported at all. Recoverable problems are issues in the report instead. */

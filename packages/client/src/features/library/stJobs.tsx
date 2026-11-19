@@ -6,7 +6,7 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 // library and the chats show is read again at most every 10 s, and once when it ends:
 // never per file.
 import { RegistryContext, useAtomValue } from "@effect/atom-react"
-import type { StImportJob } from "@rp/shared/stImportApi.ts"
+import type { StImportJob } from "@dreamspan/shared/stImportApi.ts"
 import { Link, useLocation } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { useContext, useEffect } from "react"

@@ -3,11 +3,11 @@
 // field which incoming changes to take; every conflict needs an explicit choice. The result is
 // computed with the same registered merge policy the server uses, and shown as the changes it
 // makes before merging. Unsaved fields refuse the merge: save or revert them first.
-import { defaultLibraryMergePolicy, libraryMergePolicies, type MergeSelection } from "@rp/shared/forkMerge.ts"
-import type { ForkMergePreview, MergeStatus } from "@rp/shared/forkMerge.ts"
-import { hasSchema, validateDoc } from "@rp/shared/editing.ts"
-import type { PresetPrompt } from "@rp/shared/docs/preset.ts"
-import type { Doc, EntityKind, RefId, RevisionId } from "@rp/shared/library.ts"
+import { defaultLibraryMergePolicy, libraryMergePolicies, type MergeSelection } from "@dreamspan/shared/forkMerge.ts"
+import type { ForkMergePreview, MergeStatus } from "@dreamspan/shared/forkMerge.ts"
+import { hasSchema, validateDoc } from "@dreamspan/shared/editing.ts"
+import type { PresetPrompt } from "@dreamspan/shared/docs/preset.ts"
+import type { Doc, EntityKind, RefId, RevisionId } from "@dreamspan/shared/library.ts"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"

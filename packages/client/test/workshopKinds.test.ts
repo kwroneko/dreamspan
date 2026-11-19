@@ -2,7 +2,7 @@
 // (the composer's strip, the side panel's tabs, the root's accent) and the capability chip's text.
 // Synthetic views only; a plugin's kind uses the same registrations.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { Effect } from "effect"
 import {
   availableComposerControls,

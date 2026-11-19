@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest"
 import type { ChatSession } from "../src/features/chat/session.ts"
-import type { ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { composerWorkspace } from "../src/features/chat/composerWorkspace.ts"
 
 it("keeps a remounted composer's draft queue and in-flight feedback with its session", () => {

@@ -6,8 +6,8 @@
 // A change to many entries is an ordinary unsaved change, as any edit is (owner, 2026-11-02:
 // "Isn't that how you would undo it if they didn't save themselves?"): Revert beside Save
 // undoes it and Save keeps it. No revision is cut for it, and its toast has no Undo of its own.
-import type { LorebookDoc, LorebookEntry } from "@rp/shared/docs/lorebook.ts"
-import type { FieldPath } from "@rp/shared/editing.ts"
+import type { LorebookDoc, LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
 import { showToast } from "../../ui/Toast.tsx"
 import { entryPath } from "./lorebookTable.ts"
 import type { EditorStore } from "./store.ts"

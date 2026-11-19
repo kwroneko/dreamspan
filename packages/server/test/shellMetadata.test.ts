@@ -1,7 +1,7 @@
 import { Worker } from "node:worker_threads"
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { NewVersion } from "@rp/shared/chat.ts"
+import { NewVersion } from "@dreamspan/shared/chat.ts"
 import * as Database from "../src/db/Database.ts"
 import { databaseFile } from "../src/db/connection.ts"
 import { testWorkers } from "./support/bundles.ts"

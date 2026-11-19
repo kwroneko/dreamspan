@@ -1,7 +1,7 @@
 // Opening a thread and undoing threads, from wherever they're shown (spec/THREADS.md §5.1,
 // §13): the URL names the fork a tab shows, omitted for the one the chat opens on, and keeps
 // the side panel open as it is.
-import type { Chat, ForkId } from "@rp/shared/chat.ts"
+import type { Chat, ForkId } from "@dreamspan/shared/chat.ts"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useCallback } from "react"
 import { showToast } from "../../ui/Toast.tsx"

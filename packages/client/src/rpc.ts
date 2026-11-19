@@ -1,4 +1,4 @@
-import { TransportApi, TransportJson, type TransportRpcs } from "@rp/shared/transportApi.ts"
+import { TransportApi, TransportJson, type TransportRpcs } from "@dreamspan/shared/transportApi.ts"
 import { Effect, Layer } from "effect"
 import { AtomRpc } from "effect/reactivity"
 import { RpcClient, type RpcGroup } from "effect/rpc"

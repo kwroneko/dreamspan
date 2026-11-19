@@ -4,9 +4,9 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 // (a local draft saved with SetGlobalRegex). Same fields and layout everywhere; only the
 // binding differs. Presets and cards from files run their scripts only once the user allows
 // them (ARCHITECTURE.md §9); global scripts are the user's own and need no approval.
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
-import type { FieldPath } from "@rp/shared/editing.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import type { RegexScript } from "@dreamspan/shared/docs/regexScript.ts"
+import type { FieldPath } from "@dreamspan/shared/editing.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { useContext, useEffect, useState, type ReactNode } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"

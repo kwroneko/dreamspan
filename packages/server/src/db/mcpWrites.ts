@@ -1,8 +1,8 @@
 // MCP connection, use and ledger writes (spec/MCP.md §12), in the writer worker, each one
 // transaction. Secrets arrive encrypted; the main thread's MCP client does the network work
 // between these.
-import type { UserId } from "@rp/shared/domain.ts"
-import { mcpKeyFor } from "@rp/shared/mcp.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { mcpKeyFor } from "@dreamspan/shared/mcp.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeMcpQueries, toMcpConnection } from "./mcpRows.ts"

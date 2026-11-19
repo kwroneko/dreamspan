@@ -1,5 +1,5 @@
 import { countTokens, type LocalEncoding } from "../src/importer/tokenizer.ts"
-import type { SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 // Context assembly on long chats (ARCHITECTURE.md §15): the next request over 1,000 and then
 // 4,000 more synthetic messages, all within the model's context, so every one of them is
 // read, scripted, composed and sent. Linear work grows about fourfold; a step that is
@@ -8,8 +8,8 @@ import type { SlotId, VersionId } from "@rp/shared/chat.ts"
 // it prints the medians and the ratio.
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
-import type { ChatId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Reader } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { generateReply } from "./support/generation.ts"

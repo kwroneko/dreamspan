@@ -2,7 +2,7 @@
 // middle of a long virtualized timeline opens at the right message, including after reload.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import { newCardDoc } from "@rp/shared/editing.ts"
+import { newCardDoc } from "@dreamspan/shared/editing.ts"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { expectLayout } from "./support/layoutAudit.ts"

@@ -1,8 +1,8 @@
 // Consent is read and checked only in workers. A write merges one choice in one transaction.
-import { DEFAULT_EXTERNAL_MEDIA, ExternalMediaPrefs, externalMediaAllowed } from "@rp/shared/externalMedia.ts"
-import type { ExternalMediaTarget } from "@rp/shared/externalMedia.ts"
-import type { UserId } from "@rp/shared/domain.ts"
-import { NotFound } from "@rp/shared/errors.ts"
+import { DEFAULT_EXTERNAL_MEDIA, ExternalMediaPrefs, externalMediaAllowed } from "@dreamspan/shared/externalMedia.ts"
+import type { ExternalMediaTarget } from "@dreamspan/shared/externalMedia.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import type { ReadOps, WriteOps } from "./ops.ts"

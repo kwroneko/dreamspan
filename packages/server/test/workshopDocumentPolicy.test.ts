@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { Doc } from "@rp/shared/library.ts"
-import { newLorebookEntry } from "@rp/shared/docs/lorebook.ts"
-import { promptPreset } from "@rp/shared/docs/preset.ts"
+import type { Doc } from "@dreamspan/shared/library.ts"
+import { newLorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
+import { promptPreset } from "@dreamspan/shared/docs/preset.ts"
 import { builtinPreset } from "../src/db/assemblySources.ts"
 import { documentDiff, safeAgentDocument } from "../src/db/agentDocuments.ts"
 

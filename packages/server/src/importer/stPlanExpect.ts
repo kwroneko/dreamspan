@@ -2,7 +2,7 @@
 // import it starts is held to, file by file. `StImportPlans.confirm` makes it; `StImports`
 // holds the run to it.
 import { createHash } from "node:crypto"
-import type { StPlanCounts, StPlanTarget } from "@rp/shared/stReimportPlan.ts"
+import type { StPlanCounts, StPlanTarget } from "@dreamspan/shared/stReimportPlan.ts"
 
 /**
  * A chat file's content hash: of the SHA-256 of each part, as the format worker took it of

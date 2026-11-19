@@ -2,7 +2,7 @@
 // URL every small portrait loads, and the chooser that sets a cutout. Each is one registry
 // entry with a fixed id, so a plugin can wrap or replace it (register the same id) and undo
 // that; the built-ins below are what's in effect until one does.
-import { type AvatarCrop, cropKey } from "@rp/shared/media.ts"
+import { type AvatarCrop, cropKey } from "@dreamspan/shared/media.ts"
 import { type ComponentType, useSyncExternalStore } from "react"
 import { makeRegistry } from "../registry.ts"
 import { mediaUrl } from "./mediaImage.ts"

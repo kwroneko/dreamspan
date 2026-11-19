@@ -2,9 +2,9 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 // The top of a connection's page: which model new chats use. A connection just created here
 // fetches its model list at once, and when the account has no default model yet its first
 // model becomes the default (ST's Connect picks one the same way).
-import type { ModelRefresh } from "@rp/shared/api.ts"
-import type { GenerationDefaults } from "@rp/shared/generation.ts"
-import { type Model, resolveModel } from "@rp/shared/providers.ts"
+import type { ModelRefresh } from "@dreamspan/shared/api.ts"
+import type { GenerationDefaults } from "@dreamspan/shared/generation.ts"
+import { type Model, resolveModel } from "@dreamspan/shared/providers.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { Link } from "@tanstack/react-router"
 import { Effect } from "effect"

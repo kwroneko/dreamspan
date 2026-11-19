@@ -5,7 +5,7 @@
 // changed since (`StImportPlanChanged`), which the import form answers by checking again.
 // Every text here that comes from a file or a chat is rendered as text.
 import { RegistryContext } from "@effect/atom-react"
-import type { StPlanChoice } from "@rp/shared/stImportApi.ts"
+import type { StPlanChoice } from "@dreamspan/shared/stImportApi.ts"
 import {
   type StImportPlan,
   type StPlanCounts,
@@ -13,7 +13,7 @@ import {
   type StPlanMessage,
   stPlanAffectedBySkip,
   PLAN_MESSAGES_PAGE
-} from "@rp/shared/stReimportPlan.ts"
+} from "@dreamspan/shared/stReimportPlan.ts"
 import { Link } from "@tanstack/react-router"
 import { Context, Effect, Exit } from "effect"
 import { AtomRegistry } from "effect/reactivity"

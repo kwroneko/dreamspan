@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema, Stream } from "effect"
-import { ChatKind } from "@rp/shared/chat.ts"
+import { ChatKind } from "@dreamspan/shared/chat.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { StateModules } from "../src/db/stateModules.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
@@ -8,7 +8,7 @@ import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
-import { newCardDoc } from "@rp/shared/editing.ts"
+import { newCardDoc } from "@dreamspan/shared/editing.ts"
 
 for (const workers of ["source", "bundle"] as const) {
   describe(`chat kind profiles in ${workers} workers`, () => {
@@ -107,7 +107,7 @@ for (const workers of ["source", "bundle"] as const) {
           greeting: null
         })
         assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).kind, "review/assistant")
-        const events: Array<import("@rp/shared/chatApi.ts").ChatEvent> = []
+        const events: Array<import("@dreamspan/shared/chatApi.ts").ChatEvent> = []
         yield* api.SubscribeChat({ chatId: chat.id }).pipe(
           Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
           Effect.forkScoped

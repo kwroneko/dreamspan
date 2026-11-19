@@ -4,7 +4,7 @@
 // top of the list and scrolled to its end. BRANCH_MENU_SHOTS saves screenshots there.
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
-import type { ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"

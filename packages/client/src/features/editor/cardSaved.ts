@@ -2,7 +2,7 @@
 // header, `CardNameHeader.tsx`), or after a fork or swap renamed what the chat uses. Features
 // own their dialogs; callers only provide the names and wait for the answer.
 import { useEffect, useSyncExternalStore, type ComponentType } from "react"
-import type { ChatId, EntityId, ForkId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, ForkId } from "@dreamspan/shared/chat.ts"
 import { makeRegistry } from "../../registry.ts"
 
 export interface CardSaved {

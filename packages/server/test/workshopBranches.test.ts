@@ -3,10 +3,10 @@
 // its workshops, the branches go on apart, a workshop shows only beside its own story branch, it
 // reads its paired branch wherever it's open, and the bin takes a story branch's workshop
 // branches with it. Synthetic chats only.
-import { canonicalJson } from "@rp/shared/editing.ts"
+import { canonicalJson } from "@dreamspan/shared/editing.ts"
 import { assert, layer } from "@effect/vitest"
-import { type Chat, type ChatId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
-import type { UserId } from "@rp/shared/domain.ts"
+import { type Chat, type ChatId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"

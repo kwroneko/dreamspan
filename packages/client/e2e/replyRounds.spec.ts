@@ -6,7 +6,7 @@
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
