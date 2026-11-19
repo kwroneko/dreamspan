@@ -171,7 +171,9 @@ const belowReserve = async (path: string, reserve: NonNullable<RunSpec["limits"]
   }
 }
 
-const anyBelowReserve = async (spec: RunSpec) => {
+const anyBelowReserve = async (
+  spec: Pick<RunSpec, "mounts"> & { readonly limits: Pick<RunSpec["limits"], "reserve"> }
+) => {
   const reserve = spec.limits.reserve
   if (!reserve) return false
   const checks = await Promise.all(spec.mounts.filter((m) => m.writable).map((m) => belowReserve(m.source, reserve)))
@@ -486,6 +488,20 @@ const fillRunDir = async (runDir: string, network: RunSpec["network"]): Promise<
 }
 
 /**
+ * The program's own variables, as its first shell reads them once its limits are set: a file in
+ * the run folder (owner-only, as the argument file holding the sandbox's environment is), one
+ * NUL-ended NAME=VALUE each. Never one of the app's or the proxy's names.
+ */
+const PROGRAM_ENV_FILE = "program-env"
+const programEnvFile = (spec: SpawnSpec) => {
+  const fixed = { ...spec.env, ...proxyEnv(spec.network) }
+  return Object.entries(spec.programEnv ?? {})
+    .filter(([name, value]) => !(name in fixed) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !value.includes("\0"))
+    .map(([name, value]) => `${name}=${value}\0`)
+    .join("")
+}
+
+/**
  * A program's first shell: the same limits as a command's prelude, the bridge to the proxy
  * (reading nothing of the program's stdin), then the program itself in place of the shell, its
  * arguments passed as they are (`"$@"`), never read by the shell. Its stdin, stdout and stderr
@@ -504,6 +520,11 @@ const spawnPrelude = (spec: SpawnSpec) => {
     spec.network === "public"
       ? `exec 3< <(${shellQuote(process.execPath)} ${RUNTIME}/bridge.mjs ${RUNTIME}/proxy.sock ${PROXY_PORT} </dev/null 2>/dev/null); read -r -t 10 __rp_ready <&3; exec 3<&-; unset __rp_ready`
       : ":",
+    // Only now, with the limits set and the bridge started, the program's own variables: from a
+    // file, not the environment this shell started with, so none acts on this shell or the
+    // bridge (BASH_ENV, LD_PRELOAD and NODE_OPTIONS among them would). No braces: a cgroup
+    // wrapper (systemd-run) would expand them before bash sees this.
+    `while IFS= read -r -d '' __rp_pair; do export "$__rp_pair"; done < ${RUNTIME}/${PROGRAM_ENV_FILE}; unset __rp_pair`,
     `cd -- ${shellQuote(spec.cwd)} || exit 1`,
     // The shell's own variables don't reach the program: only what the spec gives, and the proxy's.
     // (bash sets SHLVL again for what it execs, so env drops it).
@@ -521,6 +542,8 @@ const spawnOnce = async (spec: SpawnSpec): Promise<SandboxProcess> => {
   const bwrap = findOnPath("bwrap")
   if (!bwrap) throw new Error("bubblewrap isn't installed")
   if (spec.argv.length === 0 || spec.argv[0] === "") throw new Error("No program to start.")
+  if (await anyBelowReserve(spec))
+    throw new Error("The disk the app keeps its data on is nearly full, so the program wasn't started.")
   const runDir = await mkdtemp(join(runtimeRoot(), `${RUN_PREFIX}${process.pid}-`))
   let proxy: SandboxProxy | null = null
   let group: CommandCgroup | null = null
@@ -531,6 +554,7 @@ const spawnOnce = async (spec: SpawnSpec): Promise<SandboxProcess> => {
   }
   try {
     proxy = await fillRunDir(runDir, spec.network)
+    await writeFile(join(runDir, "rp", PROGRAM_ENV_FILE), programEnvFile(spec), { mode: 0o600 })
     const filter = seccompFilter()
     let filterFile: FileHandle | null = null
     if (filter) {
@@ -570,14 +594,32 @@ const spawnOnce = async (spec: SpawnSpec): Promise<SandboxProcess> => {
         child.kill("SIGKILL")
       }
     }
+    // The reserve, watched as a command's is: below it, the program is stopped.
+    let diskLow = false
+    let checking = false
+    const watch = spec.limits.reserve
+      ? setInterval(() => {
+          if (checking) return
+          checking = true
+          void anyBelowReserve(spec).then((low) => {
+            checking = false
+            if (low && !diskLow) {
+              diskLow = true
+              kill()
+            }
+          })
+        }, RESERVE_CHECK_MS)
+      : null
+    watch?.unref()
     const exited = new Promise<{ exitCode: number | null; memoryCapped: boolean }>((done) => {
       child.once("error", () => done({ exitCode: null, memoryCapped: false }))
       child.once("close", (code) => done({ exitCode: code, memoryCapped: false }))
     }).then(async (end) => {
+      if (watch) clearInterval(watch)
       const capped = group ? await group.finish().catch(() => ({ memoryCapped: false })) : { memoryCapped: false }
       group = null
       await cleanUp()
-      return { ...end, memoryCapped: capped.memoryCapped }
+      return diskLow ? { exitCode: null, memoryCapped: false, diskLow } : { ...end, memoryCapped: capped.memoryCapped }
     })
     // A pipe closing under a write is the program ending, which `exited` reports.
     child.stdin!.on("error", () => undefined)

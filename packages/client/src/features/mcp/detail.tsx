@@ -561,9 +561,12 @@ function EnvironmentCard({ connection }: McpSectionProps) {
   )
 }
 
-/** What the user's own copy of a local program wrote to its error output lately. */
+/**
+ * What the owner's own copy of a local program wrote to its error output lately. Never for a
+ * shared program: programs print their configuration, which is the owner's.
+ */
 export function ProgramOutputSection({ connection }: McpSectionProps) {
-  if (connection.transport !== "stdio") return null
+  if (connection.transport !== "stdio" || !connection.owned) return null
   return <ProgramOutput connection={connection} />
 }
 
@@ -578,7 +581,7 @@ function ProgramOutput({ connection }: { connection: McpConnection }) {
     <Card>
       <CardHeader
         title="Program output"
-        about="What your copy of the program wrote to its error output lately (the last 64 KB). It's where a program says why it stopped."
+        about="What your copy of the program wrote to its error output lately (the last 64 KB), with your variables' values hidden. It's where a program says why it stopped."
         description={shown === null ? undefined : shown.running ? "Running now." : "Not running."}
         actions={
           <Button hint="Shows what the program wrote lately." pending={read.pending} onClick={() => void load()}>

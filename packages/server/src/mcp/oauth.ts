@@ -8,11 +8,22 @@
 // registers itself by dynamic registration only. A Client ID Metadata Document needs an https
 // address the authorization server can fetch, which a self-hosted instance often lacks.
 import { randomBytes } from "node:crypto"
+import { lookup } from "node:dns/promises"
+import { isIP } from "node:net"
 import { auth, type OAuthClientProvider, type OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js"
 import type { OAuthClientInformationMixed, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js"
+import type { TargetAddresses } from "../net/Network.ts"
+import { sandboxMayReach } from "../sandbox/network.ts"
 
 /** What the app keeps of one user's sign-in, encrypted on their `mcp_uses` row. */
 export interface StoredSignIn {
+  /**
+   * The server's address the sign-in was made for. Its registration, discovery and tokens are
+   * used only while the connection still has this address: another address discovers afresh.
+   */
+  readonly serverUrl: string
+  /** The resource indicator was the server's origin only (a shared user's sign-in, see below). */
+  readonly resourceOrigin: boolean
   /** The app's registration with the authorization server, for this redirect address. */
   readonly client: OAuthClientInformationMixed
   readonly redirectUri: string
@@ -25,6 +36,8 @@ export interface StoredSignIn {
 
 /** A sign-in the browser is away for: what the code exchange will need. */
 export interface PendingSignIn {
+  readonly serverUrl: string
+  readonly resourceOrigin: boolean
   readonly client: OAuthClientInformationMixed
   readonly redirectUri: string
   readonly verifier: string
@@ -43,6 +56,36 @@ const clientMetadata = (redirectUri: string) => ({
   token_endpoint_auth_method: "none"
 })
 
+/**
+ * The app's registrations, by authorization server and redirect address, so signing in again,
+ * or another user signing in with the same service, reuses one instead of registering anew
+ * (a registration is the app's, a public client with no secret, not a user's). In memory, the
+ * most recently used kept.
+ */
+export const makeClientRegistry = (max = 256) => {
+  const clients = new Map<string, OAuthClientInformationMixed>()
+  const keyOf = (issuer: string, redirectUri: string) => `${issuer}\u0000${redirectUri}`
+  return {
+    get: (issuer: string, redirectUri: string) => {
+      const key = keyOf(issuer, redirectUri)
+      const client = clients.get(key)
+      if (client === undefined) return undefined
+      clients.delete(key)
+      clients.set(key, client)
+      return client
+    },
+    set: (issuer: string, redirectUri: string, client: OAuthClientInformationMixed) => {
+      const key = keyOf(issuer, redirectUri)
+      clients.delete(key)
+      clients.set(key, client)
+      while (clients.size > max) clients.delete(clients.keys().next().value!)
+    },
+    delete: (issuer: string, redirectUri: string) => void clients.delete(keyOf(issuer, redirectUri)),
+    size: () => clients.size
+  }
+}
+export type ClientRegistry = ReturnType<typeof makeClientRegistry>
+
 /** A provider over memory: it starts with what the step needs and records what the SDK saves. */
 class StepProvider implements OAuthClientProvider {
   client: OAuthClientInformationMixed | undefined
@@ -52,6 +95,13 @@ class StepProvider implements OAuthClientProvider {
   authorizationUrl: URL | undefined
   readonly stateValue = randomBytes(32).toString("base64url")
   readonly redirectUri: string
+  private readonly registry: ClientRegistry | undefined
+  /**
+   * Present only for a shared user's sign-in: the resource indicator is the server's origin, not
+   * its address, whose path and query only the owner sees. The sign-in page's address, which the
+   * user's browser opens, then carries nothing of them.
+   */
+  validateResourceURL?: (serverUrl: string | URL, resource?: string) => Promise<URL | undefined>
   constructor(
     redirectUri: string,
     start: {
@@ -59,6 +109,8 @@ class StepProvider implements OAuthClientProvider {
       readonly tokens?: OAuthTokens | undefined
       readonly verifier?: string | undefined
       readonly discovery?: OAuthDiscoveryState | null | undefined
+      readonly registry?: ClientRegistry | undefined
+      readonly resourceOrigin: boolean
     }
   ) {
     this.redirectUri = redirectUri
@@ -66,6 +118,18 @@ class StepProvider implements OAuthClientProvider {
     this.saved = start.tokens
     this.verifier = start.verifier ?? ""
     this.discovery = start.discovery ?? undefined
+    this.registry = start.registry
+    if (start.resourceOrigin)
+      this.validateResourceURL = async (serverUrl, resource) => {
+        // As the SDK: no resource indicator without the server's metadata.
+        if (resource === undefined) return undefined
+        const origin = new URL(serverUrl).origin
+        if (new URL(resource).origin !== origin) throw new Error("The server's sign-in details name another server.")
+        return new URL(origin)
+      }
+  }
+  private get issuer() {
+    return this.discovery?.authorizationServerUrl
   }
   get redirectUrl() {
     return this.redirectUri
@@ -77,10 +141,23 @@ class StepProvider implements OAuthClientProvider {
     return this.stateValue
   }
   clientInformation() {
+    // Discovery has run by now: the registration for the service it found, if the app has one.
+    if (this.client === undefined && this.issuer !== undefined)
+      this.client = this.registry?.get(this.issuer, this.redirectUri)
     return this.client
   }
   saveClientInformation(information: OAuthClientInformationMixed) {
     this.client = information
+    const issuer = (information as { issuer?: unknown }).issuer
+    if (typeof issuer === "string") this.registry?.set(issuer, this.redirectUri, information)
+  }
+  /** The service refused the registration or the tokens: they aren't offered again. */
+  invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier" | "discovery") {
+    if (scope === "all" || scope === "client") {
+      if (this.issuer !== undefined) this.registry?.delete(this.issuer, this.redirectUri)
+      this.client = undefined
+    }
+    if (scope === "all" || scope === "tokens") this.saved = undefined
   }
   tokens() {
     return this.saved
@@ -118,12 +195,21 @@ export const startSignIn = async (
   fetchFn: FetchLike,
   serverUrl: URL,
   redirectUri: string,
-  previous: StoredSignIn | null
+  previous: StoredSignIn | null,
+  options: { readonly registry: ClientRegistry; readonly resourceOrigin: boolean }
 ): Promise<{ readonly authorizationUrl: URL; readonly pending: PendingSignIn }> => {
-  const reuse = previous !== null && previous.redirectUri === redirectUri
+  // An earlier sign-in's discovery and registration only for the very address it was made for:
+  // a moved server is discovered afresh, so its tokens never go to another server.
+  const reuse =
+    previous !== null &&
+    previous.redirectUri === redirectUri &&
+    previous.serverUrl === serverUrl.href &&
+    previous.resourceOrigin === options.resourceOrigin
   const provider = new StepProvider(redirectUri, {
     client: reuse ? previous.client : undefined,
-    discovery: reuse ? previous.discovery : null
+    discovery: reuse ? previous.discovery : null,
+    registry: options.registry,
+    resourceOrigin: options.resourceOrigin
   })
   const result = await auth(provider, { serverUrl, fetchFn })
   if (result !== "REDIRECT" || provider.authorizationUrl === undefined || provider.client === undefined)
@@ -131,6 +217,8 @@ export const startSignIn = async (
   return {
     authorizationUrl: provider.authorizationUrl,
     pending: {
+      serverUrl: serverUrl.href,
+      resourceOrigin: options.resourceOrigin,
       client: provider.client,
       redirectUri,
       verifier: provider.verifier,
@@ -148,14 +236,18 @@ export const finishSignIn = async (
   code: string,
   now: number
 ): Promise<StoredSignIn> => {
+  if (pending.serverUrl !== serverUrl.href) throw new Error("The server's address changed during the sign-in.")
   const provider = new StepProvider(pending.redirectUri, {
     client: pending.client,
     verifier: pending.verifier,
-    discovery: pending.discovery
+    discovery: pending.discovery,
+    resourceOrigin: pending.resourceOrigin
   })
   await auth(provider, { serverUrl, authorizationCode: code, fetchFn })
   if (provider.saved === undefined) throw new Error("The server's sign-in service gave no tokens.")
   return {
+    serverUrl: pending.serverUrl,
+    resourceOrigin: pending.resourceOrigin,
     client: provider.client ?? pending.client,
     redirectUri: pending.redirectUri,
     tokens: provider.saved,
@@ -176,10 +268,13 @@ export const refreshSignIn = async (
   now: number
 ): Promise<StoredSignIn | null> => {
   if (!stored.tokens.refresh_token) return null
+  // Tokens are refreshed only at the server they were issued for.
+  if (stored.serverUrl !== serverUrl.href) return null
   const provider = new StepProvider(stored.redirectUri, {
     client: stored.client,
     tokens: stored.tokens,
-    discovery: stored.discovery
+    discovery: stored.discovery,
+    resourceOrigin: stored.resourceOrigin
   })
   const result = await auth(provider, { serverUrl, fetchFn })
   if (result !== "AUTHORIZED" || provider.saved === undefined || provider.saved === stored.tokens) return null
@@ -201,3 +296,69 @@ export const REFRESH_AHEAD_MS = 60_000
 
 /** How long the app waits for the browser to come back from a sign-in page. */
 export const SIGN_IN_PENDING_MS = 15 * 60 * 1000
+
+/** A user may have this many sign-ins waiting at once; a newer one replaces their oldest. */
+export const SIGN_IN_PENDING_PER_USER = 5
+
+/** At most this many sign-ins wait in all. */
+export const SIGN_IN_PENDING_MAX = 1000
+
+const defaultResolve = async (host: string) =>
+  (await lookup(host, { all: true, verbatim: true })).map((answer) => answer.address)
+
+/** Raised when a sign-in step would go somewhere it may not. */
+class SignInTargetRefused extends Error {
+  override readonly name = "SignInTargetRefused"
+}
+
+/**
+ * Where a sign-in's requests may go (discovery, registration, the code exchange, refresh), as
+ * `Network.fetchFor`'s `targetAddresses`: checked at every hop, redirects included, and the
+ * connection pinned to the addresses that passed, so DNS can't answer differently after.
+ *
+ * The server's own origin is the user's choice and goes where its calls go. Every other address
+ * is chosen by that server (its metadata names the sign-in service and its endpoints), so it
+ * must be public, as the sandbox's own proxy requires: never loopback, the LAN, link-local, a
+ * cloud metadata address or this host. A server that is itself on a local address may name a
+ * local sign-in service, as a self-hosted one does.
+ */
+export const signInTargets = (
+  server: URL,
+  resolve: (host: string) => Promise<ReadonlyArray<string>> = defaultResolve,
+  mayReach: (address: string) => boolean = (address) => sandboxMayReach(address)
+): TargetAddresses => {
+  const addressesOf = async (target: URL) => {
+    const host = target.hostname
+      .replace(/^\[(.*)\]$/, "$1")
+      .replace(/\.$/, "")
+      .toLowerCase()
+    if (isIP(host) !== 0) return [host]
+    if (host === "localhost" || host.endsWith(".localhost")) return ["127.0.0.1"]
+    return resolve(host).catch(() => [] as ReadonlyArray<string>)
+  }
+  let serverIsLocal: Promise<boolean> | undefined
+  return async (target) => {
+    if (!/^https?:$/.test(target.protocol) || target.username !== "" || target.password !== "")
+      throw new SignInTargetRefused(`the sign-in service's address ${target.origin} isn't allowed`)
+    if (target.origin === server.origin) return undefined
+    const addresses = await addressesOf(target)
+    if (addresses.length === 0) throw new SignInTargetRefused(`can't find ${target.hostname}`)
+    serverIsLocal ??= addressesOf(server).then((found) => found.length > 0 && found.some((ip) => !mayReach(ip)))
+    if (!(await serverIsLocal) && addresses.some((ip) => !mayReach(ip)))
+      throw new SignInTargetRefused(
+        `the server named a sign-in service at ${target.origin}, which isn't a public address`
+      )
+    return addresses
+  }
+}
+
+/**
+ * What a sign-in step's failure says to the user: never the body a service answered with (it
+ * may be any page the server's metadata pointed at), and short.
+ */
+export const briefSignInError = (text: string) => {
+  const cut = text
+    .replace(/(Invalid OAuth error response|Raw body)[\s\S]*$/, "the sign-in service's answer wasn't understood.")
+    .trim()
+  return cut.length > 200 ? `${cut.slice(0, 199)}…` : cut
+}

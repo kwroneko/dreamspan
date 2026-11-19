@@ -9,8 +9,11 @@ import type { McpConnectionSettings } from "@dreamspan/shared/mcp.ts"
 import { Effect } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { McpConnections, mcpClientTiming } from "../src/mcp/McpConnections.ts"
-import { LOCAL_PROGRAMS_OFF } from "../src/mcp/stdio.ts"
-import { linuxBwrap } from "../src/sandbox/linuxBwrap.ts"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { LOCAL_PROGRAMS_OFF, programLimits } from "../src/mcp/stdio.ts"
+import { linuxBwrap, sandboxPath } from "../src/sandbox/linuxBwrap.ts"
 import { client, login, serverLayer, testConfig } from "./support/config.ts"
 
 const state = await linuxBwrap.available()
@@ -25,7 +28,9 @@ const send = (m) => process.stdout.write(JSON.stringify(m) + "\\n")
 const tools = [
   { name: "echo", inputSchema: { type: "object", properties: { text: { type: "string" } } } },
   { name: "env", inputSchema: { type: "object" } },
-  { name: "crash", inputSchema: { type: "object" } }
+  { name: "crash", inputSchema: { type: "object" } },
+  { name: "leak", inputSchema: { type: "object" } },
+  { name: "big", inputSchema: { type: "object" } }
 ]
 rl.on("line", (line) => {
   const m = JSON.parse(line)
@@ -35,6 +40,8 @@ rl.on("line", (line) => {
   if (m.method === "tools/list") return send({ jsonrpc: "2.0", id: m.id, result: { tools } })
   if (m.method === "tools/call") {
     if (m.params.name === "crash") { process.stderr.write("crashing now\\n"); process.exit(3) }
+    if (m.params.name === "leak") process.stderr.write("auth failed with token " + process.env.NOTES_TOKEN + "\\n")
+    if (m.params.name === "big") return process.stdout.write("x".repeat(9 * 1024 * 1024))
     const text = m.params.name === "env"
       ? JSON.stringify({ env: process.env, cwd: process.cwd(), uid: process.getuid() })
       : String(m.params.arguments.text)
@@ -154,20 +161,23 @@ describe("local programs", () => {
         )
         const created = yield* admin.api.CreateMcpConnection({ settings: settings() })
         assert.isTrue(created.check.ok, created.check.detail)
-        assert.strictEqual(created.connection.toolCount, 3)
+        assert.strictEqual(created.connection.toolCount, 5)
         assert.deepStrictEqual(created.connection.program?.command, "node")
         const id = created.connection.id
-        // Its own variables; the app's own reserved names are refused.
-        assert.strictEqual(
-          (yield* admin.api
-            .SetMcpEnvironment({
-              connectionId: id,
-              env: { PATH: "/evil" },
-              expectedRowVersion: created.connection.rowVersion
-            })
-            .pipe(Effect.flip))._tag,
-          "McpRefused"
-        )
+        // Its own variables; the app's own reserved names, and those that change how a shell,
+        // the linker or a runtime starts, are refused.
+        for (const name of ["PATH", "BASH_ENV", "ENV", "LD_PRELOAD", "NODE_OPTIONS", "PYTHONSTARTUP", "PERL5OPT"])
+          assert.strictEqual(
+            (yield* admin.api
+              .SetMcpEnvironment({
+                connectionId: id,
+                env: { [name]: "/home/user/x" },
+                expectedRowVersion: created.connection.rowVersion
+              })
+              .pipe(Effect.flip))._tag,
+            "McpRefused",
+            name
+          )
         const withEnv = yield* admin.api.SetMcpEnvironment({
           connectionId: id,
           env: { NOTES_TOKEN: "program-secret-value" },
@@ -196,10 +206,13 @@ describe("local programs", () => {
         assert.strictEqual(seen.cwd, "/home/user")
         assert.notInclude(textOf(yield* callAs(admin.id, id, "env")), "app-environment-secret")
 
-        // Its stderr, for its own user only.
+        // Its stderr, for its own user only, with the variables' values scrubbed.
+        assert.strictEqual((yield* callAs(admin.id, id, "leak"))._tag, "Result")
         const output = yield* admin.api.GetMcpProgramOutput({ connectionId: id })
         assert.isTrue(output.running)
         assert.include(output.output, "fake local server ready")
+        assert.include(output.output, "auth failed with token [redacted]")
+        assert.notInclude(output.output, "program-secret-value")
         assert.strictEqual(
           (yield* bob.api.GetMcpProgramOutput({ connectionId: id }).pipe(Effect.flip))._tag,
           "NotFound"
@@ -223,14 +236,94 @@ describe("local programs", () => {
         assert.include((yield* admin.api.GetMcpProgramOutput({ connectionId: id })).output, "crashing now")
         assert.strictEqual(textOf(yield* callAs(admin.id, id, "echo", { text: "again" })), "again")
 
-        // Shared, each user runs their own copy, in their own folder.
+        // A message over the limit ends its call and stops the program; the server carries on,
+        // and the next call starts it again.
+        const big = yield* callAs(admin.id, id, "big")
+        assert.strictEqual(big._tag, "Failed")
+        if (big._tag === "Failed") {
+          assert.strictEqual(big.status, "interrupted")
+          assert.include(big.message, "longer than 8 MB")
+        }
+        assert.include((yield* admin.api.GetMcpProgramOutput({ connectionId: id })).output, "longer than 8 MB")
+        assert.strictEqual(textOf(yield* callAs(admin.id, id, "echo", { text: "still here" })), "still here")
+
+        // Shared, each user runs their own copy, in their own folder; its output, which prints
+        // the admin's configuration, isn't theirs to read.
         yield* admin.api.SetMcpShare({ connectionId: id, scope: "chosen", userIds: [bob.id] })
-        const bobs = yield* callAs(bob.id, id, "env")
+        const bobs = yield* callAs(bob.id, id, "leak")
         assert.strictEqual(bobs._tag, "Result")
-        assert.isTrue((yield* bob.api.GetMcpProgramOutput({ connectionId: id })).running)
+        assert.strictEqual(
+          (yield* bob.api.GetMcpProgramOutput({ connectionId: id }).pipe(Effect.flip))._tag,
+          "NotFound"
+        )
         const bobView = yield* bob.api.GetMcpConnection({ connectionId: id })
         assert.isNull(bobView.program)
         assert.deepStrictEqual(bobView.envNames, [])
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ mcpLocalPrograms: true }))))
+  )
+
+  it.live.skipIf(skipReason !== null)(
+    "a program's own variables reach it only after the sandbox's limits are set: none acts on its first shell",
+    () =>
+      Effect.gen(function* () {
+        const home = yield* Effect.acquireRelease(
+          Effect.promise(() => mkdtemp(join(tmpdir(), "mcp-env-"))),
+          (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true }))
+        )
+        // A file from an earlier run that the shell would source before its limits.
+        yield* Effect.promise(() =>
+          writeFile(join(home, "rc.sh"), "ulimit -n 999999 2>/dev/null; touch /home/user/sourced\n")
+        )
+        const child = yield* Effect.promise(() =>
+          linuxBwrap.spawn!({
+            argv: [
+              "node",
+              "-e",
+              `const fs = require("fs"); process.stdout.write(JSON.stringify({ bashEnv: process.env.BASH_ENV, token: process.env.NOTES_TOKEN, path: process.env.PATH, sourced: fs.existsSync("/home/user/sourced"), files: fs.readFileSync("/proc/self/limits", "utf8").split("\\n").find((l) => l.startsWith("Max open files")) }) + "\\n")`
+            ],
+            cwd: "/home/user",
+            mounts: [{ source: home, target: "/home/user", writable: true }],
+            env: { PATH: sandboxPath(), HOME: "/home/user", LANG: "C.UTF-8" },
+            // Past the RPC's checks (as a row stored before them would be): still inert for the shell.
+            programEnv: { BASH_ENV: "/home/user/rc.sh", NOTES_TOKEN: "t0ken", PATH: "/evil" },
+            network: "none",
+            limits: { ...programLimits, reserve: { bytes: 0, inodes: 0 } }
+          })
+        )
+        const chunks: Array<Buffer> = []
+        child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk))
+        const end = yield* Effect.promise(() => child.exited)
+        assert.strictEqual(end.exitCode, 0)
+        const seen = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>
+        assert.strictEqual(seen.bashEnv, "/home/user/rc.sh")
+        assert.strictEqual(seen.token, "t0ken")
+        assert.strictEqual(seen.path, sandboxPath())
+        assert.isFalse(seen.sourced)
+        assert.match(String(seen.files), /\b4096\b/)
+        const files = yield* Effect.promise(() => readFile(join(home, "rc.sh"), "utf8"))
+        assert.include(files, "touch")
+      })
+  )
+
+  it.live.skipIf(skipReason !== null)(
+    "a program keeps the disk reserve: it doesn't start below it, and stops when the disk goes below",
+    () =>
+      Effect.gen(function* () {
+        const before = programLimits.reserve
+        yield* Effect.addFinalizer(() => Effect.sync(() => (programLimits.reserve = before)))
+        const { admin } = yield* people
+        const created = yield* admin.api.CreateMcpConnection({ settings: settings() })
+        const id = created.connection.id
+        assert.strictEqual(textOf(yield* callAs(admin.id, id, "echo", { text: "room" })), "room")
+        // The disk "fills": more free space than any disk has is now the reserve.
+        programLimits.reserve = { bytes: Number.MAX_SAFE_INTEGER, inodes: 0 }
+        yield* Effect.sleep("1500 millis")
+        const output = yield* admin.api.GetMcpProgramOutput({ connectionId: id })
+        assert.isFalse(output.running)
+        assert.include(output.output, "nearly full")
+        const refused = yield* callAs(admin.id, id, "echo", { text: "no room" })
+        assert.strictEqual(refused._tag, "Failed")
+        if (refused._tag === "Failed") assert.include(refused.message, "nearly full")
       }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ mcpLocalPrograms: true }))))
   )
 })

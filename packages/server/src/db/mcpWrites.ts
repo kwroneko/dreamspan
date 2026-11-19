@@ -195,6 +195,12 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
         })}, row_version = row_version + 1, cache_revision = cache_revision + ${sending ? 1 : 0}
           WHERE id = ${connectionId}`
         if (switched && local) yield* dropOwnedKey(row.credential_id)
+        // Another address is another server: every user's sign-in with the old one goes, its
+        // discovery and tokens with it, so nothing issued there is sent to the new one.
+        if (row.url !== next.url)
+          yield* sql`UPDATE mcp_uses SET oauth_enc = NULL, oauth_origin = NULL, oauth_expires_at = NULL,
+              updated_at = ${at}, row_version = row_version + 1
+            WHERE connection_id = ${connectionId} AND oauth_enc IS NOT NULL`
         return yield* reload(userId, connectionId)
       }).pipe(transaction(sql, "UpdateMcpConnection")),
 
@@ -255,7 +261,8 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
 
     SaveMcpCatalog: ({ userId, connectionId, expectedCacheRevision, expectedCatalogRevision, outcome, at }) =>
       Effect.gen(function* () {
-        const row = yield* owned(userId, connectionId)
+        // The owner's listing only: it is the catalog everyone sharing the server sees.
+        const row = yield* mine(userId, connectionId)
         // The address or key changed while the server was asked: this listing is someone else's.
         yield* expectVersion(connectionId, row.cache_revision, expectedCacheRevision)
         yield* expectVersion(connectionId, row.catalog_revision, expectedCatalogRevision)

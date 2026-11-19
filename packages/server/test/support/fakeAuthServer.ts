@@ -11,6 +11,8 @@ export interface FakeAuthState {
   accessTtlS: number
   /** Refresh requests are refused (`invalid_grant`): the user must sign in again. */
   refuseRefresh: boolean
+  /** Registration answers 400 with this body, which isn't an OAuth error (a page from elsewhere). */
+  registerBody: string | null
 }
 
 interface Issued {
@@ -51,7 +53,7 @@ const json = (response: ServerResponse, status: number, body: unknown) =>
 const token = () => randomBytes(24).toString("base64url")
 
 export const startFakeAuthServer = async (initial: Partial<FakeAuthState> = {}): Promise<FakeAuthServer> => {
-  const state: FakeAuthState = { accessTtlS: 3600, refuseRefresh: false, ...initial }
+  const state: FakeAuthState = { accessTtlS: 3600, refuseRefresh: false, registerBody: null, ...initial }
   const recorded: Array<string> = []
   const clients = new Map<string, Record<string, unknown>>()
   const codes = new Map<string, { clientId: string; challenge: string; redirectUri: string; resource: string | null }>()
@@ -90,6 +92,10 @@ export const startFakeAuthServer = async (initial: Partial<FakeAuthState> = {}):
     }
     if (url.pathname === "/register" && request.method === "POST") {
       recorded.push("/register")
+      if (state.registerBody !== null) {
+        response.writeHead(400, { "content-type": "text/html" }).end(state.registerBody)
+        return
+      }
       const metadata = JSON.parse(body) as Record<string, unknown>
       const clientId = `client-${token()}`
       const registered = { ...metadata, client_id: clientId, client_id_issued_at: Math.floor(Date.now() / 1000) }

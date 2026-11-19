@@ -55,13 +55,25 @@ import { describeRoute, proxyUrlProblem } from "../net/route.ts"
 import { credentialBinding, requestSecrets } from "../providers/Providers.ts"
 import { Secrets } from "../secrets.ts"
 import { buildCatalog, serverInfoOf } from "./catalog.ts"
-import { LOCAL_PROGRAMS_OFF, makeProgramStarter, PROGRAM_LIMITS, ProgramEnded, ProgramTransport } from "./stdio.ts"
 import {
+  LOCAL_PROGRAMS_OFF,
+  makeProgramStarter,
+  PROGRAM_LIMITS,
+  ProgramEnded,
+  programEnvProblem,
+  ProgramTransport
+} from "./stdio.ts"
+import {
+  briefSignInError,
   finishSignIn as finishFlow,
+  makeClientRegistry,
   type PendingSignIn,
   REFRESH_AHEAD_MS,
   refreshSignIn,
+  SIGN_IN_PENDING_MAX,
   SIGN_IN_PENDING_MS,
+  SIGN_IN_PENDING_PER_USER,
+  signInTargets,
   startSignIn as startFlow,
   type StoredSignIn
 } from "./oauth.ts"
@@ -200,6 +212,13 @@ export interface McpConnectionsShape {
   readonly closeKept: (connectionId: McpConnectionId) => Effect.Effect<void>
   /** How many kept clients are open now, for tests. */
   readonly kept: () => number
+  /** What is held in memory between requests, for tests: each is bounded. */
+  readonly retained: () => {
+    readonly pendingSignIns: number
+    readonly locks: number
+    readonly outputs: number
+    readonly registrations: number
+  }
   /**
    * Starts the user's sign-in with the server (spec/MCP.md §2.4): the page the browser opens,
    * which sends it back to `appOrigin` + MCP_OAUTH_CALLBACK.
@@ -345,6 +364,29 @@ class CountingTransport implements Transport {
     this.protocolVersion = version
     this.inner.setProtocolVersion?.(version)
   }
+}
+
+const keyOf = (connectionId: string, userId: string) => `${connectionId}\u0000${userId}`
+
+/** Locks by key, each gone once nothing holds or waits for it, so they don't pile up. */
+const keyedLocks = () => {
+  const locks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>()
+  const withLock = <A, E, R>(key: string, effect: Effect.Effect<A, E, R>) =>
+    Effect.suspend(() => {
+      let entry = locks.get(key)
+      if (!entry) locks.set(key, (entry = { lock: Semaphore.makeUnsafe(1), users: 0 }))
+      const held = entry
+      held.users += 1
+      return held.lock.withPermit(effect).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            held.users -= 1
+            if (held.users === 0 && locks.get(key) === held) locks.delete(key)
+          })
+        )
+      )
+    })
+  return { withLock, size: () => locks.size }
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
@@ -493,16 +535,27 @@ export const layer = Layer.effect(
         return response
       }
 
-    /** One sign-in step (discovery, registration, the code exchange or a refresh) as a ledger row. */
+    /**
+     * One sign-in step (discovery, registration, the code exchange or a refresh) as a ledger row.
+     * Its requests go through the connection's network, to the server's own origin or to public
+     * addresses only (`signInTargets`), and its failure never repeats what a service answered.
+     */
     const signInStep = <A>(
       userId: UserId,
       target: Pick<McpPrepared, "connection" | "scrub">,
       network: RequestNetwork,
+      server: URL,
       step: (fetchFn: (url: string | URL, init?: RequestInit) => Promise<Response>) => Promise<A>
     ) => {
       const counts = { sent: 0, received: 0 }
       return recorded(userId, target, counts, { method: "oauth", tool: null }, CHECK, (signal) =>
-        step(signInFetch(network.fetchFor(), counts, signal))
+        step(signInFetch(network.fetchFor(undefined, signInTargets(server)), counts, signal)).catch(
+          (error: unknown) => {
+            throw Object.assign(new Error(briefSignInError(target.scrub(messageOf(error)))), {
+              code: httpCode(error)
+            })
+          }
+        )
       ).pipe(
         Effect.mapError((failure) =>
           failure instanceof McpRequestFailed
@@ -524,7 +577,7 @@ export const layer = Layer.effect(
         Effect.orElseSucceed(() => null)
       )
 
-    const signInLocks = new Map<string, Semaphore.Semaphore>()
+    const signInLocks = keyedLocks()
 
     /**
      * The user's sign-in, its access token refreshed first when it has expired or is about to
@@ -541,25 +594,26 @@ export const layer = Layer.effect(
     ) =>
       Effect.gen(function* () {
         const again = () => refused(`Sign in to ${connection.name} again.`)
-        if (connection.use.signIn?.origin !== url.origin)
-          return yield* refused(`Sign in to ${connection.name} again: its address changed since you signed in.`)
+        const moved = () => refused(`Sign in to ${connection.name} again: its address changed since you signed in.`)
+        if (connection.use.signIn?.origin !== url.origin) return yield* moved()
         const fresh = (stored: StoredSignIn) =>
           stored.expiresAt === null || stored.expiresAt - REFRESH_AHEAD_MS > Date.now()
         const stored = yield* readSignIn(connection.id, userId, blob)
         if (stored === null) return yield* again()
+        // Tokens go only to the address they were issued for.
+        if (stored.serverUrl !== url.href) return yield* moved()
         if (fresh(stored)) return stored
-        const key = keyOf(connection.id, userId)
-        let lock = signInLocks.get(key)
-        if (!lock) signInLocks.set(key, (lock = Semaphore.makeUnsafe(1)))
-        return yield* lock.withPermit(
+        return yield* signInLocks.withLock(
+          keyOf(connection.id, userId),
           Effect.gen(function* () {
             // Another call may have refreshed it while this one waited.
             const latest = yield* reader.ResolveMcpConnection({ userId, connectionId: connection.id })
             if (latest.oauthEnc === null) return yield* again()
             const current = yield* readSignIn(connection.id, userId, latest.oauthEnc)
             if (current === null) return yield* again()
+            if (current.serverUrl !== url.href) return yield* moved()
             if (fresh(current)) return current
-            const refreshed = yield* signInStep(userId, { connection, scrub }, network, (fetchFn) =>
+            const refreshed = yield* signInStep(userId, { connection, scrub }, network, url, (fetchFn) =>
               refreshSignIn(fetchFn, url, current, Date.now())
             )
             if (refreshed === null) return yield* again()
@@ -783,13 +837,16 @@ export const layer = Layer.effect(
         const kind = which ?? (connection.transport === "sse" ? "sse" : "streamable-http")
         const counts = { sent: 0, received: 0 }
         const local = prepared.program
-        const program =
-          local === null
-            ? null
-            : new ProgramTransport(
-                () => programs.start({ connectionId: connection.id, userId, argv: local.argv, env: local.env }),
-                programs.outputOf(connection.id, userId)
-              )
+        const startProgram = (local: NonNullable<McpPrepared["program"]>) => {
+          // What it writes to stderr is shown without the owner's variables' values.
+          const output = programs.outputOf(connection.id, userId)
+          output.keepSecrets(Object.values(local.env))
+          return new ProgramTransport(
+            () => programs.start({ connectionId: connection.id, userId, argv: local.argv, env: local.env }),
+            output
+          )
+        }
+        const program = local === null ? null : startProgram(local)
         const url = prepared.url
         if (program === null && url === null) return yield* Effect.die(new Error("no address"))
         const transport = new CountingTransport(
@@ -856,13 +913,7 @@ export const layer = Layer.effect(
     // moves on (an edit of where or how calls are sent), when it stops being usable and at
     // shutdown. Opening and reconnecting a key take its lock, so concurrent callers share one.
     const pool = new Map<string, Pooled>()
-    const locks = new Map<string, Semaphore.Semaphore>()
-    const keyOf = (connectionId: string, userId: string) => `${connectionId}\u0000${userId}`
-    const lockOf = (key: string) => {
-      let lock = locks.get(key)
-      if (!lock) locks.set(key, (lock = Semaphore.makeUnsafe(1)))
-      return lock
-    }
+    const locks = keyedLocks()
 
     /** Closes a kept client once nothing uses it; a call still running on it keeps it open. */
     const retire = (key: string, entry: Pooled) =>
@@ -908,7 +959,8 @@ export const layer = Layer.effect(
      */
     const acquire = (userId: UserId, prepared: McpPrepared, attribution: McpAttribution, stale?: Pooled) => {
       const key = keyOf(prepared.connection.id, userId)
-      return lockOf(key).withPermit(
+      return locks.withLock(
+        key,
         Effect.gen(function* () {
           const kept = pool.get(key)
           if (
@@ -946,8 +998,9 @@ export const layer = Layer.effect(
             entry.dead = true
           }
           // A connected server says its tools changed: list them again at once (spec/MCP.md §4.1).
+          // Only the owner's session stores what everyone sharing the server sees.
           session.client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
-            runFork(relist(userId, prepared, key, entry))
+            if (prepared.connection.owned) runFork(relist(userId, prepared, key, entry))
           })
           pool.set(key, entry)
           return { key, entry }
@@ -1033,8 +1086,9 @@ export const layer = Layer.effect(
             return { _tag: "Sent", failure, entry } as const
           })
         const first = yield* attempt(attribution.attempt)
-        // The first connect of this process for the connection lists its tools again, after the call.
-        if (first._tag !== "NotSent" && !listedHere.has(connectionId)) {
+        // The owner's first connect of this process for the connection lists its tools again, after
+        // the call.
+        if (first._tag !== "NotSent" && ready.connection.owned && !listedHere.has(connectionId)) {
           listedHere.add(connectionId)
           const key = keyOf(connectionId, userId)
           const entry = pool.get(key)
@@ -1112,20 +1166,21 @@ export const layer = Layer.effect(
     // Listing again on a kept client (spec/MCP.md §4.1): when a connected server says its tools
     // changed (`notifications/tools/list_changed`), and at the first connect of this process for a
     // connection. It carries nothing of the user's, and the connection is enabled, or it wouldn't
-    // be connected. The catalog is stored only if it changed (`SaveMcpCatalog`), and a listing made
+    // be connected. Only on the owner's session: a shared user's session carries their own
+    // sign-in (or their own program's files), and the catalog and instructions it lists are what
+    // every other user's model is sent, so another account's listing never replaces them. The catalog is stored only if it changed (`SaveMcpCatalog`), and a listing made
     // against an older `cache_revision` is dropped. One listing of a connection at a time.
     const listedHere = new Set<string>()
-    const listLocks = new Map<string, Semaphore.Semaphore>()
+    const listLocks = keyedLocks()
     const relist = (userId: UserId, prepared: McpPrepared, key: string, entry: Pooled) => {
       const connectionId = prepared.connection.id
-      let lock = listLocks.get(connectionId)
-      if (!lock) listLocks.set(connectionId, (lock = Semaphore.makeUnsafe(1)))
-      return lock
-        .withPermit(
+      return listLocks
+        .withLock(
+          connectionId,
           Effect.gen(function* () {
             if (entry.dead || entry.retired) return
             const before = yield* reader.GetMcpConnection({ userId, connectionId })
-            if (before.cacheRevision !== entry.revision) return
+            if (!before.owned || before.cacheRevision !== entry.revision) return
             entry.users += 1
             if (entry.timer !== null) clearTimeout(entry.timer)
             entry.timer = null
@@ -1344,6 +1399,10 @@ export const layer = Layer.effect(
         readonly until: number
       }
     >()
+    const prunePending = (now: number) => {
+      for (const [state, entry] of pendingSignIns) if (entry.until < now) pendingSignIns.delete(state)
+    }
+    const clientRegistry = makeClientRegistry()
     const { publicOrigins } = parsePublicOrigins(config.publicOrigins)
     const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"])
 
@@ -1364,17 +1423,28 @@ export const layer = Layer.effect(
         const url = prepared.url
         if (url === null) return yield* refused(`${prepared.connection.name} is a local program: it has no sign-in.`)
         const resolved = yield* reader.ResolveMcpConnection({ userId, connectionId })
-        // An earlier sign-in's registration is used again when it was for the same address.
+        // An earlier sign-in's discovery and registration are used again only for the same address.
         const previous = resolved.oauthEnc === null ? null : yield* readSignIn(connectionId, userId, resolved.oauthEnc)
         const redirectUri = `${appOrigin}${MCP_OAUTH_CALLBACK}`
-        const started = yield* signInStep(userId, prepared, prepared.network, (fetchFn) =>
-          startFlow(fetchFn, url, redirectUri, previous)
+        prunePending(Date.now())
+        if (pendingSignIns.size >= SIGN_IN_PENDING_MAX)
+          return yield* refused("Too many sign-ins are waiting on this server. Try again in a few minutes.")
+        const started = yield* signInStep(userId, prepared, prepared.network, url, (fetchFn) =>
+          startFlow(fetchFn, url, redirectUri, previous, {
+            registry: clientRegistry,
+            // A shared user's browser is sent with the server's origin only (spec/MCP.md §3).
+            resourceOrigin: !prepared.connection.owned
+          })
         )
         // The page is opened by the browser: only a web address.
         if (!/^https?:$/.test(started.authorizationUrl.protocol))
           return yield* refused(`${prepared.connection.name}'s sign-in page isn't a web address.`)
         const now = Date.now()
-        for (const [state, entry] of pendingSignIns) if (entry.until < now) pendingSignIns.delete(state)
+        prunePending(now)
+        // A user's oldest waiting sign-ins give way to a new one.
+        const mine = [...pendingSignIns].filter(([, entry]) => entry.userId === userId)
+        for (const [state] of mine.slice(0, Math.max(0, mine.length - SIGN_IN_PENDING_PER_USER + 1)))
+          pendingSignIns.delete(state)
         pendingSignIns.set(started.pending.state, {
           userId,
           connectionId,
@@ -1388,6 +1458,7 @@ export const layer = Layer.effect(
 
     const finishSignIn: McpConnectionsShape["finishSignIn"] = (userId, state, code, error) =>
       Effect.gen(function* () {
+        prunePending(Date.now())
         const entry = pendingSignIns.get(state)
         // Only the user who started it may finish it, so a link to someone else's sign-in does nothing.
         if (entry === undefined || entry.userId !== userId || entry.until < Date.now())
@@ -1402,7 +1473,7 @@ export const layer = Layer.effect(
         const url = prepared.url
         if (prepared.connection.cacheRevision !== entry.cacheRevision || url === null || url.origin !== entry.origin)
           return yield* refused(`${name}'s address changed while you were signing in. Start again.`)
-        const stored = yield* signInStep(userId, prepared, prepared.network, (fetchFn) =>
+        const stored = yield* signInStep(userId, prepared, prepared.network, url, (fetchFn) =>
           finishFlow(fetchFn, url, entry.pending, code, Date.now())
         )
         yield* writer.SetMcpOAuth({
@@ -1432,10 +1503,9 @@ export const layer = Layer.effect(
         if (connection.transport !== "stdio") return yield* refused("Only a local program has environment variables.")
         const entries = Object.entries(env ?? {}).map(([name, value]) => [name.trim(), value] as const)
         for (const [name, value] of entries) {
-          if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name))
-            return yield* refused(`"${name}" isn't a valid variable name.`)
-          // These are the sandbox's own; a program gets the server's PATH and its own HOME.
-          if (["PATH", "HOME", "LANG"].includes(name)) return yield* refused(`${name} is set by the app.`)
+          // PATH, HOME and LANG are the sandbox's own, and nothing that changes how programs start.
+          const problem = programEnvProblem(name)
+          if (problem !== null) return yield* refused(problem)
           if (value.includes("\0") || value.length > 32_768)
             return yield* refused(`${name}'s value is too long or invalid.`)
         }
@@ -1454,13 +1524,20 @@ export const layer = Layer.effect(
                   },
             at: Date.now()
           })
-          .pipe(Effect.tap(() => closeKept(connectionId)))
+          .pipe(
+            Effect.tap(() => closeKept(connectionId)),
+            Effect.tap(() => Effect.sync(() => programs.forget(connectionId)))
+          )
       })
 
+    // A program's error output is its owner's only (spec/MCP.md §3: a shared user never sees
+    // its secrets, and programs print their configuration), and the owner's variables' values
+    // are scrubbed from it.
     const programOutput: McpConnectionsShape["programOutput"] = (userId, connectionId) =>
-      Effect.map(reader.GetMcpConnection({ userId, connectionId }), () => {
+      Effect.flatMap(reader.GetMcpConnection({ userId, connectionId }), (connection) => {
+        if (!connection.owned) return Effect.fail(new NotFound({ entity: "mcp_connection", id: connectionId }))
         const ring = programs.outputOf(connectionId, userId)
-        return { running: ring.running, output: ring.text() }
+        return Effect.succeed({ running: ring.running, output: ring.text() })
       })
 
     return McpConnections.of({
@@ -1482,7 +1559,13 @@ export const layer = Layer.effect(
       request,
       call,
       closeKept,
-      kept: () => [...pool.values()].filter((entry) => !entry.dead && !entry.retired).length
+      kept: () => [...pool.values()].filter((entry) => !entry.dead && !entry.retired).length,
+      retained: () => ({
+        pendingSignIns: pendingSignIns.size,
+        locks: locks.size() + signInLocks.size() + listLocks.size(),
+        outputs: programs.size(),
+        registrations: clientRegistry.size()
+      })
     })
   })
 )
