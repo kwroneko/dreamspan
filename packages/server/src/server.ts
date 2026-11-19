@@ -432,6 +432,12 @@ const framePolicy = (
     "form-action 'none'",
     "base-uri 'none'",
     "frame-ancestors 'self'",
+    // WebRTC's STUN and TURN aren't connect-src's; where a browser knows this, none (the
+    // bootstrap takes WebRTC away where it doesn't).
+    "webrtc 'block'",
+    // A panel's HTML passes through the bootstrap's default policy (frames and hints out), and no
+    // other policy can be made.
+    ...(mode.scripts ? ["require-trusted-types-for 'script'", "trusted-types dreamspan default"] : []),
     // Opaque however the page is loaded (the app's frame is sandboxed the same way): opened as
     // a top-level page it would otherwise have the app's origin and this relaxed policy.
     "sandbox allow-scripts"
@@ -455,6 +461,7 @@ const FramePanelRoute = HttpRouter.add(
         headers: {
           "cache-control": "no-store",
           "x-content-type-options": "nosniff",
+          "x-dns-prefetch-control": "off",
           "content-security-policy": framePolicy(request.headers.host, frameMode(request.url), nonce)
         }
       }

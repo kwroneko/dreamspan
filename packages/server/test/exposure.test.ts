@@ -490,7 +490,7 @@ describe("content security policy", () => {
         new Map(csp.split("; ").map((d) => [d.split(" ")[0]!, d.split(" ").slice(1).join(" ")] as const))
       const page = (headers?: Record<string, string>, path = "/frame/panel") =>
         Effect.flatMap(serverPort, (p) =>
-          Effect.callback<{ status: number; csp: string; body: string }, Error>((resume) => {
+          Effect.callback<{ status: number; csp: string; body: string; prefetch: unknown }, Error>((resume) => {
             const req = request({ host: "127.0.0.1", port: p, path, headers }, (res) => {
               let body = ""
               res.setEncoding("utf8")
@@ -500,7 +500,8 @@ describe("content security policy", () => {
                   Effect.succeed({
                     status: res.statusCode ?? 0,
                     csp: String(res.headers["content-security-policy"] ?? ""),
-                    body
+                    body,
+                    prefetch: res.headers["x-dns-prefetch-control"]
                   })
                 )
               )
@@ -509,8 +510,10 @@ describe("content security policy", () => {
             req.end()
           })
         )
-      const { status, csp, body } = yield* page()
+      const { status, csp, body, prefetch } = yield* page()
       assert.strictEqual(status, 200)
+      // No DNS prefetch from the page (a link's own hint the bootstrap takes out).
+      assert.strictEqual(prefetch, "off")
       const directives = directivesOf(csp)
       assert.strictEqual(directives.get("default-src"), "'none'")
       // Only the page's own script tag runs: its nonce, fresh on every load.
@@ -523,6 +526,9 @@ describe("content security policy", () => {
       assert.strictEqual(directives.get("frame-ancestors"), "'self'")
       // Opaque however it's loaded, as the frame's own sandbox makes it in the app.
       assert.strictEqual(directives.get("sandbox"), "allow-scripts")
+      // No WebRTC where a browser knows the directive; nothing it can't run needs Trusted Types.
+      assert.strictEqual(directives.get("webrtc"), "'block'")
+      assert.isFalse(directives.has("require-trusted-types-for"))
       assert.notInclude(csp, String(port), "no path of the app's is a script source")
       // An IPv6 Host can't be named in a source, and still runs only the bootstrap.
       for (const host of ["[::1]", `[::1]:${port}`]) {
@@ -563,6 +569,10 @@ describe("content security policy", () => {
         assert.strictEqual(scripts.get("img-src"), `data: blob: ${lib}`)
         assert.strictEqual(scripts.get("connect-src"), "'none'", "no network without its own permission")
         assert.strictEqual(scripts.get("form-action"), "'none'")
+        // A panel's HTML goes through the bootstrap's default policy; no other can be made.
+        assert.strictEqual(scripts.get("require-trusted-types-for"), "'script'")
+        assert.strictEqual(scripts.get("trusted-types"), "dreamspan default")
+        assert.strictEqual(scripts.get("webrtc"), "'block'")
         for (const query of ["", "?scripts=1", "?scripts=1&network=1", "?network=1"])
           assert.strictEqual(
             directivesOf((yield* cspOf(`/frame/panel${query}`)).csp).get("sandbox"),
