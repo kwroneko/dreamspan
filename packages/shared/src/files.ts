@@ -23,6 +23,16 @@ export const FILES_ROUTES = {
   move: "/files/move",
   /** POST `{ path }`: to the bin when the listing said so, otherwise gone (`Deleted`). */
   delete: "/files/delete",
+  /** GET `?path=`: who a folder of yours is shared with (`FolderShare[]`). */
+  shares: "/files/shares",
+  /** POST `{ path, handle, mode }`: shares a folder of yours with an account (`FolderShare`). */
+  share: "/files/share",
+  /** POST `{ shareId }`: stops sharing. */
+  unshare: "/files/unshare",
+  /** GET `?path=`: a file's versions, newest first (`FileVersionEntry[]`). */
+  versions: "/files/versions",
+  /** POST `{ path, versionId }`: a version's content back at the path; what was there is kept (`RestoredVersion`). */
+  restoreVersion: "/files/versions/restore",
   /** POST `{ binItemId }`: a deleted file or folder put back (`Changed`). */
   restore: "/files/restore",
   /** GET `?path=`: a folder and everything in it as one zip, streamed (links and special files left out). */
@@ -84,7 +94,9 @@ export const FileEntry = Schema.Struct({
   kind: FileKind,
   /** Bytes, for a file. */
   size: Schema.Number,
-  mtimeMs: Schema.Number
+  mtimeMs: Schema.Number,
+  /** A folder of yours shared with other accounts (§1.4): how many. */
+  shared: Schema.optionalKey(Schema.Number)
 })
 export type FileEntry = typeof FileEntry.Type
 
@@ -95,6 +107,8 @@ export const FolderListing = Schema.Struct({
   more: Schema.Boolean,
   /** A folder shared with this account as Can view: every change is refused (§1.4). */
   readOnly: Schema.Boolean,
+  /** Where folders shared with you appear (`list`), or one shared with you to `view` or `edit` (§1.4). */
+  shared: Schema.optionalKey(Schema.Literals(["list", "view", "edit"])),
   /** Deleting here moves to the bin, with Undo (§1.3); false: it's gone, so the app asks first. */
   bin: Schema.Boolean
 })
@@ -272,3 +286,46 @@ export const viewOf = (name: string): FileView => {
   for (const [view, extensions] of VIEWS) if (extensions.includes(ext)) return view
   return "download"
 }
+
+/** Where folders other accounts share with you appear (§1.4): `/files/Shared/<owner>/<folder>`. */
+export const SHARED_FOLDER = "Shared"
+
+export const ShareMode = Schema.Literals(["view", "edit"])
+export type ShareMode = typeof ShareMode.Type
+
+/** One account a folder of yours is shared with. */
+export const FolderShare = Schema.Struct({
+  id: Schema.String,
+  handle: Schema.String,
+  displayName: Schema.String,
+  mode: ShareMode
+})
+export type FolderShare = typeof FolderShare.Type
+
+export const ShareRequest = Schema.Struct({
+  path: Schema.String.check(Schema.isMaxLength(4096)),
+  handle: Schema.String.check(Schema.isMaxLength(128)),
+  mode: ShareMode
+})
+
+/**
+ * A file's earlier content (§1.3). `origin` is what replaced it: `upload`, `editor`, `agent`,
+ * `restore`, `delete`; `command` is the content a command left. `actor` is the account that acted
+ * when it wasn't you.
+ */
+export const FileVersionEntry = Schema.Struct({
+  id: Schema.String,
+  createdAt: Schema.Number,
+  origin: Schema.String,
+  byteSize: Schema.Number,
+  restorable: Schema.Boolean,
+  actor: Schema.NullOr(Schema.Struct({ handle: Schema.String, displayName: Schema.String }))
+})
+export type FileVersionEntry = typeof FileVersionEntry.Type
+
+export const RestoredVersion = Schema.Struct({
+  path: Schema.String,
+  /** The version keeping what the restore replaced: restoring it undoes the restore. */
+  keptVersionId: Schema.NullOr(Schema.String)
+})
+export type RestoredVersion = typeof RestoredVersion.Type

@@ -163,6 +163,7 @@ test.describe("files", () => {
           /^Download/,
           /^Attach to message/,
           /^Copy path/,
+          /^Versions…/,
           /^Rename/,
           /^Move to…/,
           /^Delete/

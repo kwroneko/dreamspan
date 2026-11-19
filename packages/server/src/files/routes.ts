@@ -14,6 +14,12 @@ import { CurrentUser } from "@dreamspan/shared/api.ts"
 import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import {
   ATTACHMENT_MAX_BYTES,
+  type FileEntry,
+  type FileVersionEntry,
+  type FolderShare,
+  type RestoredVersion,
+  SHARED_FOLDER,
+  ShareRequest,
   FILES_ROUTES,
   type AttachedFile,
   FILES_TOP,
@@ -41,7 +47,16 @@ import { isSafePath } from "../formats/zip.ts"
 import { WorkshopFiles } from "./WorkshopFiles.ts"
 import { BinContentGone } from "./bin.ts"
 import { accountEnv, prepareAccount, resolveFilesPath } from "./environment.ts"
-import { FilePathRefused, listFolder, openFolder, readRegularFile, renameNoReplace, statPath } from "./safePath.ts"
+import {
+  FilePathRefused,
+  listFolder,
+  openFolder,
+  readRegularFile,
+  renameNoReplace,
+  statPath,
+  writeRegularFile
+} from "./safePath.ts"
+import { isMediaPath } from "../db/media.ts"
 
 const { O_RDONLY, O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW, O_NONBLOCK } = constants
 
@@ -60,6 +75,8 @@ const UPLOAD_IDLE_MS = 30_000
 const REFUSED_DRAIN_BYTES = 32 * 1024 * 1024
 /** Entries a listing returns at most. */
 const LIST_LIMIT = 5_000
+/** Versions a file's list shows at most. */
+const VERSIONS_LISTED = 200
 /** Earlier content kept as a version when an upload replaces it or a delete removes it (§1.3, as for commands). */
 const VERSION_MAX_BYTES = 16 * 1024 * 1024
 /** Bytes a Range answer without an end sends at most, so a video player pages through a large file. */
@@ -281,6 +298,43 @@ const SHA256 = /^[0-9a-f]{64}$/
 
 const sha256Of = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
 
+const UnshareBody = Schema.Struct({ shareId: Schema.String.check(Schema.isMaxLength(64)) })
+const RestoreVersionBody = Schema.Struct({
+  path: Schema.String.check(Schema.isMaxLength(4096)),
+  versionId: Schema.String.check(Schema.isMaxLength(64))
+})
+
+/** A share as the grantee reads it (db/fileShares.ts `SharesWithMe`). */
+interface ShareWithMe {
+  readonly id: string
+  readonly ownerUserId: string
+  readonly path: string
+  readonly mode: "view" | "edit"
+  readonly handle: string
+}
+
+/**
+ * Where folders shared with this account appear, as commands see them (agent/tools/files.ts,
+ * files4a's binds: the same rule, so a path is the same in both): under the owner's handle, which
+ * must be a plain name (else that owner's shares aren't offered); each folder by its own name,
+ * " (2)" and on for a second of the same name, in path order.
+ */
+const ownerSegment = (share: ShareWithMe) =>
+  /^[A-Za-z0-9_.-]{1,64}$/.test(share.handle) && !/^\.+$/.test(share.handle) ? share.handle : null
+
+const shareNames = (shares: ReadonlyArray<ShareWithMe>) => {
+  const taken = new Set<string>()
+  const names = new Map<string, string>()
+  for (const share of shares) {
+    const own = share.path.slice(share.path.lastIndexOf("/") + 1)
+    let name = own
+    for (let n = 2; taken.has(name); n++) name = `${own} (${n})`
+    taken.add(name)
+    names.set(share.id, name)
+  }
+  return names
+}
+
 const MoveBody = Schema.Struct({
   from: Schema.String.check(Schema.isMaxLength(4096)),
   to: Schema.String.check(Schema.isMaxLength(4096))
@@ -309,15 +363,69 @@ export const filesRoutes = Layer.unwrap(
         return yield* Effect.provideService(answering(handle), CurrentUser, session.value.user)
       })
 
-    /** The account's tree, made on first use, and a path in it as the walk's components. */
-    const place = (path: string) =>
+    /** The folders other accounts share with this one, by owner segment (§1.4). */
+    const sharesByOwner = (userId: string) =>
+      reader.SharesWithMe({ userId: userId as never }).pipe(
+        Effect.map((shares) => {
+          const owners = new Map<string, Array<ShareWithMe>>()
+          for (const share of shares) {
+            const segment = ownerSegment(share)
+            if (segment !== null) owners.set(segment, [...(owners.get(segment) ?? []), share])
+          }
+          return owners
+        })
+      )
+
+    /**
+     * A path as the walk's components in the tree that holds it: the account's own, made on first
+     * use, or, under `Shared/<owner>/<folder>`, the owner's (§1.4). `userId` is whose tree and
+     * quota it is, `actorId` who acts; `full` is the path as the caller names it, `ownerFull` as
+     * the owner does. A write in a folder shared to view is refused here. Paths are normalized
+     * first (no `..`, `resolveFilesPath`), and the owner's tree is walked without following links.
+     */
+    const place = (path: string, access: "read" | "write" = "write") =>
       Effect.gen(function* () {
         const user = yield* CurrentUser
         const env = accountEnv(dirs, user.id)
         yield* Effect.tryPromise(() => prepareAccount(env))
         const resolved = yield* Effect.try(() => resolveFilesPath(path, FILES_TOP))
-        return { userId: user.id, root: env.filesRoot, full: resolved.full, segments: resolved.segments }
+        const own = {
+          userId: user.id as string,
+          actorId: user.id as string,
+          root: env.filesRoot,
+          full: resolved.full,
+          ownerFull: resolved.full,
+          segments: resolved.segments,
+          share: null as ShareWithMe | null
+        }
+        const [top, owner, folder, ...rest] = resolved.segments
+        if (top !== SHARED_FOLDER || owner === undefined) return own
+        const shares = (yield* sharesByOwner(user.id)).get(owner)
+        // No account of that name shares with you: it's your own folder of that name.
+        if (!shares) return own
+        if (folder === undefined) return yield* Effect.fail(new Answer(400, "Folders shared with you go here."))
+        const names = shareNames(shares)
+        const share = shares.find((candidate) => names.get(candidate.id) === folder)
+        if (!share) return yield* Effect.fail(new Answer(404, "That folder isn't shared with you any more."))
+        if (access === "write" && share.mode === "view")
+          return yield* Effect.fail(new Answer(403, "This folder is shared with you to view: it can't be changed."))
+        const base = yield* Effect.try(() => resolveFilesPath(share.path, FILES_TOP))
+        return {
+          userId: share.ownerUserId,
+          actorId: user.id as string,
+          root: accountEnv(dirs, share.ownerUserId).filesRoot,
+          full: resolved.full,
+          ownerFull: [share.path, ...rest].join("/"),
+          segments: [...base.segments, ...rest],
+          share
+        }
       })
+
+    /** Tells the open panels of both sides (§8.1): the owner's names and the caller's. */
+    const changedAt = (placed: { userId: string; actorId: string; full: string; ownerFull: string }) => {
+      changed(placed.userId, [placed.ownerFull])
+      if (placed.actorId !== placed.userId) changed(placed.actorId, [placed.full])
+    }
 
     const queryOf = Effect.map(
       HttpServerRequest.HttpServerRequest,
@@ -336,13 +444,30 @@ export const filesRoutes = Layer.unwrap(
       })
 
     /** Keeps a file's content as a version before it's replaced or removed (§1.3), if it's small enough. */
-    const keepVersion = (userId: string, root: string, segments: ReadonlyArray<string>, path: string, origin: string) =>
+    const keepVersion = (
+      userId: string,
+      root: string,
+      segments: ReadonlyArray<string>,
+      path: string,
+      origin: string,
+      actorId: string = userId
+    ) => Effect.map(keptVersion(userId, root, segments, path, origin, actorId), (kept) => kept.bytes)
+
+    /** As `keepVersion`, with the version's id (null when nothing was kept). */
+    const keptVersion = (
+      userId: string,
+      root: string,
+      segments: ReadonlyArray<string>,
+      path: string,
+      origin: string,
+      actorId: string
+    ) =>
       Effect.gen(function* () {
         const info = yield* Effect.tryPromise(() => statPath(root, segments))
-        if (!info?.isFile() || info.size > VERSION_MAX_BYTES) return 0
+        if (!info?.isFile() || info.size > VERSION_MAX_BYTES) return { bytes: 0, id: null }
         const { bytes } = yield* Effect.tryPromise(() => readRegularFile(root, segments, VERSION_MAX_BYTES))
         const sha256 = createHash("sha256").update(bytes).digest("hex")
-        yield* holds.holding(
+        const [id] = yield* holds.holding(
           [sha256],
           Effect.andThen(
             storeMedia(config.dataDir, sha256, bytes),
@@ -350,41 +475,116 @@ export const filesRoutes = Layer.unwrap(
               userId: userId as never,
               versions: [
                 { path, inode: info.ino, sha256, mime: "application/octet-stream", byteSize: bytes.byteLength, origin }
-              ]
+              ],
+              ...(actorId === userId ? {} : { actorUserId: actorId as never })
             })
           )
         )
         // The caller counts the version's bytes: a delete nets them against what it frees, an
         // upload adds them once the new file has landed (they don't take its own room).
-        return bytes.byteLength
+        return { bytes: bytes.byteLength, id: id ?? null }
+      })
+
+    const entriesOf = (listed: Awaited<ReturnType<typeof listFolder>>): Array<FileEntry> =>
+      listed.entries
+        .filter((entry) => !entry.name.endsWith(".rp-tmp"))
+        .map((entry) => ({
+          name: entry.name,
+          kind: entry.kind,
+          size: entry.kind === "file" ? entry.size : 0,
+          mtimeMs: Math.round(entry.mtimeMs)
+        }))
+
+    const listingAnswer = (listing: FolderListing) =>
+      HttpServerResponse.jsonUnsafe(listing, { headers: { "cache-control": "no-store" } })
+
+    /**
+     * `Shared` and `Shared/<owner>` while other accounts share folders with this one (§1.4): the
+     * owners, then their folders (the ones still there). An own folder named Shared keeps its
+     * entries beside the owners; an owner's name wins a clash. Null: not such a place.
+     */
+    const sharedListing = (path: string) =>
+      Effect.gen(function* () {
+        const user = yield* CurrentUser
+        const resolved = yield* Effect.try(() => resolveFilesPath(path, FILES_TOP))
+        const [top, owner, ...rest] = resolved.segments
+        if (top !== SHARED_FOLDER || rest.length > 0) return null
+        const owners = yield* sharesByOwner(user.id)
+        if (owners.size === 0) return null
+        const now = Date.now()
+        if (owner === undefined) {
+          const env = accountEnv(dirs, user.id)
+          const own = yield* Effect.tryPromise(() =>
+            listFolder(env.filesRoot, [SHARED_FOLDER], LIST_LIMIT).catch(() => null)
+          )
+          const entries = [
+            ...[...owners.keys()].map((name) => ({ name, kind: "folder" as const, size: 0, mtimeMs: now })),
+            ...(own ? entriesOf(own).filter((entry) => !owners.has(entry.name)) : [])
+          ]
+          return {
+            path: resolved.full,
+            entries,
+            more: own?.more ?? false,
+            readOnly: false,
+            bin: true,
+            shared: "list" as const
+          }
+        }
+        const shares = owners.get(owner)
+        if (!shares) return null
+        const names = shareNames(shares)
+        const entries: Array<FileEntry> = []
+        for (const share of shares) {
+          const base = yield* Effect.try(() => resolveFilesPath(share.path, FILES_TOP))
+          const info = yield* Effect.tryPromise(() =>
+            statPath(accountEnv(dirs, share.ownerUserId).filesRoot, base.segments).catch(() => null)
+          )
+          if (info?.isDirectory())
+            entries.push({ name: names.get(share.id)!, kind: "folder", size: 0, mtimeMs: Math.round(info.mtimeMs) })
+        }
+        return { path: resolved.full, entries, more: false, readOnly: true, bin: false, shared: "list" as const }
       })
 
     const list = Effect.gen(function* () {
       const query = yield* queryOf
-      const { root, full, segments } = yield* place(query.get("path") ?? FILES_TOP)
-      const listed = yield* Effect.tryPromise(() => listFolder(root, segments, LIST_LIMIT))
-      const listing: FolderListing = {
-        path: full,
-        entries: listed.entries
-          .filter((entry) => !entry.name.endsWith(".rp-tmp"))
-          .map((entry) => ({
-            name: entry.name,
-            kind: entry.kind,
-            size: entry.kind === "file" ? entry.size : 0,
-            mtimeMs: Math.round(entry.mtimeMs)
-          })),
-        more: listed.more,
-        readOnly: false,
-        // Deleting moves to the bin, with Undo (§1.3).
-        bin: true
+      const path = query.get("path") ?? FILES_TOP
+      const virtual = yield* sharedListing(path)
+      if (virtual) return listingAnswer(virtual)
+      const placed = yield* place(path, "read")
+      const listed = yield* Effect.tryPromise(() => listFolder(placed.root, placed.segments, LIST_LIMIT))
+      let entries = entriesOf(listed)
+      if (placed.share === null) {
+        // Your folders shared with others say so; at the top, Shared appears once anything is shared with you.
+        const mine = yield* reader.SharedByMe({ userId: placed.userId as never })
+        if (mine.length > 0) {
+          const counts = new Map<string, number>()
+          for (const share of mine) counts.set(share.path, (counts.get(share.path) ?? 0) + 1)
+          entries = entries.map((entry) => {
+            const count = entry.kind === "folder" ? counts.get(`${placed.full}/${entry.name}`) : undefined
+            return count ? { ...entry, shared: count } : entry
+          })
+        }
+        if (placed.segments.length === 0 && !entries.some((entry) => entry.name === SHARED_FOLDER)) {
+          const owners = yield* sharesByOwner(placed.actorId)
+          if (owners.size > 0) entries.push({ name: SHARED_FOLDER, kind: "folder", size: 0, mtimeMs: Date.now() })
+        }
       }
-      return HttpServerResponse.jsonUnsafe(listing, { headers: { "cache-control": "no-store" } })
+      return listingAnswer({
+        path: placed.full,
+        entries,
+        more: listed.more,
+        // Can view: every change is refused (§1.4).
+        readOnly: placed.share?.mode === "view",
+        // Deleting moves to the bin, with Undo (§1.3); in a shared folder, to the owner's bin, so it asks first.
+        bin: placed.share === null,
+        ...(placed.share ? { shared: placed.share.mode } : {})
+      })
     })
 
     const raw = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
       const query = yield* queryOf
-      const { root, segments } = yield* place(query.get("path") ?? "")
+      const { root, segments } = yield* place(query.get("path") ?? "", "read")
       if (segments.length === 0) return refuse(400, "Name a file.")
       const name = segments.at(-1)!
       const dir = yield* Effect.tryPromise(() => openFolder(root, segments.slice(0, -1)))
@@ -457,7 +657,7 @@ export const filesRoutes = Layer.unwrap(
     /** A folder as one zip (§8.1), streamed as it's read: links and special files are left out. */
     const zip = Effect.gen(function* () {
       const query = yield* queryOf
-      const { root, segments } = yield* place(query.get("path") ?? FILES_TOP)
+      const { root, segments } = yield* place(query.get("path") ?? FILES_TOP, "read")
       const info = yield* Effect.tryPromise(() => statPath(root, segments))
       if (!info?.isDirectory()) return refuse(400, "That isn't a folder.")
       // The archive's own top folder: its name with what an extractor could read as a separator replaced.
@@ -515,7 +715,7 @@ export const filesRoutes = Layer.unwrap(
      */
     const text = Effect.gen(function* () {
       const query = yield* queryOf
-      const { root, full, segments } = yield* place(query.get("path") ?? "")
+      const { root, full, segments } = yield* place(query.get("path") ?? "", "read")
       if (segments.length === 0) return refuse(400, "Name a file.")
       const info = yield* Effect.tryPromise(() => statPath(root, segments))
       if (!info) return refuse(404, "Not found. It may have been moved or deleted.")
@@ -562,12 +762,17 @@ export const filesRoutes = Layer.unwrap(
       const declared = Number(request.headers["content-length"] ?? "0")
       if (declared > MAX_FILE_UPLOAD_BYTES)
         return refuse(413, `A file can be at most ${formatByteSize(MAX_FILE_UPLOAD_BYTES)}.`)
-      const { userId, root, segments } = yield* place(query.get("path") ?? "")
-      if (segments.length === 0) return refuse(400, "Name the file.")
+      const placed = yield* place(query.get("path") ?? "")
+      // A shared folder's files are the owner's: their quota, their versions, the acting account recorded.
+      const { userId, root, segments } = placed
+      if (segments.length === 0 || (placed.share && placed.full.split("/").length <= 5))
+        return refuse(400, "Name the file.")
       const problem = nameProblem(segments.at(-1)!)
       if (problem) return refuse(400, problem)
       const parent = segments.slice(0, -1)
-      const parentPath = `${FILES_TOP}/${parent.join("/")}`.replace(/\/$/, "")
+      // As the caller names it: the answer's path, and the version's in the owner's names.
+      const parentPath = placed.full.slice(0, placed.full.lastIndexOf("/"))
+      const ownerParent = placed.ownerFull.slice(0, placed.ownerFull.lastIndexOf("/"))
       const message = NodeHttpServerRequest.toIncomingMessage(request)
       // Folders this upload makes take room too (counted until the next measurement).
       const made = yield* Effect.tryPromise(async () => {
@@ -622,7 +827,14 @@ export const filesRoutes = Layer.unwrap(
         )
         const keptBytes =
           outcome === "replaced"
-            ? yield* keepVersion(userId, root, segments, `${parentPath}/${name}`, base === null ? "upload" : "editor")
+            ? yield* keepVersion(
+                userId,
+                root,
+                segments,
+                `${ownerParent}/${name}`,
+                base === null ? "upload" : "editor",
+                placed.actorId
+              )
             : 0
         const digest = createHash("sha256")
         let taken = 0
@@ -694,7 +906,7 @@ export const filesRoutes = Layer.unwrap(
             throw error
           }
         }).pipe(Effect.ensuring(Effect.sync(() => quota.wrote(userId, keptBytes))))
-        changed(userId, [`${parentPath}/${name}`])
+        changedAt({ ...placed, full: `${parentPath}/${name}`, ownerFull: `${ownerParent}/${name}` })
         return HttpServerResponse.jsonUnsafe({
           path: `${parentPath}/${name}`,
           outcome,
@@ -705,8 +917,9 @@ export const filesRoutes = Layer.unwrap(
 
     const folder = Effect.gen(function* () {
       const body = yield* jsonBody(PathBody)
-      const { userId, root, full, segments } = yield* place(body.path)
-      if (segments.length === 0) return refuse(400, "Name the folder.")
+      const placed = yield* place(body.path)
+      const { userId, root, full, segments } = placed
+      if (segments.length === 0 || (placed.share && full.split("/").length <= 5)) return refuse(400, "Name the folder.")
       const problem = nameProblem(segments.at(-1)!)
       if (problem) return refuse(400, problem)
       const dir = yield* Effect.tryPromise(() => openFolder(root, segments.slice(0, -1)))
@@ -714,7 +927,7 @@ export const filesRoutes = Layer.unwrap(
         Effect.ensuring(Effect.promise(() => dir.close()))
       )
       quota.wrote(userId, FOLDER_BYTES)
-      changed(userId, [full])
+      changedAt(placed)
       return HttpServerResponse.jsonUnsafe({ path: full })
     })
 
@@ -723,6 +936,14 @@ export const filesRoutes = Layer.unwrap(
       const from = yield* place(body.from)
       const to = yield* place(body.to)
       if (from.segments.length === 0 || to.segments.length === 0) return refuse(400, "The top folder can't be moved.")
+      // Within one tree: your own, or one shared folder (the shared folder itself stays where its owner put it).
+      if (from.share?.id !== to.share?.id)
+        return refuse(
+          400,
+          "Files move only within your own files or within one shared folder. Download and upload to copy them."
+        )
+      if (from.share && (from.full.split("/").length <= 5 || to.full.split("/").length <= 5))
+        return refuse(400, "Only its owner can move or rename a shared folder.")
       const problem = nameProblem(to.segments.at(-1)!)
       if (problem) return refuse(400, problem)
       if (to.full !== from.full && isWithin(to.full, from.full)) return refuse(400, "A folder can't go inside itself.")
@@ -736,13 +957,22 @@ export const filesRoutes = Layer.unwrap(
           // Never over what's there, even something a command makes meanwhile (EEXIST: 409).
           yield* Effect.tryPromise(() => renameNoReplace(fromName, toName))
           // The working folders stored for it (and for folders in it) follow (§1 "Paths are the names").
+          // In a shared folder, the owner's (by their names) as well as the caller's.
           if (moving.isDirectory())
-            yield* writer
-              .RecordFolderMove({ userId: from.userId as never, from: from.full, to: to.full })
-              .pipe(Effect.catchCause((cause) => Effect.logWarning("recording a folder move failed", cause)))
+            for (const [userId, fromPath, toPath] of [
+              [from.actorId, from.full, to.full],
+              ...(from.share ? [[from.userId, from.ownerFull, to.ownerFull]] : [])
+            ])
+              yield* writer
+                .RecordFolderMove({ userId: userId as never, from: fromPath!, to: toPath! })
+                .pipe(Effect.catchCause((cause) => Effect.logWarning("recording a folder move failed", cause)))
           // What names it (unsaved edits) follows it to its new path (§1.1).
-          yield* writer.MoveFileReferences({ userId: from.userId as never, from: from.full, to: to.full })
-          changed(from.userId, [from.full, to.full])
+          yield* writer.MoveFileReferences({ userId: from.actorId as never, from: from.full, to: to.full })
+          // In a shared folder, the owner's own references (their edits, their shares) follow too.
+          if (from.share)
+            yield* writer.MoveFileReferences({ userId: from.userId as never, from: from.ownerFull, to: to.ownerFull })
+          changedAt(from)
+          changedAt(to)
           return HttpServerResponse.jsonUnsafe({ path: to.full })
         }).pipe(Effect.ensuring(Effect.promise(() => target.close())))
       }).pipe(Effect.ensuring(Effect.promise(() => source.close())))
@@ -750,14 +980,18 @@ export const filesRoutes = Layer.unwrap(
 
     const remove = Effect.gen(function* () {
       const body = yield* jsonBody(PathBody)
-      const { userId, root, full, segments } = yield* place(body.path)
+      const placed = yield* place(body.path)
+      const { userId, root, segments } = placed
       if (segments.length === 0) return refuse(400, "The top folder can't be deleted.")
+      if (placed.share && placed.full.split("/").length <= 5)
+        return refuse(400, "Only its owner can delete a shared folder.")
       const info = yield* Effect.tryPromise(() => statPath(root, segments))
       if (!info) return refuse(404, "Not found. It may have been moved or deleted.")
-      // To the bin (§1.3): its bytes stay counted, under the bin, until it's emptied.
-      const item = yield* bin.toBin(userId, root, segments, full)
-      changed(userId, [full])
-      return HttpServerResponse.jsonUnsafe({ binItemId: item.id })
+      // To the bin (§1.3): its bytes stay counted, under the bin, until it's emptied. In a
+      // shared folder, the owner's bin: they can restore it; the caller has no Undo.
+      const item = yield* bin.toBin(userId, root, segments, placed.ownerFull)
+      changedAt(placed)
+      return HttpServerResponse.jsonUnsafe({ binItemId: placed.share ? null : item.id })
     })
 
     /** Attach copies running per account, with how many wait (`ATTACH_AT_ONCE`, `ATTACH_WAITING`). */
@@ -774,7 +1008,8 @@ export const filesRoutes = Layer.unwrap(
      */
     const attach = Effect.gen(function* () {
       const body = yield* jsonBody(PathBody)
-      const { userId, root, full, segments } = yield* place(body.path)
+      // The copy as sent is the caller's, whoever's tree the file is in.
+      const { actorId: userId, root, full, segments } = yield* place(body.path, "read")
       if (segments.length === 0) return refuse(400, "Name a file.")
       const name = segments.at(-1)!
       const problem = nameProblem(name)
@@ -887,6 +1122,119 @@ export const filesRoutes = Layer.unwrap(
       )
     })
 
+    /** Your own folder to share (§1.4): never the top, never one shared with you. */
+    const ownFolder = (path: string) =>
+      Effect.gen(function* () {
+        const placed = yield* place(path)
+        if (placed.share) return yield* Effect.fail(new Answer(400, "Only its owner can share this folder."))
+        if (placed.segments.length === 0)
+          return yield* Effect.fail(new Answer(400, "Share a folder inside your files."))
+        const info = yield* Effect.tryPromise(() => statPath(placed.root, placed.segments))
+        if (!info) return yield* Effect.fail(new Answer(404, "Not found. It may have been moved or deleted."))
+        if (!info.isDirectory()) return yield* Effect.fail(new Answer(400, "Only a folder can be shared."))
+        return { ...placed, inode: info.ino }
+      })
+
+    const toFolderShare = (share: { id: string; handle: string; displayName: string; mode: "view" | "edit" }) =>
+      ({ id: share.id, handle: share.handle, displayName: share.displayName, mode: share.mode }) satisfies FolderShare
+
+    const shares = Effect.gen(function* () {
+      const query = yield* queryOf
+      const placed = yield* ownFolder(query.get("path") ?? "")
+      const mine = yield* reader.SharedByMe({ userId: placed.userId as never })
+      return HttpServerResponse.jsonUnsafe(mine.filter((share) => share.path === placed.full).map(toFolderShare), {
+        headers: { "cache-control": "no-store" }
+      })
+    })
+
+    const share = Effect.gen(function* () {
+      const body = yield* jsonBody(ShareRequest)
+      const placed = yield* ownFolder(body.path)
+      const handle = body.handle.trim()
+      const grantee = handle === "" ? null : yield* reader.FindUserByHandle({ handle })
+      if (!grantee || grantee.id === placed.userId) return refuse(404, `No other account is called “${handle}”.`)
+      const made = yield* writer
+        .ShareFolder({
+          userId: placed.userId as never,
+          path: placed.full,
+          inode: placed.inode,
+          granteeUserId: grantee.id,
+          mode: body.mode
+        })
+        .pipe(
+          Effect.catchTag("NotFound", () => Effect.fail(new Answer(404, `No other account is called “${handle}”.`)))
+        )
+      changed(grantee.id, [`${FILES_TOP}/${SHARED_FOLDER}`])
+      return HttpServerResponse.jsonUnsafe(toFolderShare(made))
+    })
+
+    const unshare = Effect.gen(function* () {
+      const body = yield* jsonBody(UnshareBody)
+      const user = yield* CurrentUser
+      const mine = yield* reader.SharedByMe({ userId: user.id })
+      const gone = mine.find((candidate) => candidate.id === body.shareId)
+      yield* writer
+        .StopSharingFolder({ userId: user.id, shareId: body.shareId })
+        .pipe(Effect.catchTag("NotFound", () => Effect.fail(new Answer(404, "That folder isn't shared any more."))))
+      if (gone) changed(gone.granteeUserId, [`${FILES_TOP}/${SHARED_FOLDER}`])
+      return HttpServerResponse.jsonUnsafe({})
+    })
+
+    /** A file's versions (§1.3), newest first; in a shared folder, the owner's record of it. */
+    const versions = Effect.gen(function* () {
+      const query = yield* queryOf
+      const placed = yield* place(query.get("path") ?? "", "read")
+      if (placed.segments.length === 0) return refuse(400, "Name a file.")
+      const rows = yield* reader.ListFileVersions({
+        userId: placed.userId as never,
+        path: placed.ownerFull,
+        limit: VERSIONS_LISTED
+      })
+      const user = yield* CurrentUser
+      // The account that acted is named when it wasn't you.
+      const listed: Array<FileVersionEntry> = rows.map((row) => ({
+        id: row.id,
+        createdAt: row.createdAt,
+        origin: row.origin,
+        byteSize: row.byteSize,
+        restorable: row.hasContent,
+        actor: row.actor && row.actor.handle !== user.handle ? row.actor : null
+      }))
+      return HttpServerResponse.jsonUnsafe(listed, { headers: { "cache-control": "no-store" } })
+    })
+
+    /**
+     * A version's content back at its path (§1.3). What was there is kept as a version first
+     * (origin `restore`), so restoring that one undoes it.
+     */
+    const restoreVersion = Effect.gen(function* () {
+      const body = yield* jsonBody(RestoreVersionBody)
+      const placed = yield* place(body.path)
+      const { userId, root, segments } = placed
+      if (segments.length === 0) return refuse(400, "Name a file.")
+      const version = yield* reader
+        .FileVersion({ userId: userId as never, id: body.versionId })
+        .pipe(Effect.catchTag("NotFound", () => Effect.fail(new Answer(404, "That version is gone."))))
+      if (version.path !== placed.ownerFull) return refuse(404, "That version is of another file.")
+      if (!version.mediaPath || !isMediaPath(version.mediaPath))
+        return refuse(410, "That version's content isn't kept.")
+      const bytes = yield* Effect.tryPromise(() => readFile(join(config.dataDir, version.mediaPath!)))
+      const current = yield* Effect.tryPromise(() => statPath(root, segments))
+      if (current && !current.isFile()) return refuse(409, `“${segments.at(-1)}” isn't a file here now.`)
+      const replaced = current && current.nlink === 1 ? current.size : 0
+      yield* quota
+        .check(userId, Math.max(0, bytes.byteLength - replaced), "restore this version")
+        .pipe(Effect.mapError((error) => new Answer(507, error.message)))
+      const kept = yield* keptVersion(userId, root, segments, placed.ownerFull, "restore", placed.actorId)
+      const token = quota.freed(userId, replaced)
+      yield* Effect.tryPromise(() => writeRegularFile(root, segments, bytes, { createFolders: true })).pipe(
+        Effect.tapError(() => Effect.sync(() => quota.unfreed(userId, token)))
+      )
+      quota.wrote(userId, bytes.byteLength + kept.bytes)
+      changedAt(placed)
+      return HttpServerResponse.jsonUnsafe({ path: placed.full, keptVersionId: kept.id } satisfies RestoredVersion)
+    })
+
     const restore = Effect.gen(function* () {
       const body = yield* jsonBody(RestoreBody)
       const { userId } = yield* place(FILES_TOP)
@@ -906,7 +1254,12 @@ export const filesRoutes = Layer.unwrap(
       HttpRouter.add("POST", FILES_ROUTES.delete, authenticated(remove)),
       HttpRouter.add("POST", FILES_ROUTES.restore, authenticated(restore)),
       HttpRouter.add("POST", FILES_ROUTES.attach, authenticated(attach)),
-      HttpRouter.add("GET", FILES_ROUTES.attachment, authenticated(attachment))
+      HttpRouter.add("GET", FILES_ROUTES.attachment, authenticated(attachment)),
+      HttpRouter.add("GET", FILES_ROUTES.shares, authenticated(shares)),
+      HttpRouter.add("POST", FILES_ROUTES.share, authenticated(share)),
+      HttpRouter.add("POST", FILES_ROUTES.unshare, authenticated(unshare)),
+      HttpRouter.add("GET", FILES_ROUTES.versions, authenticated(versions)),
+      HttpRouter.add("POST", FILES_ROUTES.restoreVersion, authenticated(restoreVersion))
     )
   })
 )

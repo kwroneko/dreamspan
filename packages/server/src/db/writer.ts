@@ -1,5 +1,6 @@
 import { makePluginWriteHandlers } from "./pluginData.ts"
 import { makeFileVersionWriteHandlers } from "./fileVersions.ts"
+import { makeFileShareWriteHandlers } from "./fileShares.ts"
 import { makeWorkingFolderWriteHandlers } from "./workingFolders.ts"
 import { makeWorkshopEffectHandlers } from "./workshopEffects.ts"
 import { makeWorkshopGrantWriteHandlers } from "./workshopGrants.ts"
@@ -135,6 +136,7 @@ const handlers = Layer.unwrap(
               ...(yield* makePersonaLockWriteHandlers),
               ...(yield* makePluginWriteHandlers),
               ...(yield* makeFileVersionWriteHandlers),
+              ...(yield* makeFileShareWriteHandlers),
               ...(yield* makeWorkingFolderWriteHandlers),
               ...stImport,
               ...(yield* makeStImportJobWriteHandlers),

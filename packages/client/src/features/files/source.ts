@@ -7,7 +7,11 @@ import {
   Changed,
   Deleted,
   FILES_ROUTES,
+  FileVersionEntry,
   FolderListing,
+  FolderShare,
+  RestoredVersion,
+  type ShareMode,
   TextFile,
   UploadOutcome,
   type UploadConflict
@@ -60,6 +64,15 @@ export interface FilesSource {
    * `FileChanged`. The earlier content is kept as a version.
    */
   readonly saveText: (path: string, text: string, base: string) => Promise<UploadOutcome>
+  /** Who a folder of yours is shared with (§1.4). A source without sharing leaves these out. */
+  readonly shares?: (path: string) => Promise<ReadonlyArray<FolderShare>>
+  /** Shares a folder with an account by its name, or changes how; refused for an unknown name. */
+  readonly share?: (path: string, handle: string, mode: ShareMode) => Promise<FolderShare>
+  readonly unshare?: (shareId: string) => Promise<void>
+  /** A file's earlier contents, newest first (§1.3). */
+  readonly versions?: (path: string) => Promise<ReadonlyArray<FileVersionEntry>>
+  /** Puts a version back; what was there is kept as a version, so restoring that one undoes it. */
+  readonly restoreVersion?: (path: string, versionId: string) => Promise<RestoredVersion>
 }
 
 export const filesSources = makeRegistry<FilesSource>()
@@ -122,6 +135,10 @@ const send = (url: string, file: Blob, onProgress?: (sent: number) => void) =>
     request.send(file)
   })
 
+const done = async (response: Response) => {
+  if (!response.ok) throw await failure(response)
+}
+
 export const httpFilesSource: FilesSource = {
   id: "files.http",
   order: 100,
@@ -152,5 +169,19 @@ export const httpFilesSource: FilesSource = {
         headers: { "content-type": "application/octet-stream" },
         body: new TextEncoder().encode(text)
       })
-    )
+    ),
+  shares: async (path) =>
+    json(
+      Schema.Array(FolderShare),
+      await reach(`${FILES_ROUTES.shares}?${new URLSearchParams({ path })}`, { cache: "no-store" })
+    ),
+  share: async (path, handle, mode) => json(FolderShare, await post(FILES_ROUTES.share, { path, handle, mode })),
+  unshare: async (shareId) => done(await post(FILES_ROUTES.unshare, { shareId })),
+  versions: async (path) =>
+    json(
+      Schema.Array(FileVersionEntry),
+      await reach(`${FILES_ROUTES.versions}?${new URLSearchParams({ path })}`, { cache: "no-store" })
+    ),
+  restoreVersion: async (path, versionId) =>
+    json(RestoredVersion, await post(FILES_ROUTES.restoreVersion, { path, versionId }))
 }
