@@ -14,6 +14,7 @@ import type { FrozenTool } from "../agent/tools.ts"
 import { transcriptEntries } from "./transcriptEntries.ts"
 import { ownedModel } from "./generationSettings.ts"
 import { rolloutUsage } from "./inspectorReads.ts"
+import { resumeLineage } from "./subagentEffects.ts"
 import { LIMIT_STOP } from "@dreamspan/shared/subagents.ts"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
@@ -34,6 +35,8 @@ export interface SubagentSnapshot {
   readonly context: "task"
   readonly spawnedBy: string
   readonly callId: string
+  /** The parent's message that holds the call: where the child's chat state goes (§8). */
+  readonly versionId?: string
   /** It ran in the background: the reply went on, and its report came later (§3.2). */
   readonly background?: boolean
   /** It carries a finished subagent on with the parent's message (`message_agent`, §4). */
@@ -57,6 +60,94 @@ export const chainOf = (sql: SqlClient.SqlClient, rolloutId: string) =>
       WHERE r.parent_rollout_id IS NOT NULL AND chain.depth < 100000
     )
     SELECT id FROM chain`.pipe(Effect.map((rows) => rows.map((r) => r.id)))
+
+/**
+ * The calls a run's transcript holds, for a causal lookup (§4): each with whether it has a result
+ * and the subagent that result names (`details.subagent`, kept with the result).
+ */
+export interface HeldCall {
+  readonly id: string
+  readonly result: boolean
+  readonly subagent: string | null
+}
+
+export const heldCalls = (messages: ReadonlyArray<AgentMessage>): ReadonlyArray<HeldCall> => {
+  const results = new Map<string, string | null>()
+  for (const m of messages)
+    if (m.role === "toolResult") {
+      const named = (m.details as { subagent?: { rolloutId?: unknown } } | null | undefined)?.subagent?.rolloutId
+      results.set(m.toolCallId, typeof named === "string" ? named : null)
+    }
+  return messages.flatMap((m) =>
+    m.role === "assistant"
+      ? m.content.flatMap((p) =>
+          p.type === "toolCall" ? [{ id: p.id, result: results.has(p.id), subagent: results.get(p.id) ?? null }] : []
+        )
+      : []
+  )
+}
+
+/**
+ * The children a run's conversation started (§4, §7): its own run's by a call it holds, and an
+ * earlier run's only where the call it holds is that same call: still without a result (carried
+ * on now), or with a result naming that subagent or a run of it. A new call that reuses an
+ * earlier, cut call's id (some providers number calls) never finds the earlier call's subagent.
+ */
+const causal = (children: ReadonlyArray<ChildRecord>, rolloutId: string, calls: ReadonlyArray<HeldCall>) => {
+  const held = new Map(calls.map((c) => [c.id, c]))
+  const byId = new Map(children.map((c) => [c.id, c]))
+  /** Whether `from`, following its carried-on links, reaches `to`. */
+  const reaches = (from: string, to: string) => {
+    for (let at = byId.get(from), n = 0; at && n <= children.length; at = byId.get(at.parent_rollout_id ?? ""), n++)
+      if (at.id === to) return true
+    return false
+  }
+  return children.filter((c) => {
+    const call = held.get(c.spawned_by_call_id)
+    if (!call) return false
+    if (c.spawned_by_rollout_id === rolloutId || !call.result) return true
+    return call.subagent !== null && (reaches(call.subagent, c.id) || reaches(c.id, call.subagent))
+  })
+}
+
+/** The tool calls a transcript's model turns made. */
+const callIds = (json: string | null | undefined) =>
+  parse<ReadonlyArray<AgentMessage>>(json ?? null, []).flatMap((m) =>
+    m.role === "assistant" ? m.content.flatMap((p) => (p.type === "toolCall" ? [p.id] : [])) : []
+  )
+
+/**
+ * A reply's subagents so far (§6.2: the counts are per reply, not per run): those its run
+ * started, and those of the runs it was resumed from (resumeLineage) whose calls it kept, so a
+ * Stop and Resume never starts the count or the shared budget again, while a call cut by carrying
+ * on from an earlier step takes its subagents with it. `resumed`: a run carrying one of them on
+ * with the reply (§8), the same subagent, counted once but spending its own.
+ */
+export const replySubagents = (sql: SqlClient.SqlClient, rolloutId: string) =>
+  Effect.gen(function* () {
+    const runs = (yield* resumeLineage(sql, rolloutId)).map((r) => r.id)
+    const rows = yield* sql<{ id: string; spawned_by_rollout_id: string; spawned_by_call_id: string; resumed: number }>`
+      SELECT r.id, r.spawned_by_rollout_id, r.spawned_by_call_id,
+        EXISTS (SELECT 1 FROM rollouts s WHERE s.id = r.parent_rollout_id
+          AND s.spawned_by_call_id = r.spawned_by_call_id) AS resumed
+      FROM rollouts r WHERE r.spawned_by_rollout_id IN (SELECT value FROM json_each(${JSON.stringify(runs)}))`
+    if (runs.length <= 1 || rows.every((r) => r.spawned_by_rollout_id === rolloutId)) return rows
+    const [own] = yield* sql<{ transcript: string | null }>`
+      SELECT transcript_json AS transcript FROM rollout_payloads WHERE rollout_id = ${rolloutId}`
+    const kept = new Set(callIds(own?.transcript))
+    return rows.filter((r) => r.spawned_by_rollout_id === rolloutId || kept.has(r.spawned_by_call_id))
+  })
+
+/** What these subagents' requests cost together; `finished`: only requests that have ended. */
+export const spendOf = (sql: SqlClient.SqlClient, ids: ReadonlyArray<string>, finished = false) =>
+  ids.length === 0
+    ? Effect.succeed({ cost: 0, unpriced: 0 })
+    : sql<{ cost: number | null; unpriced: number | null }>`
+        SELECT sum(q.cost) AS cost, sum(CASE WHEN q.cost IS NULL THEN 1 ELSE 0 END) AS unpriced
+        FROM llm_requests q WHERE q.rollout_id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
+          ${finished ? sql`AND q.status <> 'running'` : sql``}`.pipe(
+        Effect.map(([row]) => ({ cost: row?.cost ?? 0, unpriced: row?.unpriced ?? 0 }))
+      )
 
 interface ChildRecord {
   readonly id: string
@@ -246,13 +337,16 @@ const earlierRuns = (sql: SqlClient.SqlClient, userId: UserId, versionId: Versio
 export const withSubagents = <S extends { readonly kind: string }>(
   sql: SqlClient.SqlClient,
   rolloutId: string,
-  steps: ReadonlyArray<S>
+  steps: ReadonlyArray<S>,
+  messages: ReadonlyArray<AgentMessage>
 ) =>
   Effect.gen(function* () {
     // Any tool's call may have started one (`agent`, `message_agent`, the story helper, a plugin's).
     const calls = steps.flatMap((s) => (s.kind === "tool" ? [(s as unknown as { id: string }).id] : []))
     if (calls.length === 0) return steps
-    const children = byCall(yield* childrenOf(sql, yield* chainOf(sql, rolloutId), calls))
+    const children = byCall(
+      causal(yield* childrenOf(sql, yield* chainOf(sql, rolloutId), calls), rolloutId, heldCalls(messages))
+    )
     return steps.map((s) => {
       const runs = s.kind === "tool" ? children.get((s as unknown as { id: string }).id) : undefined
       return runs ? { ...s, subagent: rowOf(runs[0]!, runs.slice(1)) } : s
@@ -289,7 +383,15 @@ export const makeSubagentReadHandlers = Effect.gen(function* () {
         const [owned] = yield* sql<{ id: string }>`SELECT r.id FROM rollouts r JOIN chats c ON c.id = r.chat_id
           WHERE r.id = ${rolloutId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
         if (!owned) return yield* new NotFound({ entity: "rollout", id: rolloutId })
-        const children = yield* childrenOf(sql, yield* chainOf(sql, rolloutId), calls)
+        const children = causal(
+          yield* childrenOf(
+            sql,
+            yield* chainOf(sql, rolloutId),
+            calls.map((c) => c.id)
+          ),
+          rolloutId,
+          calls
+        )
         const wanted = handle.trim().toLowerCase()
         const named = (c: ChildRecord) =>
           parse<{ readonly subagent?: SubagentSnapshot }>(c.snapshot, {}).subagent?.name?.trim().toLowerCase()
@@ -397,18 +499,18 @@ export const makeSubagentWriteHandlers = Effect.gen(function* () {
         if (parent.status !== "running") return { refused: "not_running" as const }
         if (!(yield* ownedModel(sql, userId, connectionId, modelId)))
           return yield* new NotFound({ entity: "model", id: modelId })
-        // A child resumed with the run (§8) is the same subagent, not another one.
-        const [started] = yield* sql<{ n: number }>`
-          SELECT count(*) AS n FROM rollouts r WHERE r.spawned_by_rollout_id = ${parentRolloutId}
-            AND NOT EXISTS (SELECT 1 FROM rollouts s WHERE s.id = r.parent_rollout_id
-              AND s.spawned_by_call_id = r.spawned_by_call_id)`
-        if (started!.n >= (perRun ?? SUBAGENTS_PER_RUN)) return { refused: "limit" as const }
-        if (runCost !== undefined) {
-          const [spent] = yield* sql<{ cost: number | null }>`
-            SELECT sum(q.cost) AS cost FROM rollouts r JOIN llm_requests q ON q.rollout_id = r.id
-            WHERE r.spawned_by_rollout_id = ${parentRolloutId}`
-          if ((spent?.cost ?? 0) >= runCost) return { refused: "spent" as const }
-        }
+        // Per reply, across its Stops and Resumes; a child resumed with it (§8) is the same subagent.
+        const reply = yield* replySubagents(sql, parentRolloutId)
+        if (reply.filter((r) => !r.resumed).length >= (perRun ?? SUBAGENTS_PER_RUN))
+          return { refused: "limit" as const }
+        if (
+          runCost !== undefined &&
+          (yield* spendOf(
+            sql,
+            reply.map((r) => r.id)
+          )).cost >= runCost
+        )
+          return { refused: "spent" as const }
         // Numbered across the run chain, so a handle names one child wherever the run carried on.
         const chain = yield* chainOf(sql, parentRolloutId)
         const [same] = yield* sql<{ n: number }>`

@@ -12,16 +12,13 @@ import { query, transaction } from "./tx.ts"
 import { displayEndOf } from "./displayPath.ts"
 import type { StoryAt } from "@dreamspan/shared/chat.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
-import { childEffects, newestFirst } from "./subagentEffects.ts"
+import { childEffects, newestFirst, resumeLineage as lineage } from "./subagentEffects.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { callsFrom } from "../agent/steps.ts"
 import { recoveredOperationText } from "./operationReceipts.ts"
 import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
 
 type Sql = SqlClient.SqlClient
-
-/** How many runs back a resume's approval or effects are looked for. */
-const RESUME_DEPTH = 64
 
 /** A chat of the user's whose kind permits outside effects: a workshop. */
 const ownedWorkshop = (sql: Sql, userId: string, chatId: string) =>
@@ -204,19 +201,6 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
       }).pipe(transaction(sql, "SettleToolApproval"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
 })
-
-/**
- * The run and the runs it was resumed from, nearest first: through resumed versions' sources,
- * not `parent_rollout_id`, which a run carrying on the previous turn's also sets (bounded).
- */
-const lineage = (sql: Sql, rolloutId: string) =>
-  sql<{ id: string; depth: number }>`WITH RECURSIVE up(id, depth) AS (
-      SELECT ${rolloutId}, 0
-      UNION SELECT src.rollout_id, up.depth + 1 FROM up
-        JOIN versions v ON v.rollout_id = up.id AND v.origin = 'resumed' AND v.source_version_id IS NOT NULL
-        JOIN versions src ON src.id = v.source_version_id
-        WHERE src.rollout_id IS NOT NULL AND up.depth < ${RESUME_DEPTH}
-    ) SELECT id, min(depth) AS depth FROM up GROUP BY id ORDER BY depth`
 
 export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient

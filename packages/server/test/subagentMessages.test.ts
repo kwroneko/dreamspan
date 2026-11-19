@@ -216,14 +216,15 @@ describe("subagents in the background, and messages", () => {
         script.hold(null)
         yield* eventually(() => finished(events, waiting.versionId)?.status === "complete")
         assert.strictEqual(finished(events, waiting.versionId)!.content, "Summed up.")
-        // The report reached the reply as an app message, inside the data boundary, with its progress.
+        // The report reached the reply as an app message, inside the data boundary.
         const last = parents(mock.requests()).at(-1)!
         const report = last.messages.find((m) => m.role === "user" && text(m).includes("finished"))!
         assert.include(text(report), "Subagent research-1 (cards) finished:")
         assert.include(text(report), TOOL_DATA_NOTICE)
         assert.include(text(report), "Two cards.")
         assert.strictEqual(text(report).split("</tool_data>").length - 1, 1, "only the envelope closes the data")
-        assert.isTrue(
+        // Its progress line, still queued when the report posted, is stale: it never follows the report.
+        assert.isFalse(
           last.messages.some((m) => m.role === "user" && text(m).includes("Progress from subagent research-1"))
         )
         // The reply's run sent no request while it waited: one with the result, one with the report.

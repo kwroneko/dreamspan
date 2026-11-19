@@ -171,13 +171,17 @@ function SubagentModelPicker({
                 pick === SAME
                   ? "Subagents may use the model this chat's replies use."
                   : pick === SUMMARY
-                    ? "Subagents may use the model this chat's summaries use, where it isn't the chat's own."
+                    ? "Subagents may use the model this chat's summaries use, where it isn't the chat's own. Only in chats with summaries on, which already send to it."
                     : picked.has(pick)
                       ? `Subagents may use it. Untick to stop. ${consent(choice)}`
                       : consent(choice)
               }
               description={
-                pick === SAME || pick === SUMMARY ? undefined : (choice?.connectionName ?? "Its connection is gone")
+                pick === SAME
+                  ? undefined
+                  : pick === SUMMARY
+                    ? "Only where summaries are on"
+                    : (choice?.connectionName ?? "Its connection is gone")
               }
             >
               {pickLabel(pick, choices)}

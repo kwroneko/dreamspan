@@ -16,6 +16,9 @@ export class Mailbox {
   /** Queues a message for the next boundary; false once the run has ended and can't take it. */
   post(message: AgentMessage): boolean {
     if (this.closed) return false
+    // A subagent's report makes its progress line stale: it's never delivered after it.
+    const from = (message as { readonly report?: { readonly handle?: string } }).report?.handle
+    if (from !== undefined) this.notes.delete(from)
     this.mail.push(message)
     this.ring()
     return true
@@ -54,9 +57,12 @@ export class Mailbox {
     return out
   }
 
-  /** Resolves when a message arrives or a background subagent ends. */
+  /**
+   * Resolves when a message arrives or a background subagent ends; at once when one already has
+   * (an end that rang before this was asked, or nothing left to wait for).
+   */
   next(): Promise<void> {
-    if (this.mail.length > 0) return Promise.resolve()
+    if (this.mail.length > 0 || this.running.size === 0 || this.closed) return Promise.resolve()
     return new Promise((resolve) => {
       const previous = this.wake
       this.wake = () => {
