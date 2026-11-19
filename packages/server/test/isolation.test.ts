@@ -1116,6 +1116,15 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor) =>
       refused(actor.api.FinishMcpSignIn({ state: "someone-elses-state", code: "x", error: null }), "McpRefused")
   },
+  // Sharing is the owner's (an admin's); another user's server is NotFound, and only an admin
+  // shares at all (mcpSharing.test.ts).
+  SetMcpShare: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.SetMcpShare({ connectionId: owner.mcpConnectionId, scope: "all", userIds: [] }),
+        actor.user.role === "admin" ? "NotFound" : "McpRefused"
+      )
+  },
   SignOutOfMcp: {
     probe: (actor, owner) => refused(actor.api.SignOutOfMcp({ connectionId: owner.mcpConnectionId }), "NotFound")
   },

@@ -14,8 +14,10 @@ import {
   McpConnectionSummary,
   McpLoading,
   McpRefused,
+  McpShareScope,
   McpToolChoices
 } from "./mcp.ts"
+import { UserId } from "./domain.ts"
 import { CredentialId, ProxyMode } from "./providers.ts"
 
 /**
@@ -150,6 +152,15 @@ export class McpApi extends RpcGroup.make(
     payload: { connectionId: McpConnectionId },
     success: McpConnection,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
+  }),
+  /**
+   * An admin shares their server (spec/MCP.md §3): with nobody, everyone, or the users chosen.
+   * Those who lose it lose their own use of it, their sign-in included.
+   */
+  Rpc.make("SetMcpShare", {
+    payload: { connectionId: McpConnectionId, scope: McpShareScope, userIds: Schema.Array(UserId) },
+    success: McpConnection,
+    error: Schema.Union([McpRefused, NotFound, ServerError])
   }),
   Rpc.make("DeleteMcpConnection", {
     payload: { connectionId: McpConnectionId },

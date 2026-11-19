@@ -11,6 +11,7 @@ import {
   type McpLoading,
   mcpAnnotationNotes,
   mcpToolAllowed,
+  mcpOfferedToolName,
   mcpToolIsNew,
   type McpTool,
   type RemoteMcpTransport
@@ -111,7 +112,37 @@ const draftOf = (connection: McpConnection): ServerDraft => ({
   timeoutS: String(connection.timeoutS)
 })
 
-export function ServerSection({ connection }: McpSectionProps) {
+/** A server someone else shared: what it is, read-only. */
+function SharedServer({ connection }: McpSectionProps) {
+  return (
+    <Card>
+      <CardHeader
+        title="Server"
+        about="Shared with you by an admin. You use its tools with your own settings; its address, keys and program stay theirs."
+      />
+      <dl className="flex flex-col gap-3 text-sm" data-mcp-shared-server>
+        <div className="flex flex-col gap-0.5">
+          <dt className="font-medium">Shared by</dt>
+          <dd className="[overflow-wrap:anywhere]">{connection.ownerName}</dd>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <dt className="font-medium">What it’s for</dt>
+          <dd className="[overflow-wrap:anywhere] text-muted">{connection.about || "Not said."}</dd>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <dt className="font-medium">Calls go to</dt>
+          <dd className="[overflow-wrap:anywhere]">{mcpHost(connection)}</dd>
+        </div>
+      </dl>
+    </Card>
+  )
+}
+
+export function ServerSection(props: McpSectionProps) {
+  return props.connection.owned ? <OwnServer {...props} /> : <SharedServer {...props} />
+}
+
+function OwnServer({ connection }: McpSectionProps) {
   const action = useAction()
   const [draft, setDraft] = useState<ServerDraft | null>(null)
   const [check, setCheck] = useState<McpCheck | null>(null)
@@ -440,6 +471,21 @@ function HeadersDialog({
 }
 
 export function SignInSection(props: McpSectionProps) {
+  const { connection } = props
+  if (connection.owned) return <OwnSignIn {...props} />
+  if (connection.url === null) return null
+  return (
+    <Card>
+      <CardHeader
+        title="Sign-in"
+        about="Your own sign-in with the server, if it asks for one. The admin's key and headers stay theirs and are never shown."
+      />
+      <SignInWithServer connection={connection} />
+    </Card>
+  )
+}
+
+function OwnSignIn(props: McpSectionProps) {
   const { connection, credentials } = props
   const remove = useAction()
   const [dialog, setDialog] = useState<"key" | "saved" | "remove" | "allow" | "headers" | null>(null)
@@ -611,7 +657,9 @@ function ToolRow({
         hintInline={false}
         description={
           <span className="flex flex-col gap-0.5">
-            <span className="font-mono text-xs [overflow-wrap:anywhere]">{tool.exposed}</span>
+            <span className="font-mono text-xs [overflow-wrap:anywhere]">
+              {mcpOfferedToolName(tool.exposed, connection.key, connection.use.offeredKey)}
+            </span>
             {tool.problem && <span className="text-danger">Can't be used: {tool.problem}</span>}
             {tool.description.length > MCP_DESCRIPTION_LIMIT && (
               <span>Its description is cut to {MCP_DESCRIPTION_LIMIT.toLocaleString()} characters for the model.</span>
@@ -670,20 +718,22 @@ export function ToolsSection({ connection }: McpSectionProps) {
             : `${status.label} · ${allowed} of ${connection.tools.length} allowed · listed ${formatWhen(connection.listedAt)}`
         }
         actions={
-          <Button
-            hint={`Connects to ${host} and asks for its tools. Nothing from your chats is sent.`}
-            pending={check.pending}
-            onClick={async () => {
-              setResult(null)
-              const outcome = await check.run(
-                (client) => client("CheckMcpConnection", { connectionId: connection.id }),
-                ["mcp"]
-              )
-              if (outcome.ok) setResult(outcome.value.check)
-            }}
-          >
-            Check now
-          </Button>
+          connection.owned && (
+            <Button
+              hint={`Connects to ${host} and asks for its tools. Nothing from your chats is sent.`}
+              pending={check.pending}
+              onClick={async () => {
+                setResult(null)
+                const outcome = await check.run(
+                  (client) => client("CheckMcpConnection", { connectionId: connection.id }),
+                  ["mcp"]
+                )
+                if (outcome.ok) setResult(outcome.value.check)
+              }}
+            >
+              Check now
+            </Button>
+          )
         }
       />
       <div className="flex flex-col gap-4">
@@ -766,7 +816,11 @@ export function UsesSection({ connection }: McpSectionProps) {
  * request or loads them when it needs them, and whether loading them brings the server's own
  * instructions. Only models that can load tools later wait; others get every tool at once.
  */
-export function LoadingSection({ connection }: McpSectionProps) {
+export function LoadingSection(props: McpSectionProps) {
+  return props.connection.owned ? <OwnLoading {...props} /> : null
+}
+
+function OwnLoading({ connection }: McpSectionProps) {
   const action = useAction()
   const legend = useId()
   const set = (change: { readonly loading?: McpLoading; readonly useInstructions?: boolean }) =>
@@ -826,7 +880,11 @@ export function LoadingSection({ connection }: McpSectionProps) {
   )
 }
 
-export function RouteSection({ connection }: McpSectionProps) {
+export function RouteSection(props: McpSectionProps) {
+  return props.connection.owned ? <OwnRoute {...props} /> : null
+}
+
+function OwnRoute({ connection }: McpSectionProps) {
   const action = useAction()
   const legend = useId()
   const [mode, setMode] = useState<ProxyMode | null>(null)
@@ -930,7 +988,12 @@ export function CallsSection({ connection }: McpSectionProps) {
     <Card>
       <CardHeader
         title="Recent calls"
-        about="Every request the app sent to this server, newest first. What was sent is kept with the chat it was for."
+        about="Every request the app sent to this server for you, newest first. What was sent is kept with the chat it was for."
+        description={
+          connection.othersCalls > 0
+            ? `Others it's shared with sent ${connection.othersCalls} ${connection.othersCalls === 1 ? "request" : "requests"}, not listed here.`
+            : undefined
+        }
       />
       <AsyncView atom={mcpCallsAtom(connection.id)} loading="Loading calls…">
         {(calls) => {
@@ -976,7 +1039,11 @@ export function CallsSection({ connection }: McpSectionProps) {
   )
 }
 
-export function DeleteSection({ connection }: McpSectionProps) {
+export function DeleteSection(props: McpSectionProps) {
+  return props.connection.owned ? <OwnDelete {...props} /> : null
+}
+
+function OwnDelete({ connection }: McpSectionProps) {
   const action = useAction()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -1028,7 +1095,9 @@ function ServerView(props: McpSectionProps) {
           <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{connection.name}</h1>
         </CenterHeaderContent>
         <p className="text-sm text-muted [overflow-wrap:anywhere]">
-          {transportLabels[connection.transport]} · {connection.url ?? "Local program"}
+          {connection.owned
+            ? `${transportLabels[connection.transport]} · ${connection.url ?? "Local program"}`
+            : `Shared by ${connection.ownerName ?? "an admin"} · ${mcpHost(connection)}`}
         </p>
       </div>
       <SlotOutlet slot={mcpSections} props={props} />

@@ -16,6 +16,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SetMcpUse: "User-only security, consent, account, credential or network configuration.",
   StartMcpSignIn: "User-only security, consent, account, credential or network configuration.",
   FinishMcpSignIn: "User-only security, consent, account, credential or network configuration.",
+  SetMcpShare: "User-only security, consent, account, credential or network configuration.",
   SignOutOfMcp: "User-only security, consent, account, credential or network configuration.",
   UpdateMcpConnection: "User-only security, consent, account, credential or network configuration.",
   GoBackPlugin: "Plugin management stays user-only until P4 supplies its approval workflow.",

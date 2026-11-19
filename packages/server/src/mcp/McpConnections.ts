@@ -26,7 +26,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js"
 import { createHash } from "node:crypto"
 import type { UserId } from "@dreamspan/shared/domain.ts"
-import type { NotFound, StaleWrite } from "@dreamspan/shared/errors.ts"
+import { NotFound, type StaleWrite } from "@dreamspan/shared/errors.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import {
   MCP_LISTING_BYTES_LIMIT,
@@ -1032,6 +1032,8 @@ export const layer = Layer.effect(
     const check: McpConnectionsShape["check"] = (userId, connectionId) =>
       Effect.gen(function* () {
         const before = yield* reader.GetMcpConnection({ userId, connectionId })
+        // Check stores the catalog everyone sharing it sees: only the owner starts one.
+        if (!before.owned) return yield* Effect.fail(new NotFound({ entity: "mcp_connection", id: connectionId }))
         const save = (outcome: { server: McpServerInfo; tools: Array<McpTool> } | { error: string }) =>
           writer.SaveMcpCatalog({
             userId,

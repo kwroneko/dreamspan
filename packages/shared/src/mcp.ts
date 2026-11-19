@@ -2,6 +2,7 @@
 // of tools the app stored when it last listed one, each user's use of it, and the ledger of every
 // request the app sent to one. Shared by the server, its workers and the client.
 import { Schema } from "effect"
+import { UserId } from "./domain.ts"
 import { idSchema } from "./id.ts"
 import { CredentialId, ProxyMode } from "./providers.ts"
 
@@ -92,8 +93,21 @@ export const McpUse = Schema.Struct({
 })
 export type McpUse = typeof McpUse.Type
 
+/** Who else may use a connection (spec/MCP.md §3): an admin's to choose. */
+export const McpShareScope = Schema.Literals(["private", "all", "chosen"])
+export type McpShareScope = typeof McpShareScope.Type
+const McpShare = Schema.Struct({ scope: McpShareScope, userIds: Schema.Array(UserId) })
+
 const connectionFields = {
   id: McpConnectionId,
+  /**
+   * The user's own server. Others an admin shared with them see its name, what it's for, its
+   * tools and its status, and its host for what each call sends where; never its address's
+   * path, key, headers, route or program (those fields read as empty).
+   */
+  owned: Schema.Boolean,
+  /** Whose server it is, when it isn't the user's own. */
+  ownerName: Schema.NullOr(Schema.String),
   name: Schema.String,
   /** Fixed at creation: the model sees the tools as `mcp_<key>_<tool>`. */
   key: Schema.String,
@@ -133,7 +147,11 @@ export class McpConnectionSummary extends Schema.Class<McpConnectionSummary>("Mc
 /** A connection with its catalog. Secrets appear only as `hasKey`, `keyHint` and header names. */
 export class McpConnection extends Schema.Class<McpConnection>("McpConnection")({
   ...connectionFields,
-  tools: Schema.Array(McpTool)
+  tools: Schema.Array(McpTool),
+  /** Whom the owner shares it with; "private" and nobody for anyone else. */
+  share: McpShare,
+  /** For the owner: how many requests other users sent to it (never their chats); else 0. */
+  othersCalls: Schema.Int
 }) {}
 
 /** What a new connection or a changed one is made of; secrets travel apart. */
@@ -220,6 +238,26 @@ export const mcpKeyFor = (name: string, taken: ReadonlySet<string>): string => {
  */
 export const mcpToolAllowed = (tool: McpTool, use: McpUse) =>
   tool.problem === null && (use.tools[tool.name]?.on ?? tool.firstRevision <= use.reviewedRevision)
+
+/** FNV-1a, as six hex characters: a stable short suffix that needs no crypto library. */
+const shortHash = (text: string) => {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193) >>> 0
+  return hash.toString(16).padStart(8, "0").slice(0, 6)
+}
+
+/**
+ * A tool's name for a user whose tools of this connection are offered under another key (two
+ * servers they can use share one, spec/MCP.md §4.2): `mcp_<offered>_…`, fitted to the name limit.
+ */
+export const mcpOfferedToolName = (exposed: string, key: string, offeredKey: string) => {
+  const prefix = `mcp_${key}_`
+  if (offeredKey === key || !exposed.startsWith(prefix)) return exposed
+  const plain = `mcp_${offeredKey}_${exposed.slice(prefix.length)}`
+  return plain.length <= MCP_TOOL_NAME_LIMIT
+    ? plain
+    : `${plain.slice(0, MCP_TOOL_NAME_LIMIT - 7)}_${shortHash(exposed)}`
+}
 
 /** A tool the server listed after the user last looked, with no choice of the user's yet. */
 export const mcpToolIsNew = (tool: McpTool, use: McpUse) =>

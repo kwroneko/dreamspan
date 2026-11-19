@@ -9,6 +9,7 @@ import {
   McpConnectionSummary,
   McpLoading,
   McpServerInfo,
+  McpShareScope,
   McpTool,
   McpToolChoices
 } from "@dreamspan/shared/mcp.ts"
@@ -942,6 +943,22 @@ const McpWriteOps = RpcGroup.make(
     },
     success: McpConnection,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  /**
+   * The owner (an admin: a trigger refuses anyone else) shares a connection (spec/MCP.md §3).
+   * Users who gain it get their own use (their offered key chosen here); users who lose it lose
+   * theirs, with their sign-in and choices.
+   */
+  Rpc.make("SetMcpShare", {
+    payload: {
+      userId: UserId,
+      connectionId: McpConnectionId,
+      scope: McpShareScope,
+      userIds: Schema.Array(UserId),
+      at: Schema.Number
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StorageError])
   }),
   /** At startup: requests a previous process left running are marked interrupted. */
   Rpc.make("InterruptRunningMcpCalls", {

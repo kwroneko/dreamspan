@@ -6,6 +6,7 @@ import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { type ReadOps, UserDisabled, type WriteOps } from "./ops.ts"
+import { ensureSharedUses } from "./mcpWrites.ts"
 import { toUser, type UserRow } from "./rows.ts"
 import { query, transaction } from "./tx.ts"
 
@@ -32,7 +33,11 @@ export const makeAccountWriteHandlers = Effect.gen(function* () {
       role,
       created_at: Date.now(),
       password_hash: passwordHash
-    })} RETURNING *`.pipe(Effect.map(([row]) => row!))
+    })} RETURNING *`.pipe(
+      Effect.map(([row]) => row!),
+      // MCP servers an admin shares with everyone are theirs to use too (spec/MCP.md §3).
+      Effect.tap((row) => ensureSharedUses(sql, row.id as UserId, Date.now()))
+    )
 
   const userById = (userId: UserId) =>
     sql<AccountRow>`SELECT * FROM users WHERE id = ${userId}`.pipe(

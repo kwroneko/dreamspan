@@ -9,12 +9,60 @@ import { makeMcpQueries, toMcpConnection } from "./mcpRows.ts"
 import { NotFound, StaleWrite, type WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
+/**
+ * The key a user's tools of a shared connection are offered under (spec/MCP.md §4.2): its own,
+ * else with a number, never one the user already has (their own connections' keys and the keys
+ * their other uses are offered under). Up to 26 characters, as the column allows.
+ */
+const offeredKeyFor = (key: string, taken: ReadonlySet<string>) => {
+  if (!taken.has(key)) return key
+  for (let n = 2; ; n++) {
+    const suffix = String(n)
+    const offered = `${key.slice(0, 26 - suffix.length)}${suffix}`
+    if (!taken.has(offered)) return offered
+  }
+}
+
+/**
+ * Gives a user their own use of every connection shared with them that they have none of yet, in
+ * creation order, so the first keeps its key (spec/MCP.md §3, §4.2). Part of the calling
+ * transaction: sharing a connection, and making a user while one is shared with everyone. A
+ * shared connection's tools listed so far start allowed, as at a first Check.
+ */
+export const ensureSharedUses = (sql: SqlClient.SqlClient, userId: UserId, at: number) =>
+  Effect.gen(function* () {
+    const missing = yield* sql<{ id: string; key: string; catalog_revision: number }>`
+      SELECT m.id, m.key, m.catalog_revision FROM mcp_connections m
+      WHERE m.purged_at IS NULL AND m.owner_user_id <> ${userId}
+        AND (m.share_scope = 'all' OR (m.share_scope = 'chosen' AND EXISTS (
+          SELECT 1 FROM mcp_connection_shares s WHERE s.connection_id = m.id AND s.user_id = ${userId})))
+        AND NOT EXISTS (SELECT 1 FROM mcp_uses u WHERE u.connection_id = m.id AND u.user_id = ${userId})
+      ORDER BY m.created_at, m.id`
+    if (missing.length === 0) return
+    const taken = new Set(
+      (yield* sql<{ key: string }>`
+        SELECT key FROM mcp_connections WHERE owner_user_id = ${userId} AND purged_at IS NULL
+        UNION SELECT offered_key AS key FROM mcp_uses WHERE user_id = ${userId}`).map((row) => row.key)
+    )
+    for (const connection of missing) {
+      const offered = offeredKeyFor(connection.key, taken)
+      taken.add(offered)
+      yield* sql`INSERT INTO mcp_uses ${sql.insert({
+        connection_id: connection.id,
+        user_id: userId,
+        offered_key: offered,
+        reviewed_revision: connection.catalog_revision,
+        updated_at: at
+      })}`
+    }
+  })
+
 /** A stored error line: at most what the column holds. */
 const errorLine = (text: string) => (text.length > 1000 ? `${text.slice(0, 999)}…` : text)
 
 export const makeMcpWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const { owned } = makeMcpQueries(sql)
+  const { owned, mine } = makeMcpQueries(sql)
   const reload = (userId: UserId, connectionId: string) => Effect.map(owned(userId, connectionId), toMcpConnection)
 
   const checkCredential = (userId: UserId, credentialId: string | null) =>
@@ -103,7 +151,7 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
 
     UpdateMcpConnection: ({ userId, connectionId, settings, expectedRowVersion, at }) =>
       Effect.gen(function* () {
-        const row = yield* owned(userId, connectionId)
+        const row = yield* mine(userId, connectionId)
         yield* expectVersion(connectionId, row.row_version, expectedRowVersion)
         const sending =
           row.url !== settings.url || row.transport !== settings.transport || row.timeout_s !== settings.timeoutS
@@ -121,7 +169,7 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
 
     SetMcpKey: ({ userId, connectionId, expectedRowVersion, credential, at }) =>
       Effect.gen(function* () {
-        const row = yield* owned(userId, connectionId)
+        const row = yield* mine(userId, connectionId)
         yield* expectVersion(connectionId, row.row_version, expectedRowVersion)
         if (credential) yield* insertCredential(userId, credential, at)
         yield* changeSending(connectionId, { credential_id: credential?.credentialId ?? null }, at)
@@ -131,7 +179,7 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
 
     SetMcpCredential: ({ userId, connectionId, credentialId, at }) =>
       Effect.gen(function* () {
-        const row = yield* owned(userId, connectionId)
+        const row = yield* mine(userId, connectionId)
         yield* checkCredential(userId, credentialId)
         yield* changeSending(connectionId, { credential_id: credentialId }, at)
         if (row.credential_id !== credentialId) yield* dropOwnedKey(row.credential_id)
@@ -140,7 +188,7 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
 
     SetMcpHeaders: ({ userId, connectionId, expectedRowVersion, headers, at }) =>
       Effect.gen(function* () {
-        const row = yield* owned(userId, connectionId)
+        const row = yield* mine(userId, connectionId)
         yield* expectVersion(connectionId, row.row_version, expectedRowVersion)
         yield* changeSending(
           connectionId,
@@ -156,7 +204,7 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
 
     SetMcpProxy: ({ userId, connectionId, mode, urlEnc, at }) =>
       Effect.gen(function* () {
-        yield* owned(userId, connectionId)
+        yield* mine(userId, connectionId)
         yield* changeSending(connectionId, { proxy_mode: mode, proxy_url_enc: mode === "custom" ? urlEnc : null }, at)
         return yield* reload(userId, connectionId)
       }).pipe(transaction(sql, "SetMcpProxy")),
@@ -211,7 +259,7 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
 
     SetMcpLoading: ({ userId, connectionId, loading, useInstructions, at }) =>
       Effect.gen(function* () {
-        yield* owned(userId, connectionId)
+        yield* mine(userId, connectionId)
         yield* sql`UPDATE mcp_connections SET ${sql.update({
           ...(loading === undefined ? {} : { loading }),
           ...(useInstructions === undefined ? {} : { use_instructions: useInstructions ? 1 : 0 }),
@@ -239,11 +287,45 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
         return yield* reload(userId, connectionId)
       }).pipe(transaction(sql, "SetMcpOAuth")),
 
+    SetMcpShare: ({ userId, connectionId, scope, userIds, at }) =>
+      Effect.gen(function* () {
+        yield* mine(userId, connectionId)
+        // Only real users other than the owner; the owner always has their own use.
+        const chosen =
+          scope === "chosen"
+            ? (yield* sql<{
+                id: string
+              }>`SELECT id FROM users WHERE id IN ${sql.in(userIds.length ? [...userIds] : [""])}
+                AND id <> ${userId} ORDER BY id`).map((row) => row.id)
+            : []
+        // A trigger refuses sharing by anyone but an admin.
+        yield* sql`UPDATE mcp_connections SET share_scope = ${scope}, updated_at = ${at},
+          row_version = row_version + 1 WHERE id = ${connectionId}`
+        yield* sql`DELETE FROM mcp_connection_shares WHERE connection_id = ${connectionId}`
+        for (const user of chosen)
+          yield* sql`INSERT INTO mcp_connection_shares ${sql.insert({
+            connection_id: connectionId,
+            user_id: user,
+            created_at: at
+          })}`
+        // Who lost it loses their use, sign-in and choices; who gained it gets theirs.
+        yield* sql`DELETE FROM mcp_uses WHERE connection_id = ${connectionId} AND user_id <> ${userId}
+          AND NOT (${scope} = 'all' OR user_id IN ${sql.in(chosen.length ? chosen : [""])})`
+        const gaining =
+          scope === "all"
+            ? (yield* sql<{ id: string }>`SELECT id FROM users WHERE id <> ${userId}`).map((row) => row.id)
+            : chosen
+        for (const user of gaining) yield* ensureSharedUses(sql, user as UserId, at)
+        return yield* reload(userId, connectionId)
+      }).pipe(transaction(sql, "SetMcpShare")),
+
     OpenMcpCall: ({ userId, call }) =>
       Effect.gen(function* () {
-        // A connection of the user's that isn't purged: a call may still be closing after a delete.
-        const [connection] = yield* sql`SELECT 1 FROM mcp_connections
-          WHERE id = ${call.connectionId} AND owner_user_id = ${userId} AND purged_at IS NULL`
+        // A connection the user has a use of (their own, or one shared with them) that isn't
+        // purged: a call may still be closing after a delete.
+        const [connection] = yield* sql`SELECT 1 FROM mcp_connections m
+          JOIN mcp_uses u ON u.connection_id = m.id AND u.user_id = ${userId}
+          WHERE m.id = ${call.connectionId} AND m.purged_at IS NULL`
         if (!connection) return yield* new NotFound({ entity: "mcp_connection", id: call.connectionId })
         if (call.chatId !== null) {
           const [chat] = yield* sql`SELECT 1 FROM chats WHERE id = ${call.chatId} AND owner_user_id = ${userId}`

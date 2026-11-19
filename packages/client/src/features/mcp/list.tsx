@@ -36,7 +36,8 @@ export function McpServersPage() {
             </EmptyState>
           ) : (
             <ul className="flex flex-col divide-y divide-border">
-              {connections.map((connection) => {
+              {/* Your own first, then those shared with you, each in the order they were added. */}
+              {[...connections.filter((c) => c.owned), ...connections.filter((c) => !c.owned)].map((connection) => {
                 const status = mcpStatus(connection)
                 return (
                   <li key={connection.id} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
@@ -53,6 +54,7 @@ export function McpServersPage() {
                       <Badge tone={status.tone}>{status.label}</Badge>
                       {connection.use.stories && <Badge>Stories</Badge>}
                       {connection.use.workshops && <Badge>Workshops</Badge>}
+                      {!connection.owned && <Badge tone="accent">Shared by {connection.ownerName}</Badge>}
                     </div>
                     <p className="text-sm text-muted [overflow-wrap:anywhere]">
                       {mcpHost(connection)} · {connection.toolCount} {connection.toolCount === 1 ? "tool" : "tools"}

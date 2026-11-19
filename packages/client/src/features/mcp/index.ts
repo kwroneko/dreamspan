@@ -14,6 +14,7 @@ import {
   UsesSection
 } from "./detail.tsx"
 import { McpServersPage, NewMcpServerPage } from "./list.tsx"
+import { SharingSection } from "./sharing.tsx"
 import { McpSignInCallbackPage } from "./signIn.tsx"
 import { MCP_OAUTH_CALLBACK } from "@dreamspan/shared/mcp.ts"
 
@@ -46,6 +47,7 @@ export const register = () => {
   mcpSections.register({ id: "tools", order: 30, component: ToolsSection })
   mcpSections.register({ id: "loading", order: 35, component: LoadingSection })
   mcpSections.register({ id: "route", order: 40, component: RouteSection })
+  mcpSections.register({ id: "sharing", order: 45, component: SharingSection })
   mcpSections.register({ id: "calls", order: 50, component: CallsSection })
   mcpSections.register({ id: "delete", order: 100, component: DeleteSection })
 }

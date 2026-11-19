@@ -35,7 +35,8 @@ export const makeMcpReadHandlers = Effect.gen(function* () {
             : yield* sql<{ id: string; key_enc: Uint8Array; origins_json: string }>`
                 SELECT id, key_enc, origins_json FROM credentials WHERE id = ${row.credential_id}`
         return {
-          connection: toMcpConnection(row),
+          // Everything about it, for the client that reaches it: never sent to a browser.
+          connection: toMcpConnection(row, true),
           credential: credential
             ? {
                 id: credential.id as CredentialId,
@@ -51,9 +52,11 @@ export const makeMcpReadHandlers = Effect.gen(function* () {
       }).pipe(query("ResolveMcpConnection")),
     ListMcpCalls: ({ userId, connectionId, before, limit }) =>
       Effect.gen(function* () {
-        // The calls of a connection the user can see, binned or not, but only their own.
-        const [connection] = yield* sql`SELECT 1 FROM mcp_connections
-          WHERE id = ${connectionId} AND owner_user_id = ${userId} AND purged_at IS NULL`
+        // The calls of a connection the user has a use of (theirs, or one shared with them),
+        // binned or not, but only their own: an admin sees others' only as a count.
+        const [connection] = yield* sql`SELECT 1 FROM mcp_connections m
+          JOIN mcp_uses u ON u.connection_id = m.id AND u.user_id = ${userId}
+          WHERE m.id = ${connectionId} AND m.purged_at IS NULL`
         if (!connection) return yield* new NotFound({ entity: "mcp_connection", id: connectionId })
         const at = before?.startedAt ?? Number.MAX_SAFE_INTEGER
         const rows = yield* sql<McpCallRow>`SELECT * FROM mcp_calls
@@ -64,7 +67,7 @@ export const makeMcpReadHandlers = Effect.gen(function* () {
       }).pipe(query("ListMcpCalls")),
     McpStoryConnections: ({ userId }) =>
       catalogs(userId).pipe(
-        Effect.map((rows) => rows.map(toMcpConnection)),
+        Effect.map((rows) => rows.map((row) => toMcpConnection(row))),
         query("McpStoryConnections")
       ),
     McpWorkshopConnections: ({ userId, chatId }) =>
