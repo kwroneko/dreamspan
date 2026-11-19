@@ -8,6 +8,8 @@ import { castView, CastContext } from "./cast.ts"
 import type { PendingChat } from "./pendingChat.ts"
 import type { ChatSession } from "./session.ts"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
+import { SlotOutlet } from "../../slots.tsx"
+import { pendingPersonaPickerRows } from "./presentation.tsx"
 
 export function PersonaSwitch({ session, trigger }: { session: ChatSession; trigger?: ReactNode }) {
   const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
@@ -59,6 +61,7 @@ export function PendingPersonaSwitch({ pending, trigger }: { pending: PendingCha
         trigger={trigger}
         onPick={(card) => pending.setPersona(card.entityId)}
         onNone={() => pending.setPersona(null)}
+        header={<SlotOutlet slot={pendingPersonaPickerRows} props={{ pending }} />}
       />
     </CastContext>
   )

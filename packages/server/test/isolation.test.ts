@@ -2787,6 +2787,17 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   GetCardForChat: {
     probe: (actor, owner) => refused(actor.api.GetCardForChat({ entityId: owner.cardId }), "NotFound")
   },
+  GetPersonaLock: {
+    probe: (actor, owner) => refused(actor.api.GetPersonaLock({ entityId: owner.cardId }), "NotFound")
+  },
+  SetPersonaLock: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.SetPersonaLock({ entityId: owner.cardId, persona: null }), "NotFound")
+        // Their own character, someone else's persona.
+        yield* refused(actor.api.SetPersonaLock({ entityId: actor.cardId, persona: owner.cardId }), "NotFound")
+      })
+  },
   StartChat: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

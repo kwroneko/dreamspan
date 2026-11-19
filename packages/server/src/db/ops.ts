@@ -1084,6 +1084,16 @@ export class WriteOpsChat extends RpcGroup.make(
     success: Schema.Void,
     error: StorageError
   }),
+  /**
+   * The persona locked to a character of the user's, or the lock cleared (null), in
+   * `persona_locks` (db/personaLocks.ts). NotFound unless both are the user's live cards and
+   * the persona is in the persona folder.
+   */
+  Rpc.make("SetPersonaLock", {
+    payload: { userId: UserId, entityId: EntityId, persona: Schema.NullOr(EntityId) },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** A live card of the user's marked a favourite or not (db/cardFavourites.ts); NotFound otherwise. */
   Rpc.make("SetCardFavourite", {
     payload: { userId: UserId, entityId: EntityId, favourite: Schema.Boolean },
@@ -5854,6 +5864,12 @@ export class ReadOps extends RpcGroup.make(
       now: Schema.Number
     },
     success: DraftChatPreview,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The persona locked to a character of the user's; null when none, or it is no longer a live persona. */
+  Rpc.make("GetPersonaLock", {
+    payload: { userId: UserId, entityId: EntityId },
+    success: Schema.NullOr(CastCard),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The user's generation defaults; one naming something gone reads as none. */

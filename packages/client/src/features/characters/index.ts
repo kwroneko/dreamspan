@@ -24,6 +24,7 @@ import { OpenChatBranches } from "./ShellBrowser.tsx"
 import { homeSearch } from "./homeSearch.ts"
 import { cardContributions } from "../cardForks/surfaces.tsx"
 import { registerDefaultPersona } from "./defaultPersona.tsx"
+import { registerPersonaLock } from "./personaLock.tsx"
 import { PersonaFolderSwitch } from "./personaFolder.tsx"
 import { CardChatsLink, CastChatsLink } from "./chatLinks.tsx"
 import { castMemberNavigation } from "../chat/presentation.tsx"
@@ -47,6 +48,7 @@ export const register = () => {
   archivedCardActions.register({ id: "cards.archive-unused", order: 10, component: ArchiveUnused })
   cardSearchExtras.register({ id: "cards.archived-search", order: 10, component: ArchivedMatches })
   registerDefaultPersona()
+  registerPersonaLock()
   panelEditorActions.register({ id: "characters.panel-favourite", order: 40, component: PanelFavourite })
   characterChatActions.register({ id: "characters.new-chat", order: 10, component: NewCharacterChat })
   cardContributions.register({

@@ -1,0 +1,135 @@
+// Synthetic cards only: a persona locked to a character (DESIGN §2.2, owner 2026-11-18) from a
+// new single chat's persona picker starts that character's next new chat; the character's tab
+// shows and clears it; group chats and started chats are untouched. The same tests run in
+// the focused layout audit (LAYOUT_AUDIT_PERSONALOCK_ONLY=1).
+import { expect, type Page, test } from "@playwright/test"
+import { Effect } from "effect"
+import { expectLayout } from "./layoutAudit.ts"
+import { openPanel, panelTab } from "./panel.ts"
+import { loginCookie, withCookie } from "./rpc.ts"
+import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
+
+const playing = (page: Page, name: string) =>
+  page.getByRole("button", { name: `Playing as ${name}. Change your persona`, exact: true })
+
+export function personaLockTests() {
+  test.describe("persona lock", () => {
+    test.setTimeout(180_000)
+    const server = serverPerFile(withAdmin)
+    let cookie = ""
+    test.beforeAll(async () => {
+      cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+    })
+    const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), cookie, use)
+    for (const width of [1440, 390])
+      for (const theme of ["light", "dark"] as const) {
+        const suffix = `${width} ${theme}`
+        test(`lock on the pending page, start with it, clear it from the character's tab ${suffix}`, async ({
+          page
+        }, info) => {
+          const tag = `${width}${theme === "light" ? "L" : "D"}`
+          const { harbor, pilot, mapmaker, group, started } = await admin((api) =>
+            Effect.gen(function* () {
+              const harbor = yield* api.CreateCard({ label: `Harbor ${tag}`, name: `Harbor ${tag}` })
+              const partner = yield* api.CreateCard({ label: `Navigator ${tag}`, name: `Navigator ${tag}` })
+              const pilot = yield* api.CreateCard({ label: `Pilot ${tag}`, name: `Pilot ${tag}` })
+              const mapmaker = yield* api.CreateCard({ label: `Mapmaker ${tag}`, name: `Mapmaker ${tag}` })
+              for (const card of [pilot, mapmaker]) yield* api.SetPersona({ entityId: card.entityId, persona: true })
+              yield* api.ChangeGenerationDefaults({ change: { persona: mapmaker.entityId } })
+              const group = yield* api.StartChat({
+                cards: [harbor.entityId, partner.entityId],
+                persona: mapmaker.entityId,
+                greeting: null,
+                first: { _tag: "Send", content: "Group fixture.", speakerEntityId: null },
+                title: `Voyage ${tag}`
+              })
+              // A chat with Harbor that started before any lock.
+              const started = yield* api.StartChat({
+                cards: [harbor.entityId],
+                persona: mapmaker.entityId,
+                greeting: null,
+                first: { _tag: "Send", content: "Started before the lock.", speakerEntityId: null },
+                title: `Started ${tag}`
+              })
+              return { harbor, pilot, mapmaker, group: group.chat, started: started.chat }
+            })
+          )
+          await page.setViewportSize({ width, height: 900 })
+          await page.emulateMedia({ colorScheme: theme })
+          await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+          const lock = () => admin((api) => api.GetPersonaLock({ entityId: harbor.entityId }))
+          const name = (card: { label: string }) => card.label
+
+          // The new chat starts with the account default; the picker offers the lock, off.
+          await page.goto(`${server().url}/cards/${harbor.entityId}/chat`)
+          await openPanel(page, "Cast")
+          await expect(playing(page, `${name(mapmaker)} (default)`)).toBeVisible()
+          await playing(page, `${name(mapmaker)} (default)`).click()
+          const picker = page.getByRole("dialog", { name: "Your persona" })
+          const toggle = picker.getByRole("switch", { name: `Always play as this with ${name(harbor)}`, exact: true })
+          await expect(toggle).toBeVisible()
+          await expect(toggle).not.toBeChecked()
+          await expect(toggle).toHaveAccessibleDescription(
+            `New chats with ${name(harbor)} start with this persona. Chats already started keep theirs.`
+          )
+          await picker.getByRole("option", { name: name(pilot), exact: true }).click()
+          await expect(playing(page, name(pilot))).toBeVisible()
+          // Picking a persona alone locks nothing (DESIGN §2.2: it affects only this chat).
+          expect(await lock()).toBeNull()
+          await playing(page, name(pilot)).click()
+          await expect(toggle).not.toBeChecked()
+          await picker.screenshot({ path: info.outputPath(`picker-unlocked.png`), animations: "disabled" })
+          await expectLayout(page, info, `persona-lock-picker-unlocked-${suffix}`, { scope: '[role="dialog"]' })
+          await toggle.click()
+          await expect(toggle).toBeChecked()
+          await expect.poll(async () => (await lock())?.entityId).toBe(pilot.entityId)
+          await picker.screenshot({ path: info.outputPath(`picker-locked.png`), animations: "disabled" })
+          await expectLayout(page, info, `persona-lock-picker-locked-${suffix}`, { scope: '[role="dialog"]' })
+          await page.keyboard.press("Escape")
+
+          // The pending chat's character tab shows it.
+          const row = page.locator("[data-persona-lock]")
+          await panelTab(page, name(harbor))
+          await expect(row).toContainText(`You play ${name(pilot)} with ${name(harbor)}`)
+
+          // A second new chat with Harbor starts as the locked persona; a group's new chat does not.
+          await page.goto(`${server().url}/cards/${harbor.entityId}/chat`)
+          await openPanel(page, "Cast")
+          await expect(playing(page, name(pilot))).toBeVisible()
+          await page.goto(`${server().url}/groups/${group.id}/new`)
+          await openPanel(page, "Cast")
+          await expect(playing(page, `${name(mapmaker)} (default)`)).toBeVisible()
+
+          // The chat started before the lock keeps its persona, and its Harbor tab clears the lock.
+          await page.goto(`${server().url}/chats/${started.id}`)
+          await openPanel(page, "Cast")
+          await expect(playing(page, name(mapmaker))).toBeVisible()
+          expect(
+            (await admin((api) => api.GetCast({ chatId: started.id, slotId: started.activeLeafSlotId }))).playedByMe
+          ).toEqual([mapmaker.entityId])
+          await panelTab(page, name(harbor))
+          await expect(row).toBeVisible()
+          await expect(row).toContainText(`You play ${name(pilot)} with ${name(harbor)}`)
+          const clear = row.getByRole("button", { name: "Clear", exact: true })
+          await expect(clear).toHaveAccessibleDescription(
+            `New chats with ${name(harbor)} start with your default persona again. Chats already started keep theirs.`
+          )
+          const tab = page.getByRole("tabpanel", { name: name(harbor) })
+          await tab.screenshot({ path: info.outputPath(`character-tab.png`), animations: "disabled" })
+          await expectLayout(page, info, `persona-lock-character-tab-${suffix}`, { scope: "[data-persona-lock]" })
+          await expectLayout(page, info, `persona-lock-character-panel-${suffix}`, { scope: '[role="tabpanel"]' })
+          await clear.click()
+          await expect(row).toHaveCount(0)
+          await expect.poll(async () => await lock()).toBeNull()
+          expect(
+            (await admin((api) => api.GetCast({ chatId: started.id, slotId: started.activeLeafSlotId }))).playedByMe
+          ).toEqual([mapmaker.entityId])
+
+          // New chats with Harbor are back to the account default.
+          await page.goto(`${server().url}/cards/${harbor.entityId}/chat`)
+          await openPanel(page, "Cast")
+          await expect(playing(page, `${name(mapmaker)} (default)`)).toBeVisible()
+        })
+      }
+  })
+}

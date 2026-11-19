@@ -4,6 +4,8 @@
 // message column, composer), which read it as a `ChatView` with no chat (`view`), and the side
 // panel's tabs change it through these methods, as a saved chat's tabs change its session.
 import { greetingPick, offeredGreetings } from "@rp/shared/greetings.ts"
+import { remoteOf } from "@rp/shared/cardSources.ts"
+import { startingPersona } from "@rp/shared/personaLock.ts"
 import type { CastCard, ChatId, EntityId } from "@rp/shared/chat.ts"
 import type { CardForChat } from "@rp/shared/chatSetupApi.ts"
 import type { Caller } from "../editor/caller.ts"
@@ -53,6 +55,12 @@ export class PendingChat {
     return this.availableCards
   }
   readonly group: PendingGroup | null
+  /**
+   * The one character of a new single chat, whose persona lock (DESIGN §2.2) chose who the
+   * user starts as and can be set from its persona picker; null for a group's chat, one with no
+   * character, or a card source's card not yet the user's.
+   */
+  readonly lockCard: CastCard | null
   private readonly call: Caller
 
   constructor(
@@ -61,14 +69,22 @@ export class PendingChat {
     group: PendingGroup | null,
     call: Caller,
     defaultPersona: EntityId | null = null,
-    guidance = false
+    guidance = false,
+    /** The persona locked to the chat's one character, if any. */
+    lock: EntityId | null = null
   ) {
     this.availableCards = cards
     this.group = group
     this.call = call
-    const persona =
-      [...cards, ...greeters.map((item) => item.card)].find((card) => card.entityId === defaultPersona && card.persona)
-        ?.entityId ?? null
+    const only = greeters.length === 1 ? greeters[0]!.card : null
+    this.lockCard = group === null && only !== null && remoteOf(only.entityId) === null ? only : null
+    const known = [...cards, ...greeters.map((item) => item.card)]
+    const persona = startingPersona({
+      single: this.lockCard !== null,
+      lock,
+      defaultPersona,
+      live: (id) => known.some((card) => card.entityId === id && card.persona)
+    })
     const state = { greeters, persona }
     this.state = {
       ...state,

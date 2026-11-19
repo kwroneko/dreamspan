@@ -43,6 +43,7 @@ import {
   PanelApprovalApi
 } from "./editorApi.ts"
 import { CardSourcesApi } from "./cardSources.ts"
+import { PersonaLockApi } from "./personaLockApi.ts"
 import {
   AccountRejected,
   Forbidden,
@@ -426,6 +427,8 @@ export const AuthenticatedForkMergeApi = ForkMergeApi.middleware(Authentication)
 export const AuthenticatedWorkshopPresetApi = WorkshopPresetApi.middleware(Authentication)
 
 export const AuthenticatedCardArchiveApi = CardArchiveApi.middleware(Authentication)
+/** The persona locked to a character (personaLockApi.ts, DESIGN §2.2). */
+export const AuthenticatedPersonaLockApi = PersonaLockApi.middleware(Authentication)
 
 /** Card sources (cardSources.ts): browsing an archive through the server. */
 export const AuthenticatedCardSourcesApi = CardSourcesApi.middleware(Authentication)
@@ -504,6 +507,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedDecisionApi)
   .merge(AuthenticatedThinkingApi)
   .merge(AuthenticatedCardArchiveApi)
+  .merge(AuthenticatedPersonaLockApi)
   .merge(AuthenticatedCardSourcesApi)
   .merge(AuthenticatedGalleryApi)
   .merge(AuthenticatedPanelApprovalApi)

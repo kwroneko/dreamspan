@@ -40,7 +40,7 @@ import type { ChatCardInfo } from "./CardForkDialogs.tsx"
 import type { PanelProps, PendingPanelProps } from "./panels.tsx"
 import type { PendingChat } from "./pendingChat.ts"
 import { usePendingCardInfo } from "./pendingCardInfo.ts"
-import { chatCardActions } from "./presentation.tsx"
+import { chatCardActions, chatCharacterRows } from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { composerChoice } from "./speaker.ts"
 import { remoteOf } from "@rp/shared/cardSources.ts"
@@ -316,6 +316,7 @@ function CardPanel({
             <SlotOutlet slot={chatCardActions} except={["card.edit"]} props={{ session, card, info, persona }} />
           )}
         </div>
+        {!remote && <SlotOutlet slot={chatCharacterRows} props={{ card, persona }} />}
         {state.loadError && <ErrorAlert error={state.loadError} />}
         {!state.snapshot && !state.loadError && <p className="text-sm text-muted">Loading the card…</p>}
         {state.snapshot && (

@@ -121,7 +121,7 @@ describe("0002_files", () => {
       const ledger = yield* sql<{ name: string }>`SELECT name FROM effect_sql_migrations ORDER BY migration_id`
       assert.deepStrictEqual(
         ledger.map((r) => r.name),
-        ["baseline", "files", "subagents", "workshop_branches", "preview_macro"]
+        ["baseline", "files", "subagents", "workshop_branches", "preview_macro", "persona_locks"]
       )
       // The existing row is kept, an image by default.
       assert.deepStrictEqual(yield* sql`SELECT id, alt_text, kind, name FROM composer_images`, [
@@ -252,7 +252,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0002_files",
       "0003_subagents",
       "0004_workshop_branches",
-      "0005_preview_macro"
+      "0005_preview_macro",
+      "0006_persona_locks"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -318,7 +319,7 @@ describe("0005_preview_macro", () => {
   it.effect("adds the column to a database at 0004; its older summaries are stale by format", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0005_preview_macro": _new, ...before } = migrations
+      const { "0005_preview_macro": _new, "0006_persona_locks": _later, ...before } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'rp', 'active', 0)`
@@ -339,6 +340,47 @@ describe("0005_preview_macro", () => {
       yield* sql`UPDATE fork_summaries SET format = ${FORK_SUMMARY_FORMAT - 1}`
       assert.strictEqual(yield* valid(), 0, "a format-10 row is stale")
       assert.strictEqual(current, 1, "the same row at the current format would be valid")
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
+describe("0006_persona_locks", () => {
+  it.effect("adds the table to a database at 0005, keeping its cards, and guards its rows", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { "0006_persona_locks": _new, ...before } = migrations
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      for (const user of ["u", "v"])
+        yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES (${user}, ${user}, 'Owner', 'user', 0)`
+      for (const [id, owner] of [
+        ["harbor", "u"],
+        ["pilot", "u"],
+        ["theirs", "v"]
+      ])
+        yield* sql`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES (${id}, ${owner}, 'card', 0)`
+      yield* Effect.scoped(Layer.build(Migrations))
+      assert.deepStrictEqual(
+        (yield* sql`SELECT id FROM entities ORDER BY id`).map((r) => r.id),
+        ["harbor", "pilot", "theirs"]
+      )
+      const lock = (character: string, persona: string, owner = "u") =>
+        sql`INSERT INTO persona_locks (owner_user_id, character_entity_id, persona_entity_id, updated_at)
+          VALUES (${owner}, ${character}, ${persona}, 0)`
+      const refused = (effect: Effect.Effect<unknown, unknown>, message: string) =>
+        Effect.gen(function* () {
+          const exit = yield* Effect.exit(effect)
+          assert.isTrue(Exit.isFailure(exit))
+          assert.include(String(exit), message)
+        })
+      yield* lock("harbor", "pilot")
+      yield* refused(lock("pilot", "pilot"), "two cards of its owner")
+      yield* refused(lock("pilot", "theirs"), "two cards of its owner")
+      yield* refused(lock("harbor", "pilot"), "UNIQUE")
+      yield* refused(sql`UPDATE persona_locks SET persona_entity_id = 'theirs'`, "two cards of its owner")
+      yield* refused(sql`UPDATE persona_locks SET character_entity_id = 'pilot'`, "keeps its owner and character")
+      assert.deepStrictEqual(yield* sql`SELECT character_entity_id, persona_entity_id FROM persona_locks`, [
+        { character_entity_id: "harbor", persona_entity_id: "pilot" }
+      ])
     }).pipe(Effect.provide(layer()))
   )
 })

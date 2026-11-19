@@ -62,6 +62,7 @@ import {
   AuthenticatedOwnTurnNoteApi,
   AuthenticatedPanelApprovalApi,
   AuthenticatedCardArchiveApi,
+  AuthenticatedPersonaLockApi,
   AuthenticatedTextSearchApi,
   AuthenticatedDraftPreviewApi,
   AuthenticatedCardSourcesApi,
@@ -142,6 +143,7 @@ import * as Providers from "./providers/Providers.ts"
 import * as Secrets from "./secrets.ts"
 import { makeTextSearchHandlers } from "./api/textSearch.ts"
 import { makeMcpHandlers } from "./api/mcp.ts"
+import { makePersonaLockHandlers } from "./api/personaLock.ts"
 import * as McpConnections from "./mcp/McpConnections.ts"
 
 const VERSION = "0.0.0"
@@ -227,6 +229,7 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedThinkingApi.toLayer(makeThinkingHandlers),
   AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
   AuthenticatedCardArchiveApi.toLayer(makeCardArchiveHandlers),
+  AuthenticatedPersonaLockApi.toLayer(makePersonaLockHandlers),
   AuthenticatedCardSourcesApi.toLayer(makeCardSourceHandlers),
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
   AuthenticatedProviderListApi.toLayer(makeProviderListHandlers),

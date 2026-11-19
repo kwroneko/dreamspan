@@ -34,6 +34,18 @@ export const castSections = defineSlot<{ session: ChatSession }>("chat.cast-sect
 export const pendingCastSections = defineSlot<{ pending: import("./pendingChat.ts").PendingChat }>(
   "chat.pending-cast-sections"
 )
+/** Rows at the top of a chat not made yet's persona picker: the persona lock (DESIGN §2.2). */
+export const pendingPersonaPickerRows = defineSlot<{ pending: import("./pendingChat.ts").PendingChat }>(
+  "chat.pending-persona-picker-rows"
+)
+/**
+ * Rows of a character's tab in the chat panel under its actions, saved chat or pending: the
+ * persona locked to them (DESIGN §2.2). `persona`: the tab is of the card the user plays.
+ */
+export const chatCharacterRows = defineSlot<{
+  card: import("@rp/shared/chat.ts").CastCard
+  persona: boolean
+}>("chat.character-rows")
 /** Actions in an opened chat note's row, above its editor; `onChanged` reads the notes again. */
 export const chatNoteActions = defineSlot<{ note: ChatNote; session: ChatSession; onChanged: () => void }>(
   "chat.note-actions"

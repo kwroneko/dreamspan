@@ -32,6 +32,7 @@ import { makeSubagentReadHandlers } from "./subagents.ts"
 import { makeMessageSearchHandlers } from "./messageSearch.ts"
 import { makeLibraryReplaceReadHandlers } from "./libraryReplace.ts"
 import { makeWorkshopGrantReadHandlers } from "./workshopGrants.ts"
+import { makePersonaLockReadHandlers } from "./personaLocks.ts"
 import { makeWorkshopAttachReadHandlers } from "./workshopAttach.ts"
 import { ReadOps } from "./ops.ts"
 import { makeProviderReadHandlers } from "./providerReads.ts"
@@ -81,7 +82,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               makePluginReadHandlers,
               makeMcpReadHandlers,
               makeFileVersionReadHandlers,
-              makeSubagentReadHandlers
+              makeSubagentReadHandlers,
+              makePersonaLockReadHandlers
             ]),
             ([
               history,
@@ -108,7 +110,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               plugins,
               mcp,
               fileVersions,
-              subagents
+              subagents,
+              personaLocks
             ]) =>
               ReadOps.of(
                 stateModuleHandlers(
@@ -138,6 +141,7 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
                       ...plugins,
                       ...mcp,
                       ...fileVersions,
+                      ...personaLocks,
                       ...subagents
                     })
                   )
