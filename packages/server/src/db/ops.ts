@@ -4143,9 +4143,6 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
-   * `contract`: the run ended, and this is how it met the send tool's contract (its outcome, null
-   * when it reached none, and its nudges), for the per-model metrics (spec/REPLY-CONTRACT.md §3.6).
-   */
    * A follow-up to a finished or stopped subagent (spec/SUBAGENTS.md §4), in one transaction: a new
    * child rollout of the running parent for its `message_agent` call, carried on from the source
    * (same handle, snapshot and model; `parent_rollout_id` = the source), with the transcript given
@@ -4173,6 +4170,10 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     ]),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * `contract`: the run ended, and this is how it met the send tool's contract (its outcome, null
+   * when it reached none, and its nudges), for the per-model metrics (spec/REPLY-CONTRACT.md §3.6).
+   */
   Rpc.make("SaveRolloutTranscript", {
     payload: {
       userId: UserId,
