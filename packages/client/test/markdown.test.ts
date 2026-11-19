@@ -137,6 +137,22 @@ describe("ST 1.19 message formatting", () => {
   ])("matches fixMarkdown display behavior for %s", (text, expected) => {
     expect(fixMarkdown(text)).toBe(expected)
   })
+  it("leaves fenced code blocks untouched, whatever the fence or info string", () => {
+    const html = "```html\n<script>parent.postMessage(x, '*')\nconst s = \"a\n</script>\n```"
+    expect(fixMarkdown(html)).toBe(html)
+    expect(fixMarkdown(`before\n~~~\n*x\n"y\n~~~\nafter`)).toBe(`before\n~~~\n*x\n"y\n~~~\nafter`)
+    expect(fixMarkdown("````js\n*a\n```\n*b\n````")).toBe("````js\n*a\n```\n*b\n````")
+  })
+  it("leaves an unterminated fence untouched to the end of the message", () => {
+    const text = "```html\nf(x, '*')\n\"open"
+    expect(fixMarkdown(text)).toBe(text)
+  })
+  it("still fixes prose around code blocks and inline code", () => {
+    expect(fixMarkdown("*a\n```\n*b\n```\n*c")).toBe("*a*\n```\n*b\n```\n*c*")
+    expect(fixMarkdown("`'*'`")).toBe("`'*'`")
+    expect(fixMarkdown("say `x*` then *go")).toBe("say `x*` then *go*")
+    expect(fixMarkdown("* spaced * `* keep *`")).toBe("*spaced* `* keep *`")
+  })
   it.each([false, true])("fixes every message, streaming=%s, without changing its source", (streaming) => {
     const text = '*unfinished\n\n"unfinished'
     expect(render(text, streaming)).toContain("<em>unfinished</em>")
