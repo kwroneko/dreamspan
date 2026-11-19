@@ -7,6 +7,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { foldState } from "@dreamspan/shared/state.ts"
+import { resolveLcm } from "@dreamspan/shared/lcmSettings.ts"
 import {
   parseModelPick,
   resolveLimits,
@@ -26,6 +27,7 @@ import type { ModelInput } from "../assembler/types.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { putUserSetting, readSetting } from "./settings.ts"
+import { replySubagents, spendOf } from "./subagents.ts"
 import { query, transaction } from "./tx.ts"
 
 const MODELS_KEY = "subagents.models"
@@ -104,11 +106,21 @@ export const makeSubagentSettingReadHandlers = Effect.gen(function* () {
         })
         if (picks.includes(SAME) && chatModel)
           entries.push(entry(SAME, { ...rows.get(SAME)!, alias: "same" }, chatModel.key))
+        // `summary` is the chat's summary model only where this chat summarizes (§5.1): there it
+        // already sends to it. Elsewhere the pick, made in another chat, names nothing, so it never
+        // sends a chat's content to a connection that chat didn't choose.
+        const summarizes = () =>
+          Effect.map(
+            base.lcmDefaults ? base.lcmDefaults() : Effect.succeed(null),
+            (account) => resolveLcm(state.lcm, account).enabled
+          )
         for (const pick of picks) {
           if (pick === SAME) continue
           const model =
             pick === SUMMARY
-              ? (yield* resolveSummaryModel(base, state.modelBindings)).model
+              ? (yield* summarizes())
+                ? (yield* resolveSummaryModel(base, state.modelBindings)).model
+                : null
               : yield* modelOf(base, parseModelPick(pick))
           // Gone, a decision connection, or already listed (the chat's own model is `same`).
           if (!model || model.kind === DECISION_KIND || listed.some((m) => sameModel(m, model))) continue
@@ -130,17 +142,20 @@ export const makeSubagentSettingReadHandlers = Effect.gen(function* () {
             sum(coalesce(input_uncached, 0) + coalesce(cache_read, 0) + coalesce(cache_write, 0) + coalesce(output, 0)) AS tokens,
             sum(cost) AS cost, sum(CASE WHEN cost IS NULL THEN 1 ELSE 0 END) AS unpriced
           FROM llm_requests WHERE rollout_id = ${rolloutId} AND status <> 'running'`
-        const [run] = yield* sql<{ cost: number | null; unpriced: number | null }>`
-          SELECT sum(q.cost) AS cost, sum(CASE WHEN q.cost IS NULL THEN 1 ELSE 0 END) AS unpriced
-          FROM rollouts r JOIN llm_requests q ON q.rollout_id = r.id
-          WHERE r.spawned_by_rollout_id = ${child.spawned_by_rollout_id} AND q.status <> 'running'`
+        // The reply's subagents together, across its Stops and Resumes (§6.2).
+        const reply = yield* replySubagents(sql, child.spawned_by_rollout_id)
+        const run = yield* spendOf(
+          sql,
+          reply.map((r) => r.id),
+          true
+        )
         return {
           requests: own?.requests ?? 0,
           tokens: own?.tokens ?? 0,
           cost: own?.cost ?? 0,
           unpriced: own?.unpriced ?? 0,
-          runCost: run?.cost ?? 0,
-          runUnpriced: run?.unpriced ?? 0
+          runCost: run.cost,
+          runUnpriced: run.unpriced
         }
       }).pipe(query("SubagentSpend"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>

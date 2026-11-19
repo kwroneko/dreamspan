@@ -367,7 +367,8 @@ export const offeredByGrants = <T extends { readonly capability?: string | undef
  * Asks the user one question about a call that isn't a tool's own permit, with the same pending
  * row, wait and answer as Ask first: a subagent that couldn't be resumed (spec/SUBAGENTS.md §8),
  * "Start the task again" or "Leave it". `allow` only when the user chose to; Stop, Off and a
- * stale answer are `deny`.
+ * stale answer are `deny`. Its row (and the prompt's `toolCallId`, which an answer names) is
+ * `<call>:ask`; the prompt shows on the call's own step.
  */
 export const askUser = (
   deps: Pick<PermitDeps, "reader" | "writer" | "userId" | "chatId" | "rolloutId">,
@@ -380,7 +381,10 @@ export const askUser = (
 ): Effect.Effect<{ readonly allow: boolean; readonly note: string | null }> =>
   Effect.gen(function* () {
     const { writer, userId, rolloutId } = deps
-    const { toolCallId, capability } = input
+    const { capability } = input
+    // Its own row and answer key beside the call's: the call's permit may already have asked
+    // (Resume runs a dangling call through it), and a call asks its permit question once.
+    const toolCallId = `${input.toolCallId}:ask`
     const digest = argsDigest({ ask: input.prompt.title, capability, rows: input.prompt.rows })
     const prompt: ApprovalPrompt = { ...input.prompt, rolloutId, toolCallId, digest, capability }
     const key = keyOf(rolloutId, toolCallId)

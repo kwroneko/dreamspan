@@ -115,6 +115,11 @@ export interface AgentRun {
      * the next request (the 80% "wrap up"), or nothing. At a limit it stops the run itself.
      */
     readonly beforeNextRequest?: (signal?: AbortSignal) => Promise<string | undefined>
+    /**
+     * It's being stopped at a limit: nothing more is taken from its mailbox, so a message that
+     * came meanwhile stays undelivered and its sender is told (spec/SUBAGENTS.md §4).
+     */
+    readonly stopping?: () => boolean
     /** Its `report_progress` line, shown in its row at once (spec/SUBAGENTS.md §4). */
     readonly onProgress?: (text: string) => void
   }
@@ -1232,6 +1237,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         prepareNextTurnWithContext: async (_context, signal) => {
           // A subagent's limits are checked first: at one, it stops before anything is sent.
           const limitNote = run.subagent?.beforeNextRequest ? await run.subagent.beforeNextRequest(signal) : undefined
+          // Stopped at one: its request is never sent, so its mail stays where its sender learns of it.
+          if (run.subagent?.stopping?.()) return undefined
           // What arrived meanwhile (reports, progress, the parent's messages) goes in first (§3.2, §4).
           const mail = mailbox.drain()
           const withMail = (messages: Array<AgentMessage>) =>
@@ -1411,6 +1418,38 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         )
           pass()
       }
+      // Background work this run started that hadn't reported when it stopped carries on with it
+      // (spec/SUBAGENTS.md §8): each such call's tool picks it up, and its report arrives as before.
+      // First, so a dangling message to one of them reaches the run that carries it on.
+      if (seed) {
+        const own = seed.slice(historical)
+        const reported = new Set(
+          own.flatMap((m) =>
+            m.role === "rpApp" && (m as { report?: { callId: string } }).report
+              ? [(m as { report: { callId: string } }).report.callId]
+              : []
+          )
+        )
+        for (const message of own) {
+          if (
+            message.role !== "toolResult" ||
+            message.isError ||
+            (message.details as { background?: unknown } | null)?.background !== true ||
+            reported.has(message.toolCallId)
+          )
+            continue
+          const tool = tools.find((t) => t.id === message.toolName)
+          const call = own
+            .flatMap((m) =>
+              m.role === "assistant"
+                ? m.content.filter((p) => p.type === "toolCall" && p.id === message.toolCallId)
+                : []
+            )
+            .at(-1)
+          if (tool?.resumeBackground && call?.type === "toolCall")
+            yield* tool.resumeBackground(context(message.toolCallId), call.arguments as never)
+        }
+      }
       const dangling = sent === undefined && !passed ? danglingCalls(agent.state.messages) : []
       if (dangling.length > 0) {
         const signal = new AbortController()
@@ -1477,37 +1516,6 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         }
         yield* Effect.promise(() => flush())
       }
-      // Background work this run started that hadn't reported when it stopped carries on with it
-      // (spec/SUBAGENTS.md §8): each such call's tool picks it up, and its report arrives as before.
-      if (seed) {
-        const own = seed.slice(historical)
-        const reported = new Set(
-          own.flatMap((m) =>
-            m.role === "rpApp" && (m as { report?: { callId: string } }).report
-              ? [(m as { report: { callId: string } }).report.callId]
-              : []
-          )
-        )
-        for (const message of own) {
-          if (
-            message.role !== "toolResult" ||
-            message.isError ||
-            (message.details as { background?: unknown } | null)?.background !== true ||
-            reported.has(message.toolCallId)
-          )
-            continue
-          const tool = tools.find((t) => t.id === message.toolName)
-          const call = own
-            .flatMap((m) =>
-              m.role === "assistant"
-                ? m.content.filter((p) => p.type === "toolCall" && p.id === message.toolCallId)
-                : []
-            )
-            .at(-1)
-          if (tool?.resumeBackground && call?.type === "toolCall")
-            yield* tool.resumeBackground(context(message.toolCallId), call.arguments as never)
-        }
-      }
       showSteps(false)
       // The call carried on was the message itself (or the pass).
       if (sent !== undefined || passed) {
@@ -1554,7 +1562,15 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         ended = false
         // A run doesn't end while its background subagents run, nor with a message unread
         // (spec/SUBAGENTS.md §3.2, §4). A sent message or a pass ends it whatever comes.
-        if (sent !== undefined || passed || (mailbox.waitingFor === 0 && !mailbox.hasMail)) break
+        // A subagent at its turn cap ends with its report: a message after it stays undelivered,
+        // and its parent is told with the report.
+        if (
+          sent !== undefined ||
+          passed ||
+          (mailbox.waitingFor === 0 && !mailbox.hasMail) ||
+          (run.subagent !== undefined && requests >= cap)
+        )
+          break
         // The text its model ended with is a message of its own, and the run goes on in a new
         // one; under the other contracts it becomes a step, and the reply is what comes next.
         if (body.text) {

@@ -268,10 +268,12 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         if (!row.transcript) return []
         const tools = row.tools ? (JSON.parse(row.tools) as ReadonlyArray<FrozenTool>) : []
         // An `agent` call's step carries the subagent it started (spec/SUBAGENTS.md §7).
+        const messages = JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>
         return yield* withSubagents(
           sql,
           row.rollout_id,
-          stepsOf(JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>, tools, row.running === 0, versionId)
+          stepsOf(messages, tools, row.running === 0, versionId),
+          messages
         )
       }).pipe(query("RolloutSteps")),
 

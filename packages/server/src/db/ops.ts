@@ -4120,8 +4120,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
    * stopped child `sourceRolloutId` (spawned by the same call on the parent's run chain): the
    * same handle, chat, position, model and frozen snapshot, `parent_rollout_id` the source, with
    * the kept transcript, the receipts of the calls kept and the cut tail. A second resume for the
-   * same call returns the first (`existing`). `refused` when the parent isn't running or the source
-   * isn't that call's subagent.
+   * same call returns the first (`existing`). `refused` when the parent isn't running, the source
+   * isn't that call's subagent, or it still runs; NotFound when its model is no longer the user's.
    */
   Rpc.make("ResumeSubagent", {
     payload: {
@@ -4133,18 +4133,17 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       transcript: Schema.String,
       steps: Schema.Int,
       keptCalls: Schema.Array(Schema.String),
-      branch: Schema.NullOr(Schema.Struct({ messages: Schema.String }))
+      branch: Schema.NullOr(Schema.Struct({ messages: Schema.String })),
+      /** The resumed reply's message that holds the call: where the child's chat state goes. */
+      versionId: Schema.optionalKey(Schema.String)
     },
     success: Schema.Union([
       Schema.Struct({ rolloutId: Schema.String, handle: Schema.String, existing: Schema.Boolean }),
-      Schema.Struct({ refused: Schema.Literals(["not_running", "not_found"]) })
+      Schema.Struct({ refused: Schema.Literals(["not_running", "not_found", "running"]) })
     ]),
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
-   * `contract`: the run ended, and this is how it met the send tool's contract (its outcome, null
-   * when it reached none, and its nudges), for the per-model metrics (spec/REPLY-CONTRACT.md §3.6).
-   */
    * A follow-up to a finished or stopped subagent (spec/SUBAGENTS.md §4), in one transaction: a new
    * child rollout of the running parent for its `message_agent` call, carried on from the source
    * (same handle, snapshot and model; `parent_rollout_id` = the source), with the transcript given
@@ -4162,7 +4161,9 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       keptCalls: Schema.Array(Schema.String),
       background: Schema.Boolean,
       perRun: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 64 }))),
-      runCost: Schema.optionalKey(Schema.Number)
+      runCost: Schema.optionalKey(Schema.Number),
+      /** The parent's message that holds the `message_agent` call: where the child's chat state goes. */
+      versionId: Schema.optionalKey(Schema.String)
     },
     success: Schema.Union([
       Schema.Struct({ rolloutId: Schema.String, handle: Schema.String, existing: Schema.Boolean }),
@@ -4170,6 +4171,10 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     ]),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * `contract`: the run ended, and this is how it met the send tool's contract (its outcome, null
+   * when it reached none, and its nudges), for the per-model metrics (spec/REPLY-CONTRACT.md §3.6).
+   */
   Rpc.make("SaveRolloutTranscript", {
     payload: {
       userId: UserId,
@@ -6126,14 +6131,18 @@ const ReadOpsOwn = RpcGroup.make(
   /** A subagent of the reply `versionId`'s run: its rollout status, for its Stop (subagentReads.ts). */
   /**
    * A subagent by the handle or name its parent gives (`message_agent`, spec/SUBAGENTS.md §4): one
-   * started on the run chain by one of `calls` (those its transcript holds), its newest run.
+   * started on the run chain by one of `calls` (those its transcript holds, as the same call: an
+   * earlier run's only where that call's result names it), its newest run.
    */
   Rpc.make("FindSubagentByHandle", {
     payload: {
       userId: UserId,
       rolloutId: Schema.String,
       handle: Schema.String,
-      calls: Schema.Array(Schema.String)
+      /** The calls its transcript holds, each with whether it has a result and the subagent that names. */
+      calls: Schema.Array(
+        Schema.Struct({ id: Schema.String, result: Schema.Boolean, subagent: Schema.NullOr(Schema.String) })
+      )
     },
     success: Schema.NullOr(
       Schema.Struct({

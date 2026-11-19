@@ -5,9 +5,29 @@
 // so a call it finished is answered from its receipt and never runs twice.
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { ownedModel } from "./generationSettings.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
-import { chainOf } from "./subagents.ts"
+import { chainOf, replySubagents, spendOf } from "./subagents.ts"
 import { transaction } from "./tx.ts"
+
+interface Source {
+  readonly agent_handle: string
+  readonly status: string
+  readonly connection_id: string | null
+  readonly model_id: string | null
+}
+
+/** Its model must still be one of the user's own, as `StartSubagent` checks for a new one. */
+const ownModel = (sql: SqlClient.SqlClient, userId: UserId, source: Source) =>
+  Effect.gen(function* () {
+    if (
+      source.connection_id === null ||
+      source.model_id === null ||
+      !(yield* ownedModel(sql, userId, source.connection_id, source.model_id))
+    )
+      return yield* new NotFound({ entity: "model", id: source.model_id ?? "" })
+  })
 
 export const makeSubagentResumeHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -21,7 +41,8 @@ export const makeSubagentResumeHandlers = Effect.gen(function* () {
       transcript,
       steps,
       keptCalls,
-      branch
+      branch,
+      versionId
     }) =>
       Effect.gen(function* () {
         const [parent] = yield* sql<{ readonly status: string; readonly chat_id: string }>`
@@ -35,11 +56,14 @@ export const makeSubagentResumeHandlers = Effect.gen(function* () {
         if (parent.status !== "running") return { refused: "not_running" as const }
         // Only this call's own subagent, started on the run this one carries on from.
         const chain = yield* chainOf(sql, parentRolloutId)
-        const [source] = yield* sql<{ readonly agent_handle: string }>`
-          SELECT agent_handle FROM rollouts
+        const [source] = yield* sql<Source>`
+          SELECT agent_handle, status, connection_id, model_id FROM rollouts
           WHERE id = ${sourceRolloutId} AND chat_id = ${parent.chat_id} AND spawned_by_call_id = ${callId}
             AND spawned_by_rollout_id IN (SELECT value FROM json_each(${JSON.stringify(chain)}))`
         if (!source) return { refused: "not_found" as const }
+        // One still running is carried on by nothing else (a message's continuation, say).
+        if (source.status === "running" || source.status === "created") return { refused: "running" as const }
+        yield* ownModel(sql, userId, source)
         const now = Date.now()
         yield* sql`INSERT INTO rollouts (id, chat_id, fork_id, kind, status, slot_id, leaf_slot_id, parent_rollout_id,
             role, mode, connection_id, model_id, request_class, step_count, created_at, started_at, updated_at,
@@ -48,7 +72,8 @@ export const makeSubagentResumeHandlers = Effect.gen(function* () {
             model_id, request_class, ${steps}, ${now}, ${now}, ${now}, ${parentRolloutId}, ${callId}, agent_handle
           FROM rollouts WHERE id = ${sourceRolloutId}`
         yield* sql`INSERT INTO rollout_payloads (rollout_id, context_snapshot_json, transcript_json)
-          SELECT ${rolloutId}, context_snapshot_json, ${transcript} FROM rollout_payloads WHERE rollout_id = ${sourceRolloutId}`
+          SELECT ${rolloutId}, ${versionId === undefined ? sql`context_snapshot_json` : sql`json_set(context_snapshot_json, '$.subagent.versionId', ${versionId})`},
+            ${transcript} FROM rollout_payloads WHERE rollout_id = ${sourceRolloutId}`
         for (const id of keptCalls)
           yield* sql`INSERT INTO rollout_receipts (rollout_id, tool_call_id, result_json, is_error, created_at)
             SELECT ${rolloutId}, tool_call_id, result_json, is_error, ${now} FROM rollout_receipts
@@ -81,7 +106,8 @@ export const makeSubagentResumeHandlers = Effect.gen(function* () {
       keptCalls,
       background,
       perRun,
-      runCost
+      runCost,
+      versionId
     }) =>
       Effect.gen(function* () {
         const [parent] = yield* sql<{
@@ -100,24 +126,25 @@ export const makeSubagentResumeHandlers = Effect.gen(function* () {
         if (parent.status !== "running") return { refused: "not_running" as const }
         // A subagent of this run or one it carries on from, and not one still running.
         const chain = yield* chainOf(sql, parentRolloutId)
-        const [source] = yield* sql<{ readonly agent_handle: string; readonly status: string }>`
-          SELECT agent_handle, status FROM rollouts
+        const [source] = yield* sql<Source>`
+          SELECT agent_handle, status, connection_id, model_id FROM rollouts
           WHERE id = ${sourceRolloutId} AND chat_id = ${parent.chat_id}
             AND spawned_by_rollout_id IN (SELECT value FROM json_each(${JSON.stringify(chain)}))`
         if (!source) return { refused: "not_found" as const }
         if (source.status === "running" || source.status === "created") return { refused: "running" as const }
-        // Counted like a new one (§6.2: continuations count); a run's own resumed children don't.
-        const [started] = yield* sql<{ n: number }>`
-          SELECT count(*) AS n FROM rollouts r WHERE r.spawned_by_rollout_id = ${parentRolloutId}
-            AND NOT EXISTS (SELECT 1 FROM rollouts s WHERE s.id = r.parent_rollout_id
-              AND s.spawned_by_call_id = r.spawned_by_call_id)`
-        if (started!.n >= (perRun ?? 16)) return { refused: "limit" as const }
-        if (runCost !== undefined) {
-          const [spent] = yield* sql<{ cost: number | null }>`
-            SELECT sum(q.cost) AS cost FROM rollouts r JOIN llm_requests q ON q.rollout_id = r.id
-            WHERE r.spawned_by_rollout_id = ${parentRolloutId}`
-          if ((spent?.cost ?? 0) >= runCost) return { refused: "spent" as const }
-        }
+        yield* ownModel(sql, userId, source)
+        // Counted like a new one (§6.2: continuations count), per reply across its Stops and
+        // Resumes; a child resumed with it doesn't count again.
+        const reply = yield* replySubagents(sql, parentRolloutId)
+        if (reply.filter((r) => !r.resumed).length >= (perRun ?? 16)) return { refused: "limit" as const }
+        if (
+          runCost !== undefined &&
+          (yield* spendOf(
+            sql,
+            reply.map((r) => r.id)
+          )).cost >= runCost
+        )
+          return { refused: "spent" as const }
         const now = Date.now()
         yield* sql`INSERT INTO rollouts (id, chat_id, fork_id, kind, status, slot_id, leaf_slot_id, parent_rollout_id,
             role, mode, connection_id, model_id, request_class, step_count, created_at, started_at, updated_at,
@@ -128,7 +155,8 @@ export const makeSubagentResumeHandlers = Effect.gen(function* () {
         yield* sql`INSERT INTO rollout_payloads (rollout_id, context_snapshot_json, transcript_json)
           SELECT ${rolloutId}, json_set(context_snapshot_json, '$.subagent.continued', json('true'),
               '$.subagent.background', json(${background ? "true" : "false"}),
-              '$.subagent.spawnedBy', ${parentRolloutId}, '$.subagent.callId', ${callId}),
+              '$.subagent.spawnedBy', ${parentRolloutId}, '$.subagent.callId', ${callId},
+              '$.subagent.versionId', ${versionId ?? null}),
             ${transcript}
           FROM rollout_payloads WHERE rollout_id = ${sourceRolloutId}`
         for (const id of keptCalls)

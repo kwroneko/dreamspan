@@ -5565,7 +5565,7 @@ const storage: Record<
         userId: actor.user.id,
         rolloutId: owner.chat.rolloutId,
         handle: "research-1",
-        calls: ["call_1"]
+        calls: [{ id: "call_1", result: false, subagent: null }]
       }),
       "NotFound"
     ),

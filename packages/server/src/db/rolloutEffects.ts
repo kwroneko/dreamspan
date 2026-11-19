@@ -76,10 +76,14 @@ export const makeRolloutEffectHandlers = (steps: LibrarySteps) => {
         }>`
           SELECT r.chat_id, r.fork_id, v.id AS version_id, v.slot_id, r.status
           FROM rollouts r JOIN chats c ON c.id = r.chat_id
-          -- A subagent's state is its reply's (spec/SUBAGENTS.md §8): attached to that version.
+          -- A subagent's state is its reply's (spec/SUBAGENTS.md §8): attached to the message that
+          -- holds the call that started it, which a reply that posts several messages knows
+          -- from the child's snapshot; else its newest.
           JOIN versions v ON v.rollout_id = coalesce(r.spawned_by_rollout_id, r.id)
+          LEFT JOIN rollout_payloads p ON p.rollout_id = r.id AND r.spawned_by_rollout_id IS NOT NULL
           WHERE r.id = ${rolloutId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND v.deleted_at IS NULL
-          ORDER BY (v.status = 'generating') DESC, v.created_at DESC, v.id DESC LIMIT 1`
+          ORDER BY (v.id IS json_extract(p.context_snapshot_json, '$.subagent.versionId')) DESC,
+            (v.status = 'generating') DESC, v.created_at DESC, v.id DESC LIMIT 1`
         if (!rollout) return yield* new NotFound({ entity: "rollout", id: rolloutId })
         const [receipt] = yield* sql<{ readonly result_json: string }>`
           SELECT result_json FROM rollout_receipts WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`

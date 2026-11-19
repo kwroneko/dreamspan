@@ -8,6 +8,22 @@ import { toRolloutEffect } from "./workshopEffects.ts"
 
 type Sql = SqlClient.SqlClient
 
+/** How many runs back a resume's approval or effects are looked for. */
+const RESUME_DEPTH = 64
+
+/**
+ * The run and the runs it was resumed from, nearest first: through resumed versions' sources,
+ * not `parent_rollout_id`, which a run carrying on the previous turn's also sets (bounded).
+ */
+export const resumeLineage = (sql: Sql, rolloutId: string) =>
+  sql<{ id: string; depth: number }>`WITH RECURSIVE up(id, depth) AS (
+      SELECT ${rolloutId}, 0
+      UNION SELECT src.rollout_id, up.depth + 1 FROM up
+        JOIN versions v ON v.rollout_id = up.id AND v.origin = 'resumed' AND v.source_version_id IS NOT NULL
+        JOIN versions src ON src.id = v.source_version_id
+        WHERE src.rollout_id IS NOT NULL AND up.depth < ${RESUME_DEPTH}
+    ) SELECT id, min(depth) AS depth FROM up GROUP BY id ORDER BY depth`
+
 interface Spawn {
   readonly id: string
   readonly spawned_by_rollout_id: string
