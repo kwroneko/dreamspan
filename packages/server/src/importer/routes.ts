@@ -10,7 +10,11 @@ import { ImportIssue, ImportReport } from "@dreamspan/shared/importReport.ts"
 import { ExportFormat as ExportFormatSchema, ImportResult } from "@dreamspan/shared/libraryImport.ts"
 import { CardReplacePreview } from "@dreamspan/shared/cardReplace.ts"
 import { RefId } from "@dreamspan/shared/library.ts"
-import { DraftKey, entityDraftTarget } from "@dreamspan/shared/drafts.ts"
+import { DraftKey, entityDraftTarget, fileDraftKey } from "@dreamspan/shared/drafts.ts"
+import { FILES_TOP } from "@dreamspan/shared/files.ts"
+import { FileDraftSave } from "@dreamspan/shared/filesApi.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
+import { resolveFilesPath } from "../files/environment.ts"
 import { remoteOf } from "@dreamspan/shared/cardSources.ts"
 import { EditorDraftSave } from "@dreamspan/shared/editorApi.ts"
 import { ComposerBeacon } from "@dreamspan/shared/composerApi.ts"
@@ -136,7 +140,9 @@ const LeavingDrafts = Schema.Struct({
   userDrafts: Schema.optionalKey(Schema.Array(UserDraftSave).check(Schema.isMaxLength(50))),
   summaries: Schema.optionalKey(Schema.Array(SummaryDraftSave).check(Schema.isMaxLength(50))),
   /** Message editors' text, from this browser's copies (`messageDraft.ts`). */
-  messages: Schema.optionalKey(Schema.Array(MessageDraftSave).check(Schema.isMaxLength(50)))
+  messages: Schema.optionalKey(Schema.Array(MessageDraftSave).check(Schema.isMaxLength(50))),
+  /** Edits of files of the user's Files, from this browser's copies (`files/fileDraft.ts`). */
+  files: Schema.optionalKey(Schema.Array(FileDraftSave).check(Schema.isMaxLength(20)))
 })
 
 /** `attachment` with an ASCII fallback name and the real one percent-encoded (RFC 6266). */
@@ -1089,7 +1095,7 @@ export const layer = Layer.unwrap(
      * Editor and composer drafts a page sends as it closes (`fetch` with `keepalive`), since its
      * WebSocket goes with it, and the browser copies Browser recovery retries (summaries' and
      * message editors' too). Each is saved as its own RPC (`SaveEditorDraft`, `SaveComposer`,
-     * `SaveSummaryDraft`, `SaveMessageDraft`) would: the
+     * `SaveSummaryDraft`, `SaveMessageDraft`, `SaveFileDraft`) would: the
      * writer decides a conflict with another tab's save in the same transaction (drafts.ts).
      */
     const leavingDrafts = Effect.gen(function* () {
@@ -1174,6 +1180,20 @@ export const layer = Layer.unwrap(
           expectedRowVersion: message.expectedRowVersion,
           expectedSession: message.expectedSession,
           baseRevision: message.target._tag === "Queue" ? String(message.target.rowVersion) : null
+        })
+        recovered += saved.recovered
+      }
+      for (const { path, baseSha256, ...save } of input.value.files ?? []) {
+        const full = yield* Effect.try({
+          try: () => resolveFilesPath(path, FILES_TOP).full,
+          catch: () => new NotFound({ entity: "file", id: path })
+        })
+        if (full !== path || full === FILES_TOP) return jsonError(404, "there's no such file")
+        const saved = yield* writer.SaveDraft({
+          userId: user.id,
+          key: fileDraftKey(full),
+          ...save,
+          baseRevision: baseSha256
         })
         recovered += saved.recovered
       }

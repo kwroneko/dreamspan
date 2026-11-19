@@ -73,7 +73,9 @@ export const storageKinds = makeRegistry<StorageKind>([
       "user_field",
       "queue_edit",
       "insert",
-      "remote_card"
+      "remote_card",
+      // A text file of the user's Files being edited (spec/FILES-AND-ENVIRONMENT.md §8.2).
+      "file"
     ]
   },
   {

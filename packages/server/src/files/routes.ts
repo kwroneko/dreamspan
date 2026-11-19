@@ -20,6 +20,8 @@ import {
   isWithin,
   keepBothName,
   nameProblem,
+  TEXT_OPEN_MAX_BYTES,
+  type TextFile,
   UploadConflict,
   type FolderListing,
   type UploadOutcome
@@ -275,6 +277,10 @@ const answering = <R>(effect: Effect.Effect<HttpServerResponse.HttpServerRespons
 
 const PathBody = Schema.Struct({ path: Schema.String.check(Schema.isMaxLength(4096)) })
 const RestoreBody = Schema.Struct({ binItemId: Schema.String.check(Schema.isMaxLength(64)) })
+const SHA256 = /^[0-9a-f]{64}$/
+
+const sha256Of = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
+
 const MoveBody = Schema.Struct({
   from: Schema.String.check(Schema.isMaxLength(4096)),
   to: Schema.String.check(Schema.isMaxLength(4096))
@@ -503,6 +509,45 @@ export const filesRoutes = Layer.unwrap(
       })
     })
 
+    /**
+     * A text file for the editor (§8.2): its text and the hash of its bytes, which a save names
+     * as `base`. Bytes that aren't UTF-8 are refused (415): the editor would change them on save.
+     */
+    const text = Effect.gen(function* () {
+      const query = yield* queryOf
+      const { root, full, segments } = yield* place(query.get("path") ?? "")
+      if (segments.length === 0) return refuse(400, "Name a file.")
+      const info = yield* Effect.tryPromise(() => statPath(root, segments))
+      if (!info) return refuse(404, "Not found. It may have been moved or deleted.")
+      if (!info.isFile()) return refuse(400, "Only a file can be opened.")
+      if (info.size > TEXT_OPEN_MAX_BYTES)
+        return refuse(413, `Text files over ${formatByteSize(TEXT_OPEN_MAX_BYTES)} open read-only, a page at a time.`)
+      const read = yield* Effect.tryPromise(() => readRegularFile(root, segments, TEXT_OPEN_MAX_BYTES))
+      if (read.truncated)
+        return refuse(413, `Text files over ${formatByteSize(TEXT_OPEN_MAX_BYTES)} open read-only, a page at a time.`)
+      let decoded: string
+      try {
+        decoded = new TextDecoder("utf-8", { fatal: true }).decode(read.bytes)
+      } catch {
+        return refuse(415, "This file isn't plain text, so the editor can't open it.")
+      }
+      const file: TextFile = {
+        path: full,
+        text: decoded,
+        sha256: sha256Of(read.bytes),
+        size: read.bytes.byteLength,
+        mtimeMs: read.info.mtimeMs
+      }
+      return HttpServerResponse.jsonUnsafe(file, { headers: { "cache-control": "private, no-store" } })
+    })
+
+    /** The hash of a file as it is now, or null when it isn't a regular file the editor could have opened. */
+    const currentHash = (root: string, segments: ReadonlyArray<string>) =>
+      Effect.tryPromise(() => readRegularFile(root, segments, TEXT_OPEN_MAX_BYTES)).pipe(
+        Effect.map((read) => (read.truncated ? null : sha256Of(read.bytes))),
+        Effect.catch(() => Effect.succeed(null))
+      )
+
     const upload = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
       if (request.headers["content-type"] !== "application/octet-stream")
@@ -510,6 +555,10 @@ export const filesRoutes = Layer.unwrap(
       const query = yield* queryOf
       const conflict = Schema.decodeUnknownOption(UploadConflict)(query.get("conflict") ?? "ask")
       if (Option.isNone(conflict)) return refuse(400, "conflict must be ask, keep, replace or skip.")
+      // An editor save (§8.2): it replaces the file only while it still is what the editor opened.
+      const base = query.get("base")
+      if (base !== null && (!SHA256.test(base) || conflict.value !== "replace"))
+        return refuse(400, "base must be a SHA-256, with conflict=replace.")
       const declared = Number(request.headers["content-length"] ?? "0")
       if (declared > MAX_FILE_UPLOAD_BYTES)
         return refuse(413, `A file can be at most ${formatByteSize(MAX_FILE_UPLOAD_BYTES)}.`)
@@ -535,6 +584,14 @@ export const filesRoutes = Layer.unwrap(
         let replacedBytes = 0
         /** What replacing frees for sure: a file with other links keeps its bytes. */
         let freesOnReplace = 0
+        if (base !== null) {
+          const now = existing?.isFile() ? yield* currentHash(root, segments) : null
+          if (now !== base)
+            return HttpServerResponse.jsonUnsafe(
+              { changed: true, message: existing ? "It changed since you opened it." : "It isn't there any more." },
+              { status: 409 }
+            )
+        }
         if (existing) {
           if (conflict.value === "ask") return HttpServerResponse.jsonUnsafe({ taken: true }, { status: 409 })
           if (conflict.value === "skip")
@@ -564,7 +621,10 @@ export const filesRoutes = Layer.unwrap(
           )
         )
         const keptBytes =
-          outcome === "replaced" ? yield* keepVersion(userId, root, segments, `${parentPath}/${name}`, "upload") : 0
+          outcome === "replaced"
+            ? yield* keepVersion(userId, root, segments, `${parentPath}/${name}`, base === null ? "upload" : "editor")
+            : 0
+        const digest = createHash("sha256")
         let taken = 0
         /** What the quota's room took for this upload: given back whole on failure. */
         const held = quota.hold(userId)
@@ -600,7 +660,10 @@ export const filesRoutes = Layer.unwrap(
                   quota.overMessage(room.usedBytes + received - replacedBytes, room.quotaBytes, "upload files")
                 )
                 done()
-              } else done(null, chunk)
+              } else {
+                digest.update(chunk)
+                done(null, chunk)
+              }
             }
           })
           idle = setTimeout(() => counter.destroy(new Answer(408, "The file stopped arriving.")), UPLOAD_IDLE_MS)
@@ -632,7 +695,11 @@ export const filesRoutes = Layer.unwrap(
           }
         }).pipe(Effect.ensuring(Effect.sync(() => quota.wrote(userId, keptBytes))))
         changed(userId, [`${parentPath}/${name}`])
-        return HttpServerResponse.jsonUnsafe({ path: `${parentPath}/${name}`, outcome } satisfies UploadOutcome)
+        return HttpServerResponse.jsonUnsafe({
+          path: `${parentPath}/${name}`,
+          outcome,
+          sha256: digest.digest("hex")
+        } satisfies UploadOutcome)
       }).pipe(Effect.ensuring(Effect.promise(() => dir.close())))
     })
 
@@ -673,6 +740,8 @@ export const filesRoutes = Layer.unwrap(
             yield* writer
               .RecordFolderMove({ userId: from.userId as never, from: from.full, to: to.full })
               .pipe(Effect.catchCause((cause) => Effect.logWarning("recording a folder move failed", cause)))
+          // What names it (unsaved edits) follows it to its new path (§1.1).
+          yield* writer.MoveFileReferences({ userId: from.userId as never, from: from.full, to: to.full })
           changed(from.userId, [from.full, to.full])
           return HttpServerResponse.jsonUnsafe({ path: to.full })
         }).pipe(Effect.ensuring(Effect.promise(() => target.close())))
@@ -829,6 +898,7 @@ export const filesRoutes = Layer.unwrap(
     return Layer.mergeAll(
       HttpRouter.add("GET", FILES_ROUTES.list, authenticated(list)),
       HttpRouter.add("GET", FILES_ROUTES.raw, authenticated(raw)),
+      HttpRouter.add("GET", FILES_ROUTES.text, authenticated(text)),
       HttpRouter.add("GET", FILES_ROUTES.zip, authenticated(zip)),
       HttpRouter.add("POST", FILES_ROUTES.upload, authenticated(upload)),
       HttpRouter.add("POST", FILES_ROUTES.folder, authenticated(folder)),

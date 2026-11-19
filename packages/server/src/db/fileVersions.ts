@@ -86,6 +86,14 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
           })}`
         return { mediaId: row!.id, mime: row!.mime }
       }).pipe(transaction(sql, "RecordAttachmentCopy")),
+    MoveFileReferences: ({ userId, from, to }) =>
+      Effect.gen(function* () {
+        // `from` itself, and every path below it: the prefix swapped for `to`.
+        const below = `${from}/`
+        yield* sql`UPDATE OR IGNORE drafts SET target_id = ${to} || substr(target_id, ${from.length + 1})
+          WHERE user_id = ${userId} AND target_kind = 'file'
+            AND (target_id = ${from} OR substr(target_id, 1, ${below.length}) = ${below})`
+      }).pipe(transaction(sql, "MoveFileReferences")),
     PruneFileVersions: ({ userId, before, limit }) =>
       Effect.gen(function* () {
         const gone = yield* sql<{ media_id: string | null }>`DELETE FROM file_versions WHERE id IN (

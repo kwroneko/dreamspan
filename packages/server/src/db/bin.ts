@@ -1669,6 +1669,8 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         }
         case "remote_card":
           return `A card not in your cards › ${key.field}`
+        case "file":
+          return `File ${key.targetId}`
       }
     })
 

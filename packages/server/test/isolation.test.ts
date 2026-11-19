@@ -765,6 +765,71 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         "NotFound"
       )
   },
+  // A file draft is keyed by its user: the same path names each account's own edit, never another's.
+  GetFileDraft: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const save = {
+          path: `/files/isolation-${owner.user.id}.txt`,
+          draftId: null,
+          expectedRowVersion: null,
+          expectedSession: null,
+          baseSha256: "0".repeat(64)
+        }
+        yield* owner.api.SaveFileDraft({ ...save, content: "owner's text" })
+        assert.isNull(yield* actor.api.GetFileDraft({ path: save.path }))
+      })
+  },
+  SaveFileDraft: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const save = {
+          path: `/files/isolation-save-${owner.user.id}.txt`,
+          draftId: null,
+          expectedRowVersion: null,
+          expectedSession: null,
+          baseSha256: "0".repeat(64)
+        }
+        const mine = yield* owner.api.SaveFileDraft({ ...save, content: "owner's text" })
+        // Naming the owner's draft id from another account is refused, and the owner's text stays.
+        yield* refused(
+          actor.api.SaveFileDraft({
+            ...save,
+            draftId: mine.id,
+            expectedRowVersion: mine.rowVersion,
+            content: "planted"
+          }),
+          "NotFound"
+        )
+        assert.strictEqual((yield* owner.api.GetFileDraft({ path: save.path }))?.content, "owner's text")
+      })
+  },
+  EndFileDraft: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const mine = yield* owner.api.SaveFileDraft({
+          path: `/files/isolation-end-${owner.user.id}.txt`,
+          draftId: null,
+          expectedRowVersion: null,
+          expectedSession: null,
+          baseSha256: "0".repeat(64),
+          content: "owner's text"
+        })
+        yield* refused(
+          actor.api.EndFileDraft({
+            path: `/files/isolation-end-${owner.user.id}.txt`,
+            draftId: mine.id,
+            expectedRowVersion: mine.rowVersion,
+            outcome: "discarded"
+          }),
+          "NotFound"
+        )
+        assert.strictEqual(
+          (yield* owner.api.GetFileDraft({ path: `/files/isolation-end-${owner.user.id}.txt` }))?.status,
+          "active"
+        )
+      })
+  },
   SummaryDraftHistory: {
     probe: (actor, owner) =>
       refused(actor.api.SummaryDraftHistory({ summaryId: owner.summary.id, limit: 10 }), "NotFound")

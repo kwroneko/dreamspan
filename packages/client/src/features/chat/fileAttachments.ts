@@ -3,7 +3,7 @@
 // which saves each file in the working folder's Attachments folder and attaches it by path;
 // without one (a story chat), the composer takes images only, as before. A plugin can replace it.
 import type { AttachedFile } from "@dreamspan/shared/files.ts"
-import { useSyncExternalStore } from "react"
+import { useSyncExternalStore, type ComponentType } from "react"
 import { makeRegistry } from "../../registry.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
@@ -30,6 +30,13 @@ export interface FileAttachments {
   /** Where a message's file opens without a chat (the copy as sent), for message previews. */
   readonly copyUrl: (mediaId: string, name: string, download?: boolean) => string
   readonly showHref: (path: string) => string
+  /**
+   * Whether a file's copy as sent opens in a viewer (§6.1, §8.2), read-only; a type no viewer
+   * shows downloads.
+   */
+  readonly opens?: (name: string) => boolean
+  /** The viewer `opens` says shows the file. */
+  readonly Viewer?: ComponentType<{ readonly name: string; readonly url: string }>
 }
 
 /** @public The files feature registers its workshop attachments here. */

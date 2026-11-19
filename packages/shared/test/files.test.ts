@@ -76,7 +76,10 @@ describe("file paths", () => {
   })
 
   it("picks a viewer by the name, downloading what it doesn't know", () => {
-    expect(viewOf("notes.MD")).toBe("text")
+    expect(viewOf("notes.MD")).toBe("markdown")
+    expect(viewOf("keepers.csv")).toBe("table")
+    expect(viewOf("page.html")).toBe("html")
+    expect(viewOf("icon.svg")).toBe("text")
     expect(viewOf("Makefile")).toBe("text")
     expect(viewOf("photo.webp")).toBe("image")
     expect(viewOf("clip.mp4")).toBe("video")

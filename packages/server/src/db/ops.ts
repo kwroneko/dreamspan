@@ -2900,6 +2900,20 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     error: StorageError
   }),
   /**
+   * A file or folder renamed or moved in the app (spec/FILES-AND-ENVIRONMENT.md §1.1): the stored
+   * references to it and to what's inside it follow, in one transaction: unsaved edits (`file`
+   * drafts). One already at the new path keeps its place.
+   */
+  Rpc.make("MoveFileReferences", {
+    payload: {
+      userId: UserId,
+      from: Schema.String.check(Schema.isMaxLength(4096)),
+      to: Schema.String.check(Schema.isMaxLength(4096))
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
+  /**
    * Retention (§1.3): file versions made before `before` (one account's, or every account's),
    * at most `limit` rows per call, oldest first; attachment copies (origin `attachment`) of any
    * age that no message, history entry or active composer attachment of their owner names; and

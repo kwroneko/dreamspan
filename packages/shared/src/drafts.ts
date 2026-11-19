@@ -27,7 +27,9 @@ export const DraftTargetKind = Schema.Literals([
   "queue_edit",
   "insert",
   // A field of a card on a card source, before it is added (spec/CARD-SOURCES.md §4.3): `<source>:<remote>`.
-  "remote_card"
+  "remote_card",
+  // A text file of the user's Files being edited (spec/FILES-AND-ENVIRONMENT.md §8.2): its path.
+  "file"
 ])
 
 /** What a draft is for: the composer of a chat, the edit of a version, a field of a ref... */
@@ -72,6 +74,12 @@ export const composerKey = (chatId: string, forkId: string | null) =>
  */
 export const insertDraftKey = (chatId: string, forkId: string, anchor: string | null) =>
   new DraftKey({ targetKind: "insert", targetId: chatId, field: `${forkId}:${anchor ?? ""}` })
+
+/**
+ * The unsaved edit of a text file of the user's Files (spec/FILES-AND-ENVIRONMENT.md §8.2): one
+ * per path, its base revision the SHA-256 of the file's bytes it was typed on.
+ */
+export const fileDraftKey = (path: string) => new DraftKey({ targetKind: "file", targetId: path, field: "" })
 
 const DraftStatus = Schema.Literals(["active", "committed", "discarded"])
 

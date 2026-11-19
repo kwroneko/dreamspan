@@ -439,6 +439,7 @@ export function FileBrowser(props: FileBrowserProps) {
           name={opened}
           entry={entry}
           loading={current === null}
+          readOnly={readOnly}
           onClose={() => onOpened(null)}
           tab={props.onOpenTab ? () => props.onOpenTab!(folder, opened) : undefined}
           tabHref={props.tabHref?.(folder, opened)}
@@ -998,6 +999,7 @@ function OpenedFile({
   name,
   entry,
   loading,
+  readOnly,
   onClose,
   tab,
   tabHref
@@ -1007,6 +1009,7 @@ function OpenedFile({
   name: string
   entry: FileEntry | null
   loading: boolean
+  readOnly: boolean
   onClose: () => void
   tab: (() => void) | undefined
   tabHref: string | undefined
@@ -1026,7 +1029,18 @@ function OpenedFile({
         {name} isn’t in this folder any more. It may have been renamed, moved or deleted.
       </p>
     )
-  else if (Viewer) body = <Viewer path={path} name={name} size={entry.size} source={source} />
+  else if (Viewer)
+    body = (
+      <Viewer
+        key={path}
+        path={path}
+        url={source.rawUrl(path)}
+        name={name}
+        size={entry.size}
+        source={source}
+        readOnly={readOnly}
+      />
+    )
   else body = <NoViewer name={name} size={entry.size} />
   return (
     <section aria-label={name} className="flex min-w-0 flex-col gap-2" data-file-open={path}>

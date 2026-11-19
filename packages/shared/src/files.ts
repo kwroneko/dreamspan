@@ -33,8 +33,30 @@ export const FILES_ROUTES = {
    */
   attach: "/files/attach",
   /** GET `?id=&name=` (and `&download=1`): an attachment's copy as sent, served as `raw` serves files. */
-  attachment: "/files/attachment"
+  attachment: "/files/attachment",
+  /**
+   * GET `?path=`: a text file for the editor (`TextFile`), with the hash of its bytes, which an
+   * editor save names as `base` (§8.2). At most `TEXT_OPEN_MAX_BYTES`; 415 for bytes that aren't UTF-8.
+   */
+  text: "/files/text"
 } as const
+
+/** The largest text file the editor opens whole; a larger one is shown read-only, a page at a time (§8.2). */
+export const TEXT_OPEN_MAX_BYTES = 5 * 1024 * 1024
+
+/** The longest text the editor lets you change: what an unsaved edit's draft can hold. */
+export const TEXT_EDIT_MAX_CHARS = 1_000_000
+
+/** A text file as the editor opens it: its text, and what a save checks it against. */
+export const TextFile = Schema.Struct({
+  path: Schema.String,
+  text: Schema.String,
+  /** SHA-256 of the file's bytes, hex: an editor save sends it back as `base`. */
+  sha256: Schema.String,
+  size: Schema.Number,
+  mtimeMs: Schema.Number
+})
+export type TextFile = typeof TextFile.Type
 
 /** The largest file a message can attach; larger ones stay in Files for the assistant to open (§6.1). */
 export const ATTACHMENT_MAX_BYTES = 64 * 1024 * 1024
@@ -85,7 +107,9 @@ export type UploadConflict = typeof UploadConflict.Type
 export const UploadOutcome = Schema.Struct({
   /** Where it was written: another name under Keep both. */
   path: Schema.String,
-  outcome: Schema.Literals(["written", "replaced", "skipped"])
+  outcome: Schema.Literals(["written", "replaced", "skipped"]),
+  /** SHA-256 of what was written, hex (not for a skip): the base of the next editor save. */
+  sha256: Schema.optionalKey(Schema.String)
 })
 export type UploadOutcome = typeof UploadOutcome.Type
 
@@ -180,27 +204,26 @@ export const sortEntries = (entries: ReadonlyArray<FileEntry>, by: FileSort): Re
 
 // --- Which viewer --------------------------------------------------------------------------
 
-export type FileView = "text" | "image" | "video" | "audio" | "pdf" | "download"
+export type FileView = "text" | "markdown" | "table" | "html" | "image" | "video" | "audio" | "pdf" | "download"
 
 const VIEWS: ReadonlyArray<readonly [FileView, ReadonlyArray<string>]> = [
   ["image", ["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp"]],
   ["video", ["mp4", "webm", "mov", "m4v", "ogv"]],
   ["audio", ["mp3", "wav", "ogg", "oga", "m4a", "flac", "opus"]],
   ["pdf", ["pdf"]],
+  ["markdown", ["md", "markdown"]],
+  ["table", ["csv", "tsv"]],
+  ["html", ["html", "htm"]],
   [
     "text",
     [
       "txt",
-      "md",
-      "markdown",
       "json",
       "jsonl",
       "yaml",
       "yml",
       "toml",
       "ini",
-      "csv",
-      "tsv",
       "log",
       "js",
       "mjs",
@@ -210,8 +233,6 @@ const VIEWS: ReadonlyArray<readonly [FileView, ReadonlyArray<string>]> = [
       "jsx",
       "css",
       "scss",
-      "html",
-      "htm",
       "xml",
       "svg",
       "py",
@@ -243,7 +264,7 @@ const VIEWS: ReadonlyArray<readonly [FileView, ReadonlyArray<string>]> = [
   ]
 ]
 
-/** The viewer a file opens in, by its name: what isn't known downloads (§8.2). */
+/** The viewer a file opens in, by its name: what isn't known downloads (§8.2). SVG is shown as its text. */
 export const viewOf = (name: string): FileView => {
   const lower = name.toLowerCase()
   const dot = lower.lastIndexOf(".")
