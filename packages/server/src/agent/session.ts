@@ -60,7 +60,7 @@ import {
   missingTool,
   resolveDispatch
 } from "./dispatcher.ts"
-import { liveSuffix, nudgesIn } from "./messages.ts"
+import { cutAnswersIn, liveSuffix, nudgesIn, sendOnlyTranscript } from "./messages.ts"
 import { loadedSet, loadPoints, type Skill, type ToolLoadingWire } from "./toolLoading.ts"
 import { executionRegistry } from "../execution.ts"
 
@@ -392,7 +392,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       // A resumed run counts the requests it made before, so its turn cap still holds.
       let requests = seed?.slice(historical).filter((m) => m.role === "assistant").length ?? 0
       /** Text a stop cut off: the first request sends it as the reply's start, and its output goes on from it. */
-      let continuation = run.resume?.continuation
+      // Under the send tool alone, text is never the reply, so it's never carried on (Resume
+      // writes the turn again with its tools, api/agent.ts): this only guards that.
+      let continuation = plan.contract === "send_message" ? undefined : run.resume?.continuation
       /** What this turn streamed into the body: any output, and text in particular. */
       const body = { text: false, prose: false }
       let partialSavedAt = Date.now()
@@ -1003,9 +1005,15 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           thinkingLevel: "off",
           tools: agentTools,
           messages: seed
-            ? seed.slice()
+            ? sendOnly
+              ? sendOnlyTranscript(seed)
+              : seed.slice()
             : [
-                { role: "rpRequest", timestamp: Date.now() },
+                {
+                  role: "rpRequest",
+                  timestamp: Date.now(),
+                  ...(sendOnly ? { contract: "send_message" as const } : {})
+                },
                 ...(cap <= 1
                   ? [
                       {
@@ -1122,12 +1130,14 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           const failed = message.stopReason === "error" || message.stopReason === "aborted"
           if (plain && !failed && sendOnly) {
             if (body.text) emit({ restart: true })
+            // The cap's "write now" takes precedence, even over running out: its answer is the reply (§3.5).
+            if (requests >= cap - 1) return { action: "continue" }
             if (nudges >= SEND_NUDGES) {
-              exhausted = contractFailure(nudges + 1)
+              // Every plain turn of the reply: one before each nudge, this one, and those Resume cut.
+              exhausted = contractFailure(nudges + 1 + cutAnswersIn(agent.state.messages.slice(historical)))
               return { action: "end" }
             }
-            // The cap's "write now" takes precedence: its answer is the reply (§3.5).
-            if (requests < cap - 1) pendingNudge = ++nudges
+            pendingNudge = ++nudges
             return { action: "continue" }
           }
           return undefined

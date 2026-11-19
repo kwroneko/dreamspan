@@ -1,4 +1,4 @@
-import { stepsOf } from "../agent/steps.ts"
+import { counted, stepsOf } from "../agent/steps.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { FrozenTool } from "../agent/tools.ts"
 import type { StepsSummary } from "@rp/shared/agent.ts"
@@ -272,7 +272,7 @@ const versionSteps = (row: VersionRow): { readonly steps?: StepsSummary; readonl
     final: boolean
   }
   const count = material.transcript
-    ? stepsOf(material.transcript, material.tools, !!material.final, row.id).filter((s) => s.kind === "tool").length
+    ? counted(stepsOf(material.transcript, material.tools, !!material.final, row.id))
     : 0
   const summary = row.steps_json ? (JSON.parse(row.steps_json) as StepsSummary) : { ms: null }
   return count ? { steps: { count, ms: summary.ms }, agent: true } : { agent: true }

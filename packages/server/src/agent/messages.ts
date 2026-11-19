@@ -7,7 +7,15 @@ declare module "@earendil-works/pi-agent-core" {
   interface CustomAgentMessages {
     rpCompaction: RunSummary
     /** Stands for the frozen assembled request: everything the model is sent before its own turns. */
-    rpRequest: { readonly role: "rpRequest"; readonly timestamp: number }
+    rpRequest: {
+      readonly role: "rpRequest"
+      readonly timestamp: number
+      /**
+       * The run gives its reply with the send tool alone (spec/REPLY-CONTRACT.md §3.2): no plain
+       * turn is the message, so the steps show them all. Never sent.
+       */
+      readonly contract?: "send_message"
+    }
     rpUser: {
       readonly role: "rpUser"
       readonly message: import("../assembler/types.ts").RequestMessage
@@ -23,6 +31,11 @@ declare module "@earendil-works/pi-agent-core" {
       readonly content: string
       readonly timestamp: number
       readonly nudge?: number
+      /**
+       * Answers to this nudge Resume cut and wrote again (each a plain turn the model wrote), so
+       * the failure counts every time it wrote text (§3.4).
+       */
+      readonly answersCut?: number
     }
   }
 }
@@ -50,6 +63,18 @@ export const liveSuffix = (messages: ReadonlyArray<AgentMessage | Message>): Arr
 /** How many times this run has been asked to send its reply: the nudges in its transcript. */
 export const nudgesIn = (messages: ReadonlyArray<AgentMessage>) =>
   messages.filter((m) => m.role === "rpHarness" && typeof (m as { nudge?: unknown }).nudge === "number").length
+
+/** The plain turns that answered a nudge and were cut by a Resume (`answersCut`). */
+export const cutAnswersIn = (messages: ReadonlyArray<AgentMessage>) =>
+  messages.reduce((n, m) => n + (isNudge(m) ? ((m as { answersCut?: number }).answersCut ?? 0) : 0), 0)
+
+/** The transcript with its frozen request marked as the send tool's alone (`rpRequest.contract`). */
+export const sendOnlyTranscript = (messages: ReadonlyArray<AgentMessage>): Array<AgentMessage> => {
+  const at = messages.findIndex((m) => m.role === "rpRequest")
+  return messages.map((m, i) =>
+    i === at ? { ...(m as AgentMessage & { role: "rpRequest" }), contract: "send_message" } : m
+  )
+}
 
 /** Whether `message` is one of the app's asks to send the reply. */
 export const isNudge = (message: AgentMessage | undefined) =>

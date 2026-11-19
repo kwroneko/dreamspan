@@ -113,10 +113,13 @@ export const placedSteps = (
   )
   // Under the send tool, text after the app asked for the reply to be sent is never the message,
   // except the answer to the request cap's "write now" (spec/REPLY-CONTRACT.md §3.2, §3.5).
+  // A run under the send tool alone says so on its frozen request (`rpRequest.contract`): there no
+  // plain turn is the message, nudged or not (one stopped or failed before any nudge too), but the
+  // answer to the cap's "write now".
+  const sendOnly = (messages.find((m) => m.role === "rpRequest") as { contract?: string } | undefined)?.contract
+  const writeNowAnswer = messages[plain - 1]?.role === "rpHarness" && !isNudge(messages[plain - 1])
   const stray =
-    plain >= 0 &&
-    messages.slice(0, plain).some((m) => isNudge(m)) &&
-    !(messages[plain - 1]?.role === "rpHarness" && !isNudge(messages[plain - 1]))
+    plain >= 0 && !writeNowAnswer && (sendOnly === "send_message" || messages.slice(0, plain).some((m) => isNudge(m)))
   // A message sent after a plain turn (one the app asked to be sent) makes that turn a step.
   const noFinalText =
     messages.some((m) => m.role === "toolResult" && (m.details as { versionId?: string } | null)?.versionId) &&
@@ -169,12 +172,20 @@ export const placedSteps = (
     })
   })
   // A turn the app asked to be sent after (a nudge follows it) marks its last step, so the ask is
-  // counted where it shows.
+  // counted where it shows; a turn that wrote nothing shows as an empty text step (part -1: no part).
   messages.forEach((m, index) => {
-    if (!isNudge(m)) return
-    const last = steps.findLastIndex((p) => p.message === index - 1 && p.step.kind !== "tool")
+    if (!isNudge(m) || messages[index - 1]?.role !== "assistant") return
+    const turn = index - 1
+    if (bounds && (turn <= bounds.after || turn > bounds.through)) return
+    const last = steps.findLastIndex((p) => p.message === turn && p.step.kind !== "tool")
     const placed = steps[last]
     if (placed && placed.step.kind !== "tool") steps[last] = { ...placed, step: { ...placed.step, asked: true } }
+    else if (!steps.some((p) => p.message === turn)) {
+      const after = steps.findIndex((p) => p.message > turn)
+      const empty: PlacedStep = { step: { kind: "text", text: "", asked: true }, message: turn, part: -1 }
+      if (after < 0) steps.push(empty)
+      else steps.splice(after, 0, empty)
+    }
   })
   return steps
 }

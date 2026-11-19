@@ -35,7 +35,11 @@ export interface AgentPlan {
     readonly instructions: (
       offered: ReadonlyArray<string>,
       contract: OutputContract,
-      context?: { readonly off: ReadonlyArray<string> }
+      context?: {
+        readonly off: ReadonlyArray<string>
+        /** The reply may pass (`AgentPlan.noReply`); absent: as the contract says by default. */
+        readonly noReply?: boolean
+      }
     ) => string
     /** Card-swap: only the speaking character's card is sent, where the preset puts cards. */
     readonly speakerCardOnly: boolean
@@ -82,7 +86,9 @@ export const defaultMode: OrchestrationMode = {
   plan: ({ state }) => {
     if (state.agentEnabled !== true) return { strategy: "reply", tools: [], contract: "final_text", turnCap: 1 }
     // The send tool by default (spec/REPLY-CONTRACT.md §3.1): text outside it is never the reply.
-    const chosen = state.outputContract === "several" ? "both" : (state.outputContract ?? "send_message")
+    // A workshop's several messages are no story contract (§3.1: one reply, one message): the default.
+    const chosen =
+      state.outputContract == null || state.outputContract === "several" ? "send_message" : state.outputContract
     // Who is present can only be said through the tool: a chat that requires it asks for the
     // reply through the tool even when the older output preference was final text.
     const sendPresence =

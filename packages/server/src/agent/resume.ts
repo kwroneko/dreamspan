@@ -12,6 +12,7 @@ import {
   type ToolResultMessage
 } from "@earendil-works/pi-ai"
 import { isDeepStrictEqual } from "node:util"
+import { isNudge } from "./messages.ts"
 import { placedSteps } from "./steps.ts"
 import type { FrozenTool } from "./tools.ts"
 
@@ -119,6 +120,13 @@ export const planResume = (
   if (last?.role === "assistant" && !last.content.some((p) => p.type === "toolCall")) {
     cut = [kept.pop()!, ...cut]
     policy = continuation === undefined ? "resample" : policy
+    // The nudge it answered remembers it, so the text written stays counted (spec/REPLY-CONTRACT.md §3.4).
+    const asked = kept.at(-1)
+    if (isNudge(asked))
+      kept[kept.length - 1] = {
+        ...(asked as AgentMessage & { role: "rpHarness" }),
+        answersCut: ((asked as { answersCut?: number }).answersCut ?? 0) + 1
+      }
   }
   if (danglingCalls(kept).length > 0 && continuation === undefined) policy = "rerun"
   if (!kept.some((m) => m.role === "rpRequest")) return fresh(messages)

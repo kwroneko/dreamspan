@@ -357,9 +357,21 @@ export const layer = Layer.effect(
             request.initial !== undefined ||
             (slot.entry.version.speakerEntityId !== null &&
               state.playedByMe.includes(slot.entry.version.speakerEntityId))
+          // Another version of a silent line asks for an actual reply (spec/REPLY-CONTRACT.md §3.1):
+          // a reply written where the character already passed may not pass again.
+          const passedHere =
+            !plainTurn && planned.plan.noReply === true && slot.entry.versionCount > 1
+              ? (yield* reader
+                  .ListVersions({ userId, slotId, forkId })
+                  .pipe(
+                    Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("ListVersions"))
+                  )).some((v) => v.id !== versionId && v.mark === "silent")
+              : false
           const plan = plainTurn
             ? { ...planned.plan, strategy: "reply", tools: [], contract: "final_text" as const }
-            : planned.plan
+            : passedHere
+              ? { ...planned.plan, noReply: false }
+              : planned.plan
           if (plan.sendPresence && plan.contract !== "final_text" && (state.contextPerSpeaker ?? "shared") === "shared")
             return yield* new GenerationFailed({
               class: "context_view",
@@ -436,7 +448,7 @@ export const layer = Layer.effect(
                           plan.assembly?.instructions(
                             tools.map((t) => t.id),
                             plan.contract,
-                            { off }
+                            { off, noReply: plan.noReply === true }
                           ) ?? "",
                         speakerCardOnly: plan.assembly?.speakerCardOnly ?? false,
                         ...(plan.assembly?.workshop ? { workshop: true } : {}),

@@ -6,7 +6,12 @@
 export type ReplyContract = "final_text" | "send_message" | "both" | "several"
 
 /** The default text, given the tools actually offered and how the reply is taken. */
-export const agentInstructions = (offered: ReadonlyArray<string>, contract: ReplyContract) =>
+export const agentInstructions = (
+  offered: ReadonlyArray<string>,
+  contract: ReplyContract,
+  /** Whether the reply may pass with no_reply; by default, wherever the send tool alone is the way. */
+  options?: { readonly noReply?: boolean }
+) =>
   [
     offered.length > 0
       ? "Before you write, you can use your tools to check earlier events, summaries, lore and notes, and to keep notes. Use them only when they help."
@@ -14,7 +19,9 @@ export const agentInstructions = (offered: ReadonlyArray<string>, contract: Repl
     contract === "final_text"
       ? "When you're ready, write the reply as your answer, and nothing else."
       : contract === "send_message"
-        ? "When you're ready, send the reply with send_message. If your character says nothing this turn, call no_reply instead."
+        ? (options?.noReply ?? true)
+          ? "When you're ready, send the reply with send_message. If your character says nothing this turn, call no_reply instead."
+          : "When you're ready, send the reply with send_message."
         : "When you're ready, send the reply with send_message, or write it as your answer."
   ]
     .filter(Boolean)

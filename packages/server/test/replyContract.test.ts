@@ -101,6 +101,10 @@ const TOOLS_ON = [
   { key: "agent.tools", value: { tools: [] } }
 ] as const
 
+/** The reply being written, from the chat's events. */
+const generating = (events: ReadonlyArray<ChatEvent>) =>
+  events.flatMap((e) => (e._tag === "Slot" && e.entry.version.status === "generating" ? [e.entry.version] : [])).at(-1)
+
 const resume = (api: Effect.Success<ReturnType<typeof client>>, versionId: VersionId, slotId: PathEntry["slotId"]) =>
   Effect.gen(function* () {
     const me = yield* api.Whoami()
@@ -536,6 +540,203 @@ describe("reply contract", () => {
         ]
       )
       assert.lengthOf(bodies(mock.requests()), 2)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+  it.live(
+    "Resume of a turn stopped in its text, past the third nudge, writes it again with tools on a prefill model, never into the body",
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        let hold = true
+        const mock = yield* scriptedMock((n, _body, res) => {
+          if (n < 3) return plain(res, `Text ${n + 1}.`)
+          if (n === 3 && hold) {
+            // The fourth turn's text, cut off by a stop.
+            res.writeHead(200, { "content-type": "text/event-stream" })
+            res.write(`data: ${JSON.stringify(completionChunks(["Still writing as text"], {})[0])}\n\n`)
+            return
+          }
+          sse(res, toolCall("send_message", { message: "Sent words." }))
+        })
+        const api = yield* client()
+        const events: Array<ChatEvent> = []
+        yield* Effect.forkScoped(
+          generateReply(api, {
+            connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+            // A model that takes an assistant prefill: text cut off could be carried on, but not here.
+            model: { prefill: "assistant" },
+            state: TOOLS_ON,
+            events
+          })
+        )
+        yield* eventually(() => mock.requests().filter((r) => r.path === "/v1/chat/completions").length === 4)
+        const version = generating(events)!
+        yield* Effect.sleep("400 millis")
+        yield* api.StopGeneration({ versionId: version.id })
+        yield* eventually(() => finished(events, version.id) !== undefined)
+        assert.strictEqual(finished(events, version.id)!.status, "stopped")
+        hold = false
+        const entry = yield* resume(api, version.id, version.slotId)
+        // Nothing of the stopped text is carried into the resumed version.
+        assert.strictEqual(entry.version.content, "")
+        yield* eventually(() => finished(events, entry.version.id) !== undefined)
+        const resumed = finished(events, entry.version.id)!
+        assert.strictEqual(resumed.status, "complete", JSON.stringify(resumed.error))
+        assert.strictEqual(resumed.content, "Sent words.")
+        const sent = bodies(mock.requests())
+        const again = sent.at(-1)!
+        // One attempt with tools, answering the third nudge, with no prefill of the stopped text.
+        assert.include(
+          again.tools!.map((t) => t.function.name),
+          "send_message"
+        )
+        assert.deepStrictEqual(again.messages.at(-1), { role: "user", content: NUDGE })
+        assert.strictEqual(nudgesSent(again), 3)
+        assert.isFalse(
+          events.some((e) => e._tag === "Delta" && (e.text.includes("Text") || e.text.includes("Still writing"))),
+          "stray text never streams into a body"
+        )
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    }
+  )
+
+  it.live("a turn stopped in its text before any nudge shows its text in the steps", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* scriptedMock((_n, _body, res) => {
+        res.writeHead(200, { "content-type": "text/event-stream" })
+        res.write(`data: ${JSON.stringify(completionChunks(["Three paragraphs of plain text"], {})[0])}\n\n`)
+      })
+      const api = yield* client()
+      const events: Array<ChatEvent> = []
+      yield* Effect.forkScoped(
+        generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: {},
+          state: TOOLS_ON,
+          events
+        })
+      )
+      yield* eventually(() => mock.requests().some((r) => r.path === "/v1/chat/completions"))
+      const version = generating(events)!
+      yield* Effect.sleep("400 millis")
+      yield* api.StopGeneration({ versionId: version.id })
+      yield* eventually(() => finished(events, version.id) !== undefined)
+      assert.strictEqual(finished(events, version.id)!.content, "")
+      assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: version.id }), [
+        { kind: "text", text: "Three paragraphs of plain text" }
+      ])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a swipe of the silent line isn't offered the pass: it asks for an actual reply", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      // A model that passes whenever it may.
+      const mock = yield* scriptedMock((_n, body, res) =>
+        body.tools?.some((t) => t.function.name === "no_reply")
+          ? sse(res, toolCall("no_reply", {}))
+          : sse(res, toolCall("send_message", { message: "Mira answers." }))
+      )
+      const api = yield* client()
+      const { version, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: TOOLS_ON
+      })
+      assert.strictEqual(version.mark, "silent")
+      const me = yield* api.Whoami()
+      const { entry } = yield* (yield* Reader).GetSlot({ userId: me.id, slotId: version.slotId })
+      const swipe = yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
+      yield* eventually(() => finished(events, swipe.version.id) !== undefined)
+      const reply = finished(events, swipe.version.id)!
+      assert.strictEqual(reply.content, "Mira answers.")
+      assert.isNull(reply.mark)
+      const [, second] = bodies(mock.requests()) as [Body, Body]
+      assert.deepStrictEqual(
+        second.tools!.map((t) => t.function.name),
+        ["send_message"]
+      )
+      assert.notInclude(JSON.stringify(second.messages), "no_reply")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("the cap's last request wins over running out of nudges: its answer is the reply", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* scriptedMock((n, _body, res) => plain(res, n === 4 ? "Final words." : `Text ${n + 1}.`))
+      const api = yield* client()
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [...TOOLS_ON, { key: "agent.request_cap", value: { cap: 5 } }]
+      })
+      assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
+      assert.strictEqual(version.content, "Final words.")
+      const sent = bodies(mock.requests())
+      assert.lengthOf(sent, 5)
+      assert.deepStrictEqual(sent.map(nudgesSent), [0, 1, 2, 3, 3])
+      assert.isUndefined(sent[4]!.tools)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("after a Resume that fails again, the failure counts every text written, the cut one too", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* scriptedMock((n, _body, res) => plain(res, `Text ${n + 1}.`))
+      const api = yield* client()
+      const { version, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: TOOLS_ON
+      })
+      assert.include(version.error?.message ?? "", "wrote text 4 times")
+      const entry = yield* resume(api, version.id, version.slotId)
+      yield* eventually(() => finished(events, entry.version.id) !== undefined)
+      const again = finished(events, entry.version.id)!
+      assert.strictEqual(again.status, "failed")
+      assert.strictEqual(
+        again.error?.message,
+        "The model didn't send a reply: it wrote text 5 times without calling send_message."
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a nudged turn that wrote nothing is still a step, and counted", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* scriptedMock((n, _body, res) =>
+        n === 0 ? plain(res, "") : sse(res, toolCall("send_message", { message: "Sent words." }))
+      )
+      const api = yield* client()
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: TOOLS_ON
+      })
+      assert.strictEqual(version.content, "Sent words.")
+      assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: version.id }), [
+        { kind: "text", text: "", asked: true }
+      ])
+      assert.strictEqual(version.steps?.count, 1)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a story with a workshop's several-message contract stored gets the default send tool", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* scriptedMock((_n, _body, res) => sse(res, toolCall("send_message", { message: "Hi." })))
+      const api = yield* client()
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [...TOOLS_ON, { key: "output.contract", value: "several" }]
+      })
+      assert.strictEqual(version.content, "Hi.")
+      assert.deepStrictEqual(
+        bodies(mock.requests())[0]!.tools!.map((t) => t.function.name),
+        ["send_message", "no_reply"]
+      )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

@@ -490,11 +490,7 @@ const SETTINGS: ReadonlyArray<{
     id: "output-contract",
     label: "How the reply is given",
     value: (state) =>
-      state.outputContract === "final_text"
-        ? "plain answer"
-        : state.outputContract === "both" || state.outputContract === "several"
-          ? "either"
-          : "send tool",
+      state.outputContract === "final_text" ? "plain answer" : state.outputContract === "both" ? "either" : "send tool",
     explanation: `${NEXT}, a reply that uses tools is either a message it sends, its last answer, or either one.`
   },
   {
