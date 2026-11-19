@@ -31,6 +31,11 @@ interface RunCompactorInput {
   readonly leafSlotId: import("@dreamspan/shared/chat.ts").SlotId | null
   readonly reserve: number
   readonly recentPrefix?: number | undefined
+  /**
+   * Asked before each summary request (a subagent's, spec/SUBAGENTS.md §6.2): whether it may be
+   * sent. False: no more summaries now; the request goes out as it is if it fits.
+   */
+  readonly beforeSummary?: () => Effect.Effect<boolean>
 }
 export interface RunCompactor {
   readonly id: string
@@ -45,6 +50,10 @@ export const workshopCompactor: RunCompactor = {
       const { reader, providers, request, model, prefix, rolloutId, tools } = input
       let messages = [...input.messages]
       const room = (model.context ?? 128_000) - input.reserve
+      // A fork's run starts after its parent's conversation and its task (spec/SUBAGENTS.md §2.3):
+      // those are its fixed prefix, like the frozen request, never summarized.
+      const forkAt = messages.findIndex((m) => m.role === "rpApp" && (m as { fork?: unknown }).fork === true)
+      const floor = forkAt >= 0 ? forkAt + 1 : 1
       const count = (history: ReadonlyArray<AgentMessage>) =>
         reader.CountRolloutContext({
           model: JSON.stringify(model),
@@ -52,7 +61,9 @@ export const workshopCompactor: RunCompactor = {
           transcript: JSON.stringify(history),
           tools: JSON.stringify(tools)
         })
-      const fixed = yield* count(messages.filter((m) => m.role === "rpRequest"))
+      const fixed = yield* count(
+        forkAt >= 0 ? messages.slice(0, floor) : messages.filter((m) => m.role === "rpRequest")
+      )
       const available = Math.max(0, room - fixed)
       const trigger = fixed + (available * 3) / 4
       const keep = fixed + available / 2
@@ -150,7 +161,17 @@ export const workshopCompactor: RunCompactor = {
           class: "budget",
           message: "The summary model has too little room. Choose a summary model with more room, then resume."
         })
-      // Summarize bounded pieces when a single old run is bigger than the summary model.
+      /** Out of summaries (`beforeSummary` said no): the request as it is, where it fits. */
+      const held = (history: ReadonlyArray<AgentMessage>) =>
+        Effect.gen(function* () {
+          if ((yield* count(history)) <= room) return history
+          return yield* new GenerationFailed({
+            class: "budget",
+            message: "This subagent reached its limits before it could summarize its work."
+          })
+        })
+      // Summarize bounded pieces when a single old run is bigger than the summary model. Null:
+      // `beforeSummary` held the next request.
       const summarize = Effect.fnUntraced(function* (material: string) {
         const chunks: Array<string> = []
         while (material.length) {
@@ -174,6 +195,7 @@ export const workshopCompactor: RunCompactor = {
             ],
             samplers: { ...prefix.samplers, max_tokens: target * 2 }
           }
+          if (input.beforeSummary && !(yield* input.beforeSummary())) return null
           const wire = providerRequest(assembled, summaryModel)
           let text = ""
           yield* providers
@@ -230,7 +252,7 @@ export const workshopCompactor: RunCompactor = {
           (active.length > 0 &&
             measured.total > trigger &&
             !compactionBoundaries(messages, active.at(-1)!.through).length)
-        const from = condense ? 1 : (active.at(-1)?.through ?? 1)
+        const from = Math.max(floor, condense ? floor : (active.at(-1)?.through ?? floor))
         const boundaries = compactionBoundaries(messages, from)
         // Keep the newest group (results the model hasn't read yet). Only the model's room can
         // make a huge one compactable; the recent and summary limits never do.
@@ -273,8 +295,11 @@ export const workshopCompactor: RunCompactor = {
         }
         const material = transcriptData(compactedTranscriptRange(messages, from, through))
         let content = yield* summarize(material)
-        for (let reduction = 0; reduction < 8 && (yield* countText(content)) > target * 2; reduction++)
+        if (content === null) return yield* held(messages)
+        for (let reduction = 0; reduction < 8 && (yield* countText(content)) > target * 2; reduction++) {
           content = yield* summarize(content)
+          if (content === null) return yield* held(messages)
+        }
         if ((yield* countText(content)) > target * 2)
           return yield* new GenerationFailed({
             class: "budget",

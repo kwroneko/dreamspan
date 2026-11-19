@@ -38,11 +38,14 @@ export interface SubagentSnapshot {
   readonly context: "task" | "fork"
   /**
    * A fork's request as its parent's was sent: the parent's tool definitions on the wire and as
-   * frozen, so a resumed or continued fork sends the same prefix.
+   * frozen, and its cache layout, so a resumed or continued fork sends the same prefix the same way.
    */
   readonly fork?: {
     readonly wireTools: ReadonlyArray<import("@earendil-works/pi-ai").Tool>
     readonly offered: ReadonlyArray<FrozenTool>
+    /** Its parent's cache layout: where breakpoints go, and the prefix's verbatim recent part. */
+    readonly checkpoints?: ReadonlyArray<number>
+    readonly recentPrefix?: number
   }
   readonly spawnedBy: string
   readonly callId: string
@@ -420,6 +423,41 @@ export const withSubagents = <S extends { readonly kind: string }>(
 export const makeSubagentReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
+    SubagentStartRoom: ({ userId, parentRolloutId, perRun, runCost }) =>
+      Effect.gen(function* () {
+        const [parent] = yield* sql<{ readonly status: string; readonly spawned_by_rollout_id: string | null }>`
+          SELECT r.status, r.spawned_by_rollout_id FROM rollouts r JOIN chats c ON c.id = r.chat_id
+          WHERE r.id = ${parentRolloutId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+        if (!parent) return yield* new NotFound({ entity: "rollout", id: parentRolloutId })
+        return yield* startRefusal(sql, parent, parentRolloutId, perRun, runCost)
+      }).pipe(query("SubagentStartRoom")),
+    OrphanedSubagentCopies: ({ before }) =>
+      Effect.gen(function* () {
+        // Each copy's newest run: an earlier run's outcome was settled by the run carrying it on.
+        const rows = yield* sql<{
+          user_id: string
+          rollout_id: string
+          copy: string
+          created_at: number
+          outcome: number
+        }>`
+          WITH runs AS (
+            SELECT c.owner_user_id AS user_id, r.id AS rollout_id, r.created_at,
+              json_extract(p.context_snapshot_json, '$.subagent.workspace.copy') AS copy,
+              json_extract(p.context_snapshot_json, '$.subagent.workspace.copy.path') AS path,
+              EXISTS (SELECT 1 FROM rollout_receipts t WHERE t.rollout_id = r.id AND t.tool_call_id = ${COPY_CALL}) AS outcome
+            FROM rollouts r JOIN chats c ON c.id = r.chat_id JOIN rollout_payloads p ON p.rollout_id = r.id
+            WHERE r.spawned_by_rollout_id IS NOT NULL
+              AND json_extract(p.context_snapshot_json, '$.subagent.workspace.copy.path') IS NOT NULL
+          ),
+          newest AS (
+            SELECT *, row_number() OVER (PARTITION BY user_id, path ORDER BY created_at DESC, rollout_id DESC) AS n FROM runs
+          )
+          SELECT user_id, rollout_id, copy, created_at, outcome FROM newest WHERE n = 1`
+        return rows
+          .filter((r) => !r.outcome && r.created_at < before)
+          .map((r) => ({ userId: r.user_id as UserId, rolloutId: r.rollout_id, copy: r.copy }))
+      }).pipe(query("OrphanedSubagentCopies")),
     FindSubagent: ({ userId, rolloutId, toolCallId }) =>
       Effect.gen(function* () {
         const [owned] = yield* sql<{ id: string }>`SELECT r.id FROM rollouts r JOIN chats c ON c.id = r.chat_id
@@ -532,6 +570,34 @@ export const makeSubagentReadHandlers = Effect.gen(function* () {
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })
 
+/**
+ * Why the run can't start another subagent now (§6.2), or null: it's a subagent itself, it has
+ * ended, it has started as many as it may (per reply, across its Stops and Resumes; a child
+ * resumed with it, §8, is the same subagent), or its subagents have spent what they may.
+ */
+const startRefusal = (
+  sql: SqlClient.SqlClient,
+  parent: { readonly status: string; readonly spawned_by_rollout_id: string | null },
+  parentRolloutId: string,
+  perRun: number | undefined,
+  runCost: number | undefined
+) =>
+  Effect.gen(function* () {
+    if (parent.spawned_by_rollout_id !== null) return "nested" as const
+    if (parent.status !== "running") return "not_running" as const
+    const reply = yield* replySubagents(sql, parentRolloutId)
+    if (reply.filter((r) => !r.resumed).length >= (perRun ?? SUBAGENTS_PER_RUN)) return "limit" as const
+    if (
+      runCost !== undefined &&
+      (yield* spendOf(
+        sql,
+        reply.map((r) => r.id)
+      )).cost >= runCost
+    )
+      return "spent" as const
+    return null
+  })
+
 export const makeSubagentWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
@@ -568,18 +634,8 @@ export const makeSubagentWriteHandlers = Effect.gen(function* () {
         if (parent.status !== "running") return { refused: "not_running" as const }
         if (!(yield* ownedModel(sql, userId, connectionId, modelId)))
           return yield* new NotFound({ entity: "model", id: modelId })
-        // Per reply, across its Stops and Resumes; a child resumed with it (§8) is the same subagent.
-        const reply = yield* replySubagents(sql, parentRolloutId)
-        if (reply.filter((r) => !r.resumed).length >= (perRun ?? SUBAGENTS_PER_RUN))
-          return { refused: "limit" as const }
-        if (
-          runCost !== undefined &&
-          (yield* spendOf(
-            sql,
-            reply.map((r) => r.id)
-          )).cost >= runCost
-        )
-          return { refused: "spent" as const }
+        const refused = yield* startRefusal(sql, parent, parentRolloutId, perRun, runCost)
+        if (refused !== null) return { refused }
         // Numbered across the run chain, so a handle names one child wherever the run carried on.
         const chain = yield* chainOf(sql, parentRolloutId)
         const [same] = yield* sql<{ n: number }>`

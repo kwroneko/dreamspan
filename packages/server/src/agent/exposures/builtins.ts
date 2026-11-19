@@ -10,6 +10,9 @@ import { chatCursor } from "@dreamspan/shared/chatApi.ts"
 import type { Chat } from "@dreamspan/shared/chat.ts"
 import { AppApi } from "@dreamspan/shared/api.ts"
 import { Schema, Effect } from "effect"
+import { SubagentTypes } from "@dreamspan/shared/subagents.ts"
+import { executionRegistry } from "../../execution.ts"
+import { changesRegisteredInstructions, checkTypeList, subagentToolCatalog } from "../subagentTypeEdits.ts"
 import { CastChange } from "@dreamspan/shared/chatSetupApi.ts"
 import type { EntityKind, LibraryRef } from "@dreamspan/shared/library.ts"
 import type { ToolContext, WorkshopStoryRead } from "../tools.ts"
@@ -27,6 +30,20 @@ const name = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))
 const label = Schema.String.check(Schema.isMaxLength(200))
 const optional = Schema.optionalKey
 const fail = (message: string) => Effect.fail(new Error(message))
+
+const SUBAGENT_TYPES = "subagents.types"
+
+/** A `subagents.types` value as the settings editor would store it, or why it's refused. */
+const checkedSubagentTypes = (value: unknown) =>
+  Effect.gen(function* () {
+    const decoded = yield* Schema.decodeUnknownEffect(SubagentTypes)(value).pipe(
+      Effect.mapError(() => new Error("That isn't a list of subagent types. Use read_settings to see the form."))
+    )
+    const registry = yield* Effect.scoped(executionRegistry)
+    const checked = checkTypeList(registry.subagentTypes.list(), subagentToolCatalog(registry), decoded)
+    if ("rejected" in checked) return yield* fail(checked.rejected)
+    return checked.types
+  })
 const library = (ctx: ToolContext, kind: EntityKind, value: unknown) =>
   Effect.gen(function* () {
     const found = yield* resolveLibrary(ctx, kind, String(value))
@@ -521,7 +538,18 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
         const setting = info.settings.find((s) => s.key === args.key)
         if (!setting)
           return yield* fail("This setting is not agent-changeable. Use read_settings for the allowed keys.")
-        return { key: setting.key, value: args.value, expectedRevision: setting.revision }
+        // Subagent types are checked as the settings editor checks them (spec/SUBAGENTS.md §10).
+        const value = setting.key === SUBAGENT_TYPES ? yield* checkedSubagentTypes(args.value) : args.value
+        return { key: setting.key, value, expectedRevision: setting.revision }
+      }),
+    // Rewriting a built-in or plugin type's instructions changes what every chat's subagents of
+    // that type are told: it always asks, and only for this call (DESIGN §7.10 [P]).
+    asksWhen: (payload, ctx) =>
+      Effect.gen(function* () {
+        if (payload.key !== SUBAGENT_TYPES) return false
+        const registry = yield* Effect.scoped(executionRegistry)
+        const before = (yield* ctx.reader.SubagentSettings({ userId: ctx.userId })).types
+        return changesRegisteredInstructions(registry.subagentTypes.list(), before, payload.value as SubagentTypes)
       })
   },
   // --- Notes (DESIGN §4.1): the Notes editors' own operations.

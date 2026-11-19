@@ -157,10 +157,15 @@ export const makePermit =
         )
       )
       const resolved = resolveMode(registries, grants, tool.capability, tool.effect)
+      // These arguments ask whatever the capability's mode, and only this one call can be allowed.
+      const forced =
+        resolved !== "off" &&
+        (tool.alwaysAsk?.(args as never) === true ||
+          (tool.mustAsk ? yield* tool.mustAsk(context, args as never).pipe(Effect.orElseSucceed(() => true)) : false))
       const mode =
         resolved === "off"
           ? "off"
-          : tool.approval === "always" || tool.alwaysAsk?.(args as never) === true
+          : tool.approval === "always" || forced
             ? "ask"
             : tool.approval === "rollback"
               ? "allow"
@@ -282,7 +287,7 @@ export const makePermit =
         title: described?.title ?? `${capabilityLabel}: ${tool.id}`,
         rows: described?.rows ?? argumentRows(args),
         ...(described?.changes ? { changes: described.changes } : {}),
-        ...(described?.once || tool.alwaysAsk?.(args as never) === true ? { once: true } : {}),
+        ...(described?.once || forced ? { once: true } : {}),
         uncertain,
         ...(rerun ? { rerun } : {})
       }
@@ -378,6 +383,8 @@ export const askUser = (
     readonly capability: string
     readonly prompt: Omit<ApprovalPrompt, "rolloutId" | "toolCallId" | "digest" | "capability">
     readonly onWaiting: (prompt: ApprovalPrompt | null) => void
+    /** Its row's key beside the call's (`<call>:<key>`): one per question a call may ask. Default `ask`. */
+    readonly key?: string
   }
 ): Effect.Effect<{ readonly allow: boolean; readonly note: string | null }> =>
   Effect.gen(function* () {
@@ -385,7 +392,7 @@ export const askUser = (
     const { capability } = input
     // Its own row and answer key beside the call's: the call's permit may already have asked
     // (Resume runs a dangling call through it), and a call asks its permit question once.
-    const toolCallId = `${input.toolCallId}:ask`
+    const toolCallId = `${input.toolCallId}:${input.key ?? "ask"}`
     const digest = argsDigest({ ask: input.prompt.title, capability, rows: input.prompt.rows })
     const prompt: ApprovalPrompt = { ...input.prompt, rolloutId, toolCallId, digest, capability }
     const key = keyOf(rolloutId, toolCallId)

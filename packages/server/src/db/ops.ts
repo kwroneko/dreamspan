@@ -6336,6 +6336,31 @@ const ReadOpsOwn = RpcGroup.make(
     }),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * Whether the run `parentRolloutId` may start another subagent now (§6.2), as `StartSubagent`
+   * would decide: null, or why not. Asked before a copy is made for one, so a call that would be
+   * refused never pays for a copy.
+   */
+  Rpc.make("SubagentStartRoom", {
+    payload: {
+      userId: UserId,
+      parentRolloutId: Schema.String,
+      perRun: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 64 }))),
+      runCost: Schema.optionalKey(Schema.Number)
+    },
+    success: Schema.NullOr(Schema.Literals(["limit", "spent", "not_running", "nested"])),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Subagents' copies (§3.3) whose outcome was never recorded (no `COPY_CALL` receipt on the
+   * newest run that works in each), made by runs started before `before`: what the app left when
+   * it stopped mid-run. Each with its run's owner, rollout and copy record (JSON). Every account's.
+   */
+  Rpc.make("OrphanedSubagentCopies", {
+    payload: { before: Schema.Number },
+    success: Schema.Array(Schema.Struct({ userId: UserId, rolloutId: Schema.String, copy: Schema.String })),
+    error: StorageError
+  }),
   /** A subagent of the reply `versionId`'s run: its rollout status, for its Stop (subagentReads.ts). */
   /**
    * A subagent by the handle or name its parent gives (`message_agent`, spec/SUBAGENTS.md §4): one

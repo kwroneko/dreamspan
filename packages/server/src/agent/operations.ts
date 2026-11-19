@@ -46,6 +46,8 @@ export interface OperationExposure {
   readonly effect: "read" | "library" | "setup" | "outside"
   /** Asks every time, even where the capability is Allowed (as plugin_enable does). */
   readonly approval?: "always"
+  /** Asks, even where the capability is Allowed, when the prepared payload says so (and only for this call). */
+  readonly asksWhen?: (payload: Record<string, unknown>, ctx: ToolContext) => Effect.Effect<boolean, unknown>
   readonly label: string
   readonly explanation: string
   readonly description: string
@@ -147,9 +149,20 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
         })
         return entry.adapt ? yield* entry.adapt(decoded as Record<string, unknown>, ctx) : decoded
       })
+    const { asksWhen } = entry
     return {
       ...entry,
       parameters,
+      // A payload that can't be prepared asks too: its describe then refuses it.
+      ...(asksWhen
+        ? {
+            mustAsk: (ctx: ToolContext, args: Record<string, unknown>) =>
+              validate(ctx, args).pipe(
+                Effect.flatMap((payload) => asksWhen(payload as Record<string, unknown>, ctx)),
+                Effect.orElseSucceed(() => true)
+              )
+          }
+        : {}),
       describe: (ctx, args) =>
         Effect.gen(function* () {
           const payload = yield* validate(ctx, args)

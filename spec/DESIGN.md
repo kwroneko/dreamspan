@@ -1251,6 +1251,12 @@ All owner statements below are from 2026-11-17, relayed by the coordinator. The 
 - **[P]** (subagents6, SA6) A subagent type's "Works in" is None, Your folder or Its own copy; `code` and `general` work in your folder unless the assistant asks for a copy (`copy`).
 - **[P]** (subagents9) A subagent type has a short user-facing explanation ("In short" in the editor, at most 200 characters), which a subagent's row says on hover.
 - **[P]** (subagents9) A plugin may replace the built-in `research`, `code` or `general` type by its id (declared in `replaces`, as for other parts) and an admin can make an editable copy of each; the story helper can't be replaced. A replaced type lists as "From a plugin", and the user's own changes still apply on top of it.
+- **[P]** (subagentsfix2) Under Ask first for Change your files or Run commands, making a subagent's copy (or making it again for a follow-up or Resume) asks first, saying what it copies, where to, and that a Git copy gets a new branch. Allowed for both makes it without asking.
+- **[P]** (subagentsfix2) The assistant's change of a built-in or plugin subagent type's instructions always asks, even where settings are Allowed, and only for that change (no "Allow in this workshop"). Other changes to subagent types follow the settings' permission.
+- **[P]** (subagentsfix2) A subagent's summary requests count toward its request limit, keeping room for its next request and its report; its other limits are checked before each summary, and a subagent that reaches one before it can summarize stops at its limit.
+- **[P]** (subagentsfix2) A copy left unsettled (the app stopped while its subagent ran) is checked when the app starts and every hour: kept with its row in Changes when changed, removed when not.
+- **[P]** (subagentsfix2) A copy whose only change is an ignored file (for example a build output) counts as changed and is kept.
+- **[P]** (subagentsfix2) A fork resumed after a stop that saved nothing of its run starts again from the reply's conversation up to its call, with its task; a subagent of another kind that saved nothing starts again from its task.
 
 ## 8. LCM (hierarchical summarization)
 

@@ -198,6 +198,8 @@ export interface RolloutTool<A = never> {
    * allowed (no "Allow in this workshop"): a commit of a server plugin's working copy.
    */
   readonly alwaysAsk?: (args: A) => boolean
+  /** As `alwaysAsk`, where telling needs a read: what the arguments would change, say. */
+  readonly mustAsk?: (context: ToolContext, args: A) => Effect.Effect<boolean, unknown>
   readonly adminOnly?: true
   /** A tool of an MCP server (spec/MCP.md §4.2): which, frozen with the offer. */
   readonly mcp?: McpToolRef
