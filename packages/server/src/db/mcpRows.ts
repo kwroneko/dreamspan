@@ -47,6 +47,8 @@ export interface McpConnectionRow {
   readonly use_tools_json: string
   readonly use_reviewed_revision: number
   readonly use_offered_key: string
+  readonly use_oauth_origin: string | null
+  readonly use_oauth_expires_at: number | null
   /** Only in full reads. */
   readonly tools_json?: string
 }
@@ -57,7 +59,8 @@ const columns = `m.id, m.owner_user_id, m.name, m.key, m.about, m.transport, m.u
   m.created_at, m.updated_at, json_array_length(m.tools_json) AS tool_count,
   cr.key_hint AS key_hint, cr.name AS credential_name,
   u.stories AS use_stories, u.workshops AS use_workshops, u.tools_json AS use_tools_json,
-  u.reviewed_revision AS use_reviewed_revision, u.offered_key AS use_offered_key`
+  u.reviewed_revision AS use_reviewed_revision, u.offered_key AS use_offered_key,
+  u.oauth_origin AS use_oauth_origin, u.oauth_expires_at AS use_oauth_expires_at`
 
 /** The live connections a user can use, with their use; `?` is the user, twice. */
 const from = `mcp_connections m
@@ -96,7 +99,8 @@ const fields = (row: McpConnectionRow) => ({
     workshops: row.use_workshops === 1,
     tools: JSON.parse(row.use_tools_json) as McpToolChoices,
     reviewedRevision: row.use_reviewed_revision,
-    offeredKey: row.use_offered_key
+    offeredKey: row.use_offered_key,
+    signIn: row.use_oauth_origin === null ? null : { origin: row.use_oauth_origin, expiresAt: row.use_oauth_expires_at }
   }
 })
 

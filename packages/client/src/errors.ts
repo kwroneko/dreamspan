@@ -1,5 +1,6 @@
 // Errors as the user reads them. Each tag the server sends (@dreamspan/shared/errors.ts) gets a
 // sentence; the server's own messages are shown as given, since they name the problem.
+import { McpRefused } from "@dreamspan/shared/mcp.ts"
 import { PluginRejected } from "@dreamspan/shared/plugins.ts"
 import { LcmEstimateChanged } from "@dreamspan/shared/lcm.ts"
 import { BinChanged, CannotDeleteLastFork } from "@dreamspan/shared/bin.ts"
@@ -123,6 +124,8 @@ const describeError = (error: unknown): AppError => {
   if (error instanceof EffectUndoRefused) return make("EffectUndoRefused", sentence(error.message))
   if (error instanceof ApprovalRefused) return make("ApprovalRefused", sentence(error.message))
   if (error instanceof GrantRefused) return make("GrantRefused", sentence(error.message))
+  // MCP servers: what to fix, in the server's words for the user.
+  if (error instanceof McpRefused) return make("McpRefused", sentence(error.message))
   // Editors
   if (error instanceof InvalidDocument) {
     return make("InvalidDocument", "These changes wouldn't make a valid document:", null, error.problems)

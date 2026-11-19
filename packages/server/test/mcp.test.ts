@@ -78,7 +78,7 @@ describe("names the model sees", () => {
     const read = second.find((tool) => tool.name === "read")!
     assert.strictEqual(read.firstRevision, 1)
     assert.strictEqual(write.firstRevision, 2)
-    const use = { stories: false, workshops: false, tools: {}, reviewedRevision: 1, offeredKey: "k" }
+    const use = { stories: false, workshops: false, tools: {}, reviewedRevision: 1, offeredKey: "k", signIn: null }
     assert.isTrue(mcpToolAllowed(read, use))
     assert.isFalse(mcpToolAllowed(write, use))
     assert.isTrue(mcpToolIsNew(write, use))

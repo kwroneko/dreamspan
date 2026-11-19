@@ -27,7 +27,9 @@ export const mcpStatus = (
   connection: Pick<McpConnectionSummary, "checkError" | "listedAt">
 ): { readonly tone: "success" | "danger" | "neutral"; readonly label: string } =>
   connection.checkError !== null
-    ? { tone: "danger", label: "Couldn't connect" }
+    ? /sign in/i.test(connection.checkError)
+      ? { tone: "danger", label: "Sign in again" }
+      : { tone: "danger", label: "Couldn't connect" }
     : connection.listedAt === null
       ? { tone: "neutral", label: "Not checked" }
       : { tone: "success", label: "Ready" }

@@ -126,6 +126,31 @@ export class McpApi extends RpcGroup.make(
     success: McpConnection,
     error: Schema.Union([NotFound, ServerError])
   }),
+  /**
+   * Starts signing in with the server (spec/MCP.md §2.4): finds its sign-in service, registers
+   * the app there if needed, and returns the page to open. `appOrigin` is the address the browser
+   * uses for the app; the sign-in page sends the browser back to it. Nothing of the user's is sent.
+   */
+  Rpc.make("StartMcpSignIn", {
+    payload: { connectionId: McpConnectionId, appOrigin: Schema.String },
+    success: Schema.Struct({ authorizationUrl: Schema.String }),
+    error: Schema.Union([McpRefused, NotFound, StaleWrite, ServerError])
+  }),
+  /**
+   * The sign-in page sent the browser back (its `state`, and a `code` or an `error`): the app
+   * exchanges the code for the user's own tokens and keeps them, encrypted, on their use.
+   */
+  Rpc.make("FinishMcpSignIn", {
+    payload: { state: Schema.String, code: Schema.NullOr(Schema.String), error: Schema.NullOr(Schema.String) },
+    success: Schema.Struct({ connectionId: McpConnectionId, name: Schema.String }),
+    error: Schema.Union([McpRefused, NotFound, StaleWrite, ServerError])
+  }),
+  /** Forgets the user's own sign-in with the server. Nothing is sent to it. */
+  Rpc.make("SignOutOfMcp", {
+    payload: { connectionId: McpConnectionId },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StaleWrite, ServerError])
+  }),
   Rpc.make("DeleteMcpConnection", {
     payload: { connectionId: McpConnectionId },
     success: BinItem,

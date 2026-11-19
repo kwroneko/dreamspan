@@ -220,6 +220,25 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
         return yield* reload(userId, connectionId)
       }).pipe(transaction(sql, "SetMcpLoading")),
 
+    SetMcpOAuth: ({ userId, connectionId, oauth, expectedEnc, at }) =>
+      Effect.gen(function* () {
+        yield* owned(userId, connectionId)
+        // A refresh stores its tokens only over the sign-in it refreshed: a sign-out or a new
+        // sign-in meanwhile wins.
+        const updated = yield* sql`UPDATE mcp_uses SET ${sql.update({
+          oauth_enc: oauth?.enc ?? null,
+          oauth_origin: oauth?.origin ?? null,
+          oauth_expires_at: oauth?.expiresAt ?? null,
+          updated_at: at
+        })}, row_version = row_version + 1
+          WHERE connection_id = ${connectionId} AND user_id = ${userId}
+            AND (${expectedEnc === undefined ? 1 : 0} = 1 OR oauth_enc = ${expectedEnc ?? null})
+          RETURNING row_version`
+        if (updated.length === 0)
+          return yield* new StaleWrite({ entity: "mcp_connection", id: connectionId, expected: 0, actual: 0 })
+        return yield* reload(userId, connectionId)
+      }).pipe(transaction(sql, "SetMcpOAuth")),
+
     OpenMcpCall: ({ userId, call }) =>
       Effect.gen(function* () {
         // A connection of the user's that isn't purged: a call may still be closing after a delete.

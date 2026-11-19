@@ -925,6 +925,24 @@ const McpWriteOps = RpcGroup.make(
     success: Schema.Boolean,
     error: StorageError
   }),
+  /**
+   * A user's own sign-in with a connection (spec/MCP.md §2.4), encrypted, bound to
+   * "mcp:<connection>:<user>:oauth" and to the server's origin; null forgets it. `expectedEnc`
+   * (a refresh): stored only while the sign-in is still the one refreshed, else StaleWrite.
+   */
+  Rpc.make("SetMcpOAuth", {
+    payload: {
+      userId: UserId,
+      connectionId: McpConnectionId,
+      oauth: Schema.NullOr(
+        Schema.Struct({ enc: Schema.Uint8Array, origin: Schema.String, expiresAt: Schema.NullOr(Schema.Number) })
+      ),
+      expectedEnc: Schema.optionalKey(Schema.Uint8Array),
+      at: Schema.Number
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
   /** At startup: requests a previous process left running are marked interrupted. */
   Rpc.make("InterruptRunningMcpCalls", {
     success: Schema.Struct({ interrupted: Schema.Int }),
@@ -940,7 +958,9 @@ export const McpResolved = Schema.Struct({
   ),
   headersEnc: Schema.NullOr(Schema.Uint8Array),
   proxyUrlEnc: Schema.NullOr(Schema.Uint8Array),
-  ownerRole: Schema.Literals(["admin", "user"])
+  ownerRole: Schema.Literals(["admin", "user"]),
+  /** The calling user's own sign-in with the server, still encrypted. */
+  oauthEnc: Schema.NullOr(Schema.Uint8Array)
 })
 
 const McpReadOps = RpcGroup.make(

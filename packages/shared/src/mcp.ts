@@ -32,6 +32,8 @@ export const MCP_TOOLS_LIMIT = 1000
 export const MCP_LISTING_BYTES_LIMIT = 2 * 1024 * 1024
 /** The longest a model-facing tool name may be (OpenAI's function-name limit, the strictest wire). */
 export const MCP_TOOL_NAME_LIMIT = 64
+/** Where a server's sign-in page sends the browser back to (spec/MCP.md §2.4): a page of the app. */
+export const MCP_OAUTH_CALLBACK = "/mcp/oauth/callback"
 /** Recent calls on a connection's page, per page. */
 export const MCP_CALLS_PAGE = 50
 
@@ -81,7 +83,12 @@ export const McpUse = Schema.Struct({
   /** The catalog revision the user last saw on the page: tools first listed after it start off. */
   reviewedRevision: Schema.Int,
   /** The key this user's tools are offered under (the connection's, unless two collide). */
-  offeredKey: Schema.String
+  offeredKey: Schema.String,
+  /**
+   * This user's own sign-in with the server (spec/MCP.md §2.4): the server's origin it was made
+   * for (refused anywhere else) and when its access token expires. Null: not signed in.
+   */
+  signIn: Schema.NullOr(Schema.Struct({ origin: Schema.String, expiresAt: Schema.NullOr(Schema.Number) }))
 })
 export type McpUse = typeof McpUse.Type
 

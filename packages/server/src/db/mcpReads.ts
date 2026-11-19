@@ -24,7 +24,10 @@ export const makeMcpReadHandlers = Effect.gen(function* () {
           headers_enc: Uint8Array | null
           proxy_url_enc: Uint8Array | null
           role: "admin" | "user"
-        }>`SELECT m.headers_enc, m.proxy_url_enc, u.role FROM mcp_connections m JOIN users u ON u.id = m.owner_user_id
+          oauth_enc: Uint8Array | null
+        }>`SELECT m.headers_enc, m.proxy_url_enc, u.role, s.oauth_enc
+          FROM mcp_connections m JOIN users u ON u.id = m.owner_user_id
+          LEFT JOIN mcp_uses s ON s.connection_id = m.id AND s.user_id = ${userId}
           WHERE m.id = ${connectionId}`
         const [credential] =
           row.credential_id === null
@@ -42,7 +45,8 @@ export const makeMcpReadHandlers = Effect.gen(function* () {
             : null,
           headersEnc: secrets!.headers_enc,
           proxyUrlEnc: secrets!.proxy_url_enc,
-          ownerRole: secrets!.role
+          ownerRole: secrets!.role,
+          oauthEnc: secrets!.oauth_enc
         }
       }).pipe(query("ResolveMcpConnection")),
     ListMcpCalls: ({ userId, connectionId, before, limit }) =>

@@ -8,6 +8,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js"
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js"
+import type { FakeAuthServer } from "./fakeAuthServer.ts"
 
 interface FakeMcpRequest {
   readonly httpMethod: string
@@ -24,6 +25,11 @@ export interface FakeMcpState {
   pageSize: number
   /** Requests without `Authorization: Bearer <key>` get a 401. */
   key: string | null
+  /**
+   * Signing in with this authorization server (spec/MCP.md §2.4): the server publishes its
+   * protected-resource metadata naming it, and answers only tokens it issued, else 401.
+   */
+  auth: FakeAuthServer | null
   /** Which transports answer; the other paths answer 404. */
   streamable: boolean
   sse: boolean
@@ -86,6 +92,7 @@ export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): P
     tools: [],
     pageSize: 0,
     key: null,
+    auth: null,
     streamable: true,
     sse: true,
     hangList: false,
@@ -96,6 +103,7 @@ export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): P
     ...initial
   }
   const recorded: Array<FakeMcpRequest> = []
+  let base = ""
   const servers = new Set<Server>()
 
   const mcpServer = () => {
@@ -173,6 +181,27 @@ export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): P
         .end(`refused; you sent ${request.headers.authorization ?? "nothing"}`)
       return
     }
+    if (state.auth !== null && url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
+      const resource = `${base}${url.pathname.slice("/.well-known/oauth-protected-resource".length)}`
+      response
+        .writeHead(200, { "content-type": "application/json" })
+        .end(
+          JSON.stringify({ resource, authorization_servers: [state.auth.url], bearer_methods_supported: ["header"] })
+        )
+      return
+    }
+    if (state.auth !== null) {
+      const presented = /^Bearer (.+)$/.exec(request.headers.authorization ?? "")?.[1]
+      if (presented === undefined || !state.auth.valid(presented)) {
+        response
+          .writeHead(401, {
+            "content-type": "text/plain",
+            "www-authenticate": `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource${url.pathname}"`
+          })
+          .end("unauthorized")
+        return
+      }
+    }
     if (state.key !== null && request.headers.authorization !== `Bearer ${state.key}`) {
       response.writeHead(401, { "content-type": "text/plain" }).end("unauthorized")
       return
@@ -221,7 +250,7 @@ export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): P
   })
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve))
   const { port } = http.address() as AddressInfo
-  const base = `http://127.0.0.1:${port}`
+  base = `http://127.0.0.1:${port}`
   return {
     url: base,
     streamableUrl: `${base}/mcp`,

@@ -1104,6 +1104,21 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.ListMcpCalls({ connectionId: owner.mcpConnectionId, before: null }), "NotFound")
   },
+  StartMcpSignIn: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.StartMcpSignIn({ connectionId: owner.mcpConnectionId, appOrigin: "http://localhost:5173" }),
+        "NotFound"
+      )
+  },
+  // A sign-in's state is the user's who started it; nobody else can finish it (mcpOAuth.test.ts).
+  FinishMcpSignIn: {
+    probe: (actor) =>
+      refused(actor.api.FinishMcpSignIn({ state: "someone-elses-state", code: "x", error: null }), "McpRefused")
+  },
+  SignOutOfMcp: {
+    probe: (actor, owner) => refused(actor.api.SignOutOfMcp({ connectionId: owner.mcpConnectionId }), "NotFound")
+  },
   SetConnectionHeaders: {
     probe: (actor, owner) =>
       Effect.flatMap(ownConnection(owner), (theirs) =>

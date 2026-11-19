@@ -43,6 +43,7 @@ import {
   transportLabels
 } from "./data.ts"
 import { addressProblem, parseTimeout, transportItems } from "./list.tsx"
+import { SignInWithServer } from "./signIn.tsx"
 
 export interface McpSectionProps {
   readonly connection: McpConnection
@@ -451,7 +452,7 @@ export function SignInSection(props: McpSectionProps) {
     <Card>
       <CardHeader
         title="Sign-in"
-        about="What the server needs to know it's you: a bearer token, or headers its documentation names. Neither is shown again once saved."
+        about="What the server needs to know it's you: a bearer token, your own sign-in with the server, or headers its documentation names. None is shown again once saved."
       />
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
@@ -522,6 +523,7 @@ export function SignInSection(props: McpSectionProps) {
             </Button>
           </div>
         </div>
+        {connection.url !== null && <SignInWithServer connection={connection} />}
         <div className="flex flex-col gap-2">
           <p className="text-sm font-medium">Headers</p>
           {connection.headerNames.length > 0 ? (

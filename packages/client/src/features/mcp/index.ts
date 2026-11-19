@@ -14,6 +14,8 @@ import {
   UsesSection
 } from "./detail.tsx"
 import { McpServersPage, NewMcpServerPage } from "./list.tsx"
+import { McpSignInCallbackPage } from "./signIn.tsx"
+import { MCP_OAUTH_CALLBACK } from "@dreamspan/shared/mcp.ts"
 
 export const register = () => {
   settingsGroups.register({ id: "tools", label: "Tools", order: 15, pages: ["settings.mcp"] })
@@ -30,6 +32,13 @@ export const register = () => {
     parent: "settings",
     path: "mcp/$connectionId",
     component: McpServerPage
+  })
+  // Where a server's sign-in page sends the browser back (spec/MCP.md §2.4).
+  routes.register({
+    id: "mcp.signInCallback",
+    parent: "app",
+    path: MCP_OAUTH_CALLBACK,
+    component: McpSignInCallbackPage
   })
   mcpSections.register({ id: "server", order: 10, component: ServerSection })
   mcpSections.register({ id: "sign-in", order: 20, component: SignInSection })

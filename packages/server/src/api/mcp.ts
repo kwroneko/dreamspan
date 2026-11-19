@@ -79,6 +79,12 @@ export const makeMcpHandlers = Effect.gen(function* () {
           at: Date.now()
         })
       ).pipe(internal("SetMcpLoading")),
+    StartMcpSignIn: ({ connectionId, appOrigin }) =>
+      Effect.flatMap(userId, (id) => mcp.startSignIn(id, connectionId, appOrigin)).pipe(internal("StartMcpSignIn")),
+    FinishMcpSignIn: ({ state, code, error }) =>
+      Effect.flatMap(userId, (id) => mcp.finishSignIn(id, state, code, error)).pipe(internal("FinishMcpSignIn")),
+    SignOutOfMcp: ({ connectionId }) =>
+      Effect.flatMap(userId, (id) => mcp.signOut(id, connectionId)).pipe(internal("SignOutOfMcp")),
     DeleteMcpConnection: ({ connectionId }) =>
       Effect.flatMap(userId, (id) => writer.DeleteMcpConnection({ userId: id, connectionId })).pipe(
         Effect.tap(() => mcp.closeKept(connectionId)),
