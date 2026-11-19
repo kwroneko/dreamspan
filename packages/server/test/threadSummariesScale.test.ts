@@ -21,7 +21,7 @@ import { cardDoc } from "./support/docs.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { lcmHarness, lcmServer } from "./support/lcmHarness.ts"
 import { eventually } from "./support/generation.ts"
-import { completionChunks, sse } from "./support/mockProvider.ts"
+import { sse } from "./support/mockProvider.ts"
 
 const median = (ns: ReadonlyArray<number>) => [...ns].sort((a, b) => a - b)[Math.floor(ns.length / 2)]!
 
@@ -422,14 +422,46 @@ it.live(
         Effect.forkScoped
       )
       yield* eventually(() => subscribed)
+      // The reply comes as a story's default contract sends it: one send_message call, whose
+      // executed message is the body's first text (a plain answer there is never the reply).
       h.mock.setHandler((_request, res) =>
-        sse(
-          res,
-          completionChunks(["Morning light."], {
-            prompt_tokens: 10,
-            completion_tokens: 3
-          })
-        )
+        sse(res, [
+          {
+            id: "send",
+            object: "chat.completion.chunk",
+            model: "served-model",
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call_send",
+                      type: "function",
+                      function: { name: "send_message", arguments: JSON.stringify({ message: "Morning light." }) }
+                    }
+                  ]
+                },
+                finish_reason: null
+              }
+            ]
+          },
+          {
+            id: "send",
+            object: "chat.completion.chunk",
+            model: "served-model",
+            choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }]
+          },
+          {
+            id: "send",
+            object: "chat.completion.chunk",
+            model: "served-model",
+            choices: [],
+            usage: { prompt_tokens: 10, completion_tokens: 3 }
+          }
+        ])
       )
       const tokenSamples: Array<{ shape: string; preflight: string; ms: number }> = []
       for (const [shape, source, leaf, speaker] of [
@@ -509,6 +541,14 @@ it.live(
         })}\n`
       )
 
+      // The first text of a reply under the send tool, well inside the wait above (about 1 s
+      // with a known join, 0.25 s without, on a quiet host).
+      for (const shape of new Set(tokenSamples.map((s) => s.shape)))
+        assert.isBelow(
+          median(tokenSamples.filter((s) => s.shape === shape && s.preflight === "probe").map((s) => s.ms)),
+          3_000,
+          `first text delta, ${shape}`
+        )
       process.stdout.write(`THREAD_TOOLS_PROFILE ${JSON.stringify(Object.fromEntries(spent))}\n`)
       process.stdout.write(`THREAD_SUMMARIES_SCALE ${JSON.stringify(samples)}\n`)
       const ms = (operation: string) => samples.find((s) => s.operation === operation)!.ms
