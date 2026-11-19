@@ -1459,6 +1459,9 @@ export class ChatSession {
 
   /** Keeps a generating version's text alive while it streams, shown or not. */
   private track(version: Version) {
+    // A read can bring a version finished while its Version event was missed (the chat opened
+    // after a fast reply ended): its streamed text, still "" here, would hide the saved one.
+    if (version.status !== "generating" && this.live.has(version.id)) return this.endLive(version.id)
     if (version.status !== "generating" || this.live.has(version.id)) return
     const known = this.registry.get(liveText(version.id))
     this.live.set(version.id, this.mountLive(version.id))

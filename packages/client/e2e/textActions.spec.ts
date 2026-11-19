@@ -57,6 +57,9 @@ for (const width of [1440, 390])
       expect(await menuPrevented(page.getByLabel("Message", { exact: true }))).toBe(false)
 
       // A drag selects for copying, and the copy is the message's text; it opens no editor.
+      // The summary band above the messages arrives a moment after the reply (it is 54 px tall and
+      // moves everything below it); a drag measured before it would start in the wrong place.
+      await expect(page.getByText(/^Older messages/)).toBeVisible()
       const box = (await body.boundingBox())!
       await page.mouse.move(box.x + 2, box.y + box.height / 2)
       await page.mouse.down()
