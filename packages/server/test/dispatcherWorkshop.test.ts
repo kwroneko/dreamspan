@@ -147,6 +147,8 @@ it.live("dispatches through canonical approvals, receipts, step edits, capabilit
         "write_file",
         "edit_file",
         "bash",
+        "bash_output",
+        "bash_stop",
         "tool_search",
         "load_skill",
         "send_message",

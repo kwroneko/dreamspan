@@ -145,7 +145,7 @@ describe("the split", () => {
       const { registry, tools } = yield* workshopTools
       const offer = split(registry, tools, "workshop", claude)
       assert.deepStrictEqual(
-        offer.tools.slice(0, 11).map((t) => t.id),
+        offer.tools.slice(0, 13).map((t) => t.id),
         // The file tools are callable from the start (spec/FILES-AND-ENVIRONMENT.md §2).
         [
           "list_library",
@@ -157,11 +157,13 @@ describe("the split", () => {
           "write_file",
           "edit_file",
           "bash",
+          "bash_output",
+          "bash_stop",
           "tool_search",
           "load_skill"
         ]
       )
-      assert.strictEqual(offer.deferred.size, tools.length - 9)
+      assert.strictEqual(offer.deferred.size, tools.length - 11)
       for (const name of ["list_library", "agent", "read_file", "bash"]) assert.isFalse(offer.deferred.has(name))
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
@@ -617,6 +619,8 @@ describe("the wire", () => {
           "write_file",
           "edit_file",
           "bash",
+          "bash_output",
+          "bash_stop",
           "tool_search",
           "load_skill"
         ]

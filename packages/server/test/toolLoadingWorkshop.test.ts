@@ -125,6 +125,8 @@ it.live("loads a deferred tool mid-run without changing the declared tools", () 
         "write_file",
         "edit_file",
         "bash",
+        "bash_output",
+        "bash_stop",
         "tool_search",
         "load_skill",
         "send_message"
