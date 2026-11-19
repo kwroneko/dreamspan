@@ -1,4 +1,4 @@
-import { DatabaseStartup } from "@dreamspan/shared/api.ts"
+import { DatabaseStartup } from "@dreamspan/shared/databaseStartup.ts"
 import {
   McpCall,
   McpCallMethod,

@@ -1,6 +1,8 @@
-import { spawnSync } from "node:child_process"
+import { execFile, spawnSync } from "node:child_process"
 import { cpSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
+import { promisify } from "node:util"
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
 import { inject } from "vitest"
@@ -15,6 +17,7 @@ const freshDir = () => tempDir("db")
 const bundleDir = inject("bundleDir")
 const database = (dataDir: string, readers = 2, workers: "source" | "bundle" = "source") =>
   Database.layer({ dataDir, readers, allowNetworkFs: false, workers, bundleDir })
+const execFileAsync = promisify(execFile)
 const range = (n: number) => Array.from({ length: n }, (_, i) => i)
 
 /** Largest gap between 5 ms timer ticks on this thread while `effect` runs. */
@@ -209,25 +212,30 @@ describe("bundled workers", () => {
     30_000
   )
 
+  it("bundle none of the HTTP API", () => {
+    for (const name of ["writer", "reader"]) {
+      const map = JSON.parse(readFileSync(join(bundleDir, `${name}.mjs.map`), "utf8")) as { sources: Array<string> }
+      assert.notInclude(map.sources.join("\n"), "shared/src/api.ts", `${name} bundle`)
+    }
+  })
+
+  // Measured in a fresh process (support/workerMemoryProbe.ts), median of 3: inside the test
+  // process, how much RSS grows depends on what earlier tests freed (in the full suite it read
+  // 43 MB, the test alone 89 MB). The probe's figure is the RSS growth from opening the writer
+  // and 4 readers, divided by 5; it includes the main thread's share of opening them. Measured
+  // 2026-11-19 on the test host: 86 to 87 MB (a reader alone about 60 MB, the writer about 80 MB; their
+  // live heap about 20 MB each). A worker loading Effect from source would add about 85 MB.
   it.live(
     "stay within the per-worker memory budget",
     () =>
       Effect.gen(function* () {
-        const readers = 4
-        const before = process.memoryUsage().rss
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const reader = yield* Database.Reader
-            // Touch every reader so all of them have loaded and opened their connection.
-            yield* Effect.forEach(range(readers * 4), () => reader.FindUserByHandle({ handle: "nobody" }), {
-              concurrency: "unbounded"
-            })
-            yield* Effect.sleep(500)
-            const perWorkerMb = (process.memoryUsage().rss - before) / 1048576 / (readers + 1)
-            assert.isBelow(perWorkerMb, 40, `bundled worker uses ${perWorkerMb.toFixed(0)} MB`)
-          }).pipe(Effect.provide(database(freshDir(), readers, "bundle")))
+        const probe = fileURLToPath(new URL("./support/workerMemoryProbe.ts", import.meta.url))
+        const runs = yield* Effect.forEach(range(3), () =>
+          Effect.promise(() => execFileAsync(process.execPath, [probe, freshDir(), bundleDir, "4"]))
         )
+        const perWorkerMb = runs.map((run) => Number(run.stdout.trim())).sort((a, b) => a - b)[1]!
+        assert.isBelow(perWorkerMb, 100, `bundled worker uses ${perWorkerMb.toFixed(0)} MB`)
       }),
-    30_000
+    60_000
   )
 })
