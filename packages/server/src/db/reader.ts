@@ -1,5 +1,6 @@
 import { makePluginReadHandlers } from "./pluginData.ts"
 import { makeFileVersionReadHandlers } from "./fileVersions.ts"
+import { makeWorkingFolderReadHandlers } from "./workingFolders.ts"
 import { makeAgentHistoryReadHandlers } from "./agentHistoryReads.ts"
 import { makeMergeReadHandlers } from "./merges.ts"
 import { libraryMergePolicies, defaultLibraryMergePolicy } from "@dreamspan/shared/forkMerge.ts"
@@ -86,6 +87,7 @@ RpcServer.layer<OpsOf<typeof ReadOps>>(ReadOps, { concurrency: 1, disableFatalDe
               makePluginReadHandlers,
               makeMcpReadHandlers,
               makeFileVersionReadHandlers,
+              makeWorkingFolderReadHandlers,
               makeSubagentReadHandlers,
               makeSubagentSettingReadHandlers,
               makePersonaLockReadHandlers
@@ -115,6 +117,7 @@ RpcServer.layer<OpsOf<typeof ReadOps>>(ReadOps, { concurrency: 1, disableFatalDe
               plugins,
               mcp,
               fileVersions,
+              workingFolders,
               subagents,
               subagentSettings,
               personaLocks
@@ -147,6 +150,7 @@ RpcServer.layer<OpsOf<typeof ReadOps>>(ReadOps, { concurrency: 1, disableFatalDe
                       ...plugins,
                       ...mcp,
                       ...fileVersions,
+                      ...workingFolders,
                       ...personaLocks,
                       ...subagents,
                       ...subagentSettings

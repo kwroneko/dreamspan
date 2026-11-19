@@ -2857,6 +2857,40 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     success: Schema.Struct({ versions: Schema.Int, media: Schema.Int }),
     error: StorageError
   }),
+  /**
+   * A file or folder deleted in the app goes to the bin (spec/FILES-AND-ENVIRONMENT.md §1.3) under
+   * the host's id; the host moves its content after this row is written. Keeps the bin within its
+   * item limit (a file's bytes count against the Files quota, not the bin's byte limit).
+   */
+  Rpc.make("BinFile", {
+    payload: {
+      userId: UserId,
+      itemId: Schema.String,
+      path: Schema.String.check(Schema.isMaxLength(4096)),
+      name: Schema.String,
+      entryKind: Schema.Literals(["file", "folder", "link", "other"]),
+      byteSize: Schema.Int
+    },
+    success: BinItem,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A working folder picked with the folder chip: remembered for the card and as recent (workingFolders.ts). */
+  Rpc.make("RememberWorkshopFolder", {
+    payload: {
+      userId: UserId,
+      cardId: Schema.NullOr(Schema.String),
+      path: Schema.String.check(Schema.isMaxLength(4096)),
+      inode: Schema.NullOr(Schema.Number)
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
+  /** The host put a file back (or found its content gone): its bin row goes. */
+  Rpc.make("ForgetFileBinItem", {
+    payload: { userId: UserId, itemId: Schema.String },
+    success: BinItem,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** A file put back by the host: this owner-scoped transaction marks the agent's change undone. */
   Rpc.make("CompleteFileUndo", {
     payload: { userId: UserId, ...EffectKey, result: Schema.Record(Schema.String, Schema.Unknown) },
@@ -5774,6 +5808,27 @@ const ReadOpsOwn = RpcGroup.make(
       mediaPath: Schema.NullOr(Schema.String)
     }),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The folders the user picked last, and the one remembered for a card (workingFolders.ts). */
+  Rpc.make("WorkshopFolderMemory", {
+    payload: { userId: UserId, cardId: Schema.NullOr(Schema.String) },
+    success: Schema.Struct({
+      recent: Schema.Array(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) })),
+      card: Schema.NullOr(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) }))
+    }),
+    error: StorageError
+  }),
+  /** A file or folder in the user's bin, with where it was (fileVersions.ts). */
+  Rpc.make("FileBinItem", {
+    payload: { userId: UserId, itemId: Schema.String },
+    success: Schema.Struct({ id: Schema.String, path: Schema.String, name: Schema.String, entryKind: Schema.String }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The ids of the files and folders in the user's bin, for the sweep of their content on disk. */
+  Rpc.make("FileBinItemIds", {
+    payload: { userId: UserId },
+    success: Schema.Array(Schema.String),
+    error: StorageError
   }),
   /** Bytes an account's file versions hold: each stored content once (fileVersions.ts). */
   Rpc.make("FileVersionBytes", {

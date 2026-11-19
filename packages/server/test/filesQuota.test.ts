@@ -412,9 +412,9 @@ it.live.skipIf(!commands)(
       assert.notInclude(results[2], "ran-3")
       assert.match(
         results[2]!,
-        /Your files use [\d.]+ MB of 1 MB\. Delete files you don't need to run commands again\./
+        /Your files use [\d.]+ MB of 1 MB\. Delete files you don't need and empty the bin to run commands again\./
       )
-      assert.match(results[3]!, /Delete files you don't need to write files again\./)
+      assert.match(results[3]!, /Delete files you don't need and empty the bin to write files again\./)
       assert.include(results[4], "small")
       const usage = yield* api.GetFilesUsage({})
       assert.isTrue(usage.over)

@@ -193,6 +193,25 @@ export class WorkshopApi extends RpcGroup.make(
     success: Schema.Array(Chat),
     error: Schema.Union([NotFound, ServerError])
   }),
+  /**
+   * The working-folder chip's popover (spec/FILES-AND-ENVIRONMENT.md §2.2): where the folder stored
+   * on the branch (`stored`, from the cast) is now (`current`: found again by inode after a rename;
+   * null: gone), the folders picked last, and the folder remembered for the workshop's assistant
+   * card (`card`, with its name) when it differs from the stored one.
+   */
+  Rpc.make("WorkshopFolderChoices", {
+    payload: {
+      chatId: Chat.fields.id,
+      stored: Schema.NullOr(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) })),
+      cardId: Schema.NullOr(Schema.String)
+    },
+    success: Schema.Struct({
+      current: Schema.NullOr(Schema.String),
+      recent: Schema.Array(Schema.String),
+      card: Schema.NullOr(Schema.String)
+    }),
+    error: Schema.Union([NotFound, ServerError])
+  }),
   /** A workshop's branches, each with the story branch it goes with. */
   Rpc.make("ListWorkshopBranches", {
     payload: { chatId: Chat.fields.id },

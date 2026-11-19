@@ -392,6 +392,11 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   cardsRotation: Schema.optionalKey(Schema.Boolean),
   /** HTML in older messages sent to the model (`context.html_depth`); absent: as written. */
   htmlDepth: Schema.optionalKey(HtmlDepth),
+  /**
+   * A workshop's working folder on this branch as stored (`workshop.folder`,
+   * spec/FILES-AND-ENVIRONMENT.md §2.1); absent: the top of Files.
+   */
+  workshopFolder: Schema.optionalKey(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) })),
   /** The tools agent replies offer (`agent.tools`); absent: the default list. */
   agentTools: Schema.optionalKey(Schema.Array(Schema.String)),
   /** Whether a reply's send tool says who is present (`agent.send_presence`); absent: it doesn't. */
@@ -464,6 +469,12 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("LoreBelowHistory", { on: Schema.Boolean }),
   /** HTML in older messages sent to the model from here on (`context.html_depth`). */
   Schema.TaggedStruct("HtmlDepth", { depth: HtmlDepth }),
+  /**
+   * A workshop's working folder from here on (`workshop.folder`, spec/FILES-AND-ENVIRONMENT.md
+   * §2.1): a folder of the user's Files (`/files/…`). The server records its inode, and remembers
+   * it for the workshop's assistant card (§2.3).
+   */
+  Schema.TaggedStruct("WorkshopFolder", { path: Schema.String.check(Schema.isMaxLength(4096)) }),
   /** Who replies when nobody is picked (`reply.order`): a reply policy's id. */
   Schema.TaggedStruct("ReplyOrder", { order: Schema.String.check(Schema.isMaxLength(200)) }),
   /** One reply per user action, or the reply order's whole round as in ST (`reply.single`). */

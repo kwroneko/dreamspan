@@ -46,6 +46,7 @@ const WALK_MAX_MS = 60_000
 export interface Usage {
   readonly filesBytes: number
   readonly homeBytes: number
+  readonly binBytes: number
   readonly versionsBytes: number
   readonly usedBytes: number
   readonly quotaBytes: number
@@ -54,7 +55,8 @@ export interface Usage {
   readonly partial: boolean
 }
 
-const PARTIAL_TEXT = (what: string) => `Your files are too many to count. Delete files you don't need to ${what} again.`
+const PARTIAL_TEXT = (what: string) =>
+  `Your files are too many to count. Delete files you don't need and empty the bin to ${what} again.`
 
 export class QuotaExceeded extends Error {
   override readonly name = "QuotaExceeded"
@@ -70,9 +72,10 @@ export const measureTree = async (
   maxEntries = WALK_MAX_ENTRIES,
   maxMs = WALK_MAX_MS,
   /** Count only what deleting `root` would free for sure: a file with other links frees nothing. */
-  soleOwnerOnly = false
+  soleOwnerOnly = false,
+  /** Inodes already counted, shared by the trees of one walk: a file linked into two counts once. */
+  seen = new Set<string>()
 ) => {
-  const seen = new Set<string>()
   const deadline = Date.now() + maxMs
   let bytes = 0
   let entries = 0
@@ -86,10 +89,47 @@ export const measureTree = async (
     seen.add(key)
     // Files and links by size; folders by the blocks their entries take.
     bytes += info.isDirectory() ? info.blocks * 512 : soleOwnerOnly && info.nlink > 1 ? 0 : info.size
-    if (++entries >= maxEntries || Date.now() > deadline) return { bytes, partial: true }
+    if (++entries >= maxEntries || Date.now() > deadline) return { bytes, entries, partial: true }
     if (info.isDirectory()) {
       const names = await readdir(path).catch(() => [] as Array<string>)
       for (const name of names) stack.push(join(path, name))
+    }
+  }
+  return { bytes, entries, partial: false }
+}
+
+/**
+ * What the bin's items take (`<bin>/<itemId>/<name>`): each item's content, measured as
+ * `measureTree` does, without the bin's own folders, which the app makes and removes itself and
+ * which would otherwise make a delete look like it took space. `bin` may be a single item's folder
+ * (`items: false`): then only its content.
+ */
+export const measureBin = async (
+  bin: string,
+  maxEntries = WALK_MAX_ENTRIES,
+  maxMs = WALK_MAX_MS,
+  soleOwnerOnly = false,
+  seen = new Set<string>(),
+  items = true
+) => {
+  const deadline = Date.now() + maxMs
+  const holders = items ? await readdir(bin).catch(() => [] as Array<string>) : [""]
+  let bytes = 0
+  let entries = 0
+  for (const holder of holders) {
+    const folder = holder === "" ? bin : join(bin, holder)
+    for (const name of await readdir(folder).catch(() => [] as Array<string>)) {
+      const left = Math.max(1, maxEntries - entries)
+      const measured = await measureTree(
+        join(folder, name),
+        left,
+        Math.max(0, deadline - Date.now()),
+        soleOwnerOnly,
+        seen
+      )
+      bytes += measured.bytes
+      entries += measured.entries
+      if (measured.partial || entries >= maxEntries || Date.now() > deadline) return { bytes, partial: true }
     }
   }
   return { bytes, partial: false }
@@ -98,8 +138,12 @@ export const measureTree = async (
 export interface QuotaDeps {
   readonly reader: Reader["Service"]
   readonly writer: Writer["Service"]
-  /** The account's Files and home folder on the host. */
-  readonly folders: (userId: string) => { readonly filesRoot: string; readonly home: string }
+  /** The account's Files, home folder and bin on the host. */
+  readonly folders: (userId: string) => {
+    readonly filesRoot: string
+    readonly home: string
+    readonly bin?: string
+  }
   readonly defaultBytes: number
   /** A walk's entry limit; the default outside tests. */
   readonly walkMaxEntries?: number
@@ -156,9 +200,17 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       const heldBefore = new Map(pending.get(userId))
       const landedDuring = new Set<number>()
       landing.set(userId, landedDuring)
-      const { filesRoot, home } = deps.folders(userId)
-      const [files, homeUse] = yield* Effect.promise(() =>
-        Promise.all([measureTree(filesRoot, deps.walkMaxEntries), measureTree(home, deps.walkMaxEntries)])
+      const { filesRoot, home, bin } = deps.folders(userId)
+      // Files and the bin share their inodes: a file deleted while linked elsewhere counts once.
+      const seen = new Set<string>()
+      const [files, homeUse, binUse] = yield* Effect.promise(() =>
+        Promise.all([
+          measureTree(filesRoot, deps.walkMaxEntries, undefined, false, seen),
+          measureTree(home, deps.walkMaxEntries),
+          bin === undefined
+            ? Promise.resolve({ bytes: 0, partial: false })
+            : measureBin(bin, deps.walkMaxEntries, undefined, false, seen)
+        ])
       )
       const versionsBytes = yield* deps.reader
         .FileVersionBytes({ userId: userId as never })
@@ -167,11 +219,12 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       const usage: Usage = {
         filesBytes: files.bytes,
         homeBytes: homeUse.bytes,
+        binBytes: binUse.bytes,
         versionsBytes,
-        usedBytes: files.bytes + homeUse.bytes + versionsBytes,
+        usedBytes: files.bytes + homeUse.bytes + binUse.bytes + versionsBytes,
         quotaBytes,
         measuredAt: started,
-        partial: files.partial || homeUse.partial
+        partial: files.partial || homeUse.partial || binUse.partial
       }
       landing.delete(userId)
       deps.afterRead?.(pending.get(userId))
@@ -226,7 +279,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
     })
 
   const overText = (used: number, quota: number, what: string) =>
-    `Your files use ${formatByteSize(used)} of ${formatByteSize(quota)}. Delete files you don't need to ${what} again.`
+    `Your files use ${formatByteSize(used)} of ${formatByteSize(quota)}. Delete files you don't need and empty the bin to ${what} again.`
 
   /** Removes one account's versions made before `before`, in batches. */
   const prune = (userId: string | undefined, before: number) =>

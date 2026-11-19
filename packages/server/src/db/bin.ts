@@ -170,6 +170,8 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
     (userId: UserId, origin: Record<string, unknown>) => Effect.Effect<void, NotFound | SqlError.SqlError>
   >()
   const insertItem = (item: {
+    /** The host's own id, for an item whose content it moves after this row is written (a file). */
+    readonly id?: string
     readonly userId: UserId
     readonly kind: BinItem["kind"]
     readonly targetId: string
@@ -180,7 +182,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
     readonly byteSize: number
   }) =>
     Effect.gen(function* () {
-      const id = uuidv7()
+      const id = item.id ?? uuidv7()
       const [chat] =
         item.chatId === null
           ? []
@@ -1076,6 +1078,33 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       return itemId
     })
 
+  /**
+   * A file or folder of the account's Files (spec/FILES-AND-ENVIRONMENT.md §1.3), with the id the
+   * host chose: the host writes this row first and then moves the content to
+   * `FILES_DIR/.bin/<userId>/<id>/`, so a folder there without a row is always left over.
+   */
+  const deleteFile = (
+    userId: UserId,
+    file: {
+      readonly itemId: string
+      readonly path: string
+      readonly name: string
+      readonly entryKind: string
+      readonly byteSize: number
+    }
+  ) =>
+    insertItem({
+      id: file.itemId,
+      userId,
+      kind: "file",
+      targetId: file.path,
+      chatId: null,
+      title: file.name,
+      excerpt: file.path,
+      origin: { path: file.path, entryKind: file.entryKind },
+      byteSize: file.byteSize
+    })
+
   // --- Restoring and deleting for good -----------------------------------------------
 
   /** SQL: bin items that name the fork a deletion was in (`origin_json.forkId`). */
@@ -1212,6 +1241,9 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
   const restoreOne = (userId: UserId, itemId: string, recovered?: Map<string, string>) =>
     Effect.gen(function* () {
       const item = yield* loadItem(userId, itemId)
+      // A file's content is on disk: the files host puts it back and then forgets the row
+      // (ForgetFileBinItem), so it never comes back here.
+      if (item.kind === "file") return yield* new NotFound({ entity: "bin item", id: itemId })
       if (item.kind === "card_asset") {
         const restoreAsset = assetRestorers.get("card_asset")
         if (!restoreAsset) return yield* new NotFound({ entity: "gallery", id: itemId })
@@ -1534,13 +1566,17 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       // A multi-delete's items are all just made: none of them makes room for the others.
       const made = typeof created === "string" ? [created] : created
       const limits = yield* readBinLimits(sql, userId, defaults)
+      // A file's bytes count against the account's Files quota, not the bin's byte limit, so a
+      // large deleted folder never pushes deleted chats out (spec/FILES-AND-ENVIRONMENT.md §1.2).
       const fits = sql<{ n: number; bytes: number }>`
-        SELECT count(*) AS n, coalesce(sum(byte_size), 0) AS bytes FROM bin_items WHERE user_id = ${userId}`.pipe(
+        SELECT count(*) AS n, coalesce(sum(CASE WHEN kind = 'file' THEN 0 ELSE byte_size END), 0) AS bytes
+        FROM bin_items WHERE user_id = ${userId}`.pipe(
         Effect.map(([usage]) => usage!.n <= limits.deletedItems && usage!.bytes <= limits.deletedBytes)
       )
       if (yield* fits) return
       const [newest] = yield* sql<{ n: number; bytes: number }>`
-        SELECT count(*) AS n, coalesce(sum(byte_size), 0) AS bytes FROM bin_items WHERE ${sql.in("id", made)}`
+        SELECT count(*) AS n, coalesce(sum(CASE WHEN kind = 'file' THEN 0 ELSE byte_size END), 0) AS bytes
+        FROM bin_items WHERE ${sql.in("id", made)}`
       // Not even evicting everything else would make room.
       if (limits.deletedItems < newest!.n || newest!.bytes > limits.deletedBytes) return
       yield* sql
@@ -1718,6 +1754,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
     deleteEntity,
     deleteConnection,
     deleteMcpConnection,
+    deleteFile,
     restore,
     restoreMany,
     purge,

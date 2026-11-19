@@ -42,6 +42,7 @@ export const binTitle = (item: BinItem) => {
     case "entity":
     case "connection":
     case "mcp_connection":
+    case "file":
       return item.title
   }
 }
@@ -81,6 +82,7 @@ export const purgeTitle = (item: BinItem) => {
     case "entity":
     case "connection":
     case "mcp_connection":
+    case "file":
       return item.title === "" ? "Delete this for good?" : `Delete “${item.title}” for good?`
   }
 }

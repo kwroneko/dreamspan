@@ -80,6 +80,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   DecideMediaApproval: "User-only security, consent, account, credential or network configuration.",
   ConvertPresetToWorkshop: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   GetWorkshopDefaults: "Not in W6's first exposures; use the bounded workshop read tools.",
+  WorkshopFolderChoices: "Not in W6's first exposures; use the bounded workshop read tools.",
   SetWorkshopPersona: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   DeleteChat: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   DeleteChatGroup: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",

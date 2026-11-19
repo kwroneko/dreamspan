@@ -8,12 +8,37 @@ import { chatPanels, lazyPanel, type PanelProps } from "../chat/panels.tsx"
 import { tabKinds } from "../workbench/kinds.ts"
 import { FilesPage } from "./FilesPage.tsx"
 import { FILES_PAGE } from "./href.ts"
-import { FILES_TAB } from "./ids.ts"
+import { FILES_TAB, FOLDER_CHIP } from "./ids.ts"
+import { composerControls } from "../chat/composerControls.tsx"
+import { FolderChip, useFolderChoices } from "./FolderChip.tsx"
+import { workingFolderSources } from "./working.ts"
+import { FILES_TOP } from "@dreamspan/shared/files.ts"
+import { userNoticeReceivers } from "../noticeContributions.tsx"
+import { filesNoticeReceiver } from "./live.ts"
 import { filesSources, httpFilesSource } from "./source.ts"
 import { registerViewers } from "./viewers.tsx"
 
 export const register = () => [
   filesSources.register(httpFilesSource),
+  userNoticeReceivers.register(filesNoticeReceiver),
+  // The working-folder chip after Model and Preset, before the cache chip (§2.2), workshops only.
+  composerControls.register({
+    id: FOLDER_CHIP,
+    order: 25,
+    placement: "strip",
+    available: ({ view }) => kindShows(view.chat?.kind, FOLDER_CHIP),
+    component: FolderChip
+  }),
+  // The Files tab opens at the branch's working folder and offers Set as working folder.
+  workingFolderSources.register({
+    id: "files.working",
+    useWorkingFolder: (session, view) => {
+      const shows = kindShows(view.chat?.kind, FOLDER_CHIP)
+      const folder = useFolderChoices(session, shows)
+      if (!shows || !folder.ready) return null
+      return { path: folder.choices?.current ?? FILES_TOP, set: folder.choose }
+    }
+  }),
   ...registerViewers(),
   chatPanels.register({
     id: FILES_TAB,

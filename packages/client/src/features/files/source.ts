@@ -39,6 +39,8 @@ export interface FilesSource {
   readonly restore: (binItemId: string) => Promise<Changed>
   /** The URL a viewer loads the file from, or a download starts at. */
   readonly rawUrl: (path: string, download?: boolean) => string
+  /** The URL a folder downloads from as one zip. */
+  readonly zipUrl: (path: string) => string
 }
 
 export const filesSources = makeRegistry<FilesSource>()
@@ -113,5 +115,6 @@ export const httpFilesSource: FilesSource = {
   remove: async (path) => json(Deleted, await post(FILES_ROUTES.delete, { path })),
   restore: async (binItemId) => json(Changed, await post(FILES_ROUTES.restore, { binItemId })),
   rawUrl: (path, download = false) =>
-    `${FILES_ROUTES.raw}?${new URLSearchParams(download ? { path, download: "1" } : { path })}`
+    `${FILES_ROUTES.raw}?${new URLSearchParams(download ? { path, download: "1" } : { path })}`,
+  zipUrl: (path) => `${FILES_ROUTES.zip}?${new URLSearchParams({ path })}`
 }

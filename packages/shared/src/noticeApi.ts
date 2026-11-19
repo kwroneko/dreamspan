@@ -20,6 +20,11 @@ export const Notice = Schema.Union([
   Schema.TaggedStruct("UserDraftChanged", { draft: Draft }),
   /** Initial subscription and backlog overflow: re-read open private draft workspaces. */
   Schema.TaggedStruct("UserDraftSync", {}),
+  /**
+   * The account's Files changed (spec/FILES-AND-ENVIRONMENT.md §8.1): the folders whose listings
+   * did, after an app-side change or a command's scan. `all`: the scan was partial, so any may have.
+   */
+  Schema.TaggedStruct("FilesChanged", { folders: Schema.Array(Schema.String), all: Schema.Boolean }),
   /** An ST folder import made progress or ended (ARCHITECTURE.md §13): at most about once a second per import. */
   Schema.TaggedStruct("StImportChanged", { importId: StImportId, status: StImportStatus })
 ])

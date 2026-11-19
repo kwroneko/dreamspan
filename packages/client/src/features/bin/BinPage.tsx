@@ -5,7 +5,7 @@ import { copyText } from "../../copyText.ts"
 import { SlotOutlet, defineSlot } from "../../slots.tsx"
 import { RegistryContext } from "@effect/atom-react"
 import type { BinBranch, BinItem, RecoveredText } from "@dreamspan/shared/bin.ts"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useContext, useEffect, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
@@ -21,6 +21,8 @@ import { readableChatTitle } from "../chat/chatTitle.ts"
 import { KindBadge } from "../chat/KindBadge.tsx"
 import { RESTORED_KEYS, restoreItem } from "./deleted.ts"
 import { binTitle, purgeTitle, recoveredSource } from "./titles.ts"
+import { parentOf } from "@dreamspan/shared/files.ts"
+import { filesHref } from "../files/href.ts"
 
 export const binSettings = defineSlot<Record<string, never>>("bin.settings")
 /**
@@ -54,6 +56,8 @@ const kindLabel = (item: BinItem) => {
       return "Connection"
     case "mcp_connection":
       return "MCP server"
+    case "file":
+      return item.origin.entryKind === "folder" ? "Folder" : "File"
     case "entity": {
       const kind = typeof item.origin.kind === "string" ? item.origin.kind : "entry"
       return kind[0]!.toUpperCase() + kind.slice(1)
@@ -85,6 +89,10 @@ const purgeEffect = (item: BinItem) => {
       return "The connection goes for good, with the key typed into it. Usage records keep its name."
     case "mcp_connection":
       return "The server goes for good, with the key typed into it. Its record of calls keeps its name."
+    case "file":
+      return item.origin.entryKind === "folder"
+        ? "The folder goes for good, with everything in it, and its space is freed."
+        : "The file goes for good, and its space is freed."
   }
 }
 
@@ -132,8 +140,27 @@ function PurgeBranches({
 
 /** Where a restored item is now, for a link to it. */
 function RestoredLink({ item }: { item: BinItem }) {
+  const navigate = useNavigate()
   const chatId = typeof item.origin.chatId === "string" ? item.origin.chatId : null
   const slotId = typeof item.origin.slotId === "string" ? item.origin.slotId : null
+  if (item.kind === "file" && typeof item.origin.path === "string")
+    return (
+      <span className="text-sm text-success">
+        Restored.{" "}
+        <Tooltip label="Opens the folder it went back to.">
+          <a
+            href={filesHref(parentOf(item.origin.path))}
+            className="text-accent underline-offset-4 hover:underline"
+            onClick={(event) => {
+              event.preventDefault()
+              void navigate({ href: event.currentTarget.getAttribute("href")! })
+            }}
+          >
+            Open it
+          </a>
+        </Tooltip>
+      </span>
+    )
   if (chatId === null) return <span className="text-sm text-success">Restored.</span>
   return (
     <span className="text-sm text-success">

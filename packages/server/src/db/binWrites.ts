@@ -48,6 +48,19 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
         deleting("DeleteConnection", userId, bin.deleteConnection(userId, connectionId)),
       DeleteMcpConnection: ({ userId, connectionId }) =>
         deleting("DeleteMcpConnection", userId, bin.deleteMcpConnection(userId, connectionId)),
+      BinFile: ({ userId, ...file }) =>
+        Effect.gen(function* () {
+          const itemId = yield* bin.deleteFile(userId, file)
+          yield* bin.evictDeleted(userId, itemId)
+          return toBinItem(yield* bin.loadItem(userId, itemId))
+        }).pipe(transaction(sql, "BinFile")),
+      ForgetFileBinItem: ({ userId, itemId }) =>
+        Effect.gen(function* () {
+          const item = yield* bin.loadItem(userId, itemId)
+          if (item.kind !== "file") return yield* new NotFound({ entity: "file in the bin", id: itemId })
+          yield* sql`DELETE FROM bin_items WHERE id = ${itemId}`
+          return toBinItem(item)
+        }).pipe(transaction(sql, "ForgetFileBinItem")),
       RestoreBinItem: ({ userId, itemId }) => bin.restore(userId, itemId).pipe(transaction(sql, "RestoreBinItem")),
       RestoreBinItems: ({ userId, itemIds }) =>
         bin.restoreMany(userId, itemIds).pipe(transaction(sql, "RestoreBinItems")),

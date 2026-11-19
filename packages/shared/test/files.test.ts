@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   crumbsOf,
   FILES_TOP,
+  foldersShowing,
   isWithin,
   joinPath,
   keepBothName,
@@ -83,5 +84,13 @@ describe("file paths", () => {
     expect(viewOf("paper.pdf")).toBe("pdf")
     expect(viewOf("archive.zip")).toBe("download")
     expect(viewOf("README")).toBe("download")
+  })
+})
+
+describe("foldersShowing", () => {
+  it("names the folders whose listing a change shows in, the top first", () => {
+    expect(foldersShowing("/files/thesis/notes.md")).toEqual(["/files", "/files/thesis"])
+    expect(foldersShowing("/files/readme.txt")).toEqual(["/files"])
+    expect(foldersShowing(FILES_TOP)).toEqual([])
   })
 })

@@ -6,12 +6,14 @@ import { UserId } from "./domain.ts"
 import { Forbidden, NotFound, ServerError } from "./errors.ts"
 
 export const FilesUsage = Schema.Struct({
-  /** Files, versions and the home folder together: what the quota counts. */
+  /** Files, versions, the bin and the home folder together: what the quota counts. */
   usedBytes: Schema.Number,
   quotaBytes: Schema.Number,
   filesBytes: Schema.Number,
   versionsBytes: Schema.Number,
   homeBytes: Schema.Number,
+  /** Files and folders in the bin, until it's emptied. */
+  binBytes: Schema.Number,
   /** When the folders were last measured (they are again after each command and every 10 minutes). */
   measuredAt: Schema.Number,
   /** The account is over its quota: new writes, uploads and commands are refused. */

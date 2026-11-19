@@ -15,6 +15,7 @@ const view = (usage: Usage): FilesUsage => ({
   filesBytes: usage.filesBytes,
   versionsBytes: usage.versionsBytes,
   homeBytes: usage.homeBytes,
+  binBytes: usage.binBytes,
   measuredAt: usage.measuredAt,
   over: usage.usedBytes > usage.quotaBytes,
   partial: usage.partial

@@ -10,6 +10,7 @@ import { formatMoment } from "@dreamspan/shared/branchNaming.ts"
 import {
   crumbsOf,
   isTop,
+  isWithin,
   joinPath,
   keepBothName,
   nameOf,
@@ -20,6 +21,7 @@ import {
   type FileSort,
   type FolderListing
 } from "@dreamspan/shared/files.ts"
+import { useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react"
 import type { FilesUsage } from "@dreamspan/shared/filesQuotaApi.ts"
 import { useAction } from "../../actions.tsx"
@@ -35,6 +37,7 @@ import { Badge } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { FolderTree } from "./FolderTree.tsx"
+import { onFolderChanged } from "./live.ts"
 import type { FilesSource } from "./source.ts"
 import {
   batchSize,
@@ -88,10 +91,10 @@ const copyPath = async (path: string) => {
   }
 }
 
-const download = (source: FilesSource, path: string) => {
+const download = (source: FilesSource, path: string, folder = false) => {
   const link = document.createElement("a")
-  link.href = source.rawUrl(path, true)
-  link.download = nameOf(path)
+  link.href = folder ? source.zipUrl(path) : source.rawUrl(path, true)
+  link.download = folder ? `${nameOf(path)}.zip` : nameOf(path)
   link.rel = "noopener"
   document.body.append(link)
   link.click()
@@ -100,11 +103,13 @@ const download = (source: FilesSource, path: string) => {
 
 export function FileBrowser(props: FileBrowserProps) {
   const { source, folder, onFolder, opened, onOpened, working } = props
+  const navigate = useNavigate()
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [version, setVersion] = useState(0)
   const [sort, setSort] = useState<FileSort>("name")
   const [renaming, setRenaming] = useState<string | null>(null)
-  const [creating, setCreating] = useState(false)
+  const [creating, setCreating] = useState<"folder" | "file" | null>(null)
+  const [moving, setMoving] = useState<FileEntry | null>(null)
   const [confirm, setConfirm] = useState<FileEntry | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -149,6 +154,23 @@ export function FileBrowser(props: FileBrowserProps) {
   useEffect(() => {
     void readUsage()
   }, [readUsage, version])
+
+  // Live refresh (§8.1): a change elsewhere (the assistant, another tab) reads this folder again,
+  // at most a few times a second.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const off = onFolderChanged(folder, () => {
+      if (timer === undefined)
+        timer = setTimeout(() => {
+          timer = undefined
+          reload()
+        }, 300)
+    })
+    return () => {
+      off()
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [folder, reload])
 
   const current = loaded?.for === folder ? loaded : null
   const listing = current && "listing" in current ? current.listing : null
@@ -200,7 +222,7 @@ export function FileBrowser(props: FileBrowserProps) {
     const path = joinPath(folder, name)
     const done = await change(() => source.createFolder(path), "The folder wasn't made")
     if (!done) return
-    setCreating(false)
+    setCreating(null)
     showToast({
       title: `Made the folder “${name}”`,
       actions: [
@@ -208,6 +230,51 @@ export function FileBrowser(props: FileBrowserProps) {
           label: "Undo",
           hint: "Deletes the new folder.",
           onClick: () => void change(() => source.remove(path), "The folder wasn't taken back")
+        }
+      ]
+    })
+  }
+
+  const createFile = async (name: string) => {
+    const problem = nameProblem(name)
+    if (problem) return setFailure(problem)
+    if (names.has(name)) return setFailure(`“${name}” is taken here. Choose another name.`)
+    const path = joinPath(folder, name)
+    const done = await change(() => source.upload(path, new Blob([]), "ask"), `“${name}” wasn't made`)
+    if (!done) return
+    setCreating(null)
+    showToast({
+      title: `Made the file “${name}”`,
+      actions: [
+        {
+          label: "Undo",
+          hint: "Moves the new file to the bin.",
+          onClick: () => void change(() => source.remove(path), "The file wasn't taken back")
+        }
+      ]
+    })
+  }
+
+  /** Moves an entry of this folder into `target`, under its own name. */
+  const moveTo = async (entry: FileEntry, target: string) => {
+    const from = joinPath(folder, entry.name)
+    const to = joinPath(target, entry.name)
+    const done = await change(() => source.move(from, to), `“${entry.name}” wasn't moved`)
+    if (!done) return
+    setMoving(null)
+    if (opened === entry.name) onOpened(null)
+    showToast({
+      title: `Moved “${entry.name}” to “${nameOf(target)}”`,
+      actions: [
+        {
+          label: "Undo",
+          hint: `Moves it back to “${nameOf(folder)}”.`,
+          onClick: () => void change(() => source.move(to, from), "The move wasn't undone")
+        },
+        {
+          label: "Show",
+          hint: "Shows the folder it went to.",
+          onClick: () => onFolder(target)
         }
       ]
     })
@@ -221,20 +288,32 @@ export function FileBrowser(props: FileBrowserProps) {
     if (opened === entry.name) onOpened(null)
     const binItemId = done.binItemId
     showToast({
-      title: `Deleted “${entry.name}”`,
+      title: binItemId === null ? `Deleted “${entry.name}”` : `“${entry.name}” moved to the bin.`,
       ...(binItemId === null
         ? {}
         : {
-            description: "It's in the bin.",
+            timeout: 10_000,
             actions: [
               {
                 label: "Undo",
                 hint: "Puts it back where it was.",
-                onClick: () => void change(() => source.restore(binItemId), `“${entry.name}” wasn't put back`)
+                onClick: () => void restore(entry.name, binItemId)
+              },
+              {
+                label: "Open the bin",
+                hint: "Shows deleted items you can restore.",
+                onClick: () => void navigate({ to: "/bin" })
               }
             ]
           })
     })
+  }
+
+  /** Puts a deleted item back; says so when its name was taken and it came back under another. */
+  const restore = async (name: string, binItemId: string) => {
+    const back = await change(() => source.restore(binItemId), `“${name}” wasn't put back`)
+    if (back && nameOf(back.path) !== name)
+      showToast({ title: `Put back as “${nameOf(back.path)}”`, description: `“${name}” was taken by then.` })
   }
 
   const askDelete = (entry: FileEntry) => {
@@ -383,12 +462,23 @@ export function FileBrowser(props: FileBrowserProps) {
               hint={`Makes an empty folder in “${folderName}”.`}
               disabled={readOnly || busy}
               onClick={() => {
-                setCreating(true)
+                setCreating("folder")
                 setFailure(null)
               }}
             >
               <Icon name="plus" />
               New folder
+            </Button>
+            <Button
+              hint={`Makes an empty file in “${folderName}”, such as notes.md.`}
+              disabled={readOnly || busy}
+              onClick={() => {
+                setCreating("file")
+                setFailure(null)
+              }}
+            >
+              <Icon name="file" />
+              New file
             </Button>
             <Menu
               label="Sort by"
@@ -448,7 +538,7 @@ export function FileBrowser(props: FileBrowserProps) {
               <FolderTree source={source} folder={folder} onFolder={onFolder} version={treeVersion} />
             </nav>
             <div className="flex min-w-0 flex-col gap-1">
-              {creating && (
+              {creating === "folder" && (
                 <NameForm
                   label="Name of the new folder"
                   initial={names.has("New folder") ? keepBothName("New folder", names) : "New folder"}
@@ -457,7 +547,20 @@ export function FileBrowser(props: FileBrowserProps) {
                   saveHint="Makes the folder with this name."
                   pending={busy}
                   onSave={(name) => void createFolder(name)}
-                  onCancel={() => setCreating(false)}
+                  onCancel={() => setCreating(null)}
+                />
+              )}
+              {creating === "file" && (
+                <NameForm
+                  key="file"
+                  label="Name of the new file"
+                  initial={names.has("Untitled.txt") ? keepBothName("Untitled.txt", names) : "Untitled.txt"}
+                  fresh
+                  saveLabel="Make file"
+                  saveHint="Makes an empty file with this name."
+                  pending={busy}
+                  onSave={(name) => void createFile(name)}
+                  onCancel={() => setCreating(null)}
                 />
               )}
               {current === null ? (
@@ -501,7 +604,11 @@ export function FileBrowser(props: FileBrowserProps) {
                       onRenamed={(next) => void rename(item, next)}
                       onCancelRename={() => setRenaming(null)}
                       onDelete={() => askDelete(item)}
-                      onDownload={() => download(source, joinPath(folder, item.name))}
+                      onMove={() => {
+                        setFailure(null)
+                        setMoving(item)
+                      }}
+                      onDownload={() => download(source, joinPath(folder, item.name), item.kind === "folder")}
                       onWorking={(path) => void change(() => working!.set!(path), "The working folder wasn't changed")}
                     />
                   ))}
@@ -541,6 +648,14 @@ export function FileBrowser(props: FileBrowserProps) {
         confirmHint="Deletes it for good."
         pending={busy}
         onConfirm={() => confirm && void remove(confirm)}
+      />
+      <MoveDialog
+        source={source}
+        entry={moving}
+        folder={folder}
+        pending={busy}
+        onClose={() => setMoving(null)}
+        onMove={(target) => moving && void moveTo(moving, target)}
       />
       <ConflictDialog
         open={conflict !== null}
@@ -635,6 +750,7 @@ function EntryRow({
   onRenamed,
   onCancelRename,
   onDelete,
+  onMove,
   onDownload,
   onWorking
 }: {
@@ -649,6 +765,7 @@ function EntryRow({
   onRenamed: (next: string) => void
   onCancelRename: () => void
   onDelete: () => void
+  onMove: () => void
   onDownload: () => void
   onWorking: (path: string) => void
 }) {
@@ -695,6 +812,14 @@ function EntryRow({
           Download
         </MenuItem>
       )}
+      {entry.kind === "folder" && (
+        <MenuItem
+          description="Saves the folder and everything in it on this device, as one zip file."
+          onClick={onDownload}
+        >
+          Download as zip
+        </MenuItem>
+      )}
       <MenuItem
         description={`Copies ${path}, the path the assistant's tools use for it.`}
         onClick={() => void copyPath(path)}
@@ -716,7 +841,15 @@ function EntryRow({
           <MenuItem description="Gives it another name in this folder." disabled={busy} onClick={onRename}>
             Rename
           </MenuItem>
-          <MenuItem tone="danger" description="Deletes it." disabled={busy} onClick={onDelete}>
+          <MenuItem description="Puts it in another folder of your files." disabled={busy} onClick={onMove}>
+            Move to…
+          </MenuItem>
+          <MenuItem
+            tone="danger"
+            description="Moves it to the bin, from which it can be restored later."
+            disabled={busy}
+            onClick={onDelete}
+          >
             Delete
           </MenuItem>
         </>
@@ -904,6 +1037,71 @@ function OpenedFile({
   )
 }
 
+/** Move to… (§8.1): a folder picked from the tree; the phone's way to move, since it has no drag. */
+function MoveDialog({
+  source,
+  entry,
+  folder,
+  pending,
+  onClose,
+  onMove
+}: {
+  source: FilesSource
+  entry: FileEntry | null
+  folder: string
+  pending: boolean
+  onClose: () => void
+  onMove: (target: string) => void
+}) {
+  const [target, setTarget] = useState(folder)
+  const [shownFor, setShownFor] = useState<FileEntry | null>(null)
+  if (shownFor !== entry) {
+    setShownFor(entry)
+    setTarget(folder)
+  }
+  const path = entry ? joinPath(folder, entry.name) : folder
+  const problem =
+    entry === null
+      ? null
+      : target === folder
+        ? "It's in this folder already."
+        : entry.kind === "folder" && isWithin(target, path)
+          ? "A folder can't go inside itself."
+          : null
+  return (
+    <Dialog
+      open={entry !== null}
+      onOpenChange={(open) => !open && onClose()}
+      title={`Move “${entry?.name ?? ""}” to…`}
+      description="Choose the folder it goes into."
+    >
+      <div className="flex min-w-0 flex-col gap-3">
+        <div className="max-h-72 min-h-32 overflow-y-auto" data-move-tree="">
+          <FolderTree source={source} folder={target} onFolder={setTarget} version={0} />
+        </div>
+        <p className="text-sm [overflow-wrap:anywhere]">
+          Into <span className="font-medium">{target}</span>
+        </p>
+        {problem && <p className="text-sm text-muted">{problem}</p>}
+      </div>
+      <DialogActions>
+        <Button hint="Leaves it where it is." onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          hint={`Moves it into ${target}.`}
+          disabled={problem !== null}
+          pending={pending}
+          onClick={() => onMove(target)}
+        >
+          Move here
+        </Button>
+      </DialogActions>
+    </Dialog>
+  )
+}
+
 function ConflictDialog({ open, onAnswer }: { open: boolean; onAnswer: (answer: ConflictAnswer | null) => void }) {
   return (
     <Dialog
@@ -941,8 +1139,8 @@ function UsageLine({ usage }: { usage: FilesUsage }) {
     <Tooltip
       label={
         usage.over
-          ? "Your files are over their storage limit. Delete files you don't need to upload or change files again."
-          : "How much of your storage your files use, with their earlier versions and the assistant's home folder."
+          ? "Your files are over their storage limit. Delete files you don't need and empty the bin to upload or change files again."
+          : "How much of your storage your files use, with their earlier versions, the bin and the assistant's home folder."
       }
     >
       <p

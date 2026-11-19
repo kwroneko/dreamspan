@@ -5,6 +5,7 @@
 // content as a version and records a `file.*` effect with Undo; every command records a
 // `shell.run` effect listing the files it changed, with no Undo. A call cut off without its
 // receipt is never run again silently: the permit asks (agent/approvals.ts).
+import { locateFolder } from "../../files/workingFolder.ts"
 import { createHash } from "node:crypto"
 import { readFile, statfs } from "node:fs/promises"
 import { join, posix } from "node:path"
@@ -88,6 +89,8 @@ export interface FileToolDeps {
   /** Bytes held from the media sweep until their rows commit. */
   readonly holding: <A, E, R>(hashes: ReadonlyArray<string>, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   readonly limits?: FileToolLimits
+  /** The account's files changed (paths under /files), for open file managers; `all`: maybe any. */
+  readonly onChanged?: (userId: string, paths: ReadonlyArray<string>, all?: boolean) => void
 }
 
 const READ_MAX_BYTES = 10 * 2 ** 20
@@ -217,16 +220,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
         .StateEventsAt({ userId: ctx.userId, chatId: ctx.chatId, slotId: ctx.leafSlotId, forkId: ctx.forkId })
         .pipe(Effect.orElseSucceed(() => []))
       const folder = foldState(events).workshopFolder
-      let start = FILES_MOUNT
-      if (folder) {
-        try {
-          const { full, segments } = resolveFilesPath(folder.path, FILES_MOUNT)
-          const info = yield* attempt(() => statPath(env.filesRoot, segments))
-          if (info?.isDirectory()) start = full
-        } catch {
-          // A folder that's gone: the top of Files (§2.2).
-        }
-      }
+      // Found again by its inode after a rename; a folder that's gone: the top of Files (§2.2).
+      const start = folder
+        ? ((yield* Effect.promise(() => locateFolder(env.filesRoot, folder).catch(() => null))) ?? FILES_MOUNT)
+        : FILES_MOUNT
       ctx.cache.set(CWD_KEY, start)
       return start
     })
@@ -575,6 +572,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
           writeRegularFile(env.filesRoot, segments, content, { createFolders: true })
         )
         deps.quota?.wrote(env.userId, adding)
+        deps.onChanged?.(env.userId, [full])
         const after = sha256(content)
         ctx.cache.set(readKey(full), after)
         const effectKind = before ? (kind === "edit" ? "file.edit" : "file.write") : "file.create"
@@ -813,6 +811,11 @@ export const makeFileTools = (deps: FileToolDeps) => {
           Semaphore.withPermit(accountPermits(env.userId))(run)
         )
         if (result.cwd) ctx.cache.set(CWD_KEY, result.cwd)
+        deps.onChanged?.(
+          env.userId,
+          [...changes.changed, ...changes.created, ...changes.deleted].map((p) => `${FILES_MOUNT}/${p}`),
+          changes.partial
+        )
         yield* keepCommandVersions(ctx, env, [...changes.changed, ...changes.created], changes.deleted)
         // Commands can't be stopped mid-write by a quota: measured after, and the next refused.
         const overQuota = deps.quota
@@ -909,6 +912,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
             yield* attempt(() => writeRegularFile(env.filesRoot, segments, bytes))
             deps.quota?.wrote(env.userId, bytes.byteLength)
           } else yield* attempt(() => removeFile(env.filesRoot, segments))
+          deps.onChanged?.(env.userId, [recipe.path as string])
           return yield* deps.writer.CompleteFileUndo({
             userId: actor.id,
             rolloutId: effect.rolloutId,

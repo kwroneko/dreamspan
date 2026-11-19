@@ -125,6 +125,24 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
           mediaPath: row.media_path
         }
       }).pipe(query("FileVersion")),
+    FileBinItem: ({ userId, itemId }) =>
+      Effect.gen(function* () {
+        const [row] = yield* sql<{ id: string; title: string; origin_json: string }>`
+          SELECT id, title, origin_json FROM bin_items WHERE id = ${itemId} AND user_id = ${userId} AND kind = 'file'`
+        if (!row) return yield* new NotFound({ entity: "file in the bin", id: itemId })
+        const origin = JSON.parse(row.origin_json) as { path?: unknown; entryKind?: unknown }
+        return {
+          id: row.id,
+          path: String(origin.path ?? ""),
+          name: row.title,
+          entryKind: String(origin.entryKind ?? "file")
+        }
+      }).pipe(query("FileBinItem")),
+    FileBinItemIds: ({ userId }) =>
+      sql<{ id: string }>`SELECT id FROM bin_items WHERE user_id = ${userId} AND kind = 'file'`.pipe(
+        Effect.map((rows) => rows.map((row) => row.id)),
+        query("FileBinItemIds")
+      ),
     FileVersionBytes: ({ userId }) =>
       sql<{ bytes: number | null }>`SELECT sum(m.byte_size) AS bytes FROM media_assets m
         WHERE m.id IN (SELECT media_id FROM file_versions WHERE owner_user_id = ${userId} AND media_id IS NOT NULL)`.pipe(
