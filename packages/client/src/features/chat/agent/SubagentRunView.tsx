@@ -16,7 +16,15 @@ import { useTitle } from "../../shell.tsx"
 import { Steps, Tools } from "./RunSteps.tsx"
 import { subagentFacts } from "./SubagentPanel.tsx"
 
-const ended = { running: "Working", waiting: "Waiting for you", done: "Done", stopped: "Stopped", failed: "Failed" }
+const ended = {
+  queued: "Queued",
+  running: "Working",
+  waiting: "Waiting for you",
+  done: "Done",
+  stopped: "Stopped",
+  limit: "Stopped at its limit",
+  failed: "Failed"
+}
 
 export function SubagentRunView({
   chatId,
@@ -60,8 +68,12 @@ export function SubagentRunView({
                 <dt className="text-muted">Handle</dt>
                 <dd className="font-mono [overflow-wrap:anywhere]">{run.row.handle}</dd>
                 <dt className="text-muted">Model</dt>
-                <dd className="[overflow-wrap:anywhere]">The reply's own: {run.row.model}</dd>
-                {run.error && (
+                <dd className="[overflow-wrap:anywhere]">
+                  {run.row.alias === "same"
+                    ? `The reply's own: ${run.row.model}`
+                    : `${run.row.alias}: ${run.row.model}`}
+                </dd>
+                {run.error && run.row.status !== "limit" && (
                   <>
                     <dt className="text-muted">Error</dt>
                     <dd className="text-danger [overflow-wrap:anywhere]">{run.error}</dd>

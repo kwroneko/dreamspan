@@ -14,6 +14,7 @@ import type { FrozenTool } from "../agent/tools.ts"
 import { transcriptEntries } from "./transcriptEntries.ts"
 import { ownedModel } from "./generationSettings.ts"
 import { rolloutUsage } from "./inspectorReads.ts"
+import { LIMIT_STOP } from "@dreamspan/shared/subagents.ts"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
 
@@ -33,6 +34,13 @@ export interface SubagentSnapshot {
   readonly context: "task"
   readonly spawnedBy: string
   readonly callId: string
+  /** Its limits, as they applied (spec/SUBAGENTS.md §6.2); absent on SA1's children. */
+  readonly caps?: {
+    readonly requests: number
+    readonly tokens: number
+    readonly cost: number
+    readonly minutes: number
+  }
 }
 
 /** The rollouts a run carries on from, itself first: where its earlier calls' children were started. */
@@ -89,16 +97,18 @@ const parse = <A>(json: string | null, fallback: A): A => {
 }
 
 /** A rollout's status as a subagent's row says it; an interrupted one (a restart) was stopped. */
-const statusOf = (status: string, steps: ReadonlyArray<ChildStep>): SubagentStatus =>
-  status === "running" || status === "created"
-    ? steps.some((s) => s.kind === "tool" && s.status === "waiting")
-      ? "waiting"
-      : "running"
-    : status === "completed"
-      ? "done"
-      : status === "failed"
-        ? "failed"
-        : "stopped"
+const statusOf = (status: string, steps: ReadonlyArray<ChildStep>, error: string | null): SubagentStatus =>
+  status === "stopped" && error === LIMIT_STOP
+    ? "limit"
+    : status === "running" || status === "created"
+      ? steps.some((s) => s.kind === "tool" && s.status === "waiting")
+        ? "waiting"
+        : "running"
+      : status === "completed"
+        ? "done"
+        : status === "failed"
+          ? "failed"
+          : "stopped"
 
 /** The last text a transcript's model turns hold: what a subagent had of its report. */
 const lastText = (messages: ReadonlyArray<AgentMessage>): string | null => {
@@ -134,7 +144,7 @@ const rowOf = (r: ChildRecord): SubagentRow => {
     task: sub?.task ?? "",
     alias: sub?.alias ?? "same",
     model: sub?.model ?? "",
-    status: statusOf(r.status, steps),
+    status: statusOf(r.status, steps, r.error),
     steps,
     count: r.step_count,
     ms: r.completed_at === null ? null : Math.max(0, r.completed_at - r.created_at),
@@ -265,7 +275,18 @@ export const makeSubagentReadHandlers = Effect.gen(function* () {
 export const makeSubagentWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
-    StartSubagent: ({ userId, parentRolloutId, callId, rolloutId, type, connectionId, modelId, snapshot }) =>
+    StartSubagent: ({
+      userId,
+      parentRolloutId,
+      callId,
+      rolloutId,
+      type,
+      connectionId,
+      modelId,
+      snapshot,
+      perRun,
+      runCost
+    }) =>
       Effect.gen(function* () {
         const [parent] = yield* sql<{
           readonly chat_id: string
@@ -289,7 +310,13 @@ export const makeSubagentWriteHandlers = Effect.gen(function* () {
           return yield* new NotFound({ entity: "model", id: modelId })
         const [started] = yield* sql<{ n: number }>`
           SELECT count(*) AS n FROM rollouts WHERE spawned_by_rollout_id = ${parentRolloutId}`
-        if (started!.n >= SUBAGENTS_PER_RUN) return { refused: "limit" as const }
+        if (started!.n >= (perRun ?? SUBAGENTS_PER_RUN)) return { refused: "limit" as const }
+        if (runCost !== undefined) {
+          const [spent] = yield* sql<{ cost: number | null }>`
+            SELECT sum(q.cost) AS cost FROM rollouts r JOIN llm_requests q ON q.rollout_id = r.id
+            WHERE r.spawned_by_rollout_id = ${parentRolloutId}`
+          if ((spent?.cost ?? 0) >= runCost) return { refused: "spent" as const }
+        }
         // Numbered across the run chain, so a handle names one child wherever the run carried on.
         const chain = yield* chainOf(sql, parentRolloutId)
         const [same] = yield* sql<{ n: number }>`

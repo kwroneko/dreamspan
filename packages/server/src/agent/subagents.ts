@@ -1,8 +1,11 @@
-// Subagents (spec/SUBAGENTS.md, milestone SA1): a child rollout started by the parent run's
+// Subagents (spec/SUBAGENTS.md, milestones SA1–SA3): a child rollout started by the parent run's
 // `agent` call, inside the reply. It gets its own context (its type's instructions, the date and
 // the task, nothing of the chat), never more tools than the parent was offered and the workshop
-// allows now, the parent's model (`same`), and the `final_text` contract: its last plain turn is
-// the report, which comes back as the call's result inside the workshop data boundary. Its
+// allows now, a model from the chat's subagent models by alias (§5: `same` is the chat's own), and
+// the `final_text` contract: its last plain turn is the report, which comes back as the call's
+// result inside the workshop data boundary. It runs within its limits (§6.2: requests, tokens,
+// cost, wall time; a wrap-up note at 80%, a stop at 100%) and waits, queued, for a free place
+// among the reply's and the account's running subagents (§6.3). Its
 // requests are ledger rows of its own rollout attributed to the parent's version, so the version's
 // cost includes it. It runs in the parent call's fiber: stopping the reply stops it; Stop on its
 // row stops it alone, and the parent gets what it had. A call that already started one never starts
@@ -16,16 +19,19 @@ import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { makeRegistry } from "@dreamspan/shared/registry.ts"
-import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect"
+import { SAME } from "@dreamspan/shared/subagents.ts"
+import { LIMIT_STOP } from "@dreamspan/shared/subagents.ts"
+import { Cause, Deferred, Effect, Exit, Fiber, Option, Stream } from "effect"
 import type { AssembledRequest, Generation } from "../assembler/types.ts"
 import { GenerationFailed, type GenerationRequest } from "../chat/Generator.ts"
 import { defaultReplyOutput } from "../chat/replyOutput.ts"
 import type { SubagentSnapshot } from "../db/subagents.ts"
+import type { SubagentModelEntry, SubagentModelsAt } from "../db/subagentSettings.ts"
 import { executionRegistry } from "../execution.ts"
 import { makePermit, offeredByGrants } from "./approvals.ts"
 import { runAgent, type AgentRun } from "./session.ts"
 import { escapeToolData, toolData, TOOL_RESULT_CHARS } from "./toolData.ts"
-import type { FrozenTool, RolloutTool, ToolContext, ToolOutput } from "./tools.ts"
+import type { FrozenTool, OfferContext, RolloutTool, ToolContext, ToolOutput } from "./tools.ts"
 
 /** A kind of subagent the parent may start (spec/SUBAGENTS.md §2.5); plugins add theirs (SA7). */
 interface SubagentType {
@@ -38,8 +44,8 @@ interface SubagentType {
   readonly kinds: ReadonlyArray<string>
   /** Which of the parent's offered tools it may use: always narrowed to them. */
   readonly tools: (tool: RolloutTool<never>) => boolean
-  /** Its most requests, the last without tools (§6.2's turn cap). */
-  readonly turnCap: number
+  /** The model alias it runs on when the call names none, where that alias is allowed (§2.5). */
+  readonly defaultAlias: string
   /** Its first message, before the task: the "Subagent instructions". */
   readonly instructions: string
 }
@@ -69,13 +75,16 @@ const subagentTypes = makeRegistry<SubagentType>([
       "Searches and reads with your read-only tools (your library, chats you may read, card sources) and returns a short brief.",
     kinds: ["workshop"],
     tools: (tool) => tool.effect === "read" && !NEVER.has(tool.id),
-    turnCap: 30,
+    defaultAlias: "fast",
     instructions: RESEARCH_INSTRUCTIONS
   }
 ])
 
 /** The request a subagent's run ends with, at its turn cap. */
 const WRITE_REPORT = "Write your report now."
+
+/** The one-time harness note at 80% of a limit (§6.2, reference-harness's first tier). */
+const WRAP_UP = "You're close to your limit: stop looking further and write your report now with what you have."
 
 /** A report longer than this is cut with a marker, so its envelope fits the result budget. */
 const REPORT_CHARS = TOOL_RESULT_CHARS - 1_000
@@ -91,24 +100,130 @@ export const stopSubagent = (userId: string, rolloutId: string) => {
   return true
 }
 
+/**
+ * Running subagents' places (§6.3), by key: a reply's (its rollout id) and an account's (its
+ * user id). More than a key's limit wait, queued, in the order they started.
+ */
+interface Gate {
+  active: number
+  readonly waiting: Array<{ readonly limit: number; readonly wake: Deferred.Deferred<void> }>
+}
+const gates = new Map<string, Gate>()
+
+const pump = (key: string) => {
+  const gate = gates.get(key)
+  if (!gate) return
+  while (gate.waiting.length > 0 && gate.active < gate.waiting[0]!.limit) {
+    gate.active++
+    Deferred.doneUnsafe(gate.waiting.shift()!.wake, Effect.void)
+  }
+  if (gate.active === 0 && gate.waiting.length === 0) gates.delete(key)
+}
+
+const leave = (key: string) => {
+  const gate = gates.get(key)
+  if (!gate) return
+  gate.active--
+  pump(key)
+}
+
+/** Takes a place under `key` for the scope, waiting in line for one (`onWait` first) while all are taken. */
+const enter = (key: string, limit: number, onWait: () => void) =>
+  Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function* () {
+      let gate = gates.get(key)
+      if (!gate) gates.set(key, (gate = { active: 0, waiting: [] }))
+      if (gate.waiting.length === 0 && gate.active < limit) gate.active++
+      else {
+        const waiter = { limit, wake: Deferred.makeUnsafe<void>() }
+        gate.waiting.push(waiter)
+        onWait()
+        yield* restore(Deferred.await(waiter.wake)).pipe(
+          Effect.onInterrupt(() =>
+            Effect.sync(() => {
+              const at = gate.waiting.indexOf(waiter)
+              // Still in line: out of it. Already woken: the place it was given goes back.
+              if (at >= 0) {
+                gate.waiting.splice(at, 1)
+                pump(key)
+              } else leave(key)
+            })
+          )
+        )
+      }
+      yield* Effect.addFinalizer(() => Effect.sync(() => leave(key)))
+    })
+  )
+
 interface AgentArgs {
   readonly type: string
   readonly task: string
   readonly name?: string
+  readonly model?: string
 }
 
 const refuse = (text: string): ToolOutput => ({ text, isError: true })
 
-/** The tool's description: when to delegate, when not, and the types it offers (§2.1). */
-const description = () =>
+/** The model a call runs on: the alias it names, else its type's default, else `same`, else the first. */
+const chosenEntry = (entries: ReadonlyArray<SubagentModelEntry>, type: SubagentType | undefined, alias?: string) =>
+  alias !== undefined
+    ? entries.find((e) => e.alias === alias)
+    : (entries.find((e) => e.alias === type?.defaultAlias) ?? entries.find((e) => e.pick === SAME) ?? entries[0])
+
+/** The allowed models as the assistant reads them (§5.1): "fast: model-key. Its note." */
+const modelLines = (entries: ReadonlyArray<SubagentModelEntry>) =>
+  entries.map((e) => `- ${e.alias}: ${e.name}.${e.note.trim() ? ` ${e.note.trim()}` : ""}`).join("\n")
+
+/** The tool's description: when to delegate, when not, the types and the models it offers (§2.1, §5.1). */
+const description = (entries?: ReadonlyArray<SubagentModelEntry>) =>
   [
     "Hands one task to a subagent: a helper that works on its own, in a fresh context, and returns a report. Use it for searches or reading that would take many calls (looking through many cards, chats or files), or to keep long material out of your own context. Don't use it for a single lookup you can do yourself.",
     "The subagent sees only what you write in `task`, not this conversation: say exactly what to find and what to report. It has only your read tools, and it can't start subagents of its own. You wait for its report, which comes back as this call's result.",
     `Types: ${subagentTypes
       .list()
-      .map((t) => `"${t.id}": ${t.description}`)
-      .join(" ")}`
+      .map((t) => {
+        const alias = entries ? chosenEntry(entries, t)?.alias : undefined
+        return `"${t.id}": ${t.description}${alias ? ` Default model: ${alias}.` : ""}`
+      })
+      .join(" ")}`,
+    ...(entries && entries.length > 0
+      ? [
+          `Models it may run on (\`model\`, by name; only these):\n${modelLines(entries)}\nChoose a cheaper one for simple lookups and a stronger one for hard reading.`
+        ]
+      : [])
   ].join("\n\n")
+
+const parametersFor = (entries?: ReadonlyArray<SubagentModelEntry>) =>
+  Type.Object({
+    type: Type.String({ description: "The subagent's type, from the list above: research." }),
+    task: Type.String({
+      description: "What to do and what to report: its only instructions besides its type's. It can't see this chat."
+    }),
+    name: Type.Optional(
+      Type.String({ description: "A short label for it, shown to the user: “cache TTLs”.", maxLength: 64 })
+    ),
+    model: Type.Optional(
+      Type.String({
+        description: `The model it runs on, by name from the list above${entries?.length ? `: ${entries.map((e) => e.alias).join(", ")}` : ""}. Absent: its type's default.`
+      })
+    )
+  })
+
+/** The chat's subagent models at a position, as `SubagentModelsAt` resolves them. */
+const modelsAt = (
+  context: Pick<OfferContext, "reader" | "userId" | "chatId" | "forkId" | "leafSlotId">
+): Effect.Effect<SubagentModelsAt | null> =>
+  context.reader
+    .SubagentModelsAt({
+      userId: context.userId,
+      chatId: context.chatId,
+      forkId: context.forkId,
+      leafSlotId: context.leafSlotId
+    })
+    .pipe(
+      Effect.map((json) => JSON.parse(json) as SubagentModelsAt),
+      Effect.catchCause((cause) => Effect.logWarning("reading subagent models failed", cause).pipe(Effect.as(null)))
+    )
 
 /** The step's subagent while it runs, from the child's own steps. */
 const liveRow = (row: SubagentRow, steps: ReadonlyArray<RolloutStep>): SubagentRow => {
@@ -163,8 +278,31 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
     }
     const execution = yield* executionRegistry
     const { input, run } = host
-    const model = input.generation.model
-    if (model === null) return refuse("No model is chosen for this chat.")
+    // The chat's subagent models now (§5.1): a model turned off since the reply started isn't used.
+    const at = yield* modelsAt({
+      reader,
+      userId,
+      chatId,
+      forkId: ctx.forkId,
+      leafSlotId: ctx.leafSlotId
+    })
+    if (at === null) return refuse("The app couldn't read which models subagents may use. Try again.")
+    const aliases = at.entries.map((e) => e.alias)
+    if (aliases.length === 0) return refuse("No model is allowed for subagents in this chat. Do the task yourself.")
+    const wanted = typeof args.model === "string" && args.model.trim() ? args.model.trim().toLowerCase() : undefined
+    const entry = chosenEntry(at.entries, type, wanted)
+    if (!entry) return refuse(`There's no subagent model “${args.model}” here. Use one of: ${aliases.join(", ")}.`)
+    const model = entry.model ?? input.generation.model
+    if (model === null || model === undefined) return refuse("No model is chosen for this chat.")
+    // Its limits (§6.2): the account's, then the model's own row.
+    const { limits } = at
+    const caps = {
+      requests: entry.caps?.requests ?? limits.requests,
+      tokens: entry.caps?.tokens ?? limits.tokens,
+      cost: entry.caps?.cost ?? limits.cost,
+      minutes: entry.caps?.minutes ?? limits.minutes
+    }
+    const runCost = limits.cost * limits.runCostTimes
     // Never more than the parent: the type's tools among those the parent was offered, less the
     // capabilities turned off now (§6.1). Ask first stays Ask first: the child's permit asks.
     const offered = new Set(host.offered.map((t) => t.name))
@@ -204,12 +342,13 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
       typeLabel: type.label,
       task,
       ...(name ? { name } : {}),
-      alias: "same",
+      alias: entry.alias,
       model: model.key,
       instructions: type.instructions,
       context: "task",
       spawnedBy: ctx.rolloutId,
-      callId: ctx.toolCallId
+      callId: ctx.toolCallId,
+      caps
     }
     const started = yield* writer
       .StartSubagent({
@@ -223,9 +362,11 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
         snapshot: JSON.stringify({
           request,
           inputs: { chatId, leafSlotId: generation.leafSlotId, model },
-          agent: { mode: "subagent", contract: "final_text", turnCap: type.turnCap, tools: frozen },
+          agent: { mode: "subagent", contract: "final_text", turnCap: caps.requests, tools: frozen },
           subagent
-        })
+        }),
+        perRun: limits.perRun,
+        runCost
       })
       .pipe(Effect.option)
     if (Option.isNone(started)) return refuse("The subagent couldn't be started.")
@@ -233,9 +374,11 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
       return refuse(
         started.value.refused === "limit"
           ? "This reply has started as many subagents as it may. Do the rest yourself."
-          : started.value.refused === "nested"
-            ? "A subagent can't start subagents of its own."
-            : "This reply has ended."
+          : started.value.refused === "spent"
+            ? "This reply's subagents have spent what they may together. Do the rest yourself."
+            : started.value.refused === "nested"
+              ? "A subagent can't start subagents of its own."
+              : "This reply has ended."
       )
     const handle = started.value.handle
     let row: SubagentRow = {
@@ -245,7 +388,7 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
       typeLabel: type.label,
       ...(name ? { name } : {}),
       task,
-      alias: "same",
+      alias: entry.alias,
       model: model.key,
       status: "running",
       steps: [],
@@ -264,7 +407,7 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
       ...(input.request.storyAt ? { storyAt: input.request.storyAt } : {})
     }
     const childRun: AgentRun = {
-      plan: { strategy: "agent", tools: [...ids], contract: "final_text", turnCap: type.turnCap },
+      plan: { strategy: "agent", tools: [...ids], contract: "final_text", turnCap: caps.requests },
       mode: "subagent",
       tools,
       offered: frozen,
@@ -275,12 +418,48 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
       ...(run.onChanged ? { onChanged: run.onChanged } : {}),
       ...(run.onState ? { onState: run.onState } : {}),
       permit: makePermit({ registries: execution, reader: run.reader, writer: run.writer, userId, chatId, rolloutId }),
-      subagent: { writeNow: WRITE_REPORT }
+      subagent: { writeNow: WRITE_REPORT, beforeNextRequest: (signal) => limitCheck(signal) }
     }
     let report = ""
-    const startedAt = Date.now()
+    let startedAt = Date.now()
+    const services = yield* Effect.context<never>()
+    const runPromise = Effect.runPromiseWith(services)
+    // Its limits (§6.2): at 80% of one, a one-time note to wrap up; at 100%, the next request
+    // isn't sent and it ends stopped, its last text the partial report.
+    const live: { fiber?: Fiber.Fiber<void, unknown> } = {}
+    let atLimit = false
+    let warned = false
+    const stopAtLimit = () => {
+      atLimit = true
+      live.fiber?.interruptUnsafe()
+    }
+    const limitCheck = (signal?: AbortSignal) =>
+      runPromise(
+        Effect.gen(function* () {
+          const spend = yield* reader.SubagentSpend({ userId, rolloutId }).pipe(Effect.option)
+          if (Option.isNone(spend)) return undefined
+          const s = spend.value
+          const shares = [
+            s.tokens / caps.tokens,
+            // A model with no known price is held to its token limit alone.
+            s.unpriced === 0 && caps.cost > 0 ? s.cost / caps.cost : 0,
+            (Date.now() - startedAt) / (caps.minutes * 60_000),
+            s.runUnpriced === 0 && runCost > 0 ? s.runCost / runCost : 0
+          ]
+          if (shares.some((share) => share >= 1)) {
+            stopAtLimit()
+            return undefined
+          }
+          if (!warned && Math.max(...shares, s.requests / caps.requests) >= 0.8) {
+            warned = true
+            return WRAP_UP
+          }
+          return undefined
+        }),
+        signal ? { signal } : undefined
+      ).catch(() => undefined)
     const output = defaultReplyOutput.create({ prefix: null, request: childRequest, generation, rolloutId })
-    const child = runAgent(
+    const agentRun = runAgent(
       {
         ...(input.purpose ? { purpose: input.purpose } : {}),
         resolveImages: input.resolveImages,
@@ -291,17 +470,40 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
         providers: input.providers
       },
       childRun
-    ).pipe(
-      Stream.runForEach((chunk) =>
-        Effect.sync(() => {
-          if (typeof chunk === "string") report += chunk
-          else if ("restart" in chunk) report = ""
-          else if ("steps" in chunk) {
-            row = liveRow(row, chunk.steps)
-            host.show(row)
-          }
-        })
-      ),
+    )
+    // A place among the reply's and the account's running subagents first (§6.3), queued while none is free.
+    const queued = () => {
+      if (row.status === "queued") return
+      row = { ...row, status: "queued" }
+      host.show(row)
+    }
+    const child = Effect.gen(function* () {
+      yield* enter(ctx.rolloutId, limits.runConcurrent, queued)
+      yield* enter(userId, limits.accountConcurrent, queued)
+      if (row.status === "queued") {
+        row = { ...row, status: "running" }
+        host.show(row)
+      }
+      // Its time counts from here, and its wall-time limit stops it even mid-request.
+      startedAt = Date.now()
+      yield* Effect.acquireRelease(
+        Effect.sync(() => setTimeout(stopAtLimit, caps.minutes * 60_000)),
+        (timer) => Effect.sync(() => clearTimeout(timer))
+      )
+      yield* agentRun.pipe(
+        Stream.runForEach((chunk) =>
+          Effect.sync(() => {
+            if (typeof chunk === "string") report += chunk
+            else if ("restart" in chunk) report = ""
+            else if ("steps" in chunk) {
+              row = liveRow(row, chunk.steps)
+              host.show(row)
+            }
+          })
+        )
+      )
+    }).pipe(
+      Effect.scoped,
       Effect.onExit((exit) =>
         writer
           .FinishRollout({
@@ -310,31 +512,40 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
             versionId: null,
             status: Exit.isSuccess(exit) ? "completed" : Cause.hasInterruptsOnly(exit.cause) ? "stopped" : "failed",
             error: Exit.isFailure(exit)
-              ? Option.getOrNull(
-                  Option.map(Cause.findErrorOption(exit.cause), (e) =>
-                    e instanceof GenerationFailed ? e.message : String(e)
+              ? Cause.hasInterruptsOnly(exit.cause) && atLimit && !stopped
+                ? LIMIT_STOP
+                : Option.getOrNull(
+                    Option.map(Cause.findErrorOption(exit.cause), (e) =>
+                      e instanceof GenerationFailed ? e.message : String(e)
+                    )
                   )
-                )
               : null
           })
           .pipe(Effect.catchCause((cause) => Effect.logError(`closing subagent ${rolloutId} failed`, cause)))
       )
     )
-    const fiber = yield* Effect.forkChild(child)
     let stopped = false
+    const forked = yield* Effect.forkChild(child)
+    live.fiber = forked
     running.set(rolloutId, {
       userId,
       stop: () => {
         stopped = true
-        fiber.interruptUnsafe()
+        forked.interruptUnsafe()
       }
     })
     // Stopping the reply stops it too, and waits for it to close (§8).
-    const exit = yield* Fiber.await(fiber).pipe(
-      Effect.onInterrupt(() => Fiber.interrupt(fiber)),
+    const exit = yield* Fiber.await(forked).pipe(
+      Effect.onInterrupt(() => Fiber.interrupt(forked)),
       Effect.ensuring(Effect.sync(() => running.delete(rolloutId)))
     )
-    const status = Exit.isSuccess(exit) ? "done" : Cause.hasInterruptsOnly(exit.cause) ? "stopped" : "failed"
+    const status = Exit.isSuccess(exit)
+      ? "done"
+      : Cause.hasInterruptsOnly(exit.cause)
+        ? atLimit && !stopped
+          ? "limit"
+          : "stopped"
+        : "failed"
     const error = Exit.isFailure(exit)
       ? Option.getOrUndefined(
           Option.map(Cause.findErrorOption(exit.cause), (e) => (e instanceof GenerationFailed ? e.message : String(e)))
@@ -355,6 +566,7 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
     const body = partial.length > REPORT_CHARS ? partial.slice(0, REPORT_CHARS) : partial
     const notes = [
       stopped && status === "stopped" ? "Stopped by the user: below is what it had written so far." : "",
+      status === "limit" ? "Stopped at its limit: below is what it had written so far." : "",
       status === "failed" ? `It failed: ${error ?? "the request failed"}. Below is what it had written.` : "",
       body === "" ? "It wrote no report." : "",
       body.length < partial.length ? `The report was cut at ${REPORT_CHARS} characters.` : ""
@@ -398,24 +610,41 @@ export const agentTool: RolloutTool<AgentArgs> = {
   storyRead: "conversation",
   titleField: "task",
   description: description(),
-  parameters: Type.Object({
-    type: Type.String({ description: "The subagent's type, from the list above: research." }),
-    task: Type.String({
-      description: "What to do and what to report: its only instructions besides its type's. It can't see this chat."
-    }),
-    name: Type.Optional(
-      Type.String({ description: "A short label for it, shown to the user: “cache TTLs”.", maxLength: 64 })
-    )
-  }),
-  describe: (_ctx, args) =>
-    Effect.sync(() => {
+  parameters: parametersFor(),
+  // The chat's subagent models, listed for the assistant where the run starts (§5.1); none: not offered.
+  offerFor: (context) =>
+    modelsAt(context).pipe(
+      Effect.map((at) =>
+        at === null
+          ? (agentTool as RolloutTool<never>)
+          : at.entries.length === 0
+            ? null
+            : ({
+                ...agentTool,
+                description: description(at.entries),
+                parameters: parametersFor(at.entries)
+              } as RolloutTool<never>)
+      )
+    ),
+  describe: (ctx, args) =>
+    Effect.gen(function* () {
       const type = subagentTypes.get(args.type)
+      const at = yield* modelsAt(ctx)
+      const alias = typeof args.model === "string" && args.model.trim() ? args.model.trim().toLowerCase() : undefined
+      const entry = at ? chosenEntry(at.entries, type, alias) : undefined
       return {
         title: `Start a subagent: ${type?.label ?? args.type}`,
         rows: [
           { label: "Task", value: String(args.task ?? "") },
           ...(args.name ? [{ label: "Name", value: String(args.name) }] : []),
-          { label: "Model", value: "The model this chat uses" }
+          {
+            label: "Model",
+            value: entry
+              ? entry.pick === SAME
+                ? `The model this chat uses (${entry.name})`
+                : `${entry.alias}: ${entry.name}`
+              : (alias ?? "The model this chat uses")
+          }
         ]
       }
     }),

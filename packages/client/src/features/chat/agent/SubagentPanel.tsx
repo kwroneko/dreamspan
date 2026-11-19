@@ -18,24 +18,34 @@ import { StepRow } from "./Steps.tsx"
 import { stepsText } from "./steps.ts"
 
 const statusWords: Record<SubagentStatus, string> = {
+  queued: "Queued",
   running: "Working",
   waiting: "Waiting for you",
   done: "Done",
   stopped: "Stopped",
+  limit: "Stopped at its limit",
   failed: "Failed"
 }
 
 const statusTone = {
+  queued: "neutral",
   running: "neutral",
   waiting: "warning",
   done: "success",
   stopped: "neutral",
+  limit: "warning",
   failed: "danger"
 } as const
 
-/** "3 steps · 14 s · $0.012", as far as each is known. */
+/** "3 steps · 14 s · $0.012", as far as each is known; "cost unknown" once it ended unpriced. */
 export const subagentFacts = (row: SubagentRow) =>
-  [stepsText(row.count, row.ms), ...(row.cost ? [formatCost(row.cost)] : [])].join(" · ")
+  [stepsText(row.count, row.ms), ...(row.cost ? [formatCost(row.cost)] : row.ms !== null ? ["cost unknown"] : [])].join(
+    " · "
+  )
+
+/** Its model as the row names it: "Same model · key", or the alias the assistant chose and the key. */
+const subagentModel = (row: SubagentRow) =>
+  row.alias === "same" ? `Same model · ${row.model}` : `${row.alias} · ${row.model}`
 
 export function SubagentPanel({ step, version, session }: StepActionProps) {
   const row = step.subagent
@@ -43,7 +53,7 @@ export function SubagentPanel({ step, version, session }: StepActionProps) {
   const action = useAction()
   const id = useId()
   if (!row) return null
-  const live = row.status === "running" || row.status === "waiting"
+  const live = row.status === "running" || row.status === "waiting" || row.status === "queued"
   const stop = () =>
     void action.run((client) => client("StopSubagent", { versionId: version.id, rolloutId: row.rolloutId }))
   return (
@@ -67,7 +77,7 @@ export function SubagentPanel({ step, version, session }: StepActionProps) {
               <span className="text-muted"> · {row.typeLabel}</span>
               {row.name && <span className="text-text"> · {row.name}</span>}
               <span className="block text-muted">
-                Same model · {row.model} · {subagentFacts(row)}
+                {subagentModel(row)} · {subagentFacts(row)}
               </span>
             </span>
           </button>

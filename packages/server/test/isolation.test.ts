@@ -2689,6 +2689,28 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         yield* refused(actor.api.StopSubagent({ versionId, rolloutId: owner.chat.rolloutId }), "NotFound")
       })
   },
+  // Subagent models and limits are the caller's own settings: another's picks never show or change.
+  GetSubagentSettings: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const pick = `${owner.connectionId} ${owner.modelId}`
+        yield* actor.api.ChangeSubagentSettings({ picks: ["same"], limits: null })
+        yield* owner.api.ChangeSubagentSettings({ picks: ["same", pick], limits: { cost: 0.07 } })
+        const seen = yield* actor.api.GetSubagentSettings({})
+        assert.notInclude(seen.models.picks, pick)
+        assert.notStrictEqual(seen.limits.cost, 0.07)
+      })
+  },
+  ChangeSubagentSettings: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* owner.api.ChangeSubagentSettings({ picks: ["same"], limits: null })
+        yield* actor.api.ChangeSubagentSettings({ picks: ["same", "summary"], limits: { perRun: 2 } })
+        const own = yield* owner.api.GetSubagentSettings({})
+        assert.deepStrictEqual(own.models.picks, ["same"])
+        assert.isUndefined(own.limits.perRun)
+      })
+  },
   // The registered modes and tools: the same for everyone, nobody's data.
   ListReplyTools: {
     probe: (actor) =>

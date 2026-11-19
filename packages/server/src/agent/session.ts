@@ -105,7 +105,14 @@ export interface AgentRun {
    * This run is a subagent (spec/SUBAGENTS.md): its tools get no host to start one of their own,
    * its last request says `writeNow`, and it isn't summarized as it goes (that's SA7's).
    */
-  readonly subagent?: { readonly writeNow: string }
+  readonly subagent?: {
+    readonly writeNow: string
+    /**
+     * Asked at each request boundary (spec/SUBAGENTS.md §6.2): a harness message to add before
+     * the next request (the 80% "wrap up"), or nothing. At a limit it stops the run itself.
+     */
+    readonly beforeNextRequest?: (signal?: AbortSignal) => Promise<string | undefined>
+  }
 }
 
 export interface AgentStrategyInput {
@@ -1161,14 +1168,19 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           return undefined
         },
         // The last request is made without tools, after the app's "write now".
-        prepareNextTurnWithContext: () => {
+        prepareNextTurnWithContext: async (_context, signal) => {
+          // A subagent's limits are checked first: at one, it stops before anything is sent.
+          const limitNote = run.subagent?.beforeNextRequest ? await run.subagent.beforeNextRequest(signal) : undefined
           if (requests === cap - 1) {
             pendingNudge = undefined
             return {
               messages: [{ role: "rpApp", content: run.subagent?.writeNow ?? WRITE_NOW, timestamp: Date.now() }]
             }
           }
-          if (pendingNudge === undefined) return undefined
+          if (pendingNudge === undefined)
+            return limitNote === undefined
+              ? undefined
+              : { messages: [{ role: "rpApp", content: limitNote, timestamp: Date.now() }] }
           const nudge = pendingNudge
           pendingNudge = undefined
           return { messages: [{ role: "rpApp", content: nudgeText, nudge, timestamp: Date.now() }] }

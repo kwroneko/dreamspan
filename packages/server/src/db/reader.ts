@@ -29,6 +29,7 @@ import { makeImportReadHandlers } from "./importReads.ts"
 import { makeInspectorReadHandlers } from "./inspectorReads.ts"
 import { makeAgentReadHandlers } from "./agentReads.ts"
 import { makeSubagentReadHandlers } from "./subagents.ts"
+import { makeSubagentSettingReadHandlers } from "./subagentSettings.ts"
 import { makeMessageSearchHandlers } from "./messageSearch.ts"
 import { makeLibraryReplaceReadHandlers } from "./libraryReplace.ts"
 import { makeWorkshopGrantReadHandlers } from "./workshopGrants.ts"
@@ -83,6 +84,7 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               makeMcpReadHandlers,
               makeFileVersionReadHandlers,
               makeSubagentReadHandlers,
+              makeSubagentSettingReadHandlers,
               makePersonaLockReadHandlers
             ]),
             ([
@@ -111,6 +113,7 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               mcp,
               fileVersions,
               subagents,
+              subagentSettings,
               personaLocks
             ]) =>
               ReadOps.of(
@@ -142,7 +145,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
                       ...mcp,
                       ...fileVersions,
                       ...personaLocks,
-                      ...subagents
+                      ...subagents,
+                      ...subagentSettings
                     })
                   )
                 )

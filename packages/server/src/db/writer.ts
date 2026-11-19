@@ -36,6 +36,7 @@ import { makeChatSetupWriteHandlers } from "./chatSetupWrites.ts"
 import { makeGenerationWriteHandlers } from "./generationWrites.ts"
 import { makeRolloutWriteHandlers } from "./rolloutWrites.ts"
 import { makeSubagentWriteHandlers } from "./subagents.ts"
+import { makeSubagentSettingWriteHandlers } from "./subagentSettings.ts"
 import { makeDecisionWriteHandlers } from "./decisions.ts"
 import { makeLibraryWriteHandlers } from "./libraryWrites.ts"
 import { makeAdoptWriteHandlers } from "./cardOrigins.ts"
@@ -135,6 +136,7 @@ const handlers = Layer.unwrap(
               ...(yield* makeRolloutWriteHandlers(graph.AddSelectedVersion)),
               // --- Subagents (spec/SUBAGENTS.md §11)
               ...(yield* makeSubagentWriteHandlers),
+              ...(yield* makeSubagentSettingWriteHandlers),
               ...adoption,
               ...(yield* makeDecisionWriteHandlers(bin))
             },

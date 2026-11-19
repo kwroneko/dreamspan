@@ -9,9 +9,19 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
-import { eventually, finished } from "./support/generation.ts"
+import { eventually, finished, generateReply } from "./support/generation.ts"
 import { sizedPng } from "./formats/support.ts"
-import { anthropicSse, type Recorded, startMockProvider } from "./support/mockProvider.ts"
+import { anthropicSse, completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
+import {
+  completions,
+  isChild,
+  mockProvider,
+  scripted,
+  task,
+  toolTexts,
+  TRIGGER,
+  watch
+} from "./support/subagentScript.ts"
 import { countingModelKey } from "../src/providers/countingModel.ts"
 
 const upload = (bytes: Uint8Array) =>
@@ -213,4 +223,59 @@ describe("the model a counting connection is asked for", () => {
     assert.strictEqual(countingModelKey("google/gemini-2.5-pro", []), "gemini-2.5-pro")
     assert.strictEqual(countingModelKey("models/gemini-2.5-pro", ["gemini-2.5-pro"]), "gemini-2.5-pro")
   })
+})
+
+// The subagent twin (spec/SUBAGENTS.md §5.2): with the subagent settings at their defaults
+// ("Same as this chat's model"), a workshop's subagent sends only to the chat's own model, whatever
+// the reply asks for, even with a summary model on another connection; a story reply, even with
+// tools on, is never offered the agent tool.
+describe("what a subagent reaches", () => {
+  it.live("with the defaults, a subagent sends only to the chat's model, whatever the reply asks for", () =>
+    Effect.gen(function* () {
+      const script = scripted({
+        parent: [
+          { name: "agent", args: { type: "research", task: "Look.", model: "fast" }, id: "fast" },
+          { name: "agent", args: { type: "research", task: "Look." }, id: "plain" }
+        ],
+        child: () => undefined
+      })
+      const chatProvider = yield* mockProvider(script.handler)
+      const elsewhere = yield* mockProvider((_request, res) => sse(res, completionChunks(["Elsewhere."], {})))
+      const api = yield* client()
+      const story = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${chatProvider.url}/v1` },
+        model: {},
+        state: [
+          { key: "agent.enabled", value: { on: true } },
+          { key: "output.contract", value: "final_text" }
+        ]
+      })
+      const other = yield* api.CreateConnection({
+        kind: "openai-chat",
+        settings: settings("Elsewhere", `${elsewhere.url}/v1`)
+      })
+      const model = yield* api.AddUserModel({ connectionId: other.id, key: "elsewhere-model", overrides: {} })
+      // A summary model elsewhere: the chat already sends summaries there, but subagents weren't given it.
+      yield* api.ChangeGenerationDefaults({ change: { summarizer: { connection: other.id, model: model.id } } })
+      const chat = yield* api.CreateWorkshop({})
+      const events = yield* watch(api, chat)
+      const versionId = yield* task(api, chat, "look")
+      yield* eventually(() => finished(events, versionId) !== undefined)
+      const bodies = completions(chatProvider.requests())
+      const results = toolTexts(bodies.filter((b) => !isChild(b)).at(-1)!)
+      assert.include(results[0], "no subagent model “fast” here. Use one of: same.")
+      assert.include(results[1], "Report.")
+      assert.lengthOf(bodies.filter(isChild), 1)
+      assert.lengthOf(completions(elsewhere.requests()), 0)
+      // The story's agent reply had tools, never `agent`.
+      const storyBodies = bodies.filter((b) => !isChild(b) && !JSON.stringify(b.messages).includes(TRIGGER))
+      assert.isAbove(storyBodies.length, 0)
+      for (const body of storyBodies)
+        assert.notInclude(
+          (body.tools ?? []).map((t) => t.function.name),
+          "agent"
+        )
+      assert.isDefined(story.chat)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
 })

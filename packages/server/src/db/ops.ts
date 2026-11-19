@@ -229,6 +229,13 @@ import { DraftChatPreview, NextContext, RunContext, VersionMetrics } from "@drea
 import { ActivityCursor, ActivityPage, NotResumable, RolloutStep, RunTranscript } from "@dreamspan/shared/agent.ts"
 import { SubagentRun } from "@dreamspan/shared/agentApi.ts"
 import { SubagentRow } from "@dreamspan/shared/agent.ts"
+import {
+  SubagentLimits,
+  SubagentModelRow,
+  SubagentPick,
+  SubagentPicks,
+  SubagentSettings
+} from "@dreamspan/shared/subagents.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@dreamspan/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@dreamspan/shared/state.ts"
 import { ConnectionDecisions, DecisionPointSetting } from "@dreamspan/shared/decisions.ts"
@@ -3947,14 +3954,36 @@ export class WriteOpsLibrary extends RpcGroup.make(
       type: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,40}$/)),
       connectionId: ConnectionId,
       modelId: ModelId,
-      snapshot: Schema.String
+      snapshot: Schema.String,
+      /** The most a run may start (`subagents.limits` `perRun`, §6.2); absent: `SUBAGENTS_PER_RUN`. */
+      perRun: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 64 }))),
+      /** What the run's subagents may cost together; reached, no more start (`spent`). */
+      runCost: Schema.optionalKey(Schema.Number)
     },
     success: Schema.Union([
       Schema.Struct({ rolloutId: Schema.String, handle: Schema.String, existing: Schema.Boolean }),
-      /** `limit`: the run has started as many as it may; `not_running`: it has ended. */
-      Schema.Struct({ refused: Schema.Literals(["limit", "not_running", "nested"]) })
+      /**
+       * `limit`: the run has started as many as it may; `spent`: its subagents have spent what
+       * they may together; `not_running`: it has ended.
+       */
+      Schema.Struct({ refused: Schema.Literals(["limit", "spent", "not_running", "nested"]) })
     ]),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The account's subagent settings (spec/SUBAGENTS.md §5.1, §6.2): `models` replaces the picks
+   * and the rows given (the rows whole), `limits` the limits (null: back to the defaults).
+   * Never an agent's write: they're consent and spend, which only the user changes (§10).
+   */
+  Rpc.make("ChangeSubagentSettings", {
+    payload: {
+      userId: UserId,
+      picks: Schema.optionalKey(SubagentPicks),
+      rows: Schema.optionalKey(Schema.Record(SubagentPick, SubagentModelRow)),
+      limits: Schema.optionalKey(Schema.NullOr(SubagentLimits))
+    },
+    success: Schema.Void,
+    error: StorageError
   }),
   Rpc.make("SaveRolloutTranscript", {
     payload: { userId: UserId, rolloutId: Schema.String, transcript: Schema.String, steps: Schema.Int },
@@ -5783,6 +5812,44 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("SubagentRun", {
     payload: { userId: UserId, versionId: VersionId, rolloutId: Schema.String },
     success: SubagentRun,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The account's subagent models and limits, defaults filled in (subagentSettings.ts). */
+  Rpc.make("SubagentSettings", {
+    payload: { userId: UserId },
+    success: SubagentSettings,
+    error: StorageError
+  }),
+  /**
+   * The models a chat's subagents may use at `leafSlotId` (spec/SUBAGENTS.md §5.1), as JSON: the
+   * chat's picks (its lock) or the account's, each resolved to one of the user's models with its
+   * alias and note, `same` first as the chat's own model; picks that resolve to nothing, to a
+   * decision connection, or to a model already listed are left out. And the limits.
+   */
+  Rpc.make("SubagentModelsAt", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: Schema.NullOr(SlotId)
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, StorageError, AssemblyFailed])
+  }),
+  /**
+   * What a subagent has spent (§6.2): its requests, tokens and priced cost, and what its run's
+   * subagents have cost together (`unpriced`: requests the ledger couldn't price).
+   */
+  Rpc.make("SubagentSpend", {
+    payload: { userId: UserId, rolloutId: Schema.String },
+    success: Schema.Struct({
+      requests: Schema.Int,
+      tokens: Schema.Int,
+      cost: Schema.Number,
+      unpriced: Schema.Int,
+      runCost: Schema.Number,
+      runUnpriced: Schema.Int
+    }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A subagent of the reply `versionId`'s run: its rollout status, for its Stop (subagentReads.ts). */

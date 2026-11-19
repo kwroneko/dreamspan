@@ -12,6 +12,7 @@ import { CostRules } from "@dreamspan/shared/costFormulas.ts"
 import { DecisionPointSetting } from "@dreamspan/shared/decisions.ts"
 import { LcmDefaults, ModelChoice } from "@dreamspan/shared/lcmSettings.ts"
 import { GlobalScripts } from "@dreamspan/shared/regexScripts.ts"
+import { SubagentLimits, SubagentModels } from "@dreamspan/shared/subagents.ts"
 import { StaleWrite } from "@dreamspan/shared/errors.ts"
 import { StorageError } from "./ops.ts"
 
@@ -62,6 +63,10 @@ const definitions: ReadonlyArray<SettingDefinition> = [
   { id: "generation.judge", scope: "user", schema: Schema.NullOr(ModelChoice) },
   { id: "generation.lcm", scope: "user", schema: Schema.NullOr(LcmDefaults) },
   { id: "regex.global", scope: "user", schema: GlobalScripts },
+  // Subagents' models and limits (spec/SUBAGENTS.md §5, §6.2): consent and spend, so never an
+  // agent's write (no `agent` entry).
+  { id: "subagents.models", scope: "user", schema: SubagentModels },
+  { id: "subagents.limits", scope: "user", schema: SubagentLimits },
   { id: "bin.limits", scope: "user", schema: BinLimits },
   { id: "sources", scope: "user", schema: SourcePrefs },
   { id: "sources.admin", scope: "app", schema: SourceAdminSettings },

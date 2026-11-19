@@ -67,6 +67,8 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "model.unbind", value: {} }
     case "DefaultPreset":
       return { key: "preset.unbind", value: {} }
+    case "SubagentModels":
+      return { key: "subagents.models", value: { picks: change.picks } }
     case "SummaryModel":
       return change.model === null
         ? { key: "model.unbind", value: {} }
@@ -513,6 +515,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       ...(state.modelBindings["summarizer"]
         ? { summaryModel: state.modelBindings["summarizer"] as NonNullable<Cast["summaryModel"]> }
         : {}),
+      ...(state.subagentModels ? { subagentModels: state.subagentModels } : {}),
       preset: (state.presetBindings[""]?.ref ?? null) as Cast["preset"],
       presetLocked: state.presetBindings[""] !== undefined,
       lorebooks: state.lorebooks as Cast["lorebooks"],

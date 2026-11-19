@@ -47,6 +47,7 @@ import { Reader, Writer } from "../db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../execution.ts"
 import { internal } from "./internal.ts"
 import { stopSubagent } from "../agent/subagents.ts"
+import { rowProblems, SAME, SubagentSettingsRejected } from "@dreamspan/shared/subagents.ts"
 
 /** What a resume needs of the stopped run's frozen snapshot. */
 interface Frozen {
@@ -407,6 +408,7 @@ const agentVersionResumer = Effect.gen(function* () {
 
 export const makeAgentHandlers = Effect.gen(function* () {
   const reader = yield* Reader
+  const writer = yield* Writer
 
   const resume = yield* agentVersionResumer
 
@@ -469,6 +471,26 @@ export const makeAgentHandlers = Effect.gen(function* () {
         yield* reader.SubagentStatus({ userId, versionId, rolloutId })
         return { stopped: stopSubagent(userId, rolloutId) }
       }).pipe(internal("StopSubagent")),
+    // The account's subagent models and limits (spec/SUBAGENTS.md §5.1, §6.2): the user's alone.
+    GetSubagentSettings: () =>
+      Effect.flatMap(CurrentUser, (user) => reader.SubagentSettings({ userId: user.id })).pipe(
+        internal("GetSubagentSettings")
+      ),
+    ChangeSubagentSettings: ({ picks, rows, limits }) =>
+      Effect.gen(function* () {
+        const userId = (yield* CurrentUser).id
+        if (rows !== undefined) {
+          const current = yield* reader.SubagentSettings({ userId })
+          const problems = rowProblems({ ...current.models.rows, ...rows, [SAME]: { alias: "same", note: "" } })
+          if (problems.length) return yield* new SubagentSettingsRejected({ message: problems.join(" ") })
+        }
+        yield* writer.ChangeSubagentSettings({
+          userId,
+          ...(picks === undefined ? {} : { picks: [...new Set(picks)] }),
+          ...(rows === undefined ? {} : { rows }),
+          ...(limits === undefined ? {} : { limits })
+        })
+      }).pipe(internal("ChangeSubagentSettings")),
     // The rule the note and card tools apply (agent/tools/notes.ts, cardEdit.ts): the chat's
     // `agent.permission`, else the note's `agent_editable` or the card's `agent_editable_fields`.
     GetAgentPermissions: ({ chatId, slotId, forkId }) =>
