@@ -121,7 +121,9 @@ for (const scenario of [
           ? {
               state: [
                 { key: "agent.enabled", value: { on: true } },
-                { key: "agent.tools", value: { tools: ["read_messages", "search_chat", "read_run"] } }
+                { key: "agent.tools", value: { tools: ["read_messages", "search_chat", "read_run"] } },
+                // It ends in plain text: the contract that takes it, so the captured bytes stay as they were.
+                { key: "output.contract", value: "both" }
               ]
             }
           : {})

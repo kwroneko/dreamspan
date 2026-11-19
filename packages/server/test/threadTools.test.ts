@@ -206,6 +206,17 @@ describe("the agent's read tools across threads", () => {
             scope: null,
             data: { key: "agent.enabled", value: { on: true } }
           })
+          // The scripted reply ends in plain text: the contract that takes it, so every request
+          // offers the same tools (the send tool's nudges would end on the cap's tool-less request).
+          yield* t.writer.AddStateEvent({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: t.F,
+            slotId: null,
+            versionId: null,
+            scope: null,
+            data: { key: "output.contract", value: "both" }
+          })
           const started = yield* t.api.Generate({
             chatId: t.chatId,
             forkId: t.F,
