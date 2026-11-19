@@ -14,7 +14,7 @@
 // The child runs in a fiber of the call's own, so "Open as thread" (§14) can later read the same
 // rollout and transcript without changing how it runs.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import { Type } from "@earendil-works/pi-ai"
+import { Type, type Tool } from "@earendil-works/pi-ai"
 import type { ChildStep, RolloutStep, SubagentRow } from "@dreamspan/shared/agent.ts"
 import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
@@ -30,7 +30,9 @@ import type { SubagentSnapshot } from "../db/subagents.ts"
 import type { SubagentModelEntry, SubagentModelsAt } from "../db/subagentSettings.ts"
 import { executionRegistry } from "../execution.ts"
 import { askUser, makePermit, offeredByGrants } from "./approvals.ts"
+import { loadingWireFor } from "./loadingPlan.ts"
 import { Mailbox } from "./mailbox.ts"
+import { forkStart } from "./messages.ts"
 import { planResume } from "./resume.ts"
 import { runAgent, type AgentRun } from "./session.ts"
 import { countSteps } from "./steps.ts"
@@ -65,7 +67,12 @@ interface SubagentType {
    * limits (§6.2's story column), which its model's own limits can only lower.
    */
   readonly story?: true
+  /** What it sees when the call doesn't say (§2.3): its task alone (default), or a fork. */
+  readonly context?: SubagentContext
 }
+
+/** What a subagent sees (§2.3): its task alone, or its parent's conversation up to the call, then its task. */
+type SubagentContext = "task" | "fork"
 
 /** Tools no subagent gets: starting another, the run's own loading and paging, the message. */
 const NEVER = new Set([
@@ -102,6 +109,7 @@ export const subagentTypes = makeRegistry<SubagentType>([
     kinds: ["workshop"],
     tools: (tool) => tool.effect === "read" && !NEVER.has(tool.id),
     defaultAlias: "fast",
+    context: "task",
     instructions: RESEARCH_INSTRUCTIONS
   },
   {
@@ -231,6 +239,7 @@ interface AgentArgs {
   readonly task: string
   readonly name?: string
   readonly model?: string
+  readonly context?: string
   readonly background?: boolean
 }
 
@@ -265,12 +274,28 @@ interface ChildStart {
   readonly background?: boolean
   /** Called once it's in `running`, where a message to it is delivered. */
   readonly onRunning?: () => void
+  /** A fork (§2.3): its requests send its parent's tool definitions and cache layout. */
+  readonly fork?: ForkWire
+}
+
+/** What a fork's requests share with its parent's, exactly: the tools on the wire and the cache layout. */
+interface ForkWire {
+  readonly wireTools: ReadonlyArray<Tool>
+  readonly offered: ReadonlyArray<FrozenTool>
+  readonly checkpoints?: ReadonlyArray<number>
+  readonly recentPrefix?: number
 }
 
 type Host = NonNullable<ToolContext["subagentHost"]>
 
 /** The child's tools now: those it may have (`names`) among the parent's, less what's Off (§6.1). */
-const childTools = (ctx: ToolContext, host: Host, names: (tool: RolloutTool<never>) => boolean) =>
+const childTools = (
+  ctx: ToolContext,
+  host: Host,
+  names: (tool: RolloutTool<never>) => boolean,
+  /** A fork's requests carry its parent's definitions only, so it gets no tools of its own. */
+  own = true
+) =>
   Effect.gen(function* () {
     const execution = yield* executionRegistry
     const offered = new Set(host.offered.map((t) => t.name))
@@ -281,12 +306,12 @@ const childTools = (ctx: ToolContext, host: Host, names: (tool: RolloutTool<neve
     )
     const ids = new Set(tools.map((t) => t.id))
     // And every subagent's own tools (report_progress): never a parent's.
-    const own = subagentTools.list().filter((t) => !ids.has(t.id))
+    const extra = own ? subagentTools.list().filter((t) => !ids.has(t.id)) : []
     const frozen: ReadonlyArray<FrozenTool> = [
       ...host.offered.filter((t) => ids.has(t.name)).map(({ deferred: _deferred, ...t }) => t),
-      ...own.map(frozenTool)
+      ...extra.map(frozenTool)
     ]
-    return { tools: [...tools, ...own], frozen }
+    return { tools: [...tools, ...extra], frozen }
   })
 
 /** The model a call runs on: the alias it names, else its type's default, else `same`, else the first. */
@@ -304,6 +329,7 @@ const description = (entries?: ReadonlyArray<SubagentModelEntry>, background = f
   [
     "Hands one task to a subagent: a helper that works on its own, in a fresh context, and returns a report. Use it for searches or reading that would take many calls (looking through many cards, chats or files), or to keep long material out of your own context. Don't use it for a single lookup you can do yourself.",
     "The subagent sees only what you write in `task`, not this conversation: say exactly what to find and what to report. It has only your read tools, and it can't start subagents of its own. You wait for its report, which comes back as this call's result.",
+    'With `context: "fork"` it sees this conversation as it is now, then its task: use that when the task needs what was said here. A fork runs on your own model (`same`) and starts from what you were just sent, so it costs little to start.',
     ...(background
       ? [
           "With `background: true` the call returns at once and you carry on; its report reaches you later as a message, and you can tell the user what you're waiting for. Start several in the background to work in parallel. Your reply doesn't end while they run: when you've said what you have so far, end your turn and their reports come to you.",
@@ -339,6 +365,12 @@ const parametersFor = (entries?: ReadonlyArray<SubagentModelEntry>, background =
     model: Type.Optional(
       Type.String({
         description: `The model it runs on, by name from the list above${entries?.length ? `: ${entries.map((e) => e.alias).join(", ")}` : ""}. Absent: its type's default.`
+      })
+    ),
+    context: Type.Optional(
+      Type.Union([Type.Literal("task"), Type.Literal("fork")], {
+        description:
+          "What it sees: task (only what you write in `task`) or fork (this conversation, then the task; your own model only). Absent: its type's default."
       })
     ),
     ...(background
@@ -508,29 +540,57 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
     const aliases = at.entries.map((e) => e.alias)
     if (aliases.length === 0) return refuse("No model is allowed for subagents in this chat. Do the task yourself.")
     const wanted = typeof args.model === "string" && args.model.trim() ? args.model.trim().toLowerCase() : undefined
-    const entry = chosenEntry(at.entries, type, wanted)
-    if (!entry) return refuse(`There's no subagent model “${args.model}” here. Use one of: ${aliases.join(", ")}.`)
+    const context = args.context ?? type.context ?? "task"
+    if (context !== "task" && context !== "fork") return refuse("`context` is task or fork.")
+    const fork = context === "fork"
+    // A fork runs on the reply's own model (§2.3): another model can't read the reply's cache.
+    const entry =
+      fork && wanted === undefined ? at.entries.find((e) => e.pick === SAME) : chosenEntry(at.entries, type, wanted)
+    if (!entry)
+      return refuse(
+        fork && wanted === undefined
+          ? "A fork runs on the model this chat uses, which isn't allowed for subagents here. Use context task."
+          : `There's no subagent model “${args.model}” here. Use one of: ${aliases.join(", ")}.`
+      )
+    if (fork && entry.pick !== SAME)
+      return refuse(
+        `A fork runs only on the model this chat uses (same): ${entry.alias} can't read this conversation from cache. Use context task to run on ${entry.alias}.`
+      )
     const model = entry.model ?? input.generation.model
     if (model === null || model === undefined) return refuse("No model is chosen for this chat.")
+    // A fork's conversation: the reply's, as it was when it made this call.
+    const seed = fork ? forkSeed(ctx.transcript?.() ?? [], ctx.toolCallId) : null
+    if (fork && seed === null) return refuse("This conversation can't be forked here. Use context task.")
     // Its limits (§6.2): the account's, then the model's own row.
     const { limits } = at
     const caps = capsFor(type, limits, entry.caps)
     const runCost = runCostFor(type, limits)
     // Never more than the parent: the type's tools among those the parent was offered, less the
     // capabilities turned off now (§6.1). Ask first stays Ask first: the child's permit asks.
-    const { tools, frozen } = yield* childTools(ctx, host, type.tools)
+    const { tools, frozen } = yield* childTools(ctx, host, type.tools, !fork)
     const date = new Date().toISOString().slice(0, 10)
-    const request: AssembledRequest = {
-      messages: [
-        { role: "system", content: type.instructions },
-        { role: "user", content: `Today is ${date}.\n\nYour task:\n${task}` }
-      ],
-      prefill: null,
-      samplers: input.generation.request.samplers,
-      useSystemPrompt: true,
-      breakpoints: [],
-      names: input.generation.request.names
-    }
+    // A fork's request is the reply's own, sent with the reply's tool definitions (§2.3).
+    const request: AssembledRequest = fork
+      ? input.generation.request
+      : {
+          messages: [
+            { role: "system", content: type.instructions },
+            { role: "user", content: `Today is ${date}.\n\nYour task:\n${task}` }
+          ],
+          prefill: null,
+          samplers: input.generation.request.samplers,
+          useSystemPrompt: true,
+          breakpoints: [],
+          names: input.generation.request.names
+        }
+    const forkWire: ForkWire | undefined = fork
+      ? {
+          wireTools: host.wireTools,
+          offered: host.offered,
+          ...(host.run.checkpoints?.length ? { checkpoints: host.run.checkpoints } : {}),
+          ...(host.run.recentPrefix !== undefined ? { recentPrefix: host.run.recentPrefix } : {})
+        }
+      : undefined
     const generation = childGeneration(host, request, model, input.generation.leafSlotId)
     const rolloutId = uuidv7()
     const subagent: SubagentSnapshot = {
@@ -541,7 +601,8 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
       alias: entry.alias,
       model: model.key,
       instructions: type.instructions,
-      context: "task",
+      context,
+      ...(forkWire ? { fork: { wireTools: forkWire.wireTools, offered: forkWire.offered } } : {}),
       spawnedBy: ctx.rolloutId,
       callId: ctx.toolCallId,
       versionId: ctx.versionId,
@@ -598,13 +659,21 @@ const runSubagent = (ctx: ToolContext, args: AgentArgs): Effect.Effect<ToolOutpu
         count: 0,
         ms: null,
         cost: null,
-        ...(background ? { background: true } : {})
+        ...(background ? { background: true } : {}),
+        ...(fork ? { forked: true } : {})
       },
       generation,
       tools,
       frozen,
       limits: { caps, runCost, runConcurrent: limits.runConcurrent, accountConcurrent: limits.accountConcurrent },
-      ...(background ? { background: true } : {})
+      ...(background ? { background: true } : {}),
+      // A fork starts from the reply's conversation, then its task; its own run counts from there.
+      ...(seed && forkWire
+        ? {
+            fork: forkWire,
+            resume: { transcript: [...seed, forkTask(type.instructions, task)], historical: seed.length }
+          }
+        : {})
     }
     if (!background) return yield* runChild(ctx, host, start)
     // In the background (§3.2): the call returns now, and the report reaches the reply later.
@@ -620,6 +689,33 @@ const carried = (host: Host, toolCallId: string) =>
   ((host.run.resume?.transcript ?? []) as ReadonlyArray<AgentMessage>).some(
     (m) => m.role === "assistant" && m.content.some((p) => p.type === "toolCall" && p.id === toolCallId)
   )
+
+/**
+ * A fork's conversation (§2.3): the reply's transcript before the turn that made the call, so its
+ * request is the one the reply was just sent. Null where the call isn't in it.
+ */
+const forkSeed = (messages: ReadonlyArray<AgentMessage>, callId: string): ReadonlyArray<AgentMessage> | null => {
+  const at = messages.findLastIndex(
+    (m) => m.role === "assistant" && m.content.some((p) => p.type === "toolCall" && p.id === callId)
+  )
+  if (at < 0) return null
+  const seed = messages.slice(0, at)
+  return seed.some((m) => m.role === "rpRequest") ? seed : null
+}
+
+/** A fork's task, after the reply's conversation: where its own run starts (`forkStart`). */
+const forkTask = (instructions: string, task: string): AgentMessage => ({
+  role: "rpApp",
+  content: `From here on you are a subagent, not the assistant above: it started you with one task and waits for your report. You see its conversation as it was when it started you; don't carry it on.\n\n${instructions}\n\nYour task:\n${task}`,
+  fork: true,
+  timestamp: Date.now()
+})
+
+/** A fork's wire from its snapshot, for its resume or continuation (§2.3, §8). */
+const forkOf = (snapshot: ChildSnapshot): ForkWire | undefined =>
+  snapshot.subagent?.context === "fork" && snapshot.subagent.fork
+    ? { wireTools: snapshot.subagent.fork.wireTools, offered: snapshot.subagent.fork.offered }
+    : undefined
 
 /** A child's generation: its own request at the parent's position (§2.3), what the reply could read. */
 const childGeneration = (
@@ -655,7 +751,7 @@ interface ChildSnapshot {
   readonly request?: AssembledRequest
   readonly inputs?: { readonly leafSlotId?: Generation["leafSlotId"]; readonly model?: Generation["model"] }
   readonly agent?: { readonly tools?: ReadonlyArray<FrozenTool> }
-  readonly subagent?: Pick<SubagentSnapshot, "caps" | "type">
+  readonly subagent?: Pick<SubagentSnapshot, "caps" | "type" | "context" | "fork">
 }
 
 /**
@@ -755,12 +851,14 @@ const carryOn = (
             true
           )
       }
-      plan = { ...plan, transcript: plan.transcript.slice(0, 1) }
+      // From its start again: a fork from its task, after the reply's conversation.
+      plan = { ...plan, transcript: plan.transcript.slice(0, forkStart(plan.transcript) + 1) }
     }
     const unread = undelivered(ctx.transcript?.() ?? [], prior.handle, plan.transcript)
+    const fork = forkOf(snapshot)
     // Its tools now: what it was given, among the resumed reply's and the grants now (§6.1).
     const given = new Set((snapshot.agent?.tools ?? []).map((t) => t.name))
-    const { tools, frozen } = yield* childTools(ctx, host, (t) => given.has(t.id))
+    const { tools, frozen } = yield* childTools(ctx, host, (t) => given.has(t.id), !fork)
     // Its limits as they applied (§6.2), and the reply's places and spend now (§6.3).
     const now = at.limits
     const kind = subagentTypes.get(snapshot.subagent?.type ?? "")
@@ -803,7 +901,8 @@ const carryOn = (
       },
       // The parent's messages the stop kept it from reading reach it first (§4).
       ...(unread.length > 0 ? { inbox: unread.map(fromParent) } : {}),
-      ...(onRunning ? { onRunning } : {})
+      ...(onRunning ? { onRunning } : {}),
+      ...(fork ? { fork } : {})
     })
   })
 
@@ -835,6 +934,8 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
     const writer = run.writer
     let row = start.row
     const execution = yield* executionRegistry
+    // A fork's deferred tools are carried as its parent's were, on its (the parent's) model.
+    const forkLoading = start.fork ? loadingWireFor(execution, generation.model ?? null) : undefined
     host.show(row)
     // What its parent sends it while it runs (§4), and a continuation's first message.
     const mailbox = new Mailbox()
@@ -866,7 +967,16 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
       plan: { strategy: "agent", tools: tools.map((t) => t.id), contract: "final_text", turnCap: caps.requests },
       mode: "subagent",
       tools,
-      offered: frozen,
+      // A fork's requests send its parent's definitions and cache layout (§2.3); it runs only its own tools.
+      ...(start.fork
+        ? {
+            offered: start.fork.offered,
+            wireTools: start.fork.wireTools,
+            ...(start.fork.checkpoints ? { checkpoints: start.fork.checkpoints } : {}),
+            ...(start.fork.recentPrefix !== undefined ? { recentPrefix: start.fork.recentPrefix } : {}),
+            ...(forkLoading ? { loadingWire: forkLoading } : {})
+          }
+        : { offered: frozen }),
       ...(run.kind ? { kind: run.kind } : {}),
       ...(run.allowsOutside !== undefined ? { allowsOutside: run.allowsOutside } : {}),
       reader: run.reader,
@@ -1175,6 +1285,9 @@ export const agentTool: RolloutTool<AgentArgs> = {
         rows: [
           { label: "Task", value: String(args.task ?? "") },
           ...(args.name ? [{ label: "Name", value: String(args.name) }] : []),
+          ...((args.context ?? type?.context) === "fork"
+            ? [{ label: "Sees", value: "This conversation, then the task" }]
+            : []),
           {
             label: "Model",
             value: entry
@@ -1526,8 +1639,9 @@ const continueChild = (
       return refuse(`${prior.handle} can't be carried on. Start a new subagent with agent if you still need it.`)
     // Its tools as it was given them, among the reply's and the grants now (§6.1); its limits as
     // they applied, counted from this run on, and the reply's places and spend now (§6.2, §6.3).
+    const fork = forkOf(snapshot)
     const given = new Set((snapshot.agent?.tools ?? []).map((t) => t.name))
-    const { tools, frozen } = yield* childTools(ctx, host, (t) => given.has(t.id))
+    const { tools, frozen } = yield* childTools(ctx, host, (t) => given.has(t.id), !fork)
     const now = at.limits
     const kind = subagentTypes.get(snapshot.subagent?.type ?? "")
     const caps = snapshot.subagent?.caps ?? capsFor(kind, now, undefined)
@@ -1588,7 +1702,8 @@ const continueChild = (
       // Its run so far is the start of this one: its limits count from here.
       resume: { transcript, historical: transcript.length },
       inbox: [fromParent(message)],
-      ...(background ? { background: true } : {})
+      ...(background ? { background: true } : {}),
+      ...(fork ? { fork } : {})
     }
     if (!background) return yield* runChild(ctx, host, start)
     host.background!(

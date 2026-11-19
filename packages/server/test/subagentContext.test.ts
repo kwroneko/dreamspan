@@ -1,6 +1,6 @@
 // Subagents, milestone SA7 (spec/SUBAGENTS.md §2.3, §10): a long subagent is summarized as it
-// goes, with the same request-boundary compaction a workshop reply uses. Synthetic data and a
-// scripted loopback provider only.
+// goes, with the same request-boundary compaction a workshop reply uses; a fork sees the reply's
+// conversation and shares its request's prefix. Synthetic data and a scripted loopback provider only.
 import type { ServerResponse } from "node:http"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
@@ -180,6 +180,116 @@ describe("subagent context (SA7)", () => {
       const steps = yield* api.GetRolloutSteps({ versionId })
       const spawn = steps.find((s) => s.kind === "tool" && s.id === "spawn")
       assert.strictEqual(spawn?.kind === "tool" ? spawn.subagent?.status : undefined, "done")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a fork sees the reply's conversation and sends its request's prefix, with only its own tools", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const FORK = "From here on you are a subagent"
+      let childRequests = 0
+      const handler = (request: Recorded, res: ServerResponse) => {
+        const body = request.body as unknown as Body
+        if (!body?.messages) return sse(res, completionChunks(["Ready."], {}))
+        if (text(body).includes(FORK)) {
+          const n = childRequests++
+          return sse(
+            res,
+            n === 0
+              ? toolCall("create_card", { name: "Forbidden" }, "child-create")
+              : n === 1
+                ? toolCall("list_library", { kind: "card" }, "child-list")
+                : completionChunks(["Report: the library holds what the reply listed."], {})
+          )
+        }
+        if (!text(body).includes(TRIGGER)) return sse(res, completionChunks(["Ready."], {}))
+        const done = body.messages.filter((m) => m.role === "tool").length
+        return sse(
+          res,
+          done === 0
+            ? toolCall("list_library", { kind: "card" }, "parent-list")
+            : done === 1
+              ? toolCall(
+                  "agent",
+                  { type: "research", task: "Check the list above against the library.", context: "fork" },
+                  "spawn"
+                )
+              : completionChunks(["Done."], {})
+        )
+      }
+      const { api, chat, events, mock } = yield* workshop(handler)
+      const versionId = yield* task(api, chat, "list, then fork a check")
+      yield* eventually(() => finished(events, versionId) !== undefined, 60_000)
+      assert.strictEqual(finished(events, versionId)!.status, "complete")
+
+      const bodies = completions(mock.requests())
+      const forks = bodies.filter((b) => text(b).includes(FORK))
+      assert.lengthOf(forks, 3)
+      const spawning = bodies.find(
+        (b) =>
+          text(b).includes(TRIGGER) &&
+          !text(b).includes(FORK) &&
+          b.messages.filter((m) => m.role === "tool").length === 1
+      )!
+      // Its request is the reply's, as the reply was just sent, then its task.
+      const first = forks[0]!
+      assert.deepStrictEqual(first.messages.slice(0, -1), spawning.messages)
+      assert.strictEqual(first.messages.at(-1)!.role, "user")
+      assert.include(JSON.stringify(first.messages.at(-1)!.content), "Check the list above against the library.")
+      // The same tool definitions on the wire, so the provider reads the prefix from cache.
+      assert.deepStrictEqual(first.tools, (spawning as { tools?: unknown }).tools as Body["tools"])
+      // But it may use only its own tools: the reply's create_card isn't one.
+      const created = forks[1]!.messages.filter((m) => m.role === "tool")
+      assert.include(JSON.stringify(created.at(-1)!.content), "not found")
+      const [made] = yield* fixtureSql(
+        config.dataDir,
+        [{ sql: "SELECT count(*) AS n FROM entity_revisions WHERE doc_json LIKE '%Forbidden%'" }],
+        { readOnly: true }
+      )
+      assert.strictEqual(made![0]!["n"], 0)
+
+      // Its row: a fork, with its own steps only (not the reply's list_library).
+      const steps = yield* api.GetRolloutSteps({ versionId })
+      const spawn = steps.find((s) => s.kind === "tool" && s.id === "spawn")
+      const row = spawn?.kind === "tool" ? spawn.subagent : undefined
+      assert.strictEqual(row?.status, "done")
+      assert.isTrue(row?.forked)
+      assert.deepStrictEqual(
+        row?.steps?.map((s) => (s.kind === "tool" ? s.id : s.kind)),
+        ["child-create", "child-list"]
+      )
+      assert.strictEqual(row?.count, 2)
+      // The inspector shows its run from its task on.
+      const run = yield* api.GetSubagentRun({ versionId, rolloutId: row!.rolloutId })
+      assert.notInclude(JSON.stringify(run.entries), "parent-list")
+      assert.include(JSON.stringify(run.entries), "child-list")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a fork runs only on the reply's own model", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const handler = (request: Recorded, res: ServerResponse) => {
+        const body = request.body as unknown as Body
+        if (!body?.messages || !text(body).includes(TRIGGER)) return sse(res, completionChunks(["Ready."], {}))
+        const done = body.messages.filter((m) => m.role === "tool").length
+        return sse(
+          res,
+          done === 0
+            ? toolCall("agent", { type: "research", task: "Anything.", context: "fork", model: "fast" }, "spawn")
+            : completionChunks(["Done."], {})
+        )
+      }
+      const { api, chat, events, mock } = yield* workshop(handler)
+      const versionId = yield* task(api, chat, "fork on another model")
+      yield* eventually(() => finished(events, versionId) !== undefined, 60_000)
+      const last = completions(mock.requests())
+        .filter((b) => text(b).includes(TRIGGER))
+        .at(-1)!
+      const result = JSON.stringify(last.messages.filter((m) => m.role === "tool").at(-1)!.content)
+      // `fast` isn't picked here; either way no fork runs on another model.
+      assert.match(result, /no subagent model|only on the model this chat uses/)
+      assert.isFalse(completions(mock.requests()).some((b) => text(b).includes("From here on you are a subagent")))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

@@ -103,6 +103,11 @@ interface SubagentHost {
   readonly run: import("./session.ts").AgentRun
   /** The definitions the run was offered, as frozen: a child never gets more. */
   readonly offered: ReadonlyArray<FrozenTool>
+  /**
+   * The tool definitions the run's requests send, exactly as sent: a fork subagent (spec/SUBAGENTS.md
+   * §2.3) sends the same, so its request starts with the run's cached prefix.
+   */
+  readonly wireTools: ReadonlyArray<import("@earendil-works/pi-ai").Tool>
   /** Shows the child in the call's step as it runs; null takes it out. */
   readonly show: (row: SubagentRow | null) => void
   /** Shows the call waiting for the user's answer (a subagent that couldn't be resumed); null: no longer. */
