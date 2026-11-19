@@ -437,13 +437,25 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
       "The file manager's routes over that same no-follow walk: a file's bytes for a Range download (a link is refused) and an upload's fresh temporary name inside the folder already opened (FILES §1.1, §8.1).",
     expressions: [
       "open(at(dir, name), O_RDONLY | O_NOFOLLOW | O_NONBLOCK)",
+      "open(at(dir, segments.at(-1)!), O_RDONLY | O_NOFOLLOW | O_NONBLOCK)",
       "open(at(dir, temporary), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)"
+    ]
+  },
+  "packages/server/src/files/bin.ts": {
+    reason:
+      "The account's own bin folders in the configured data volume (filesDir/.bin/<user>/<item>): opened O_DIRECTORY|O_NOFOLLOW, listed through /proc/self/fd of the opened handle, and the per-account folder names read for the expiry sweep (FILES bin). User data only.",
+    expressions: [
+      "open(binRoot(userId), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)",
+      "open(at(bin, itemId), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)",
+      "readdir(join(deps.filesDir, BIN_FOLDER))",
+      "open(binRoot(user), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)",
+      "readdir(`/proc/self/fd/${bin.fd}`)"
     ]
   },
   "packages/server/src/files/quota.ts": {
     reason:
       "The account's Files and home folders walked for its usage (FILES §1.2): each entry is lstat'ed first, each inode counted once, and a folder's own names are read to walk it.",
-    expressions: ["readdir(path)"]
+    expressions: ["readdir(path)", "readdir(bin)", "readdir(folder)"]
   },
   "packages/server/src/agent/tools/files.ts": {
     reason:
