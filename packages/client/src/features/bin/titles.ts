@@ -5,6 +5,11 @@ import { readableChatTitle } from "../chat/chatTitle.ts"
 export const binTitle = (item: BinItem) => {
   if (typeof item.origin.groupId === "string") return item.title
   if (item.kind === "chat") return item.title === "" ? "Untitled chat" : readableChatTitle(item.title)
+  if (item.kind === "file") {
+    // Deleted by another account in a folder you share with it (§1.4).
+    const by = item.origin.by as { handle?: unknown } | undefined
+    return typeof by?.handle === "string" ? `${item.title}, deleted by ${by.handle}` : item.title
+  }
   const chat = typeof item.origin.chatTitle === "string" ? readableChatTitle(item.origin.chatTitle) : null
   if (chat === null) return item.title
   // Numbered as the chat numbered it where it was deleted (its position from 1, which inserted
@@ -42,7 +47,6 @@ export const binTitle = (item: BinItem) => {
     case "entity":
     case "connection":
     case "mcp_connection":
-    case "file":
       return item.title
   }
 }

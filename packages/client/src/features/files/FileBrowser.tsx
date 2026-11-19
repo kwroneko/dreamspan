@@ -53,6 +53,7 @@ import { freeBytes, noRoomMessage, roomProblem } from "./usage.ts"
 import { UsageDetails } from "./UsageDetails.tsx"
 import { NoViewer, viewerFor } from "./viewers.tsx"
 import { ShareDialog } from "./ShareDialog.tsx"
+import { ShareNotices } from "./ShareNotices.tsx"
 import { VersionsDialog } from "./VersionsDialog.tsx"
 
 /** The chat's working folder on its branch (§2.1), and how to change it where that's offered. */
@@ -549,6 +550,14 @@ export function FileBrowser(props: FileBrowserProps) {
           {sharedHere === "list" && (
             <p className="text-sm text-muted">Folders other accounts share with you, by their name.</p>
           )}
+          {listing && (
+            <ShareNotices
+              source={source}
+              invitations={listing.invitations ?? []}
+              unavailable={listing.unavailableShares ?? []}
+              onChanged={reload}
+            />
+          )}
           {progress !== null && (
             <ProgressBar label="Uploading" value={progress.done} max={progress.total} className="h-1.5" />
           )}
@@ -825,8 +834,9 @@ function EntryRow({
   const [menu, setMenu] = useState(false)
   const path = joinPath(folder, entry.name)
   const opens = entry.kind === "file" || entry.kind === "folder"
-  const kindText =
-    entry.kind === "folder"
+  const kindText = entry.unavailable
+    ? "Folder: its owner moved or deleted it"
+    : entry.kind === "folder"
       ? "Folder"
       : entry.kind === "file"
         ? formatByteSize(entry.size)
@@ -962,6 +972,7 @@ function EntryRow({
               </span>
             </span>
             {entry.shared !== undefined && <Badge>Shared</Badge>}
+            {entry.unavailable && <Badge>Unavailable</Badge>}
             {isWorking && <Badge tone="accent">Working here</Badge>}
           </button>
         }

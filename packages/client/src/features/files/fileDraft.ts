@@ -9,7 +9,7 @@
 // the assistant, another tab), nothing is written and the edit shows the conflict instead.
 import { type Draft, deletedSince, type ObservedDeletion } from "@dreamspan/shared/drafts.ts"
 import type { FileDraftSave } from "@dreamspan/shared/filesApi.ts"
-import type { TextFile } from "@dreamspan/shared/files.ts"
+import { encodeText, type TextFile } from "@dreamspan/shared/files.ts"
 import type { Effect } from "effect"
 import type { ActionResult } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
@@ -319,7 +319,7 @@ export class FileDraft {
     const base = this.typedOn()
     let outcome
     try {
-      outcome = await this.source.saveText(this.path, content, base)
+      outcome = await this.source.saveText(this.path, content, base, this.file)
     } catch (error) {
       if (error instanceof FileChanged) {
         this.refresh({ conflict: true, error: null })
@@ -328,7 +328,7 @@ export class FileDraft {
       this.refresh({ error: failed(error instanceof Error ? error.message : String(error)) })
       return null
     }
-    const size = new TextEncoder().encode(content).byteLength
+    const size = encodeText(content, this.file.lineEnding, this.file.bom).byteLength
     this.file = { ...this.file, text: content, sha256: outcome.sha256 ?? base, size, mtimeMs: Date.now() }
     if (this.local === null) {
       // The draft's text is the file's now: its session ends as committed.

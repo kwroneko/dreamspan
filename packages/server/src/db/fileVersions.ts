@@ -90,8 +90,16 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         // `from` itself, and every path below it: the prefix swapped for `to`.
         const below = `${from}/`
-        yield* sql`UPDATE OR IGNORE file_shares SET path = ${to} || substr(path, ${from.length + 1})
-          WHERE owner_user_id = ${userId} AND (path = ${from} OR substr(path, 1, ${below.length}) = ${below})`
+        const toBelow = `${to}/`
+        // The move never replaces (renameNoReplace), so nothing of the owner's was at `to`: shares
+        // and invitations still recorded there were stale, and go rather than block these.
+        for (const table of ["file_shares", "file_share_invitations"] as const) {
+          yield* sql`DELETE FROM ${sql(table)} WHERE owner_user_id = ${userId}
+            AND (path = ${to} OR substr(path, 1, ${toBelow.length}) = ${toBelow})
+            AND NOT (path = ${from} OR substr(path, 1, ${below.length}) = ${below})`
+          yield* sql`UPDATE OR IGNORE ${sql(table)} SET path = ${to} || substr(path, ${from.length + 1})
+            WHERE owner_user_id = ${userId} AND (path = ${from} OR substr(path, 1, ${below.length}) = ${below})`
+        }
         yield* sql`UPDATE OR IGNORE drafts SET target_id = ${to} || substr(target_id, ${from.length + 1})
           WHERE user_id = ${userId} AND target_kind = 'file'
             AND (target_id = ${from} OR substr(target_id, 1, ${below.length}) = ${below})`
@@ -171,7 +179,8 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
           origin: string
           sha256: string | null
           media_path: string | null
-        }>`SELECT v.id, v.path, v.inode, v.byte_size, v.origin, m.sha256, m.path AS media_path
+          created_at: number
+        }>`SELECT v.id, v.path, v.inode, v.byte_size, v.origin, m.sha256, m.path AS media_path, v.created_at
           FROM file_versions v LEFT JOIN media_assets m ON m.id = v.media_id
           WHERE v.id = ${id} AND v.owner_user_id = ${userId}`
         if (!row) return yield* new NotFound({ entity: "file version", id })
@@ -182,7 +191,8 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
           byteSize: row.byte_size,
           origin: row.origin,
           sha256: row.sha256,
-          mediaPath: row.media_path
+          mediaPath: row.media_path,
+          createdAt: row.created_at
         }
       }).pipe(query("FileVersion")),
     FileBinItem: ({ userId, itemId }) =>
@@ -206,8 +216,18 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
     // Folders other accounts shared with this one (§1.4), for its commands' binds (A5). Shares
     // from a disabled account don't count.
     FileSharesGrantedTo: ({ userId }) =>
-      sql<{ id: string; owner_user_id: string; handle: string; path: string; inode: number | null; mode: string }>`
-        SELECT s.id, s.owner_user_id, u.handle, s.path, s.inode, s.mode
+      sql<{
+        id: string
+        owner_user_id: string
+        handle: string
+        path: string
+        inode: number | null
+        device: number | null
+        suspended_at: number | null
+        created_at: number
+        mode: string
+      }>`
+        SELECT s.id, s.owner_user_id, u.handle, s.path, s.inode, s.device, s.suspended_at, s.created_at, s.mode
         FROM file_shares s JOIN users u ON u.id = s.owner_user_id
         WHERE s.grantee_user_id = ${userId} AND u.disabled_at IS NULL
         ORDER BY u.handle, s.path`.pipe(
@@ -218,6 +238,9 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
             ownerHandle: row.handle,
             path: row.path,
             inode: row.inode,
+            device: row.device,
+            suspendedAt: row.suspended_at,
+            createdAt: row.created_at,
             mode: row.mode === "edit" ? ("edit" as const) : ("view" as const)
           }))
         ),

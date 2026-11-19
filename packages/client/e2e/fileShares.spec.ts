@@ -1,9 +1,12 @@
 // Sharing a folder and a file's versions (spec/FILES-AND-ENVIRONMENT.md §1.3, §1.4, track B3) in
-// the browser against the real server: the owner shares a folder from its row menu with an account
-// by name, Can view, and the row says Shared; the other account, in its own browser, finds it under
-// Shared/<owner>/<folder>, opens a file, and can change nothing; Can edit lets it save. The owner's
-// Versions dialog lists the earlier content with who replaced it, and Restore puts it back with
-// Undo in the toast. Layout audit at 1440 and 390, light and dark. Synthetic files only.
+// the browser against the real server: the owner offers a folder from its row menu to an account
+// by name, Can view, and the row says Shared; a name that's no account's is listed as invited just
+// the same. The other account, in its own browser, accepts the invitation at the top of its files,
+// finds it under Shared/<owner>/<folder>, opens a file, and can change nothing; Can edit lets it
+// save. The owner's Versions dialog lists the earlier content with who replaced it, and Restore
+// puts it back with Undo in the toast. Deleted and restored, the folder isn't shared again until
+// the owner says so. Layout audit at 1440 and 390, light and dark. Synthetic files only.
+import { FILES_ROUTES } from "@dreamspan/shared/files.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { filesOf } from "./support/files.ts"
@@ -46,14 +49,19 @@ for (const width of [1440, 390])
     await page.getByRole("menuitem", { name: "Share…" }).click()
     const dialog = page.getByRole("dialog", { name: `Share “${name}”` })
     await expect(dialog.getByText("Nobody yet.")).toBeVisible()
+    // A name that's no account's is answered as one that is: invited.
     await dialog.getByRole("textbox", { name: "Account name" }).fill("nobody-here")
     await dialog.getByRole("button", { name: "Share", exact: true }).click()
-    await expect(dialog.getByRole("alert")).toHaveText("No other account is called “nobody-here”.")
+    const nobody = dialog.locator('[data-share-row="nobody-here"]')
+    await expect(nobody).toContainText("Invited")
     await dialog.getByRole("textbox", { name: "Account name" }).fill(handle)
     await dialog.getByRole("button", { name: "Share", exact: true }).click()
     const shared = dialog.locator(`[data-share-row="${handle}"]`)
-    await expect(shared).toContainText(`Keeper ${width}`)
+    await expect(shared).toContainText("Invited")
+    await expect(shared).not.toContainText(`Keeper ${width}`)
     await audit(page, info, `share-dialog-${width}`, "[role=dialog]")
+    await nobody.getByRole("button", { name: "Take back" }).click()
+    await expect(nobody).toHaveCount(0)
     await dialog.getByRole("button", { name: "Done" }).click()
     await expect(row.getByText("Shared", { exact: true })).toBeVisible()
 
@@ -62,6 +70,12 @@ for (const width of [1440, 390])
     const other = await theirs.newPage()
     await apiLogin(other.request, server(), handle, password)
     await other.goto(`${server().url}/files?${new URLSearchParams({ path: "/files" })}`)
+    // Offered, not yet theirs: accepted at the top of their files.
+    const invitation = other.locator(`[data-share-invitation="${name}"]`)
+    await expect(invitation).toContainText(`shares “${name}” with you to view.`)
+    await audit(other, info, `share-invitation-${width}`, "main")
+    await invitation.getByRole("button", { name: "Accept" }).click()
+    await expect(invitation).toHaveCount(0)
     await other
       .locator('[data-file-row="Shared"]')
       .getByRole("button", { name: /^Shared,/ })
@@ -88,13 +102,14 @@ for (const width of [1440, 390])
     await page.goto(`${server().url}/files?${new URLSearchParams({ path: "/files" })}`)
     await row.getByRole("button", { name: `Actions for ${name}` }).click()
     await page.getByRole("menuitem", { name: "Share…" }).click()
+    await expect(shared).toContainText(`Keeper ${width}`)
+    await expect(shared).not.toContainText("Invited")
     await shared.getByRole("button", { name: "Can edit" }).click()
     await expect(shared.getByRole("button", { name: "Can edit" })).toHaveAttribute("aria-pressed", "true")
     await dialog.getByRole("button", { name: "Done" }).click()
     const theirFiles = filesOf(other.request, server().url)
     await theirFiles.put(`/files/Shared/${ADMIN.handle}/${name}/log.txt`, "Third entry, by the keeper.")
     expect(await files.text(`/files/${name}/log.txt`)).toBe("Third entry, by the keeper.")
-    await theirs.close()
 
     // Versions: newest first, who replaced it named; Restore puts it back, Undo in the toast.
     await page.goto(`${server().url}/files?${new URLSearchParams({ path: `/files/${name}`, file: "log.txt" })}`)
@@ -112,4 +127,24 @@ for (const width of [1440, 390])
     await expect(listed.first()).toContainText("Before a restore")
     await page.getByRole("button", { name: "Undo" }).click()
     await expect.poll(() => files.text(`/files/${name}/log.txt`)).toBe("Third entry, by the keeper.")
+
+    // Deleted and put back from the bin, it isn't shared again until the owner says so.
+    const binned = await page.request.post(`${server().url}${FILES_ROUTES.delete}`, {
+      headers: { origin: server().url },
+      data: { path: `/files/${name}` }
+    })
+    const { binItemId } = (await binned.json()) as { binItemId: string }
+    await page.request.post(`${server().url}${FILES_ROUTES.restore}`, {
+      headers: { origin: server().url },
+      data: { binItemId }
+    })
+    expect(await theirFiles.text(`/files/Shared/${ADMIN.handle}/${name}/log.txt`)).toBeNull()
+    await page.goto(`${server().url}/files?${new URLSearchParams({ path: "/files" })}`)
+    const stopped = page.locator(`[data-share-unavailable="/files/${name}"]`)
+    await expect(stopped).toContainText(`“/files/${name}” was deleted, so Keeper ${width} no longer has it.`)
+    await audit(page, info, `share-unavailable-${width}`, "main")
+    await stopped.getByRole("button", { name: "Share again" }).click()
+    await expect(stopped).toHaveCount(0)
+    expect(await theirFiles.text(`/files/Shared/${ADMIN.handle}/${name}/log.txt`)).toBe("Third entry, by the keeper.")
+    await theirs.close()
   })

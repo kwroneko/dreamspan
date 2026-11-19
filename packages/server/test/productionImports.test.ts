@@ -468,7 +468,9 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
       "open(at(dir, temporary), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)",
       // A copied attachment's temporary file and a saved file's path: user data in the data volume.
       "readFile(copied.temporary)",
-      "open(join(config.dataDir, file.path), O_RDONLY | O_NOFOLLOW)"
+      "open(join(config.dataDir, file.path), O_RDONLY | O_NOFOLLOW)",
+      // A kept version's bytes (Versions dialog): its media path is the server's own content hash name.
+      "readFile(join(config.dataDir, version.mediaPath!))"
     ]
   },
   "packages/server/src/files/commandOutput.ts": {
@@ -607,6 +609,12 @@ const productionImportProblems = (
         const target = relative(root, asset).split(sep).join("/")
         if (!existsSync(asset) || excludedBy(rules, target) || (!client && !included(target)))
           problems.push(`Missing asset: ${target}`)
+        continue
+      }
+      // A Vite `?url` import of a package's file (pdf.js's worker): the file is served as an asset.
+      if (bare && specifier.endsWith("?url")) {
+        if (!existsSync(join(root, "node_modules", clean)))
+          problems.push(`${specifier} doesn't resolve, imported by ${path}`)
         continue
       }
       const resolved = ts.resolveModuleName(specifier, file, compilerOptions, host).resolvedModule

@@ -92,3 +92,19 @@ test("a message is numbered by its place where it was deleted, which insertions 
   expect(binTitle(item({ chatTitle: "Lighthouse", depth: 3 }))).toBe("Message 4 in “Lighthouse”")
   expect(binTitle(item({ chatTitle: "Lighthouse" }))).toBe("Message in “Lighthouse”")
 })
+
+test("a file another account deleted in a folder you share says who", () => {
+  const file = (origin: Record<string, unknown>) =>
+    new BinItem({
+      id: "bin",
+      kind: "file",
+      targetId: "/files/A/a.txt",
+      title: "a.txt",
+      excerpt: "/files/A/a.txt",
+      origin,
+      byteSize: 2,
+      deletedAt: 0
+    })
+  expect(binTitle(file({ path: "/files/A/a.txt", by: { userId: "u", handle: "ash" } }))).toBe("a.txt, deleted by ash")
+  expect(binTitle(file({ path: "/files/A/a.txt" }))).toBe("a.txt")
+})

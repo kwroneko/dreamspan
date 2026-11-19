@@ -1,12 +1,16 @@
-// Share… (spec/FILES-AND-ENVIRONMENT.md §1.4): a folder of yours shared with named accounts, each
-// Can view or Can edit, changed or stopped here. The other account finds it under
-// Files/Shared/<your name>/<folder>.
+// Share… (spec/FILES-AND-ENVIRONMENT.md §1.4): a folder of yours offered to named accounts, each
+// Can view or Can edit, changed or stopped here. The other account accepts it, then finds it under
+// Files/Shared/<your name>/<folder>. Whether a name is an account isn't said: an invitation is
+// listed under the name as typed either way. A share whose folder is no longer at its path
+// (moved by a command, replaced, or deleted and restored) is unavailable until shared again.
 import type { FolderShare, ShareMode } from "@dreamspan/shared/files.ts"
 import { useEffect, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
+import { Badge } from "../../ui/Surface.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { FilesSource } from "./source.ts"
 
 const MODES = [
@@ -73,6 +77,11 @@ export function ShareDialog({
       await source.unshare!(entry.id)
       return (list ?? []).filter((other) => other.id !== entry.id)
     })
+  const again = (entry: FolderShare) =>
+    run(async () => {
+      const made = await source.shareAgain!(entry.id)
+      return (list ?? []).map((other) => (other.id === entry.id ? made : other))
+    })
 
   return (
     <Dialog
@@ -84,7 +93,7 @@ export function ShareDialog({
         onClose()
       }}
       title={`Share “${name}”`}
-      description={`Who you share it with finds it in their files, under Shared.`}
+      description="They get an invitation, and find it in their files under Shared once they accept."
     >
       <form
         className="flex min-w-0 flex-col gap-3"
@@ -113,7 +122,7 @@ export function ShareDialog({
           <Button
             type="submit"
             variant="primary"
-            hint="Shares the folder with this account."
+            hint="Sends this account an invitation to the folder. Nothing is shared until they accept."
             disabled={handle.trim() === ""}
             pending={busy}
           >
@@ -137,20 +146,36 @@ export function ShareDialog({
                   {entry.displayName}
                   {entry.displayName !== entry.handle && <span className="text-muted"> ({entry.handle})</span>}
                 </span>
-                <Segmented
-                  label={`What ${entry.displayName} can do`}
-                  inlineDescription
-                  options={MODES}
-                  value={entry.mode}
-                  onValueChange={(next) => void share(entry.handle, next)}
-                />
+                {entry.status !== "active" && <StatusBadge status={entry.status} />}
+                {entry.status !== "unavailable" && (
+                  <Segmented
+                    label={`What ${entry.displayName} can do`}
+                    inlineDescription
+                    options={MODES}
+                    value={entry.mode}
+                    onValueChange={(next) => void share(entry.handle, next)}
+                  />
+                )}
+                {entry.status === "unavailable" && source.shareAgain && (
+                  <Button
+                    hint={`Shares this folder with ${entry.displayName} again. They see what's in it from now on, not its earlier versions.`}
+                    disabled={busy}
+                    onClick={() => void again(entry)}
+                  >
+                    Share again
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
-                  hint={`Stops sharing it with ${entry.displayName}. Their next look no longer finds it.`}
+                  hint={
+                    entry.status === "invited"
+                      ? `Takes back the invitation to “${entry.handle}”.`
+                      : `Stops sharing it with ${entry.displayName}. Their next look no longer finds it.`
+                  }
                   disabled={busy}
                   onClick={() => void stop(entry)}
                 >
-                  Stop sharing
+                  {entry.status === "invited" ? "Take back" : "Stop sharing"}
                 </Button>
               </li>
             ))}
@@ -163,5 +188,26 @@ export function ShareDialog({
         </Button>
       </DialogActions>
     </Dialog>
+  )
+}
+
+const STATUS = {
+  invited: {
+    label: "Invited",
+    hint: "Shared once they accept. If no account has this name, nobody gets the invitation."
+  },
+  unavailable: {
+    label: "Unavailable",
+    hint: "This isn't the folder you shared: it was moved, replaced or deleted since. Share again to share this one."
+  }
+} as const
+
+function StatusBadge({ status }: { status: keyof typeof STATUS }) {
+  return (
+    <Tooltip label={STATUS[status].hint}>
+      <span tabIndex={0} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
+        <Badge tone="neutral">{STATUS[status].label}</Badge>
+      </span>
+    </Tooltip>
   )
 }
