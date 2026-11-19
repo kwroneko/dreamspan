@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Exit, Layer } from "effect"
+import { Cause, Context, Effect, Exit, Layer, Logger } from "effect"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "../src/db/connection.ts"
-import { migrate, migrationDefinitions, Migrations, migrations } from "../src/db/migrations.ts"
+import { DatabaseStartup, migrate, migrationDefinitions, Migrations, migrations } from "../src/db/migrations.ts"
 import { FORK_SUMMARY_FORMAT, summaryValidSql } from "../src/db/summaryValidity.ts"
 import { tempDir } from "./support/tempDir.ts"
 
@@ -32,6 +32,39 @@ const messages = (error: unknown): string => {
 }
 
 const layer = () => writerConnection(join(tempDir("mig"), "db.sqlite"))
+
+/** Fake migrations for the tests below, numbered after the newest real one, so new real ones never collide. */
+const newestReal = Math.max(...Object.keys(migrationDefinitions).map((key) => Number(key.slice(0, 4))))
+const fakeKey = (name: string, offset = 1) => `${String(newestReal + offset).padStart(4, "0")}_${name}`
+/** The real migrations after 0005, which the tests below leave pending on a database at 0005. */
+const after5 = Object.keys(migrationDefinitions)
+  .filter((key) => Number(key.slice(0, 4)) > 5)
+  .sort()
+
+const upTo = (id: number) =>
+  Object.fromEntries(Object.entries(migrationDefinitions).filter(([key]) => Number(key.slice(0, 4)) <= id))
+
+/** Pins of chats that aren't there, made with foreign keys off as an outside tool would. */
+const orphanPins = (chats: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`INSERT OR IGNORE INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+    yield* sql.unsafe("PRAGMA foreign_keys = OFF")
+    for (const chat of chats) yield* sql`INSERT INTO chat_pins (user_id, chat_id) VALUES ('u', ${chat})`
+    yield* sql.unsafe("PRAGMA foreign_keys = ON")
+  })
+
+const newestRecorded = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  return (yield* sql<{ id: number }>`SELECT max(migration_id) AS id FROM effect_sql_migrations`)[0]!.id
+})
+
+const pragmaValue = (name: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql.unsafe(`PRAGMA ${name}`)
+    return Object.values(row!)[0]
+  })
 
 describe("0001_baseline", () => {
   it.effect("bumps existing connections for provider setting writes, never for reads or unchanged values", () =>
@@ -232,48 +265,131 @@ describe("the migrator", () => {
     }).pipe(Effect.provide(layer()))
   )
 
-  it.effect("refuses to start on rows that point at rows that don't exist, never saying to empty the data folder", () =>
+  it.effect("starts on references broken before, with a warning and a report, when no change is pending", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* Effect.scoped(Layer.build(Migrations))
-      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
-      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'rp', 'active', 0)`
-      // Broken outside the app (foreign keys off): a pin of a chat that isn't there.
-      yield* sql.unsafe("PRAGMA foreign_keys = OFF")
-      yield* sql`INSERT INTO chat_pins (user_id, chat_id) VALUES ('u', 'gone'), ('u', 'lost')`
-      yield* sql.unsafe("PRAGMA foreign_keys = ON")
-      const exit = yield* Effect.exit(Effect.scoped(Layer.build(Migrations)))
-      assert.isTrue(Exit.isFailure(exit))
-      assert.include(
-        String(exit),
-        "Dreamspan won't start: 2 rows in its database point at rows that don't exist: 2 in chat_pins (pointing into chats)"
+      yield* migrate(migrationDefinitions)
+      yield* orphanPins(["gone", "lost"])
+      const warnings: Array<string> = []
+      const report = yield* migrate(migrationDefinitions).pipe(
+        Effect.provide(
+          Logger.layer([
+            Logger.make((options) => {
+              if (options.logLevel === "Warn") warnings.push(String(options.message))
+            })
+          ])
+        )
       )
-      assert.include(String(exit), "restore the backup taken before this update")
-      assert.notInclude(String(exit), "empty")
-      // Mended, it starts.
+      assert.deepStrictEqual(report, { applied: [], broken: [{ table: "chat_pins", parent: "chats", rows: 2 }] })
+      assert.deepStrictEqual(warnings, [
+        "Dreamspan's database has 2 rows pointing at rows that don't exist: 2 in chat_pins (pointing into chats). " +
+          "No database change ran at this start, so this was already there; Dreamspan starts anyway. " +
+          "Items that use those rows may not open or change. Restore a backup from before the problem, or report it. Admins see this on the Server status page."
+      ])
+      // The writer's layer gives the same report to the Server status page.
+      const startup = yield* Effect.scoped(Layer.build(Migrations).pipe(Effect.map(Context.get(DatabaseStartup))))
+      assert.deepStrictEqual(startup.broken, report.broken)
+      // Mended, the report is clean.
       yield* sql`DELETE FROM chat_pins WHERE chat_id IN ('gone', 'lost')`
-      assert.isTrue(Exit.isSuccess(yield* Effect.exit(Effect.scoped(Layer.build(Migrations)))))
+      assert.deepStrictEqual(yield* migrate(migrationDefinitions), { applied: [], broken: [] })
     }).pipe(Effect.provide(layer()))
   )
 
-  it.effect("keeps a pending migration out when the reference check after it fails", () =>
+  it.effect("runs pending changes on top of references broken before them", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const upTo5 = Object.fromEntries(Object.entries(migrationDefinitions).filter(([key]) => key < "0006"))
-      yield* migrate(upTo5)
+      yield* migrate(upTo(5))
+      yield* orphanPins(["gone"])
+      const report = yield* migrate(migrationDefinitions)
+      assert.deepStrictEqual(report, {
+        applied: after5,
+        broken: [{ table: "chat_pins", parent: "chats", rows: 1 }]
+      })
+      assert.strictEqual((yield* sql`SELECT name FROM sqlite_master WHERE name = 'persona_locks'`).length, 1)
+    }).pipe(Effect.provide(layer()))
+  )
+
+  it.effect(
+    "refuses a pending change that breaks references, keeping nothing of this start, never saying to empty the data folder",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* migrate(upTo(5))
+        // One broken row was there already; the new change adds two more of the same kind.
+        yield* orphanPins(["old"])
+        const exit = yield* Effect.exit(
+          migrate({
+            ...migrationDefinitions,
+            [fakeKey("breaks")]: {
+              statements: [
+                "PRAGMA defer_foreign_keys = ON",
+                "INSERT INTO chat_pins (user_id, chat_id) VALUES ('u', 'new1'), ('u', 'new2')"
+              ]
+            }
+          })
+        )
+        assert.isTrue(Exit.isFailure(exit))
+        assert.strictEqual(
+          messages(Cause.squash((exit as Exit.Failure<unknown, unknown>).cause)),
+          `Dreamspan won't start: this update's database changes ${[...after5, fakeKey("breaks")].join(", ")} would leave` +
+            " 2 rows pointing at rows that don't exist: 2 in chat_pins (pointing into chats). " +
+            "So these database changes were undone, and the data is not served. " +
+            "Nothing else was changed: the data is as the version you ran before left it. Go back to that version, or restore the backup taken before this update, and report this problem."
+        )
+        assert.notInclude(String(exit), "empty")
+        assert.deepStrictEqual(yield* sql`SELECT name FROM sqlite_master WHERE name = 'persona_locks'`, [])
+        assert.strictEqual(yield* newestRecorded, 5)
+        assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM chat_pins`)[0]!.n, 1)
+      }).pipe(Effect.provide(layer()))
+  )
+
+  it.effect("says which changes were kept when one after them breaks references", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* migrate(upTo(5))
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
-      yield* sql.unsafe("PRAGMA foreign_keys = OFF")
-      yield* sql`INSERT INTO chat_pins (user_id, chat_id) VALUES ('u', 'gone')`
-      yield* sql.unsafe("PRAGMA foreign_keys = ON")
-      const exit = yield* Effect.exit(migrate(migrationDefinitions))
-      assert.isTrue(Exit.isFailure(exit))
-      assert.deepStrictEqual(yield* sql`SELECT name FROM sqlite_master WHERE name = 'persona_locks'`, [])
-      assert.deepStrictEqual(
-        (yield* sql<{ migration_id: number }>`SELECT max(migration_id) AS migration_id FROM effect_sql_migrations`).map(
-          (row) => row.migration_id
-        ),
-        [5]
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'rp', 'active', 0)`
+      yield* sql`INSERT INTO chat_pins (user_id, chat_id) VALUES ('u', 'c')`
+      // The real ones after 0005 and a fake one commit as one run; the next, outside a transaction
+      // with foreign keys off, deletes a pinned chat.
+      const exit = yield* Effect.exit(
+        migrate({
+          ...migrationDefinitions,
+          [fakeKey("fine")]: { statements: ["CREATE TABLE fine_table (id INTEGER PRIMARY KEY) STRICT"] },
+          [fakeKey("breaks", 2)]: { outsideTransaction: ["DELETE FROM chats WHERE id = 'c'"] }
+        })
       )
+      assert.isTrue(Exit.isFailure(exit))
+      const message = messages(Cause.squash((exit as Exit.Failure<unknown, unknown>).cause))
+      assert.strictEqual(
+        message,
+        `Dreamspan won't start: this update's database change ${fakeKey("breaks", 2)} would leave` +
+          " 3 rows pointing at rows that don't exist: 1 in chat_pins (pointing into chats), 1 in fork_labels (pointing into chats), 1 in forks (pointing into chats). " +
+          "So this database change was undone, and the data is not served. " +
+          `The changes before it at this start (${[...after5, fakeKey("fine")].join(", ")}) passed the same check` +
+          " and were kept, so the version you ran before can't open this data any more: restore the backup taken before this update, and report this problem."
+      )
+      assert.notInclude(message, "Go back")
+      assert.notInclude(message, "empty")
+      assert.strictEqual(yield* newestRecorded, newestReal + 1)
+      assert.strictEqual((yield* sql`SELECT id FROM chats`).length, 1)
+      assert.strictEqual(yield* pragmaValue("foreign_keys"), 1)
+    }).pipe(Effect.provide(layer()))
+  )
+
+  it.effect("refuses migrations that share a number, changing nothing", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const exit = yield* Effect.exit(
+        migrate({
+          ...migrationDefinitions,
+          [fakeKey("a")]: { statements: ["CREATE TABLE a (id INTEGER PRIMARY KEY) STRICT"] },
+          [fakeKey("b")]: { statements: ["CREATE TABLE b (id INTEGER PRIMARY KEY) STRICT"] }
+        })
+      )
+      assert.isTrue(Exit.isFailure(exit))
+      assert.include(String(exit), `share a number (${fakeKey("a")} and ${fakeKey("b")})`)
+      assert.deepStrictEqual(yield* sql`SELECT name FROM sqlite_master`, [])
     }).pipe(Effect.provide(layer()))
   )
 

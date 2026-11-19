@@ -60,6 +60,7 @@ import {
   AppCoreApi,
   AuthenticatedGalleryApi,
   AuthenticatedOwnTurnNoteApi,
+  DatabaseStatusApi,
   AuthenticatedPanelApprovalApi,
   AuthenticatedPanelDataApi,
   AuthenticatedCardArchiveApi,
@@ -122,6 +123,7 @@ import * as ContextGenerator from "./chat/ContextGenerator.ts"
 import { Generator } from "./chat/Generator.ts"
 import { AppConfig } from "./config.ts"
 import * as Database from "./db/Database.ts"
+import { Forbidden, ServerError } from "@dreamspan/shared/errors.ts"
 import { EventLoopMonitor } from "./eventLoop.ts"
 import * as Formats from "./importer/Formats.ts"
 import * as ImportRoutes from "./importer/routes.ts"
@@ -203,8 +205,28 @@ const CoreHandlers = AppCoreApi.toLayer(
   })
 )
 
+// Admins only: what the database writer found when it last started (Settings → Server status).
+const DatabaseStatusHandlers = DatabaseStatusApi.toLayer(
+  Effect.gen(function* () {
+    const writer = yield* Database.Writer
+    return {
+      GetDatabaseStartup: () =>
+        Effect.gen(function* () {
+          const user = yield* CurrentUser
+          if (user.role !== "admin") return yield* new Forbidden({ message: "only an admin can see this" })
+          return yield* writer.GetDatabaseStartup()
+        }).pipe(
+          Effect.catchTag("RpcClientError", () =>
+            Effect.fail(new ServerError({ message: "Could not reach the database" }))
+          )
+        )
+    }
+  })
+)
+
 const HandlerLayers = Layer.mergeAll(
   CoreHandlers,
+  DatabaseStatusHandlers,
   AuthenticatedOwnTurnNoteApi.toLayer(makeOwnTurnNoteHandlers),
   AuthenticatedWorkshopPresetApi.toLayer(makeWorkshopPresetHandlers),
   AuthenticatedMessageVersionApi.toLayer(makeMessageVersionHandlers),

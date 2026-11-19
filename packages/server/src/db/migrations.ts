@@ -1,5 +1,5 @@
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
-import { Effect, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 import { baseline } from "./baseline.ts"
 import { filesMigration } from "./migrationFiles.ts"
@@ -118,28 +118,71 @@ const refuseUnknownLedger = (definitions: Readonly<Record<string, MigrationDefin
     )
   })
 
-/**
- * Refuses to go on when a row points at a row that isn't there. After the migrations (and inside
- * each table rebuild, before it commits), so a broken update stops before the server serves data.
- */
-const refuseBrokenReferences = Effect.gen(function* () {
+/** Rows that point at a row that isn't there, counted by table and the table they point into. */
+export interface BrokenReference {
+  readonly table: string
+  readonly parent: string
+  readonly rows: number
+}
+
+/** What a start did to the database: the migrations it applied, and the broken references left. */
+export interface MigrationReport {
+  readonly applied: ReadonlyArray<string>
+  readonly broken: ReadonlyArray<BrokenReference>
+}
+
+/** The writer's migration report, for the admin's Server status page (`GetDatabaseStartup`). */
+export class DatabaseStartup extends Context.Service<DatabaseStartup, MigrationReport>()("rp/db/DatabaseStartup") {}
+
+const brokenReferences = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const broken = yield* sql<{ table: string; parent: string; n: number }>`SELECT "table", parent, count(*) AS n
-    FROM pragma_foreign_key_check GROUP BY "table", parent ORDER BY n DESC, "table"`
-  if (broken.length === 0) return
-  const total = broken.reduce((sum, row) => sum + row.n, 0)
+  return yield* sql<BrokenReference>`SELECT "table", parent, count(*) AS rows
+    FROM pragma_foreign_key_check GROUP BY "table", parent ORDER BY rows DESC, "table", parent`
+})
+
+const describeBroken = (broken: ReadonlyArray<BrokenReference>) => {
+  const total = broken.reduce((sum, row) => sum + row.rows, 0)
   const where = broken
     .slice(0, 6)
-    .map((row) => `${row.n} in ${row.table} (pointing into ${row.parent})`)
+    .map((row) => `${row.rows} in ${row.table} (pointing into ${row.parent})`)
     .join(", ")
-  return yield* Effect.die(
-    new Error(
-      `Dreamspan won't start: ${total} rows in its database point at rows that don't exist: ${where}${broken.length > 6 ? ", and more" : ""}. ` +
-        `This build's database changes were not kept, and the data is not served, so nothing more changes. ` +
-        `Go back to the version you ran before, or restore the backup taken before this update, and report this problem.`
+  return `${total} ${total === 1 ? "row pointing at a row that doesn't" : "rows pointing at rows that don't"} exist: ${where}${broken.length > 6 ? ", and more" : ""}`
+}
+
+const list = (keys: ReadonlyArray<string>) => keys.join(", ")
+const plural = (keys: ReadonlyArray<string>, one: string, many: string) => (keys.length === 1 ? one : many)
+
+/**
+ * The reference check that ends each run of migrations, inside the run's transaction. Broken
+ * references that were there before this start (`before`) are not this run's doing: they were
+ * logged when the start began, and the run goes on. Any more than that, and the run rolls back
+ * and the writer stops, saying exactly what was kept: the runs this start committed before it
+ * (`kept`) passed the same check and stay.
+ */
+const refuseNewBreakage = (
+  before: ReadonlyArray<BrokenReference>,
+  run: ReadonlyArray<string>,
+  kept: ReadonlyArray<string>
+) =>
+  Effect.gen(function* () {
+    const now = yield* brokenReferences
+    const had = new Map(before.map((row) => [`${row.table}\u0000${row.parent}`, row.rows]))
+    const added = now.flatMap((row) => {
+      const more = row.rows - (had.get(`${row.table}\u0000${row.parent}`) ?? 0)
+      return more > 0 ? [{ ...row, rows: more }] : []
+    })
+    if (added.length === 0) return now
+    const these = plural(run, "this database change", "these database changes")
+    return yield* Effect.die(
+      new Error(
+        `Dreamspan won't start: this update's database ${plural(run, "change", "changes")} ${list(run)} would leave ${describeBroken(added)}. ` +
+          `So ${these} ${plural(run, "was", "were")} undone, and the data is not served. ` +
+          (kept.length === 0
+            ? `Nothing else was changed: the data is as the version you ran before left it. Go back to that version, or restore the backup taken before this update, and report this problem.`
+            : `The ${plural(kept, "change", "changes")} before ${plural(run, "it", "them")} at this start (${list(kept)}) passed the same check and ${plural(kept, "was", "were")} kept, so the version you ran before can't open this data any more: restore the backup taken before this update, and report this problem.`)
+      )
     )
-  )
-})
+  })
 
 /** Turns foreign keys back on and the legacy rename off, whatever happened. */
 const restoreConnection = Effect.gen(function* () {
@@ -149,11 +192,23 @@ const restoreConnection = Effect.gen(function* () {
 }).pipe(Effect.orDie)
 
 /**
+ * The code an `outsideTransaction` migration runs besides its own steps: bump this when
+ * `runOutside` changes what it does (the pragmas around the steps, the check, the ledger row),
+ * so the fingerprint of every released migration that runs through it changes too
+ * (db/releases.ts `fingerprint`).
+ */
+export const OUTSIDE_RUNNER_VERSION = 1
+
+/**
  * Runs one `outsideTransaction` migration: foreign keys off (only possible outside a
  * transaction, so it is checked), then its steps, the reference check and its ledger row in one
  * transaction. A failure rolls all of it back, and the next start tries again.
  */
-const runOutside = (key: string, steps: ReadonlyArray<OutsideStep>) =>
+const runOutside = (
+  key: string,
+  steps: ReadonlyArray<OutsideStep>,
+  check: Effect.Effect<unknown, never, SqlClient.SqlClient>
+) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     yield* sql.unsafe("PRAGMA foreign_keys = OFF")
@@ -163,7 +218,7 @@ const runOutside = (key: string, steps: ReadonlyArray<OutsideStep>) =>
     yield* sql.withTransaction(
       Effect.gen(function* () {
         for (const step of steps) yield* typeof step === "string" ? sql.unsafe(step) : rebuildTable(step)
-        yield* refuseBrokenReferences
+        yield* check
         yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (${idOf(key)}, ${nameOf(key)})`
       })
     )
@@ -172,39 +227,92 @@ const runOutside = (key: string, steps: ReadonlyArray<OutsideStep>) =>
     Effect.catch((error) => Effect.die(new Error(`Migration "${key}" failed`, { cause: error })))
   )
 
+/** Two migrations with one number: the migrator would run only one of them. A fault in the build. */
+export const duplicateMigrationIds = (keys: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const byId = new Map<number, Array<string>>()
+  for (const key of keys) byId.set(idOf(key), [...(byId.get(idOf(key)) ?? []), key])
+  return [...byId.values()].filter((same) => same.length > 1).map((same) => same.join(" and "))
+}
+
 /**
- * Brings a database up to `definitions`, in order. Runs of ordinary migrations go through
- * Effect's migrator, which runs each run in one transaction; an `outsideTransaction` migration
- * between them runs on its own (`runOutside`). The last run and the reference check share one
- * transaction, so a reference problem leaves the database as it was before that run.
+ * Brings a database up to `definitions`, in order, and says what it did. Runs of ordinary
+ * migrations go through Effect's migrator, each run in one transaction; an `outsideTransaction`
+ * migration between them runs on its own (`runOutside`). Every run ends with the reference check
+ * in its own transaction, so a run that breaks a reference rolls back alone (`refuseNewBreakage`).
+ * References already broken when the start began are logged as a warning and kept in the report:
+ * the start goes on, so an old problem never stops the server for good.
  */
 export const migrate = (definitions: Readonly<Record<string, MigrationDefinition>>) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    yield* refuseUnknownLedger(definitions)
-    const keys = Object.keys(definitions).sort((a, b) => idOf(a) - idOf(b))
-    const inTransaction = (below: number) =>
-      SqliteMigrator.fromRecord(
-        Object.fromEntries(
-          keys.flatMap((key) => {
-            const definition = definitions[key]!
-            return idOf(key) < below && "statements" in definition ? [[key, runAll(definition.statements)]] : []
-          })
+    const duplicates = duplicateMigrationIds(Object.keys(definitions))
+    if (duplicates.length > 0)
+      return yield* Effect.die(
+        new Error(
+          `This build has database changes that share a number (${duplicates.join("; ")}), so only one of each would run. ` +
+            `Nothing was changed. This is a fault in the build, not in the data.`
         )
       )
-    for (const key of keys) {
+    yield* refuseUnknownLedger(definitions)
+    const [ledger] = yield* sql<{
+      n: number
+    }>`SELECT count(*) AS n FROM sqlite_master WHERE name = 'effect_sql_migrations'`
+    const latest =
+      ledger!.n === 0
+        ? 0
+        : ((yield* sql<{ id: number | null }>`SELECT max(migration_id) AS id FROM effect_sql_migrations`)[0]?.id ?? 0)
+    const pending = Object.keys(definitions)
+      .filter((key) => idOf(key) > latest)
+      .sort((a, b) => idOf(a) - idOf(b))
+
+    let broken = yield* brokenReferences
+    if (broken.length > 0)
+      yield* Effect.logWarning(
+        `Dreamspan's database has ${describeBroken(broken)}. ` +
+          (pending.length === 0
+            ? `No database change ran at this start, so this was already there; Dreamspan starts anyway. `
+            : `They were there before this start's database changes (${list(pending)}), which run anyway. `) +
+          `Items that use those rows may not open or change. Restore a backup from before the problem, or report it. Admins see this on the Server status page.`
+      )
+
+    // Consecutive ordinary migrations form one run; each outside-transaction migration is its own.
+    const runs: Array<{ keys: Array<string>; outside?: ReadonlyArray<OutsideStep> }> = []
+    for (const key of pending) {
       const definition = definitions[key]!
-      if ("statements" in definition) continue
-      yield* SqliteMigrator.run({ loader: inTransaction(idOf(key)) })
-      const [latest] = yield* sql<{ id: number | null }>`SELECT max(migration_id) AS id FROM effect_sql_migrations`
-      if ((latest?.id ?? 0) < idOf(key)) yield* runOutside(key, definition.outsideTransaction)
+      if ("outsideTransaction" in definition) runs.push({ keys: [key], outside: definition.outsideTransaction })
+      else if (runs.at(-1) !== undefined && runs.at(-1)!.outside === undefined) runs.at(-1)!.keys.push(key)
+      else runs.push({ keys: [key] })
     }
-    yield* sql.withTransaction(
-      Effect.gen(function* () {
-        yield* SqliteMigrator.run({ loader: inTransaction(Infinity) })
-        yield* refuseBrokenReferences
-      })
-    )
+    // The ledger an outside-transaction migration writes its row to (the migrator makes it itself).
+    if (ledger!.n === 0 && runs.some((run) => run.outside !== undefined))
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord({}) })
+    const applied: Array<string> = []
+    for (const run of runs) {
+      const before = broken
+      const check = refuseNewBreakage(before, run.keys, [...applied]).pipe(
+        Effect.tap((now) => Effect.sync(() => (broken = now))),
+        Effect.orDie
+      )
+      if (run.outside !== undefined) yield* runOutside(run.keys[0]!, run.outside, check)
+      else
+        yield* sql.withTransaction(
+          Effect.gen(function* () {
+            yield* SqliteMigrator.run({
+              loader: SqliteMigrator.fromRecord(
+                Object.fromEntries(
+                  run.keys.map((key) => [
+                    key,
+                    runAll((definitions[key] as { statements: ReadonlyArray<string> }).statements)
+                  ])
+                )
+              )
+            })
+            yield* check
+          })
+        )
+      applied.push(...run.keys)
+    }
+    return { applied, broken } satisfies MigrationReport
   })
 
-export const Migrations = Layer.effectDiscard(migrate(migrationDefinitions))
+export const Migrations = Layer.effect(DatabaseStartup, migrate(migrationDefinitions))

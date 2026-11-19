@@ -26,7 +26,8 @@ import { Effect, Layer } from "effect"
 import { RpcServer } from "effect/rpc"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "./connection.ts"
-import { Migrations } from "./migrations.ts"
+import { DatabaseStartup as StartupReport, Migrations } from "./migrations.ts"
+import { BrokenReferences, DatabaseStartup } from "@dreamspan/shared/api.ts"
 import { WriteOps } from "./ops.ts"
 import { type OpsOf, serveOps } from "./opsOf.ts"
 import { defaultBinLimits, type BinLimits } from "@dreamspan/shared/bin.ts"
@@ -89,11 +90,17 @@ const handlers = Layer.unwrap(
       library.CommitEditorDrafts,
       bin.drafts
     )
+    const startup = yield* StartupReport
+    const startupReport = new DatabaseStartup({
+      broken: startup.broken.map((row) => new BrokenReferences(row)),
+      applied: startup.applied
+    })
     const served = WriteOps.of(
       providerDefinitionHandlers(
         stateModuleHandlers(
           stImportPrefixHandlers(
             {
+              GetDatabaseStartup: () => Effect.succeed(startupReport),
               ...(yield* makeHistoryWriteHandlers),
               ...(yield* makeInsertWriteHandlers(bin)),
               ...(yield* makeMoveWriteHandlers(bin)),

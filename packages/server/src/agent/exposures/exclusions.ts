@@ -161,6 +161,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   GetTokenCounting: "User-only security, consent, account, credential or network configuration.",
   GetUserDraft: "User-only security, consent, account, credential or network configuration.",
   GetVersionMetrics: "Not in W6's first exposures; use the bounded workshop read tools.",
+  GetDatabaseStartup: "User-only security, consent, account, credential or network configuration.",
   Health: "Not in W6's first exposures; use the bounded workshop read tools.",
   HistoryEditCost: "Not in W6's first exposures; use the bounded workshop read tools.",
   ImpersonationNotice: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
