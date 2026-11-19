@@ -7,7 +7,8 @@
     "0003_subagents": "61662f854a3ae1cb70ae09ed7999f291b2494d8027e72430090fa4e004d5ff89",
     "0004_workshop_branches": "540d6fb096cbed38b4888c57f12bb395dc2490f19d4ca602784d3ad39eb9f585",
     "0005_preview_macro": "e7f28c60b75eb5fdbc63ebc8ace5071414d2b23ee03242779766bd97136f5c68",
-    "0006_persona_locks": "4b493b3cd5e259f1d93beec91675307117dc750f9e2c6c15e41c79cf988adae8"
+    "0006_persona_locks": "4b493b3cd5e259f1d93beec91675307117dc750f9e2c6c15e41c79cf988adae8",
+    "0007_contract_records": "3216bbb24ba72d906af44f376d79c9182660de49217843ad2959e5f3eeb164e4"
   },
   "schema": [
     {
@@ -693,6 +694,12 @@
       "name": "rollouts_chat",
       "tbl_name": "rollouts",
       "sql": "CREATE INDEX rollouts_chat ON rollouts(chat_id, created_at DESC)"
+    },
+    {
+      "type": "index",
+      "name": "rollouts_contract",
+      "tbl_name": "rollouts",
+      "sql": "CREATE INDEX rollouts_contract ON rollouts(model_id) WHERE contract_outcome IS NOT NULL"
     },
     {
       "type": "index",
@@ -1628,7 +1635,7 @@
       "type": "table",
       "name": "rollouts",
       "tbl_name": "rollouts",
-      "sql": "CREATE TABLE rollouts ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, kind TEXT NOT NULL, status TEXT NOT NULL, slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, parent_rollout_id TEXT REFERENCES rollouts(id), role TEXT NOT NULL, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), request_class TEXT NOT NULL, -- Provider-reported usage, rolled up. NULL means unknown, not zero (as in reference-harness). llm_requests INTEGER, usage_input_tokens INTEGER, usage_output_tokens INTEGER, usage_cache_read_tokens INTEGER, usage_cache_write_tokens INTEGER, usage_cost REAL, cache_observed_json TEXT CHECK (cache_observed_json IS NULL OR json_valid(cache_observed_json)), error TEXT, created_at INTEGER NOT NULL, started_at INTEGER, updated_at INTEGER NOT NULL, completed_at INTEGER , context_issues_json TEXT CHECK (context_issues_json IS NULL OR json_valid(context_issues_json)), history_start_slot_id TEXT, history_start_depth INTEGER, history_depth INTEGER, fork_id TEXT, -- Agent rollouts (spec/AGENTIC.md §9): tool calls so far, and the orchestration mode it ran in. step_count INTEGER NOT NULL DEFAULT 0 CHECK (step_count >= 0), mode TEXT, spawned_by_rollout_id TEXT REFERENCES rollouts(id), spawned_by_call_id TEXT, agent_handle TEXT CHECK (agent_handle IS NULL OR length(agent_handle) BETWEEN 1 AND 64)) STRICT"
+      "sql": "CREATE TABLE rollouts ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, kind TEXT NOT NULL, status TEXT NOT NULL, slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, parent_rollout_id TEXT REFERENCES rollouts(id), role TEXT NOT NULL, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), request_class TEXT NOT NULL, -- Provider-reported usage, rolled up. NULL means unknown, not zero (as in reference-harness). llm_requests INTEGER, usage_input_tokens INTEGER, usage_output_tokens INTEGER, usage_cache_read_tokens INTEGER, usage_cache_write_tokens INTEGER, usage_cost REAL, cache_observed_json TEXT CHECK (cache_observed_json IS NULL OR json_valid(cache_observed_json)), error TEXT, created_at INTEGER NOT NULL, started_at INTEGER, updated_at INTEGER NOT NULL, completed_at INTEGER , context_issues_json TEXT CHECK (context_issues_json IS NULL OR json_valid(context_issues_json)), history_start_slot_id TEXT, history_start_depth INTEGER, history_depth INTEGER, fork_id TEXT, -- Agent rollouts (spec/AGENTIC.md §9): tool calls so far, and the orchestration mode it ran in. step_count INTEGER NOT NULL DEFAULT 0 CHECK (step_count >= 0), mode TEXT, spawned_by_rollout_id TEXT REFERENCES rollouts(id), spawned_by_call_id TEXT, agent_handle TEXT CHECK (agent_handle IS NULL OR length(agent_handle) BETWEEN 1 AND 64), contract_outcome TEXT CHECK (contract_outcome IS NULL OR contract_outcome IN ('clean', 'recovered', 'gave_up', 'exhausted', 'stopped', 'failed', 'capped')), contract_nudges INTEGER CHECK (contract_nudges IS NULL OR contract_nudges >= 0)) STRICT"
     },
     {
       "type": "table",
