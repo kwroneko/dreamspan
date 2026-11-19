@@ -4,13 +4,15 @@
 // the context since the one before (the tools' results, the app's own messages) and the model's
 // turn, all verbatim. Request N's context is the request above plus everything listed before it.
 // A plain reply's run has no transcript, and this shows nothing.
+// An MCP server's tools are grouped under their server, its calls say where and when they were
+// sent from the call ledger, and their results show what the model was sent of them (spec/MCP.md §10).
 //
 // Each step (thinking or text before a tool call, a call's arguments, its result) has Edit and
 // Resume from here (§4.4): the run carried on from that step, changed first or not, as a new
 // version of the message, which the chat then shows being written. What a resume or an edit cut
 // from the run it carried on shows folded where it was cut. Step edits use server-kept drafts;
 // the URL records which editor is open, so reloading restores both the editor and its text.
-import type { CutSpan, OfferedTool, StepEdit, TranscriptEntry, TurnPart } from "@dreamspan/shared/agent.ts"
+import type { CutSpan, McpCallLine, OfferedTool, StepEdit, TranscriptEntry, TurnPart } from "@dreamspan/shared/agent.ts"
 import type { ForkId, VersionId } from "@dreamspan/shared/chat.ts"
 import type { InspectorUsage, RunContext } from "@dreamspan/shared/inspectorApi.ts"
 import { displayToolData } from "@dreamspan/shared/toolData.ts"
@@ -18,7 +20,7 @@ import { useAtomValue } from "@effect/atom-react"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { Effect } from "effect"
 import { AsyncResult } from "effect/reactivity"
-import { Fragment, type ReactNode, useContext, useMemo, useState } from "react"
+import { createContext, Fragment, type ReactNode, useContext, useMemo, useState } from "react"
 import { ChatPlaceScope, chatPlaceKey } from "../chatPlace.ts"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../../editor/userDraft.tsx"
 import { useAction } from "../../../actions.tsx"
@@ -30,6 +32,8 @@ import { requestStatusText } from "../requestWords.ts"
 import { editableText, stepEdit, type StepTarget } from "./resume.ts"
 import { turnsOf } from "./steps.ts"
 import { guardReply } from "../replyGuards.ts"
+import { formatWhen } from "../chatTitle.ts"
+import { bytesLabel, callStatusLabels } from "../../mcp/data.ts"
 
 const json = (value: unknown) => JSON.stringify(value, null, 2)
 
@@ -111,10 +115,99 @@ function ToolGroup({
         </span>
       </h3>
       <p className="text-sm text-muted">{about}</p>
-      {tools.map((tool) => (
-        <ToolBox key={tool.name} tool={tool} note={note(tool)} />
+      {tools
+        .filter((tool) => tool.mcp === undefined)
+        .map((tool) => (
+          <ToolBox key={tool.name} tool={tool} note={note(tool)} />
+        ))}
+      {serversOf(tools).map(({ connection, name, listedAt, tools: own }) => (
+        <section
+          key={connection}
+          aria-label={`From ${name}`}
+          className="flex flex-col gap-2"
+          data-mcp-tools={connection}
+        >
+          <h4 className="text-sm font-medium">
+            From {name}
+            {listedAt === null ? "" : <span className="font-normal text-muted">, listed {formatWhen(listedAt)}</span>}
+          </h4>
+          {own.map((tool) => (
+            <ToolBox key={tool.name} tool={tool} note={note(tool)} />
+          ))}
+        </section>
       ))}
     </section>
+  )
+}
+
+/** A group's MCP server tools under their server (spec/MCP.md §10), in the order offered. */
+const serversOf = (tools: ReadonlyArray<OfferedTool>) => {
+  const servers = new Map<
+    string,
+    { connection: string; name: string; listedAt: number | null; tools: Array<OfferedTool> }
+  >()
+  for (const tool of tools) {
+    if (tool.mcp === undefined) continue
+    const server = servers.get(tool.mcp.connection)
+    if (server) server.tools.push(tool)
+    else
+      servers.set(tool.mcp.connection, {
+        connection: tool.mcp.connection,
+        name: tool.mcp.connectionName,
+        listedAt: tool.mcp.listedAt,
+        tools: [tool]
+      })
+  }
+  return [...servers.values()]
+}
+
+/** What the run's MCP calls need in their steps: their tools' servers and the ledger's rows. */
+interface McpFacts {
+  readonly tools: ReadonlyMap<string, NonNullable<OfferedTool["mcp"]>>
+  readonly calls: ReadonlyMap<string, ReadonlyArray<McpCallLine>>
+}
+const McpFactsContext = createContext<McpFacts>({ tools: new Map(), calls: new Map() })
+
+const clock = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+
+/** "1.2 s", "340 ms", or "…" while it runs. */
+const tookLabel = (line: McpCallLine) => {
+  if (line.endedAt === null) return "…"
+  const ms = line.endedAt - line.startedAt
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`
+}
+
+/**
+ * Where an MCP call went (spec/MCP.md §10): one line per attempt the ledger recorded, "Sent to
+ * api.example.com (Archive) at 14:02:11 · 1.2 s · 3 KB back", or that it was never sent.
+ */
+function McpSentLines({
+  server,
+  lines
+}: {
+  server: NonNullable<OfferedTool["mcp"]>
+  lines: ReadonlyArray<McpCallLine>
+}) {
+  const where =
+    server.host === "a local program"
+      ? `Run as a local program (${server.connectionName})`
+      : `Sent to ${server.host} (${server.connectionName})`
+  if (lines.length === 0)
+    return (
+      <p className="font-sans text-xs text-muted" data-mcp-sent="none">
+        Never sent to {server.connectionName}.
+      </p>
+    )
+  return (
+    <ul className="flex flex-col gap-0.5 font-sans text-xs text-muted tabular-nums" data-mcp-sent={lines.length}>
+      {lines.map((line) => (
+        <li key={`${line.attempt}:${line.startedAt}`} className="[overflow-wrap:anywhere]">
+          {lines.length > 1 ? `Attempt ${line.attempt}: ` : ""}
+          {where} at {clock.format(line.startedAt)} · {tookLabel(line)} · {bytesLabel(line.receivedBytes)} back
+          {line.status === "complete" ? "" : ` · ${callStatusLabels[line.status]}`}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -185,11 +278,15 @@ interface StepEditing {
 const quotesStory = (target: StepTarget) =>
   target.kind === "result" && !target.entry.isError && target.entry.text.startsWith("<story_excerpt ")
 
-const titleOf = (target: StepTarget) =>
+const titleOf = (target: StepTarget, mcp = false) =>
   target.kind === "result"
-    ? `Result of ${target.entry.tool}${target.entry.isError ? " (an error)" : quotesStory(target) ? ": story text, quoted for the assistant to discuss" : ""}`
+    ? mcp
+      ? `What the server returned${target.entry.isError ? " (an error)" : ""}`
+      : `Result of ${target.entry.tool}${target.entry.isError ? " (an error)" : quotesStory(target) ? ": story text, quoted for the assistant to discuss" : ""}`
     : target.part.type === "toolCall"
-      ? `Tool call: ${target.part.name}`
+      ? mcp
+        ? `Sent to the server: ${target.part.name}`
+        : `Tool call: ${target.part.name}`
       : target.part.type === "thinking"
         ? "Thinking"
         : "Text"
@@ -204,8 +301,23 @@ const toolOf = (target: StepTarget) =>
 function StepBox({ target, editing, id }: { target: StepTarget; editing: StepEditing | null; id: string }) {
   const step = target.kind === "result" ? target.entry.step : target.part.step
   const original = editableText(target)
-  const title = titleOf(target)
+  const facts = useContext(McpFactsContext)
+  const toolName = toolOf(target)
+  const server = toolName === null ? undefined : facts.tools.get(toolName)
+  const title = titleOf(target, server !== undefined)
   const note = noteOf(target)
+  // A server call's box says where it went; its result, what the model was sent of it.
+  const callId = target.kind === "part" && target.part.type === "toolCall" ? target.part.id : null
+  const sentLines =
+    server !== undefined && callId !== null ? (
+      <McpSentLines server={server} lines={facts.calls.get(callId) ?? []} />
+    ) : null
+  const modelSaw =
+    server !== undefined && target.kind === "result" && target.entry.sent !== undefined ? (
+      <Disclosure title="What the model saw" hint="Click to show or hide the part of this result the model was sent">
+        <Verbatim text={displayToolData(target.entry.sent)} />
+      </Disclosure>
+    ) : null
   const shown =
     target.kind === "result"
       ? displayToolData(original)
@@ -215,7 +327,9 @@ function StepBox({ target, editing, id }: { target: StepTarget; editing: StepEdi
   if (editing === null || step === undefined || editing.running)
     return (
       <Box title={title} {...(note ? { note } : {})}>
+        {sentLines}
         <Verbatim text={shown} />
+        {modelSaw}
       </Box>
     )
   const open = editing.open === id
@@ -247,7 +361,9 @@ function StepBox({ target, editing, id }: { target: StepTarget; editing: StepEdi
   )
   return (
     <Box title={title} {...(note ? { note } : {})} actions={actions}>
+      {sentLines}
       {open ? <StepEditor target={target} editing={editing} id={id} step={step} /> : <Verbatim text={shown} />}
+      {!open && modelSaw}
     </Box>
   )
 }
@@ -563,18 +679,28 @@ function Transcript({
   run,
   tools,
   entries,
-  cut
+  cut,
+  mcpCalls
 }: {
   run: RunContext
   tools: ReadonlyArray<OfferedTool>
   entries: ReadonlyArray<TranscriptEntry>
   cut: ReadonlyArray<CutSpan>
+  mcpCalls: ReadonlyArray<McpCallLine>
 }) {
   const editing = useStepEditing(run, tools)
+  const facts = useMemo<McpFacts>(() => {
+    const calls = new Map<string, Array<McpCallLine>>()
+    for (const line of mcpCalls) calls.set(line.toolCallId, [...(calls.get(line.toolCallId) ?? []), line])
+    return {
+      tools: new Map(tools.flatMap((t) => (t.mcp ? [[t.name, t.mcp] as const] : []))),
+      calls
+    }
+  }, [tools, mcpCalls])
   // Resume from here (not inside an open editor) reports its refusal under the steps' heading.
   const outside = editing.open === null && editing.error !== null
   return (
-    <>
+    <McpFactsContext.Provider value={facts}>
       {tools.length > 0 && <Tools tools={tools} entries={entries} />}
       {outside && (
         <p role="alert" className="text-sm text-danger">
@@ -584,7 +710,7 @@ function Transcript({
       {(entries.length > 0 || cut.length > 0) && (
         <Steps requests={run.requests} entries={entries} cut={cut} editing={editing} />
       )}
-    </>
+    </McpFactsContext.Provider>
   )
 }
 
@@ -601,5 +727,13 @@ export function RunSteps({ run }: { run: RunContext }) {
   if (!AsyncResult.isSuccess(result)) return null
   const transcript = result.value
   if (transcript.tools.length === 0 && transcript.entries.length === 0) return null
-  return <Transcript run={run} tools={transcript.tools} entries={transcript.entries} cut={transcript.cut} />
+  return (
+    <Transcript
+      run={run}
+      tools={transcript.tools}
+      entries={transcript.entries}
+      cut={transcript.cut}
+      mcpCalls={transcript.mcpCalls ?? []}
+    />
+  )
 }

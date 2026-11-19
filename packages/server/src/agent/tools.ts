@@ -247,6 +247,8 @@ export interface McpToolRef {
   readonly catalogRevision: number
   /** The server's own name for the tool, sent in `tools/call`. */
   readonly tool: string
+  /** When the server's tools were last listed, as the run was planned (for the inspector). */
+  readonly listedAt?: number | null
 }
 
 export const frozenTool = (tool: RolloutTool<never>): FrozenTool => ({

@@ -332,7 +332,8 @@ export const mcpOfferTools = (
             host: mcpHostOf(connection),
             key: connection.use.offeredKey,
             catalogRevision: connection.catalogRevision,
-            tool: tool.name
+            tool: tool.name,
+            listedAt: connection.listedAt
           }
         ) as unknown as RolloutTool<never>
     )

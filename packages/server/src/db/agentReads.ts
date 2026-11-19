@@ -47,6 +47,7 @@ import { sqlSources } from "./assemblySources.ts"
 import { AssemblySources } from "../assembler/pipeline.ts"
 import { inFork } from "./forkState.ts"
 import { withAssemblyModules } from "../assembler/modules.ts"
+import type { McpCallRow } from "./mcpRows.ts"
 
 /** At most this many full-text matches in the chat, SearchChat starts from them. */
 const FEW = 2000
@@ -756,7 +757,33 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
             p.names.map((name) => [name, p.toolCallId] as const)
           )
         )
+        // The ledger's rows for the run's server calls (spec/MCP.md §10), every attempt, from this
+        // run and the runs it carried on, as McpCallsFor finds them.
+        const mcpCalls = tools.some((t) => t.mcp)
+          ? yield* sql<McpCallRow>`WITH RECURSIVE line(id, depth) AS (
+                SELECT ${row.rollout_id}, 0
+                UNION SELECT src.rollout_id, line.depth + 1 FROM line
+                  JOIN versions v ON v.rollout_id = line.id AND v.origin = 'resumed' AND v.source_version_id IS NOT NULL
+                  JOIN versions src ON src.id = v.source_version_id
+                  WHERE src.rollout_id IS NOT NULL AND line.depth < 64
+              )
+              SELECT DISTINCT c.* FROM mcp_calls c JOIN line ON c.rollout_id = line.id
+              WHERE c.owner_user_id = ${userId} AND c.method = 'tools/call'
+              ORDER BY c.started_at, c.id`
+          : []
         return {
+          ...(mcpCalls.length
+            ? {
+                mcpCalls: mcpCalls.map((c) => ({
+                  toolCallId: c.tool_call_id ?? "",
+                  attempt: c.attempt,
+                  status: c.status,
+                  startedAt: c.started_at,
+                  endedAt: c.ended_at,
+                  receivedBytes: c.received_bytes
+                }))
+              }
+            : {}),
           tools: tools.map((t) => ({
             name: t.name,
             label: t.label,
@@ -767,7 +794,17 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
             effect: t.effect,
             tokens: count(JSON.stringify({ name: t.name, description: t.description, parameters: t.parameters })),
             ...(t.deferred ? { deferred: true } : {}),
-            ...(loadedBy.has(t.name) ? { loadedBy: loadedBy.get(t.name)! } : {})
+            ...(loadedBy.has(t.name) ? { loadedBy: loadedBy.get(t.name)! } : {}),
+            ...(t.mcp
+              ? {
+                  mcp: {
+                    connection: t.mcp.connection,
+                    connectionName: t.mcp.connectionName,
+                    host: t.mcp.host,
+                    listedAt: t.mcp.listedAt ?? null
+                  }
+                }
+              : {})
           })),
           entries: transcriptEntries(messages, tools.length, turnCap, placedSteps(messages, tools, true, versionId)),
           cut: cutSpans(messages, branches, tools.length, turnCap)

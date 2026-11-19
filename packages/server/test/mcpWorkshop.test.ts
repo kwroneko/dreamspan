@@ -261,6 +261,19 @@ describe("MCP servers in workshops", () => {
       const step = steps.find((s) => s.kind === "tool" && s.id === "w1")
       assert.isTrue(step?.kind === "tool" && step.effect === "external" && step.effectClass === "mcp")
       assert.isTrue(step?.kind === "tool" && step.label === "wipe (Vault)")
+      // The inspector groups the tool under its server and has the call's ledger line.
+      const inspected = yield* api.GetRunTranscript({ versionId: versionId as VersionId })
+      const offered = inspected.tools.find((t) => t.name === "mcp_vault_wipe")!
+      assert.strictEqual(offered.mcp?.connectionName, "Vault")
+      assert.strictEqual(offered.mcp?.connection, connection.id)
+      assert.match(offered.mcp?.host ?? "", /^127\.0\.0\.1:\d+$/)
+      assert.isNumber(offered.mcp?.listedAt)
+      assert.isUndefined(inspected.tools.find((t) => t.name === "list_library")?.mcp)
+      assert.deepStrictEqual(
+        (inspected.mcpCalls ?? []).map((c) => [c.toolCallId, c.attempt, c.status]),
+        [["w1", 1, "complete"]]
+      )
+      assert.isAbove(inspected.mcpCalls![0]!.receivedBytes ?? 0, 0)
       const undone = yield* Effect.flip(
         api.UndoRolloutEffect({ rolloutId: effects[0]!.rolloutId, toolCallId: "w1", seq: 0 })
       )
@@ -321,6 +334,10 @@ describe("MCP servers in workshops", () => {
       const transcript = yield* api.GetRunTranscript({ versionId: versionId as VersionId })
       const stored = JSON.stringify(transcript)
       assert.include(stored, "line 5999 of the archive")
+      // The inspector has what the model was sent of it beside the whole result.
+      const entry = transcript.entries.find((e) => e.role === "toolResult" && e.toolCallId === "b1")
+      assert.isTrue(entry?.role === "toolResult" && entry.text.includes("line 5999 of the archive"))
+      assert.isTrue(entry?.role === "toolResult" && entry.sent !== undefined && !entry.sent.includes("line 5999"))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
@@ -430,6 +447,15 @@ describe("MCP servers in workshops", () => {
         { status: "cancelled", attempt: 1 },
         { status: "complete", attempt: 2 }
       ])
+      // The resumed run's inspector lists both attempts, the stopped run's included.
+      const inspected = yield* api.GetRunTranscript({ versionId: resumed.version.id })
+      assert.deepStrictEqual(
+        (inspected.mcpCalls ?? []).map((c) => [c.toolCallId, c.attempt, c.status]),
+        [
+          ["r1", 1, "cancelled"],
+          ["r1", 2, "complete"]
+        ]
+      )
       // The change the resumed version kept is the call that went through.
       const effects = yield* api.ListVersionEffects({ versionId: resumed.version.id })
       assert.deepStrictEqual(

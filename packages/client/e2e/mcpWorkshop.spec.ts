@@ -1,7 +1,8 @@
 // MCP servers in workshops (spec/MCP.md M2, §13.1 Use it in, §13.3 the chip, §13.4 Changes) in the
 // browser: the server's Use it in switches, its On / Off row in the workshop's chip, a call the
 // model makes running without asking with its progress in the step's row, and its change in the
-// step and the Changes tab, which can't be undone from the app. Layout audit at both widths and in both themes. A local fake MCP
+// step and the Changes tab, which can't be undone from the app, and the run inspector's server
+// grouping and ledger line. Layout audit at both widths and in both themes. A local fake MCP
 // server and a scripted loopback provider only.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -144,4 +145,34 @@ for (const width of [1440, 390])
       `mcp-changes-${width}`,
       width === 390 ? '[role="dialog"]' : 'aside[aria-label="Chat panel"]'
     )
+
+    // The run inspector groups the tool under its server and says where the call went.
+    const versionId = await admin((api) =>
+      Effect.gen(function* () {
+        const chat = yield* api.GetChat({ chatId: workshop.id })
+        const window = yield* api.ReadPath({
+          chatId: workshop.id,
+          forkId: null,
+          leafSlotId: null,
+          range: { _tag: "Around", slot: chat.activeLeafSlotId! },
+          limit: 3
+        })
+        return window.entries.find((e) => e.slotId === chat.activeLeafSlotId)!.version.id
+      })
+    )
+    await page.goto(`${server().url}/chats/${workshop.id}/context/${versionId}#run-steps`)
+    const offered = page.getByRole("region", { name: "Tools offered" })
+    const fromArchive = offered.getByRole("region", { name: "From Archive" })
+    await expect(fromArchive).toBeVisible({ timeout: 30_000 })
+    await expect(fromArchive.getByRole("heading", { level: 4 })).toHaveText(/^From Archive, listed .+/)
+    await expect(fromArchive.getByRole("region", { name: "mcp_archive_lookup" })).toBeVisible()
+    const steps = page.getByRole("region", { name: "Steps" })
+    const sent = steps.getByRole("region", { name: "Sent to the server: mcp_archive_lookup" })
+    await expect(sent.locator("[data-mcp-sent]")).toHaveText(
+      /^Sent to 127\.0\.0\.1:\d+ \(Archive\) at .+ · .+ · .+ back$/
+    )
+    await expect(steps.getByRole("region", { name: "What the server returned" })).toContainText("Found it.")
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await audit(page, info, `mcp-inspector-tools-${width}`, '[aria-label="Tools offered"]')
+    await audit(page, info, `mcp-inspector-steps-${width}`, '[aria-label="Steps"]')
   })
