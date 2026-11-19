@@ -480,8 +480,20 @@ for (const width of [1440, 390])
         new RegExp(`/chats/${made.chatId}\\?fork=${made.original}&slot=`)
       )
       await shoot(page, `inspector-viewed-fork-${width}-${theme}`)
-      await page.getByRole("link", { name: "← Back to the reply" }).click()
-      await expect(page).toHaveURL(new RegExp(`/chats/${made.chatId}\\?fork=${made.original}&slot=${made.slot}$`))
+      // The link itself carries the place only; the chat then writes its pane's own view params
+      // (timeline, rail) back into the URL, so the URL is checked by its place params.
+      const back = page.getByRole("link", { name: "← Back to the reply" })
+      await expect(back).toHaveAttribute(
+        "href",
+        new RegExp(`/chats/${made.chatId}\\?fork=${made.original}&slot=${made.slot}$`)
+      )
+      await back.click()
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === `/chats/${made.chatId}` &&
+          url.searchParams.get("fork") === made.original &&
+          url.searchParams.get("slot") === made.slot
+      )
       await expect(page.getByRole("article", { name: "Reply" }).filter({ hasText: REPLY })).toBeVisible()
       // (The chat list's preview shows the current fork's last message; the messages don't.)
       await expect(page.getByRole("article").filter({ hasText: EDITED })).toHaveCount(0)
