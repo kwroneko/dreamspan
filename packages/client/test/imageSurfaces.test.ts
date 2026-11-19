@@ -37,6 +37,9 @@ it("keeps image pixels in the stock img surfaces covered by root CSS", () => {
     "ui/ImageViewer.tsx"
   ])
   expect(pixels.sort()).toEqual([
+    // The PDF viewer (files4b) draws each page, embedded pictures included, on a <canvas>;
+    // the root's canvas rule blurs or hides pages and thumbnails like any other image.
+    "features/files/PdfViewer.tsx",
     // The file manager's viewers (filesui1): a video file opens in its own <video> and an
     // audio file in <audio>, both under the root's blur/hide rule; its images go through
     // ui/ImageViewer, which carries the fallback and is in the list above.

@@ -253,7 +253,11 @@ export const builtinToolLoadingProfiles: ReadonlyArray<ToolLoadingProfile> = [
       "search_files",
       "write_file",
       "edit_file",
-      "bash"
+      // bash's own description sends a background command's reader and stopper to these two,
+      // so they're callable as soon as it is.
+      "bash",
+      "bash_output",
+      "bash_stop"
     ]
   }
 ]
