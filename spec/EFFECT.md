@@ -1,6 +1,6 @@
 # Effect across the stack
 
-**Status**: Implemented portions obsolete as proposals (2026-10-30): Effect 4 HTTP/RPC, worker RPC, services/layers, schemas, client atoms and the pi-ai streaming boundary are built; see ARCHITECTURE §1–§6 and §16. `node:sqlite` through Effect’s driver is built (§3), superseding the open driver choice in §4. General pi-agent-core integration and its tool-schema boundary remain Phase 4 proposals; summary tool output already works through the registered summary strategies (§16). Other conventions in §4 remain proposals beyond what CLAUDE.md requires. Original proposal/spike: 2026-10-10. Implementation is not owner confirmation; nothing is newly Decided here.
+**Status**: Implemented portions obsolete as proposals (2026-10-30): Effect 4 HTTP/RPC, worker RPC, services/layers, schemas, client atoms and the pi-ai streaming boundary are built; see ARCHITECTURE §1–§6 and §16. `node:sqlite` through Effect’s driver is built (§3), superseding the open driver choice in §4. pi-agent-core integration and its tool-schema boundary are built with the agent rollouts (2026-11, ARCHITECTURE §16); summary tool output already works through the registered summary strategies (§16). Other conventions in §4 remain proposals beyond what CLAUDE.md requires. Original proposal/spike: 2026-10-10. Implementation is not owner confirmation; nothing is newly Decided here.
 **Related**: [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md), DESIGN §10.4, PLAN phase 0.
 
 ---
