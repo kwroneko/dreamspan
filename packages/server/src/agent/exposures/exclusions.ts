@@ -108,6 +108,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   GetCardGallery: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetCardPromptUse: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetCasts: "Not in W6's first exposures; use the bounded workshop read tools.",
+  GetPanelData: "A panel's own read, for its frame; use the bounded workshop read tools.",
   GetChat: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetComposerChoice: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetComposerImages: "Not in W6's first exposures; use the bounded workshop read tools.",

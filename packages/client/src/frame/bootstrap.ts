@@ -19,8 +19,28 @@ interface Theme {
   readonly accent: string
   readonly scheme: "light" | "dark"
 }
+/** What a panel's scripts may read (Tier B; shared/panelDataApi.ts `PanelData`). */
+interface Tavern {
+  readonly messageId: number
+  readonly messages: ReadonlyArray<{
+    readonly messageId: number
+    readonly name: string
+    readonly role: "user" | "assistant" | "system"
+    readonly hidden: boolean
+    readonly message: string
+  }>
+  readonly chatVariables: Readonly<Record<string, unknown>>
+  readonly names: { readonly user: string; readonly char: string }
+}
 type Incoming =
-  | { readonly type: "dreamspan:render"; readonly html: string; readonly vh: number; readonly theme: Theme }
+  | {
+      readonly type: "dreamspan:render"
+      readonly html: string
+      readonly vh: number
+      readonly theme: Theme
+      readonly tavern?: Tavern
+      readonly port?: MessagePort
+    }
   | { readonly type: "dreamspan:theme"; readonly theme: Theme }
   | { readonly type: "dreamspan:vh"; readonly vh: number }
 
@@ -79,9 +99,10 @@ function parse(html: string) {
   return parsed
 }
 
-function render(html: string, vh: number, theme: Theme) {
+function render(html: string, vh: number, theme: Theme, data?: Tavern, port?: MessagePort) {
   const parsed = parse(html)
   if (scripts) {
+    if (data !== undefined) tavern(data, port)
     // The variables go in with the document: its scripts may read them as it's written.
     setViewport(vh, parsed.documentElement)
     setTheme(theme, parsed.documentElement)
@@ -99,6 +120,7 @@ function render(html: string, vh: number, theme: Theme) {
     // takes away this window's listeners, so they're added again before its scripts run.
     document.open()
     listen()
+    if (data !== undefined) Object.assign(window, tavernApi)
     document.write(`<!doctype html>${parsed.documentElement.outerHTML}`)
     document.close()
     if (document.body) watch()
@@ -160,13 +182,118 @@ function onClick(event: MouseEvent) {
   if (/^https?:\/\//i.test(href)) post({ type: "dreamspan:open", url: href, token: actionToken }, hostOrigin)
 }
 
+/**
+ * Tier B (spec/HTML-MESSAGES.md §3.4): a read-only subset of Tavern Helper's API, answered from
+ * what the app gave this panel, its message and those before it, so it's synchronous as Tavern
+ * Helper's is. Nothing here writes. Updates come through `port`, which only the document the
+ * block was delivered to holds; each fires `tavern_events.MESSAGE_UPDATED` with this message's id.
+ */
+let snapshot: Tavern | null = null
+const listeners = new Map<string, Array<(...args: Array<unknown>) => unknown>>()
+const EVENTS = { MESSAGE_UPDATED: "message_updated" } as const
+const copy = <A>(value: A): A => (value === undefined ? value : (JSON.parse(JSON.stringify(value)) as A))
+
+function tavern(data: Tavern, port?: MessagePort) {
+  snapshot = data
+  if (port === undefined) return
+  port.onmessage = (event: MessageEvent<{ readonly type?: unknown; readonly tavern?: Tavern }>) => {
+    if (event.data?.type !== "dreamspan:data" || typeof event.data.tavern !== "object") return
+    snapshot = event.data.tavern
+    emit(EVENTS.MESSAGE_UPDATED, snapshot.messageId)
+  }
+}
+
+function emit(type: string, ...args: Array<unknown>) {
+  for (const listener of [...(listeners.get(type) ?? [])]) {
+    try {
+      void listener(...args)
+    } catch (error) {
+      setTimeout(() => {
+        throw error
+      })
+    }
+  }
+}
+
+/** Tavern Helper's message range: `n`, `"n"` or `"a-b"`, negatives counted back from the last. */
+function range(input: unknown, last: number): readonly [number, number] | null {
+  const clamp = (value: number) => Math.min(Math.max(value < 0 ? last + value + 1 : value, 0), last)
+  const text = String(input).trim()
+  const one = /^(-?\d+)$/.exec(text)
+  if (one) return [clamp(Number(one[1])), clamp(Number(one[1]))]
+  const two = /^(-?\d+)-(-?\d+)$/.exec(text)
+  if (!two) return null
+  const [a, b] = [clamp(Number(two[1])), clamp(Number(two[2]))]
+  return a <= b ? [a, b] : [b, a]
+}
+
+interface MessageOptions {
+  readonly role?: "all" | "system" | "assistant" | "user"
+  readonly hide_state?: "all" | "hidden" | "unhidden"
+  readonly include_swipes?: boolean
+}
+
+const tavernApi = {
+  /** This panel's message: the last a panel may see (causal order). */
+  getCurrentMessageId: () => snapshot?.messageId ?? 0,
+  getLastMessageId: () => snapshot?.messageId ?? 0,
+  getChatMessages(input: unknown, { role = "all", hide_state = "all", include_swipes = false }: MessageOptions = {}) {
+    if (snapshot === null) return []
+    const bounds = range(input, snapshot.messageId)
+    if (bounds === null) return []
+    return snapshot.messages
+      .filter(
+        (m) =>
+          m.messageId >= bounds[0] &&
+          m.messageId <= bounds[1] &&
+          (role === "all" || m.role === role) &&
+          (hide_state === "all" || (hide_state === "hidden") === m.hidden)
+      )
+      .map((m) => {
+        const base = { message_id: m.messageId, name: m.name, role: m.role, is_hidden: m.hidden }
+        // Only the version shown is given: its one swipe.
+        return include_swipes
+          ? { ...base, swipe_id: 0, swipes: [m.message], swipes_data: [{}], swipes_info: [{}] }
+          : { ...base, message: m.message, data: {}, extra: {}, swipe_id: 0, swipes: [m.message], swipes_data: [{}] }
+      })
+  },
+  /** The chat's variables; every other scope reads as empty. */
+  getVariables: (option: { readonly type?: string } = { type: "chat" }) =>
+    (option?.type ?? "chat") === "chat" ? copy({ ...snapshot?.chatVariables }) : {},
+  getAllVariables: () => copy({ ...snapshot?.chatVariables }),
+  eventOn(type: string, listener: (...args: Array<unknown>) => unknown) {
+    const list = listeners.get(type) ?? []
+    if (!list.includes(listener)) list.push(listener)
+    listeners.set(type, list)
+    return { stop: () => tavernApi.eventRemoveListener(type, listener) }
+  },
+  eventOnce(type: string, listener: (...args: Array<unknown>) => unknown) {
+    const once = (...args: Array<unknown>) => {
+      tavernApi.eventRemoveListener(type, once)
+      return listener(...args)
+    }
+    return tavernApi.eventOn(type, once)
+  },
+  eventRemoveListener(type: string, listener: (...args: Array<unknown>) => unknown) {
+    const list = listeners.get(type)
+    if (list)
+      listeners.set(
+        type,
+        list.filter((one) => one !== listener)
+      )
+  },
+  tavern_events: EVENTS,
+  SillyTavern: { getContext: () => ({ name1: snapshot?.names.user ?? "", name2: snapshot?.names.char ?? "" }) }
+}
+Object.assign(tavernApi, { TavernHelper: { ...tavernApi } })
+
 function onMessage(event: MessageEvent<Incoming>) {
   if (event.source !== host || event.origin !== hostOrigin || typeof event.data !== "object" || event.data === null)
     return
   const message = event.data
   if (message.type === "dreamspan:render" && !rendered && typeof message.html === "string") {
     rendered = true
-    render(message.html, message.vh, message.theme)
+    render(message.html, message.vh, message.theme, message.tavern, message.port)
   } else if (message.type === "dreamspan:theme" && rendered) setTheme(message.theme)
   else if (message.type === "dreamspan:vh" && rendered) setViewport(message.vh)
 }

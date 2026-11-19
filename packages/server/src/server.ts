@@ -61,6 +61,7 @@ import {
   AuthenticatedGalleryApi,
   AuthenticatedOwnTurnNoteApi,
   AuthenticatedPanelApprovalApi,
+  AuthenticatedPanelDataApi,
   AuthenticatedCardArchiveApi,
   AuthenticatedPersonaLockApi,
   AuthenticatedTextSearchApi,
@@ -96,6 +97,7 @@ import {
   makeForkMergeHandlers,
   makeCardArchiveHandlers
 } from "./api/editor.ts"
+import { makePanelDataHandlers } from "./api/panelData.ts"
 import { makeGenerationHandlers } from "./api/generation.ts"
 import { makeBinHandlers } from "./api/bin.ts"
 import { makeComposerHandlers } from "./api/composer.ts"
@@ -239,7 +241,8 @@ const HandlerLayers = Layer.mergeAll(
 
   AuthenticatedTextSearchApi.toLayer(makeTextSearchHandlers),
   AuthenticatedDraftPreviewApi.toLayer(makeDraftPreviewHandlers),
-  AuthenticatedPanelApprovalApi.toLayer(makePanelApprovalHandlers)
+  AuthenticatedPanelApprovalApi.toLayer(makePanelApprovalHandlers),
+  AuthenticatedPanelDataApi.toLayer(makePanelDataHandlers)
 )
 
 const Handlers = Layer.effectDiscard(

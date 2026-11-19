@@ -1627,6 +1627,7 @@ All owner statements below are from 2026-11-17, relayed by the coordinator. The 
 - **[P]** Model-generated HTML renders only in a **sandboxed iframe**: no same-origin access, ideally a separate origin, a strict CSP, and a narrow `postMessage` bridge to the harness. This follows AIRI's CVE-2025-59053, where card text rendered as HTML led to RCE through Tauri IPC.
 - **[P]** Ordinary messages get sanitized markdown. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §14).
 - **[P]** Each version has a **display form** and a **context form**: recent turns send the rich form, older ones the compact form (reference-harness's rich/compact split).
+- **[P]** Panel reads (HTML-MESSAGES.md §3.4 Tier B; htmlstep6, 2026-11-19): a panel whose scripts are approved reads its own message and up to 99 before it (at most 1,000,000 characters of text), the chat's variables as they stood there and the names, through Tavern Helper's synchronous read calls; never a later message. Script approval covers these reads, and its explanation says so; there is no separate switch. Message ids are display positions. **Built** (ARCHITECTURE §12 "panel reads"), except message variables, which wait for the ST importer to keep Tavern Helper's per-swipe `variables`.
 - **[L]** Template-bound UI: a persistent "stage" or widget whose state the model updates through tools, so only small state changes enter the context.
 
 ### 10.2a Image input (vision)

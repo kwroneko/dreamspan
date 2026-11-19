@@ -108,6 +108,7 @@ function BodyText({
   const html = useMemo(
     () => ({
       key: version.slotId,
+      slotId: version.slotId,
       streaming,
       fromTip,
       media: current ? media : { ...media, scope: null, actions: [] },

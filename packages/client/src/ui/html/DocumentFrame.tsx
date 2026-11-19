@@ -21,10 +21,13 @@ import {
   panelHasScripts,
   type PanelPermit
 } from "./messageHtml.ts"
-import type { DocumentBlockProps } from "./parts.ts"
+import { effectivePanelApi, type DocumentBlockProps } from "./parts.ts"
+import type { PanelData } from "@dreamspan/shared/panelDataApi.ts"
 
 /** The page every frame loads (the server's route, packages/server/src/server.ts). */
 const FRAME_URL = "/frame/panel"
+/** How long after a change to the chat a live panel reads its data again: one read for a burst. */
+const PANEL_REFRESH_MS = 300
 /** Frames outside any chat view (a preview) share these slots. */
 const loose = new FrameSlots()
 
@@ -190,7 +193,7 @@ function ScriptsStrip({ ask }: { ask: NonNullable<PanelPermit["ask"]> }) {
         open={open}
         onOpenChange={setOpen}
         title={`Run scripts from ${ask.name}?`}
-        description={`Panels from ${ask.name} will run their scripts in every chat. They stay walled off: they can't reach your account, your chats or other sites. You can stop them in its Panels settings.`}
+        description={`Panels from ${ask.name} will run their scripts in every chat. They can read their message, the ones before it and the chat's variables, but can't change anything or reach your account or other sites. You can stop them in its Panels settings.`}
         confirmLabel="Run scripts"
         pending={pending}
         onConfirm={() => void allow()}
@@ -210,6 +213,8 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
   const chat = useContext(HtmlChatContext)
   const { panelDepth } = useContext(HtmlSettingsContext)
   const slots = chat?.frames ?? loose
+  const panelData = chat?.panelData
+  const slotId = message?.slotId
   const id = `${message?.key ?? "preview"}:${index}`
   const streaming = message?.streaming === true
   const older =
@@ -255,7 +260,31 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
   // only the bridge's. A frame window gets the block once (`delivered`).
   useEffect(() => {
     if (!live) return
-    const post = (data: unknown) => frame.current?.contentWindow?.postMessage(data, "*")
+    const post = (data: unknown, transfer: Array<Transferable> = []) =>
+      frame.current?.contentWindow?.postMessage(data, "*", transfer)
+    // Tier B: a panel whose scripts run may read its message and those before it. Its updates
+    // go through a channel handed to the document the block was delivered to, so a document
+    // that later takes over the frame never receives them (the HTML's own rule, above).
+    const reader = permit?.scripts && slotId !== undefined && panelData ? effectivePanelApi() : undefined
+    let port: MessagePort | null = null
+    let shown = ""
+    let stopped = false
+    const read = () => (reader && slotId !== undefined && panelData ? reader.read(panelData, slotId) : null)
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const refresh = () => {
+      if (timer !== null) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = null
+        void read()?.then((data) => {
+          if (stopped || port === null || data === null) return
+          const next = JSON.stringify(data)
+          if (next === shown) return
+          shown = next
+          port.postMessage({ type: "dreamspan:data", tavern: data })
+        })
+      }, PANEL_REFRESH_MS)
+    }
+    const stopSource = reader && panelData ? panelData.subscribe(refresh) : () => {}
     const onMessage = (event: MessageEvent) => {
       const target = frame.current?.contentWindow
       if (!target || event.source !== target || event.origin !== "null") return
@@ -264,7 +293,31 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
       if (data.type === "dreamspan:ready") {
         if (delivered.current.has(target)) return
         delivered.current.set(target, data.token)
-        post({ type: "dreamspan:render", html: source, vh: columnHeight(frame.current), theme: theme() })
+        const render = (tavern: PanelData | null) => {
+          // The frame was replaced or unloaded while its data was read.
+          if (stopped || frame.current?.contentWindow !== target) return
+          if (tavern === null) {
+            post({ type: "dreamspan:render", html: source, vh: columnHeight(frame.current), theme: theme() })
+            return
+          }
+          const channel = new MessageChannel()
+          port = channel.port1
+          shown = JSON.stringify(tavern)
+          post(
+            {
+              type: "dreamspan:render",
+              html: source,
+              vh: columnHeight(frame.current),
+              theme: theme(),
+              tavern,
+              port: channel.port2
+            },
+            [channel.port2]
+          )
+        }
+        const pending = read()
+        if (pending === null) render(null)
+        else void pending.then(render, () => render(null))
       } else if (data.type === "dreamspan:height") {
         const next = Math.max(0, Math.min(Math.ceil(data.height), window.innerHeight * 2))
         slots.heights.set(id, next)
@@ -294,13 +347,17 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
     const resized = () => post({ type: "dreamspan:vh", vh: columnHeight(frame.current) })
     window.addEventListener("resize", resized)
     return () => {
+      stopped = true
+      stopSource()
+      if (timer !== null) clearTimeout(timer)
+      port?.close()
       releaseFocus()
       window.removeEventListener("message", onMessage)
       scheme.removeEventListener("change", themeChanged)
       attributes.disconnect()
       window.removeEventListener("resize", resized)
     }
-  }, [live, source, src, id, slots])
+  }, [live, source, src, id, slots, permit?.scripts, slotId, panelData])
 
   // One character stands for the whole block when a selection is copied (sourcePositions.ts).
   const copy = (

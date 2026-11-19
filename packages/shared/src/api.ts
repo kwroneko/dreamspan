@@ -43,6 +43,7 @@ import {
   PanelApprovalApi
 } from "./editorApi.ts"
 import { CardSourcesApi } from "./cardSources.ts"
+import { PanelDataApi } from "./panelDataApi.ts"
 import { PersonaLockApi } from "./personaLockApi.ts"
 import {
   AccountRejected,
@@ -440,6 +441,8 @@ export const AuthenticatedExternalMediaApi = ExternalMediaApi.middleware(Authent
 /** Saved card media (savedMedia.ts): approved sites, approvals and lookups. */
 export const AuthenticatedSavedMediaApi = SavedMediaApi.middleware(Authentication)
 export const AuthenticatedPanelApprovalApi = PanelApprovalApi.middleware(Authentication)
+/** What a panel's scripts may read (panelDataApi.ts). */
+export const AuthenticatedPanelDataApi = PanelDataApi.middleware(Authentication)
 export const AuthenticatedSummaryRequestApi = SummaryRequestApi.middleware(Authentication)
 
 export const AuthenticatedShellUpdatesApi = ShellUpdatesApi.middleware(Authentication)
@@ -511,6 +514,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedCardSourcesApi)
   .merge(AuthenticatedGalleryApi)
   .merge(AuthenticatedPanelApprovalApi)
+  .merge(AuthenticatedPanelDataApi)
   .merge(AuthenticatedExternalMediaApi)
   .merge(AuthenticatedSavedMediaApi)
   .merge(AuthenticatedSummaryRequestApi)

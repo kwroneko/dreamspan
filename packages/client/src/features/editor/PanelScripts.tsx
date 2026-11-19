@@ -54,7 +54,7 @@ function PanelScripts({ store, holder }: { store: EditorStore; holder: "card" | 
           checked={scripts}
           disabled={pending || snapshot === null}
           onCheckedChange={(on) => void set({ scripts: on, network: on && network })}
-          about={`Panels are boxes ${WHO[holder]} in messages. Their scripts run walled off: they can't reach your account, your chats or other sites.`}
+          about={`Panels are boxes ${WHO[holder]} in messages. Their scripts run walled off: they can read their message, the ones before it and the chat's variables, but can't change anything or reach your account or other sites.`}
         >
           Run panel scripts
         </Switch>
@@ -62,7 +62,7 @@ function PanelScripts({ store, holder }: { store: EditorStore; holder: "card" | 
           checked={network}
           disabled={pending || !scripts || snapshot === null}
           onCheckedChange={(on) => void set({ scripts: true, network: on })}
-          about="Panels can then load from other sites and send them what they show, your messages included. Only with their scripts running."
+          about="Panels can then load from other sites and send them what they show or read, your messages included. Only with their scripts running."
         >
           Let panels use the internet
         </Switch>
