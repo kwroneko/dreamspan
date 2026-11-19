@@ -79,7 +79,7 @@ export const cancelCapability = (chatId: string, capability: string, target?: st
 }
 
 /** The arguments as they are, one row a field: the description of a tool that has none of its own. */
-const argumentRows = (args: unknown) =>
+export const argumentRows = (args: unknown) =>
   args !== null && typeof args === "object" && !Array.isArray(args)
     ? Object.entries(args as Record<string, unknown>).map(([label, value]) => ({
         label,
@@ -160,7 +160,7 @@ export const makePermit =
       const mode =
         resolved === "off"
           ? "off"
-          : tool.approval === "always"
+          : tool.approval === "always" || tool.alwaysAsk?.(args as never) === true
             ? "ask"
             : tool.approval === "rollback"
               ? "allow"
@@ -250,7 +250,7 @@ export const makePermit =
       const described = rerun
         ? ({ title: `Run “${tool.label}” again`, rows: argumentRows(args) } as Pick<
             ApprovalPrompt,
-            "title" | "rows" | "changes" | "storyAt" | "storyScope" | "plugin" | "presentation"
+            "title" | "rows" | "changes" | "storyAt" | "storyScope" | "plugin" | "presentation" | "once"
           >)
         : tool.describe
           ? yield* Effect.suspend(() => tool.describe!(context, args as never)).pipe(
@@ -282,6 +282,7 @@ export const makePermit =
         title: described?.title ?? `${capabilityLabel}: ${tool.id}`,
         rows: described?.rows ?? argumentRows(args),
         ...(described?.changes ? { changes: described.changes } : {}),
+        ...(described?.once || tool.alwaysAsk?.(args as never) === true ? { once: true } : {}),
         uncertain,
         ...(rerun ? { rerun } : {})
       }

@@ -13,7 +13,7 @@ import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
 export const makeFileVersionWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
-    RecordFileVersions: ({ userId, versions }) =>
+    RecordFileVersions: ({ userId, versions, actorUserId }) =>
       Effect.gen(function* () {
         const ids: Array<string> = []
         const now = Date.now()
@@ -44,7 +44,7 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
             media_id: mediaId,
             byte_size: version.byteSize,
             origin: version.origin,
-            actor_user_id: userId,
+            actor_user_id: actorUserId ?? userId,
             rollout_id: version.rolloutId ?? null,
             tool_call_id: version.rolloutId ? (version.toolCallId ?? null) : null,
             created_at: now

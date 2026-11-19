@@ -66,7 +66,12 @@ export const writeGrant = (
 export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
-    SetWorkshopGrant: ({ userId, chatId, capability, mode, target }) =>
+    ClearCapabilityGrants: ({ capability }) =>
+      sql<{ n: number }>`DELETE FROM workshop_grants WHERE capability = ${capability} RETURNING 1 AS n`.pipe(
+        Effect.map((rows) => rows.length),
+        transaction(sql, "ClearCapabilityGrants")
+      ),
+    SetWorkshopGrant: ({ userId, chatId, capability, mode, target, consent }) =>
       Effect.gen(function* () {
         yield* ownedWorkshop(sql, userId, chatId)
         if (target !== undefined && target !== "") {
@@ -84,6 +89,9 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
         // Choosing a capability's standing anew also forgets what was allowed for exact content
         // under it (a card skill "allowed in this workshop"): the chip is where that is undone.
         yield* sql`DELETE FROM workshop_grants WHERE chat_id = ${chatId} AND capability = ${capability} AND target <> ''`
+        // The consent the user gave with this choice, if any (§3.7): only with a grant that turns it on.
+        if (consent !== undefined && mode !== null && mode !== "off")
+          yield* writeGrant(sql, userId, chatId, capability, "allow", consent)
         if (mode === "off")
           yield* sql`UPDATE tool_approvals SET status = CASE WHEN status = 'allowed' THEN 'used' ELSE 'cancelled' END
             WHERE capability = ${capability} AND status IN ('pending', 'allowed')
@@ -119,7 +127,7 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
         }>`SELECT status, digest, capability, prompt_json
           FROM tool_approvals WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`
         if (!row) return yield* new NotFound({ entity: "approval", id: toolCallId })
-        const asked = JSON.parse(row.prompt_json) as { storyAt?: StoryAt; grantTarget?: unknown }
+        const asked = JSON.parse(row.prompt_json) as { storyAt?: StoryAt; grantTarget?: unknown; once?: unknown }
         const expectedAt = asked.storyAt
         // Server-written with the request: the client's answer can't name other content.
         const target = typeof asked.grantTarget === "string" ? asked.grantTarget : ""
@@ -156,7 +164,8 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
             message: "This capability is turned off. Look again before allowing it."
           })
         // Running an interrupted MCP call again is one answer for one call (spec/MCP.md §8.3).
-        if (answer === "allow_chat" && row.capability === "mcp")
+        // A question for this one call only (a server plugin's commit from Files) has no standing answer.
+        if (answer === "allow_chat" && (row.capability === "mcp" || asked.once === true))
           return yield* new ApprovalRefused({ message: "This can only be answered for this call." })
         if (
           answer === "allow_chat" &&

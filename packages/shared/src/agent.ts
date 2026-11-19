@@ -48,6 +48,8 @@ export const ApprovalPrompt = Schema.Struct({
   changes: Schema.optionalKey(
     Schema.Array(Schema.Struct({ field: Schema.String, before: Schema.String, after: Schema.String }))
   ),
+  /** Only this one call can be allowed: no "Allow in this workshop" (a server plugin's commit from Files). */
+  once: Schema.optionalKey(Schema.Boolean),
   /** The app stopped while it may have been running: it may already have happened. */
   uncertain: Schema.Boolean,
   /**

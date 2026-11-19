@@ -2,6 +2,7 @@
 // each with its user-facing label, explanation and example and the choices it offers, and ONE
 // registered table of defaults. A workshop's own choice (a grant, db/workshopGrants.ts) overrides
 // its default. Plugins add, replace or disable entries in either registry.
+import { createHash } from "node:crypto"
 import type { CapabilityMode, WorkshopCapability } from "@dreamspan/shared/workshopApi.ts"
 import { makeRegistry } from "@dreamspan/shared/registry.ts"
 
@@ -39,6 +40,21 @@ export const COMMANDS_NETWORK = "commands.network"
  * only to an admin where ALLOW_UNSANDBOXED_COMMANDS is set (api/workshop.ts), Off by default.
  */
 export const COMMANDS_UNSANDBOXED = "commands.unsandboxed"
+
+/**
+ * Where the server records that the user agreed to a capability's consent (its `confirm`), as
+ * the consent text stands now: a grant row of the capability with this target, written with the
+ * grant by SetWorkshopGrant only when the user's request says they agreed. Changed text needs a
+ * fresh consent; null: the capability has none.
+ */
+export const consentTarget = (registries: CapabilityRegistries, capability: string): string | null => {
+  const confirm = registries.workshopCapabilities.get(capability)?.confirm
+  if (!confirm) return null
+  const digest = createHash("sha256")
+    .update(JSON.stringify([confirm.title, confirm.body, confirm.confirmLabel]))
+    .digest("hex")
+  return `consent:${digest.slice(0, 32)}`
+}
 
 /** The capability of every MCP server's tools; a workshop's choice names the server as its target. */
 export const MCP_CAPABILITY = "mcp"

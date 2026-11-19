@@ -16,6 +16,7 @@ const view = (usage: Usage, network: { readonly bytes: number; readonly since: n
   filesBytes: usage.filesBytes,
   versionsBytes: usage.versionsBytes,
   homeBytes: usage.homeBytes,
+  outputBytes: usage.outputBytes,
   binBytes: usage.binBytes,
   measuredAt: usage.measuredAt,
   over: usage.usedBytes > usage.quotaBytes,

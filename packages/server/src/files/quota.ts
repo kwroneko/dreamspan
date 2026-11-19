@@ -1,7 +1,7 @@
 // Per-account Files quotas (spec/FILES-AND-ENVIRONMENT.md §1.2) and version retention (§1.3).
 //
-// Usage is the account's Files, its home folder for commands and the bytes its file versions
-// hold. It is measured by walking both folders (no links followed, each inode once, a file's
+// Usage is the account's Files, its home folder for commands, its commands' kept output
+// (files/commandOutput.ts) and the bytes its file versions hold. It is measured by walking both folders (no links followed, each inode once, a file's
 // own size: a sparse file counts its full size, and a compressing filesystem such as ZFS
 // doesn't make files look smaller, nor do blocks it hasn't allocated yet) after each command, every 10
 // minutes for accounts in use, and when nothing newer is known. App-side writes and uploads
@@ -46,6 +46,8 @@ const WALK_MAX_MS = 60_000
 export interface Usage {
   readonly filesBytes: number
   readonly homeBytes: number
+  /** Commands' kept output (a day, at most 200 per account). */
+  readonly outputBytes: number
   readonly binBytes: number
   readonly versionsBytes: number
   readonly usedBytes: number
@@ -143,6 +145,8 @@ export interface QuotaDeps {
     readonly filesRoot: string
     readonly home: string
     readonly bin?: string
+    /** Where its commands' whole output is kept. */
+    readonly output?: string
   }
   readonly defaultBytes: number
   /** A walk's entry limit; the default outside tests. */
@@ -200,16 +204,19 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       const heldBefore = new Map(pending.get(userId))
       const landedDuring = new Set<number>()
       landing.set(userId, landedDuring)
-      const { filesRoot, home, bin } = deps.folders(userId)
+      const { filesRoot, home, bin, output } = deps.folders(userId)
       // Files and the bin share their inodes: a file deleted while linked elsewhere counts once.
       const seen = new Set<string>()
-      const [files, homeUse, binUse] = yield* Effect.promise(() =>
+      const [files, homeUse, binUse, outputUse] = yield* Effect.promise(() =>
         Promise.all([
           measureTree(filesRoot, deps.walkMaxEntries, undefined, false, seen),
           measureTree(home, deps.walkMaxEntries),
           bin === undefined
             ? Promise.resolve({ bytes: 0, partial: false })
-            : measureBin(bin, deps.walkMaxEntries, undefined, false, seen)
+            : measureBin(bin, deps.walkMaxEntries, undefined, false, seen),
+          output === undefined
+            ? Promise.resolve({ bytes: 0, partial: false })
+            : measureTree(output, deps.walkMaxEntries)
         ])
       )
       const versionsBytes = yield* deps.reader
@@ -219,12 +226,13 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       const usage: Usage = {
         filesBytes: files.bytes,
         homeBytes: homeUse.bytes,
+        outputBytes: outputUse.bytes,
         binBytes: binUse.bytes,
         versionsBytes,
-        usedBytes: files.bytes + homeUse.bytes + binUse.bytes + versionsBytes,
+        usedBytes: files.bytes + homeUse.bytes + outputUse.bytes + binUse.bytes + versionsBytes,
         quotaBytes,
         measuredAt: started,
-        partial: files.partial || homeUse.partial || binUse.partial
+        partial: files.partial || homeUse.partial || binUse.partial || outputUse.partial
       }
       landing.delete(userId)
       deps.afterRead?.(pending.get(userId))

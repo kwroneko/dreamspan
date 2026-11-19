@@ -7,7 +7,7 @@
 // receipt is never run again silently: the permit asks (agent/approvals.ts).
 import { locateFolder } from "../../files/workingFolder.ts"
 import { createHash } from "node:crypto"
-import { readFile, readdir, rmdir, statfs, type FileHandle } from "node:fs/promises"
+import { lstat, readFile, readdir, rmdir, statfs, type FileHandle } from "node:fs/promises"
 import { join, posix } from "node:path"
 import { Type } from "@earendil-works/pi-ai"
 import { Effect, Semaphore } from "effect"
@@ -57,9 +57,18 @@ import {
 import type { CommandOutputs } from "../../files/commandOutput.ts"
 import type { HostFolders } from "../../files/hostFolders.ts"
 import { QuotaExceeded, type FilesQuota } from "../../files/quota.ts"
+import { OUTPUT_KEEP_MS } from "../../files/commandOutput.ts"
+import { folderShareRefusal } from "../../files/pluginCopies.ts"
+import { isSharedFolder, shareMountNames } from "../../files/sharedFolders.ts"
 import { sandboxPath } from "../../sandbox/linuxBwrap.ts"
 import type { SubagentCopyRecord } from "../../db/subagents.ts"
-import { COMMANDS_NETWORK, COMMANDS_UNSANDBOXED, resolveMode, type CapabilityRegistries } from "../capabilities.ts"
+import {
+  COMMANDS_NETWORK,
+  COMMANDS_UNSANDBOXED,
+  consentTarget,
+  resolveMode,
+  type CapabilityRegistries
+} from "../capabilities.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
 
 /** Where subagents' isolated copies go, under /files (spec/SUBAGENTS.md §3.3). */
@@ -99,14 +108,24 @@ interface FileToolLimits {
   readonly maxTimeoutMs: number
   readonly perAccount: number
   readonly perInstance: number
+  /** Background commands (§3.6): per account, per instance, and how long one may run. */
+  readonly backgroundPerAccount: number
+  readonly backgroundPerInstance: number
+  readonly backgroundMs: number
   readonly run: Omit<RunLimits, "timeoutMs">
 }
+
+/** Free space commands, their kept output and versions leave on the data folder's disk. */
+export const DISK_RESERVE_BYTES = 2 * 2 ** 30
 
 const defaultFileToolLimits: FileToolLimits = {
   defaultTimeoutMs: 120_000,
   maxTimeoutMs: 600_000,
   perAccount: 4,
   perInstance: 16,
+  backgroundPerAccount: 4,
+  backgroundPerInstance: 16,
+  backgroundMs: 2 * 3600_000,
   run: {
     processes: 512,
     memoryBytes: 4 * 2 ** 30,
@@ -114,7 +133,7 @@ const defaultFileToolLimits: FileToolLimits = {
     openFiles: 4096,
     tmpBytes: 2 ** 30,
     // Until per-account quotas (§1.2): the disk the database shares is never filled by commands.
-    reserve: { bytes: 2 * 2 ** 30, inodes: 100_000 }
+    reserve: { bytes: DISK_RESERVE_BYTES, inodes: 100_000 }
   }
 }
 
@@ -158,10 +177,6 @@ const LIST_MAX = 500
 const SEARCH_CHARS = 15_000
 const VERSION_MAX_BYTES = 16 * 2 ** 20
 const VERSIONS_PER_COMMAND = 256 * 2 ** 20
-/** Background commands (§3.6): per account, per instance, and how long one may run. */
-const BACKGROUND_PER_ACCOUNT = 4
-const BACKGROUND_PER_INSTANCE = 16
-const BACKGROUND_MS = 2 * 3600_000
 /** What one bash_output call gives of a background command's new output. */
 const SINCE_BYTES = 64 * 1024
 const IMAGE_TYPES: Readonly<Record<string, string>> = {
@@ -258,27 +273,56 @@ export const makeFileTools = (deps: FileToolDeps) => {
    * its owner's Files. Shares whose owner name or path can't be a path are left out.
    */
   const sharesOf = (userId: string) =>
-    deps.reader.FileSharesGrantedTo({ userId: userId as never }).pipe(
-      Effect.orElseSucceed(() => []),
-      Effect.map((shares) => {
-        const taken = new Set<string>()
-        return shares.flatMap((share) => {
-          if (!/^[A-Za-z0-9_.-]{1,64}$/.test(share.ownerHandle) || /^\.+$/.test(share.ownerHandle)) return []
-          let segments: ReadonlyArray<string>
-          try {
-            segments = segmentsOf(share.path.replace(/^\/files(?=\/|$)/, ""))
-          } catch {
-            return []
+    Effect.gen(function* () {
+      const shares = yield* deps.reader
+        .FileSharesGrantedTo({ userId: userId as never })
+        .pipe(Effect.orElseSucceed(() => []))
+      // Named as the Files routes name them (files/sharedFolders.ts).
+      const named = yield* Effect.promise(() =>
+        shareMountNames(accountEnv(deps, userId).filesRoot, shares).catch(() => [])
+      )
+      return named.flatMap((entry) => {
+        if (!entry) return []
+        let segments: ReadonlyArray<string>
+        try {
+          segments = segmentsOf(entry.share.path.replace(/^\/files(?=\/|$)/, ""))
+        } catch {
+          return []
+        }
+        // Never the whole Files, nor the server plugins' working copies (§5.3).
+        if (folderShareRefusal(segments) !== null) return []
+        return [
+          {
+            share: entry.share,
+            segments,
+            target: `${SHARED_MOUNT}/${entry.owner}/${entry.name}`,
+            ownerRoot: accountEnv(deps, entry.share.ownerId).filesRoot
           }
-          if (segments.length === 0) return []
-          const name = segments.at(-1)!
-          let target = `${SHARED_MOUNT}/${share.ownerHandle}/${name}`
-          for (let n = 2; taken.has(target); n++) target = `${SHARED_MOUNT}/${share.ownerHandle}/${name} (${n})`
-          taken.add(target)
-          return [{ share, segments, target, ownerRoot: accountEnv(deps, share.ownerId).filesRoot }]
-        })
+        ]
       })
-    )
+    })
+  /**
+   * The shared folders as they are now: each opened by the no-follow walk from its owner's
+   * Files and kept only when it's the folder that was shared (its inode); a share without a
+   * recorded inode is left out. Commands bind `dir`; the file tools check and close it. The
+   * caller closes every `dir`.
+   */
+  const openShares = (userId: string) =>
+    Effect.gen(function* () {
+      const opened: Array<Effect.Success<ReturnType<typeof sharesOf>>[number] & { readonly dir: FileHandle }> = []
+      for (const found of yield* sharesOf(userId)) {
+        if (found.share.inode === null) continue
+        const dir = yield* Effect.promise(() => openFolder(found.ownerRoot, found.segments).catch(() => null))
+        if (!dir) continue
+        const info = yield* Effect.promise(() => dir.stat().catch(() => null))
+        if (!isSharedFolder(found.share, found.segments, info)) {
+          yield* Effect.promise(() => dir.close().catch(() => undefined))
+          continue
+        }
+        opened.push({ ...found, dir })
+      }
+      return opened
+    })
   /** The branch's stored working folder (`workshop.folder`), read once per run. */
   const storedFolder = (ctx: ToolContext) =>
     Effect.gen(function* () {
@@ -309,7 +353,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
   const rootsOf = (env: AccountEnv, ctx: ToolContext) =>
     Effect.gen(function* () {
       const source = yield* appSourceOf()
-      const shares = yield* sharesOf(env.userId)
+      // The same identity check as commands' binds: only the folder that was shared.
+      const opened = yield* openShares(env.userId)
+      yield* Effect.promise(() => Promise.all(opened.map(({ dir }) => dir.close().catch(() => undefined))))
+      const shares = opened
       const host = yield* hostPlace(ctx)
       return [
         ...toolRoots(env, source),
@@ -372,13 +419,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
    * other roots (the app's source, folders shared with the account, a host folder) it reads as
    * the workshop does.
    */
-  const resolveIn = (
-    ctx: ToolContext,
-    input: string,
-    cwd: string,
-    roots: ReadonlyArray<ToolRoot>,
-    write = false
-  ) => {
+  const resolveIn = (ctx: ToolContext, input: string, cwd: string, roots: ReadonlyArray<ToolRoot>, write = false) => {
     const resolved = write ? writablePath(input, cwd, roots) : resolveToolPath(input, cwd, roots)
     const root = ctx.workspace?.root
     if (
@@ -448,7 +489,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
     userId: string,
     path: string,
     content: { readonly bytes: Uint8Array; readonly inode: number | null } | null,
-    origin: string
+    origin: string,
+    /** The account that acted, when not `userId` (a command through a folder shared to edit). */
+    actorUserId?: string
   ) =>
     Effect.gen(function* () {
       const hash = content ? sha256(content.bytes) : null
@@ -457,6 +500,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
         hash ? [hash] : [],
         deps.writer.RecordFileVersions({
           userId: userId as never,
+          ...(actorUserId && actorUserId !== userId ? { actorUserId: actorUserId as never } : {}),
           versions: [
             {
               path,
@@ -685,20 +729,24 @@ export const makeFileTools = (deps: FileToolDeps) => {
           ]
             .filter(Boolean)
             .join(" ")
-          const setup = yield* commandSetup(ctx, env)
-          const result = yield* attempt((signal) =>
-            selected.run(
-              {
-                command,
-                cwd: FILES_MOUNT,
-                mounts: setup.mounts,
-                env: commandEnv(),
-                network: "none",
-                limits: { ...limits.run, timeoutMs: 60_000 }
-              },
-              signal
-            )
-          ).pipe(Effect.ensuring(Effect.promise(() => setup.close())))
+          // A command like any other: Reset waits for it (§3.6).
+          enter(env.userId)
+          const result = yield* Effect.gen(function* () {
+            const setup = yield* commandSetup(ctx, env)
+            return yield* attempt((signal) =>
+              selected.run(
+                {
+                  command,
+                  cwd: FILES_MOUNT,
+                  mounts: setup.mounts,
+                  env: commandEnv(),
+                  network: "none",
+                  limits: { ...limits.run, timeoutMs: 60_000 }
+                },
+                signal
+              )
+            ).pipe(Effect.ensuring(Effect.promise(() => setup.close())))
+          }).pipe(Effect.ensuring(Effect.sync(() => leave(env.userId))))
           if (result.exitCode === 0 || result.exitCode === 1) {
             const text = (result.head + result.tail).trim()
             return {
@@ -921,27 +969,38 @@ export const makeFileTools = (deps: FileToolDeps) => {
     )
   }
 
-  /** A tree whose changes a command's scan lists (§7.2): the account's Files. */
+  /**
+   * A tree whose changes a command's scan lists (§7.2): the account's Files, a host folder, or a
+   * folder another account shared with it to edit (§1.4), whose changes are its owner's: kept
+   * as the owner's versions, with the acting account recorded, and told to the owner's open file
+   * managers.
+   */
   interface ScanPlace {
     readonly root: string
-    /** How the agent names its top: /files, or a host folder's real path. */
+    /** How the agent names its top: /files, a host folder's real path, /files/Shared/<owner>/<folder>. */
     readonly prefix: string
-    /** Where its files are read from by the no-follow walk, when not `root`: "/" and the components. */
+    /** Where its files are read from by the no-follow walk, when not `root`: a top and the components. */
     readonly walk?: { readonly root: string; readonly base: ReadonlyArray<string> }
+    /** A shared folder's owner, and the folder's path in the owner's Files (/files/…). */
+    readonly owner?: { readonly userId: string; readonly handle: string; readonly prefix: string }
   }
   interface PlaceChanges {
     readonly place: ScanPlace
     readonly changes: TreeChanges
   }
   const scanPlaces = (places: ReadonlyArray<ScanPlace>) =>
-    Effect.forEach(places, (place) => attempt(() => scanTree(place.root)).pipe(Effect.map((scan) => ({ place, scan }))))
+    Effect.forEach(places, (place) =>
+      attempt(() =>
+        place.walk ? scanTree(place.walk.root, undefined, undefined, place.walk.base) : scanTree(place.root)
+      ).pipe(Effect.map((scan) => ({ place, scan })))
+    )
   const diffPlaces = (
     before: ReadonlyArray<{ place: ScanPlace; scan: Scan }>,
     after: ReadonlyArray<{ place: ScanPlace; scan: Scan }>
   ): ReadonlyArray<PlaceChanges> =>
     before.map((b, i) => ({ place: b.place, changes: diffScans(b.scan, after[i]!.scan) }))
-  const allChanges = (found: ReadonlyArray<PlaceChanges>) => {
-    const full = (place: ScanPlace, paths: ReadonlyArray<string>) => paths.map((p) => `${place.prefix}/${p}`)
+  const allChanges = (found: ReadonlyArray<PlaceChanges>, named: (place: ScanPlace) => string = (p) => p.prefix) => {
+    const full = (place: ScanPlace, paths: ReadonlyArray<string>) => paths.map((p) => `${named(place)}/${p}`)
     return {
       changed: found.flatMap(({ place, changes }) => full(place, changes.changed)),
       created: found.flatMap(({ place, changes }) => full(place, changes.created)),
@@ -950,23 +1009,20 @@ export const makeFileTools = (deps: FileToolDeps) => {
     }
   }
 
-  /** Stores the new content of what a command changed (§7.2), within the per-command budget. */
+  /**
+   * Stores the new content of what a command changed (§7.2), within the per-command budget,
+   * under `userId` (a shared folder's owner), recording `actorUserId` when another account acted.
+   */
   const keepCommandVersions = (
-    call: { readonly rolloutId: string; readonly toolCallId: string },
+    call: { readonly rolloutId: string; readonly toolCallId: string } | null,
     userId: string,
-    found: ReadonlyArray<PlaceChanges>
+    found: ReadonlyArray<PlaceChanges>,
+    budget: { left: number },
+    actorUserId?: string
   ) =>
     Effect.gen(function* () {
-      // Versions go to the media store on the data folder's disk: none past its reserve either.
-      const reserve = limits.run.reserve
-      const free = reserve
-        ? yield* attempt(() => statfs(deps.dataDir)).pipe(
-            Effect.map((fs) => fs.bavail * fs.bsize - reserve.bytes),
-            Effect.orElseSucceed(() => 0)
-          )
-        : Infinity
-      let budget = Math.min(VERSIONS_PER_COMMAND, Math.max(0, free))
       for (const { place, changes } of found) {
+        const named = place.owner?.prefix ?? place.prefix
         for (const path of [...changes.changed, ...changes.created]) {
           const read = yield* attempt(() =>
             readRegularFile(
@@ -975,69 +1031,111 @@ export const makeFileTools = (deps: FileToolDeps) => {
               VERSION_MAX_BYTES + 1
             )
           ).pipe(Effect.orElseSucceed(() => null))
-          if (!read || read.truncated || read.bytes.byteLength > budget) continue
-          budget -= read.bytes.byteLength
+          if (!read || read.truncated || read.bytes.byteLength > budget.left) continue
+          budget.left -= read.bytes.byteLength
           yield* keepVersion(
             call,
             userId,
-            `${place.prefix}/${path}`,
+            `${named}/${path}`,
             { bytes: read.bytes, inode: read.info.ino },
-            "command"
+            "command",
+            actorUserId
           ).pipe(Effect.ignore)
         }
         for (const path of changes.deleted)
-          yield* keepVersion(call, userId, `${place.prefix}/${path}`, null, "command").pipe(Effect.ignore)
+          yield* keepVersion(call, userId, `${named}/${path}`, null, "command", actorUserId).pipe(Effect.ignore)
       }
     })
 
-  /** Commands running per account (foreground and background), so Reset waits for none. */
+  /**
+   * Commands running per account (foreground and background, `search_files` and the app's own
+   * quiet commands too), so Reset waits for none. Counted from the call's start.
+   */
   const running = new Map<string, number>()
-  const busy = (userId: string, by: 1 | -1) => {
-    const next = (running.get(userId) ?? 0) + by
-    if (next <= 0) running.delete(userId)
-    else running.set(userId, next)
+  /** Accounts whose home folder is being emptied: no command starts meanwhile. */
+  const resetting = new Set<string>()
+  /** Accounts whose Shared mount point a command made, to be removed when none runs. */
+  const madeShared = new Set<string>()
+  const homeBusy = () => new FilePathRefused("The home folder for commands is being reset. Try again in a moment.")
+  /** Counts a command of the account from now; refused while its home folder is being reset. */
+  const enter = (userId: string) => {
+    if (resetting.has(userId)) throw homeBusy()
+    running.set(userId, (running.get(userId) ?? 0) + 1)
+  }
+  /** The command ended: once none of the account's runs, the Shared mount point it made goes. */
+  const leave = (userId: string) => {
+    const next = (running.get(userId) ?? 0) - 1
+    if (next > 0) {
+      running.set(userId, next)
+      return
+    }
+    running.delete(userId)
+    if (madeShared.delete(userId))
+      // rmdir refuses a folder with anything in it, and a link.
+      void rmdir(join(accountEnv(deps, userId).filesRoot, "Shared")).catch(() => undefined)
   }
 
   /**
-   * Folders other accounts shared with this one (§1.4), each opened by the no-follow walk from its
-   * owner's Files and bound by that descriptor at /files/Shared/<owner>/<folder>: read-only for
-   * Can view, writable for Can edit. A share whose folder is gone, or was swapped for another
-   * (its inode differs), is left out. `close` frees the descriptors after the run.
+   * Folders other accounts shared with this one (§1.4), each opened by the no-follow walk from
+   * its owner's Files, checked by its inode and bound by that descriptor at
+   * /files/Shared/<owner>/<folder>: read-only for Can view, writable for Can edit while the
+   * owner's Files are within their quota. A folder shared to edit is also a place the command's
+   * scan covers, as its owner's. `close` frees the descriptors after the run.
    */
-  /** Accounts whose Shared mount point a command made, to be removed when none runs. */
-  const madeShared = new Set<string>()
   const sharedPlaces = (userId: string) =>
     Effect.gen(function* () {
-      const handles: Array<FileHandle> = []
+      const opened = yield* openShares(userId)
       const mounts: Array<SandboxMount> = []
-      for (const { share, segments, target, ownerRoot } of yield* sharesOf(userId)) {
-        const dir = yield* Effect.promise(() => openFolder(ownerRoot, segments).catch(() => null))
-        if (!dir) continue
-        const info = yield* Effect.promise(() => dir.stat().catch(() => null))
-        if (!info || (share.inode !== null && info.ino !== share.inode)) {
-          yield* Effect.promise(() => dir.close().catch(() => undefined))
-          continue
+      const places: Array<ScanPlace> = []
+      const bound: Array<BoundShare> = []
+      const readOnly: Array<string> = []
+      const close = () => Promise.all(opened.map(({ dir }) => dir.close().catch(() => undefined))).then(() => undefined)
+      // A Files top whose `Shared` isn't a real folder: refused, never left to the sandbox.
+      const root = accountEnv(deps, userId).filesRoot
+      if (opened.length > 0) {
+        const top = yield* Effect.promise(() => lstat(join(root, "Shared")).catch(() => null))
+        if (top && (!top.isDirectory() || top.isSymbolicLink())) {
+          yield* Effect.promise(close)
+          return yield* Effect.fail(
+            new FilePathRefused(
+              `${SHARED_MOUNT} in your files isn't a folder, but folders other accounts share with you appear there. Rename or move it, then run the command again.`
+            )
+          )
         }
-        handles.push(dir)
-        mounts.push({ source: "", target, writable: share.mode === "edit", fd: dir.fd })
+        if (!top) madeShared.add(userId)
+      }
+      const overQuota = new Map<string, boolean>()
+      for (const { share, segments, target, ownerRoot, dir } of opened) {
+        let writable = share.mode === "edit"
+        if (writable && deps.quota) {
+          // The owner's quota pays for what commands write there: over it, the folder is read-only.
+          if (!overQuota.has(share.ownerId))
+            overQuota.set(
+              share.ownerId,
+              yield* deps.quota.check(share.ownerId, 0, "run commands").pipe(
+                Effect.as(false),
+                Effect.orElseSucceed(() => true)
+              )
+            )
+          if (overQuota.get(share.ownerId)) {
+            writable = false
+            readOnly.push(target)
+          }
+        }
+        mounts.push({ source: "", target, writable, fd: dir.fd })
+        bound.push({ id: share.id, mode: writable ? "edit" : "view", inode: share.inode! })
+        if (writable)
+          places.push({
+            root: ownerRoot,
+            prefix: target,
+            walk: { root: ownerRoot, base: segments },
+            owner: { userId: share.ownerId, handle: share.ownerHandle, prefix: `${FILES_MOUNT}/${segments.join("/")}` }
+          })
       }
       // The shared folders sit in a small empty folder of their own. Its mount point is the only
       // thing made in Files, and it goes again once no command of the account runs.
-      const root = accountEnv(deps, userId).filesRoot
-      if (mounts.length > 0 && !(yield* Effect.promise(() => statPath(root, ["Shared"]).catch(() => null))))
-        madeShared.add(userId)
       if (mounts.length) mounts.unshift({ source: "", target: SHARED_MOUNT, writable: false, empty: true })
-      return {
-        mounts: mounts as ReadonlyArray<SandboxMount>,
-        close: async () => {
-          await Promise.all(handles.map((handle) => handle.close().catch(() => undefined)))
-          // rmdir refuses a folder with anything in it, and a link.
-          if (madeShared.has(userId) && (running.get(userId) ?? 0) === 0) {
-            madeShared.delete(userId)
-            await rmdir(join(root, "Shared")).catch(() => undefined)
-          }
-        }
-      }
+      return { mounts: mounts as ReadonlyArray<SandboxMount>, places, bound, readOnly, close }
     })
 
   /** The outcome line of a command's result. */
@@ -1074,7 +1172,11 @@ export const makeFileTools = (deps: FileToolDeps) => {
       : ""
   }
 
-  /** What the app does after any command: tell open file managers, keep versions, measure, count the internet. */
+  /**
+   * What the app does after any command: tell open file managers, keep versions, measure, count
+   * the internet. A shared folder's changes are its owner's: their file managers are told, the
+   * versions are theirs (the acting account recorded), and their quota is measured.
+   */
   const afterCommand = (
     call: { readonly rolloutId: string; readonly toolCallId: string },
     userId: string,
@@ -1083,35 +1185,83 @@ export const makeFileTools = (deps: FileToolDeps) => {
   ) =>
     Effect.gen(function* () {
       const changes = allChanges(found)
-      deps.onChanged?.(userId, [...changes.changed, ...changes.created, ...changes.deleted], changes.partial)
-      yield* keepCommandVersions(call, userId, found)
+      const own = found.filter(({ place }) => !place.owner)
+      const mine = allChanges(own)
+      deps.onChanged?.(userId, [...mine.changed, ...mine.created, ...mine.deleted], mine.partial)
+      // Versions go to the media store on the data folder's disk: none past its reserve either.
+      const reserve = limits.run.reserve
+      const free = reserve
+        ? yield* attempt(() => statfs(deps.dataDir)).pipe(
+            Effect.map((fs) => fs.bavail * fs.bsize - reserve.bytes),
+            Effect.orElseSucceed(() => 0)
+          )
+        : Infinity
+      const budget = { left: Math.min(VERSIONS_PER_COMMAND, Math.max(0, free)) }
+      yield* keepCommandVersions(call, userId, own, budget)
+      const owners = new Map<string, { handle: string; found: Array<PlaceChanges> }>()
+      for (const entry of found)
+        if (entry.place.owner) {
+          const owner = owners.get(entry.place.owner.userId) ?? { handle: entry.place.owner.handle, found: [] }
+          owner.found.push(entry)
+          owners.set(entry.place.owner.userId, owner)
+        }
+      const notes: Array<string> = []
+      for (const [ownerId, owner] of owners) {
+        const theirs = allChanges(owner.found, (place) => place.owner!.prefix)
+        const paths = [...theirs.changed, ...theirs.created, ...theirs.deleted]
+        if (paths.length === 0 && !theirs.partial) continue
+        deps.onChanged?.(ownerId, paths, theirs.partial)
+        // The owner's versions aren't tied to this account's run: its run isn't theirs to open.
+        yield* keepCommandVersions(null, ownerId, owner.found, budget, userId)
+        const over = deps.quota ? yield* deps.quota.afterCommand(ownerId).pipe(Effect.orElseSucceed(() => null)) : null
+        if (over)
+          notes.push(
+            `${owner.handle}'s files are now over their storage limit, so commands can only read the folders ${owner.handle} shared until space is freed.`
+          )
+      }
       if (result.networkBytes) deps.onNetwork?.(userId, result.networkBytes)
       // Commands can't be stopped mid-write by a quota: measured after, and the next refused.
       const overQuota = deps.quota
         ? yield* deps.quota.afterCommand(userId).pipe(Effect.orElseSucceed(() => null))
         : null
-      return { changes, overQuota }
+      return { changes, overQuota: [overQuota, ...notes].filter(Boolean).join("\n") || null }
     })
 
-  /** Everything a command runs with for this account: its folders, shared folders and the app's source. */
+  /**
+   * Whether the workshop's grant turned the sandbox off (§3.7), with the consent the server
+   * recorded for the consent text as it is now; a grant without it doesn't count.
+   */
+  const unsandboxedGranted = (userId: string, chatId: string) =>
+    Effect.gen(function* () {
+      const consent = consentTarget(deps.registries, COMMANDS_UNSANDBOXED)
+      const [grants, consented] = yield* Effect.all([
+        deps.reader.WorkshopGrants({ userId: userId as never, chatId: chatId as never, now: Date.now() }),
+        consent
+          ? deps.reader.WorkshopGrants({
+              userId: userId as never,
+              chatId: chatId as never,
+              now: Date.now(),
+              target: consent
+            })
+          : Effect.succeed([])
+      ])
+      if (!consented.some((g) => g.capability === COMMANDS_UNSANDBOXED && g.mode === "allow")) return false
+      const modes = new Map(grants.map((g) => [g.capability, g.mode]))
+      return resolveMode(deps.registries, modes, COMMANDS_UNSANDBOXED, "outside") === "allow"
+    })
   /**
    * Without a sandbox (§3.7): checked at every command, whatever the grant says: the server
-   * allows it (ALLOW_UNSANDBOXED_COMMANDS), the account is an admin, the workshop turned it on,
-   * and the `none` sandbox is registered.
+   * allows it (ALLOW_UNSANDBOXED_COMMANDS), the account is an admin, the workshop turned it on
+   * with the recorded consent, and the `none` sandbox is registered.
    */
   const unsandboxedFor = (ctx: ToolContext) =>
     Effect.gen(function* () {
       const actor = ctx.cache.get(ACTOR_KEY) as User | undefined
       if (deps.allowUnsandboxed !== true || actor?.role !== "admin") return null
-      const grants = new Map(
-        (yield* deps.reader.WorkshopGrants({ userId: ctx.userId, chatId: ctx.chatId, now: Date.now() })).map((g) => [
-          g.capability,
-          g.mode
-        ])
-      )
-      if (resolveMode(deps.registries, grants, COMMANDS_UNSANDBOXED, "outside") !== "allow") return null
+      if (!(yield* unsandboxedGranted(ctx.userId, ctx.chatId))) return null
       return deps.sandboxes.list().find((sandbox) => sandbox.unsandboxed) ?? null
     })
+  /** Everything a command runs with for this account: its folders, shared folders and the app's source. */
   const commandSetup = (ctx: ToolContext, env: AccountEnv) =>
     Effect.gen(function* () {
       const grants = new Map(
@@ -1138,8 +1288,15 @@ export const makeFileTools = (deps: FileToolDeps) => {
           { root: env.filesRoot, prefix: FILES_MOUNT },
           ...(hostMount.length
             ? [{ root: host!.path, prefix: host!.path, walk: { root: "/", base: host!.segments } }]
-            : [])
+            : []),
+          ...shared.places
         ] as ReadonlyArray<ScanPlace>,
+        /** What the command was given, checked again while it runs (`recheck`). */
+        bound: {
+          host: hostMount.length ? { path: host!.path, inode: hostInfo!.ino } : null,
+          shares: shared.bound
+        },
+        readOnly: shared.readOnly,
         close: async () => {
           await hostDir?.close().catch(() => undefined)
           await shared.close()
@@ -1147,8 +1304,97 @@ export const makeFileTools = (deps: FileToolDeps) => {
       }
     })
 
+  // Commands running now (§3.6, §3.7, §1.4), foreground and background: what each was given, so
+  // taking it away stops it at once (`recheck`): Run commands or the sandbox's grant turned off,
+  // the account disabled or no longer an admin, a host folder no longer allowed, a shared folder
+  // unshared. Each is checked again every few seconds too, whatever took it away.
+  interface BoundShare {
+    readonly id: string
+    readonly mode: "view" | "edit"
+    readonly inode: number
+  }
+  interface Live {
+    readonly userId: string
+    /** Its workshop; null for the app's own commands for a subagent's copy outside a call. */
+    readonly chatId: string | null
+    readonly unsandboxed: boolean
+    readonly host: { readonly path: string; readonly inode: number } | null
+    readonly shares: ReadonlyArray<BoundShare>
+    readonly controller: AbortController
+    /** Why the app stopped it, once it did. */
+    stopped: string | null
+  }
+  const live = new Set<Live>()
+
+  /** Why a running command may no longer run; null: it may. Unknown (storage failed): it may. */
+  const revoked = (entry: Live) =>
+    Effect.gen(function* () {
+      const account = yield* deps.reader
+        .GetPasswordHash({ userId: entry.userId as never })
+        .pipe(Effect.orElseSucceed(() => undefined))
+      if (account === null) return "the account was turned off"
+      const grants =
+        entry.chatId === null
+          ? undefined
+          : yield* deps.reader
+              .WorkshopGrants({ userId: entry.userId as never, chatId: entry.chatId as never, now: Date.now() })
+              .pipe(
+                Effect.map((rows) => new Map(rows.map((g) => [g.capability, g.mode]))),
+                Effect.catchTag("NotFound", () => Effect.succeed(null)),
+                Effect.orElseSucceed(() => undefined)
+              )
+      if (grants === null) return "its workshop is gone"
+      if (grants && resolveMode(deps.registries, grants, "commands", "outside") === "off")
+        return "Run commands was turned off in its workshop"
+      const admin = account === undefined || account.user.role === "admin"
+      if (entry.unsandboxed) {
+        if (!admin || deps.allowUnsandboxed !== true) return "running commands without a sandbox isn't allowed now"
+        const granted = yield* unsandboxedGranted(entry.userId, entry.chatId!).pipe(Effect.orElseSucceed(() => true))
+        if (!granted) return "running without a sandbox was turned off in its workshop"
+      }
+      if (entry.host) {
+        if (!admin) return "its folder on the server isn't available to the account now"
+        const now = deps.hostFolders
+          ? yield* Effect.promise(() => deps.hostFolders!.check(entry.host!.path).catch(() => null))
+          : null
+        if (!now || now.inode !== entry.host.inode) return "its folder on the server isn't available now"
+      }
+      if (entry.shares.length) {
+        const current = yield* sharesOf(entry.userId).pipe(Effect.orElseSucceed(() => undefined))
+        if (current)
+          for (const bound of entry.shares) {
+            const now = current.find(({ share }) => share.id === bound.id)
+            if (!now || now.share.inode !== bound.inode) return "a folder it used is no longer shared with the account"
+            if (bound.mode === "edit" && now.share.mode !== "edit")
+              return "a folder it changed is no longer shared with the account to edit"
+          }
+      }
+      return null
+    })
+
+  /**
+   * Checks the running commands (of `userIds`, else all) again, and stops at once those whose
+   * account, workshop grant, host folder or shared folders no longer allow them. Answers how many
+   * were stopped.
+   */
+  const recheck = (userIds?: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      let stopped = 0
+      for (const entry of [...live]) {
+        if (entry.stopped !== null || (userIds && !userIds.includes(entry.userId))) continue
+        const why = yield* revoked(entry)
+        if (why && entry.stopped === null) {
+          entry.stopped = why
+          entry.controller.abort()
+          stopped++
+        }
+      }
+      return stopped
+    })
+
   // Background commands (§3.6, §5.1): children of the app, stopped after 2 hours, by bash_stop,
-  // or with the app. Their output is read from the kept output as they run.
+  // with the app, or when what they were given is taken away. Their output is read from the kept
+  // output as they run. An ended one is remembered as long as its output is kept.
   interface Job {
     readonly id: string
     readonly userId: string
@@ -1157,7 +1403,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
     readonly startedAt: number
     /** The Changes rows' target kind: `command`, or `command.unsandboxed`. */
     readonly kind: string
-    readonly controller: AbortController
+    readonly live: Live
+    /** Stopped with bash_stop. */
+    stoppedByTool: boolean
     /** Bytes of its output already given to the agent. */
     cursor: number
     /** The end, once it ended. */
@@ -1165,8 +1413,37 @@ export const makeFileTools = (deps: FileToolDeps) => {
     readonly done: Promise<void>
   }
   const jobs = new Map<string, Job>()
+  /** Background slots taken by calls still starting (between the limit's check and the job). */
+  const starting = new Map<string, number>()
+  const startingTotal = () => [...starting.values()].reduce((sum, n) => sum + n, 0)
   const jobsOf = (userId: string) => [...jobs.values()].filter((job) => job.userId === userId && job.ended === null)
   const runningJobs = () => [...jobs.values()].filter((job) => job.ended === null)
+  /** Forgets ended jobs whose output is no longer kept. */
+  const pruneJobs = (now = Date.now()) => {
+    for (const [id, job] of jobs) if (job.ended && now - job.ended.at > OUTPUT_KEEP_MS) jobs.delete(id)
+  }
+  /**
+   * Takes a background slot of the account and of the instance at once, before any wait, so
+   * calls starting together can't pass the limits; a refusal's text otherwise. `release` gives
+   * the slot back (the job then counts itself, or it never started).
+   */
+  const takeSlot = (userId: string): { readonly release: () => void } | string => {
+    if (jobsOf(userId).length + (starting.get(userId) ?? 0) >= limits.backgroundPerAccount)
+      return `${limits.backgroundPerAccount} commands are already running in the background. Stop one with bash_stop first.`
+    if (runningJobs().length + startingTotal() >= limits.backgroundPerInstance)
+      return "This server is running as many background commands as it can. Try again later."
+    starting.set(userId, (starting.get(userId) ?? 0) + 1)
+    let held = true
+    return {
+      release: () => {
+        if (!held) return
+        held = false
+        const left = (starting.get(userId) ?? 1) - 1
+        if (left > 0) starting.set(userId, left)
+        else starting.delete(userId)
+      }
+    }
+  }
 
   // --- bash
   const bashTool: RolloutTool<Record<string, unknown>> = {
@@ -1207,6 +1484,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
       }),
     execute: wrap("commands", (ctx, args, env) =>
       Effect.gen(function* () {
+        pruneJobs()
         const none = yield* unsandboxedFor(ctx)
         const selected = none ?? (yield* sandboxFor())
         if (typeof selected === "string")
@@ -1216,137 +1494,176 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const background = args.run_in_background === true
         if (background && !deps.outputs)
           return { isError: true, text: "Commands can't run in the background here. Run it in the foreground." }
-        if (background && jobsOf(env.userId).length >= BACKGROUND_PER_ACCOUNT)
-          return {
-            isError: true,
-            text: `${BACKGROUND_PER_ACCOUNT} commands are already running in the background. Stop one with bash_stop first.`
+        // Without a sandbox, a background command must be held together so it can be stopped.
+        if (background && none) {
+          const contained = none.containment ? yield* attempt(() => none.containment!()) : null
+          if (!contained?.ok)
+            return {
+              isError: true,
+              text: `Commands without a sandbox can't run in the background on this server: ${contained && !contained.ok ? contained.reason : "nothing here can stop everything such a command starts."} Run it in the foreground.`
+            }
+        }
+        // The slot is taken now, before any wait; given back unless a job takes it over.
+        const slot = background ? takeSlot(env.userId) : null
+        if (typeof slot === "string") return { isError: true, text: slot }
+        // Counted from here, so Reset can't empty the home folder under it.
+        enter(env.userId)
+        let handedOver = false
+        return yield* Effect.gen(function* () {
+          const start = yield* currentDir(ctx, env)
+          const cwd =
+            typeof args.cwd === "string" && args.cwd.trim() !== "" ? posix.resolve(start, args.cwd.trim()) : start
+          const timeoutMs = background
+            ? limits.backgroundMs
+            : Math.min(Number(args.timeout_ms ?? limits.defaultTimeoutMs), limits.maxTimeoutMs)
+          if (deps.quota) yield* deps.quota.check(env.userId, 0, "run commands")
+          const setup = yield* commandSetup(ctx, env)
+          const entry: Live = {
+            userId: env.userId,
+            chatId: ctx.chatId,
+            unsandboxed: none !== null,
+            host: setup.bound.host,
+            shares: setup.bound.shares,
+            controller: new AbortController(),
+            stopped: null
           }
-        if (background && runningJobs().length >= BACKGROUND_PER_INSTANCE)
-          return {
-            isError: true,
-            text: "This server is running as many background commands as it can. Try again later."
-          }
-        const start = yield* currentDir(ctx, env)
-        const cwd =
-          typeof args.cwd === "string" && args.cwd.trim() !== "" ? posix.resolve(start, args.cwd.trim()) : start
-        const timeoutMs = background
-          ? BACKGROUND_MS
-          : Math.min(Number(args.timeout_ms ?? limits.defaultTimeoutMs), limits.maxTimeoutMs)
-        if (deps.quota) yield* deps.quota.check(env.userId, 0, "run commands")
-        const setup = yield* commandSetup(ctx, env)
-        const call = { rolloutId: ctx.rolloutId, toolCallId: ctx.toolCallId }
-        const sink = deps.outputs ? yield* attempt(() => deps.outputs!.open(env.userId)) : null
-        const spec = (signal: AbortSignal) =>
-          selected.run(
-            {
+          const call = { rolloutId: ctx.rolloutId, toolCallId: ctx.toolCallId }
+          const sink = deps.outputs
+            ? yield* attempt(() => deps.outputs!.open(env.userId)).pipe(
+                Effect.tapError(() => Effect.promise(() => setup.close()))
+              )
+            : null
+          const spec = (signal: AbortSignal) =>
+            selected.run(
+              {
+                command: String(args.command),
+                cwd,
+                mounts: setup.mounts,
+                env: commandEnv(),
+                network: setup.network,
+                limits: { ...limits.run, timeoutMs },
+                ...(sink ? { onOutput: sink.write } : {})
+              },
+              signal
+            )
+          const short = String(args.command).split("\n")[0]!.slice(0, 80)
+          const readOnlyText = setup.readOnly.length
+            ? `Read-only in this command, as their owner's files are over their storage limit: ${setup.readOnly.join(", ")}\n`
+            : ""
+
+          if (background) {
+            const before = yield* scanPlaces(setup.places).pipe(
+              Effect.tapError(() => Effect.promise(() => setup.close()))
+            )
+            live.add(entry)
+            const job: Job = {
+              id: sink!.id,
+              userId: env.userId,
               command: String(args.command),
               cwd,
-              mounts: setup.mounts,
-              env: commandEnv(),
-              network: setup.network,
-              limits: { ...limits.run, timeoutMs },
-              ...(sink ? { onOutput: sink.write } : {})
-            },
-            signal
-          )
-        const short = String(args.command).split("\n")[0]!.slice(0, 80)
-
-        if (background) {
-          const before = yield* scanPlaces(setup.places)
-          const controller = new AbortController()
-          busy(env.userId, 1)
-          const job: Job = {
-            id: sink!.id,
-            userId: env.userId,
-            command: String(args.command),
-            cwd,
-            startedAt: Date.now(),
-            kind: commandKind,
-            controller,
-            cursor: 0,
-            ended: null,
-            done: spec(controller.signal)
-              .then(async (result) => {
-                await sink!.end(result.outputBytes)
-                const after = await Effect.runPromise(scanPlaces(setup.places))
-                const { changes, overQuota } = await Effect.runPromise(
-                  afterCommand(call, env.userId, result, diffPlaces(before, after))
-                )
-                job.ended = {
-                  at: Date.now(),
-                  failed: failed(result),
-                  text:
-                    `${controller.signal.aborted ? "stopped with bash_stop" : result.timedOut ? "stopped after 2 hours" : statusOf(result, timeoutMs)}\nDirectory after: ${result.cwd ?? cwd}\n` +
-                    changesText(changes) +
-                    (overQuota ? `${overQuota}\n` : "")
+              startedAt: Date.now(),
+              kind: commandKind,
+              live: entry,
+              stoppedByTool: false,
+              cursor: 0,
+              ended: null,
+              done: spec(entry.controller.signal)
+                .then(async (result) => {
+                  await sink!.end(result.outputBytes)
+                  const after = await Effect.runPromise(scanPlaces(setup.places))
+                  const { changes, overQuota } = await Effect.runPromise(
+                    afterCommand(call, env.userId, result, diffPlaces(before, after))
+                  )
+                  job.ended = {
+                    at: Date.now(),
+                    failed: failed(result),
+                    text:
+                      `${entry.stopped ? `stopped: ${entry.stopped}` : job.stoppedByTool ? "stopped with bash_stop" : result.timedOut ? "stopped after 2 hours" : statusOf(result, timeoutMs)}\nDirectory after: ${result.cwd ?? cwd}\n` +
+                      changesText(changes) +
+                      (overQuota ? `${overQuota}\n` : "")
+                  }
+                })
+                .catch(async () => {
+                  await sink!.end(sink!.kept()).catch(() => undefined)
+                  job.ended = { at: Date.now(), failed: true, text: "The command couldn't run.\n" }
+                })
+                .finally(() => {
+                  live.delete(entry)
+                  void setup.close().finally(() => leave(env.userId))
+                })
+            }
+            jobs.set(job.id, job)
+            // The job counts itself from now, and leaves when it ends.
+            handedOver = true
+            slot?.release()
+            return {
+              text: `Started in the background as ${job.id}, in ${cwd}. Read what it writes with bash_output (id: ${job.id}); stop it with bash_stop. It's stopped after 2 hours.${setup.network === "none" ? "\nInternet from commands is off in this workshop." : ""}${readOnlyText ? `\n${readOnlyText.trimEnd()}` : ""}`,
+              effects: [
+                {
+                  kind: "shell.run",
+                  targetKind: commandKind,
+                  targetId: cwd,
+                  title: `Started \`${short}\` in the background in ${cwd}`,
+                  undo: null
                 }
-              })
-              .catch(async () => {
-                await sink!.end(sink!.kept()).catch(() => undefined)
-                job.ended = { at: Date.now(), failed: true, text: "The command couldn't run.\n" }
-              })
-              .finally(() => {
-                busy(env.userId, -1)
-                void setup.close()
-              })
+              ]
+            }
           }
-          jobs.set(job.id, job)
+
+          const run = Effect.gen(function* () {
+            const before = yield* scanPlaces(setup.places)
+            live.add(entry)
+            const result = yield* attempt((signal) => {
+              // Stopping the call (Stop) or taking away what it was given stops the command.
+              signal.addEventListener("abort", () => entry.controller.abort(), { once: true })
+              if (signal.aborted) entry.controller.abort()
+              return spec(entry.controller.signal)
+            }).pipe(Effect.ensuring(Effect.sync(() => live.delete(entry))))
+            const after = yield* scanPlaces(setup.places)
+            return { result, found: diffPlaces(before, after) }
+          })
+          const { result, found } = yield* Semaphore.withPermit(instance)(
+            Semaphore.withPermit(accountPermits(env.userId))(run)
+          ).pipe(Effect.ensuring(Effect.promise(() => setup.close())))
+          if (sink) yield* Effect.promise(() => sink.end(result.outputBytes).catch(() => undefined))
+          if (result.cwd) ctx.cache.set(CWD_KEY, result.cwd)
+          const { changes, overQuota } = yield* afterCommand(call, env.userId, result, found)
+          const output = result.tail === "" ? result.head : `${result.head}\n…\n${result.tail}`
+          const shown = headTail(output)
+          const cut = result.tail !== "" || shown.length < output.length
+          const counts = countsOf(changes)
+          const text =
+            `${entry.stopped ? `stopped: ${entry.stopped}` : statusOf(result, timeoutMs)}\nDirectory after: ${result.cwd ?? cwd}\n` +
+            changesText(changes) +
+            readOnlyText +
+            (none
+              ? `No sandbox: this ran directly on the server. /files is ${env.filesRoot} and /home/user is ${env.home} here.\n`
+              : setup.network === "none"
+                ? "Internet from commands is off in this workshop.\n"
+                : "") +
+            (overQuota ? `${overQuota}\n` : "") +
+            `Output (${result.outputBytes.toLocaleString("en-US")} bytes${cut && sink ? `; the whole output is kept: bash_output id ${sink.id}` : ""}):\n${shown}`
           return {
-            text: `Started in the background as ${job.id}, in ${cwd}. Read what it writes with bash_output (id: ${job.id}); stop it with bash_stop. It's stopped after 2 hours.${setup.network === "none" ? "\nInternet from commands is off in this workshop." : ""}`,
+            text,
+            isError: entry.stopped !== null || failed(result),
             effects: [
               {
                 kind: "shell.run",
                 targetKind: commandKind,
                 targetId: cwd,
-                title: `Started \`${short}\` in the background in ${cwd}`,
+                title: `Ran \`${short}\` in ${cwd}${counts.length ? `: ${counts.join(", ")}` : ""}`,
                 undo: null
               }
             ]
           }
-        }
-
-        const run = Effect.gen(function* () {
-          const before = yield* scanPlaces(setup.places)
-          busy(env.userId, 1)
-          const result = yield* attempt((signal) => spec(signal)).pipe(
-            Effect.ensuring(Effect.sync(() => busy(env.userId, -1)))
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              slot?.release()
+              if (!handedOver) leave(env.userId)
+            })
           )
-          const after = yield* scanPlaces(setup.places)
-          return { result, found: diffPlaces(before, after) }
-        })
-        const { result, found } = yield* Semaphore.withPermit(instance)(
-          Semaphore.withPermit(accountPermits(env.userId))(run)
-        ).pipe(Effect.ensuring(Effect.promise(() => setup.close())))
-        if (sink) yield* Effect.promise(() => sink.end(result.outputBytes).catch(() => undefined))
-        if (result.cwd) ctx.cache.set(CWD_KEY, result.cwd)
-        const { changes, overQuota } = yield* afterCommand(call, env.userId, result, found)
-        const output = result.tail === "" ? result.head : `${result.head}\n…\n${result.tail}`
-        const shown = headTail(output)
-        const cut = result.tail !== "" || shown.length < output.length
-        const counts = countsOf(changes)
-        const text =
-          `${statusOf(result, timeoutMs)}\nDirectory after: ${result.cwd ?? cwd}\n` +
-          changesText(changes) +
-          (none
-            ? `No sandbox: this ran directly on the server. /files is ${env.filesRoot} and /home/user is ${env.home} here.\n`
-            : setup.network === "none"
-              ? "Internet from commands is off in this workshop.\n"
-              : "") +
-          (overQuota ? `${overQuota}\n` : "") +
-          `Output (${result.outputBytes.toLocaleString("en-US")} bytes${cut && sink ? `; the whole output is kept: bash_output id ${sink.id}` : ""}):\n${shown}`
-        return {
-          text,
-          isError: failed(result),
-          effects: [
-            {
-              kind: "shell.run",
-              targetKind: commandKind,
-              targetId: cwd,
-              title: `Ran \`${short}\` in ${cwd}${counts.length ? `: ${counts.join(", ")}` : ""}`,
-              undo: null
-            }
-          ]
-        }
+        )
       })
     )
   }
@@ -1441,7 +1758,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
             text: `No background command has the id ${id}. Background commands end when the app restarts.`
           }
         if (job.ended) return { text: `${id} had already ended: ${job.ended.text.trimEnd()}` }
-        job.controller.abort()
+        job.stoppedByTool = true
+        job.live.controller.abort()
         yield* Effect.promise(() => Promise.race([job.done, new Promise((r) => setTimeout(r, 10_000))]))
         return {
           text: `Stopped ${id}.${job.ended ? `\n${(job.ended as { text: string }).text.trimEnd()}` : ""}`,
@@ -1547,29 +1865,49 @@ export const makeFileTools = (deps: FileToolDeps) => {
   // that the copy it hands the subagent is a folder of the user's Files. Hooks don't run.
   const GIT = "git -c core.hooksPath=/dev/null -c core.fsmonitor=false"
 
-  /** Runs one of the copies' scripts in the sandbox: its output lines; a failure says why. */
-  const copyScript = (env: AccountEnv, script: string, timeoutMs: number) =>
+  /**
+   * Runs one of the copies' scripts in the sandbox: its output lines; a failure says why. It is a
+   * running command like any other (files4afix): Reset waits for it, and it stops with the app or
+   * when the account, or the workshop's Run commands (`chatId`), is taken away.
+   */
+  const copyScript = (env: AccountEnv, script: string, timeoutMs: number, chatId: string | null) =>
     Effect.gen(function* () {
       const selected = yield* sandboxFor()
       if (typeof selected === "string")
         return yield* Effect.fail(new ToolInputRefused(`Copies need commands, which can't run here: ${selected}`))
+      yield* Effect.try({ try: () => enter(env.userId), catch: (error) => error })
+      const entry: Live = {
+        userId: env.userId,
+        chatId,
+        unsandboxed: false,
+        host: null,
+        shares: [],
+        controller: new AbortController(),
+        stopped: null
+      }
       const result = yield* Semaphore.withPermit(instance)(
         Semaphore.withPermit(accountPermits(env.userId))(
-          attempt((signal) =>
-            selected.run(
-              {
-                command: script,
-                cwd: FILES_MOUNT,
-                mounts: accountMounts(env),
-                env: commandEnv(),
-                network: "none",
-                limits: { ...limits.run, timeoutMs }
-              },
-              signal
-            )
-          )
+          Effect.suspend(() => {
+            live.add(entry)
+            return attempt((signal) => {
+              signal.addEventListener("abort", () => entry.controller.abort(), { once: true })
+              if (signal.aborted) entry.controller.abort()
+              return selected.run(
+                {
+                  command: script,
+                  cwd: FILES_MOUNT,
+                  mounts: accountMounts(env),
+                  env: commandEnv(),
+                  network: "none",
+                  limits: { ...limits.run, timeoutMs }
+                },
+                entry.controller.signal
+              )
+            })
+          })
         )
-      )
+      ).pipe(Effect.ensuring(Effect.sync(() => (live.delete(entry), leave(env.userId)))))
+      if (entry.stopped !== null) return { ok: false, lines: [] as Array<string> }
       const lines = `${result.head}${result.tail}`.split("\n").map((line) => line.trim())
       return { ok: result.exitCode === 0 && !result.timedOut, lines }
     })
@@ -1635,7 +1973,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
           `  ${GIT} -C "$top" ls-tree -r -l HEAD | awk '{ if ($4 ~ /^[0-9]+$/) s += $4 } END { print s + 0 }'`,
           `else echo files; du -sb --exclude=${COPIES} "$from" | cut -f1; fi`
         ].join("\n"),
-        120_000
+        120_000,
+        ctx.chatId
       )
       const [kind, ...rest] = probe.lines.filter((line) => line !== "")
       if (!probe.ok || (kind !== "git" && kind !== "files"))
@@ -1663,7 +2002,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
         isGit
           ? `mkdir -p ${q(`${FILES_MOUNT}/${COPIES}`)} && ${GIT} -C ${q(top)} worktree add --quiet -b ${q(branch)} ${q(path)} ${q(base)}`
           : `mkdir -p ${q(path)} && tar -C ${q(source)} --exclude=./${COPIES} -cf - . | tar -C ${q(path)} -xf -`,
-        600_000
+        600_000,
+        ctx.chatId
       )
       if (!made.ok) {
         yield* removeCopy(env, { path, from: source, kind: isGit ? "git" : "files", ...(isGit ? { top, branch } : {}) })
@@ -1689,7 +2029,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
           : "",
         `rm -rf -- "$dest"; rmdir ${q(`${FILES_MOUNT}/${COPIES}`)} 2>/dev/null; [ ! -e "$dest" ] && echo removed`
       ].join("\n"),
-      120_000
+      120_000,
+      null
     ).pipe(Effect.map((out) => out.lines.includes("removed")))
 
   /**
@@ -1709,7 +2050,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
             ? `st=$(${GIT} -C "$dest" status --porcelain --untracked-files=all) || { echo changed; exit 0; }\nhead=$(${GIT} -C "$dest" rev-parse HEAD) || { echo changed; exit 0; }\nif [ -z "$st" ] && [ "$head" = ${q(copy.base ?? "")} ]; then echo same; else echo changed; fi`
             : `if diff -rq --no-dereference -x ${COPIES} ${q(copy.from)} "$dest" >/dev/null 2>&1; then echo same; else echo changed; fi`
         ].join("\n"),
-        300_000
+        300_000,
+        null
       )
       if (check.lines.includes("gone")) return false
       if (!check.ok || !check.lines.includes("same")) return true
@@ -1744,7 +2086,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
           `if ${GIT} -C "$top" rev-parse --verify -q "refs/heads/$branch" >/dev/null; then ${GIT} -C "$top" worktree add --quiet "$dest" "$branch" || exit 1; echo kept`,
           `else ${GIT} -C "$top" worktree add --quiet -b "$branch" "$dest" ${q(copy.base ?? "HEAD")} || exit 1; echo made; fi`
         ].join("\n"),
-        600_000
+        600_000,
+        ctx.chatId
       )
       if (!made.ok || !made.lines.some((line) => line === "kept" || line === "made"))
         return yield* Effect.fail(new ToolInputRefused("The copy couldn't be made again."))
@@ -1768,19 +2111,25 @@ export const makeFileTools = (deps: FileToolDeps) => {
     const selected = await selectSandbox(deps.sandboxes, deps.sandboxId)
     if (!("sandbox" in selected)) return null
     const env = accountEnv(deps, userId)
-    await prepareAccount(env)
-    const source = deps.appSource ? await deps.appSource().catch(() => null) : null
-    return selected.sandbox.run(
-      {
-        command,
-        cwd,
-        mounts: accountMounts(env, source),
-        env: commandEnv(),
-        network: "none",
-        limits: { ...limits.run, timeoutMs: 60_000 }
-      },
-      AbortSignal.timeout(70_000)
-    )
+    // Counted like any command: Reset waits for it, and it waits for Reset.
+    enter(userId)
+    try {
+      await prepareAccount(env)
+      const source = deps.appSource ? await deps.appSource().catch(() => null) : null
+      return await selected.sandbox.run(
+        {
+          command,
+          cwd,
+          mounts: accountMounts(env, source),
+          env: commandEnv(),
+          network: "none",
+          limits: { ...limits.run, timeoutMs: 60_000 }
+        },
+        AbortSignal.timeout(70_000)
+      )
+    } finally {
+      leave(userId)
+    }
   }
 
   return {
@@ -1789,27 +2138,43 @@ export const makeFileTools = (deps: FileToolDeps) => {
     runQuiet,
     /**
      * Empties the account's home folder for commands (§3.6 Reset); refused while one of its
-     * commands runs. Its files stay.
+     * commands runs (any kind, counted from the call's start), and no command starts until it's
+     * done. Its files stay.
      */
     resetHome: (userId: string) =>
-      Effect.gen(function* () {
-        if ((running.get(userId) ?? 0) > 0)
-          return yield* Effect.fail(new FilePathRefused("Commands are running. Wait for them, or stop them, first."))
+      Effect.suspend(() => {
+        // Checked and marked together, with nothing in between.
+        if ((running.get(userId) ?? 0) > 0 || resetting.has(userId))
+          return Effect.fail(new FilePathRefused("Commands are running. Wait for them, or stop them, first."))
+        resetting.add(userId)
         const env = accountEnv(deps, userId)
-        yield* attempt(() => prepareAccount(env))
-        yield* attempt(async () => {
-          const dir = await openFolder(env.home, [])
-          try {
-            for (const name of await readdir(`/proc/self/fd/${dir.fd}`)) await removeTreeAt(dir, name)
-          } finally {
-            await dir.close()
-          }
-        })
+        return Effect.gen(function* () {
+          yield* attempt(() => prepareAccount(env))
+          yield* attempt(async () => {
+            const dir = await openFolder(env.home, [])
+            try {
+              for (const name of await readdir(`/proc/self/fd/${dir.fd}`)) await removeTreeAt(dir, name)
+            } finally {
+              await dir.close()
+            }
+          })
+        }).pipe(Effect.ensuring(Effect.sync(() => resetting.delete(userId))))
       }),
     /** Stops every background command (the app is stopping). */
     stopAll: () => {
-      for (const job of runningJobs()) job.controller.abort()
+      for (const job of runningJobs()) job.live.controller.abort()
+      // Foreground commands and the app's own for subagents' copies too.
+      for (const entry of live) entry.controller.abort()
     },
+    /**
+     * Checks running commands (of these accounts, else all) again and stops those whose account,
+     * workshop grant, host folder or shared folders no longer allow them; forgets ended
+     * background commands whose output is gone. Answers how many were stopped.
+     */
+    recheckCommands: (userIds?: ReadonlyArray<string>, now = Date.now()) =>
+      Effect.sync(() => pruneJobs(now)).pipe(Effect.andThen(live.size ? recheck(userIds) : Effect.succeed(0))),
+    /** Background commands the app remembers, running or ended (for tests and the log). */
+    jobCount: () => jobs.size,
     tools: [
       readTool,
       listTool,

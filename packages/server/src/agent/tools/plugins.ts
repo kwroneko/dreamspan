@@ -1,7 +1,7 @@
 import { toolData } from "../toolData.ts"
 import { builtinCopyStem } from "@dreamspan/shared/builtinParts.ts"
 // Workshop plugin tools: registered by the host, never generic RPC exposures. Loading grants no authority.
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { Type, type TSchema } from "@earendil-works/pi-ai"
 import { Effect, Semaphore } from "effect"
 import type { User } from "@dreamspan/shared/domain.ts"
@@ -15,7 +15,7 @@ import { repoTask } from "../../plugins/repoTask.ts"
 import type { AuthorRequest, AuthorResult } from "../../plugins/authorRepo.ts"
 import { checkPlugin } from "../../plugins/check.ts"
 import { appSource, pluginApiDocs } from "../../plugins/reference.ts"
-import { argsDigest } from "../approvals.ts"
+import { argsDigest, argumentRows } from "../approvals.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
 import { builtinCopy, builtinCopyListing } from "../../plugins/builtins.ts"
 import type { PluginWorkingCopy } from "../pluginWorkingCopies.ts"
@@ -85,6 +85,25 @@ const targetOf = (value: unknown): Target => {
 }
 const data = toolData
 const refused = (message: string) => new PluginRejected({ message })
+/**
+ * A commit of an instance plugin's working copy (spec/FILES-AND-ENVIRONMENT.md §5.3): the copy
+ * sits in the admin's Files, which commands change, so it becomes server code only with the
+ * admin's own approval of this exact call, after seeing its diff; never allowed in advance.
+ */
+const commitsServerCopy = (args: Record<string, unknown>) => {
+  if (args.from !== "files") return false
+  try {
+    return targetOf(args.plugin).scope === "instance"
+  } catch {
+    return false
+  }
+}
+const treeDigest = (files: Record<string, string>) =>
+  createHash("sha256")
+    .update(JSON.stringify(Object.entries(files).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))))
+    .digest("hex")
+/** The diff shown for a commit from a working copy: at most this many files, each in full. */
+const COMMIT_DIFF_FILES = 64
 export interface PluginAuthorDeps {
   readonly host: Omit<PluginHost["Service"], "undoEffect">
   readonly lock: Semaphore.Semaphore
@@ -117,6 +136,8 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
   const operationKey = (ctx: ToolContext, args: Args) =>
     `${String(ctx.cache.get("plugin:journalIdentity") ?? ctx.rolloutId)}:${ctx.toolCallId}:${argsDigest(args)}`
   const preparedKey = (ctx: ToolContext) => `plugin:consent:${ctx.toolCallId}`
+  /** The working copy's files as shown in a commit's question, by digest. */
+  const commitFilesKey = (ctx: ToolContext) => `plugin:commitFiles:${ctx.toolCallId}`
   const attempt = <A>(f: () => Promise<A>) =>
     Effect.tryPromise({
       try: f,
@@ -214,6 +235,48 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
       })
       return { text: saved, dataOnly: true as const }
     })
+  /** The question for a commit of a server plugin's working copy: every file it changes, before and after. */
+  const describeCommitFromFiles = (ctx: ToolContext, args: Args) =>
+    Semaphore.withPermit(deps.lock)(
+      Effect.gen(function* () {
+        const actor = yield* proof(ctx, "plugins.write", false, true)
+        const target = targetOf(args.plugin)
+        const owner = ownerOf(actor, target)
+        const copy = copyOf()
+        if (!copy) return yield* refused("There's no working copy in your files here.")
+        const files = yield* copy.read(actor, target).pipe(Effect.mapError((error) => refused(error.message)))
+        const saved = yield* treeOf(owner, target.id)
+        const paths = [...new Set([...Object.keys(saved), ...Object.keys(files)])]
+          .filter((path) => saved[path] !== files[path])
+          .sort()
+        ctx.cache.set(commitFilesKey(ctx), treeDigest(files))
+        const shown = paths.slice(0, COMMIT_DIFF_FILES)
+        return {
+          title: `Save the working copy of ${target.id} as server code?`,
+          rows: [
+            { label: "Plugin", value: target.id },
+            { label: "From", value: copy.where(target) },
+            { label: "Message", value: String(args.message ?? "") },
+            {
+              label: "Files changed",
+              value:
+                paths.length === 0
+                  ? "None"
+                  : `${paths.length}${paths.length > shown.length ? ` (the first ${shown.length} are shown)` : ""}`
+            },
+            { label: "Then", value: "Nothing runs until the plugin is turned on, which asks again." }
+          ],
+          changes: shown.map((path) => ({ field: path, before: saved[path] ?? "", after: files[path] ?? "" })),
+          once: true as const
+        }
+      })
+    ).pipe(
+      Effect.mapError((error) =>
+        error instanceof PluginRejected || error instanceof ToolInputRefused
+          ? new ToolInputRefused(error.message)
+          : new ToolInputRefused("This commit couldn't be shown safely.")
+      )
+    )
   const describeEnable = (ctx: ToolContext, args: Args) =>
     Semaphore.withPermit(deps.lock)(
       Effect.gen(function* () {
@@ -284,7 +347,12 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
       execute: (ctx, args) =>
         Semaphore.withPermit(deps.lock)(
           Effect.gen(function* () {
-            const actor = yield* proof(ctx, capability, id === "plugin_enable", id === "plugin_rollback")
+            const actor = yield* proof(
+              ctx,
+              capability,
+              id === "plugin_enable" || (id === "plugin_commit" && commitsServerCopy(args)),
+              id === "plugin_rollback"
+            )
             return yield* run(ctx, args, actor)
           })
         ).pipe(
@@ -571,9 +639,15 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
             "This plugin has changes made with plugin_write or plugin_edit that aren't committed. Commit them first (plugin_commit without from), then commit the working copy."
           )
       }
+      // A server plugin's copy: only this exact call, approved by the admin, with the files shown.
+      const serverCopy = fromFiles && target.scope === "instance"
+      if (serverCopy && ctx.approvalDigest !== argsDigest({ tool: "plugin_commit", capability: "plugins.write", args }))
+        return yield* refused("Committing a server plugin's working copy needs your approval of this exact call.")
       const files = fromFiles
         ? yield* copy!.read(actor, target).pipe(Effect.mapError((error) => refused(error.message)))
         : undefined
+      if (serverCopy && (!files || ctx.cache.get(commitFilesKey(ctx)) !== treeDigest(files)))
+        return yield* refused("The working copy changed after you were asked. Commit it again to see the new changes.")
       const request: AuthorRequest = {
         ...args,
         action,
@@ -628,8 +702,15 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
         })
       )
     },
-    "Commit the plugin working tree. Nothing is enabled. Undo creates a revert commit; it never runs the old code. After every change to the repository, the working copy in your files is updated to match; the result says when that replaced changes made there.",
-    mutate("commit")
+    'Commit the plugin working tree. Nothing is enabled. Undo creates a revert commit; it never runs the old code. After every change to the repository, the working copy in your files is updated to match; the result says when that replaced changes made there. Committing a server plugin\'s working copy (from: "files") always asks the admin first, with the changes.',
+    mutate("commit"),
+    {
+      alwaysAsk: commitsServerCopy,
+      describe: (ctx, args) =>
+        commitsServerCopy(args)
+          ? describeCommitFromFiles(ctx, args)
+          : Effect.succeed({ title: `Save a version of ${String(args.plugin ?? "")}?`, rows: argumentRows(args) })
+    }
   )
   add(
     "plugin_check",

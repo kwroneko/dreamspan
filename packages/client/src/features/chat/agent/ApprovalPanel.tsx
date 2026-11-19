@@ -189,7 +189,7 @@ export function ApprovalPanel({ step, version }: StepActionProps) {
         >
           {rerun ? "Run it again" : approval.plugin ? "Turn on" : "Allow"}
         </Button>
-        {!rerun && !approval.plugin && approval.capability !== "plugins.apply" && (
+        {!rerun && !approval.plugin && !approval.once && approval.capability !== "plugins.apply" && (
           <Button
             pending={answering === "allow_chat"}
             disabled={busy}
