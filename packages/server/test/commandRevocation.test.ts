@@ -10,7 +10,10 @@
 // - ended background commands are forgotten with their output;
 // - a `Shared` in Files that isn't a folder is refused with a plain message;
 // - shares of the server plugins' working copies never resolve;
-// - Reset and commands exclude each other.
+// - Reset and commands exclude each other;
+// - a subagent in its own copy reads the workshop's shared folders but writes only in its copy;
+// - the app's commands for subagents' copies are running commands: Reset waits for them, and
+//   revocation and the app's stop end them.
 // Synthetic data only.
 import { mkdir, readFile, rename, symlink, writeFile, stat } from "node:fs/promises"
 import { existsSync } from "node:fs"
@@ -30,6 +33,7 @@ import { makeCommandOutputs } from "../src/files/commandOutput.ts"
 import { linuxBwrap } from "../src/sandbox/linuxBwrap.ts"
 import { noSandbox } from "../src/sandbox/none.ts"
 import type { RolloutTool, ToolContext, ToolOutput } from "../src/agent/tools.ts"
+import type { CommandSandbox, RunResult } from "../src/sandbox/registry.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 const commands = (await linuxBwrap.available()).ok
@@ -46,7 +50,49 @@ interface Share {
   mode: "view" | "edit"
 }
 
-const world = (options: { backgroundPerAccount?: number; allowUnsandboxed?: boolean } = {}) => {
+/**
+ * A sandbox whose commands run until they're stopped, so a test can act while one runs; `started`
+ * resolves at each start.
+ */
+const heldSandbox = () => {
+  let started: () => void = () => undefined
+  const next = () => new Promise<void>((resolve) => (started = resolve))
+  let waiting = next()
+  const sandbox = {
+    ...linuxBwrap,
+    id: "held",
+    available: async () => ({ ok: true as const }),
+    run: (_spec: unknown, signal: AbortSignal) =>
+      new Promise<RunResult>((resolve) => {
+        const end = () =>
+          resolve({
+            exitCode: null,
+            timedOut: false,
+            outputCapped: false,
+            head: "",
+            tail: "",
+            outputBytes: 0,
+            cwd: null,
+            durationMs: 1
+          })
+        signal.addEventListener("abort", end, { once: true })
+        if (signal.aborted) end()
+        started()
+      })
+  } as CommandSandbox
+  return {
+    sandbox,
+    /** Resolves once a command started since the last call. */
+    started: async () => {
+      await waiting
+      waiting = next()
+    }
+  }
+}
+
+const world = (
+  options: { backgroundPerAccount?: number; allowUnsandboxed?: boolean; sandbox?: CommandSandbox } = {}
+) => {
   const dataDir = tempDir("cmdfix")
   const filesDir = join(dataDir, "files")
   const homesDir = join(dataDir, "env-home")
@@ -118,7 +164,7 @@ const world = (options: { backgroundPerAccount?: number; allowUnsandboxed?: bool
     },
     wrote: () => undefined
   } as unknown as FilesQuota
-  const sandboxes = [linuxBwrap, noSandbox]
+  const sandboxes = [...(options.sandbox ? [options.sandbox] : []), linuxBwrap, noSandbox]
   const files = makeFileTools({
     dataDir,
     filesDir,
@@ -145,9 +191,32 @@ const world = (options: { backgroundPerAccount?: number; allowUnsandboxed?: bool
   })
   const tool = (id: string) => files.tools.find((t) => t.id === id)! as unknown as RolloutTool<Record<string, unknown>>
   let calls = 0
-  const run = (userId: string, id: string, args: Record<string, unknown>, cache = new Map<string, unknown>()) =>
+  const context = (userId: string, workspace?: { start: string; root?: string }) =>
+    ({
+      userId,
+      chatId: `chat-${userId}`,
+      forkId: null,
+      slotId: "slot",
+      versionId: "version",
+      rolloutId: `run-${userId}`,
+      toolCallId: `call-${++calls}`,
+      leafSlotId: null,
+      viewers: null,
+      reader,
+      writer,
+      cache: new Map<string, unknown>(),
+      ...(workspace ? { workspace } : {})
+    }) as unknown as ToolContext
+  const run = (
+    userId: string,
+    id: string,
+    args: Record<string, unknown>,
+    cache = new Map<string, unknown>(),
+    workspace?: { start: string; root?: string }
+  ) =>
     tool(id).execute(
       {
+        ...(workspace ? { workspace } : {}),
         userId,
         chatId: `chat-${userId}`,
         forkId: null,
@@ -190,7 +259,7 @@ const world = (options: { backgroundPerAccount?: number; allowUnsandboxed?: bool
       }
       return "still running"
     })
-  return { files, state, versions, changed, quotaCalls, run, root, share, idOf, ended, dataDir }
+  return { files, state, versions, changed, quotaCalls, run, context, root, share, idOf, ended, dataDir }
 }
 
 it.live.skipIf(!commands)(
@@ -396,4 +465,75 @@ it.live.skipIf(!commands)(
       assert.isTrue(out.text.includes("being reset") || marker, out.text)
     }),
   120_000
+)
+
+it.live.skipIf(!commands)(
+  "a subagent in its own copy reads the workshop's shared folders, and writes only in its copy",
+  () =>
+    Effect.gen(function* () {
+      const w = world()
+      yield* Effect.promise(async () => {
+        await w.share("view")
+        await mkdir(join(w.root("ben"), ".subagents/c1"), { recursive: true })
+        await writeFile(join(w.root("ben"), "top.txt"), "mine\n")
+      })
+      const copy = { start: "/files/.subagents/c1", root: "/files/.subagents/c1" }
+      const call = (id: string, args: Record<string, unknown>) =>
+        w.run("ben", id, args, new Map(), copy).pipe(
+          Effect.map((out) => out.text),
+          Effect.catch((error) => Effect.succeed(`refused: ${String((error as Error).message ?? error)}`))
+        )
+      // The folder shared with the account, as the workshop reads it.
+      assert.include(yield* call("read_file", { path: "/files/Shared/mara/notes/a.txt" }), "first")
+      // The rest of the account's Files stays outside the copy, for reading and writing.
+      assert.include(yield* call("read_file", { path: "/files/top.txt" }), "outside your copy")
+      assert.include(yield* call("write_file", { path: "/files/new.txt", content: "x" }), "outside your copy")
+      // A shared folder is only read by the file tools, as in the workshop.
+      assert.include(
+        yield* call("write_file", { path: "/files/Shared/mara/notes/b.txt", content: "x" }),
+        "only read it"
+      )
+      assert.notInclude(
+        yield* call("write_file", { path: "/files/.subagents/c1/x.txt", content: "x" }),
+        "outside your copy"
+      )
+      assert.strictEqual(yield* Effect.promise(() => readFile(join(w.root("ben"), ".subagents/c1/x.txt"), "utf8")), "x")
+      // Once the share is stopped, the subagent doesn't see it either.
+      w.state.shares = []
+      assert.notInclude(yield* call("read_file", { path: "/files/Shared/mara/notes/a.txt" }), "first")
+    }),
+  120_000
+)
+
+it.live("the app's commands for subagents' copies are running commands: Reset, revocation and the app's stop", () =>
+  Effect.gen(function* () {
+    const held = heldSandbox()
+    const w = world({ sandbox: held.sandbox })
+    yield* Effect.promise(() => mkdir(join(w.root("ben"), "notes"), { recursive: true }))
+    // Making a copy: Reset waits, and Run commands turned off in its workshop stops it.
+    const making = Effect.runPromise(Effect.exit(w.files.workspaces.makeCopy(w.context("ben"), "c1", "/files/notes")))
+    yield* Effect.promise(() => held.started())
+    const busy = yield* w.files.resetHome("ben").pipe(Effect.flip)
+    assert.include(String((busy as Error).message), "Commands are running")
+    w.state.grants.set("commands", "off")
+    assert.strictEqual(yield* w.files.recheckCommands(["ben"]), 1)
+    w.state.grants.delete("commands")
+    const made = yield* Effect.promise(() => making)
+    assert.strictEqual(made._tag, "Failure")
+    // Checking a copy after the call (no workshop): the account turned off stops it.
+    const record = { path: "/files/.subagents/c2", from: "/files/notes", kind: "files" as const }
+    const checking = Effect.runPromise(w.files.workspaces.finishCopy("ben", record))
+    yield* Effect.promise(() => held.started())
+    w.state.disabled.add("ben")
+    assert.strictEqual(yield* w.files.recheckCommands(["ben"]), 1)
+    w.state.disabled.delete("ben")
+    // A copy that couldn't be checked stays.
+    assert.isTrue(yield* Effect.promise(() => checking))
+    // The app's stop ends one too, and Reset can run after.
+    const again = Effect.runPromise(w.files.workspaces.finishCopy("ben", record))
+    yield* Effect.promise(() => held.started())
+    w.files.stopAll()
+    assert.isTrue(yield* Effect.promise(() => again))
+    yield* w.files.resetHome("ben")
+  })
 )
