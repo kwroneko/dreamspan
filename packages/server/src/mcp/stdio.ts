@@ -113,8 +113,8 @@ export class OutputRing {
    * what is shown, whoever reads it, including values the owner has since replaced.
    */
   private secrets = requestSecrets()
-  keepSecrets(values: Iterable<string>) {
-    for (const value of values) this.secrets.add(value)
+  keepSecrets(env: Readonly<Record<string, string>>) {
+    this.secrets.variables(env)
   }
   push(chunk: Buffer) {
     this.touchedAt = Date.now()

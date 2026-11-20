@@ -2,7 +2,7 @@
 // real credentials always, and never ordinary text such as a provider's own link or a word that
 // happens to be a non-credential header's value. Synthetic values only.
 import { assert, describe, it } from "@effect/vitest"
-import { makeScrub, requestSecrets, secretLike } from "../src/providers/Providers.ts"
+import { incidentalSecret, makeScrub, requestSecrets } from "../src/providers/Providers.ts"
 
 const providerLink = "Give it once at https://acme.example/consents?model=acme-large-2"
 
@@ -74,23 +74,41 @@ describe("a request's secret inventory", () => {
     )
   })
 
-  it("never scrubs a short value, a host name or a plain word, even as a key", () => {
+  it("always scrubs a credential by where it came from, short or a plain word", () => {
     const inventory = requestSecrets()
-    for (const value of ["acme", "acme-123", "acme.example", "api.acme.example", "Organization", "consentsmodel"])
-      inventory.add(value)
-    inventory.headers({ "x-api-key": "acme", Authorization: "Bearer acme" })
-    inventory.route("https://acme.example/acme/v1?key=acme")
-    assert.strictEqual(inventory.scrub(providerLink), providerLink)
-    assert.strictEqual(makeScrub(["acme", "short-key"])(providerLink), providerLink)
+    const password = "pw7x2q"
+    const key = "acmekeys"
+    inventory.add(key)
+    inventory.add(`http://proxyuser:${password}@proxy.acme.example:3128`)
+    inventory.headers({ "x-api-key": "zeta", Authorization: "Bearer gamma" })
+    inventory.route("https://acme.example/v1?api_key=omega")
+    inventory.variables({ NOTES_TOKEN: "delta", LOG_LEVEL: "debug", DATA_DIR: "local-notes-archive" })
+    const scrubbed = inventory.scrub(
+      `proxy proxyuser said ${password}; key ${key}; zeta gamma omega delta; level debug in local-notes-archive`
+    )
+    for (const secret of [password, key, "proxyuser", "zeta", "gamma", "omega", "delta"])
+      assert.notInclude(scrubbed, secret)
+    // A variable not named like a credential is kept only if it looks like one.
+    assert.include(scrubbed, "level debug in local-notes-archive")
+    assert.strictEqual(makeScrub([key])(`the ${key} key`), "the [redacted] key")
   })
 
-  it("judges values by length, shape and position", () => {
-    assert.isTrue(secretLike("sk-acme-3f9a1c7e5b2d"))
-    assert.isTrue(secretLike("synthetic-route-user"))
-    assert.isFalse(secretLike("eleven-char"))
-    assert.isFalse(secretLike("api.acme.example"))
-    assert.isFalse(secretLike("Organization"))
-    assert.isFalse(secretLike("openai-compatible", true))
-    assert.isTrue(secretLike("acme-route-key-a81f", true))
+  it("never scrubs a 1–3 character fragment, or a plain route name or host of an address", () => {
+    const inventory = requestSecrets()
+    inventory.add("ab")
+    inventory.headers({ "x-api-key": "k9", Authorization: "Bearer xyz" })
+    inventory.route("https://acme.example/acme/openai-compatible/v1?model=acme-large")
+    assert.strictEqual(inventory.scrub(providerLink), providerLink)
+    assert.strictEqual(inventory.scrub("about the xyz k9 tab"), "about the xyz k9 tab")
+    assert.strictEqual(makeScrub(["ab", "k9"])(providerLink), providerLink)
+  })
+
+  it("judges values that aren't credentials by origin by length and shape", () => {
+    assert.isTrue(incidentalSecret("sk-acme-3f9a1c7e5b2d"))
+    assert.isTrue(incidentalSecret("acme-route-key-a81f"))
+    assert.isFalse(incidentalSecret("eleven-ch4r"))
+    assert.isFalse(incidentalSecret("api.acme.example"))
+    assert.isFalse(incidentalSecret("Organization"))
+    assert.isFalse(incidentalSecret("openai-compatible"))
   })
 })

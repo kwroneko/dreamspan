@@ -110,16 +110,16 @@ describe("a local program's transport", () => {
 describe("a local program's error output", () => {
   it("shows its owner's variables' values scrubbed, and never half a line cut at the start", () => {
     const ring = new OutputRing()
-    ring.keepSecrets(["ghp-secret-token-value"])
+    ring.keepSecrets({ GITHUB_TOKEN: "ghp-secret-token-value" })
     ring.line("config: token=ghp-secret-token-value")
     assert.notInclude(ring.text(), "ghp-secret-token-value")
     assert.include(ring.text(), "token=[redacted]")
     // Replaced values stay scrubbed in what was written before.
-    ring.keepSecrets(["another-secret"])
+    ring.keepSecrets({ GITHUB_TOKEN: "another-secret" })
     assert.notInclude(ring.text(), "ghp-secret-token-value")
     // Past the 64 KiB kept, the cut line goes whole.
     const cut = new OutputRing()
-    cut.keepSecrets(["ABCDEFGHIJ"])
+    cut.keepSecrets({ API_KEY: "ABCDEFGHIJ" })
     cut.push(Buffer.from(`ABCDEFGHIJ${"y".repeat(64 * 1024 - 5)}\nnext line\n`))
     assert.strictEqual(cut.text(), "next line\n")
   })

@@ -744,7 +744,7 @@ export const layer = Layer.effect(
                 .decrypt(resolved.envEnc, envBinding(connection.id))
                 .pipe(Effect.mapError((error) => new McpRefused({ message: error.message })))
         const env = envJson === null ? {} : (JSON.parse(envJson) as Record<string, string>)
-        for (const value of Object.values(env)) inventory.add(value)
+        inventory.variables(env)
         return {
           connection,
           url: null,
@@ -845,7 +845,7 @@ export const layer = Layer.effect(
         const startProgram = (local: NonNullable<McpPrepared["program"]>) => {
           // What it writes to stderr is shown without the owner's variables' values.
           const output = programs.outputOf(connection.id, userId)
-          output.keepSecrets(Object.values(local.env))
+          output.keepSecrets(local.env)
           return new ProgramTransport(
             () => programs.start({ connectionId: connection.id, userId, argv: local.argv, env: local.env }),
             output
