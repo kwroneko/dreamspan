@@ -2,7 +2,7 @@
 // placement follows the width, as a plugin's can.
 import type { CacheWarmth } from "@dreamspan/shared/inspectorApi.ts"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cacheNotes, cacheState, compactTokens } from "../src/features/chat/CacheIndicator.tsx"
+import { cacheNotes, cacheState, compactTokens, uncachedText } from "../src/features/chat/CacheIndicator.tsx"
 import {
   availableComposerControls,
   composerControls,
@@ -54,6 +54,12 @@ describe("the cache chip", () => {
       tokens: 2_926,
       why: "More than 5 minutes passed since the last request, so the provider's cache has expired."
     })
+  })
+
+  it("shows the uncached count out of the next request's total when it's known", () => {
+    expect(uncachedText(7_046, 7_046)).toBe("↻ 7.0k of 7.0k uncached")
+    expect(uncachedText(2_926, 96_906)).toBe("↻ 2.9k of 97k uncached")
+    expect(uncachedText(2_926, undefined)).toBe("↻ 2.9k uncached")
   })
 
   it("shows nothing when the estimate rounds to 0, or without a TTL and with nothing changed", () => {

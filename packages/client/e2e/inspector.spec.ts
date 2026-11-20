@@ -294,7 +294,9 @@ test("an earlier reply and a swipe each open their own request from the message'
   await expect(messages.getByText("The bell rang twice.", { exact: true })).toBeVisible()
 })
 
-test("the cache indicator is warm after a reply, and cold once an earlier message is edited", async ({ page }) => {
+test("the cache indicator is warm after a reply, and cold once an earlier message is edited", async ({
+  page
+}, info) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chat.id}`)
   const chip = cacheChip(page)
@@ -319,13 +321,23 @@ test("the cache indicator is warm after a reply, and cold once an earlier messag
   await mine.getByRole("button", { name: "Edit" }).click()
   await mine.getByLabel("Message text").fill("The road washed out.")
   await mine.getByRole("button", { name: "Save" }).click()
-  await expect(chip).toHaveAccessibleName(/^Cache: [\d,]+ tokens uncached on the next reply/)
-  await expect(chip).toHaveText(/^↻ [\d.]+k? uncached$/)
+  await expect(chip).toHaveAccessibleName(/^Cache: [\d,]+ of [\d,]+ tokens uncached on the next reply/)
+  await expect(chip).toHaveText(/^↻ [\d.]+k? of [\d.]+k? uncached$/)
   await chip.click()
   const cold = page.getByRole("dialog", { name: "Not cached", exact: true })
-  await expect(cold).toContainText(/Your next reply re-sends about [\d,]+ tokens at full price/)
+  await expect(cold).toContainText(/Your next reply re-sends about [\d,]+ of its [\d,]+ tokens at full price/)
   await expect(cold).toContainText("Why: Message 2 was")
   await shoot(page, "cache-cold")
+  if (process.env.LAYOUT_AUDIT) {
+    await page.keyboard.press("Escape")
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      await expect(chip).toHaveText(/^↻ [\d.]+k? of [\d.]+k? uncached$/)
+      await expectLayout(page, info, `cache-cold-composer-${width}`, {
+        scope: '.chat-column:has([data-testid="composer"])'
+      })
+    }
+  }
 })
 
 test("the inspector fits a phone's width", async ({ page }) => {

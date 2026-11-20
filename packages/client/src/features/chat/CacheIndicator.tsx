@@ -107,6 +107,12 @@ export const cacheState = (warmth: CacheWarmth | null, now: number): Shown => {
       }
 }
 
+/** The chip's uncached count, out of the next request's total when it's known. */
+export const uncachedText = (tokens: number, total: number | undefined) =>
+  total === undefined
+    ? `↻ ${compactTokens(tokens)} uncached`
+    : `↻ ${compactTokens(tokens)} of ${compactTokens(total)} uncached`
+
 /** How long the chip waits after a reply for the estimate that follows it (one that fails never comes). */
 const AFTER_REPLY_MS = 30_000
 
@@ -204,15 +210,19 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
     }
   }
   const left = warm && countdown ? clock(expiresAt - now) : null
+  // The next request's estimated size, as the history note gives it; never below its uncached part.
+  const counted = view.history?.budget?.countedInput
+  const total = shown?.kind === "uncached" && counted !== undefined ? Math.max(counted, shown.tokens) : undefined
+  const ofTotal = total === undefined ? "" : ` of ${total.toLocaleString()}`
   const text =
     shown?.kind === "uncached"
-      ? `↻ ${compactTokens(shown.tokens)} uncached`
+      ? uncachedText(shown.tokens, total)
       : warm
         ? `Cache warm${left ? ` ${left}` : ""}`
         : `↻ ${notes[0]!.short}`
   const label =
     shown?.kind === "uncached"
-      ? `Cache: ${shown.tokens.toLocaleString()} tokens uncached on the next reply. Why`
+      ? `Cache: ${shown.tokens.toLocaleString()}${ofTotal} tokens uncached on the next reply. Why`
       : warm
         ? `Cache warm${left ? `, ${left} left` : ""}. Details`
         : `Cache: ${notes[0]!.text}`
@@ -236,7 +246,8 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
         {shown?.kind === "uncached" && (
           <>
             <p>
-              Your next reply re-sends about {shown.tokens.toLocaleString()} tokens at full price, instead of reading
+              Your next reply re-sends about {shown.tokens.toLocaleString()}
+              {total === undefined ? "" : ` of its ${total.toLocaleString()}`} tokens at full price, instead of reading
               them from the provider's cache.
             </p>
             <p className="text-muted">Why: {shown.why}</p>
