@@ -131,6 +131,30 @@ test.describe("model picker catalog layout", () => {
         await page.goto(`${server.url}/chats/${chatId}`)
         await modelChip(page).click()
         await expect(page.getByRole("radiogroup", { name: "Model", exact: true })).toBeVisible()
+        // A pinned model's pin reads as on (owner, 2026-11-20): pressed, filled and in the accent,
+        // where an unpinned one is an outline in muted text. The pin outlives the test, so the
+        // later viewports find it already set.
+        const picker = page.locator("[data-model-picker]")
+        const pinned = picker.getByRole("button", { name: /^Unpin / }).first()
+        if ((await picker.getByRole("button", { name: /^Unpin / }).count()) === 0)
+          await picker.getByRole("button", { name: /^Pin / }).first().click()
+        await expect(pinned).toHaveAttribute("aria-pressed", "true")
+        const unpinned = picker.getByRole("button", { name: /^Pin / }).first()
+        await expect(unpinned).toHaveAttribute("aria-pressed", "false")
+        const look = (button: typeof pinned) =>
+          button.evaluate((el) => ({
+            fill: el.querySelector("svg")?.getAttribute("fill"),
+            color: getComputedStyle(el).color,
+            border: getComputedStyle(el).borderTopColor,
+            backing: getComputedStyle(el).backgroundImage
+          }))
+        const on = await look(pinned)
+        const off = await look(unpinned)
+        expect(on.fill).toBe("currentColor")
+        expect(off.fill).toBe("none")
+        expect(on.color).not.toBe(off.color)
+        expect(on.border).not.toBe(off.border)
+        expect(on.backing).not.toBe(off.backing)
         await expectLayout(page, info, `model-picker-${width}-${theme}`, { scope: "[data-model-picker]" })
         await page.getByRole("searchbox", { name: "Find a model", exact: true }).fill("story2998")
         await expectLayout(page, info, `model-filtered-${width}-${theme}`, { scope: "[data-model-picker]" })

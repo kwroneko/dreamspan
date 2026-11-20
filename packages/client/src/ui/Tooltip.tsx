@@ -154,6 +154,13 @@ export function SquareIconButton({
 }
 
 /**
+ * A pressed toggle (owner, 2026-11-20: a pinned pin "looks identical to the unpinned one"): accent
+ * icon, filled, on an accent wash and edge. The wash is a gradient over the opaque surface, so a
+ * toggle over a picture keeps its backing.
+ */
+const PRESSED = "border-accent/60 bg-linear-to-b from-accent/15 to-accent/15 text-accent"
+
+/**
  * An icon button that toggles (`pressed`): label names it, hint explains the next click. Disabled,
  * it stays focusable and hoverable, so its tooltip can still say why it can't be used.
  * `className` places it and sets when it shows. Without `pressed` it's a plain action in the
@@ -166,11 +173,14 @@ export function ToggleIconButton({
   hint,
   disabled = false,
   className = "",
+  fillWhenPressed = true,
   onClick
 }: {
   label: string
   icon: IconName
   pressed?: boolean | undefined
+  /** False for an icon drawn as open strokes (an eye), which a fill would blot. */
+  fillWhenPressed?: boolean
   hint?: ReactNode
   disabled?: boolean
   className?: string
@@ -184,11 +194,11 @@ export function ToggleIconButton({
         disabled={disabled}
         focusableWhenDisabled
         onClick={onClick}
-        className={`inline-flex size-8 items-center justify-center rounded-md border border-border bg-surface shadow-sm outline-none transition-opacity select-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus ${
-          pressed ? "text-text" : "text-muted"
+        className={`inline-flex size-8 items-center justify-center rounded-md border bg-surface shadow-sm outline-none transition-opacity select-none focus-visible:ring-2 focus-visible:ring-focus ${
+          pressed ? PRESSED : "border-border text-muted hover:text-text"
         } ${className}`}
       >
-        <Icon name={icon} />
+        <Icon name={icon} filled={pressed === true && fillWhenPressed} />
       </BaseButton>
     </Tooltip>
   )

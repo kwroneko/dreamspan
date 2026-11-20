@@ -1035,6 +1035,7 @@ function ContextToggle({
         hint={rule !== null ? label : `Click to ${label.charAt(0).toLowerCase()}${label.slice(1)}`}
         icon={out ? "eyeOff" : "eye"}
         pressed={out}
+        fillWhenPressed={false}
         disabled={rule !== null || busy}
         onClick={onToggle}
         className="tile-toggle"
