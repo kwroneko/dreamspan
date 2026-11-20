@@ -6,6 +6,7 @@ import babel from "@rolldown/plugin-babel"
 import tailwindcss from "@tailwindcss/vite"
 import react, { reactCompilerPreset } from "@vitejs/plugin-react"
 import { defineConfig, type Plugin } from "vite"
+import { babelCache } from "./scripts/babelCache.ts"
 
 // In development the client runs on Vite and proxies the RPC socket and login to the server.
 const server = process.env.RP_SERVER ?? "http://127.0.0.1:8080"
@@ -96,7 +97,8 @@ export default defineConfig({
   define: { "import.meta.env.VITE_BUILD_ID": JSON.stringify(buildId) },
   plugins: [
     react(),
-    babel({ presets: [reactCompilerPreset()] }),
+    // Cached per file across builds (scripts/babelCache.ts): a UI change recompiles only what changed.
+    babel({ presets: [reactCompilerPreset()] }).then((plugin) => babelCache(plugin as Plugin)),
     tailwindcss(),
     {
       name: "plugin-host-development",
