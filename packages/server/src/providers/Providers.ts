@@ -32,7 +32,7 @@ import type { ChatId, VersionId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import {
-  type Connection,
+  Connection,
   type ConnectionId,
   type ConnectionSettings,
   type Credential,
@@ -43,7 +43,7 @@ import {
   pinnedRoute,
   type ModelEndpoints,
   type EffectiveModel,
-  type Model,
+  Model,
   type ModelId,
   type ModelUpstream,
   type PriceFeedState,
@@ -75,7 +75,16 @@ import { withCatalogs } from "./contextCatalog.ts"
 import type { ListedModel } from "./modelLists.ts"
 import { hasRetryShim, applyShims, providerRules, withShims } from "./shims.ts"
 import { statedContextLimit } from "./contextLimits.ts"
-import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
+import {
+  classify,
+  parseRetryAfter,
+  ProviderError,
+  type ProviderErrorReason,
+  providerError,
+  RETRYABLE
+} from "./errors.ts"
+import { TEST_MODEL_KEYS } from "@dreamspan/shared/providerApi.ts"
+import { ConnectionForRequest } from "../db/ops.ts"
 import { fetchEndpoints, ModelListError } from "./modelLists.ts"
 import { type ProviderKindEntry, ProviderRegistry, type RequestTarget, type StableEndpoint } from "./registry.ts"
 import {
@@ -223,12 +232,36 @@ interface DecideResult {
   readonly cost: Cost | null
 }
 
+/** The one short message a check sends, and what came back. */
+export interface TestReply {
+  readonly model: string
+  readonly ok: boolean
+  readonly text: string
+  readonly ms: number
+  readonly route: string | null
+  readonly reason: ProviderErrorReason | null
+  readonly status: number | null
+  readonly detail: string | null
+}
+
 export interface TestResult {
   readonly ok: boolean
   readonly detail: string
   readonly route: string | null
   readonly models: number | null
+  readonly reason: ProviderErrorReason | null
+  readonly status: number | null
+  readonly modelKeys: ReadonlyArray<string>
+  readonly ms: number | null
+  readonly catalog: boolean
+  readonly reply: TestReply | null
 }
+
+/** A check's message: one word, answered in a few tokens. */
+const TEST_PROMPT = "Hi"
+const TEST_MAX_TOKENS = 16
+const TEST_TIMEOUT_MS = 60_000
+const TEST_REPLY_CHARS = 300
 
 /** Everything a request on a connection needs, secrets decrypted. Lives for one request. */
 interface Prepared {
@@ -515,11 +548,29 @@ export interface ProvidersShape {
    * limit), for a model the user adds by id; empty when nothing matches or the connection is gone.
    */
   readonly catalogUpstream: (userId: UserId, connectionId: ConnectionId, key: string) => Effect.Effect<ModelUpstream>
-  /** Checks a connection by fetching its model list; reports the route it took. */
+  /**
+   * Checks a connection by fetching its model list, and, given a model, by sending it one short
+   * message through the real request path (recorded as a "test" request). Reports the routes.
+   */
   readonly testConnection: (
     userId: UserId,
-    connectionId: ConnectionId
+    connectionId: ConnectionId,
+    modelId?: ModelId | null
   ) => Effect.Effect<TestResult, ProviderError | ServerError>
+  /**
+   * The same check for a connection not yet created, as `createConnection` would make it: a
+   * typed key or a saved one, no headers, the inherited route. Nothing is stored.
+   */
+  readonly testDraft: (input: {
+    readonly userId: UserId
+    readonly role: "admin" | "user"
+    readonly provider?: string | undefined
+    readonly kind: ProviderKind
+    readonly settings: ConnectionSettings
+    readonly apiKey?: string | null | undefined
+    readonly credentialId?: CredentialId | null | undefined
+    readonly model?: string | null | undefined
+  }) => Effect.Effect<TestResult, ProviderError | ServerError>
   readonly stream: (request: StreamRequest) => Stream.Stream<ProviderEvent, ProviderError | ServerError>
   /**
    * One decision request (spec/AGENTIC.md §7) on a connection whose kind answers decisions:
@@ -723,9 +774,18 @@ export const layer = (options: ProvidersOptions = {}) =>
       ) => (provider ? providerBaseUrl(provider, settings ?? {}) : kind.defaultBaseUrl)
 
       const prepare = (userId: UserId, connectionId: ConnectionId) =>
+        fromStorage(reader.ResolveConnection({ userId, connectionId })).pipe(
+          Effect.flatMap((resolved) => prepareResolved(resolved, null))
+        )
+
+      /**
+       * A connection with its stored secrets, ready for a request. `typed` is a key typed for a
+       * connection not yet created (a check of the new-connection form): used as it is, never stored.
+       */
+      const prepareResolved = (resolved: ConnectionForRequest, typed: string | null) =>
         Effect.gen(function* () {
-          const resolved = yield* fromStorage(reader.ResolveConnection({ userId, connectionId }))
           const connection = resolved.connection
+          const connectionId = connection.id
           const info = registry.kinds.get(connection.kind)
           if (!info) {
             return yield* providerError("unusable", `the provider kind "${connection.kind}" isn't available`)
@@ -764,7 +824,11 @@ export const layer = (options: ProvidersOptions = {}) =>
             )
           }
           const apiKey =
-            credential === null ? null : yield* decryptWith(credential.keyEnc, credentialBinding(credential.id))
+            typed !== null
+              ? inventory.add(typed)
+              : credential === null
+                ? null
+                : yield* decryptWith(credential.keyEnc, credentialBinding(credential.id))
           if (apiKey !== null) for (const part of info.secretsOf?.(apiKey) ?? []) inventory.add(part)
           // Keyless where the API type or the provider allows it: a custom server's Responses API,
           // say, or a kind a plugin registered for a keyless server.
@@ -1303,31 +1367,6 @@ export const layer = (options: ProvidersOptions = {}) =>
           Effect.map(([model]) => model!.upstream),
           Effect.catch(() => Effect.succeed<ModelUpstream>({}))
         )
-
-      const testConnection: ProvidersShape["testConnection"] = (userId, connectionId) =>
-        Effect.gen(function* () {
-          const prepared = yield* prepare(userId, connectionId)
-          let route: string | null = null
-          return yield* listModels(prepared, (d) => (route = d)).pipe(
-            Effect.map((models): TestResult => ({
-              ok: true,
-              // Nothing was sent: the list is a catalog, so the key is checked by the first reply.
-              detail: prepared.kind.listsCatalog
-                ? `${models.length} models in the built-in list; nothing was sent, so the key is checked by the first reply`
-                : `${models.length} models listed`,
-              route,
-              models: models.length
-            })),
-            Effect.catch((error) =>
-              Effect.succeed<TestResult>({
-                ok: false,
-                detail: `${error.reason}: ${error.message}`,
-                route,
-                models: null
-              })
-            )
-          )
-        })
 
       // --- Streaming ----------------------------------------------------------------
 
@@ -2320,6 +2359,312 @@ export const layer = (options: ProvidersOptions = {}) =>
           )
         )
 
+      // --- Connection checks ----------------------------------------------------------
+
+      /** The model list part of a check, with the route it took and how long it took. */
+      const checkList = (prepared: Prepared) =>
+        Effect.gen(function* () {
+          let route: string | null = null
+          const started = Date.now()
+          const catalog = prepared.kind.listsCatalog === true
+          return yield* listModels(prepared, (d) => (route = d)).pipe(
+            Effect.timeoutOrElse({
+              duration: TEST_TIMEOUT_MS,
+              orElse: () => Effect.fail(providerError("network", `no answer in ${TEST_TIMEOUT_MS / 1000} s`))
+            }),
+            Effect.map((listed) => ({
+              ok: true,
+              // A catalog is built in: nothing was sent to list it.
+              detail: catalog ? `${listed.length} models in the built-in list` : `${listed.length} models listed`,
+              route,
+              models: listed.length as number | null,
+              reason: null as ProviderErrorReason | null,
+              status: null as number | null,
+              modelKeys: listed.slice(0, TEST_MODEL_KEYS).map((model) => model.key) as ReadonlyArray<string>,
+              ms: Date.now() - started,
+              catalog,
+              listed
+            })),
+            Effect.catch((error: ProviderError) =>
+              Effect.succeed({
+                ok: false,
+                detail: error.message,
+                route,
+                models: null,
+                reason: error.reason,
+                status: error.status,
+                modelKeys: [],
+                ms: Date.now() - started,
+                catalog,
+                listed: [] as ReadonlyArray<ListedModel>
+              })
+            )
+          )
+        })
+
+      const testResult = (
+        { listed: _listed, ...list }: Effect.Success<ReturnType<typeof checkList>>,
+        reply: TestReply | null
+      ): TestResult => ({ ...list, ok: list.ok && (reply?.ok ?? true), reply })
+
+      const replyOf = (
+        prepared: Prepared,
+        model: string,
+        started: number,
+        route: string | null,
+        text: string,
+        error: ProviderError | null
+      ): TestReply => {
+        // A reply cut off at the tiny limit still answered.
+        const failed = error !== null && error.reason !== "length_cutoff" ? error : null
+        return {
+          model,
+          ok: failed === null,
+          text: prepared.scrub(text).trim().slice(0, TEST_REPLY_CHARS),
+          ms: Date.now() - started,
+          route,
+          reason: failed?.reason ?? null,
+          status: failed?.status ?? null,
+          detail: failed === null ? null : prepared.scrub(failed.message).slice(0, 500)
+        }
+      }
+
+      const testContext = (): PiContext => ({
+        messages: [{ role: "user", content: TEST_PROMPT, timestamp: Date.now() }]
+      })
+
+      const testConnection: ProvidersShape["testConnection"] = (userId, connectionId, modelId = null) =>
+        Effect.gen(function* () {
+          const prepared = yield* prepare(userId, connectionId)
+          const list = yield* checkList(prepared)
+          if (modelId === null) return testResult(list, null)
+          const model = yield* fromStorage(reader.GetModel({ userId, modelId }))
+          if (model.connectionId !== connectionId)
+            return yield* providerError("unusable", "that model belongs to another connection")
+          // The real request path, recorded like any other request on the connection.
+          const started = Date.now()
+          let route: string | null = null
+          let text = ""
+          const error = yield* stream({
+            userId,
+            connectionId,
+            modelId,
+            context: testContext(),
+            options: { maxTokens: TEST_MAX_TOKENS, cacheRetention: "none" },
+            attribution: { purpose: "test" }
+          }).pipe(
+            Stream.runForEach((event) =>
+              Effect.sync(() => {
+                if (event.type === "text") text += event.delta
+                if (event.type === "route") route = event.description
+              })
+            ),
+            Effect.timeoutOrElse({
+              duration: TEST_TIMEOUT_MS,
+              orElse: () => Effect.fail(providerError("no_response", `no answer in ${TEST_TIMEOUT_MS / 1000} s`))
+            }),
+            Effect.as<ProviderError | null>(null),
+            Effect.catch((failure) =>
+              Effect.succeed(
+                failure instanceof ProviderError ? failure : providerError("unknown", "the request failed")
+              )
+            )
+          )
+          return testResult(list, replyOf(prepared, model.key, started, route, text, error))
+        })
+
+      /** Where a connection as `createConnection` would make it points, or why it can't be made. */
+      const draftTarget = (
+        providerId: string | undefined,
+        kind: ProviderKind,
+        settings: Pick<ConnectionSettings, "baseUrl" | "providerSettings">
+      ) =>
+        Effect.gen(function* () {
+          const entry = registry.kinds.get(kind)
+          if (!entry) return yield* providerError("bad_request", `unknown provider kind "${kind}"`)
+          const named = providerId === undefined ? undefined : registry.providers.get(providerId)
+          if (providerId !== undefined && !named)
+            return yield* providerError("bad_request", `unknown provider "${providerId}"`)
+          const provider = named ?? findProvider(registry.providers.list(), null, kind, settings.baseUrl)
+          if (named && !named.apis.some((api) => api.id === kind)) {
+            return yield* providerError("bad_request", `${named.label} doesn't offer the API type "${kind}"`)
+          }
+          const baseUrl = settings.baseUrl ?? defaultBaseUrl(provider, entry, settings.providerSettings)
+          if (baseUrl === null) return yield* providerError("bad_request", "enter the server's base URL")
+          return { entry, provider, baseUrl }
+        })
+
+      /**
+       * One short message on a draft connection: pi-ai's adapter with the registered transforms
+       * and shims, as a reply would be sent, but with no retries and nothing recorded (there is
+       * no connection to record it on).
+       */
+      const draftReply = (prepared: Prepared, key: string, listed: ReadonlyArray<ListedModel>) =>
+        Effect.gen(function* () {
+          const started = Date.now()
+          let route: string | null = null
+          let text = ""
+          const seen = { status: null as number | null, retryAfterMs: null as number | null }
+          const done = (error: ProviderError | null) => replyOf(prepared, key, started, route, text, error)
+          if (prepared.kind.decide)
+            return done(providerError("unusable", "this API type answers decision questions only"))
+          const [described] = yield* describeModels(prepared.kind, prepared.provider, [
+            listed.find((model) => model.key === key) ?? { key, upstream: {} }
+          ])
+          const model = new Model({
+            id: uuidv7() as ModelId,
+            connectionId: prepared.connection.id,
+            key,
+            source: "fetched",
+            upstream: described?.upstream ?? {},
+            overrides: {},
+            hidden: false,
+            fetchedAt: started,
+            missingSince: null,
+            rowVersion: 0
+          })
+          const effective = resolveModel(key, model.upstream, {}, prepared.connection.compat, prepared.settings)
+          const built = yield* Effect.tryPromise({
+            try: () => buildPiModel(prepared, model, effective, registry.thinkingBindings.list()),
+            catch: (error) => providerError("unknown", `could not prepare the model: ${String(error)}`)
+          }).pipe(Effect.result)
+          if (built._tag === "Failure") return done(built.failure)
+          const piModel = built.success
+          const context = testContext()
+          const target: RequestTarget = {
+            kind: prepared.kind.id,
+            api: prepared.api,
+            provider: prepared.provider,
+            model: key
+          }
+          const transforms = registry.transforms.list().filter((t) => t.appliesTo(target))
+          const routed = fetchFor(prepared, (description) => (route = description))
+          const failed = (errorMessage: string): AssistantMessage => ({
+            role: "assistant",
+            content: [],
+            api: prepared.api,
+            provider: piModel.provider,
+            model: key,
+            usage: emptyUsage(),
+            stopReason: "error",
+            errorMessage,
+            timestamp: Date.now()
+          })
+          const message = yield* Effect.tryPromise({
+            try: async (signal) => {
+              const events = prepared.kind.streams.streamSimple(piModel, normalizeContext(context), {
+                apiKey: prepared.kind.transport ? TRANSPORT_AUTH : (prepared.apiKey ?? "no-key"),
+                env: {},
+                maxRetries: 0,
+                signal,
+                headers: prepared.headers,
+                maxTokens: TEST_MAX_TOKENS,
+                cacheRetention: "none",
+                ...(prepared.kind.acceptsFetch
+                  ? {
+                      fetch: prepared.kind.transport
+                        ? prepared.kind.transport(routed, {
+                            apiKey: prepared.apiKey,
+                            baseUrl: prepared.baseUrl,
+                            settings: prepared.settings,
+                            aside: routed
+                          })
+                        : routed
+                    }
+                  : {}),
+                onResponse: (response) => {
+                  seen.status = response.status
+                  seen.retryAfterMs = parseRetryAfter(response.headers["retry-after"])
+                },
+                onPayload: (payload: unknown) => {
+                  const transformed = transforms.reduce(
+                    (current, t) =>
+                      t.transform(current, {
+                        target,
+                        messages: context.messages,
+                        breakpoints: [],
+                        cacheLayout: effective.cacheLayout.value,
+                        cacheRetention: "none",
+                        settings: prepared.settings
+                      }),
+                    payload as Record<string, unknown>
+                  )
+                  return Promise.resolve(applyShims(registry.shims.list(), transformed, target).payload)
+                }
+              })
+              for await (const event of events) if (event.type === "text_delta") text += event.delta
+              return await events.result()
+            },
+            catch: (thrown) => thrown
+          }).pipe(
+            Effect.catch((thrown) => Effect.succeed(failed(thrown instanceof Error ? thrown.message : String(thrown)))),
+            Effect.timeoutOrElse({
+              duration: TEST_TIMEOUT_MS,
+              orElse: () => Effect.succeed(failed(`no answer in ${TEST_TIMEOUT_MS / 1000} s`))
+            })
+          )
+          return done(classify(message, { ...seen, category: null }, undefined, text !== "", true))
+        })
+
+      const testDraft: ProvidersShape["testDraft"] = (input) =>
+        Effect.gen(function* () {
+          const { entry, provider } = yield* draftTarget(input.provider, input.kind, input.settings)
+          const key = typedKey(input.apiKey)
+          let credential: ConnectionForRequest["credential"] = null
+          let credentialName: string | null = null
+          if (key === null && input.credentialId) {
+            const saved = (yield* fromStorage(reader.ListCredentials({ userId: input.userId }))).find(
+              (entry) => entry.id === input.credentialId
+            )
+            if (!saved) return yield* providerError("unusable", "that saved key no longer exists")
+            const { keyEnc } = yield* fromStorage(
+              reader.ResolveCredential({ userId: input.userId, credentialId: saved.id })
+            )
+            credential = { id: saved.id, keyEnc, origins: saved.origins }
+            credentialName = saved.name
+          }
+          const now = Date.now()
+          // The connection `createConnection` would store, held only for this check.
+          const connection = new Connection({
+            id: uuidv7() as ConnectionId,
+            name: input.settings.name.trim() || "New connection",
+            provider: provider?.id ?? "",
+            providerSettings: input.settings.providerSettings
+              ? providerChanges(provider, input.settings.providerSettings)
+              : {},
+            kind: input.kind,
+            api: entry.api,
+            baseUrl: input.settings.baseUrl,
+            credentialId: credential?.id ?? null,
+            credentialName,
+            hasKey: key !== null || credential !== null,
+            keyHint: null,
+            headerNames: [],
+            compat: input.settings.compat,
+            cacheTtlS: input.settings.cacheTtlS,
+            maxConcurrent: input.settings.maxConcurrent,
+            proxyMode: "inherit",
+            presetOverrideRefId: null,
+            rowVersion: 0,
+            createdAt: now,
+            updatedAt: now
+          })
+          const prepared = yield* prepareResolved(
+            new ConnectionForRequest({
+              connection,
+              credential,
+              headersEnc: null,
+              headersOrigin: null,
+              proxyUrlEnc: null,
+              ownerRole: input.role
+            }),
+            key
+          )
+          const list = yield* checkList(prepared)
+          const model = input.model?.trim() || null
+          return testResult(list, model === null ? null : yield* draftReply(prepared, model, list.listed))
+        })
+
       const decide: ProvidersShape["decide"] = (request) =>
         Effect.gen(function* () {
           const auto = yield* AutoRequestGuard
@@ -2688,6 +3033,7 @@ export const layer = (options: ProvidersOptions = {}) =>
         priceTimerRound,
         catalogUpstream,
         testConnection,
+        testDraft,
         stream
       })
     })

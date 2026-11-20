@@ -25,7 +25,7 @@ import { ChatApi, ChatEventsApi, MessageVersionApi } from "./chatApi.ts"
 import { AgentApi } from "./agentApi.ts"
 import { DecisionApi } from "./decisionApi.ts"
 import { ThinkingApi } from "./thinkingApi.ts"
-import { ProviderListApi } from "./providerApi.ts"
+import { ConnectionTest, ProviderListApi } from "./providerApi.ts"
 import { McpApi } from "./mcpApi.ts"
 import { ChatSetupApi, ShellUpdatesApi } from "./chatSetupApi.ts"
 import { StImportApi, StImportPlanApi } from "./stImportApi.ts"
@@ -116,13 +116,7 @@ export class Health extends Schema.Class<Health>("Health")({
   readers: Schema.Int
 }) {}
 
-/** The result of checking a connection, with the route its request took. */
-export class ConnectionTest extends Schema.Class<ConnectionTest>("ConnectionTest")({
-  ok: Schema.Boolean,
-  detail: Schema.String,
-  route: Schema.NullOr(Schema.String),
-  models: Schema.NullOr(Schema.Int)
-}) {}
+export { ConnectionTest, ConnectionTestReply, TEST_MODEL_KEYS } from "./providerApi.ts"
 
 export class ModelRefresh extends Schema.Class<ModelRefresh>("ModelRefresh")({
   added: Schema.Int,
@@ -274,8 +268,12 @@ export class AppCoreApi extends RpcGroup.make(
     success: BinItem,
     error: Schema.Union([...StorageErrors])
   }),
+  /**
+   * Lists the connection's models and, given a model, sends it one short message: the user's
+   * own request to this connection. Recorded with the connection's other requests.
+   */
   Rpc.make("TestConnection", {
-    payload: { connectionId: ConnectionId },
+    payload: { connectionId: ConnectionId, modelId: Schema.optionalKey(Schema.NullOr(ModelId)) },
     success: ConnectionTest,
     error: Schema.Union([ProviderError, ServerError])
   }),

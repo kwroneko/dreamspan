@@ -1,8 +1,8 @@
-// A fresh install to a working chat (uiaudit §2): the home's steps, a new connection fetching
-// its models and choosing the default, and the note a composer shows without a model.
+// A fresh install to a working chat (uiaudit §2): the home's steps, a new connection whose test
+// lists its models for the user to choose the default from, and the note a composer shows without a model.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import { chooseCustomServer, type FakeProvider, startProvider } from "./support/provider.ts"
+import { chooseCustomServer, type FakeProvider, startProvider, chooseDefaultModelIfNone } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -26,7 +26,7 @@ const clearDefaultModel = () =>
     })
   )
 
-test("the empty home leads to a connection, whose first model becomes the default", async ({ page }) => {
+test("the empty home leads to a connection, and the user chooses its default model", async ({ page }) => {
   test.setTimeout(180_000)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(server().url)
@@ -43,10 +43,19 @@ test("the empty home leads to a connection, whose first model becomes the defaul
   await page.getByLabel("Name", { exact: true }).fill("First run")
   await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   // The kind takes no key: left empty, none is sent.
+  // With no default model yet, the form asks for one; nothing is chosen for the user.
+  await page.getByRole("button", { name: "Create connection" }).click()
+  await expect(page.getByText("Choose the model new chats use.")).toBeVisible()
+  expect((await admin((api) => api.ListConnections())).length).toBe(0)
+  // Test lists the models to choose from.
+  await page.getByRole("button", { name: "Test", exact: true }).click()
+  await expect(page.getByText("2 models listed")).toBeVisible()
+  await page.getByRole("combobox", { name: "Default model for new chats", exact: true }).click()
+  await page.getByRole("option", { name: "fake-small" }).click()
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByText("Found 2 models.")).toBeVisible()
   const using = page.getByRole("status").filter({ hasText: "for new chats" })
-  await expect(using).toContainText(/Using Fake (Large|Small) for new chats/)
+  await expect(using).toContainText("Using Fake Small for new chats")
   const defaults = await admin((api) => api.GetGenerationDefaults())
   expect(defaults.model).not.toBeNull()
   // Each model's id shows only where it differs from its name.
@@ -59,7 +68,7 @@ test("the empty home leads to a connection, whose first model becomes the defaul
 
   await page.goto(server().url)
   await expect(steps).toContainText("1 of 3 done")
-  await expect(steps).toContainText(/Using Fake (Large|Small) for new chats/)
+  await expect(steps).toContainText("Using Fake Small for new chats")
   await expect(steps.getByRole("link", { name: "Import" })).toBeVisible()
 
   // A second connection leaves the chosen default alone. Its name, left empty, is the server's.
@@ -69,6 +78,7 @@ test("the empty home leads to a connection, whose first model becomes the defaul
   await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   const host = new URL(provider.baseUrl).host
   await expect(page.getByLabel("Name", { exact: true })).toHaveAttribute("placeholder", host)
+  await chooseDefaultModelIfNone(page)
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByRole("heading", { name: host, exact: true })).toBeVisible()
   await expect(page.getByText("Found 2 models.")).toBeVisible()

@@ -6,15 +6,27 @@ import { Dialog } from "../../ui/Dialog.tsx"
 import { providerBaseUrl } from "@dreamspan/shared/providerDefinitions.ts"
 import type { Credential, CredentialId, ProviderInfo } from "@dreamspan/shared/providers.ts"
 import { originOf } from "@dreamspan/shared/providers.ts"
+import type { ConnectionTest } from "@dreamspan/shared/api.ts"
+import { useAtomValue } from "@effect/atom-react"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { type FormEvent, useState } from "react"
+import { Effect } from "effect"
+import { AsyncResult } from "effect/reactivity"
+import { type FormEvent, useRef, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Field, focusFirstInvalid, formText, Input, SecretInput } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
-import { effectiveOrigin, freshConnections, parseOptionalInt, providerLabel, providerSetupAtom } from "./data.ts"
+import { CheckResult, TEST_HINT } from "./check.tsx"
+import {
+  effectiveOrigin,
+  freshConnections,
+  generationDefaultsAtom,
+  parseOptionalInt,
+  providerLabel,
+  providerSetupAtom
+} from "./data.ts"
 import {
   AwsKeyFields,
   awsKey,
@@ -149,6 +161,8 @@ interface NewConnectionDraft {
   readonly maxConcurrent: string
   readonly cacheTtlS: string
   readonly provider: ProviderDraft
+  /** The model new chats will use, by its id; empty keeps the current default. Absent in older drafts. */
+  readonly model?: string
 }
 
 const blankDraft = (providers: ReadonlyArray<ProviderInfo>): NewConnectionDraft => ({
@@ -178,7 +192,22 @@ function NewConnectionForm({
     ...blankDraft(providers),
     ...(JSON.parse(durable.text) as Partial<NewConnectionDraft>)
   }
-  const edit = (change: Partial<NewConnectionDraft>) => durable.setText(JSON.stringify({ ...values, ...change }))
+  const [check, setCheck] = useState<ConnectionTest | null>(null)
+  /** The model a test sends to when no default is being chosen here. */
+  const [testModel, setTestModel] = useState<string | null>(null)
+  const testing = useAction()
+  const [testTried, setTestTried] = useState(false)
+  const formRef = useRef<HTMLFormElement>(null)
+  const save = (change: Partial<NewConnectionDraft>) => durable.setText(JSON.stringify({ ...values, ...change }))
+  // A changed setting makes the last test's result stale.
+  const edit = (change: Partial<NewConnectionDraft>) => {
+    setCheck(null)
+    save(change)
+  }
+  const defaults = useAtomValue(generationDefaultsAtom)
+  // Unknown until loaded: not required meanwhile, so a slow read never blocks creating.
+  const hasDefault = !AsyncResult.isSuccess(defaults) || defaults.value.model !== null
+  const model = values.model?.trim() ?? ""
   const [keyMode, setKeyMode] = useState<KeyMode>("typed")
   const [keyEmpty, setKeyEmpty] = useState(noKeys)
   const [keyAccount, setKeyAccount] = useState<{ email: string; project: string | null } | null>(null)
@@ -229,44 +258,89 @@ function NewConnectionForm({
     maxMarkers: parsed.problems.maxMarkers,
     minTokens: parsed.problems.minTokens,
     idleTimeoutS: parsed.problems.idleTimeoutS,
-    cacheTtlS: ttl.problem
+    cacheTtlS: ttl.problem,
+    model: !hasDefault && model === "" ? "Choose the model new chats use. Test lists the models." : null
   }
+
+  /** The connection `CreateConnection` makes from the form: also what Test checks. */
+  const draft = (form: HTMLFormElement) => {
+    const apiKey = aws ? awsKey(form) : formText(form, "apiKey")
+    return {
+      provider: provider!.id,
+      kind: api!.id,
+      settings: {
+        name: values.name.trim() || defaultName,
+        baseUrl: values.baseUrl.trim() || null,
+        compat: {},
+        cacheTtlS: ttl.value,
+        maxConcurrent: concurrency.value,
+        presetOverrideRefId: null,
+        providerSettings: parsed.changes
+      },
+      ...(keyMode === "saved" ? { credentialId } : apiKey !== "" ? { apiKey } : {})
+    }
+  }
+  // What the address, region, project and key need before a test can be sent.
+  const testProblems = [problems.baseUrl, problems.region, problems.project, problems.apiKey]
+
+  const test = async (target: string | null) => {
+    const form = formRef.current
+    setTestTried(true)
+    if (!form || !provider || !api) return
+    if (testProblems.some((problem) => problem !== null)) return focusFirstInvalid(form)
+    const outcome = await testing.run((client) =>
+      client("TestConnectionDraft", { ...draft(form), ...(target ? { model: target } : {}) })
+    )
+    setCheck(outcome.ok ? outcome.value : null)
+  }
+  const sendTo = model || testModel
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitted(true)
     if (!provider || !api) return
     if (Object.values(problems).some((problem) => problem !== null)) return focusFirstInvalid(event.currentTarget)
-    const apiKey = aws ? awsKey(event.currentTarget) : formText(event.currentTarget, "apiKey")
+    const created = draft(event.currentTarget)
     await durable.commit(durable.text, async () => {
-      const result = await action.run(
-        (client) =>
-          client("CreateConnection", {
-            provider: provider.id,
-            kind: api.id,
-            settings: {
-              name: values.name.trim() || defaultName,
-              baseUrl: values.baseUrl.trim() || null,
-              compat: {},
-              cacheTtlS: ttl.value,
-              maxConcurrent: concurrency.value,
-              presetOverrideRefId: null,
-              providerSettings: parsed.changes
-            },
-            ...(keyMode === "saved" ? { credentialId } : apiKey !== "" ? { apiKey } : {})
-          }),
-        ["connections", "credentials"]
-      )
+      const result = await action.run((client) => client("CreateConnection", created), ["connections", "credentials"])
       if (result.ok) {
-        // Its page fetches the model list at once (defaultModel.tsx).
-        freshConnections.add(result.value.id)
-        void navigate({ to: "/settings/connections/$connectionId", params: { connectionId: result.value.id } })
+        const connectionId = result.value.id
+        // Its page shows the model list's fetch (defaultModel.tsx); with a model chosen here it is
+        // fetched now, so the chosen one is a model of the connection, and becomes the default.
+        const refresh =
+          model === ""
+            ? null
+            : await action.run(
+                (client) =>
+                  Effect.gen(function* () {
+                    const refresh = yield* client("RefreshModels", { connectionId }).pipe(
+                      Effect.catch(() => Effect.succeed(null))
+                    )
+                    const listed = yield* client("ListModels", { connectionId, includeHidden: true })
+                    const found =
+                      listed.find((entry) => entry.key === model) ??
+                      (yield* client("AddUserModel", { connectionId, key: model, overrides: {} }))
+                    yield* client("ChangeGenerationDefaults", {
+                      change: { model: { connection: connectionId, model: found.id } }
+                    })
+                    return refresh
+                  }),
+                ["models", "settings"]
+              )
+        freshConnections.set(connectionId, refresh?.ok ? refresh.value : null)
+        void navigate({ to: "/settings/connections/$connectionId", params: { connectionId } })
       }
       return result.ok
     })
   }
 
-  const shown = (problem: string | null) => (submitted ? problem : null)
+  const shown = (problem: string | null) =>
+    submitted || (testTried && testProblems.includes(problem)) ? problem : null
+  const listed = check?.modelKeys ?? []
+  const modelItems = [
+    ...(hasDefault ? [{ value: "", label: "Keep the current default" }] : []),
+    ...listed.map((key) => ({ value: key, label: key }))
+  ]
   const sentTo = origin ? `It's sent only to ${origin} and never shown again.` : "It's never shown again."
   const typed = (name: keyof typeof noKeys) => (empty: boolean) =>
     setKeyEmpty((current) => ({ ...current, [name]: empty }))
@@ -274,7 +348,7 @@ function NewConnectionForm({
   return (
     <Card>
       <CardHeader center inline title="New connection" />
-      <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
+      <form ref={formRef} onSubmit={submit} className="flex flex-col gap-5" noValidate>
         <UserDraftNotices draft={durable} />
         <Field
           label="Provider"
@@ -395,6 +469,56 @@ function NewConnectionForm({
             </Tooltip>
           )}
         </div>
+        <section aria-label="Test" className="flex flex-col gap-3">
+          <div>
+            <Button hint={TEST_HINT} onClick={() => void test(sendTo)} pending={testing.pending}>
+              Test
+            </Button>
+          </div>
+          {check && (
+            <CheckResult
+              result={check}
+              sending={testing.pending}
+              onSend={sendTo ? () => void test(sendTo) : undefined}
+              picker={
+                model === "" && listed.length > 0 ? (
+                  <Field label="Model to test">
+                    <Select
+                      items={listed.map((key) => ({ value: key, label: key }))}
+                      value={testModel}
+                      onValueChange={setTestModel}
+                      placeholder="Choose a model"
+                    />
+                  </Field>
+                ) : undefined
+              }
+            />
+          )}
+          <ErrorAlert error={testing.error} title="It doesn't work" />
+          <Field
+            label="Default model for new chats"
+            about="The model new chats use. Test lists the models to choose from, or type a model’s id."
+            error={shown(problems.model)}
+          >
+            {listed.length > 0 ? (
+              <Select
+                items={modelItems}
+                value={model === "" && !hasDefault ? null : model}
+                onValueChange={(chosen) => save({ model: chosen })}
+                placeholder="Choose a model"
+              />
+            ) : (
+              <Input
+                value={values.model ?? ""}
+                onValueChange={(typed) => save({ model: typed })}
+                placeholder={hasDefault ? "Empty keeps the current default" : "Test to list the models"}
+                autoCapitalize="none"
+                spellCheck={false}
+                autoComplete="off"
+              />
+            )}
+          </Field>
+        </section>
         <Field
           label="Concurrent requests"
           about="Limit how many requests can run at once. Others wait. Empty means no limit."

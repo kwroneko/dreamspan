@@ -5,7 +5,7 @@ import { Effect } from "effect"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { loginCookie, withCookie, type Client } from "./support/rpc.ts"
 import { openPanel, closePanel, openSummarySettings } from "./support/panel.ts"
-import { chooseCustomServer } from "./support/provider.ts"
+import { chooseCustomServer, chooseDefaultModelIfNone } from "./support/provider.ts"
 
 const server = serverPerFile(withAdmin)
 test.describe.configure({ mode: "serial" })
@@ -321,6 +321,7 @@ test("creation and rename forms keep non-secret text without copying a typed key
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Unfinished connection")
   await expect(page.getByLabel("API key", { exact: true })).toHaveValue("")
   await page.getByLabel("API key", { exact: true }).fill("synthetic-key")
+  await chooseDefaultModelIfNone(page)
   await page.getByRole("button", { name: "Create connection", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Unfinished connection", exact: true })).toBeVisible()
   const connectionId = new URL(page.url()).pathname.split("/").at(-1)!

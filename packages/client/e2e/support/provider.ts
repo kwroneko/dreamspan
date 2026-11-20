@@ -17,6 +17,15 @@ export const chooseCustomServer = async (page: Page) => {
   await expect(picker).toContainText("OpenAI-compatible")
 }
 
+/**
+ * On the new connection form, types the default model's id when the account has none (the form
+ * then requires one); otherwise leaves the current default alone.
+ */
+export const chooseDefaultModelIfNone = async (page: Page, id = "fake-large") => {
+  const field = page.getByLabel("Default model for new chats", { exact: true })
+  if ((await field.getAttribute("placeholder")) === "Test to list the models") await field.fill(id)
+}
+
 export interface FakeProvider {
   readonly baseUrl: string
   readonly listings: number

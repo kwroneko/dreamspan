@@ -7,6 +7,7 @@ import {
   type ProviderInfo,
   type ProviderKindInfo
 } from "@dreamspan/shared/providers.ts"
+import type { ModelRefresh } from "@dreamspan/shared/api.ts"
 import { allOf } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { defaultsAtom } from "../pickers/defaults.ts"
@@ -26,8 +27,11 @@ export const providerSetupAtom = allOf({
 /** The account's defaults; the writes that change them name "settings". The pickers' atom: one read for both. */
 export const generationDefaultsAtom = defaultsAtom
 
-/** Connections just created here, whose page fetches their model list once as it opens. */
-export const freshConnections = new Set<ConnectionId>()
+/**
+ * Connections just created here: what the form's fetch of their model list found, or null for
+ * their page to fetch it once as it opens.
+ */
+export const freshConnections = new Map<ConnectionId, ModelRefresh | null>()
 
 export const modelsAtom = (connectionId: ConnectionId, includeHidden: boolean) =>
   AppClient.query("ListModels", { connectionId, includeHidden }, { reactivityKeys: ["models"] })

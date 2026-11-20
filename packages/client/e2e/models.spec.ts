@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { chooseCustomServer, type FakeProvider, startProvider } from "./support/provider.ts"
+import { chooseCustomServer, type FakeProvider, startProvider, chooseDefaultModelIfNone } from "./support/provider.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -18,9 +18,10 @@ test("refresh, hide, edit and add models", async ({ page }) => {
   await page.getByLabel("Name", { exact: true }).fill("Models test")
   await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   // Left empty, the key is optional for this kind: no key is sent.
+  await chooseDefaultModelIfNone(page)
   await page.getByRole("button", { name: "Create connection" }).click()
 
-  // Creating it fetches the models, and the first becomes the default for new chats.
+  // Creating it fetches the models, and the one typed on the form becomes the default for new chats.
   const models = page.getByRole("list", { name: "Models" })
   await expect(page.getByText("Found 2 models.")).toBeVisible()
   await expect(page.getByRole("status").filter({ hasText: "for new chats" })).toContainText("Using Fake Large")
@@ -64,6 +65,7 @@ test("model generation settings take typed decimals and keep the reply length ap
   await chooseCustomServer(page)
   await page.getByLabel("Name", { exact: true }).fill("Settings test")
   await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
+  await chooseDefaultModelIfNone(page)
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByText("Found 2 models.")).toBeVisible()
 
@@ -100,6 +102,7 @@ test("the model's form keeps the provider's limits apart from your settings for 
   await page.getByLabel("Name", { exact: true }).fill("Limits test")
   await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   // Creating it fetches the models.
+  await chooseDefaultModelIfNone(page)
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByText("Found 2 models.")).toBeVisible()
   await page.getByRole("button", { name: "Edit fake-large" }).click()

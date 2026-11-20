@@ -361,6 +361,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SetRemoteUpdatesIgnored: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   TakeRemoteVersion: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   TestConnection: "User-only security, consent, account, credential or network configuration.",
+  TestConnectionDraft: "User-only security, consent, account, credential or network configuration.",
   ThreadsOf: "Not in W6's first exposures; use the bounded workshop read tools.",
   UndoAwayMark: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UndoCardArchive: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",

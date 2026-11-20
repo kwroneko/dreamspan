@@ -1,13 +1,12 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 // The top of a connection's page: which model new chats use. A connection just created here
-// fetches its model list at once, and when the account has no default model yet its first
-// model becomes the default (ST's Connect picks one the same way).
+// shows what its model list held, fetching it first unless the form already did. Nothing is
+// ever chosen for the user (owner, 2026-11-20): with no default model, it says so and links to
+// the picker.
 import type { ModelRefresh } from "@dreamspan/shared/api.ts"
-import type { GenerationDefaults } from "@dreamspan/shared/generation.ts"
 import { type Model, resolveModel } from "@dreamspan/shared/providers.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { Link } from "@tanstack/react-router"
-import { Effect } from "effect"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
@@ -18,38 +17,28 @@ import type { ConnectionSectionProps } from "./detail.tsx"
 
 const modelName = (model: Model) => resolveModel(model.key, model.upstream, model.overrides).name.value
 
-const change = (
+const change = (label: string) => (
   <Tooltip label="Opens the default model picker.">
     <Link to="/settings/chats" className="font-medium text-accent underline-offset-4 hover:underline">
-      Change
+      {label}
     </Link>
   </Tooltip>
 )
 
+const statusLine =
+  "flex flex-wrap items-baseline gap-x-2 gap-y-1 rounded-lg border border-border bg-surface px-4 py-3 text-sm"
+
 export function DefaultModelSection({ connection }: ConnectionSectionProps) {
   const fetching = useAction()
-  const [fetched, setFetched] = useState<{ refresh: ModelRefresh; adopted: boolean } | null>(null)
+  // What the form's fetch found, when it fetched the list itself.
+  const [fetched, setFetched] = useState<ModelRefresh | null>(() => freshConnections.get(connection.id) ?? null)
   useEffect(() => {
-    if (!freshConnections.delete(connection.id)) return
+    if (!freshConnections.has(connection.id)) return
+    const done = freshConnections.get(connection.id)
+    freshConnections.delete(connection.id)
+    if (done) return
     void fetching
-      .run(
-        (client) =>
-          Effect.gen(function* () {
-            const refresh = yield* client("RefreshModels", { connectionId: connection.id })
-            const models: ReadonlyArray<Model> = yield* client("ListModels", {
-              connectionId: connection.id,
-              includeHidden: false
-            })
-            const defaults: GenerationDefaults = yield* client("GetGenerationDefaults", undefined)
-            const first = models[0]
-            if (defaults.model || !first) return { refresh, adopted: false }
-            yield* client("ChangeGenerationDefaults", {
-              change: { model: { connection: connection.id, model: first.id } }
-            })
-            return { refresh, adopted: true }
-          }),
-        ["models", "settings"]
-      )
+      .run((client) => client("RefreshModels", { connectionId: connection.id }), ["models"])
       .then((result) => result.ok && setFetched(result.value))
   }, [connection.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -73,15 +62,23 @@ export function DefaultModelSection({ connection }: ConnectionSectionProps) {
     )
   const found = fetched && (
     <span className="text-muted">
-      Found {fetched.refresh.added} {fetched.refresh.added === 1 ? "model" : "models"}.
+      Found {fetched.added} {fetched.added === 1 ? "model" : "models"}.
     </span>
   )
+  if (chosen === null)
+    return (
+      <div role="status" className={statusLine}>
+        {found}
+        <span>No model is set for new chats</span>
+        <span aria-hidden="true" className="text-muted">
+          ·
+        </span>
+        {change("Choose")}
+      </div>
+    )
   if (!model) return found ? <p role="status">{found}</p> : null
   return (
-    <div
-      role="status"
-      className="flex flex-wrap items-baseline gap-x-2 gap-y-1 rounded-lg border border-border bg-surface px-4 py-3 text-sm"
-    >
+    <div role="status" className={statusLine}>
       {found}
       <span>
         Using <strong className="font-medium [overflow-wrap:anywhere]">{modelName(model)}</strong> for new chats
@@ -89,7 +86,7 @@ export function DefaultModelSection({ connection }: ConnectionSectionProps) {
       <span aria-hidden="true" className="text-muted">
         ·
       </span>
-      {change}
+      {change("Change")}
     </div>
   )
 }

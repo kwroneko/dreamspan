@@ -43,9 +43,10 @@ export const register = () => {
   connectionSections.register({ id: "key-blocked", order: 1, component: KeyBlockedSection })
   // Which model new chats use; a new connection fetches its models here at once.
   connectionSections.register({ id: "default-model", order: 5, component: DefaultModelSection })
+  // Near the top, so the test is in reach without scrolling past the settings (owner, 2026-11-20).
+  connectionSections.register({ id: "test", order: 7, component: TestSection })
   connectionSections.register({ id: "settings", order: 10, component: SettingsSection })
   connectionSections.register({ id: "key", order: 20, component: KeySection })
-  connectionSections.register({ id: "test", order: 30, component: TestSection })
   connectionSections.register({ id: "models", order: 40, component: ModelsSection })
   connectionSections.register({ id: "headers", order: 50, component: HeadersSection })
   connectionSections.register({ id: "route", order: 60, component: RouteSection })

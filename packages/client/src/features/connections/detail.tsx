@@ -33,12 +33,19 @@ import { AllowHostDialog } from "../credentials.tsx"
 import {
   effectiveBaseUrl,
   effectiveOrigin,
+  generationDefaultsAtom,
+  modelsAtom,
   parseOptionalInt,
   providerLabel,
   providerOf,
   providerSetupAtom
 } from "./data.ts"
 import { PriceFeedStatus } from "./priceFeedStatus.tsx"
+import { CheckResult, TEST_HINT } from "./check.tsx"
+import type { ConnectionTest } from "@dreamspan/shared/api.ts"
+import { type ModelId, resolveModel, type Model } from "@dreamspan/shared/providers.ts"
+import { useAtomValue } from "@effect/atom-react"
+import { AsyncResult } from "effect/reactivity"
 import {
   AwsKeyFields,
   awsKey,
@@ -61,6 +68,8 @@ export interface ConnectionSectionProps {
 }
 
 export const connectionSections = defineSlot<ConnectionSectionProps>("connection.sections")
+
+const modelName = (model: Model) => resolveModel(model.key, model.upstream, model.overrides).name.value
 
 /** The form's own copy while the user edits; null shows the connection as it is. */
 interface SettingsDraft {
@@ -941,37 +950,51 @@ export function RouteSection({ connection }: ConnectionSectionProps) {
 
 export function TestSection({ connection }: ConnectionSectionProps) {
   const action = useAction()
-  const [result, setResult] = useState<{
-    ok: boolean
-    detail: string
-    route: string | null
-    models: number | null
-  } | null>(null)
+  const [result, setResult] = useState<ConnectionTest | null>(null)
+  const [chosen, setChosen] = useState<ModelId | null>(null)
+  const defaults = useAtomValue(generationDefaultsAtom)
+  const models = useAtomValue(modelsAtom(connection.id, false))
+  const listed = AsyncResult.isSuccess(models) ? models.value : []
+  // The model new chats use, when it's on this connection: what the test sends to unless another is picked.
+  const current = AsyncResult.isSuccess(defaults) ? defaults.value.model : null
+  const preferred = current?.connection === connection.id ? current.model : null
+  const target = chosen ?? preferred
+  const test = async (modelId: ModelId | null) => {
+    const outcome = await action.run((client) =>
+      client("TestConnection", { connectionId: connection.id, ...(modelId === null ? {} : { modelId }) })
+    )
+    setResult(outcome.ok ? outcome.value : null)
+  }
   return (
     <Card>
       <CardHeader
-        title="Check the connection"
-        about="See whether the connection works and which models it offers."
+        title="Test the connection"
         actions={
-          <Button
-            hint="Checks this connection and lists available models."
-            pending={action.pending}
-            onClick={async () => {
-              setResult(null)
-              const outcome = await action.run((client) => client("TestConnection", { connectionId: connection.id }))
-              if (outcome.ok) setResult(outcome.value)
-            }}
-          >
-            Check
+          <Button hint={TEST_HINT} pending={action.pending} onClick={() => void test(target)}>
+            Test
           </Button>
         }
       />
       {result && (
-        <Alert tone={result.ok ? "success" : "danger"} title={result.ok ? "It works" : "It doesn't work"}>
-          <p>{result.detail}</p>
-          {result.models !== null && <p>{result.models} models listed.</p>}
-          {result.route && <p className="text-muted">Route: {result.route}</p>}
-        </Alert>
+        <CheckResult
+          result={result}
+          sending={action.pending}
+          onSend={target === null ? undefined : () => void test(target)}
+          picker={
+            listed.length === 0 ? (
+              <p className="text-muted">Add a model under Models to send it a test message.</p>
+            ) : (
+              <Field label="Model to test">
+                <Select
+                  items={listed.map((model) => ({ value: model.id, label: modelName(model) }))}
+                  value={target}
+                  onValueChange={setChosen}
+                  placeholder="Choose a model"
+                />
+              </Field>
+            )
+          }
+        />
       )}
       <ErrorAlert error={action.error} title="It doesn't work" />
     </Card>

@@ -1,5 +1,6 @@
 // Secrets being typed stay in the input's live value: never in a DOM attribute (where
 // page markup, extensions and serializers see them), and never after the dialog closes.
+import { chooseDefaultModelIfNone } from "./support/provider.ts"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -53,6 +54,7 @@ test("keys, header values and passwords never reach an attribute, and closing a 
   await expectKeyField(page.getByLabel("API key", { exact: true }))
   await page.getByLabel("API key", { exact: true }).fill("sk-typed-on-the-form-0001")
   expect(await markup(page)).not.toContain("sk-typed-on-the-form")
+  await chooseDefaultModelIfNone(page)
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByRole("heading", { name: "Secrets", level: 1 })).toBeVisible()
 

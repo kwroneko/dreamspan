@@ -1241,6 +1241,19 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.TestConnection({ connectionId: owner.connectionId }), "ProviderError:unusable")
   },
+  // Another user's saved key is as unknown as a deleted one: nothing is sent with it.
+  TestConnectionDraft: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.TestConnectionDraft({
+          kind: "openai-chat",
+          settings: settings("x"),
+          credentialId: owner.credentialId,
+          model: "any"
+        }),
+        "ProviderError:unusable"
+      )
+  },
   RefreshModels: {
     probe: (actor, owner) =>
       refused(actor.api.RefreshModels({ connectionId: owner.connectionId }), "ProviderError:unusable")

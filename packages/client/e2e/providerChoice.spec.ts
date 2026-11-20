@@ -3,6 +3,7 @@
 // server), and an advanced section with the provider's own defaults. Help on hover, no internals
 // in the copy, and the layout audit at 1440 and 390 px in light and dark. Nothing reaches a
 // provider: a Bedrock connection lists its models from the catalog.
+import { chooseDefaultModelIfNone } from "./support/provider.ts"
 import { expect, test, type Page } from "@playwright/test"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -92,6 +93,7 @@ for (const [width, height] of [
         "placeholder",
         "http://localhost:8000/v1"
       )
+      await chooseDefaultModelIfNone(page)
       await page.getByRole("button", { name: "Create connection" }).click()
       await expect(page.getByText("Enter the server’s address, such as http://localhost:8000/v1.")).toBeVisible()
 
@@ -152,6 +154,7 @@ for (const [width, height] of [
       await page.getByLabel("Name", { exact: true }).fill("Bedrock Paris")
       await page.getByLabel("Access key ID", { exact: true }).fill("AKIDEXAMPLESYNTHETIC")
       await page.getByLabel("Secret access key", { exact: true }).fill("synthetic/secret/never-used-0001")
+      await chooseDefaultModelIfNone(page)
       await page.getByRole("button", { name: "Create connection" }).click()
       await expect(page.getByRole("heading", { name: "Bedrock Paris", level: 1 })).toBeVisible()
       await expect(
@@ -218,6 +221,7 @@ for (const [width, height] of [
       await expect(region).toHaveAttribute("placeholder", "global")
       await help(page, "Region", /Where Google Cloud runs your requests/)
       await region.fill("not a region")
+      await chooseDefaultModelIfNone(page)
       await page.getByRole("button", { name: "Create connection" }).click()
       await expect(page.getByText("Enter a region code, such as us-east5.")).toBeVisible()
       await region.fill("us-east5")
@@ -251,6 +255,7 @@ for (const [width, height] of [
 
       // Created: its Region and project are kept, and a new key is another file.
       await page.getByLabel("Name", { exact: true }).fill("Vertex Lantern")
+      await chooseDefaultModelIfNone(page)
       await page.getByRole("button", { name: "Create connection" }).click()
       await expect(page.getByRole("heading", { name: "Vertex Lantern", level: 1 })).toBeVisible()
       await expect(page.getByText("Anthropic (Google Vertex) · https://aiplatform.eu.rep.googleapis.com")).toBeVisible()

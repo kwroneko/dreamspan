@@ -2,7 +2,7 @@ import { dispatcherConnectionTests } from "./support/dispatcherConnections.ts"
 import { logoutFromSettings } from "./support/appMenu.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import { chooseCustomServer, startProvider, type FakeProvider } from "./support/provider.ts"
+import { chooseCustomServer, startProvider, type FakeProvider, chooseDefaultModelIfNone } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, type TestServer, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -25,6 +25,7 @@ const createConnection = async (page: Page, name: string, baseUrl: string, key: 
   await page.getByLabel("Name", { exact: true }).fill(name)
   await page.getByLabel("Base URL", { exact: true }).fill(baseUrl)
   await page.getByLabel("API key", { exact: true }).fill(key)
+  await chooseDefaultModelIfNone(page)
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible()
 }
@@ -43,6 +44,7 @@ test("create, check, edit, route and delete a connection", async ({ page }) => {
   await page.getByRole("link", { name: "New connection" }).click()
   await chooseCustomServer(page)
   await page.getByLabel("Base URL", { exact: true }).fill("localhost port 5001")
+  await chooseDefaultModelIfNone(page)
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByText("Enter a full URL, such as http://localhost:8000/v1.")).toBeVisible()
   // Focus goes to the first invalid field, and its description carries the error.
@@ -53,7 +55,7 @@ test("create, check, edit, route and delete a connection", async ({ page }) => {
   await createConnection(page, "Local fake", provider.baseUrl, "sk-fake-key-123456")
   await expect(page.getByText("Key ending in 3456")).toBeVisible()
 
-  await page.getByRole("button", { name: "Check", exact: true }).click()
+  await page.getByRole("button", { name: "Test", exact: true }).click()
   await expect(page.getByText("It works")).toBeVisible()
   await expect(page.getByText(/Route: direct/)).toBeVisible()
   expect(provider.keys).toContain("sk-fake-key-123456")
@@ -168,7 +170,7 @@ test("a key or header typed for one address isn't sent to the one another sessio
   await expect(dialog.getByLabel("Key", { exact: true })).toHaveValue("")
   await expect(dialog.getByRole("button", { name: "Save key" })).toBeDisabled()
   await dialog.getByRole("button", { name: "Cancel" }).click()
-  await page.getByRole("button", { name: "Check", exact: true }).click()
+  await page.getByRole("button", { name: "Test", exact: true }).click()
   await expect(page.getByText("It doesn't work")).toBeVisible()
   expect(other.keys).not.toContain("sk-repointed-victim-0002")
 
@@ -210,7 +212,7 @@ test("a key isn't sent to a new address until it's typed again", async ({ page }
   await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click()
   const blocked = page.getByRole("status").filter({ hasText: `isn't allowed for ${origin}` })
   await expect(blocked).toContainText("replies through this connection fail")
-  await page.getByRole("button", { name: "Check", exact: true }).click()
+  await page.getByRole("button", { name: "Test", exact: true }).click()
   await expect(page.getByText("It doesn't work")).toBeVisible()
   expect(other.keys).not.toContain("sk-bound-key-abcdef")
 
@@ -224,7 +226,7 @@ test("a key isn't sent to a new address until it's typed again", async ({ page }
   await expect(dialog).toBeHidden()
   await expect(blocked).toBeHidden()
   await expect(page.getByText(`Not allowed for ${origin}`)).toBeHidden()
-  await page.getByRole("button", { name: "Check", exact: true }).click()
+  await page.getByRole("button", { name: "Test", exact: true }).click()
   await expect(page.getByText("It works")).toBeVisible()
   expect(other.keys).toContain("sk-bound-key-abcdef")
 })

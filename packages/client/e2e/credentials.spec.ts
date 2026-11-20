@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import { chooseCustomServer, type FakeProvider, startProvider } from "./support/provider.ts"
+import { chooseCustomServer, type FakeProvider, startProvider, chooseDefaultModelIfNone } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -43,6 +43,7 @@ test("save, rename, allow, replace and delete a key, which never comes back out"
   await page.getByLabel("Name", { exact: true }).fill("Uses the saved key")
   await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   await page.getByRole("button", { name: "Use a saved key instead" }).click()
+  await chooseDefaultModelIfNone(page)
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByText("saved as “Gateway key”")).toBeVisible()
 
@@ -98,6 +99,7 @@ test("replacing a key without its connections' address warns first, and the conn
   await page.getByLabel("Name", { exact: true }).fill("Strandable")
   await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   await page.getByLabel("API key", { exact: true }).fill("sk-strandable-key-0001")
+  await chooseDefaultModelIfNone(page)
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByRole("heading", { name: "Strandable", level: 1 })).toBeVisible()
   const connectionUrl = page.url()

@@ -688,11 +688,18 @@ describe("provider quirks", () => {
       // vLLM reports the context it was started with.
       assert.strictEqual(model.upstream.context, 16_384)
       const result = yield* providers.testConnection(userId, connection.id)
-      assert.deepStrictEqual(result, {
+      const { ms, ...rest } = result
+      assert.isAtLeast(ms!, 0)
+      assert.deepStrictEqual(rest, {
         ok: true,
         detail: "1 models listed",
         route: "direct: no proxy configured",
-        models: 1
+        models: 1,
+        reason: null,
+        status: null,
+        modelKeys: ["local-model"],
+        catalog: false,
+        reply: null
       })
       const events = yield* collect(
         providers.stream({ userId, connectionId: connection.id, modelId, context, attribution: { purpose: "test" } })
@@ -2157,7 +2164,7 @@ it.live("Google lists pages with its key, merges catalog modalities and prices, 
     refused = true
     const bad = yield* providers.testConnection(userId, connection.id)
     assert.isFalse(bad.ok)
-    assert.include(bad.detail, "auth")
+    assert.strictEqual(bad.reason, "auth")
     assert.notInclude(JSON.stringify(bad), "synthetic-google-key")
   }).pipe(Effect.scoped, Effect.provide(layer()))
 )

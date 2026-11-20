@@ -1,7 +1,14 @@
 // Client RPC handlers for connections, models, network settings and usage
 // (spec/PROVIDERS.md). Every handler acts as the authenticated user; storage enforces
 // ownership, so another user's ids are NotFound.
-import { type AppApi, ConnectionTest, CurrentUser, ModelRefresh, NetworkSettings } from "@dreamspan/shared/api.ts"
+import {
+  type AppApi,
+  ConnectionTest,
+  ConnectionTestReply,
+  CurrentUser,
+  ModelRefresh,
+  NetworkSettings
+} from "@dreamspan/shared/api.ts"
 import type { RecomputeTarget } from "@dreamspan/shared/costFormulas.ts"
 import { Forbidden, ServerError } from "@dreamspan/shared/errors.ts"
 import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
@@ -9,7 +16,7 @@ import { Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { Network } from "../net/Network.ts"
-import { Providers } from "../providers/Providers.ts"
+import { Providers, type ProvidersShape, type TestResult } from "../providers/Providers.ts"
 import { recomputeCosts } from "../providers/recompute.ts"
 import { ProviderRegistry } from "../providers/registry.ts"
 
@@ -18,6 +25,11 @@ const toServerError = (operation: string) => (error: unknown) =>
   Effect.logError(`${operation} failed`, error).pipe(
     Effect.andThen(Effect.fail(new ServerError({ message: `${operation} failed` })))
   )
+
+type TestDraftPayload = Omit<Parameters<ProvidersShape["testDraft"]>[0], "userId" | "role">
+
+const toConnectionTest = (result: TestResult) =>
+  new ConnectionTest({ ...result, reply: result.reply && new ConnectionTestReply(result.reply) })
 
 const admin = Effect.gen(function* () {
   const user = yield* CurrentUser
@@ -41,6 +53,20 @@ export const makeProviderListHandlers = Effect.gen(function* () {
     ApplyCostRecompute: ({ target }: { target: RecomputeTarget }) =>
       recompute(target, true, "ApplyCostRecompute").pipe(Effect.map(({ changed }) => ({ changed }))),
     ListProviders: () => Effect.sync(() => providers.providers()),
+    // The typed key goes only to the provider: never stored, logged or returned.
+    TestConnectionDraft: ({ provider, kind, settings, apiKey, credentialId, model }: TestDraftPayload) =>
+      Effect.flatMap(CurrentUser, (user) =>
+        providers.testDraft({
+          userId: user.id,
+          role: user.role,
+          provider,
+          kind,
+          settings,
+          apiKey: apiKey ?? null,
+          credentialId: credentialId ?? null,
+          model: model ?? null
+        })
+      ).pipe(Effect.map(toConnectionTest)),
     RefreshModelEndpoints: ({ modelId }: { modelId: ModelId }) =>
       Effect.flatMap(CurrentUser, (user) => providers.refreshEndpoints(user.id, modelId)),
     GetPriceFeedState: ({ connectionId }: { connectionId: ConnectionId }) =>
@@ -136,9 +162,9 @@ export const makeProviderHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) =>
         writer.DeleteConnection({ userId: id, connectionId }).pipe(Effect.tap(() => warmth.refreshUser(id, true)))
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("DeleteConnection"))),
-    TestConnection: ({ connectionId }) =>
-      Effect.flatMap(userId, (id) => providers.testConnection(id, connectionId)).pipe(
-        Effect.map((result) => new ConnectionTest(result))
+    TestConnection: ({ connectionId, modelId }) =>
+      Effect.flatMap(userId, (id) => providers.testConnection(id, connectionId, modelId ?? null)).pipe(
+        Effect.map(toConnectionTest)
       ),
     RefreshModels: ({ connectionId }) =>
       Effect.flatMap(userId, (id) =>
