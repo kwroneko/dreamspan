@@ -339,7 +339,7 @@ it.live("catalog header credentials enter the inventory before capture and error
 })
 it.live("authenticated endpoint route components are scrubbed", () => {
   const config = testConfig(),
-    secret = "synthetic-route-token"
+    secret = "synthetic-route-token-4f9c2a"
   return Effect.gen(function* () {
     const mock = yield* resource(() =>
       startMockProvider((r, res) =>

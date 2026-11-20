@@ -69,7 +69,8 @@ it.live("review: unchanged prefix stays warm with an ordinary short header value
     const me = yield* api.Whoami()
     const warmth = (yield* (yield* Reader).CacheWarmth({ userId: me.id, chatId: chat.id })).warmth
     const run = yield* api.GetRunContext({ versionId: entry.version.id })
-    assert.include(run.messages.map((m) => m.content).join(" "), "[redacted]")
+    // A header that carries no credential is no secret: "en" stays in the captured text.
+    assert.notInclude(run.messages.map((m) => m.content).join(" "), "[redacted]")
     assert.notInclude(JSON.stringify(run), "digest")
     // What follows the chat changes every turn (the group nudge, the user turn that ends the
     // request, DESIGN §2.2): the rest must come back as it was.

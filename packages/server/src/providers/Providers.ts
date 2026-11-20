@@ -264,9 +264,35 @@ const merged = (base: unknown, over: Readonly<Record<string, unknown>>): Record<
   return out
 }
 
-/** A scrubber for the given secrets: every occurrence becomes "[redacted]". */
+/** The shortest value scrubbed: anything shorter could blank ordinary words in a message. */
+export const MIN_SECRET_LENGTH = 12
+
+/** A host name (`api.acme.example`): addresses are shown, never secrets. */
+const HOSTNAME = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}\.?$/i
+/** One plain word, letters only (`Organization`). */
+const PLAIN_WORD = /^[a-z]+$/i
+/** Plain words joined by `-`, `_`, `.` or spaces (`openai-compatible`), as public route names are. */
+const PLAIN_WORDS = /^[a-z]+(?:[-_ .][a-z]+)*$/i
+
+/**
+ * Whether a value is worth scrubbing: at least 12 characters, and not a host name or one plain
+ * word, so scrubbing it can't blank a provider's own link or an ordinary word in its message.
+ * `words` also refuses plain words joined, for values that aren't credentials by position (an
+ * address's path segments and its query values not named like a credential).
+ */
+export const secretLike = (value: string, words = false) => {
+  const trimmed = value.trim()
+  if (trimmed.length < MIN_SECRET_LENGTH) return false
+  if (HOSTNAME.test(trimmed)) return false
+  return !(words ? PLAIN_WORDS : PLAIN_WORD).test(trimmed)
+}
+
+/** Header names that carry credentials; others (Referer, X-Title, User-Agent) aren't secrets. */
+export const CREDENTIAL_HEADER = /key|token|secret|auth|passw|cookie|signature|credential/i
+
+/** A scrubber for the given secrets: every occurrence of a secret-like one becomes "[redacted]". */
 export const makeScrub = (secrets: ReadonlyArray<string | null | undefined>) => {
-  const values = [...new Set(secrets.filter((v): v is string => typeof v === "string" && v.length > 0))].sort(
+  const values = [...new Set(secrets.filter((v): v is string => typeof v === "string" && secretLike(v)))].sort(
     (a, b) => b.length - a.length
   )
   const pattern = values.length
@@ -275,64 +301,81 @@ export const makeScrub = (secrets: ReadonlyArray<string | null | undefined>) => 
   return (text: string) => (pattern ? text.replace(pattern, "[redacted]") : text)
 }
 
-/** One request-local inventory, populated as secrets resolve, before any payload is captured. */
+/**
+ * One request-local inventory, populated as secrets resolve, before any payload is captured.
+ * Only values `secretLike` accepts are kept.
+ */
 export const requestSecrets = () => {
   const values = new Set<string>()
   let cached: ((text: string) => string) | undefined
-  const add = (value: string) => {
+  const keep = (value: string, words = false) => {
+    if (!secretLike(value, words)) return
     cached = undefined
-    if (value) values.add(value)
-    // Proxy credentials may be echoed independently, percent encoded, or as Basic auth.
+    values.add(value)
+  }
+  /** A URL's credentials, which may be echoed independently, percent encoded, or as Basic auth. */
+  const userinfo = (url: URL) => {
+    const username = decodeURIComponent(url.username)
+    const password = decodeURIComponent(url.password)
+    for (const part of [url.username, url.password, username, password]) if (part) keep(part)
+    if (username || password) keep(Buffer.from(`${username}:${password}`).toString("base64"))
+  }
+  const add = (value: string) => {
+    if (value) keep(value)
     try {
       const url = new URL(value)
-      values.add(url.href)
-      const username = decodeURIComponent(url.username)
-      const password = decodeURIComponent(url.password)
-      for (const part of [url.username, url.password, username, password]) if (part) values.add(part)
-      if (username || password) values.add(Buffer.from(`${username}:${password}`).toString("base64"))
+      keep(url.href)
+      userinfo(url)
     } catch {
       /* Most secrets aren't URLs. */
     }
     return value
   }
+  /** A credential header's value, and a `Bearer`/`Basic` credential in any header. */
   const headers = (headers: Readonly<Record<string, string | undefined>> | undefined) => {
-    for (const value of Object.values(headers ?? {})) {
+    for (const [name, value] of Object.entries(headers ?? {})) {
       if (typeof value !== "string") continue
-      add(value)
       const auth = /^(Bearer|Basic)\s+(.+)$/i.exec(value.trim())
-      if (!auth) continue
+      if (!auth) {
+        if (CREDENTIAL_HEADER.test(name)) add(value)
+        continue
+      }
+      keep(value)
       add(auth[2]!)
       if (auth[1]!.toLowerCase() === "basic") {
         const decoded = Buffer.from(auth[2]!, "base64").toString("utf8")
-        add(decoded)
+        keep(decoded)
         const colon = decoded.indexOf(":")
         if (colon >= 0) {
-          add(decoded.slice(0, colon))
-          add(decoded.slice(colon + 1))
+          keep(decoded.slice(0, colon))
+          keep(decoded.slice(colon + 1))
         }
       }
     }
   }
+  /**
+   * An address. Its host and plain route names (`v1`, `openai-compatible`) are shown, but a
+   * gateway may carry a key in its path or query, so every other long segment and value is
+   * protected, and a query value named like a credential (`access_token=…`) as a key is.
+   */
   const route = (value: string) => {
-    add(value)
     const url = new URL(value)
-    // Routes have no public/private component annotation: conservatively protect all values.
-    for (const part of [
-      ...url.pathname.split("/"),
-      ...url.search
-        .slice(1)
-        .split("&")
-        .map((p) => p.slice(p.indexOf("=") + 1))
-    ]) {
-      if (!part) continue
-      add(part)
+    userinfo(url)
+    const both = (part: string, words: boolean) => {
+      keep(part, words)
       try {
-        add(decodeURIComponent(part))
+        keep(decodeURIComponent(part), words)
       } catch {
         /* Malformed encodings remain covered verbatim. */
       }
     }
-    for (const value of url.searchParams.values()) add(value)
+    for (const part of url.pathname.split("/")) if (part) both(part, true)
+    for (const pair of url.search.slice(1).split("&")) {
+      const equals = pair.indexOf("=")
+      if (equals < 0) both(pair, true)
+      else both(pair.slice(equals + 1), !CREDENTIAL_HEADER.test(pair.slice(0, equals)))
+    }
+    for (const [name, part] of url.searchParams) keep(part, !CREDENTIAL_HEADER.test(name))
   }
   return { add, headers, route, scrub: (text: string) => (cached ??= makeScrub([...values]))(text) }
 }

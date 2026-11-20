@@ -1692,9 +1692,9 @@ describe("pure pieces", () => {
     assert.isNull(priceCost({ ...counts, output: null }, price))
   })
 
-  it("scrubs every nonempty secret, longest first", () => {
-    const scrub = makeScrub(["sk-abcdef123456", "sk-abcdef", "pw", null])
-    assert.strictEqual(scrub("key sk-abcdef123456 and sk-abcdef, pw"), "key [redacted] and [redacted], [redacted]")
+  it("scrubs every secret-like value, longest first, and leaves short ones", () => {
+    const scrub = makeScrub(["sk-abcdef123456-long", "sk-abcdef1234", "pw", null])
+    assert.strictEqual(scrub("key sk-abcdef123456-long and sk-abcdef1234, pw"), "key [redacted] and [redacted], pw")
   })
 
   it("reads Retry-After as seconds or a date", () => {
