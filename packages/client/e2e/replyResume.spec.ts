@@ -1,11 +1,11 @@
-// Resume beside a failed plain reply (spec/AGENTIC.md §12.6): the error box has a Resume
-// button, explained on hover, which writes the reply again as a new version, since the failed
-// one has no text to continue. Layout audit on the message at 1440 and 390, light and dark.
+// The button beside a failed or stopped plain reply (spec/AGENTIC.md §12.6), named for what it
+// does and explained on hover: Retry asks for the reply again when it has no text, Continue
+// carries on text it stopped in. Layout audit on the message at 1440 and 390, light and dark.
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import { PLAIN_REPLY, startAgentProvider } from "./support/agentProvider.ts"
+import { PARTIAL_REPLY, PLAIN_REPLY, startAgentProvider } from "./support/agentProvider.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -19,10 +19,18 @@ test.afterAll(async () => {
   await provider.stop()
 })
 
-for (const status of ["failed", "stopped"] as const)
+const CASES = [
+  { status: "failed", partial: false, label: "Retry", hint: "Asks the model for this reply again" },
+  { status: "stopped", partial: false, label: "Retry", hint: "Asks the model for this reply again" },
+  { status: "stopped", partial: true, label: "Continue", hint: "Continues the text it stopped in" }
+] as const
+
+for (const { status, partial, label, hint } of CASES)
   for (const width of [1440, 390])
     for (const theme of ["light", "dark"] as const)
-      test(`a ${status} plain reply resumes from the visible button at ${width} ${theme}`, async ({ page }, info) => {
+      test(`a ${status} plain reply${partial ? " with text" : ""} offers ${label} at ${width} ${theme}`, async ({
+        page
+      }, info) => {
         await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
         await page.emulateMedia({ colorScheme: theme })
         await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
@@ -58,7 +66,7 @@ for (const status of ["failed", "stopped"] as const)
         await page.goto(`${server().url}/chats/${chat.id}`)
         await expect(page.getByTestId("messages").getByText("Is it still raining?")).toBeVisible()
         if (status === "failed") provider.failPlain()
-        else provider.holdPlain()
+        else provider.holdPlain(partial)
         await page
           .getByRole("button", { name: /^(Reply$|Generate(?! another))/ })
           .last()
@@ -66,6 +74,7 @@ for (const status of ["failed", "stopped"] as const)
         const failed = page.getByRole("article").last()
         if (status === "stopped") {
           await expect.poll(() => provider.heldCount()).toBeGreaterThan(0)
+          if (partial) await expect(failed).toContainText(PARTIAL_REPLY)
           await failed.getByRole("button", { name: "Stop", exact: true }).click()
           await expect(failed.getByText("stopped", { exact: true })).toBeVisible()
           provider.release()
@@ -74,22 +83,21 @@ for (const status of ["failed", "stopped"] as const)
           .getByRole("note")
           .filter({ hasText: status === "failed" ? /^Failed \(/ : "This reply was stopped." })
         await expect(box).toBeVisible()
-        const resume = box.getByRole("button", { name: "Resume", exact: true })
+        const resume = box.getByRole("button", { name: label, exact: true })
         await expect(resume).toBeVisible()
+        await expect(box.getByRole("button", { name: "Resume", exact: true })).toHaveCount(0)
         await resume.hover()
-        await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(
-          "Carries this reply on from where it stopped"
-        )
+        await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(hint)
         const shots = process.env.SCREENSHOT_DIR
         if (shots) {
           mkdirSync(shots, { recursive: true })
           await page.screenshot({
-            path: resolve(shots, `plain-${status}-${width}-${theme}.png`),
+            path: resolve(shots, `plain-${status}-${label}-${width}-${theme}.png`),
             animations: "disabled"
           })
         }
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-        await expectLayout(page, info, `plain-${status}-${width}-${theme}`, { scope: "article:last-of-type" })
+        await expectLayout(page, info, `plain-${status}-${label}-${width}-${theme}`, { scope: "article:last-of-type" })
         await resume.click()
         await expect(failed).toContainText(PLAIN_REPLY)
         await expect(failed.getByText(/^Failed \(/)).toHaveCount(0)

@@ -9,6 +9,8 @@ import type { AddressInfo } from "node:net"
 
 export const AGENT_REPLY = "Mira lifts the lantern and points across the flooded bridge."
 export const PLAIN_REPLY = "The rain keeps falling."
+/** What a held plain reply with `holdPlain(true)` has written when it's stopped. */
+export const PARTIAL_REPLY = "The rain"
 export const THINKING = "The traveler asked about the bridge; check what was said of it."
 
 const QUERIES = ["bridge", "lantern"]
@@ -24,6 +26,7 @@ export const startAgentProvider = async () => {
   let failing: number | null = null
   let failingPlain = false
   let holdingPlain = false
+  let partialPlain = false
   const held: Array<() => void> = []
   const bodies: Array<{ messages: Array<{ role: string }>; tools?: unknown }> = []
   const chunk = (delta: object, finish: string | null = null, usage?: object) =>
@@ -62,6 +65,15 @@ export const startAgentProvider = async () => {
       bodies.push(body)
       const usage = { prompt_tokens: 400, completion_tokens: 12 }
       if (!body.tools) {
+        if (holdingPlain && partialPlain) {
+          // Some text first, then nothing until the reply's Stop gives up on it.
+          res.writeHead(200, { "content-type": "text/event-stream" })
+          res.write(chunk({ role: "assistant", content: PARTIAL_REPLY }))
+          held.push(() => {
+            if (!res.destroyed) res.end("data: [DONE]\n\n")
+          })
+          return
+        }
         if (holdingPlain) {
           held.push(() =>
             stream(res, [chunk({ role: "assistant", content: PLAIN_REPLY }), chunk({}, "stop"), chunk({}, null, usage)])
@@ -152,12 +164,15 @@ export const startAgentProvider = async () => {
     failPlain: () => {
       failingPlain = true
     },
-    holdPlain: () => {
+    /** Holds the next plain replies; with `partial`, after sending PARTIAL_REPLY. */
+    holdPlain: (partial = false) => {
       holdingPlain = true
+      partialPlain = partial
     },
     release: () => {
       holding = null
       holdingPlain = false
+      partialPlain = false
       for (const go of held.splice(0)) go()
     },
     stop: () =>

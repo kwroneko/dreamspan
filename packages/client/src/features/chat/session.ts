@@ -62,6 +62,13 @@ const MAX_LOADED = 500
 const CHATS_REREAD_MS = 1000
 
 /** Whether this version is held behind a cold-prefix writer. */
+/**
+ * What `resumeReply` does with a stopped or failed version: an agent reply's run resumes, a
+ * plain reply with text is continued, a plain reply without text is asked for again.
+ */
+export const resumeKind = (version: Pick<Version, "agent" | "content">): "resume" | "continue" | "retry" =>
+  version.agent === true ? "resume" : version.content.trim() !== "" ? "continue" : "retry"
+
 export const waitingCache = Atom.family((_id: VersionId) => Atom.make(false))
 
 /** The text so far of a version that's generating, by its id; null when it isn't. */
@@ -1871,8 +1878,9 @@ export class ChatSession {
    * guidance), or, with no text yet, written again as a new version.
    */
   resumeReply(entry: PathEntry): Promise<Outcome<unknown>> {
-    if (entry.version.agent === true) return this.resumeVersion(entry)
-    return entry.version.content.trim() !== "" ? this.continueVersion(entry, false) : this.regenerate(entry)
+    const kind = resumeKind(entry.version)
+    if (kind === "resume") return this.resumeVersion(entry)
+    return kind === "continue" ? this.continueVersion(entry, false) : this.regenerate(entry)
   }
 
   /** "Show as reply text": the reply's leading sections back in its text, as a new version (spec/REPLY-SECTIONS.md). */

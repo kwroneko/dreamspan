@@ -47,7 +47,7 @@ import { OFF, usePanelPermit } from "./panelPermits.ts"
 import { MessageDetails, useMessageDetails } from "./messageDetails.tsx"
 import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
-import { type ChatSession, liveText, type Outcome, waitingCache } from "./session.ts"
+import { type ChatSession, liveText, type Outcome, resumeKind, waitingCache } from "./session.ts"
 import { stepVersion } from "./versionNavigation.ts"
 import {
   availableCommands,
@@ -137,16 +137,30 @@ function BodyText({
   )
 }
 
-/** Resume stays visible beside every stopped, interrupted or failed reply. */
-function ResumeButton({ onResume }: { onResume: () => void }) {
+const RESUME_COPY = {
+  resume: {
+    label: "Resume",
+    hint: "Carries this reply on from where it stopped, as a new version, with the model and settings the chat has now. Nothing new is written for you."
+  },
+  continue: {
+    label: "Continue",
+    hint: "Continues the text it stopped in, as a new version, with the model and settings the chat has now."
+  },
+  retry: {
+    label: "Retry",
+    hint: "Asks the model for this reply again, as a new version, with the model and settings the chat has now."
+  }
+} as const
+
+/**
+ * Stays visible beside every stopped, interrupted or failed reply, named for what it does
+ * (`resumeKind`): Resume for an agent reply, Continue for plain text, Retry when there's none.
+ */
+function ResumeButton({ version, onResume }: { version: Version; onResume: () => void }) {
+  const copy = RESUME_COPY[resumeKind(version)]
   return (
-    <Button
-      variant="secondary"
-      className="self-start"
-      hint="Carries this reply on from where it stopped, as a new version, with the model and settings the chat has now. Nothing new is written for you."
-      onClick={onResume}
-    >
-      Resume
+    <Button variant="secondary" className="self-start" hint={copy.hint} onClick={onResume}>
+      {copy.label}
     </Button>
   )
 }
@@ -224,7 +238,7 @@ function VersionBody({
             Failed ({version.error.class}): {version.error.message}
           </p>
           <SlotOutlet slot={versionFailureActions} props={{ version }} />
-          {onResume && <ResumeButton onResume={onResume} />}
+          {onResume && <ResumeButton version={version} onResume={onResume} />}
         </div>
       )}
       {(version.status === "interrupted" || version.status === "stopped") && onResume && (
@@ -237,7 +251,7 @@ function VersionBody({
               ? "This reply was stopped."
               : "The app stopped while this reply was being written."}
           </p>
-          <ResumeButton onResume={onResume} />
+          <ResumeButton version={version} onResume={onResume} />
         </div>
       )}
     </div>
