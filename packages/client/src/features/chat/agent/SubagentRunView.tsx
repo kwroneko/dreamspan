@@ -84,11 +84,15 @@ export function SubagentRunView({
                 )}
               </dl>
             </Card>
+            <Card>
+              <CardHeader title="Usage" about="Its requests, which the reply's cost includes." />
+              <Usage requests={run.requests} />
+            </Card>
             <section aria-label="Its context" className="flex flex-col gap-2">
               <h2 className="text-base font-semibold">Its context</h2>
               <Card>
                 <CardHeader title="Subagent instructions" />
-                <pre className="max-h-96 overflow-auto font-mono text-xs whitespace-pre-wrap text-text [overflow-wrap:anywhere]">
+                <pre className="font-mono text-xs whitespace-pre-wrap text-text [overflow-wrap:anywhere]">
                   {run.instructions}
                 </pre>
               </Card>
@@ -107,10 +111,6 @@ export function SubagentRunView({
                 first="Every request after the first is its context above, then everything listed before it here."
               />
             )}
-            <Card>
-              <CardHeader title="Usage" about="Its requests, which the reply's cost includes." />
-              <Usage requests={run.requests} />
-            </Card>
           </div>
         )}
       </AsyncView>

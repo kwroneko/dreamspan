@@ -3,10 +3,11 @@ import { usePlaceExpansion, usePlaceParam } from "../../usePlaceParam.ts"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { tokenizerText } from "../editor/tokenCounts.ts"
 // The request inspector (DESIGN §7.4): the context one reply was generated from, as it was
-// sent. Each message with its role, where its text came from, its tokens and the cache
-// breakpoints between them; then the model, the samplers and what the provider reported.
-// Text is shown as text. Measured virtual rows keep dense contexts bounded; collapsed
-// messages render only their previews.
+// sent. First the model, the samplers, what was left out and what the provider reported; then
+// each message with its role, where its text came from, its tokens and the cache breakpoints
+// between them. Text is shown as text. The page's pane is the only scroller (owner,
+// 2026-11-20: "No more scroll inside scroll"): the messages are measured virtual rows of that
+// pane, so dense contexts stay bounded, and collapsed messages render only their previews.
 import type { ChatId, ForkId, VersionId } from "@dreamspan/shared/chat.ts"
 import { scriptLabel } from "./rewrites.tsx"
 import { BUILTIN_PRESET_LABEL } from "@dreamspan/shared/generation.ts"
@@ -21,7 +22,18 @@ import type {
 import { Link, Navigate, useParams, useSearch } from "@tanstack/react-router"
 import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
 import { type Reuse, ReuseLine, reuseByMessage } from "../editor/promptLines.tsx"
-import { createContext, Fragment, lazy, type ReactNode, Suspense, useContext, useMemo, useRef, useState } from "react"
+import {
+  createContext,
+  Fragment,
+  lazy,
+  type ReactNode,
+  Suspense,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useCallback,
+  useState
+} from "react"
 import { Loading } from "../../ui/Spinner.tsx"
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 import { AsyncView } from "../../actions.tsx"
@@ -32,7 +44,7 @@ import { ImageEstimate } from "./imageTokens.tsx"
 import { requestStatusText } from "./requestWords.ts"
 import { useTitle } from "../shell.tsx"
 import { SlotOutlet } from "../../slots.tsx"
-import { runInspectorSections } from "./presentation.tsx"
+import { runInspectorSections, runInspectorTranscript } from "./presentation.tsx"
 
 /** How much of a collapsed message shows. */
 const PREVIEW = 200
@@ -464,7 +476,7 @@ function NotSent({ run }: { run: Pick<RunContext, "notSent" | "messages" | "chat
         {listed.map((source) => (
           <li
             key={source.id}
-            className="flex items-start gap-2 rounded-md border border-dashed border-border px-2.5 py-1.5 text-xs"
+            className="flex items-start gap-2 rounded-md border border-dashed border-border px-2.5 py-2 text-xs"
           >
             <span className="shrink-0 rounded bg-surface-raised px-1.5 py-0.5 font-semibold tracking-wide text-muted uppercase">
               Not sent
@@ -573,9 +585,43 @@ function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
 /** A context this small opens with every turn's text showing. */
 const OPEN_ALL = { messages: 60, characters: 120_000 }
 
+/** The nearest ancestor that scrolls: the page's pane, a workbench frame's, or a dialog's body. */
+const scrollPaneOf = (element: HTMLElement): HTMLElement => {
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    const { overflowY } = getComputedStyle(parent)
+    if (overflowY === "auto" || overflowY === "scroll") return parent
+  }
+  return document.documentElement
+}
+
+/**
+ * The pane the list scrolls with, and where the list starts in it: the rows are virtual rows of
+ * the pane itself, never of a scroller of their own inside it.
+ */
+function useScrollPane() {
+  const [list, setList] = useState<{ element: HTMLElement; pane: HTMLElement } | null>(null)
+  const [margin, setMargin] = useState(0)
+  const ref = useCallback((element: HTMLElement | null) => {
+    setList(element ? { element, pane: scrollPaneOf(element) } : null)
+  }, [])
+  useLayoutEffect(() => {
+    if (!list) return
+    const { element, pane } = list
+    // What's above the list (the request's facts, a section that loads) moves where it starts.
+    // The observer reports each element once on observing it, before the first paint.
+    const observer = new ResizeObserver(() =>
+      setMargin(element.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop)
+    )
+    observer.observe(element)
+    for (const child of pane.children) observer.observe(child)
+    return () => observer.disconnect()
+  }, [list])
+  return { ref, pane: list?.pane ?? null, margin }
+}
+
 function Messages({ run }: { run: Pick<RunContext, "messages" | "chatId"> }) {
   "use no memo"
-  const parent = useRef<HTMLDivElement>(null)
+  const { ref: listRef, pane, margin } = useScrollPane()
   const all = () => new Set(run.messages.keys())
   const defaultAll =
     run.messages.length <= OPEN_ALL.messages &&
@@ -602,9 +648,10 @@ function Messages({ run }: { run: Pick<RunContext, "messages" | "chatId"> }) {
   // eslint-disable-next-line react-hooks/incompatible-library -- mutable instance; memoization is disabled above
   const virtualizer = useVirtualizer({
     count: run.messages.length,
-    getScrollElement: () => parent.current,
+    getScrollElement: () => pane,
     estimateSize: () => 120,
     overscan: 4,
+    scrollMargin: margin,
     rangeExtractor: (range) => {
       const visible = defaultRangeExtractor(range)
       return focused === null || visible.includes(focused) ? visible : [...visible, focused].sort((a, b) => a - b)
@@ -623,42 +670,40 @@ function Messages({ run }: { run: Pick<RunContext, "messages" | "chatId"> }) {
       >
         {everyOpen ? "Collapse every turn" : "Expand every turn"}
       </Button>
-      <div ref={parent} role="list" className="h-[75vh] overflow-y-auto">
-        <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
-          {virtualizer.getVirtualItems().map((item) => (
-            <div
-              key={item.key}
-              role="listitem"
-              aria-posinset={item.index + 1}
-              aria-setsize={run.messages.length}
-              onFocusCapture={() => setFocused(item.index)}
-              onBlurCapture={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget)) setFocused(null)
-              }}
-              data-index={item.index}
-              ref={virtualizer.measureElement}
-              className="absolute top-0 left-0 w-full"
-              style={{ transform: `translateY(${item.start}px)` }}
-            >
-              <Message
-                message={run.messages[item.index]!}
-                index={item.index}
-                chatId={run.chatId}
-                reuse={reuse.has(item.index) ? { kind: reuse.get(item.index)!, alone: reuseAlone } : undefined}
-                open={expanded.has(item.index)}
-                setOpen={(open) =>
-                  setExpanded((previous) => {
-                    if (previous.has(item.index) === open) return previous
-                    const next = new Set(previous)
-                    if (open) next.add(item.index)
-                    else next.delete(item.index)
-                    return next
-                  })
-                }
-              />
-            </div>
-          ))}
-        </div>
+      <div ref={listRef} role="list" className="relative" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((item) => (
+          <div
+            key={item.key}
+            role="listitem"
+            aria-posinset={item.index + 1}
+            aria-setsize={run.messages.length}
+            onFocusCapture={() => setFocused(item.index)}
+            onBlurCapture={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setFocused(null)
+            }}
+            data-index={item.index}
+            ref={virtualizer.measureElement}
+            className="absolute top-0 left-0 w-full"
+            style={{ transform: `translateY(${item.start - margin}px)` }}
+          >
+            <Message
+              message={run.messages[item.index]!}
+              index={item.index}
+              chatId={run.chatId}
+              reuse={reuse.has(item.index) ? { kind: reuse.get(item.index)!, alone: reuseAlone } : undefined}
+              open={expanded.has(item.index)}
+              setOpen={(open) =>
+                setExpanded((previous) => {
+                  if (previous.has(item.index) === open) return previous
+                  const next = new Set(previous)
+                  if (open) next.add(item.index)
+                  else next.delete(item.index)
+                  return next
+                })
+              }
+            />
+          </div>
+        ))}
       </div>
     </>
   )
@@ -743,6 +788,16 @@ function Inspector({ run }: { run: RunContext }) {
           </ul>
         </Alert>
       )}
+      <SlotOutlet slot={runInspectorSections} props={{ run }} />
+      <NotSent run={run} />
+      <Card>
+        <CardHeader
+          title="Usage"
+          about="First token: the time from sending to the first text or reasoning. Reasoning time isn't recorded."
+        />
+        <Usage requests={run.requests} />
+      </Card>
+      {/* The prompt last, in the page's own flow: the pane scrolls it, nothing inside does. */}
       <section aria-label="Messages" className="flex flex-col gap-2">
         <h2 className="text-base font-semibold">Messages</h2>
         {run.capture === "unavailable" ? (
@@ -751,15 +806,7 @@ function Inspector({ run }: { run: RunContext }) {
           <Messages key={run.versionId} run={run} />
         )}
       </section>
-      <NotSent run={run} />
-      <SlotOutlet slot={runInspectorSections} props={{ run }} />
-      <Card>
-        <CardHeader
-          title="Usage"
-          about="First token: the time from sending to the first text or reasoning. Reasoning time isn't recorded."
-        />
-        <Usage requests={run.requests} />
-      </Card>
+      <SlotOutlet slot={runInspectorTranscript} props={{ run }} />
     </div>
   )
 }
@@ -808,11 +855,11 @@ export function DraftRequestView({ request }: { request: DraftRequest }) {
           </ul>
         </Alert>
       )}
+      <NotSent run={run} />
       <section aria-label="Messages" className="flex flex-col gap-2">
         <h2 className="text-base font-semibold">Messages</h2>
         <Messages run={run} />
       </section>
-      <NotSent run={run} />
     </div>
   )
 }

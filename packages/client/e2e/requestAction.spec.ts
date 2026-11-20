@@ -44,7 +44,7 @@ for (const width of [1440, 390])
       await reply.getByRole("button", { name: "Stop", exact: true }).click()
       await expect(reply.getByText("stopped", { exact: true })).toBeVisible()
 
-      const label = "Request it was generated from"
+      const label = "Open request inspector"
       if (process.env.LAYOUT_AUDIT) {
         await showActions(reply)
         await reply.getByRole("button", { name: "More actions", exact: true }).click()
@@ -76,7 +76,7 @@ for (const width of [1440, 390])
         })
       await link.hover()
       await expect(
-        page.getByText("See everything the model was sent for this version, and where each part came from.", {
+        page.getByText("Shows everything the model was sent for this version, and where each part came from.", {
           exact: true
         })
       ).toBeVisible()

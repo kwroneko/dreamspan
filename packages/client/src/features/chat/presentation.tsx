@@ -23,12 +23,20 @@ export function ChatCardActions(props: ChatCardActionProps) {
 }
 export const chatSettingSections = defineSlot<{ session: ChatSession }>("chat.setting-sections")
 /**
- * Sections of the request inspector after the context and what it left out (ContextPage.tsx): an
- * agent reply's tools and steps (agent/RunSteps.tsx), the run behind the request.
+ * Sections of the request inspector above the sent messages, with its other facts about the
+ * request (ContextPage.tsx): whose context it was (ContextViewSection.tsx), an agent reply's
+ * attempts at a reply (agent/RunSteps.tsx).
  */
 export const runInspectorSections = defineSlot<{
   readonly run: import("@dreamspan/shared/inspectorApi.ts").RunContext
 }>("inspector.run-sections")
+/**
+ * Sections of the request inspector after the sent messages, continuing them: an agent reply's
+ * tools and steps (agent/RunSteps.tsx), the requests that followed the first.
+ */
+export const runInspectorTranscript = defineSlot<{
+  readonly run: import("@dreamspan/shared/inspectorApi.ts").RunContext
+}>("inspector.run-transcript")
 /** Sections of the Cast tab under the cast itself: Add characters (CastAdd.tsx). */
 export const castSections = defineSlot<{ session: ChatSession }>("chat.cast-sections")
 /** The same sections in a chat not made yet: who answers first, Add characters. */

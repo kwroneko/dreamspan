@@ -39,7 +39,7 @@ export function ContextViewSection({ run }: { run: RunContext }) {
           {view.leftOut.map((message) => (
             <li
               key={`${message.slotId}:${message.merged?.ordinal ?? ""}`}
-              className="flex items-start gap-2 rounded-md border border-dashed border-border px-2.5 py-1.5 text-xs"
+              className="flex items-start gap-2 rounded-md border border-dashed border-border px-2.5 py-2 text-xs"
             >
               <span className="shrink-0 rounded bg-surface-raised px-1.5 py-0.5 font-semibold tracking-wide text-muted uppercase">
                 Not sent

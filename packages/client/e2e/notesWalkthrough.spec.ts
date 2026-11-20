@@ -14,6 +14,7 @@ import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { openPanel } from "./support/panel.ts"
+import { scrollPane } from "./support/scrollPane.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import {
   closeNoteBlock,
@@ -337,9 +338,7 @@ for (const width of [1440, 390])
         // The note goes at the end of the tail: the messages list is virtual, so to its end.
         const messages = page.getByRole("region", { name: "Messages" })
         await expect(messages.getByText("#1", { exact: true })).toBeVisible({ timeout: 30_000 })
-        await messages.getByRole("list").evaluate((el) => {
-          el.scrollTop = el.scrollHeight
-        })
+        await scrollPane(messages.getByRole("list"), { to: "end" })
         const last = messages.getByText(/^#\d+$/).last()
         await expect(last).toBeVisible()
         if (who === "aria") {

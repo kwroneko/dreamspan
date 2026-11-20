@@ -142,9 +142,9 @@ export const registerMessageActions = () => [
     group: "context",
     available: ({ entry }) => entry.version.context !== null,
     describe: viewOf(({ session, entry }) => ({
-      label: "Request it was generated from",
+      label: "Open request inspector",
       icon: "layers",
-      hint: "See everything the model was sent for this version, and where each part came from.",
+      hint: "Shows everything the model was sent for this version, and where each part came from.",
       link: (
         <Link
           to="/chats/$chatId/context/$versionId"

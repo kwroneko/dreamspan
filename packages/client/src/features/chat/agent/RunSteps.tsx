@@ -766,15 +766,13 @@ function Transcript({
   tools,
   entries,
   cut,
-  mcpCalls,
-  contract
+  mcpCalls
 }: {
   run: RunContext
   tools: ReadonlyArray<OfferedTool>
   entries: ReadonlyArray<TranscriptEntry>
   cut: ReadonlyArray<CutSpan>
   mcpCalls: ReadonlyArray<McpCallLine>
-  contract?: ContractRecord | undefined
 }) {
   const editing = useStepEditing(run, tools)
   const facts = useMemo<McpFacts>(() => {
@@ -790,7 +788,6 @@ function Transcript({
   return (
     <McpFactsContext.Provider value={facts}>
       {tools.length > 0 && <Tools tools={tools} entries={entries} />}
-      {contract && contract.attempts.length > 0 && <ReplyAttempts record={contract} />}
       {outside && (
         <p role="alert" className="text-sm text-danger">
           {editing.error}
@@ -823,7 +820,19 @@ export function RunSteps({ run }: { run: RunContext }) {
       entries={transcript.entries}
       cut={transcript.cut}
       mcpCalls={transcript.mcpCalls ?? []}
-      contract={transcript.contract}
     />
   )
+}
+
+/**
+ * The run's attempts at a reply, above the sent messages with the request's other facts; the
+ * same read as the steps below them (one query per version).
+ */
+export function RunAttempts({ run }: { run: RunContext }) {
+  const atom = useMemo(() => AppClient.query("GetRunTranscript", { versionId: run.versionId }), [run.versionId])
+  const result = useAtomValue(atom)
+  if (!AsyncResult.isSuccess(result)) return null
+  const { tools, entries, contract } = result.value
+  if ((tools.length === 0 && entries.length === 0) || !contract || contract.attempts.length === 0) return null
+  return <ReplyAttempts record={contract} />
 }

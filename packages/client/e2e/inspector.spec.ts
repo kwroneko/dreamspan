@@ -14,6 +14,8 @@ import { asUser } from "./support/rpc.ts"
 import { messageMenu, showActions } from "./support/message.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { cacheChip } from "./support/strip.ts"
+import { expectOneScroller, scrollPane, scrollUntil } from "./support/scrollPane.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -158,6 +160,8 @@ test("inserted history keeps its displayed numbers in the inspector at desktop a
       await page.emulateMedia({ colorScheme: theme })
       await page.goto(`${server().url}/chats/${made.chatId}/context/${made.version}`)
       const messages = page.getByRole("region", { name: "Messages" })
+      // The messages follow the request's facts, below a phone's first screen.
+      await scrollUntil(messages, messages.getByRole("link", { name: /^Message 3(?:,|$)/ }))
       await expect(messages.getByRole("link", { name: /^Message 3(?:,|$)/ })).toHaveAttribute(
         "href",
         new RegExp(`slot=${made.inserted}`)
@@ -207,7 +211,7 @@ test("a reply's context opens from the reply, with its sources and the cache bre
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chat.id}`)
   await expect(reply(page)).toContainText(REPLY)
-  await messageMenu(reply(page), "Request it was generated from")
+  await messageMenu(reply(page), "Open request inspector")
   await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}/context/${chat.reply}\\?fork=[^&]+$`))
   const messages = page.getByRole("region", { name: "Messages" })
   await expect(messages.getByText("Card “Mira”: description")).toBeVisible()
@@ -274,17 +278,19 @@ test("an earlier reply and a swipe each open their own request from the message'
   const replies = page.getByRole("article", { name: "Reply" }).filter({ hasText: REPLY })
   await expect(replies).toHaveCount(2)
   // The swipe, the second version of the last reply.
-  await messageMenu(replies.last(), "Request it was generated from")
+  await messageMenu(replies.last(), "Open request inspector")
   await expect(page).toHaveURL(new RegExp(`/chats/${made.id}/context/${made.swipe}\\?fork=[^&]+$`))
   await expect(page.getByText(/^swipe, /)).toBeVisible()
   const messages = page.getByRole("region", { name: "Messages" })
   // The earlier reply is in its history, by message and version.
+  await scrollUntil(messages, messages.getByRole("link", { name: "Message 3, version 1" }))
   await expect(messages.getByRole("link", { name: "Message 3, version 1" })).toBeVisible()
   await page.getByRole("link", { name: "← Back to the reply" }).click()
   // The earlier reply opens its own request.
-  await messageMenu(replies.first(), "Request it was generated from")
+  await messageMenu(replies.first(), "Open request inspector")
   await expect(page).toHaveURL(new RegExp(`/chats/${made.id}/context/${made.first}\\?fork=[^&]+$`))
   await expect(page.getByText(/^normal, /)).toBeVisible()
+  await scrollUntil(messages, messages.getByText("The bell rang twice.", { exact: true }))
   await expect(messages.getByText("The bell rang twice.", { exact: true })).toBeVisible()
 })
 
@@ -385,17 +391,13 @@ test("a long context opens collapsed: 200 messages, about 100,000 tokens", async
   // Only visible rows and their previews are mounted.
   expect(await page.evaluate(() => document.body.textContent.length)).toBeLessThan(80_000)
   // A later row can be scrolled to and expanded.
-  await messages.getByRole("list").evaluate((el) => {
-    el.scrollTop = 152 * 120
-  })
+  await scrollPane(messages.getByRole("list"), { at: 152 * 120 })
   const target = messages.getByText("#153", { exact: true })
   await expect
     .poll(async () => {
       if (await target.count()) return true
-      await messages.getByRole("list").evaluate((el) => {
-        const first = Number(el.querySelector("[data-index]")?.getAttribute("data-index"))
-        el.scrollTop += first > 152 ? -el.clientHeight / 2 : el.clientHeight / 2
-      })
+      const first = Number(await messages.locator("[data-index]").first().getAttribute("data-index"))
+      await scrollPane(messages.getByRole("list"), { by: first > 152 ? -0.5 : 0.5 })
       return false
     })
     .toBe(true)
@@ -471,7 +473,7 @@ for (const width of [1440, 390])
       await page.goto(`${server().url}/chats/${made.chatId}?fork=${made.original}`)
       const original = page.getByRole("article", { name: "Reply" }).filter({ hasText: REPLY })
       await expect(original).toBeVisible()
-      await messageMenu(original, "Request it was generated from")
+      await messageMenu(original, "Open request inspector")
       await expect(page).toHaveURL(new RegExp(`\\?fork=${made.original}$`))
       // The history sources link to the viewed fork too.
       const messages = page.getByRole("region", { name: "Messages" })
@@ -580,9 +582,7 @@ test("10,000 short messages mount only visible rows and scroll to the last sourc
   const messages = await denseContext(page)
   expect(await messages.getByRole("listitem").count()).toBeLessThan(80)
   const scroll = messages.getByRole("list")
-  await scroll.evaluate((el) => {
-    el.scrollTop = el.scrollHeight
-  })
+  await scrollPane(scroll, { to: "end" })
   await expect(messages.getByText("#10000", { exact: true })).toBeVisible()
   await messages.getByText("#10000", { exact: true }).click()
   await expect(messages.locator("p", { hasText: "Short synthetic sentence 9999." })).toBeVisible()
@@ -598,9 +598,7 @@ test("virtualized messages retain keyboard focus and expose their list positions
     await page.waitForTimeout(80)
   }
   await expect(first).toBeFocused()
-  await messages.getByRole("list").evaluate((el) => {
-    el.scrollTop = el.scrollHeight
-  })
+  await scrollPane(messages.getByRole("list"), { to: "end" })
   const last = messages.getByRole("listitem").filter({ hasText: "#10000" })
   await expect(last).toBeVisible()
   await expect(first).toBeFocused()
@@ -615,17 +613,70 @@ test("expanded messages survive unmounting and scrolling back", async ({ page })
   // Move focus out so this row can unmount independently of focus retention.
   await page.getByRole("link", { name: "← Back to the reply" }).focus()
   const scroll = messages.getByRole("list")
-  await scroll.evaluate((el) => {
-    el.scrollTop = el.scrollHeight
-  })
+  await scrollPane(scroll, { to: "end" })
   await expect(messages.getByText("#10000", { exact: true })).toBeVisible()
   await expect(messages.getByText("#1", { exact: true })).toHaveCount(0)
-  await scroll.evaluate((el) => {
-    el.scrollTop = 0
-  })
+  await scrollPane(scroll, { to: "start" })
   await expect(messages.getByText("#1", { exact: true })).toBeVisible()
   await expect(messages.locator("details").first()).toHaveAttribute("open", "")
   await expect(messages.locator("p", { hasText: "Short synthetic sentence 0." })).toBeVisible()
+})
+
+// Owner, 2026-11-20: "It's ONE OR THE OTHER… No more scroll inside scroll." The request's facts
+// come first; the sent messages follow in the page's flow, and the page's pane is the only
+// thing that scrolls, in its own column and in a workbench frame alike.
+for (const [width, height] of [
+  [1440, 900],
+  [390, 844]
+] as const)
+  for (const theme of ["light", "dark"] as const)
+    test(`a long request scrolls with its page alone, at ${width} ${theme}`, async ({ page }, info) => {
+      await page.setViewportSize({ width, height })
+      await page.emulateMedia({ colorScheme: theme })
+      const messages = await denseContext(page)
+      const pane = messages.getByRole("list")
+      // Everything that isn't the prompt is above it.
+      const top = async (name: string) =>
+        (await page.getByRole("heading", { name, exact: true }).boundingBox())?.y ?? Number.NaN
+      const prompt = await top("Messages")
+      expect(await top("Request")).toBeLessThan(prompt)
+      expect(await top("Usage")).toBeLessThan(prompt)
+      await expectOneScroller(pane, `top ${width} ${theme}`)
+      await shoot(page, `inspector-scroll-top-${width}-${theme}`)
+      await page.screenshot({ path: info.outputPath(`inspector-scroll-top-${width}-${theme}.png`) })
+      // Partway down, with a few turns open: the rows are still the pane's own.
+      await scrollPane(pane, { at: 40 * 120 })
+      await expect(messages.locator("[data-index]").first()).toBeVisible()
+      for (const row of await messages
+        .locator("summary")
+        .all()
+        .then((rows) => rows.slice(1, 4)))
+        await row.click()
+      await expectOneScroller(pane, `middle ${width} ${theme}`)
+      expect(await messages.getByRole("listitem").count()).toBeLessThan(80)
+      await page.screenshot({ path: info.outputPath(`inspector-scroll-middle-${width}-${theme}.png`) })
+      await shoot(page, `inspector-scroll-middle-${width}-${theme}`)
+      if (process.env.LAYOUT_AUDIT) await expectLayout(page, info, `inspector-scroll-${width}-${theme}`)
+      await scrollPane(pane, { to: "end" })
+      await expect(messages.getByText("#10000", { exact: true })).toBeVisible()
+      await expectOneScroller(pane, `end ${width} ${theme}`)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+    })
+
+test("the inspector in a workbench frame scrolls with its frame alone", async ({ page }, info) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const messages = await denseContext(page)
+  const at = new URL(page.url()).pathname
+  const wb = JSON.stringify(["r", [0.5, 0.5], [0, `/chats/${chat.id}`], [0, "="]])
+  await page.goto(`${server().url}${at}?wb=${encodeURIComponent(wb)}`)
+  await expect(page.getByText(/10,000 messages, about 100,000 tokens/)).toBeVisible()
+  await expectOneScroller(messages.getByRole("list"), "frame top")
+  await scrollPane(messages.getByRole("list"), { to: "end" })
+  await expect(messages.getByText("#10000", { exact: true })).toBeVisible()
+  await expectOneScroller(messages.getByRole("list"), "frame end")
+  await page.screenshot({ path: info.outputPath("inspector-scroll-frame-1440.png") })
+  await shoot(page, "inspector-scroll-frame-1440")
+  if (process.env.LAYOUT_AUDIT) await expectLayout(page, info, "inspector-scroll-frame-1440")
 })
 
 test("source explanations retain distinct equal labels and show historical activation decisions", async ({ page }) => {

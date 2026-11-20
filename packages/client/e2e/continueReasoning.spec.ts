@@ -142,7 +142,7 @@ for (const width of [1440, 390]) {
     await expect(reply.getByRole("region", { name: "Reasoning" })).toContainText("Finish the thought.")
     await shoot(page, "07-reasoning-reloaded")
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-    await messageMenu(reply, "Request it was generated from")
+    await messageMenu(reply, "Open request inspector")
     const prefill = page.getByRole("link", { name: /as it was, continued from its end/ })
     await prefill.scrollIntoViewIfNeeded()
     await expect(prefill).toBeVisible()
@@ -219,7 +219,7 @@ for (const width of [1440, 390]) {
     await reasoning.click()
     await expect(reply.getByRole("region", { name: "Reasoning" })).toContainText(THOUGHT)
     // The inspector names the nudge by its preset setting.
-    await messageMenu(reply, "Request it was generated from")
+    await messageMenu(reply, "Open request inspector")
     const nudge = page.getByText("End of request: when you continue a reply").first()
     await nudge.scrollIntoViewIfNeeded()
     await expect(nudge).toBeVisible()
@@ -255,7 +255,7 @@ for (const width of [1440, 390]) {
       const sent = provider.requests.at(-1)!
       if (adapter === "deepseek") expect(sent.messages.at(-1)?.prefix).toBe(true)
       else expect(sent.tools).toHaveLength(1)
-      await messageMenu(reply, "Request it was generated from")
+      await messageMenu(reply, "Open request inspector")
       const label = adapter === "deepseek" ? "DeepSeek prefix: true" : "Forced tool schema prefill"
       await expect(page.getByText(label, { exact: true })).toBeVisible()
       if (adapter === "schema") {
@@ -350,7 +350,7 @@ for (const width of [1440, 390]) {
     await shoot(page, "08-metrics")
     await page.keyboard.press("Escape")
     // The inspector's usage gives each request's times.
-    await messageMenu(reply, "Request it was generated from")
+    await messageMenu(reply, "Open request inspector")
     await expect(page.getByText("First token", { exact: true }).locator("visible=true")).toBeVisible()
     await expect(page.getByText("Tokens/s", { exact: true }).locator("visible=true")).toBeVisible()
     await page.getByText("Tokens/s", { exact: true }).locator("visible=true").scrollIntoViewIfNeeded()

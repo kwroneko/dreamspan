@@ -16,6 +16,7 @@ import { asUser } from "./support/rpc.ts"
 import { showActions } from "./support/message.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { level1 } from "./support/summaries.ts"
+import { scrollPane } from "./support/scrollPane.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -327,29 +328,19 @@ const scrollTo = async (page: Page, name: string | RegExp) => {
   await expect
     .poll(async () => {
       if ((await box.count()) && (await box.isVisible())) return true
-      await messages.getByRole("list").evaluate((el) => {
-        el.scrollTop += el.clientHeight / 2
-      })
+      await scrollPane(messages.getByRole("list"), { by: 0.5 })
       return false
     })
     .toBe(true)
-  // The box at the top of the list, and the list in view, for the screenshot.
-  await box.evaluate((el) => {
-    const list = el.closest("[role=list]")!
-    list.scrollTop += el.getBoundingClientRect().top - list.getBoundingClientRect().top - 8
-  })
-  await messages.getByRole("list").scrollIntoViewIfNeeded()
+  // The box at the top of the page's pane, for the screenshot.
+  await scrollPane(box, { at: -8 })
   return box
 }
 
-/** The turn list as it shows, scrolled where `scrollTo` left it. */
+/** The page as it shows, scrolled where `scrollTo` left it. */
 const shootList = async (page: Page, name: string) => {
   const dir = process.env.SCREENSHOT_DIR
-  if (dir)
-    await page
-      .getByRole("region", { name: "Messages" })
-      .getByRole("list")
-      .screenshot({ path: join(dir, `${name}.png`) })
+  if (dir) await page.screenshot({ path: join(dir, `${name}.png`) })
 }
 
 for (const [width, height] of [
@@ -368,7 +359,7 @@ for (const [width, height] of [
       await showActions(reply)
       // In More actions unless pinned, like every action but Edit, Continue, Branch and Delete.
       await reply.getByRole("button", { name: "More actions" }).click()
-      const button = page.getByRole("menuitem", { name: "Request it was generated from" })
+      const button = page.getByRole("menuitem", { name: "Open request inspector" })
       await expect(button).toBeVisible()
       await shoot(page, `${tag}-1-message-button`)
       await button.click()

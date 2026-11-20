@@ -103,7 +103,7 @@ const EVERY_REPLY_ACTION = [
   "Move down",
   "Merge a chat here…",
   "Hide from the model",
-  // "Request it was generated from" is on a version with a recorded request: not the fake
+  // "Open request inspector" is on a version with a recorded request: not the fake
   // generator's (inspector.spec.ts has it).
   "Copy text",
   "Copy link",

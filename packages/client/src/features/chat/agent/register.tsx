@@ -5,7 +5,13 @@
 import { lazy, Suspense, type ComponentProps } from "react"
 import { Loading } from "../../../ui/Spinner.tsx"
 import { chatPanels, lazyPanel, type PanelProps } from "../panels.tsx"
-import { chatSettingSections, messageHeaderDetails, reasoningPanels, runInspectorSections } from "../presentation.tsx"
+import {
+  chatSettingSections,
+  messageHeaderDetails,
+  reasoningPanels,
+  runInspectorSections,
+  runInspectorTranscript
+} from "../presentation.tsx"
 import { Steps, StepsBadge } from "./Steps.tsx"
 import { cardDefinitionSections } from "../../editor/cardSections.ts"
 import { invokeMessageAction, messageActions, viewOf } from "../messageActions.tsx"
@@ -15,6 +21,7 @@ import { ApprovalPanel } from "./ApprovalPanel.tsx"
 import { SubagentPanel } from "./SubagentPanel.tsx"
 
 const RunSteps = lazy(() => import("./RunSteps.tsx").then((m) => ({ default: m.RunSteps })))
+const RunAttempts = lazy(() => import("./RunSteps.tsx").then((m) => ({ default: m.RunAttempts })))
 const ToolsSection = lazy(() => import("./ToolsSection.tsx").then((m) => ({ default: m.ToolsSection })))
 const AgentPermissionsSection = lazy(() =>
   import("./AgentPermissionsSection.tsx").then((m) => ({ default: m.AgentPermissionsSection }))
@@ -47,7 +54,17 @@ export const registerAgent = () => [
   stepActions.register({ id: "agent.approval", order: 10, component: ApprovalPanel }),
   // The subagent an `agent` call started (spec/SUBAGENTS.md §7): its row, with Stop and Inspect.
   stepActions.register({ id: "agent.subagent", order: 20, component: SubagentPanel }),
+  // Above the sent messages: how the run tried to reply. After them: its tools and steps.
   runInspectorSections.register({
+    id: "inspector.reply-attempts",
+    order: 10,
+    component: (props: ComponentProps<typeof RunAttempts>) => (
+      <Suspense fallback={null}>
+        <RunAttempts {...props} />
+      </Suspense>
+    )
+  }),
+  runInspectorTranscript.register({
     id: "inspector.run-steps",
     order: 10,
     component: (props: ComponentProps<typeof RunSteps>) => (
