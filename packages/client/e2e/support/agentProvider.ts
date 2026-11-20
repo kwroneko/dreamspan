@@ -11,6 +11,23 @@ export const AGENT_REPLY = "Mira lifts the lantern and points across the flooded
 export const PLAIN_REPLY = "The rain keeps falling."
 /** What a held plain reply with `holdPlain(true)` has written when it's stopped. */
 export const PARTIAL_REPLY = "The rain"
+/** How `failPlain` fails: a 400, a stream the provider ends on content_filter, or a 403 with a long body. */
+export type PlainFailure = "bad_request" | "content_filter" | "denied"
+const FAIL_MESSAGE = "The synthetic provider refused this request."
+/** A 403 whose body is long JSON, as some gateways send. */
+const DENIED_BODY = {
+  error: {
+    message: "Access denied: this key may not use the requested model in this region.",
+    type: "permission_error",
+    code: "model_access_denied",
+    param: null,
+    details: {
+      request_id: "req_0f3c9a1e7b2d4c5f8a6e9b1d3c7f2a4e",
+      allowed_models: ["synthetic-small", "synthetic-medium", "synthetic-large-preview-2026-10-01"],
+      policy: "org-default/model-allowlist/v3"
+    }
+  }
+}
 export const THINKING = "The traveler asked about the bridge; check what was said of it."
 
 const QUERIES = ["bridge", "lantern"]
@@ -24,7 +41,7 @@ export const startAgentProvider = async () => {
   /** The tool results a request has when it's held or failed: QUERIES.length is the final answer. */
   let holding: number | null = null
   let failing: number | null = null
-  let failingPlain = false
+  let failingPlain: PlainFailure | null = null
   let holdingPlain = false
   let partialPlain = false
   const held: Array<() => void> = []
@@ -81,9 +98,12 @@ export const startAgentProvider = async () => {
           return
         }
         if (failingPlain) {
-          failingPlain = false
-          res.writeHead(400, { "content-type": "application/json" })
-          return res.end(JSON.stringify({ error: { message: "The synthetic provider refused this request." } }))
+          const kind = failingPlain
+          failingPlain = null
+          if (kind === "content_filter")
+            return stream(res, [chunk({ role: "assistant", content: "" }), chunk({}, "content_filter")])
+          res.writeHead(kind === "denied" ? 403 : 400, { "content-type": "application/json" })
+          return res.end(JSON.stringify(kind === "denied" ? DENIED_BODY : { error: { message: FAIL_MESSAGE } }))
         }
         return stream(res, [
           chunk({ role: "assistant", content: PLAIN_REPLY }),
@@ -161,8 +181,8 @@ export const startAgentProvider = async () => {
       failing = at
     },
     /** Answers the next request without tools (a plain reply) with an error. */
-    failPlain: () => {
-      failingPlain = true
+    failPlain: (kind: PlainFailure = "bad_request") => {
+      failingPlain = kind
     },
     /** Holds the next plain replies; with `partial`, after sending PARTIAL_REPLY. */
     holdPlain: (partial = false) => {

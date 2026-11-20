@@ -159,9 +159,22 @@ const RESUME_COPY = {
 function ResumeButton({ version, onResume }: { version: Version; onResume: () => void }) {
   const copy = RESUME_COPY[resumeKind(version)]
   return (
-    <Button variant="secondary" className="self-start" hint={copy.hint} onClick={onResume}>
+    <Button variant="secondary" className="ml-auto" hint={copy.hint} onClick={onResume}>
       {copy.label}
     </Button>
+  )
+}
+
+/**
+ * What happened to a reply, with its button on the right, centred on the text; where the
+ * text needs the width, the button goes under it on the right.
+ */
+function StatusRow({ text, action }: { text: string; action: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <p className="min-w-[min(100%,16rem)] flex-1 [overflow-wrap:anywhere]">{text}</p>
+      {action}
+    </div>
   )
 }
 
@@ -234,11 +247,11 @@ function VersionBody({
           role="note"
           className="flex flex-col gap-2 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger"
         >
-          <p>
-            Failed ({version.error.class}): {version.error.message}
-          </p>
+          <StatusRow
+            text={`Failed (${version.error.class}): ${version.error.message}`}
+            action={onResume && <ResumeButton version={version} onResume={onResume} />}
+          />
           <SlotOutlet slot={versionFailureActions} props={{ version }} />
-          {onResume && <ResumeButton version={version} onResume={onResume} />}
         </div>
       )}
       {(version.status === "interrupted" || version.status === "stopped") && onResume && (
@@ -246,12 +259,14 @@ function VersionBody({
           role="note"
           className="flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-sm text-text"
         >
-          <p>
-            {version.status === "stopped"
-              ? "This reply was stopped."
-              : "The app stopped while this reply was being written."}
-          </p>
-          <ResumeButton version={version} onResume={onResume} />
+          <StatusRow
+            text={
+              version.status === "stopped"
+                ? "This reply was stopped."
+                : "The app stopped while this reply was being written."
+            }
+            action={<ResumeButton version={version} onResume={onResume} />}
+          />
         </div>
       )}
     </div>
