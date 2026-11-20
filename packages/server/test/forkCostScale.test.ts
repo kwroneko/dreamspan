@@ -1,5 +1,5 @@
 // Measure the whole fork lifecycle, not just INSERT INTO forks. Synthetic data only.
-// Run: env VITEST_MAX_WORKERS=1 FORKCOST_OUT=/storage/.../results.jsonl
+// Run: env VITEST_MAX_WORKERS=1 FORKCOST_OUT=<folder outside the checkout>/results.jsonl
 //   npx vitest run --project server-slow packages/server/test/forkCostScale.test.ts
 import { appendFileSync } from "node:fs"
 import { join } from "node:path"

@@ -185,7 +185,7 @@ const anyBelowReserve = async (
  * unprivileged process: io_uring, keyrings, userfaultfd, BPF, perf events, file handles, and
  * mounting, namespaces and module or system calls (most need a capability the command doesn't
  * have; they are refused before the kernel looks). Docker's default filter refuses these too,
- * but a server outside Docker (a development server) has none. Refused with EPERM, as Docker does.
+ * but a server outside Docker has none. Refused with EPERM, as Docker does.
  * Numbers for x86_64 and for aarch64 (the generic table, which has no `uselib`); other
  * architectures get no filter.
  */
@@ -230,7 +230,7 @@ const DENIED_X86_64: Readonly<Record<string, number>> = {
   uselib: 134
 }
 
-/** include/uapi/asm-generic/unistd.h (aarch64), checked against a Linux host's headers. */
+/** include/uapi/asm-generic/unistd.h (aarch64), checked against a Linux host's kernel headers. */
 const DENIED_AARCH64: Readonly<Record<string, number>> = {
   io_uring_setup: 425,
   io_uring_enter: 426,

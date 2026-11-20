@@ -1,5 +1,5 @@
 // Opt-in production-client profiling at owner scale. All inputs are synthetic.
-// CLIENT_SCALE_WORK=/storage/... npx playwright test -c
+// CLIENT_SCALE_WORK=<folder outside the checkout> npx playwright test -c
 // packages/client/perf/playwright.config.ts clientScale.perf.ts
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"

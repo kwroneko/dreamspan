@@ -12,7 +12,7 @@ An agentic roleplay harness and web app to replace SillyTavern. Read `README.md`
 
 ## Reference implementation
 
-The owner's reference-harness (`reference-harness/`; use the most recently modified worktree) already implements much of the core: LCM summarization (ARCHITECTURE.md §9b), timeline/rollout separation, session resume and fork (`src/agent/recovery.ts`, `src/agent/fork.ts`), cache breakpoints, decision models (`spec/DECISION-MODEL.md`), and OpenAI prefill (`spec/OPENAI-PREFILL.md`). Before designing any of these, read how reference-harness does it, and present designs as deltas from it.
+The owner's reference-harness (a public repository; read a current clone of it) already implements much of the core: LCM summarization (ARCHITECTURE.md §9b), timeline/rollout separation, session resume and fork (`src/agent/recovery.ts`, `src/agent/fork.ts`), cache breakpoints, decision models (`spec/DECISION-MODEL.md`), and OpenAI prefill (`spec/OPENAI-PREFILL.md`). Before designing any of these, read how reference-harness does it, and present designs as deltas from it.
 
 ## Code conventions
 
@@ -20,7 +20,7 @@ The owner's reference-harness (`reference-harness/`; use the most recently modif
 - **Effect 4.x only.** Agents tend to write Effect 3 APIs. Work from `node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/` and the module sources, not from memory or web search.
 - **SQLite never runs on the main thread.** Add storage operations to `packages/server/src/db/ops.ts` and implement them in the writer or reader worker. A write operation is one synchronous transaction with no non-database work inside.
 - **Client styling uses semantic tokens only** (the default Tailwind palette is removed). Feature code imports UI from `packages/client/src/ui/`, never from Base UI directly.
-- Pin dependencies to exact versions. The owner's machine runs npm through pmg with a 5-day cooldown on new releases.
+- Pin dependencies to exact versions, and only to releases at least 5 days old.
 - Run `npm run check` before committing: static checks and the fast tests. `npm run test:slow` runs the scale, model-based, timing and process-spawn tests that `npm test` leaves out (ARCHITECTURE.md §1); the coordinator runs it before a deploy. `npm run build` builds the client and the database worker bundles.
 
 ## Privacy

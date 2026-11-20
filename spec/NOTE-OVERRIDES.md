@@ -15,7 +15,7 @@ This completes DESIGN §4.2's **[O] Still to design**: the UI on every surface, 
 
 ## 2. The UI
 
-The owner's rule for every placement below: no invented space or rows. Each sits in a place the real UI already has (screenshots before the change: `<work>/artifacts/noteoverrides/before/`).
+The owner's rule for every placement below: no invented space or rows. Each sits in a place the real UI already has.
 
 ### 2.1 A replaced card field or preset prompt (owner, 2026-11-05)
 

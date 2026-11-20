@@ -1,7 +1,8 @@
 # Local models for the offline laptop run
 
-**Status**: Research, 2026-10-14, for the owner to pick from; nothing downloaded. Nothing here is Decided. It answers the PLAN.md item "a short list of local models that fit 128 GB unified memory for RP, with measured or reported speeds", and the server and cache-warmth questions that go with it.
+**Status**: Research, 2026-10-14; nothing downloaded. Nothing here is Decided. It answers the PLAN.md item "a short list of local models that fit 128 GB unified memory for RP, with measured or reported speeds", and the server and cache-warmth questions that go with it.
 
+Target: an M3 Max laptop with 128 GB (the 40-core-GPU variant, about 400 GB/s memory bandwidth), offline (on a plane, say), served over an OpenAI-compatible endpoint (LM Studio, `mlx_lm.server`, `llama-server`, or another MLX server). Budget: about 100 GB for weights plus KV cache, leaving the rest to macOS and the app.
 
 ## Summary
 
@@ -16,7 +17,7 @@ The candidates differ mostly in how long a cold 30–60k prompt takes to prefill
 | **Step-3.7-Flash** (196B/11B active), 3-bit | Apache-2.0, CaliperBench RP 76 (but CW 54). 74 GB at IQ3_XXS. | Almost no community RP reports; speeds on this chip are from few uploads. |
 | **Gemma 4 31B finetune** (dense, reference) | The community's favourite local RP model by far and the top local RP scores on CaliperBench (up to 79.6). | Dense. Measured prefill about 130–180 tok/s and decode 10–18 tok/s on this chip: a cold 32k prompt takes about 4 minutes. Only usable with a warm cache. |
 
-If I had to choose one to download first: **Gemma 4 26B-A4B**, because it is the only one with comfortable memory and prefill times, and the RP finetunes of it are what the community actually uses. Then **Qwen3.8-Flash-Next** or **DeepSeek-V4-Flash 2-bit** for a "big model" feel. This is a recommendation from reported data only. Nobody (including me) has run an RP scene on these on an M3 Max; the owner's own 30-minute bake-off on the laptop will say more than this document (see "Before the flight").
+If I had to choose one to download first: **Gemma 4 26B-A4B**, because it is the only one with comfortable memory and prefill times, and the RP finetunes of it are what the community actually uses. Then **Qwen3.8-Flash-Next** or **DeepSeek-V4-Flash 2-bit** for a "big model" feel. This is a recommendation from reported data only. Nobody (including me) has run an RP scene on these on an M3 Max; a 30-minute bake-off on the laptop itself will say more than this document (see "Before the flight").
 
 ## How reliable the numbers are
 
@@ -33,13 +34,13 @@ If I had to choose one to download first: **Gemma 4 26B-A4B**, because it is the
 
 ## The shortlist
 
-Speeds are **M3 Max, oMLX, 4-bit unless noted**; "PP" is prefill tok/s, "TG" is decode tok/s. 40c means the 40-core GPU (the owner's laptop); 30c is the cheaper M3 Max, roughly 25% fewer cores and 25% less bandwidth.
+Speeds are **M3 Max, oMLX, 4-bit unless noted**; "PP" is prefill tok/s, "TG" is decode tok/s. 40c means the 40-core GPU (the target); 30c is the cheaper M3 Max, roughly 25% fewer cores and 25% less bandwidth.
 
 ### 1. Gemma 4 26B-A4B (25.2B total, about 3.8B active)
 
 - **Repos**
   - Stock MLX: [`mlx-community/gemma-4-26b-a4b-it-4bit`](https://huggingface.co/mlx-community/gemma-4-26b-a4b-it-4bit) (15.3 GB), [`-8bit`](https://huggingface.co/mlx-community/gemma-4-26b-a4b-it-8bit) (28.0 GB). Original: [`google/gemma-4-26B-A4B-it`](https://huggingface.co/google/gemma-4-26B-A4B-it).
-  - RP finetunes (GGUF only, no MLX conversions found): [`zerofata/G4-MeroMero-26B-A4B-gguf`](https://huggingface.co/zerofata/G4-MeroMero-26B-A4B-gguf), `SubMaroon/Boulesis-v2.1-26B-A4B` via [`mradermacher/Boulesis-v2.1-26B-A4B-i1-GGUF`](https://huggingface.co/mradermacher/Boulesis-v2.1-26B-A4B-i1-GGUF), [`TheDrummer/Orion-26B-A4B-v1.1`](https://huggingface.co/TheDrummer/Orion-26B-A4B-v1.1), and the plain `gemma-4-26B-A4B-it-heretic` GGUF. An MLX conversion of a finetune is a one-line `mlx_lm.convert` if the owner wants MLX.
+  - RP finetunes (GGUF only, no MLX conversions found): [`zerofata/G4-MeroMero-26B-A4B-gguf`](https://huggingface.co/zerofata/G4-MeroMero-26B-A4B-gguf), `SubMaroon/Boulesis-v2.1-26B-A4B` via [`mradermacher/Boulesis-v2.1-26B-A4B-i1-GGUF`](https://huggingface.co/mradermacher/Boulesis-v2.1-26B-A4B-i1-GGUF), [`TheDrummer/Orion-26B-A4B-v1.1`](https://huggingface.co/TheDrummer/Orion-26B-A4B-v1.1), and the plain `gemma-4-26B-A4B-it-heretic` GGUF. An MLX conversion of a finetune is a one-line `mlx_lm.convert` if MLX is wanted.
 - **Memory**: 15–16 GB at 4-bit, 28 GB at 8-bit, plus a few GB of KV even at 64k. Leaves room for a second model (a speculative-decoding draft, or Qwen3.6-35B-A3B as a fast helper).
 - **Speed, M3 Max 40c, 128 GB** ([oMLX rows](https://omlx.ai/benchmarks)): PP about 1,000–1,180 at 16k, 810–1,010 at 32k, 670–870 at 64k (one run 392); TG about 52–72 at 16k, 37–51 at 32k, 22–55 at 64k. On a 30c/36 GB machine, [one run](https://omlx.ai/benchmarks/d9clw7nr) shows the same shape: PP 943 at 1k to 581 at 64k, TG 50 at 1k to 12 at 64k. Decode falls off with context because Gemma's global-attention layers still read the whole cache.
 - **Usable context**: config says 262,144. A commenter who tested Gemma 4 (31B, Q8 with F16 KV) says it holds up to about 80k and "breaks down rapidly" after 110k ([4 Oct](https://www.reddit.com/r/SillyTavernAI/comments/1wxsier/)). The MeroMero listing gives 32,768 as its context ([Featherless](https://featherless.ai/models/zerofata/G4-MeroMero-26B-A4B)). Realistic: 32–64k.
@@ -60,7 +61,7 @@ Speeds are **M3 Max, oMLX, 4-bit unless noted**; "PP" is prefill tok/s, "TG" is 
 - **RP quality**: weak and inconsistent. CaliperBench RP: base (non-thinking, MTP) **52.0**, CW 55.4; the "uncensored" non-thinking variant 50.6; the same uncensored model **with thinking** 77.7 (CW 81.6, slop 18.6, among the lowest slop scores in the table); heretic-2 thinking 68.8, non-thinking 59.5; Swift-1.5 thinking 68.3, non-thinking 62.7. So CaliperBench says QFN is good only with reasoning on, which costs seconds per turn at 30–40 tok/s. Community: "a bit difficult to get it to not be so acceptive of the user's whims, even when they contradict the card" (an IQ3 user, [27 Sep](https://www.reddit.com/r/SillyTavernAI/comments/1wrxo41/)); "not as bad as 27b" at Qwen prose tics, but a worry about tracking who said what (4 Oct). The wider Qwen3.8 family splits opinion: one user calls the **27B** "the strongest local model I've tried", another "pure slop" prose ([4 Oct](https://www.reddit.com/r/SillyTavernAI/comments/1wxsier/)). The Qwen team described it as an experimental preview of the Qwen4 architecture; a review reports the team said it is intentionally under-trained ([eesel](https://www.eesel.ai/blog/qwen38-flash-next-review)).
 - **License**: [Qwen Community License 1.0](https://huggingface.co/Qwen/Qwen3.8-Flash-Next/raw/main/LICENSE): MIT-like, with extra terms only for products over 100M MAU / $20M monthly revenue and for Model-as-a-Service businesses. Fine for personal use.
 - **Chat template**: system message supported **but it raises `System message must be at the beginning.`** for any system message that is not first ([template line 106](https://huggingface.co/Qwen/Qwen3.8-Flash-Next/raw/main/chat_template.jinja)), and `No user query found in messages` if there is no user message. ST-style presets with depth-injected system messages (author's note, lorebook entries inserted mid-chat) will return an error unless the harness folds later system messages into the first one or sends them as `user`. This applies to the Qwen family generally.
-- **Server support**: not in stock `mlx-lm` main (no `qwen4_exp` among its [model files](https://github.com/ml-explore/mlx-lm/tree/main/mlx_lm/models)). Supported by `mlx-vlm` (`qwen4_exp`), oMLX, mlx-serve and llama.cpp. Whether the LM Studio build the owner has installed loads it, I could not verify.
+- **Server support**: not in stock `mlx-lm` main (no `qwen4_exp` among its [model files](https://github.com/ml-explore/mlx-lm/tree/main/mlx_lm/models)). Supported by `mlx-vlm` (`qwen4_exp`), oMLX, mlx-serve and llama.cpp. Whether a given LM Studio build loads it, I could not verify.
 
 ### 3. GLM-4.5-Air (106B total, 12B active)
 

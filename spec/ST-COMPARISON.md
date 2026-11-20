@@ -7,7 +7,7 @@ The owner's verdict is supported by the walkthrough. Master has a much clearer h
 ## How this was made
 
 - Read `CLAUDE.md`, PLAN's “Next session”, `ST-GRIPES.md`, the implemented differential-harness architecture, and the realistic fixture instructions in `scratchpad/units/common.md`.
-- Ran `npm ci` and `npm run build` in this worktree. Generated the folder with **`writeRealisticStFolder(dir)`**, directly from `packages/server/test/support/stRealistic.ts`, under the work directory's `synthetic/`. Used no real cards, chats, ST installation, other machines, or `~/`.
+- Ran `npm ci` and `npm run build` in this worktree. Generated the folder with **`writeRealisticStFolder(dir)`**, directly from `packages/server/test/support/stRealistic.ts`, under the work directory's `synthetic/`. Used no real cards, chats or ST installation.
 - Copied that generated `default-user` folder into `st-container/data/default-user`. Used **the repo's `startSt()`**, not a separately chosen image/configuration: `ghcr.io/sillytavern/sillytavern@sha256:eef27ff0c7961f1a2f488400f581f48ff38f8b910c5d3b8d389138d71791bb14`, host networking, loopback whitelist, calling UID/GID, `rp-st-diff-*` names and `rp-harness.st-diff.owner` PID-namespace/PID label. Did **not** call the harness's orphan remover; only this run's containers were removed by their registered exact-name stop functions.
 - Stock ST fills in its fresh-install defaults and adds its bundled character/persona. Kept those defaults, disabled first-run onboarding, and pointed its custom OpenAI-compatible connection at the repo's loopback `startMock()` (`st-diff-model`). Preset-to-connection binding was disabled so imported presets could not move traffic away from the mock. The synthetic preset selected in both apps was **Celia 4.2**. No external model or real key was used.
 - Ran our development entry point with **`HOST=127.0.0.1 PORT=5994 FAKE_GENERATOR_TPS=60`**, fresh `app-data/`, and `IMPORT_START_DIR` pointing at the synthetic folder. Imported by the actual UI: Folder path → Look in this folder → Import. Added a synthetic local connection and refreshed its model list through Settings; selected the model in This chat.
@@ -17,7 +17,7 @@ The owner's verdict is supported by the walkthrough. Master has a much clearer h
 **Evidence locations.** The committed set is **30 PNG pairs / 60 PNGs**, in [st-comparison/](st-comparison/). Each pair means ST and ours at the same viewport, doing the same task; a confirmation dialog versus Undo, or an unsupported editor versus a working editor, intentionally shows different results of that task. The complete raw desktop/phone set, scripts, fixture, measurements and full command logs remain outside the commit at:
 
 ```text
-<scratchpad>/
+stcompare/
   raw/           PNGs and matching accessibility snapshots
   scripts/       stack.mjs, numbered Playwright steps, curate.py
   logs/          npm-ci.log, build.log, app.log, stack3.log, check.log,

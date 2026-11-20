@@ -58,7 +58,7 @@ import { pluginFiles } from "./support/plugin.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
 // Opt-in: it imports a large synthetic library and still reports known findings, so the default
-// browser suite (`npm run test:browser`, the release gate's `e2e/`) leaves it out.
+// browser suite (`npm run test:browser`) leaves it out.
 test.skip(!process.env["LAYOUT_AUDIT"], "the layout audit runs only with LAYOUT_AUDIT=1")
 test("Compact marker insets retain density and horizontal bounds", async ({ page }) => {
   await page.setContent(`<style>

@@ -245,7 +245,7 @@ These matter most for DSH's "everything is a plugin" design. In rp-harness the c
    - its main user ships a fork with 23 patches, several in lifecycle code
 3. **Its distinctive features serve trusted code:** in-process reversible composition, and HMR through Node internals. The goal that makes a kernel matter here, plugins written by the agent itself with RCE avoidance as the top priority (DESIGN §11), needs an out-of-process boundary that Cordis neither provides nor helps with.
 
-**[O] Choosing the sandbox technology** (QuickJS-WASM, `isolated-vm`, or a child process under an OS sandbox) is the real open question for phase 6. It deserves its own spike measuring cold start, memory per plugin and capability-call latency on the owner's host.
+**[O] Choosing the sandbox technology** (QuickJS-WASM, `isolated-vm`, or a child process under an OS sandbox) is the real open question for phase 6. It deserves its own spike measuring cold start, memory per plugin and capability-call latency on the server's host.
 
 **What would change this:**
 - Plugins are limited to trusted, owner-reviewed in-process code, and plugin-to-plugin service graphs become rich (optional dependencies, runtime replacement).

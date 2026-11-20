@@ -1,4 +1,4 @@
-// A tab left open across a rebuild (dev redeploys on every merge, prod on each release) still
+// A tab left open across a rebuild (each redeploy of the server) still
 // runs the old build, whose lazy chunks the server no longer has. Every lazy chunk load goes
 // through Vite's preload helper (`vite:preloadError`), and our boundaries report the import
 // rejections they catch too. A failure is confirmed against the server's build id

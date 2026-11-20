@@ -4,16 +4,58 @@
 
 ## State at 2026-11-20 (plancleanup1; checked against ARCHITECTURE.md and the code)
 
-Phases 0 to 6 are built, and so is most of phase 7 except the items listed under it. The phase sections below say what is built and what is not. **Everything dated before 2026-11-19 under "Next session" is history**; it is kept as the record of how the work went, not as a to-do list. The product is named **Dreamspan** (DESIGN §12 **[D]**, owner 2026-11-19): the in-repo rename and the dev and prod infrastructure are done; the GitHub repository rename and the local directory renames (the repository and its work folder are still `rp-harness` and `work-folder/`) are not. The next milestones are the owner's real data on prod and then the first testers (see "Release readiness" under phase 7). Tonight's queue (2026-11-19) finished every spec unit that had been designed: stories' reply contract M1–M4, workshop subagents SA1–SA9, MCP M0–M6, the files track A and B, the HTML panel reads and the panel exfiltration block, prices, saved video, and schema safety. What tonight's work left unbuilt is listed under the phase it belongs to, and in each spec's status line.
+Phases 0 to 6 are built, and so is most of phase 7 except the items listed under it. The phase sections below say what is built and what is not. The product is named **Dreamspan** (DESIGN §12 **[D]**, owner 2026-11-19): the in-repo rename is done; the GitHub repository rename is not. The next milestones are the owner's real data and then the first testers (see "Release readiness" under phase 7). Tonight's queue (2026-11-19) finished every spec unit that had been designed: stories' reply contract M1–M4, workshop subagents SA1–SA9, MCP M0–M6, the files track A and B, the HTML panel reads and the panel exfiltration block, prices, saved video, and schema safety. What tonight's work left unbuilt is listed under the phase it belongs to, and in each spec's status line.
 
-## Next session: start here
+## Standing notes
 
-Session notes are not kept in the repository.
+**Small follow-ups:**
+- The Status page showed an event-loop p99 of 74 ms with the app idle (2026-10-14), at a host load average of 20–90, and the 10 ms timer can't tell CPU starvation from blocking. Measure again on a quiet host before looking for a cause in the app.
+- The reader's first `PlanSummaries` on a 100,000-message chat takes about 1.5 s (in a reader worker; the writer is bounded). Perf fixtures still run with LCM off.
+- `lcmReviewScale` (condensation enqueue scaling) times out in full runs under heavy host load and passes alone.
+- `historyPerf`'s 100,000-message test no longer nears its 60 s (historyperf1, 2026-11-19): its fixture's bare connection lacked `temp_store = MEMORY`, so every trigger-firing insert spilled its statement journal to a temporary file; 72 s alone at load 42, now 22 s at load 35–50. Each assembly there now reads about 7,800 of the 100-character messages, since the default context became 128,000 tokens (2026-11-12): about 500 ms at load 40, against 200 ms at 4,095 tokens.
+- The LCM rebase combined the summary cursor with the stepped history start (LCM on: the cursor governs; off: the stepped cut). It passed check, browser and the ST gate, but no reviewer has looked at that seam yet.
+- Lorebook keys follow ST for now (`use_regex` ignored; owner, 2026-10-12). Revisit later; low priority.
+- ST's global and persona-bound lorebooks have no representation yet, so the assembler doesn't use them (ARCHITECTURE §15).
+- WebKit needs `libgtk-4`, `libgstcodecparsers` and `libavif` to launch. Firefox times out on one reload in `chatSetup.spec.ts` 2 runs in 10.
+- `library.spec.ts:98` (export "canceled") still fails in some reviewers' environments. It's quarantined only when a plain download also fails.
+- Migration 0014's recursive backfill may be quadratic on a long purged subtree. Not measured. Migrations get squashed before release anyway.
+- The lorebook entry cap is 10,000. It can be raised if a real lorebook needs more.
+
+**Decisions waiting on the owner:** none for phases 2–4.
+- Not needed yet, only when plugins are built (phase 6): PLUGINS.md §10
+  - applying plugin updates
+  - declared surfaces
+  - the sandboxed plugin type
+  - how far client overrides go
+  - git binary or library
+
+**Built on proposals.** The code follows these, and they stay marked [P] until the owner says otherwise. Nothing is needed unless the owner disagrees:
+- the workflow (WORKFLOW.md §2–4), which is how work is done now
+- the cross-site guard and `PUBLIC_ORIGINS` (DESIGN §11)
+- how "a password on every user" is read (DESIGN §11)
+- the env bootstrap for headless servers (DESIGN §10.1)
+- in proxy mode with `TRUSTED_PROXIES`, the Docker health check needs `127.0.0.1` on that list (ARCHITECTURE.md §7)
+- snapshots record an assembler semantics version, and rebuilding an older one returns the stored snapshot with a typed result (ARCHITECTURE §15)
+- a chat note edited from the chat changes only that branch, from the message shown on (DESIGN §3.4's default edit scope)
+- in our layouts, lorebook entries go in one block at the tail with a reserved allowance of at most 25% of the budget, sized from what could activate (ARCHITECTURE §15)
+- a browser copy goes only once the server acknowledged it, with no automatic expiry; the user can delete one explicitly from Browser recovery (ARCHITECTURE §3.10, §14.6)
+- every nonempty endpoint path segment and query value counts as a secret in captures, since routes have no sensitivity annotations (ARCHITECTURE §15)
+
+**Rules that shape phase 1–2 code** (PLUGINS.md §8):
+- Features register through registries with ids, never wired in directly: assembler stages, macros, importers, display rules, tools; on the client, slots.
+- Chat state keys get a namespace scheme before the first extension needs one.
+- Library documents keep `extensions.<plugin-id>`.
+- The client's CSP allows `connect-src` to our origin only.
+- Settings are configurable from inside the app (by the agent too), except security settings.
+
+**Housekeeping before the first release:**
+- ~~Squash migrations.~~ Done: the baseline was squashed and then frozen by `0002_files`; changes since are numbered migrations (`0002` to `0009`; ARCHITECTURE §3.7), recorded in release 0 (provisional).
+- Drop the tests' `--no-wasm-code-gc` once Node 24 ships the V8 fix (nodejs/node#66366).
 
 ## Phase 0: Foundations
 **Status (2026-10-30): built.** Foundations, schema and invariants, typed RPC and subscriptions, optimistic writes, isolated database workers, users with login and proxy auth, the provider layer and settings, user cost formulas, ledger rollups, host-bound keys and exposure password handling (ARCHITECTURE). Cache controls are provider-specific; card variants and overrides were superseded by independent forks.
 
-**Progress (2026-10-10):** the scaffold is done (ARCHITECTURE.md): repo, tooling, CI, Docker image, server skeleton with typed RPC over a WebSocket, the database worker architecture, and proxy/single-user auth. Client framework decided (React), server framework implemented on Effect's HTTP server. The full schema with database-enforced invariants, the message-graph operations and the library operations (variants, chat overrides, three-way merge on re-import) drafts with server-side undo history, and the recycle bin followed. The provider layer followed (ARCHITECTURE.md §6): encrypted connection secrets, the outbound proxy with bypass list and per-connection routes, model lists merged with pi-ai's catalog, streaming with typed errors and retries before the first token, the usage ledger with normalized counts and cost, explicit Anthropic breakpoints, and the client RPCs. The Cordis evaluation is written ([CORDIS.md](CORDIS.md)). Then (2026-10-11) the review fixes, host-bound credentials and the provider registry. Remaining: see "Next session" above.
+**Progress (2026-10-10):** the scaffold is done (ARCHITECTURE.md): repo, tooling, CI, Docker image, server skeleton with typed RPC over a WebSocket, the database worker architecture, and proxy/single-user auth. Client framework decided (React), server framework implemented on Effect's HTTP server. The full schema with database-enforced invariants, the message-graph operations and the library operations (variants, chat overrides, three-way merge on re-import) drafts with server-side undo history, and the recycle bin followed. The provider layer followed (ARCHITECTURE.md §6): encrypted connection secrets, the outbound proxy with bypass list and per-connection routes, model lists merged with pi-ai's catalog, streaming with typed errors and retries before the first token, the usage ledger with normalized counts and cost, explicit Anthropic breakpoints, and the client RPCs. The Cordis evaluation is written ([CORDIS.md](CORDIS.md)). Then (2026-10-11) the review fixes, host-bound credentials and the provider registry.
 
 - ~~Repo, tooling, CI, Docker image. Node LTS, TypeScript ESM.~~ Done.
 - Settle the open stack questions: ~~client framework~~ (React), ~~server framework~~ (Effect HTTP), ~~a time-boxed Cordis evaluation~~ (not adopted).
@@ -97,6 +139,7 @@ Session notes are not kept in the repository.
 ## Phase 7: Advanced RP and release readiness
 **Status (2026-11-20): mostly built.** Built: parallel threads, sending to several threads and merges (THREADS.md TH1 to TH8, CHAT-MERGE.md, including separate timelines), separate contexts per character with presence and away (CHARACTER-CONTEXT.md C1 to C9), HTML rendering in sandboxed frames with scripts, the bridge, external media consent, saved video, the Tavern Helper reads for approved panels and the block on ways out of a panel (HTML-MESSAGES.md steps 1 to 6, SAVED-MEDIA.md), internal side-by-side panels (the workbench). Not built: per-character agents (AGENTIC.md §10), message variables for panels (they wait for the ST importer to read Tavern Helper's per-swipe variables), template-bound UI (model-driven widgets, DESIGN §10.2 **[L]**), web push (not found in ARCHITECTURE or the code), a desktop package (DESKTOP.md, nothing built), and a public release: docs, installation as a single binary, the security review.
 
+**Release readiness (two milestones: the owner's real data, then the first testers).** Built tonight (2026-11-19): the rename to Dreamspan with its stored identifiers (database file, cookie, key-derivation label pinned by a test, browser storage names, extension name, plugin API scope); the released-schema snapshot (`release-0`, still provisional) and the guard against editing a released migration (`npm run schema:record`, `scripts/check-released-migrations.ts`, a gate line); a reference check at every start that never bricks the server, refusal messages that never say to empty the data folder, and the admin "Database check" row; the table-rebuild helper with foreign keys off and owner-scale tests (ARCHITECTURE §3.7). Not built: an online backup inside the app and an automatic backup before pending migrations; an upgrade test that migrates a database built by the previous release's code; per-kind migrations for stored documents and settings; accounts for testers (admin account deletion, a temporary password, per-account storage view, a problems page); a separate tester instance; blocking private addresses for non-admin connections; a security review; versions, changelog and a rollback runbook; a tester guide. Release 0 stays provisional until the owner starts keeping data (`npm run schema:record -- --final`).
 - Parallel threads, sending to several threads, merges.
 - Per-character agents with presence-limited views and private state.
 - HTML rendering in a sandbox, rich and compact forms, then template-bound UI.

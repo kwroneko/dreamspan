@@ -8,6 +8,7 @@ import { mkdirSync, readdirSync, readFileSync, existsSync, symlinkSync, writeFil
 import { rm, statfs } from "node:fs/promises"
 import { createServer, request as httpRequest, type Server } from "node:http"
 import { connect } from "node:net"
+import { homedir } from "node:os"
 import { randomBytes } from "node:crypto"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
@@ -540,7 +541,7 @@ describe.skipIf(skipReason !== null || "none" in limiter)("the Linux sandbox wit
       "none"
     ])
     expect(pid).toMatch(/^\d+$/)
-    expect(output(result)).not.toContain(process.env.HOME ?? "~")
+    expect(output(result)).not.toContain(homedir())
   }, 60_000)
 
   it("passes a wrapped program's arguments through unchanged", async () => {

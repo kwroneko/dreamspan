@@ -1,5 +1,4 @@
 // Compare two JSON arrays of DDL statements, on fresh databases, in a worker.
-// Schemaclean inputs and output: <work>/artifacts/schemaclean/.
 import { deepStrictEqual } from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"

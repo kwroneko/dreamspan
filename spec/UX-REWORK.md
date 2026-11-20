@@ -1,9 +1,12 @@
 # UX rework: where the design stands
 
+**Status**: Snippets (the 2026-10-27 confirmation) implemented 2026-10-28 and obsolete as a proposal; see [ARCHITECTURE.md §14](../ARCHITECTURE.md). The “Editing and saving” editor markers and full-text revision comparisons are built (U17, 2026-10-28; ARCHITECTURE §14), obsolete as proposals. Other sections retain their original status. Condensed state of the design discussion of 2026-10-16, written 2026-10-26 to continue from. It summarizes; the full wording is in [DESIGN.md](DESIGN.md) (§2.1, §3.1, §3.4, §4, §6.2), [CHATS.md](CHATS.md) and [CARD-FORKS.md](CARD-FORKS.md). **D** = the owner decided or stated it; **P** = proposed in the discussion, not confirmed; **O** = open. Shell integration U01 is built (2026-10-28): stable fork rows, independent metadata/pins and explicit fork navigation, documented in ARCHITECTURE §12; these portions are obsolete as proposals.
 
 ## 1. Where things stand
 
 - **Historical code snapshot when this discussion was written** (superseded for implemented sections above): master = `origin/master` (`dreamspan`). Nothing from this discussion is built: it was design only, and no code changes until the design is agreed. One exception, on a branch: `refs/heads/claude/compassionate-rhodes-787c7d` (d30483d) imports the names users gave forks in ST as branch names, and re-import fills in missing names without overwriting app-set ones. It's not reviewed or merged; three scale tests timed out in its full run under load and pass alone.
+- The owner isn't using the app yet (below).
+- **Housekeeping still open:** whether to build a "sync from ST" button.
 
 ## 2. The owner's position and how to work
 

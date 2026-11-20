@@ -1,6 +1,6 @@
 # Phase 1 decisions and the next work (2026-10-28)
 
-Status: the owner's answers of 2026-10-28 on the Phase 1 build (deployed 2026-10-27, master b129497), plus the defaults the coordinator settled where the owner left the choice open (marked **default**). The full question write-ups, with file:line references to the built code, are in `work-folder/2026-10-27/DECISIONS.md`; where that file and this one differ, this one wins. Each item names what to change; "keep" means the build already does it. Implementation status 2026-10-30: the implemented requirements in §1–§7 are obsolete as implementation plans; see ARCHITECTURE §3.8, §9, §12–§16. The later end-of-request decision supersedes the historical closing-turn/direction-import rules as noted below. “Keep” requirements are unchanged. §8–§9 are historical validation/work-order instructions, not evidence of a fresh fidelity-gate run or deployment.
+Status: the owner's answers of 2026-10-28 on the Phase 1 build (master b129497), plus the defaults the coordinator settled where the owner left the choice open (marked **default**). The full question write-ups, with file:line references to the built code, were kept outside the repository; where they and this file differ, this one wins. Each item names what to change; "keep" means the build already does it. Implementation status 2026-10-30: the implemented requirements in §1–§7 are obsolete as implementation plans; see ARCHITECTURE §3.8, §9, §12–§16. The later end-of-request decision supersedes the historical closing-turn/direction-import rules as noted below. “Keep” requirements are unchanged. §8–§9 are historical validation/work-order instructions, not evidence of a fresh fidelity-gate run.
 
 Once built, each item moves into ARCHITECTURE.md and the matching DESIGN.md item becomes **Decided** (owner-stated items) in the same commit.
 
@@ -87,13 +87,11 @@ Also from the reviews, code lows for a cleanup pass: `DECISIONS.md` "Not decisio
 
 ## 8. ST fidelity gate
 
-Run `npm run test:st` locally (Docker works on the owner's machine) on master after the fixes. Every intended difference gets a documented matcher with its explanation in ARCHITECTURE §15: the group nudge in every chat, the closing user turn, conditioned prompt order, `<Name>` wrappers, the removed one-character ST mode. *(The nudge, closing turn and conditioned order are replaced by one "End-of-request instruction" difference, DESIGN §2.2, owner 2026-10-29; `{{char}}` in groups is listed too.)* Anything else that differs is a bug.
+Run `npm run test:st` (it needs Docker) on master after the fixes. Every intended difference gets a documented matcher with its explanation in ARCHITECTURE §15: the group nudge in every chat, the closing user turn, conditioned prompt order, `<Name>` wrappers, the removed one-character ST mode. *(The nudge, closing turn and conditioned order are replaced by one "End-of-request instruction" difference, DESIGN §2.2, owner 2026-10-29; `{{char}}` in groups is listed too.)* Anything else that differs is a bug.
 
 ## 9. Work order for the next run
 
-1. The context inspector (§1). Merge, deploy.
-2. The fix batch (§2 to §6, §8). Merge, run the gate, deploy.
-3. Small fixes (§7). Merge, deploy.
+1. The context inspector (§1).
+2. The fix batch (§2 to §6, §8), then the ST gate.
+3. Small fixes (§7).
 4. Phase 2 as far as the budget goes (owner: "Phase 1, then Phase 2"), in the handoff's order: fork independence units (1–3 clean on `fi-3`; 4 on `fi-4r` needs a full check; 5–9 not started), card forks (`d-1r` built, unreviewed), snippets, search and replace.
-
-Deploy after each milestone once master is green: back up `the data folder` first (verify the copy), never wipe it.

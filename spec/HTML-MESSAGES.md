@@ -6,7 +6,7 @@
 
 Scope: HTML that cards, regex scripts and models put into message text, which existing cards need. Model-driven UI (widgets and stages whose state the model updates through tools, DESIGN §10.2 [L]) is a separate, later discussion and is not covered here.
 
-Sources, all public and cloned read-only under `<work>/ref/`: `SillyTavern-1.19.0`, `DOMPurify-3.4.2` (the version ST's `package.json:48` asks for), `JS-Slash-Runner` (Tavern Helper 4.12.0, `6897ed6c`), `LittleWhiteBox` (`707e03f2`) and `MagVarUpdate` (`d03b7dc8`). Every example below is synthetic.
+Sources, all public and read from read-only clones: `SillyTavern-1.19.0`, `DOMPurify-3.4.2` (the version ST's `package.json:48` asks for), `JS-Slash-Runner` (Tavern Helper 4.12.0, `6897ed6c`), `LittleWhiteBox` (`707e03f2`) and `MagVarUpdate` (`d03b7dc8`). Every example below is synthetic.
 
 ## 0. Summary
 

@@ -223,7 +223,7 @@ describe("bundled workers", () => {
   // process, how much RSS grows depends on what earlier tests freed (in the full suite it read
   // 43 MB, the test alone 89 MB). The probe's figure is the RSS growth from opening the writer
   // and 4 readers, divided by 5; it includes the main thread's share of opening them. Measured
-  // 2026-11-19 on the test host: 86 to 87 MB (a reader alone about 60 MB, the writer about 80 MB; their
+  // 2026-11-19 on a Linux x86_64 host: 86 to 87 MB (a reader alone about 60 MB, the writer about 80 MB; their
   // live heap about 20 MB each). A worker loading Effect from source would add about 85 MB.
   it.live(
     "stay within the per-worker memory budget",

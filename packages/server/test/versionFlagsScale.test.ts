@@ -1,4 +1,4 @@
-// Opt-in study: VERSION_FLAGS_STUDY=/storage/... through a check slot. Same fixtures before/after the text split.
+// Opt-in study: VERSION_FLAGS_STUDY=<folder outside the checkout>. Same fixtures before/after the text split.
 import { mkdirSync, writeFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { Worker } from "node:worker_threads"

@@ -8,7 +8,7 @@
 // - `cgroup-delegated`: a cgroup subtree this process may write, named by COMMAND_CGROUP. The
 //   image's entrypoint makes one in Docker (docker/entrypoint.sh, docker/README.md). Each command
 //   gets a child folder; a small shell joins it, then becomes bubblewrap.
-// - `systemd-scope`: on a host with a systemd user manager (a development server),
+// - `systemd-scope`: on a host with a systemd user manager (a server outside Docker),
 //   `systemd-run --user --scope` puts bubblewrap in a transient scope with the same limits. The
 //   scope runs bubblewrap in place, so its parent is still this process. systemd-run expands
 //   `${NAME}`, a whole-argument `$NAME` and `$$` in the command's arguments on the host (newer

@@ -86,7 +86,7 @@ per-process limits and the container's `mem_limit`, and the "Run commands" row s
 run with weaker limits here." Set `mem_limit` in any case: it is the cap on the server and all
 commands together.
 
-Outside Docker (a development server, a systemd user service), commands get a transient scope
+Outside Docker (for example a server run as a systemd user service), commands get a transient scope
 from `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0 -p TasksMax=…`, which needs
 nothing set up. The server checks once a minute that the user manager really applies those
 limits (some don't delegate the memory controller).
@@ -110,7 +110,7 @@ Then `security_opt: apparmor=dreamspan`. `userns,` is an AppArmor 4 rule (Ubuntu
 later restrict unprivileged user namespaces to profiles that allow them); AppArmor 3 parsers
 (Debian 12) don't know it: delete that line there. Hosts without AppArmor need nothing.
 
-**Untested at runtime:** the test host has AppArmor off, so the profile was only compiled (AppArmor
+**Untested at runtime:** the profile has only been compiled (AppArmor
 parser 4.1.7, `apparmor_parser -Q -K`), never enforced. Check it on the AppArmor host before
 relying on it: with it loaded, a command should run, and the workshop's "Run commands" row
 should not say commands are unavailable.
@@ -139,7 +139,7 @@ Internet from commands Off there is no proxy and no lookup.
 
 The kernel must allow unprivileged user namespaces (`/proc/sys/user/max_user_namespaces` > 0;
 on Debian before 11, `kernel.unprivileged_userns_clone=1`), and use cgroup v2 for the memory cap.
-Checked on the test host (Linux 6.12, Docker 29.7.2): with the seccomp and system-path settings, a command
+Checked on Linux 6.12 with Docker 29.7.2: with the seccomp and system-path settings, a command
 in the image runs as the sandbox's own user, sees only its files, runs git, python3, rg and
 node, reaches a public site, and is refused 127.0.0.1; with only the seccomp file it fails with
 "Can't mount proc on /proc", and with neither with "No permissions to create a new namespace".
@@ -148,13 +148,13 @@ node, reaches a public site, and is refused 127.0.0.1; with only the seccomp fil
 
 The final stage installs `bubblewrap` and the tools commands find inside the sandbox: git,
 python3 (with pip and venv), ripgrep, curl, procps, xz-utils, unzip, less and file. Node is the
-image's own. This adds about 170 MB (measured on the test host: 403 MB against 230 MB for the base image).
+image's own. This adds about 170 MB (403 MB against 230 MB for the base image).
 The entrypoint (`/usr/local/bin/dreamspan-entrypoint`) uses util-linux's `unshare` and `setpriv`, already
 in the base image.
 
 ## Outside Docker
 
-a development server (a systemd user service) needs nothing extra: bubblewrap from the host's
+A server run as a systemd user service needs nothing extra: bubblewrap from the host's
 packages, the kernel's unprivileged user namespaces, and the user manager for the per-command
 scopes. `COMMAND_SANDBOX` names the sandbox to use (`linux-bwrap` is the only one); empty picks
 the first available. `COMMAND_CGROUP` names a delegated cgroup subtree the server may write,

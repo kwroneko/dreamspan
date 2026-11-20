@@ -16,7 +16,7 @@
 - **Agent tools**: `bash` with timeouts, output paging and background commands; `read_file`, `write_file`, `edit_file`, `list_files` and `search_files`. The file tools run in the app and work even where commands can't. Plugin authoring works on a working copy in `Files/Plugins/<id>`, and Check and consent are still required to turn anything on (§5).
 - **Attachments of any type**: in a workshop, an attachment is saved as a file in the working folder automatically. The message tells the model its path, in the shape reference-harness uses, and images also go as image blocks to vision models. Story chats keep today's images-only behaviour unless the owner says otherwise (question 1) (§6).
 - **Changes and Undo**: every file the agent wrote through a file tool has Undo. A command's file changes are listed, with **Restore** for each file the app holds an earlier copy of. What a command did outside Files can't be taken back, and its row says so (§7).
-- **Build plan**: the sandbox, folders and agent tools come first and need no file-manager UI. The file-manager UI is a parallel track that blocks nothing (owner [D]). Linux comes first: the server and a development server run it today (§9).
+- **Build plan**: the sandbox, folders and agent tools come first and need no file-manager UI. The file-manager UI is a parallel track that blocks nothing (owner [D]). Linux comes first: the server runs on it today, in Docker and natively (§9).
 - **Baseline**: `baseline.ts` stays as it is. One additive migration, `0002_files`, adds two tables and four columns (§10).
 
 ## 1. Files
@@ -207,7 +207,7 @@ The agent never depends on what the machine has installed. Each platform's `Tool
 - **Today**: one container, from `node:24.22.1-trixie-slim`, running as `node` (uid 1000) with `./data:/data`, behind the reverse proxy. There is no Docker socket and no extra capability. The production Docker host runs Docker 29.2.1, rootful, cgroup v2, AppArmor and seccomp. (This was a read-only lookup over SSH, made without asking first, which the house rule for that host requires.)
 - **Changes**: the image adds the toolchain and `bubblewrap`/`socat` (§3.4). Compose adds a **seccomp profile** that permits creating user namespaces: Docker's default profile with `unshare`/`clone` of a new user namespace allowed, shipped in the repo as `docker/seccomp-userns.json`. It also adds an **AppArmor** setting that lets `bwrap` mount inside its own namespace, either a shipped profile or `apparmor=unconfined` on this one service, decided in L0 by what actually works on the host. No socket, sidecar or new service. The files can stay in `./data`.
 - **Why this is acceptable**: the container is still the outer boundary around the app. Inside it, the sandbox keeps commands away from `/data` (the database, the server secret and every account's data) and from each other. Allowing user namespaces inside the container slightly enlarges the kernel surface a command can reach, so L0 checks the result with the same escape tests as desktop Linux (§9). sandbox-runtime's "weaker nested sandbox" mode is not used.
-- **Native and dev runs** (the README's laptop runs, a development server) use the same `linux-bwrap` sandbox with the host's user namespaces.
+- **Native and dev runs** (the README's laptop runs, a development server run as a systemd user service) use the same `linux-bwrap` sandbox with the host's user namespaces.
 
 ## 4. Consent: what reaches a provider
 
@@ -364,7 +364,7 @@ The owner [D]: a file-management UI "can't slow down or block it or anything els
 | **B2** | Viewers (§8.2), drafts and conflicts for the editor; attachments open in them | B1 |
 | **B3** | Sharing UI and `file_shares` operations; the Versions dialog | B1 |
 
-Each unit gets its own review. **Linux comes first** because the server and a development server run it now; it is also the desktop Linux sandbox. macOS reuses the same library. Windows has the most unknowns, so its spike runs as soon as a desktop build exists, in parallel with everything else. Track A's file tools, attachments and folder chip don't depend on any sandbox.
+Each unit gets its own review. **Linux comes first** because the server runs on it now; it is also the desktop Linux sandbox. macOS reuses the same library. Windows has the most unknowns, so its spike runs as soon as a desktop build exists, in parallel with everything else. Track A's file tools, attachments and folder chip don't depend on any sandbox.
 
 ## 10. Database and baseline impact
 
@@ -375,7 +375,7 @@ Each unit gets its own review. **Linux comes first** because the server and a de
 - **`version_attachments`**: `ADD COLUMN name TEXT` and `ADD COLUMN path TEXT`, both nullable, so existing image rows stay valid.
 - **`composer_images`**: `ADD COLUMN kind TEXT NOT NULL DEFAULT 'image'` and `ADD COLUMN name TEXT`. The table keeps its name, since renaming it would be a rewriting migration.
 - **No migration needed** for: bin kind `file`; effect kinds `file.*` and `shell.run` (the `rollout_effects_owner` trigger already admits other target kinds); `drafts.target_kind = "file"`; `version_attachments.kind = "file"`. These are `storageKinds` registries, with no `CHECK` lists. Also no migration for the settings `workshop.cardFolders`, `workshop.lastFolder`, quotas and environment settings (the `settings` table), the grants (`workshop_grants`), or the state key `workshop.folder`. Sandbox state (profiles, ACLs, the toolchain) lives on disk and in the platform, not in the database.
-- **Tests**: `preSquashSchema.json` is regenerated from baseline plus migrations. A new test opens a database made at `0001_baseline` with synthetic rows, runs `0002_files`, and checks that the rows and the schema match. It is the first real upgrade the migrator runs, so this test is required. the release gate keeps working in keep mode, since `baseline.ts` doesn't change.
+- **Tests**: `preSquashSchema.json` is regenerated from baseline plus migrations. A new test opens a database made at `0001_baseline` with synthetic rows, runs `0002_files`, and checks that the rows and the schema match. It is the first real upgrade the migrator runs, so this test is required. A pre-deploy check that keeps an existing database keeps working, since `baseline.ts` doesn't change.
 
 ## 11. Later
 

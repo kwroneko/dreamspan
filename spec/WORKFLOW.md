@@ -148,4 +148,3 @@ So far:
 - A fresh reviewer keeps finding new defect classes in code that earlier rounds called clean (N: Astra's fresh pass after three rounds found 6 high). For protocols with races, stating invariants and testing them with a randomized model, then planting defects to check that model, converged faster than fixing reported cases one by one.
 - Fixes by Sol held up as well as fixes by Opus on the same stream (N, P, lorebook), at no Claude quota.
 - So far running both is worth it: neither reviewer's findings contain the other's, and both keep finding real defects after Opus reviews.
-

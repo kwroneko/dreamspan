@@ -157,7 +157,7 @@ describe("trusted host names", () => {
     return Effect.gen(function* () {
       const { allows, summary } = yield* proxyPolicy(["traefik", "127.0.0.1"], dns)
       for (const ip of ["172.31.7.9", "::ffff:172.31.7.9", "fd00::9", "127.0.0.1"]) assert.isTrue(allows(ip), ip)
-      assert.isFalse(allows("172.20.0.10"))
+      assert.isFalse(allows("172.31.7.10"))
       assert.include(summary(), "traefik (172.31.7.9, fd00::9), 127.0.0.1")
     }).pipe(Effect.scoped)
   })
@@ -179,9 +179,9 @@ describe("trusted host names", () => {
       assert.isFalse(allows("172.31.7.19"))
       assert.lengthOf(dns.calls, 2)
       // Without a refused connection, the background resolution catches a move within 30 s.
-      dns.table.traefik = ["172.20.0.30"]
+      dns.table.traefik = ["172.31.7.30"]
       yield* advance("30 seconds")
-      assert.isTrue(allows("172.20.0.30"))
+      assert.isTrue(allows("172.31.7.30"))
       assert.isFalse(allows("172.31.7.9"))
     }).pipe(Effect.scoped)
   })
@@ -243,7 +243,7 @@ describe("trusted host names", () => {
       assert.include(warning, "AUTH_MODE=proxy")
       assert.include(warning, "traefik (172.31.7.19), 127.0.0.1")
       assert.isUndefined(refused("172.31.7.9", 59_000))
-      assert.isString(refused("172.20.0.10", 59_000))
+      assert.isString(refused("172.31.7.10", 59_000))
       assert.isString(refused("172.31.7.9", 60_000))
       assert.strictEqual(refusal("172.31.7.9"), "172.31.7.9 isn't a trusted proxy of this instance.\n")
     }).pipe(Effect.scoped)

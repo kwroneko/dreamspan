@@ -10,7 +10,7 @@
 - every provider type has an overridable base URL
 - model lists are fetched from the upstream, and users can add and edit models
 
-This is phase 0's provider work (PLAN.md): connections, model lists, user-defined models with capabilities, write-only keys, the usage ledger, and one streaming entry point that the context assembler (phase 2) and the agent loop (phase 4) will call. It's written as a delta from reference-harness (CLAUDE.md), which runs pi-ai 0.84.2 with a patch. The reference is the `reference-harness` worktree.
+This is phase 0's provider work (PLAN.md): connections, model lists, user-defined models with capabilities, write-only keys, the usage ledger, and one streaming entry point that the context assembler (phase 2) and the agent loop (phase 4) will call. It's written as a delta from reference-harness (CLAUDE.md), which runs pi-ai 0.84.2 with a patch.
 
 ---
 

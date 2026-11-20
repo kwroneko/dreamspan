@@ -12,7 +12,7 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
-const shots = process.env.DECISIONS_SHOTS ?? "<work>/artifacts/decisions1113"
+const shots = process.env.DECISIONS_SHOTS ?? resolve(import.meta.dirname, "../test-results/workshopChatList-shots")
 const server = serverPerFile(withAdmin)
 let ids = { solo: "", pair: "", workshop: "" }
 
