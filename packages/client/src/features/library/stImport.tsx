@@ -866,7 +866,7 @@ function StartForm({ open, close, again }: StImportSectionProps & { close: (() =
         )}
         <FileDrop
           label="Choose the folder"
-          description="Sends the selected folder from this tab, which must stay open until the import finishes."
+          description="Pick SillyTavern's data folder on this computer, or drop it here. Its files upload from this tab, so keep the tab open until the import is done."
           directory
           onFiles={(picked) => choose({ _tag: "Picked", files: pickedFiles(picked) })}
         />
