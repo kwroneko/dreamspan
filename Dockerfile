@@ -15,14 +15,14 @@ FROM deps AS build
 COPY . .
 # The React Compiler's per-file output is kept between builds (packages/client/scripts/babelCache.ts),
 # so a UI change compiles only the files that changed. The client and the database workers build
-# side by side (the root `build` script runs them one after the other).
+# side by side (the root `build` script runs them one after the other). Then what the image runs is
+# gathered into two trees, so the final stage adds each as one layer: the server's, and the client's
+# with the design docs (the read-only /app-source copy commands see, spec/FILES-AND-ENVIRONMENT.md
+# §3.6, files/appSource.ts). A UI change rebuilds only the second. One step, since each step costs
+# time of its own. The guarded development imports must fail plainly in the image.
 RUN --mount=type=cache,id=dreamspan-babel,target=/babel-cache export RP_BABEL_CACHE=/babel-cache MIMALLOC_ALLOW_THP=0 \
-  && { npm run build -w @dreamspan/server & workers=$!; npm run build -w @dreamspan/client && wait $workers; }
-# What the image runs, gathered into two trees so the final stage adds each as one layer: the
-# server's, and the client's with the design docs (the read-only /app-source copy commands see,
-# spec/FILES-AND-ENVIRONMENT.md §3.6, files/appSource.ts). A UI change rebuilds only the second.
-# The guarded development imports must fail plainly in the image.
-RUN mkdir /server /client \
+  && { npm run build -w @dreamspan/server & workers=$!; npm run build -w @dreamspan/client && wait $workers; } \
+  && mkdir /server /client \
   && cp -a --parents package.json package-lock.json packages/shared/package.json packages/shared/src \
     packages/plugin-api/package.json packages/plugin-api/src packages/server/package.json packages/server/src \
     packages/server/dist/workers /server \
