@@ -46,14 +46,44 @@ export function ConnectionsLink({ className, children }: { className: string; ch
   )
 }
 
+interface PinOrder {
+  /** The pins the list groups by. */
+  readonly pins: Readonly<Record<string, boolean>>
+  /** Models pinned or unpinned in this list since `pins` was taken, at their place then. */
+  readonly held: Readonly<Record<string, boolean>>
+  readonly query: string
+  readonly connection: string
+}
+
+/** The pins the list groups by next: `previous` while nothing changed but this list's own pins. */
+function pinOrder(
+  previous: PinOrder | null,
+  pins: Readonly<Record<string, boolean>>,
+  query: string,
+  connection: string
+): PinOrder {
+  if (!previous || previous.query !== query || previous.connection !== connection)
+    return { pins, held: {}, query, connection }
+  const differs = (id: string) => !(id in previous.held) && (pins[id] === true) !== (previous.pins[id] === true)
+  if (!Object.keys(pins).some(differs) && !Object.keys(previous.pins).some(differs)) return previous
+  const held = Object.fromEntries(Object.entries(previous.held).filter(([, pinned]) => pinned))
+  const kept = Object.fromEntries(Object.entries(pins).filter(([id]) => !(id in previous.held)))
+  return { ...previous, pins: { ...kept, ...held } }
+}
+
 export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPickerProps) {
   const { prefs, change, error, ready } = useViewPrefs()
   const [query, setQuery] = useState("")
   // ALL lists every connection's models; otherwise a connection's id.
   const [connection, setConnection] = useState(ALL)
-  // A pin never moves the button under the pointer. Its new place applies on reopening.
-  const [orderPins, setOrderPins] = useState<Readonly<Record<string, boolean>> | null>(ready ? prefs.modelPins : null)
-  if (orderPins === null && ready) setOrderPins(prefs.modelPins)
+  // A pin never moves the button under the pointer: the list groups by the pins as they were
+  // when it last changed, holding each model pinned or unpinned here where it was. Pins that
+  // load or change elsewhere (another tab, another picker) apply at once; a new search, a
+  // connection filter or reopening takes every current pin.
+  const [order, setOrder] = useState<PinOrder | null>(null)
+  const nextOrder = ready ? pinOrder(order, prefs.modelPins, query, connection) : order
+  if (nextOrder !== order) setOrder(nextOrder)
+  const orderPins = nextOrder?.pins ?? null
   const search = useRef<HTMLInputElement>(null)
   const searchRef = focus === "search" ? focusRef : search
   const navigation = useRef<ModelListNavigation>(null)
@@ -167,12 +197,14 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
         pinsReady={ready}
         onChoose={choose}
         focusRef={focus === "current" ? focusRef : undefined}
-        onPin={(id) =>
+        onPin={(id) => {
+          if (order && !(id in order.held))
+            setOrder({ ...order, held: { ...order.held, [id]: order.pins[id] === true } })
           void change(
             { modelPins: { ...prefs.modelPins, [id]: !prefs.modelPins[id] } },
             { modelPins: { [id]: !prefs.modelPins[id] } }
           )
-        }
+        }}
       />
       {models.length === 0 && (
         <p className="text-sm text-muted">

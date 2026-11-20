@@ -92,6 +92,80 @@ test("a pin toggles in place and leads the list on reopening", async ({ page }) 
   await expect(pin).toHaveAttribute("aria-pressed", "false")
 })
 
+test("a pin on a named model of a second connection joins Pinned once the search changes or clears", async ({
+  page
+}) => {
+  await page.goto(`${server().url}/chats/${seeded.chat.id}`)
+  await modelChip(page).click()
+  await search(page).fill("storyteller 007")
+  const label = "Router catalog · openai/story-007-v3.1"
+  await list(page)
+    .getByRole("button", { name: `Pin ${label}`, exact: true })
+    .click()
+  const unpin = list(page).getByRole("button", { name: `Unpin ${label}`, exact: true })
+  await expect(unpin).toHaveAttribute("aria-pressed", "true")
+  await search(page).fill("storyteller 00")
+  await expect(heading(page, "Pinned")).toBeVisible()
+  expect((await names(page)).slice(0, 2).sort()).toEqual(["Router catalog · anthropic/story-000-v3.1", label].sort())
+  await search(page).fill("")
+  await expect(heading(page, "Pinned")).toBeVisible()
+  expect((await names(page)).slice(0, 4)).toContain(label)
+  await unpin.click()
+  await expect(list(page).getByRole("button", { name: `Pin ${label}`, exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "false"
+  )
+})
+
+test("pins that load after the picker opens, or change in another tab, join Pinned at once", async ({ page }) => {
+  const label = "Router catalog · mistralai/story-010-v3.1"
+  const other = "Router catalog · deepseek/story-017-v3.1"
+  const pinRow = (on: Page, name: string, pinned: boolean) =>
+    list(on).getByRole("button", { name: `${pinned ? "Unpin" : "Pin"} ${name}`, exact: true })
+  // Pinned before the picker opens.
+  await page.goto(`${server().url}/chats/${seeded.chat.id}`)
+  await modelChip(page).click()
+  await search(page).fill("storyteller 010")
+  await pinRow(page, label, false).click()
+  await expect(pinRow(page, label, true)).toHaveAttribute("aria-pressed", "true")
+  // Reopened on a fresh page whose pins arrive only after the picker shows.
+  let release: (() => void) | undefined
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string }) : null
+      if (request?.tag === "GetDisplayPrefs" && !release) {
+        release = () => upstream.send(data)
+        return
+      }
+      upstream.send(data)
+    })
+    upstream.onMessage((data) => socket.send(data))
+  })
+  await page.goto(`${server().url}/chats/${seeded.chat.id}`)
+  await modelChip(page).click()
+  await expect(list(page)).toBeVisible()
+  await expect.poll(() => release !== undefined).toBe(true)
+  await expect(heading(page, "Pinned")).toHaveCount(0)
+  release!()
+  await expect(heading(page, "Pinned")).toBeVisible()
+  await expect.poll(async () => (await names(page)).slice(0, 4)).toContain(label)
+  // Pinned in another tab while this picker stays open, its search unchanged.
+  const second = await page.context().newPage()
+  await second.goto(`${server().url}/chats/${seeded.chat.id}`)
+  await modelChip(second).click()
+  await search(second).fill("storyteller 017")
+  await pinRow(second, other, false).click()
+  await expect(pinRow(second, other, true)).toHaveAttribute("aria-pressed", "true")
+  await expect.poll(async () => (await names(page)).slice(0, 5)).toContain(other)
+  await pinRow(second, other, true).click()
+  await expect(pinRow(second, other, false)).toHaveAttribute("aria-pressed", "false")
+  await second.close()
+  await expect.poll(async () => (await names(page)).slice(0, 5)).not.toContain(other)
+  await pinRow(page, label, true).click()
+  await expect(pinRow(page, label, false)).toHaveAttribute("aria-pressed", "false")
+})
+
 test("the sort is a labelled choice beside the connection filter", async ({ page }) => {
   await page.goto(`${server().url}/chats/${seeded.chat.id}`)
   await modelChip(page).click()
