@@ -1,6 +1,6 @@
 {
   "release": 0,
-  "provisional": true,
+  "provisional": false,
   "migrations": {
     "0001_baseline": "46d1fc20c64ec731b17b22a2b44ad08f0d7c3ca7abc378b20065e9ef162d514a",
     "0002_files": "5d8db5bc130564d115e906e19419e9bb75a47b035fa4abacd36bfcfb9a316964",
