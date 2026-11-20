@@ -113,7 +113,7 @@ function DecisionsSection({ connection, kinds }: ConnectionSectionProps) {
   const save = (next: Pick<ConnectionDecisions, "model" | "points">) =>
     void action.run((client) => client("SetDecisionSettings", { connectionId: connection.id, ...next }), ["decisions"])
   const items: Array<ModelChoice> = [
-    { value: NONE, label: "None", description: "Nothing is asked." },
+    { value: NONE, label: "No model", description: "Nothing is asked." },
     ...models.value
       .filter((model) => !model.hidden || model.id === own.model)
       .map((model) => ({

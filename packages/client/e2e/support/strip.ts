@@ -61,3 +61,17 @@ export const capabilityCounts = (capabilities: ReadonlyArray<{ readonly mode: st
   asks: capabilities.filter((c) => c.mode === "ask").length,
   off: capabilities.filter((c) => c.mode === "off").length
 })
+
+const startsWith = (text: string) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)
+
+/** The open model picker's connection filter: a connection's name, or "All connections". */
+export const filterModels = async (page: Page, connection: string) => {
+  await page.locator("[data-model-picker]").getByRole("combobox", { name: "Connection", exact: true }).click()
+  await page.getByRole("option", { name: startsWith(connection) }).click()
+}
+
+/** The open model picker's sort: "Name" or "Last used". */
+export const sortModels = async (page: Page, sort: "Name" | "Last used") => {
+  await page.locator("[data-model-picker]").getByRole("combobox", { name: "Sort models", exact: true }).click()
+  await page.getByRole("option", { name: startsWith(sort) }).click()
+}

@@ -35,6 +35,10 @@ import { type Write } from "./LcmFields.tsx"
 import { modelValue, parseModelValue, useModelChoices } from "./modelChoices.ts"
 
 const NONE = "none"
+
+/** The model fields' "No model" row, with what it means for that field. */
+const withNone = (items: ReturnType<typeof useModelChoices>, description: string) =>
+  items.map((item) => (item.value === NONE ? { ...item, description } : item))
 const SAME_AS_CHAT = "Same as the chat's model"
 
 const savedTail = (defaults: GenerationDefaults | null) => defaults?.lcm?.tail ?? ""
@@ -126,7 +130,7 @@ function ChatDefaultsContent() {
     setSaved(await instruction.commit(text, () => change({ tail: text === "" ? null : text })))
   }
 
-  const items = [{ value: NONE, label: "None" }, ...models]
+  const items = [{ value: NONE, label: "No model" }, ...models]
   const choice = (picked: { connection: string; model: string } | null | undefined) =>
     picked ? modelValue(picked.connection, picked.model) : NONE
   const unsaved = defaults !== null && tail !== savedTail(defaults)
@@ -154,9 +158,9 @@ function ChatDefaultsContent() {
           >
             <ModelSelect
               ariaLabel="Default model"
-              items={items}
+              items={withNone(items, "Chats have no model until one is chosen.")}
               value={defaults ? choice(defaults.model) : null}
-              placeholder="None"
+              placeholder="No model"
               onValueChange={(value) => void change({ model: value === NONE ? null : parseModelValue(value) })}
             />
           </Field>
@@ -180,9 +184,9 @@ function ChatDefaultsContent() {
           >
             <ModelSelect
               ariaLabel="Refusal judge"
-              items={items}
+              items={withNone(items, "Only refusals the provider reports are caught.")}
               value={defaults ? choice(defaults.judge) : null}
-              placeholder="None"
+              placeholder="No model"
               onValueChange={(value) => void change({ judge: value === NONE ? null : parseModelValue(value) })}
             />
           </Field>
@@ -278,9 +282,9 @@ export function SummaryDefaults({
         <Field label="Fallback summarizer" about="Tried once when a summary keeps failing on its own model.">
           <ModelSelect
             ariaLabel="Fallback summarizer"
-            items={items}
+            items={withNone(items, "A failing summary isn't tried with another model.")}
             value={defaults ? choice(defaults.lcm?.fallback) : null}
-            placeholder="None"
+            placeholder="No model"
             onValueChange={(value) => void change({ fallback: value === NONE ? null : parseModelValue(value) })}
           />
         </Field>

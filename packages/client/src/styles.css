@@ -535,6 +535,37 @@ main:has(> [data-fill]) {
   }
 }
 
+/*
+ * A list whose scrollbar is only its thumb: Chromium draws step arrows at both ends of a
+ * standard thin scrollbar on some systems, a second scroll control beside the bar. Its own
+ * pseudo-elements draw none, and they apply only once the standard properties are unset.
+ */
+@supports selector(::-webkit-scrollbar) {
+  .scroll-thumb-only,
+  .scroll-thumb-only:hover {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+  .scroll-thumb-only::-webkit-scrollbar {
+    width: 8px;
+  }
+  .scroll-thumb-only::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-thumb-only::-webkit-scrollbar-button {
+    display: none;
+  }
+  .scroll-thumb-only::-webkit-scrollbar-thumb {
+    background: var(--scrollbar);
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: padding-box;
+  }
+  .scroll-thumb-only:hover::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-hover);
+  }
+}
+
 /* What Base UI would add as an inline <style>, which the CSP refuses (ui/CspProvider.tsx). */
 .base-ui-disable-scrollbar {
   scrollbar-width: none;

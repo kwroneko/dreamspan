@@ -367,12 +367,10 @@ for (const [name, viewport] of [
       const dialog = page.getByRole("region", { name: "Models for summaries" })
       const pick = async (select: Locator, option: string | RegExp) => {
         await select.click()
-        if (option === "None") await page.getByRole("button", { name: "None", exact: true }).click()
-        else
-          await page
-            .getByRole("radiogroup", { name: "Model", exact: true })
-            .getByRole("radio", { name: option })
-            .click()
+        await page
+          .getByRole("radiogroup", { name: "Model", exact: true })
+          .getByRole("radio", { name: option, ...(typeof option === "string" ? { exact: true } : {}) })
+          .click()
         await expect(page.getByRole("radiogroup", { name: "Model", exact: true })).toHaveCount(0)
       }
       await pick(page.getByLabel("Refusal judge", { exact: true }), /fake-small/)
@@ -380,7 +378,7 @@ for (const [name, viewport] of [
       await expect
         .poll(async () => admin((api) => api.GetGenerationDefaults()).then((d) => [!!d.judge, !!d.lcm?.fallback]))
         .toEqual([true, true])
-      await pick(page.getByLabel("Refusal judge", { exact: true }), "None")
+      await pick(page.getByLabel("Refusal judge", { exact: true }), "No model")
       await expect.poll(async () => admin((api) => api.GetGenerationDefaults()).then((d) => !!d.judge)).toBe(false)
       // Clearing one leaves the other.
       expect(await admin((api) => api.GetGenerationDefaults()).then((d) => !!d.lcm?.fallback)).toBe(true)

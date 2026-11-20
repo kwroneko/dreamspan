@@ -15,7 +15,7 @@ import { closePanel, openPanel } from "./support/panel.ts"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { modelChip, modelName, presetChip, presetName } from "./support/strip.ts"
+import { modelChip, modelName, presetChip, presetName, sortModels } from "./support/strip.ts"
 
 const server = serverPerFile(withAdmin)
 const shots = resolve(process.env.SCREENSHOT_DIR ?? join(tmpdir(), "rp-picker-screenshots"))
@@ -326,7 +326,7 @@ for (const width of [1440, 390]) {
       // Recent choices count alongside replies, across the shared model selectors.
       await expect(list.getByRole("radio", { name: /fake-large$/ })).toHaveAccessibleDescription(/^used /)
       await expect(list.getByRole("radio", { name: /fake-small$/ })).toHaveAccessibleDescription(/^(never used$|used )/)
-      await page.getByRole("group", { name: "Sort models" }).getByRole("button", { name: "Used" }).click()
+      await sortModels(page, "Last used")
       await expect(list.getByRole("radio").first()).toHaveAccessibleName(
         theme === "light" ? /fake-large$/ : /fake-small$/
       )

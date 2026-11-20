@@ -164,7 +164,9 @@ const PRESSED = "border-accent/60 bg-linear-to-b from-accent/15 to-accent/15 tex
  * An icon button that toggles (`pressed`): label names it, hint explains the next click. Disabled,
  * it stays focusable and hoverable, so its tooltip can still say why it can't be used.
  * `className` places it and sets when it shows. Without `pressed` it's a plain action in the
- * same shape (a tile's corner button, `tile-action`).
+ * same shape (a tile's corner button, `tile-action`). `quiet` drops the frame for a toggle
+ * repeated on every row of a list (a model's pin): off, a muted icon; pressed, the same accent
+ * filled icon as the framed toggle, without the wash and edge.
  */
 export function ToggleIconButton({
   label,
@@ -174,6 +176,7 @@ export function ToggleIconButton({
   disabled = false,
   className = "",
   fillWhenPressed = true,
+  quiet = false,
   onClick
 }: {
   label: string
@@ -181,6 +184,7 @@ export function ToggleIconButton({
   pressed?: boolean | undefined
   /** False for an icon drawn as open strokes (an eye), which a fill would blot. */
   fillWhenPressed?: boolean
+  quiet?: boolean
   hint?: ReactNode
   disabled?: boolean
   className?: string
@@ -194,8 +198,10 @@ export function ToggleIconButton({
         disabled={disabled}
         focusableWhenDisabled
         onClick={onClick}
-        className={`inline-flex size-8 items-center justify-center rounded-md border bg-surface shadow-sm outline-none transition-opacity select-none focus-visible:ring-2 focus-visible:ring-focus ${
-          pressed ? PRESSED : "border-border text-muted hover:text-text"
+        className={`inline-flex size-8 items-center justify-center rounded-md outline-none transition-opacity select-none focus-visible:ring-2 focus-visible:ring-focus ${
+          quiet
+            ? `shrink-0 hover:bg-hover ${pressed ? "text-accent" : "text-muted hover:text-text"}`
+            : `border bg-surface shadow-sm ${pressed ? PRESSED : "border-border text-muted hover:text-text"}`
         } ${className}`}
       >
         <Icon name={icon} filled={pressed === true && fillWhenPressed} />

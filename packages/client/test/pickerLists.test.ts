@@ -75,16 +75,20 @@ describe("the preset lists", () => {
 })
 
 describe("the model list", () => {
-  it("finds names, ids and provider prefixes with punctuation-tolerant fuzzy words", () => {
+  it("finds names, ids and connections when every typed word appears, punctuation and accents ignored", () => {
     const model = {
       value: "c1 m1",
       label: "Router · anthropic/claude-3.1",
+      connectionName: "Router",
       name: "Café storyteller",
       modelKey: "anthropic/claude-3.1"
     }
-    for (const query of ["cafe", "anth cld31", "anthropic.claude/3-1", "story teller", "CLAUDE 31"])
+    for (const query of ["cafe", "anth claude31", "anthropic.claude/3-1", "story teller", "CLAUDE 31", "router 3.1"])
       expect(matchesModel(model, query), query).toBe(true)
     expect(matchesModel(model, "gemini")).toBe(false)
+    // No more piecing words together from scattered letters.
+    expect(matchesModel(model, "cld")).toBe(false)
+    expect(matchesModel(model, "claude gemini")).toBe(false)
     // Digits must not be pieced together across repeated id/name fields.
     expect(
       matchesModel(
@@ -98,9 +102,36 @@ describe("the model list", () => {
       )
     ).toBe(false)
   })
+  it("requires every word, and ranks a word's start in the name or id above its middle or the connection", () => {
+    const gateway = (key: string) => ({
+      value: `g ${key}`,
+      label: `Gateway UNO · ${key}`,
+      connectionId: "g",
+      connectionName: "Gateway UNO",
+      modelKey: key,
+      name: key
+    })
+    const catalog = ["uno.gemini-4-argon", "uno.gemini-4-neon", "uno.gemini-4-neon-lite", "uno.neonate-x"].map(gateway)
+    const keys = (query: string) =>
+      modelRows(catalog, "name", query, "", {}, new Map()).flatMap((row) =>
+        "model" in row ? [row.model.modelKey] : []
+      )
+    expect(keys("gemini neon")).toEqual(["uno.gemini-4-neon", "uno.gemini-4-neon-lite"])
+    expect(keys("neon")).toEqual(["uno.gemini-4-neon", "uno.gemini-4-neon-lite", "uno.neonate-x"])
+    expect(keys("eon")).toEqual(["uno.gemini-4-neon", "uno.gemini-4-neon-lite", "uno.neonate-x"])
+    // A pinned match leads, under its own heading.
+    const pinned = modelRows(catalog, "name", "neon", "", { "g uno.neonate-x": true }, new Map())
+    expect(pinned.map((row) => ("heading" in row ? row.heading : "model" in row ? row.model.modelKey : ""))).toEqual([
+      "Pinned",
+      "uno.neonate-x",
+      "Matches",
+      "uno.gemini-4-neon",
+      "uno.gemini-4-neon-lite"
+    ])
+  })
   it("keeps pins and recent models across connections before the grouped catalog, and filters every section", () => {
     const rows = modelRows(models, "name", "", "", { "c2 m1": true }, used)
-    expect(rows.map((row) => ("heading" in row ? row.heading : row.model.value))).toEqual([
+    expect(rows.map((row) => ("heading" in row ? row.heading : "model" in row ? row.model.value : ""))).toEqual([
       "Pinned",
       "c2 m1",
       "Recent",
@@ -110,7 +141,7 @@ describe("the model list", () => {
     ])
     expect(
       modelRows(models, "name", "small", "c1", { "c2 m1": true }, used).map((row) =>
-        "heading" in row ? row.heading : row.model.value
+        "heading" in row ? row.heading : "model" in row ? row.model.value : ""
       )
     ).toEqual(["c1 m2"])
   })

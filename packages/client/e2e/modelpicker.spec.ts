@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { modelCatalog } from "./support/modelCatalog.ts"
 import { serverPerFile } from "./support/server.ts"
 import { withCookie } from "./support/rpc.ts"
-import { modelChip } from "./support/strip.ts"
+import { filterModels, modelChip, sortModels } from "./support/strip.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 
 const server = serverPerFile(
@@ -103,10 +103,10 @@ for (const width of [1440, 390])
       await expect(list.getByRole("radio").first()).toHaveAccessibleName(/2998/)
       await expect(list.getByText("Recent", { exact: true })).toBeVisible()
       await expect(list.getByRole("radio", { name: /Local ten.*0000/ })).toHaveAccessibleDescription(/^used /)
-      await page.getByRole("group", { name: "Sort models" }).getByRole("button", { name: "Used" }).click()
-      await page.getByRole("combobox", { name: "Connection", exact: true }).selectOption(seeded.lists[1]!.connection.id)
+      await sortModels(page, "Last used")
+      await filterModels(page, seeded.lists[1]!.connection.name)
       await expect(list.getByRole("radio")).toHaveCount(10)
-      await page.getByRole("combobox", { name: "Connection", exact: true }).selectOption("")
+      await filterModels(page, "All connections")
       expect(await list.getByRole("radio").count()).toBeLessThan(25)
       await expectLayout(page, info, `picker-${width}-${theme}`, { scope: "[data-model-picker]" })
       await page.screenshot({ path: join(work, `picker-${width}-${theme}.png`) })
@@ -171,9 +171,7 @@ for (const width of [1440, 390])
       for (const name of ["Default model", "Refusal judge", "Fallback summarizer"]) {
         await page.getByRole("button", { name, exact: true }).click()
         await expect(page.locator("[data-model-picker]").getByText("Pinned", { exact: true })).toBeVisible()
-        await page
-          .getByRole("combobox", { name: "Connection", exact: true })
-          .selectOption(seeded.lists[2]!.connection.id)
+        await filterModels(page, seeded.lists[2]!.connection.name)
         await page.getByRole("searchbox", { name: "Find a model", exact: true }).fill("story 0038")
         const list = page.getByRole("radiogroup", { name: "Model", exact: true })
         await expect(list.getByRole("radio")).toHaveCount(1)
@@ -196,8 +194,11 @@ for (const width of [1440, 390])
       await page.goto(`${server().url}/settings/connections/${seeded.decision.id}`)
       await page.getByRole("button", { name: "Decision model", exact: true }).click()
       const list = page.getByRole("radiogroup", { name: "Model", exact: true })
-      await expect(list.getByRole("radio")).toHaveCount(40)
-      await expect(page.getByRole("combobox", { name: "Connection", exact: true }).locator("option")).toHaveCount(2)
+      // Its 40 models and No model.
+      await expect(list.getByRole("radio")).toHaveCount(41)
+      await page.getByRole("combobox", { name: "Connection", exact: true }).click()
+      await expect(page.getByRole("option")).toHaveCount(2)
+      await page.keyboard.press("Escape")
       await page.getByRole("searchbox", { name: "Find a model", exact: true }).fill("qwen story0038")
       await expect(list.getByRole("radio")).toHaveCount(1)
       await expectLayout(page, info, `decision-${width}-${theme}`, { scope: "[data-model-picker]" })

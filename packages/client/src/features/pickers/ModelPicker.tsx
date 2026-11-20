@@ -1,14 +1,15 @@
 import { ChatLock } from "./PickerParts.tsx"
-// The model picker: the composer's model chip and the Model tab open this same list. A filter,
-// Name or Used, when each model last wrote a reply under its name, and Manage connections… at
-// the end, where models come from. The body is the registered `model.picker` entry.
+// The model picker: the composer's model chip and the Model tab open this same list. A search,
+// a connection filter and the sort in one row, the list (a host's own choices such as "No
+// model" first, as rows like the models'), and Manage connections… at the end, where models
+// come from. The body is the registered `model.picker` entry.
 import { Link } from "@tanstack/react-router"
 import { type ReactNode, useCallback, useId, useMemo, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { SlotOutlet, defineSlot } from "../../slots.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Field } from "../../ui/Field.tsx"
-import { Segmented } from "../../ui/Segmented.tsx"
+import { Select } from "../../ui/Select.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import {
@@ -21,7 +22,7 @@ import {
 import { MODEL_SORTS, type ModelSort, modelConnection, modelRows, modelsInOrder } from "./modelList.ts"
 import { type ModelSelection, useModelUse } from "./modelSelection.ts"
 import type { ModelChoice } from "../chat/modelChoices.ts"
-import { VirtualModelList, type ModelListNavigation } from "./VirtualModelList.tsx"
+import { VirtualModelList, type ModelListNavigation, type ModelRow } from "./VirtualModelList.tsx"
 
 export interface ModelPickerProps extends PickerBodyProps {
   readonly selection: ModelSelection
@@ -29,6 +30,8 @@ export interface ModelPickerProps extends PickerBodyProps {
 
 /** The registered model picker body (`model.picker`); a plugin may replace or add to it. */
 export const modelPickers = defineSlot<ModelPickerProps>("model.picker")
+
+const ALL = "all connections"
 
 const CONNECTIONS_HINT = "Open Settings → Connections to add a connection or change one; Back returns to this chat"
 
@@ -46,7 +49,8 @@ export function ConnectionsLink({ className, children }: { className: string; ch
 export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPickerProps) {
   const { prefs, change, error, ready } = useViewPrefs()
   const [query, setQuery] = useState("")
-  const [connection, setConnection] = useState("")
+  // ALL lists every connection's models; otherwise a connection's id.
+  const [connection, setConnection] = useState(ALL)
   // A pin never moves the button under the pointer. Its new place applies on reopening.
   const [orderPins, setOrderPins] = useState<Readonly<Record<string, boolean>> | null>(ready ? prefs.modelPins : null)
   if (orderPins === null && ready) setOrderPins(prefs.modelPins)
@@ -76,8 +80,20 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
   )
   const ordered = useMemo(() => modelsInOrder(prefs.modelSort, "", catalog, used), [prefs.modelSort, catalog, used])
   const rows = useMemo(
-    () => modelRows(ordered, prefs.modelSort, query, connection, orderPins ?? prefs.modelPins, used, true),
-    [ordered, prefs.modelSort, query, connection, orderPins, prefs.modelPins, used]
+    (): ReadonlyArray<ModelRow> => [
+      // The host's own choices lead the list, outside the search's matches.
+      ...(query.trim() ? [] : choices.map((choice) => ({ choice, key: `choice:${choice.value}` }))),
+      ...modelRows(
+        ordered,
+        prefs.modelSort,
+        query,
+        connection === ALL ? "" : connection,
+        orderPins ?? prefs.modelPins,
+        used,
+        true
+      )
+    ],
+    [choices, ordered, prefs.modelSort, query, connection, orderPins, prefs.modelPins, used]
   )
   const choose = useCallback(
     (next: string) => {
@@ -96,7 +112,7 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
       <Field label="Find a model" labelHidden className="shrink-0">
         <PickerSearch
           label="Find a model"
-          placeholder="Search name, id or provider"
+          placeholder="Search name, id or connection"
           value={query}
           onChange={setQuery}
           inputRef={searchRef}
@@ -107,37 +123,38 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
           controls={listId}
         />
       </Field>
-      <label className="flex shrink-0 items-center gap-2 text-sm">
-        <span>Connection</span>
-        <Tooltip label="Show models from one connection, or all connections">
-          <select
-            aria-label="Connection"
+      {/* Each in its own Field: inside a settings field's popover, the outer Field's label would name them. */}
+      <div className="flex shrink-0 items-center gap-2">
+        <Field label="Connection" labelHidden className="min-w-0 flex-1">
+          <Select<string>
+            className="max-w-none!"
             value={connection}
-            onChange={(event) => setConnection(event.target.value)}
-            className="h-9 min-w-0 flex-1 rounded-md border border-border bg-surface px-2 text-text outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            <option value="">All connections</option>
-            {connections.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.name}
-              </option>
-            ))}
-          </select>
-        </Tooltip>
-      </label>
-      <Segmented<ModelSort>
-        label="Sort models"
-        value={prefs.modelSort}
-        onValueChange={(modelSort) => void change({ modelSort })}
-        options={MODEL_SORTS}
-      />
-      {choices.map((choice) => (
-        <Tooltip key={choice.value} label={choice.description ?? `Choose ${choice.label}`}>
-          <button type="button" className={pickerRowClass} onClick={() => choose(choice.value)}>
-            {choice.label}
-          </button>
-        </Tooltip>
-      ))}
+            onValueChange={setConnection}
+            items={[
+              { value: ALL, label: "All connections", description: "Lists the models of every connection." },
+              ...connections.map((entry) => ({
+                value: entry.id,
+                label: entry.name,
+                description: `Lists only ${entry.name}'s models.`
+              }))
+            ]}
+          />
+        </Field>
+        <Field label="Sort models" labelHidden className="shrink-0">
+          <Select<ModelSort>
+            className="w-auto!"
+            value={prefs.modelSort}
+            onValueChange={(modelSort) => void change({ modelSort })}
+            items={MODEL_SORTS}
+            shown={(sort) => (
+              <>
+                <span className="text-muted">Sort: </span>
+                {MODEL_SORTS.find((option) => option.value === sort)?.label}
+              </>
+            )}
+          />
+        </Field>
+      </div>
       <VirtualModelList
         ref={navigation}
         fallbackFocus={searchRef}

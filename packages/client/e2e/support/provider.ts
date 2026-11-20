@@ -62,7 +62,7 @@ export const startProvider = async (
     reasoningTokens?: number
     models?: ReadonlyArray<{
       id: string
-      name: string
+      name?: string
       context_length: number
       pricing?: { prompt: string; completion: string }
     }>
