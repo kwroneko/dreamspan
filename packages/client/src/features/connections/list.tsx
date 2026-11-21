@@ -199,9 +199,16 @@ function NewConnectionForm({
   const [testTried, setTestTried] = useState(false)
   const formRef = useRef<HTMLFormElement>(null)
   const save = (change: Partial<NewConnectionDraft>) => durable.setText(JSON.stringify({ ...values, ...change }))
-  // A changed setting makes the last test's result stale.
-  const edit = (change: Partial<NewConnectionDraft>) => {
+  /** Counts changes to what a test sends: a test answers only for the values it was sent with. */
+  const tested = useRef(0)
+  // A changed setting or key makes the last test's result stale, and one still running unanswered.
+  const stale = () => {
+    tested.current += 1
     setCheck(null)
+    testing.clearError()
+  }
+  const edit = (change: Partial<NewConnectionDraft>) => {
+    stale()
     save(change)
   }
   const defaults = useAtomValue(generationDefaultsAtom)
@@ -288,9 +295,11 @@ function NewConnectionForm({
     setTestTried(true)
     if (!form || !provider || !api) return
     if (testProblems.some((problem) => problem !== null)) return focusFirstInvalid(form)
+    const asked = tested.current
     const outcome = await testing.run((client) =>
       client("TestConnectionDraft", { ...draft(form), ...(target ? { model: target } : {}) })
     )
+    if (asked !== tested.current) return testing.clearError()
     setCheck(outcome.ok ? outcome.value : null)
   }
   const sendTo = model || testModel
@@ -342,8 +351,10 @@ function NewConnectionForm({
     ...listed.map((key) => ({ value: key, label: key }))
   ]
   const sentTo = origin ? `It's sent only to ${origin} and never shown again.` : "It's never shown again."
-  const typed = (name: keyof typeof noKeys) => (empty: boolean) =>
+  const typed = (name: keyof typeof noKeys) => (empty: boolean) => {
+    stale()
     setKeyEmpty((current) => ({ ...current, [name]: empty }))
+  }
   const editProvider = (draft: ProviderDraft) => edit({ provider: draft })
   return (
     <Card>
@@ -428,7 +439,10 @@ function NewConnectionForm({
                   label: credential.keyHint ? `${credential.name} (•••• ${credential.keyHint})` : credential.name
                 }))}
                 value={credentialId}
-                onValueChange={setCredentialId}
+                onValueChange={(chosen) => {
+                  stale()
+                  setCredentialId(chosen)
+                }}
               />
             </Field>
           ) : aws ? (
@@ -438,7 +452,10 @@ function NewConnectionForm({
               about={provider?.auth.find((choice) => choice.id === parsed.settings.auth)?.about}
               origin={origin}
               error={shown(problems.apiKey)}
-              onLoad={setKeyAccount}
+              onLoad={(account) => {
+                stale()
+                setKeyAccount(account)
+              }}
             />
           ) : (
             <Field
@@ -451,7 +468,7 @@ function NewConnectionForm({
               }
               error={shown(problems.apiKey)}
             >
-              <SecretInput name="apiKey" onEmptyChange={typed("apiKey")} />
+              <SecretInput name="apiKey" onEmptyChange={(empty) => typed("apiKey")(empty)} />
             </Field>
           )}
           {credentials.length > 0 && (
@@ -460,6 +477,7 @@ function NewConnectionForm({
                 type="button"
                 className="self-start text-sm text-accent underline-offset-4 hover:underline"
                 onClick={() => {
+                  stale()
                   setKeyMode(keyMode === "typed" ? "saved" : "typed")
                   setKeyEmpty(noKeys)
                 }}
