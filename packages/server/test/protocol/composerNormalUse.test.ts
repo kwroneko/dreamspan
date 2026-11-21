@@ -196,10 +196,6 @@ for (const scenario of scenarios)
         const again = page(api, chat.id, owner, time)
         await open(again.store)
         await again.pause(700)
-        for (const shown of [first.store.snapshot(), again.store.snapshot()]) {
-          assert.strictEqual(shown.moved, 0, "no unsent text went to the bin")
-          assert.strictEqual(shown.movedElsewhere, 0, "no other chat's unsent text went to the bin")
-        }
         assert.strictEqual(again.store.snapshot().text, "Next")
         const recovered = await Effect.runPromise(api.ListRecoveredTexts({ limit: 100, before: null }))
         assert.deepStrictEqual(

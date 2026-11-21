@@ -114,13 +114,10 @@ for (const kind of ["composer", "editor"] as const) {
         if (kind === "composer" && variant === "committed elsewhere") {
           await expectTextBox(box(back), "")
           await expect(back.getByRole("article", { name: "Your message" })).toContainText(elsewhere)
-          // Said once, in a toast with the way to the bin, never in the composer.
-          const toast = back.locator("[data-toast]").filter({
-            hasText: "Unsent text from “Synthetic offline chat” was moved to the bin."
-          })
-          await expect(toast).toHaveCount(1)
+          // In the bin's recovered texts without a word: no line in the composer, no toast (DESIGN §6.2).
           await expect(back.getByRole("status").filter({ hasText: "bin" })).toHaveCount(0)
-          await toast.getByRole("button", { name: "Open the bin", exact: true }).click()
+          await expect(back.locator("[data-toast]")).toHaveCount(0)
+          await back.goto(`${server.url}/bin?section=recovered`)
           await expect(back.getByText(offline, { exact: true })).toBeVisible()
           expect((await saved())?.content).toBe("")
         } else {

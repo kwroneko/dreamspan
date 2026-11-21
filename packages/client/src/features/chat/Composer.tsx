@@ -19,9 +19,7 @@ import {
 // so typing re-renders nothing else.
 import type { CastCard, EntityId, MessageImages } from "@dreamspan/shared/chat.ts"
 import type { DraftState } from "@dreamspan/shared/drafts.ts"
-import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
-import { useNavigate } from "@tanstack/react-router"
-import { showToast } from "../../ui/Toast.tsx"
+import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
@@ -255,8 +253,6 @@ export function Composer({
     guidance: draftGuidance,
     ready: textReady,
     conflict,
-    moved,
-    movedElsewhere,
     error: saveError,
     draftId
   } = useSyncExternalStore(draft.subscribe, draft.snapshot)
@@ -409,30 +405,6 @@ export function Composer({
       void draft.flush()
     }
   }, [draft])
-
-  // Unsent text that went to the bin, because what it was typed into was sent or deleted
-  // meanwhile, is said in a toast, once each time; passive recovery is never announced.
-  const navigate = useNavigate()
-  const announced = useRef({ moved, movedElsewhere })
-  const chatTitle = view.chat?.title ?? null
-  useEffect(() => {
-    const before = announced.current
-    if (moved === before.moved && movedElsewhere === before.movedElsewhere) return
-    const here = moved > before.moved
-    announced.current = { moved, movedElsewhere }
-    showToast({
-      title: here
-        ? `Unsent text from ${chatTitle ? `“${chatTitle}”` : "this chat"} was moved to the bin.`
-        : "Unsent text from another chat was moved to the bin.",
-      actions: [
-        {
-          label: "Open the bin",
-          hint: "Shows the text under Recovered text.",
-          onClick: () => void navigate({ to: "/bin", search: { section: "recovered" } })
-        }
-      ]
-    })
-  }, [moved, movedElsewhere, chatTitle, navigate])
 
   /**
    * Picking a speaker only picks who writes, from the chat's cast (DESIGN §2.2): who `{{user}}`

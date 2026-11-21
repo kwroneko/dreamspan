@@ -49,15 +49,6 @@ export interface ComposerState {
   readonly ready: boolean
   /** A replay displaced text saved elsewhere; kept until acknowledged or switched. */
   readonly conflict: ReplayConflict | null
-  /**
-   * How many times since the page opened unsent text typed in this chat's composers went to
-   * the bin's recovered texts, because what it was typed into was sent or deleted meanwhile.
-   * Text a commit or the history's limits passed there (DESIGN §6.2) isn't counted: it's
-   * produced passively, and never announced.
-   */
-  readonly moved: number
-  /** The same for other chats' composers, whose copies in this browser were saved from here. */
-  readonly movedElsewhere: number
   /** The last save that failed, until one succeeds. */
   readonly error: AppError | null
   /** The draft the box shows, once ready: its speaker and reply choice go with it (speaker.ts). */
@@ -92,8 +83,6 @@ export class ComposerDraft {
   private ready = false
   private conflict: ReplayConflict | null = null
   private replayedAt: number | null = null
-  private moved = 0
-  private movedElsewhere = 0
   private error: AppError | null = null
   /** A send is on its way: the box holds the next message, saved once the send is answered. */
   private held = false
@@ -111,8 +100,6 @@ export class ComposerDraft {
     guidance: false,
     ready: false,
     conflict: null,
-    moved: 0,
-    movedElsewhere: 0,
     error: null,
     draftId: null
   }
@@ -144,15 +131,13 @@ export class ComposerDraft {
   }
 
   private emit() {
-    const { text, ready, conflict, moved, movedElsewhere, error } = this
+    const { text, ready, conflict, error } = this
     const draftId = ready ? (this.base?.id ?? null) : null
     this.state = {
       text,
       guidance: this.base?.guidance ?? false,
       ready,
       conflict,
-      moved,
-      movedElsewhere,
       error,
       draftId
     }
@@ -307,8 +292,9 @@ export class ComposerDraft {
 
   /**
    * Makes every save this browser kept for want of the server (a page closed first), any
-   * chat's, and says what they did to `opened`, counting the unsent texts that went to the
-   * recovered texts (`moved`). A copy of `opened` that can't be saved now comes back as `unsent`.
+   * chat's, and says what they did to `opened`. Text that went to the recovered texts is
+   * there without a word (DESIGN §6.2). A copy of `opened` that can't be saved now comes back
+   * as `unsent`.
    * A copy that fails stays, whatever the reason: only an acknowledgement removes it.
    */
   private async saveCopies(opened: Draft) {
@@ -365,7 +351,7 @@ export class ComposerDraft {
     for (const copy of copies) {
       const pending = pendingOf(copy)
       if (pending?.kind !== "composer") continue
-      const { chatId, draftId } = pending.payload
+      const { draftId } = pending.payload
       const deleted =
         draftId === draft.id && deletedSince(draft, { draftId, expectedRowVersion: pending.payload.rowVersion })
       // The writer can acknowledge an already-applied clear by its receipt, or
@@ -381,7 +367,6 @@ export class ComposerDraft {
         if (now.displaced !== null) conflict = { ...now.displaced, typedAt: copy.at }
         draft = now
       }
-      this.noteMoved(chatId, saved.value, copy.content)
     }
     return { draft, conflict, unsent }
   }
@@ -473,21 +458,6 @@ export class ComposerDraft {
     return this.outgoing.has(copy)
   }
 
-  /**
-   * One unsent text typed here went to the recovered texts, if a save says so and its draft
-   * doesn't hold it: text the save put on the draft, with older text recovered by the
-   * history's limits, isn't unsent.
-   */
-  private noteMoved(
-    chatId: string,
-    saved: { readonly recovered: boolean; readonly draft: Draft | null },
-    text: string
-  ) {
-    if (!saved.recovered || (saved.draft !== null && shown(saved.draft) === text)) return
-    if (chatId === this.chatId) this.moved++
-    else this.movedElsewhere++
-  }
-
   /** Saves the pending copy unchanged, with the base it was typed on. */
   private async save() {
     if (this.held || !this.unsaved) return
@@ -508,7 +478,6 @@ export class ComposerDraft {
     const descendant = this.pending?.ancestors.includes(copy.key) === true
     this.acknowledge(copy)
     this.error = null
-    this.noteMoved(this.chatId, saved.value, sent)
     if (this.replayedAt !== null && saved.value.draft?.displaced != null)
       this.conflict = { ...saved.value.draft.displaced, typedAt: this.replayedAt }
     this.replayedAt = null
@@ -571,7 +540,6 @@ export class ComposerDraft {
         if (result.value.recovered || result.value.draft === null) {
           // Its session ended meanwhile (sent from another tab): the text is in the recovered
           // texts unless it was sent already, rather than sent from a draft it wasn't typed in.
-          this.noteMoved(this.chatId, result.value, text)
           return this.settleSend(result.value.draft ?? (await this.reopen()))
         }
         // A save the server had already made (this browser's copy, sent as a page closed)
