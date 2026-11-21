@@ -61,7 +61,8 @@ export function useDurableForm<T extends object>(key: string, field: string, sav
  * reload opens it again. Several can be open at once; ids name what they open
  * ("new-card", "rename-key:<id>").
  */
-export function useOpenPlace(id: string) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- the boxes that open in a dialog or disclosure use it next
+function useOpenPlace(id: string) {
   const [open, setOpen] = usePlaceList("open")
   const shown = open.includes(id)
   const set = useCallback(
