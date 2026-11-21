@@ -250,7 +250,8 @@ it.live(
           draftId: d.id,
           rowVersion: d.rowVersion,
           session: d.session,
-          content: `stale ${i}`
+          // Each its own text: one inside the text kept ("stale 1" in "stale 1002") isn't lost.
+          content: `stale ${i}.`
         })
       const entries = yield* api.ListRecoveredTexts({ limit: 10, before: null })
       assert.isAbove(entries.length, 0)

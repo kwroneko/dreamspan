@@ -756,7 +756,10 @@ class World {
     }
   }
 
-  /** I5: a tab's write that put text in the recovered texts says so, and the tab shows it. */
+  /**
+   * I5: a tab's write that put text in the recovered texts says so, and the tab shows it: an
+   * editor always, a composer when the text was unsent (its save didn't put it on a draft).
+   */
   private checkRecovered(request: Request, before: number, value: Record<string, unknown>) {
     if (request.tag === "SaveComposer" && value.draft !== null) {
       const nested = (value.draft as { recovered: number }).recovered
@@ -774,7 +777,12 @@ class World {
     if (says === false) this.fail(`I5: ${request.tag} sent text to the recovered texts without saying so`)
     if (says && !request.silent && request.page.alive) {
       if (request.store !== null) expectEditorNotice.add(request.store)
-      else expectComposerNotice.add(request.page)
+      else if (request.tag === "SaveComposer" && !request.keepalive) {
+        const draft = value.draft as { status: string; content: string } | null
+        const sent = (request.payload as { content: string }).content
+        if (draft === null || (draft.status === "active" ? draft.content : "") !== sent)
+          expectComposerNotice.add(request.page)
+      }
     }
   }
 
@@ -873,8 +881,9 @@ class World {
     for (const page of expectComposerNotice) {
       if (!page.alive) expectComposerNotice.delete(page)
       else if (page.outstanding === 0 && page.composer.snapshot().ready) {
-        if (!page.composer.snapshot().recovered)
-          this.fail(`I5: tab ${page.tab.id}'s composer doesn't say text went to the recovered texts`)
+        const shown = page.composer.snapshot()
+        if (shown.moved + shown.movedElsewhere === 0)
+          this.fail(`I5: tab ${page.tab.id}'s composer doesn't say unsent text went to the recovered texts`)
         expectComposerNotice.delete(page)
       }
     }

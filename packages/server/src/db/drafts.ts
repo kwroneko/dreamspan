@@ -261,6 +261,19 @@ const beforeKept = (
 }
 
 /**
+ * Of texts on their way to the recovered texts, those really lost, in order: none empty,
+ * none inside a text that stays (`kept`: the text committed, say), and none inside another
+ * of them (an earlier, shorter state of the same text).
+ */
+const stillLost = (texts: ReadonlyArray<string>, kept: ReadonlyArray<string>) => {
+  const unique = [...new Set(texts)].filter((text) => text.trim() !== "")
+  return unique.filter(
+    (text, index) =>
+      !kept.some((other) => other.includes(text)) && !unique.some((other, at) => at !== index && other.includes(text))
+  )
+}
+
+/**
  * `recover` is where text a commit or discard would lose goes: the bin's recovered-text
  * section. Only the writer commits or discards drafts.
  */
@@ -472,9 +485,12 @@ export const makeDraftStore = (
       })
       let recovered = 0
       if (mayLoseText && toBin(draft)) {
-        const lost = beforeKept(content, yield* entries(draft.id), (seq) => seq <= cutSeq)
+        const lost = stillLost(
+          beforeKept(content, yield* entries(draft.id), (seq) => seq <= cutSeq),
+          [content]
+        )
         yield* recover(draft.user_id, toDraft(draft).key, lost, "commit")
-        recovered = new Set(lost.filter((text) => text.trim() !== "")).size
+        recovered = lost.length
       }
       yield* sql`DELETE FROM draft_history WHERE draft_id = ${draft.id} AND seq <= ${cutSeq}`
       return recovered
@@ -627,6 +643,28 @@ export const makeDraftStore = (
 
   const shown = (draft: DraftRow | null) => (draft?.status === "active" ? draft.content : "")
 
+  /** How many of a chat's newest messages a late composer save is checked against. */
+  const SENT_CHECKED = 100
+
+  /**
+   * `content` is in one of the chat's newest messages (as typed, before scripts rewrote it),
+   * one-turn directions or queued entries: a composer's text that was sent already.
+   */
+  const sentInChat = (chatId: string, content: string) =>
+    sql<{ found: number }>`SELECT EXISTS (
+        SELECT 1 FROM (
+          SELECT t.content, t.raw_content, t.direction FROM slots s
+          JOIN versions v ON v.slot_id = s.id
+          JOIN version_texts t ON t.version_seq = v.seq
+          WHERE s.chat_id = ${chatId} AND (v.writer != 'model' OR t.direction IS NOT NULL)
+          ORDER BY v.seq DESC LIMIT ${SENT_CHECKED}
+        ) WHERE instr(content, ${content}) > 0 OR instr(coalesce(raw_content, ''), ${content}) > 0
+          OR instr(coalesce(direction, ''), ${content}) > 0
+      ) OR EXISTS (
+        SELECT 1 FROM queued_messages q WHERE q.chat_id = ${chatId}
+          AND (instr(q.content, ${content}) > 0 OR instr(coalesce(q.raw_content, ''), ${content}) > 0)
+      ) AS found`.pipe(Effect.map(([row]) => row?.found === 1))
+
   /**
    * The one rule for text saved onto a draft, every kind, in the writer's transaction.
    * `base` is the draft as the client had it when the text was typed (null: it had none).
@@ -684,7 +722,14 @@ export const makeDraftStore = (
         formEdit?.content ?? content
       )
       if (deleted || reconciled.rejected || (ended && options.ended === "recover" && options.next !== true)) {
-        const recovered = toBin(draft) && content.trim() !== "" && content !== shown(draft)
+        // Only text that's nowhere else goes to the recovered texts: not text the draft still
+        // holds, nor a composer's text that was sent (a browser copy of it, replayed late).
+        const held = draft.target_kind === "user_field" ? content === shown(draft) : shown(draft).includes(content)
+        const recovered =
+          toBin(draft) &&
+          content.trim() !== "" &&
+          !held &&
+          !(ended && draft.target_kind === "composer" && (yield* sentInChat(draft.target_id, content)))
         if (recovered) yield* recover(draft.user_id, toDraft(draft).key, [content], "discard")
         return { draft: toDraft(draft, recovered ? 1 : 0), recovered }
       }
@@ -963,8 +1008,12 @@ export const makeDraftStore = (
         draft.target_kind === "entity_field" && draft.base_revision !== null
           ? yield* revisionContent(draft.base_revision, draft.field)
           : null
-      const lost = beforeKept(draft.content, yield* entries(draft.id)).filter((text) => text !== based)
-      if (outcome === "discarded") lost.unshift(draft.content)
+      // Text the commit keeps (or the revision it was typed on holds) isn't lost.
+      const earlier = beforeKept(draft.content, yield* entries(draft.id))
+      const lost = stillLost(outcome === "discarded" ? [draft.content, ...earlier] : earlier, [
+        ...(outcome === "committed" ? [draft.content] : []),
+        ...(based === null ? [] : [based])
+      ])
       if (toBin(draft))
         yield* recover(draft.user_id, toDraft(draft).key, lost, outcome === "discarded" ? "discard" : "commit")
       yield* sql`DELETE FROM draft_history WHERE draft_id = ${draft.id}`
@@ -992,9 +1041,9 @@ export const makeDraftStore = (
           updated_at: updatedAt,
           history_length: 0
         },
-        toBin(draft) ? new Set(lost.filter((text) => text.trim() !== "")).size : 0
+        toBin(draft) ? lost.length : 0
       )
-      return { draft: ended, recovered: toBin(draft) ? new Set(lost.filter((text) => text.trim() !== "")).size : 0 }
+      return { draft: ended, recovered: toBin(draft) ? lost.length : 0 }
     })
 
   const clear = (

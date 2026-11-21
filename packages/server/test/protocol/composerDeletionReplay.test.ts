@@ -101,6 +101,6 @@ for (const kind of ["lost clear acknowledgement", "stale text"] as const)
         recovered.some((entry) => entry.content === copy.content),
         kind === "stale text"
       )
-      assert.strictEqual(store.snapshot().recovered, kind === "stale text")
+      assert.strictEqual(store.snapshot().moved, kind === "stale text" ? 1 : 0)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
