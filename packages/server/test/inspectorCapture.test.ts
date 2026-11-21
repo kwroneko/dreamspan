@@ -106,7 +106,8 @@ it.live("review: final capture excludes transport fields and scrubs all request 
     const proxyValues = [
       proxyUrl,
       new URL(proxyUrl).href,
-      username,
+      // A plain username alone stays readable; as a credential (`user:password`) it goes.
+      username + ":" + password,
       password,
       encodeURIComponent(username),
       encodeURIComponent(password),
@@ -211,7 +212,8 @@ it.live("review: custom proxy credentials are scrubbed from the final stored pro
     const proxyValues = [
       proxyUrl,
       new URL(proxyUrl).href,
-      username,
+      // A plain username alone stays readable; as a credential (`user:password`) it goes.
+      username + ":" + password,
       password,
       encodeURIComponent(username),
       encodeURIComponent(password),

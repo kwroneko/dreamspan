@@ -302,14 +302,21 @@ const merged = (base: unknown, over: Readonly<Record<string, unknown>>): Record<
  * a credential header, a proxy's password) always is, short or a plain word, but a 1–3 letter
  * fragment would blank pieces of ordinary words.
  */
-export const MIN_CREDENTIAL_LENGTH = 4
+const MIN_CREDENTIAL_LENGTH = 4
 /** The shortest value scrubbed that isn't a credential by where it came from (a path segment). */
-export const MIN_INCIDENTAL_LENGTH = 12
+const MIN_INCIDENTAL_LENGTH = 12
 
 /** A host name (`api.acme.example`): addresses are shown, never secrets. */
 const HOSTNAME = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}\.?$/i
-/** Plain words, alone or joined by `-`, `_`, `.` or spaces (`openai-compatible`), as public route names are. */
-const PLAIN_WORDS = /^[a-z]+(?:[-_ .][a-z]+)*$/i
+/** Words, alone or joined by `-`, `_`, `.` or spaces (`openai-compatible`), as public route names are. */
+const WORDS = /^[a-z]+(?:[-_ .][a-z]+)*$/i
+/** A word as written: lower case, capitalized or all capitals, under 20 letters. */
+const PLAIN_WORD = /^(?:[A-Z]?[a-z]{1,18}|[A-Z]{1,19})$/
+/**
+ * Plain words: a letters-only run of 20 or more, or one with capitals inside it
+ * (`AbCdEfGhIjKlMnOpQrStUvWx`), is a generated key, not a word.
+ */
+const plainWords = (value: string) => WORDS.test(value) && value.split(/[-_ .]/).every((word) => PLAIN_WORD.test(word))
 
 /** Whether a credential (by where it came from) is long enough to scrub. */
 const credentialLike = (value: string) => value.trim().length >= MIN_CREDENTIAL_LENGTH
@@ -322,11 +329,91 @@ const credentialLike = (value: string) => value.trim().length >= MIN_CREDENTIAL_
  */
 export const incidentalSecret = (value: string) => {
   const trimmed = value.trim()
-  return trimmed.length >= MIN_INCIDENTAL_LENGTH && !HOSTNAME.test(trimmed) && !PLAIN_WORDS.test(trimmed)
+  return trimmed.length >= MIN_INCIDENTAL_LENGTH && !HOSTNAME.test(trimmed) && !plainWords(trimmed)
 }
 
-/** Names (of headers, query parameters, variables) that carry credentials; others aren't secrets. */
-export const CREDENTIAL_NAME = /key|token|secret|auth|passw|cookie|signature|credential/i
+/** A name's parts, split at `_`, `-`, `.` and camelCase (`maxTokens`, `X-Api-Key`), lower case. */
+const nameParts = (name: string) =>
+  name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[\s_.-]+/)
+    .filter(Boolean)
+/** A name part that names a credential: `key`, `apikey`, `access_token`'s `token`, `passwd`. */
+const CREDENTIAL_PART =
+  /^(?:[a-z]*(?:key|token|secret|password|passwd|passphrase|cookie|signature|credentials?)|auth[a-z]*|pass|sig)$/
+/**
+ * A first or last part that makes the name a setting about credentials, not one
+ * (`max_tokens`, `AUTH_MODE`, `token_url`, `key_count`).
+ */
+const SETTING_PART = new Set([
+  "max",
+  "min",
+  "num",
+  "mode",
+  "type",
+  "scheme",
+  "method",
+  "enabled",
+  "disabled",
+  "required",
+  "url",
+  "uri",
+  "endpoint",
+  "host",
+  "header",
+  "version",
+  "count",
+  "limit",
+  "length",
+  "size",
+  "timeout",
+  "ttl",
+  "provider",
+  "parallelism"
+])
+/** Names that look like credentials but are a model's or a tool's parameters (`tokenizer`, `keyboard`). */
+const NOT_CREDENTIAL_NAMES = new Set(["tokenizer", "tokenizers", "keyboard", "keyboards", "monkey"])
+
+/** Whether a name is a setting's (`X-Auth-Mode`, `max_tokens`, `X-Timeout`) by its first or last part. */
+const settingName = (name: string) => {
+  const parts = nameParts(name)
+  return parts.length > 0 && (SETTING_PART.has(parts[0]!) || SETTING_PART.has(parts[parts.length - 1]!))
+}
+
+/** Whether a name (of a header, query parameter or variable) is one that carries a credential. */
+const credentialName = (name: string) => {
+  const parts = nameParts(name)
+  if (parts.length === 0 || settingName(name)) return false
+  return parts.some((part) => !NOT_CREDENTIAL_NAMES.has(part) && CREDENTIAL_PART.test(part))
+}
+
+/** A switch (`true`, `off`): never a credential, whatever its name says. */
+const SWITCH_VALUE = /^(?:true|false|yes|no|on|off|null|none|enabled|disabled)$/i
+/**
+ * A switch or a small count (`4096`): a custom header's value or a variable not named like a
+ * credential that is one of these is a setting. Under a credential's name a number may be a PIN.
+ */
+const SETTING_VALUE = /^(?:true|false|yes|no|on|off|null|none|enabled|disabled|\d{1,11})$/i
+
+/**
+ * Headers that are public by definition (an app's name and link, the client, what it accepts),
+ * shown as they are.
+ */
+const PUBLIC_HEADERS = new Set([
+  "user-agent",
+  "referer",
+  "http-referer",
+  "x-title",
+  "accept",
+  "accept-language",
+  "accept-encoding",
+  "content-type",
+  "anthropic-version",
+  "anthropic-beta",
+  "openai-beta"
+])
 
 /** A scrubber for the given credentials: every occurrence of each (4+ characters) becomes "[redacted]". */
 export const makeScrub = (secrets: ReadonlyArray<string | null | undefined>) => {
@@ -355,7 +442,19 @@ export const requestSecrets = () => {
   const userinfo = (url: URL) => {
     const username = decodeURIComponent(url.username)
     const password = decodeURIComponent(url.password)
-    for (const part of [url.username, url.password, username, password]) if (part) keep(part)
+    // A username is often a plain word (`user`): alone it is kept only if it could be a secret,
+    // but where it stands as a credential (`//user:`, `//user@`, `user:password`) it always is.
+    for (const part of [url.username, username]) {
+      if (!part) continue
+      keep(part, false)
+      keep(`//${part}:`)
+      keep(`//${part}@`)
+    }
+    for (const part of [url.password, password]) if (part) keep(part)
+    if (username && password) {
+      keep(`${username}:${password}`)
+      keep(`${url.username}:${url.password}`)
+    }
     if (username || password) keep(Buffer.from(`${username}:${password}`).toString("base64"))
   }
   /** A credential: a key, a token, a proxy URL (with its credentials), a decrypted secret. */
@@ -370,13 +469,27 @@ export const requestSecrets = () => {
     }
     return value
   }
-  /** A credential header's value, and a `Bearer`/`Basic` credential in any header. */
+  /** A value named like a credential is one, unless it's a switch. */
+  const named = (name: string, value: string) => {
+    if (credentialName(name) && !SWITCH_VALUE.test(value.trim())) add(value)
+    else keep(value, false)
+  }
+  /**
+   * A connection's configured headers. Their values are credentials whatever the name
+   * (`X-Session: s3ss`), and a `Bearer`/`Basic` credential's parts too. Public headers
+   * (`User-Agent`, `Referer`, `X-Title`), switches and counts (`X-Retries: 3`) are shown; a
+   * setting's value (`X-Auth-Mode: basic`) only goes if it could be a secret, and a link in a
+   * header not named like a credential is judged as an address.
+   */
   const headers = (headers: Readonly<Record<string, string | undefined>> | undefined) => {
     for (const [name, value] of Object.entries(headers ?? {})) {
       if (typeof value !== "string") continue
       const auth = /^(Bearer|Basic)\s+(.+)$/i.exec(value.trim())
       if (!auth) {
-        if (CREDENTIAL_NAME.test(name)) add(value)
+        if (PUBLIC_HEADERS.has(name.toLowerCase())) continue
+        if (credentialName(name)) named(name, value)
+        else if (/^https?:\/\//i.test(value.trim()) && URL.canParse(value.trim())) route(value.trim())
+        else if (!SETTING_VALUE.test(value.trim())) keep(value, !settingName(name))
         continue
       }
       keep(value)
@@ -386,7 +499,7 @@ export const requestSecrets = () => {
         keep(decoded)
         const colon = decoded.indexOf(":")
         if (colon >= 0) {
-          keep(decoded.slice(0, colon))
+          keep(decoded.slice(0, colon), false)
           keep(decoded.slice(colon + 1))
         }
       }
@@ -394,10 +507,7 @@ export const requestSecrets = () => {
   }
   /** A program's variables: one named like a credential is one; any other only if it looks like one. */
   const variables = (env: Readonly<Record<string, string>>) => {
-    for (const [name, value] of Object.entries(env)) {
-      if (CREDENTIAL_NAME.test(name)) add(value)
-      else keep(value, false)
-    }
+    for (const [name, value] of Object.entries(env)) named(name, value)
   }
   /**
    * An address. Its host and plain route names (`v1`, `openai-compatible`) are shown, but a
@@ -407,6 +517,15 @@ export const requestSecrets = () => {
   const route = (value: string) => {
     const url = new URL(value)
     userinfo(url)
+    const queryCredential = (name: string, value: string) => {
+      let decoded = name
+      try {
+        decoded = decodeURIComponent(name)
+      } catch {
+        /* Judged as written. */
+      }
+      return credentialName(decoded) && !SWITCH_VALUE.test(value.trim())
+    }
     const both = (part: string, credential: boolean) => {
       keep(part, credential)
       try {
@@ -419,9 +538,9 @@ export const requestSecrets = () => {
     for (const pair of url.search.slice(1).split("&")) {
       const equals = pair.indexOf("=")
       if (equals < 0) both(pair, false)
-      else both(pair.slice(equals + 1), CREDENTIAL_NAME.test(pair.slice(0, equals)))
+      else both(pair.slice(equals + 1), queryCredential(pair.slice(0, equals), pair.slice(equals + 1)))
     }
-    for (const [name, part] of url.searchParams) keep(part, CREDENTIAL_NAME.test(name))
+    for (const [name, part] of url.searchParams) keep(part, queryCredential(name, part))
   }
   return { add, headers, variables, route, scrub: (text: string) => (cached ??= makeScrub([...values]))(text) }
 }

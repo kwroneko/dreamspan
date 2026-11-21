@@ -64,8 +64,7 @@ describe("a request's secret inventory", () => {
       "X-Title": "acme",
       "HTTP-Referer": "https://acme.example",
       Referer: "https://acme.example/app",
-      "User-Agent": "AcmeStudioClient/1.4.2 (synthetic)",
-      "X-Client-Name": "acme-roleplay-studio"
+      "User-Agent": "AcmeStudioClient/1.4.2 (synthetic)"
     })
     assert.strictEqual(inventory.scrub(providerLink), providerLink)
     assert.strictEqual(
@@ -86,8 +85,7 @@ describe("a request's secret inventory", () => {
     const scrubbed = inventory.scrub(
       `proxy proxyuser said ${password}; key ${key}; zeta gamma omega delta; level debug in local-notes-archive`
     )
-    for (const secret of [password, key, "proxyuser", "zeta", "gamma", "omega", "delta"])
-      assert.notInclude(scrubbed, secret)
+    for (const secret of [password, key, "zeta", "gamma", "omega", "delta"]) assert.notInclude(scrubbed, secret)
     // A variable not named like a credential is kept only if it looks like one.
     assert.include(scrubbed, "level debug in local-notes-archive")
     assert.strictEqual(makeScrub([key])(`the ${key} key`), "the [redacted] key")
@@ -103,6 +101,79 @@ describe("a request's secret inventory", () => {
     assert.strictEqual(makeScrub(["ab", "k9"])(providerLink), providerLink)
   })
 
+  it("scrubs a configured custom header's value, whatever its name", () => {
+    const inventory = requestSecrets()
+    inventory.headers({
+      "X-Pass": "s3cr3tvalue123456",
+      "X-Session": "s3ss-41",
+      "X-Tenant": "acmecorp",
+      "X-Retries": "3",
+      "X-Debug": "false",
+      "X-Callback": "https://hooks.acme.example/cb/hook-9f2e7a1c4b3d8e"
+    })
+    const scrubbed = inventory.scrub(
+      "sent s3cr3tvalue123456 and s3ss-41 for acmecorp to https://hooks.acme.example/cb/hook-9f2e7a1c4b3d8e"
+    )
+    for (const secret of ["s3cr3tvalue123456", "s3ss-41", "acmecorp", "hook-9f2e7a1c4b3d8e"])
+      assert.notInclude(scrubbed, secret)
+    // A link's host, a switch and a count stay readable.
+    assert.include(scrubbed, "https://hooks.acme.example/cb/")
+    assert.strictEqual(inventory.scrub("retry 3 times, debug false"), "retry 3 times, debug false")
+  })
+
+  it("matches credential names by whole parts, and never takes a switch or a count for one", () => {
+    const inventory = requestSecrets()
+    inventory.variables({
+      TOKENIZERS_PARALLELISM: "false",
+      MAX_TOKENS: "4096",
+      AUTH_ENABLED: "true",
+      AUTH_MODE: "oauth",
+      NOTES_API_KEY: "notes-key-1234",
+      NOTES_PIN_TOKEN: "902118"
+    })
+    inventory.headers({ "X-Auth-Mode": "basic", "X-Api-Key": "acme-xkey-77" })
+    inventory.route("https://acme.example/v1?max_tokens=1024&maxTokens=2048&accessToken=acme-qtok-55")
+    const text = "max 4096 or 1024 or 2048 tokens, parallel false, auth true via oauth basic"
+    assert.strictEqual(inventory.scrub(text), text)
+    const scrubbed = inventory.scrub("notes-key-1234 acme-xkey-77 acme-qtok-55 902118")
+    // A number under a credential's own name may be a PIN, so it goes.
+    for (const secret of ["notes-key-1234", "acme-xkey-77", "acme-qtok-55", "902118"])
+      assert.notInclude(scrubbed, secret)
+  })
+
+  it("keeps a proxy's or an address's plain username readable, and scrubs its password", () => {
+    const inventory = requestSecrets()
+    inventory.add("http://user:pr0xy-pw@proxy.acme.example:3128")
+    inventory.route("https://assistant:hunter22@acme.example/v1")
+    inventory.headers({ "Proxy-Authorization": `Basic ${Buffer.from("user:hunter33").toString("base64")}` })
+    inventory.add("http://alice@proxy2.acme.example:3128")
+    const text = 'expected "user", "alice" and "assistant"; pass a value'
+    assert.strictEqual(inventory.scrub(text), text)
+    const scrubbed = inventory.scrub("pr0xy-pw hunter22 hunter33")
+    for (const secret of ["pr0xy-pw", "hunter22", "hunter33"]) assert.notInclude(scrubbed, secret)
+    // Where it stands as a credential, the username goes too.
+    const echoed = inventory.scrub(
+      "via http://user:pr0xy-pw@proxy.acme.example:3128, user:hunter33 and http://alice@proxy2.acme.example"
+    )
+    for (const part of ["user:", "//user", "alice@"]) assert.notInclude(echoed, part)
+    assert.include(echoed, "proxy2.acme.example")
+    // A username that could be a secret still goes.
+    const long = requestSecrets()
+    long.add("http://u-8f3a1c9e2b7d4f60:pw12@proxy.acme.example:3128")
+    assert.notInclude(long.scrub("as u-8f3a1c9e2b7d4f60"), "u-8f3a1c9e2b7d4f60")
+  })
+
+  it("scrubs a long or mixed-case letters-only key in an address", () => {
+    const inventory = requestSecrets()
+    inventory.route("https://gw.acme.example/AbCdEfGhIjKlMnOpQrStUvWx/v1")
+    inventory.route("https://gw.acme.example/qwertzuiopasdfghjklyxcv/v1")
+    const scrubbed = inventory.scrub("at /AbCdEfGhIjKlMnOpQrStUvWx/ and /qwertzuiopasdfghjklyxcv/")
+    assert.notInclude(scrubbed, "AbCdEfGhIjKlMnOpQrStUvWx")
+    assert.notInclude(scrubbed, "qwertzuiopasdfghjklyxcv")
+    assert.isTrue(incidentalSecret("abcdefghijklmnopqrst"))
+    assert.isTrue(incidentalSecret("route-AbCdEfGhIjKlMn"))
+  })
+
   it("judges values that aren't credentials by origin by length and shape", () => {
     assert.isTrue(incidentalSecret("sk-acme-3f9a1c7e5b2d"))
     assert.isTrue(incidentalSecret("acme-route-key-a81f"))
@@ -110,5 +181,7 @@ describe("a request's secret inventory", () => {
     assert.isFalse(incidentalSecret("api.acme.example"))
     assert.isFalse(incidentalSecret("Organization"))
     assert.isFalse(incidentalSecret("openai-compatible"))
+    assert.isFalse(incidentalSecret("Organization-Settings"))
+    assert.isFalse(incidentalSecret("CONTENT_FILTER"))
   })
 })

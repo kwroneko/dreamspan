@@ -267,7 +267,8 @@ for (const scheme of ["Bearer", "Basic"])
         token = "synthetic-bearer-token"
       const encoded = Buffer.from(username + ":" + password).toString("base64")
       const value = scheme === "Bearer" ? "Bearer " + token : "Basic " + encoded
-      const parts = scheme === "Bearer" ? [token] : [username, password, encoded, username + ":" + password]
+      // A plain username alone stays readable; as a credential (`user:password`, encoded) it goes.
+      const parts = scheme === "Bearer" ? [token] : [password, encoded, username + ":" + password]
       const { chat, connection, events } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: mock.url + "/v1" },
         model: {}
@@ -462,7 +463,14 @@ it.live("URL userinfo and query credentials are scrubbed from capture and Versio
     const url = new URL(mock.url + "/v1?access_token=synthetic-query-token")
     url.username = "synthetic-route-user"
     url.password = "synthetic-route-password"
-    const values = [url.href, url.username, url.password, "synthetic-query-token"]
+    // A plain username alone stays readable; in the userinfo (`//user:`) and the pair it goes.
+    const values = [
+      url.href,
+      "//" + url.username + ":",
+      url.username + ":" + url.password,
+      url.password,
+      "synthetic-query-token"
+    ]
     yield* echo(registry, values)
     const { version, events } = yield* generateReply(api, {
       connection: { kind: "openai-chat", baseUrl: url.href },
