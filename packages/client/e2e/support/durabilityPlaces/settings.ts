@@ -79,8 +79,7 @@ export const settingsPlaces = [
       await go(page, ctx, "/settings/network")
       return page.getByLabel("Bypass list", { exact: true })
     },
-    shown: (page) => page.getByLabel("Bypass list", { exact: true }),
-    gaps: { text: "NetworkForm keeps its edits in useState: no server draft, no browser copy" }
+    shown: (page) => page.getByLabel("Bypass list", { exact: true })
   }),
   place({
     name: "New MCP server: what it's for",
@@ -90,8 +89,7 @@ export const settingsPlaces = [
       await go(page, ctx, "/settings/mcp/new")
       return page.getByLabel("What it’s for", { exact: true })
     },
-    shown: (page) => page.getByLabel("What it’s for", { exact: true }),
-    gaps: { text: "The new MCP server form keeps its fields in useState: no server draft, no browser copy" }
+    shown: (page) => page.getByLabel("What it’s for", { exact: true })
   }),
   place({
     name: "MCP server: what it's for",
@@ -101,8 +99,7 @@ export const settingsPlaces = [
       await go(page, ctx, `/settings/mcp/${connection.id}`)
       return page.getByLabel("What it’s for", { exact: true })
     },
-    shown: (page) => page.getByLabel("What it’s for", { exact: true }),
-    gaps: { text: "The MCP server form keeps its edits in useState: no server draft, no browser copy" }
+    shown: (page) => page.getByLabel("What it’s for", { exact: true })
   }),
   place({
     name: "Connection: settings",
@@ -220,8 +217,7 @@ export const settingsPlaces = [
       if ((await editor.count()) === 0) await page.getByRole("button", { name: "New type" }).click()
       return editor.getByLabel("Instructions", { exact: true })
     },
-    shown: (page) => page.locator('[data-subagent-type-editor="new"]').getByLabel("Instructions", { exact: true }),
-    gaps: { text: "The subagent type editor keeps its fields in useState: no server draft, no browser copy" }
+    shown: (page) => page.locator('[data-subagent-type-editor="new"]').getByLabel("Instructions", { exact: true })
   }),
   place({
     name: "Subagent models: what it's for",
@@ -232,7 +228,6 @@ export const settingsPlaces = [
       await subagentNote(page).waitFor({ timeout: 30_000 })
       return subagentNote(page)
     },
-    shown: subagentNote,
-    gaps: { text: "The subagent models form keeps its rows' edits in useState: no server draft, no browser copy" }
+    shown: subagentNote
   })
 ]

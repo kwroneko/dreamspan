@@ -4,16 +4,27 @@
 // store the file must use), a reason it holds no typed text of the user's (`exempt`), or a
 // known gap (`gap`, matched by a test.fail() place in e2e/textDurability.spec.ts). A new box
 // changes its file's count and fails this test until it's listed, so it can't ship unbacked
-// by accident: back it with one of the stores (EditorStore, useUserDraft, MessageDraft,
-// SummaryDraft, ComposerDraft, FileDraft) and add a Place to the e2e guard.
+// by accident: back it with its target's store (EditorStore, MessageDraft, SummaryDraft,
+// ComposerDraft, FileDraft) or, for anything else, the generic one (editor/durable.tsx:
+// useDurableText, useDurableForm), and add a Place to the e2e guard.
 import { readdirSync, readFileSync } from "node:fs"
 import { relative, resolve } from "node:path"
 import { expect, it } from "vitest"
 
 type Site =
   | {
-      readonly durable: "EditorStore" | "useUserDraft" | "MessageDraft" | "SummaryDraft" | "ComposerDraft" | "FileDraft"
+      readonly durable:
+        | "EditorStore"
+        | "useUserDraft"
+        | "useDurableText"
+        | "useDurableForm"
+        | "MessageDraft"
+        | "SummaryDraft"
+        | "ComposerDraft"
+        | "FileDraft"
       readonly what: string
+      /** The files that hold the store, when callers keep the text this file renders. */
+      readonly via?: ReadonlyArray<string>
     }
   | { readonly exempt: string }
   | { readonly gap: string }
@@ -54,8 +65,11 @@ const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
   "features/chat/ThisChatTab.tsx": [{ durable: "useUserDraft", what: "this chat's summarization instruction" }],
   "features/chat/ChatDefaults.tsx": [{ durable: "useUserDraft", what: "Settings → Chats summarization instruction" }],
   "features/chat/agent/RunSteps.tsx": [{ durable: "useUserDraft", what: "an agent step's text edit" }],
-  "features/chat/MergeChatDialog.tsx": [{ gap: "merge dialog's framing line: React state only, lost on reload" }],
-  "features/chat/agent/ApprovalPanel.tsx": [{ gap: "note for the assistant on Decline/Don't run: React state only" }],
+  "features/chat/MergeChatDialog.tsx": [{ durable: "useDurableForm", what: "merge dialog's title and framing line" }],
+  "features/chat/agent/ApprovalPanel.tsx": [{ durable: "useDurableText", what: "note for the assistant on Decline" }],
+  "features/chat/htmlTextField.tsx": [
+    { durable: "useDurableText", what: "a text field in a message's HTML, kept per version and place" }
+  ],
 
   // Library editors.
   "features/editor/CardEditor.tsx": [{ durable: "EditorStore", what: "card text fields (CardTextEditor)" }],
@@ -75,20 +89,22 @@ const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
       durable: "EditorStore",
       what: "local-binding trim lines; their owner keeps them (GlobalRegexPage: useUserDraft)"
     },
-    { gap: "regex Try it sample text: React state only" }
+    { durable: "useDurableText", what: "regex Try it sample text" }
   ],
   "features/editor/conflicts.tsx": [
     {
-      gap: '"Edit it" text of a conflict: its caller keeps the choice. A fork merge keeps it in a server draft (forkMerge/MergeDialog.tsx, "Merge choices"), but the dialog closes on reload; a save conflict (SaveRevision.tsx) keeps it in React state only'
+      durable: "useDurableForm",
+      what: '"Edit it" text of a conflict, kept with the choices by its callers',
+      via: ["features/forkMerge/MergeDialog.tsx", "features/editor/SaveRevision.tsx"]
     }
   ],
   "features/workshop/CardSkills.tsx": [
-    { gap: "card skill dialog's description: React state until Save writes the card" },
-    { gap: "card skill dialog's instructions: React state until Save writes the card" }
+    { durable: "useDurableForm", what: "card skill dialog's description" },
+    { durable: "useDurableForm", what: "card skill dialog's instructions" }
   ],
   "features/workshop/SubagentTypes.tsx": [
-    { gap: "subagent type's description: React state only" },
-    { gap: "subagent type's instructions: React state only" }
+    { durable: "useDurableForm", what: "subagent type's description" },
+    { durable: "useDurableForm", what: "subagent type's instructions" }
   ],
   "features/workshop/ConvertPreset.tsx": [
     { durable: "useUserDraft", what: "a kept piece's text" },
@@ -102,12 +118,12 @@ const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
     { durable: "useUserDraft", what: "advanced model settings JSON" },
     { durable: "useUserDraft", what: "capability overrides JSON" }
   ],
-  "features/network.tsx": [{ gap: "proxy bypass list: React state only" }],
+  "features/network.tsx": [{ durable: "useDurableForm", what: "proxy bypass list (network settings form)" }],
   "features/mcp/list.tsx": [
-    { gap: "new MCP server's \"What it's for\": React state only" },
-    { gap: "new MCP server's arguments: React state only" }
+    { durable: "useDurableForm", what: "new MCP server's \"What it's for\"" },
+    { durable: "useDurableForm", what: "arguments (ProgramFields, typed in both MCP forms)" }
   ],
-  "features/mcp/detail.tsx": [{ gap: "MCP server's \"What it's for\": React state only" }],
+  "features/mcp/detail.tsx": [{ durable: "useDurableForm", what: "MCP server's \"What it's for\"" }],
   "features/files/TextViewer.tsx": [{ durable: "FileDraft", what: "a text file's edit (file draft)" }],
 
   // Not the user's writing.
@@ -115,7 +131,8 @@ const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
   "features/editor/BrowserRecovery.tsx": [{ exempt: "read-only: a browser copy shown for copying" }],
   "ui/html/HtmlParts.tsx": [
     {
-      gap: "a <textarea> in a message's own HTML: uncontrolled, the page's, not saved; typing in it is lost on reload (judged acceptable? owner to decide)"
+      exempt:
+        "a message's HTML outside a chat (no account to keep it for): uncontrolled; in a chat, features/chat/htmlTextField.tsx keeps it"
     }
   ]
 }
@@ -137,8 +154,14 @@ it("lists every multi-line text box with what keeps its text across a reload", (
   const listed = Object.fromEntries(Object.entries(SITES).map(([file, sites]) => [file, sites.length]))
   expect(found, "a text box was added or removed: list it in SITES with what keeps its text").toEqual(listed)
   for (const [file, sites] of Object.entries(SITES)) {
-    const source = readFileSync(resolve(root, file), "utf8")
-    for (const site of sites)
-      if ("durable" in site) expect(source, `${file} is listed as kept by ${site.durable}`).toContain(site.durable)
+    for (const site of sites) {
+      if (!("durable" in site)) continue
+      // A file its callers keep names none of the stores; one of the callers must.
+      const holders = (site.via ?? [file]).map((path) => readFileSync(resolve(root, path), "utf8"))
+      expect(
+        holders.some((source) => source.includes(site.durable)),
+        `${file} is listed as kept by ${site.durable}`
+      ).toBe(true)
+    }
   }
 })

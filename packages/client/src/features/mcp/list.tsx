@@ -9,6 +9,7 @@ import { Field, focusFirstInvalid, formText, Input, SecretInput, Textarea } from
 import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
+import { useDurableForm } from "../editor/durable.tsx"
 import { useTitle } from "../shell.tsx"
 import { credentialsAtom, localProgramsAtom, mcpConnectionsAtom, mcpHost, mcpStatus } from "./data.ts"
 
@@ -150,12 +151,22 @@ function NewServerForm({
 }) {
   const navigate = useNavigate()
   const action = useAction()
-  const [name, setName] = useState("")
-  const [about, setAbout] = useState("")
-  const [transport, setTransport] = useState<McpTransport>("streamable-http")
-  const [url, setUrl] = useState("")
-  const [command, setCommand] = useState("")
-  const [args, setArgs] = useState("")
+  // Kept as typed (editor/durable.tsx); the bearer token is a secret and stays in the form only.
+  const form = useDurableForm("mcp:new", "Settings", {
+    name: "",
+    about: "",
+    transport: "streamable-http" as McpTransport,
+    url: "",
+    command: "",
+    args: ""
+  })
+  const { name, about, transport, url, command, args } = form.values
+  const setName = (name: string) => form.edit({ name })
+  const setAbout = (about: string) => form.edit({ about })
+  const setTransport = (transport: McpTransport) => form.edit({ transport })
+  const setUrl = (url: string) => form.edit({ url })
+  const setCommand = (command: string) => form.edit({ command })
+  const setArgs = (args: string) => form.edit({ args })
   const [submitted, setSubmitted] = useState(false)
   const program = transport === "stdio"
   const origin = program ? null : originOf(url.trim())
@@ -180,12 +191,16 @@ function NewServerForm({
       ...(program ? { program: { command: command.trim(), args: parseArguments(args) } } : {}),
       timeoutS: MCP_TIMEOUT_DEFAULT_S
     }
-    const result = await action.run(
-      (client) => client("CreateMcpConnection", { settings, apiKey: apiKey.trim() === "" ? null : apiKey }),
-      ["mcp", "credentials"]
-    )
-    if (result.ok)
-      void navigate({ to: "/settings/mcp/$connectionId", params: { connectionId: result.value.connection.id } })
+    let created: string | null = null
+    await form.commit(async () => {
+      const result = await action.run(
+        (client) => client("CreateMcpConnection", { settings, apiKey: apiKey.trim() === "" ? null : apiKey }),
+        ["mcp", "credentials"]
+      )
+      if (result.ok) created = result.value.connection.id
+      return result.ok
+    })
+    if (created !== null) void navigate({ to: "/settings/mcp/$connectionId", params: { connectionId: created } })
   }
 
   return (
@@ -196,7 +211,12 @@ function NewServerForm({
           <Input value={name} onValueChange={setName} placeholder={host ?? undefined} autoComplete="off" />
         </Field>
         <Field label="What it’s for" about="Shown to the model so it knows when to use these tools. In your own words.">
-          <Textarea value={about} onChange={(event) => setAbout(event.currentTarget.value)} rows={2} />
+          <Textarea
+            value={about}
+            readOnly={!form.ready}
+            onChange={(event) => setAbout(event.currentTarget.value)}
+            rows={2}
+          />
         </Field>
         <Field label="Transport" about="How the app talks to the server. Most servers speak Streamable HTTP.">
           <Select items={transportItems(local)} value={transport} onValueChange={setTransport} />
@@ -207,6 +227,7 @@ function NewServerForm({
             onCommandChange={setCommand}
             args={args}
             onArgsChange={setArgs}
+            readOnly={!form.ready}
             error={shown(problems.command)}
           />
         ) : (
@@ -249,7 +270,7 @@ function NewServerForm({
             Add and check
           </Button>
           <Tooltip label="Returns to the list without adding a server.">
-            <Link to="/settings/mcp" className={buttonClass("ghost")}>
+            <Link to="/settings/mcp" className={buttonClass("ghost")} onClick={() => void form.discard()}>
               Cancel
             </Link>
           </Tooltip>
@@ -265,12 +286,15 @@ export function ProgramFields({
   onCommandChange,
   args,
   onArgsChange,
+  readOnly = false,
   error
 }: {
   command: string
   onCommandChange: (command: string) => void
   args: string
   onArgsChange: (args: string) => void
+  /** Until the kept text is read back (editor/durable.tsx). */
+  readOnly?: boolean
   error: string | null
 }) {
   return (
@@ -291,6 +315,7 @@ export function ProgramFields({
       >
         <Textarea
           value={args}
+          readOnly={readOnly}
           onChange={(event) => onArgsChange(event.currentTarget.value)}
           rows={3}
           autoCapitalize="none"

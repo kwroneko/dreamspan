@@ -55,7 +55,10 @@ const valueOf = (box: Locator) =>
     )
     .catch(() => "")
 
+// A box still loading its text is read-only, and a key typed into it shows nothing: as a
+// user does, type once it takes typing.
 const typeMarker = async (box: Locator, marker: string) => {
+  await expect(box).toBeEditable()
   await box.click()
   await box.press("ControlOrMeta+End")
   await box.page().keyboard.insertText(` ${marker}`)

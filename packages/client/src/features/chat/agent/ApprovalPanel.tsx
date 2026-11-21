@@ -5,6 +5,7 @@
 // user writes one. The answer names the call's arguments' digest, so it holds for this call only.
 import { syncClientPlugins } from "../../../pluginLifecycle.ts"
 import { useCaller } from "../../editor/caller.ts"
+import { useDurableText } from "../../editor/durable.tsx"
 import { StoryScope } from "../../workshop/StoryScope.tsx"
 import type { ApprovalAnswer } from "@dreamspan/shared/workshopApi.ts"
 import { useState } from "react"
@@ -31,12 +32,18 @@ const rerunFacts = (rerun: NonNullable<NonNullable<StepActionProps["step"]["appr
 
 export function ApprovalPanel({ step, version }: StepActionProps) {
   const approval = step.status === "waiting" ? step.approval : undefined
+  return approval ? <WaitingApproval approval={approval} version={version} /> : null
+}
+
+function WaitingApproval({ approval, version }: { approval: Prompt; version: StepActionProps["version"] }) {
   const action = useAction()
   const call = useCaller()
   const [answering, setAnswering] = useState<ApprovalAnswer | null>(null)
-  const [noting, setNoting] = useState(false)
-  const [note, setNote] = useState("")
-  if (!approval) return null
+  const [adding, setAdding] = useState(false)
+  // The note is kept as typed (editor/durable.tsx), so it's there again after a reload.
+  const durable = useDurableText(`approval-note:${approval.rolloutId}:${approval.toolCallId}`, "Note", "")
+  const note = durable.text
+  const noting = adding || note !== ""
   const answer = async (choice: ApprovalAnswer) => {
     setAnswering(choice)
     const trimmed = note.trim()
@@ -53,6 +60,8 @@ export function ApprovalPanel({ step, version }: StepActionProps) {
       choice === "allow_chat" ? ["workshop-capabilities"] : []
     )
     setAnswering(null)
+    // Sent with Decline, the note is the answer's; with another answer it goes to the bin.
+    if (result.ok && note !== "") void (choice === "deny" ? durable.commit(async () => true) : durable.discard())
     if (result.ok && approval.plugin && choice === "allow") {
       // The approval reply precedes compilation/activation. Keep following this exact call
       // even if the completed steps fold and unmount this panel. Other tabs keep their reload notice.
@@ -169,7 +178,13 @@ export function ApprovalPanel({ step, version }: StepActionProps) {
           label="Note for the assistant"
           description={`Sent with ${rerun ? "Don't run it" : "Decline"}, so it knows why. Optional.`}
         >
-          <Textarea value={note} maxLength={2000} rows={2} onChange={(event) => setNote(event.target.value)} />
+          <Textarea
+            value={note}
+            readOnly={!durable.ready}
+            maxLength={2000}
+            rows={2}
+            onChange={(event) => durable.setText(event.target.value)}
+          />
         </Field>
       )}
       <ErrorAlert error={action.error} title="Your answer wasn’t taken" />
@@ -222,7 +237,7 @@ export function ApprovalPanel({ step, version }: StepActionProps) {
             variant="ghost"
             disabled={busy}
             hint={`Adds a note the assistant gets with ${rerun ? "Don't run it" : "Decline"}, saying why or what to do instead.`}
-            onClick={() => setNoting(true)}
+            onClick={() => setAdding(true)}
           >
             Add a note
           </Button>

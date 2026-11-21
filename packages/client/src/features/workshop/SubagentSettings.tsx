@@ -26,6 +26,7 @@ import { Field, Input } from "../../ui/Field.tsx"
 import { Alert, Card, CardHeader, Disclosure } from "../../ui/Surface.tsx"
 import { useModelChoiceList } from "../chat/modelChoices.ts"
 import { ReasoningEffortSelect } from "../connections/ReasoningEffort.tsx"
+import { useDurableForm } from "../editor/durable.tsx"
 import { pickLabel, SUBAGENT_SETTINGS_KEY, subagentSettingsAtom } from "./SubagentModelsChip.tsx"
 
 const KEYS = ["settings", SUBAGENT_SETTINGS_KEY]
@@ -148,21 +149,23 @@ function LimitsForm({ settings }: { settings: SubagentSettings }) {
     ...[...CAP_FIELDS, ...RUN_FIELDS].map((f) => [f.key, shown(settings.limits[f.key])]),
     ...STORY_FIELDS.map((f) => [f.key, shown(settings.limits.story?.[f.cap])])
   ]) as Draft<LimitKey>
-  const [draft, setDraft] = useState<Draft<LimitKey> | null>(null)
+  // Kept as typed (editor/durable.tsx): null until something is changed.
+  const form = useDurableForm<{ draft: Draft<LimitKey> | null }>("subagent-limits", "Limits", { draft: null })
+  const { draft } = form.values
   const [saved, setSaved] = useState(false)
   const [invalid, setInvalid] = useState<string | null>(null)
   const values = draft ?? initial
   const edit = (key: LimitKey, text: string) => {
     setSaved(false)
     setInvalid(null)
-    setDraft({ ...values, [key]: text })
+    form.replace({ draft: { ...values, [key]: text } })
   }
   const save = async (limits: SubagentLimits | null) => {
-    const result = await action.run((client) => client("ChangeSubagentSettings", { limits }), KEYS)
-    if (result.ok) {
-      setDraft(null)
-      setSaved(true)
-    }
+    const ok = await form.commit(async () => {
+      const result = await action.run((client) => client("ChangeSubagentSettings", { limits }), KEYS)
+      return result.ok
+    })
+    if (ok) setSaved(true)
   }
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -232,7 +235,7 @@ function LimitsForm({ settings }: { settings: SubagentSettings }) {
             variant="ghost"
             hint="Discards the changes you haven't saved."
             onClick={() => {
-              setDraft(null)
+              void form.discard()
               setInvalid(null)
             }}
           >
@@ -277,14 +280,18 @@ function ModelsForm({ settings }: { settings: SubagentSettings }) {
     listed.filter((p) => p.includes(" "))
   )
   const rows = rowsFor(settings.models, listed)
-  const [drafts, setDrafts] = useState<Readonly<Record<string, RowDraft>>>({})
+  // Kept as typed (editor/durable.tsx): only the rows changed.
+  const form = useDurableForm<{ drafts: Readonly<Record<string, RowDraft>> }>("subagent-models", "Models", {
+    drafts: {}
+  })
+  const { drafts } = form.values
   const [saved, setSaved] = useState(false)
   const [invalid, setInvalid] = useState<string | null>(null)
   const draftOf = (pick: string) => drafts[pick] ?? rowDraft(rows.get(pick)!)
   const edit = (pick: string, change: Partial<RowDraft>) => {
     setSaved(false)
     setInvalid(null)
-    setDrafts({ ...drafts, [pick]: { ...draftOf(pick), ...change } })
+    form.replace({ drafts: { ...drafts, [pick]: { ...draftOf(pick), ...change } } })
   }
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -309,11 +316,11 @@ function ModelsForm({ settings }: { settings: SubagentSettings }) {
         ...(draft.effort ? { effort: draft.effort } : {})
       }
     }
-    const result = await action.run((client) => client("ChangeSubagentSettings", { rows: changed }), KEYS)
-    if (result.ok) {
-      setDrafts({})
-      setSaved(true)
-    }
+    const ok = await form.commit(async () => {
+      const result = await action.run((client) => client("ChangeSubagentSettings", { rows: changed }), KEYS)
+      return result.ok
+    })
+    if (ok) setSaved(true)
   }
   return (
     <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4" data-subagent-models="">
@@ -349,6 +356,7 @@ function ModelsForm({ settings }: { settings: SubagentSettings }) {
                   <Input
                     fullWidth
                     value={draft.note}
+                    readOnly={!form.ready}
                     maxLength={300}
                     onChange={(event) => edit(pick, { note: event.currentTarget.value })}
                   />
@@ -412,7 +420,7 @@ function ModelsForm({ settings }: { settings: SubagentSettings }) {
             variant="ghost"
             hint="Discards the changes you haven't saved."
             onClick={() => {
-              setDrafts({})
+              void form.discard()
               setInvalid(null)
             }}
           >

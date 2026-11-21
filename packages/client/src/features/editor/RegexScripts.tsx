@@ -20,6 +20,7 @@ import type { DisplayResult } from "../chat/displayPipeline.ts"
 import { runRegexJob } from "../chat/displayWorker.ts"
 import type { Caller } from "./caller.ts"
 import { LinesField, NumberField, SelectField, SwitchField, TextField } from "./controls.tsx"
+import { useDurableText } from "./durable.tsx"
 import { addScriptChange } from "./regexAdd.ts"
 import { SearchNavigation } from "./searchNavigation.ts"
 import { type EditorStore, useEditorState, useText, useValue } from "./store.ts"
@@ -321,7 +322,9 @@ const TRY_NAMES = { user: "User", char: "Character" }
  * flags and depths. It runs on the display-regex worker, within its deadline.
  */
 function TryIt({ script }: { script: RegexScript }) {
-  const [sample, setSample] = useState("")
+  // Scratch text, but typed text all the same: kept as typed (durable.tsx), never saved anywhere else.
+  const durable = useDurableText(`regex-sample:${script.id}`, "Sample text", "")
+  const sample = durable.text
   const [result, setResult] = useState<{ readonly sample: string; readonly value: DisplayResult } | null>(null)
   useEffect(() => {
     if (sample === "" || script.find_regex === "") return
@@ -357,7 +360,8 @@ function TryIt({ script }: { script: RegexScript }) {
             className="resize-y font-mono"
             spellCheck={false}
             value={sample}
-            onChange={(event) => setSample(event.currentTarget.value)}
+            readOnly={!durable.ready}
+            onChange={(event) => durable.setText(event.currentTarget.value)}
           />
         </Field>
         {shown && (

@@ -25,6 +25,7 @@ import { Segmented } from "../../ui/Segmented.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
 import { ReasoningEffortSelect } from "../connections/ReasoningEffort.tsx"
+import { useDurableForm } from "../editor/durable.tsx"
 import { SUBAGENT_SETTINGS_KEY, subagentSettingsAtom } from "./SubagentModelsChip.tsx"
 
 const TYPES_KEY = "subagent-types"
@@ -126,13 +127,15 @@ function TypeEditor({
   close: () => void
 }) {
   const action = useAction()
-  const [draft, setDraft] = useState<Draft>(() => draftOf(type))
+  // Kept as typed (editor/durable.tsx), per type, until Save or Cancel.
+  const form = useDurableForm<Draft>(`subagent-type:${type?.id ?? "new"}`, "Type", draftOf(type))
+  const draft = form.values
   const [idTouched, setIdTouched] = useState(false)
   const [invalid, setInvalid] = useState<string | null>(null)
   const isNew = type === undefined
   const edit = (change: Partial<Draft>) => {
     setInvalid(null)
-    setDraft({ ...draft, ...change })
+    form.edit(change)
   }
   const change = (edit: SubagentTypeEdit | null) =>
     action.run((client) => client("ChangeSubagentType", { id: type?.id ?? draft.id, edit }), KEYS)
@@ -151,27 +154,30 @@ function TypeEditor({
       setInvalid("A type needs a name and instructions.")
       return
     }
-    const result = await action.run(
-      (client) =>
-        client("ChangeSubagentType", {
-          id,
-          edit: {
+    const saved = await form.commit(async () => {
+      const result = await action.run(
+        (client) =>
+          client("ChangeSubagentType", {
             id,
-            label: draft.label.trim(),
-            explanation: draft.explanation.trim(),
-            description: draft.description.trim(),
-            instructions: draft.instructions.trim(),
-            tools: [...draft.tools],
-            defaultAlias: draft.defaultAlias,
-            effort: draft.effort,
-            context: draft.context,
-            isolation: draft.isolation,
-            ...(draft.off ? { off: true } : {})
-          }
-        }),
-      KEYS
-    )
-    if (result.ok) close()
+            edit: {
+              id,
+              label: draft.label.trim(),
+              explanation: draft.explanation.trim(),
+              description: draft.description.trim(),
+              instructions: draft.instructions.trim(),
+              tools: [...draft.tools],
+              defaultAlias: draft.defaultAlias,
+              effort: draft.effort,
+              context: draft.context,
+              isolation: draft.isolation,
+              ...(draft.off ? { off: true } : {})
+            }
+          }),
+        KEYS
+      )
+      return result.ok
+    })
+    if (saved) close()
   }
   const toggle = (tool: SubagentToolChoice, on: boolean) =>
     edit({ tools: on ? [...draft.tools, tool.id] : draft.tools.filter((t) => t !== tool.id) })
@@ -231,6 +237,7 @@ function TypeEditor({
         <Textarea
           name="description"
           value={draft.description}
+          readOnly={!form.ready}
           maxLength={600}
           rows={2}
           onChange={(event) => edit({ description: event.currentTarget.value })}
@@ -240,6 +247,7 @@ function TypeEditor({
         <Textarea
           name="instructions"
           value={draft.instructions}
+          readOnly={!form.ready}
           maxLength={20_000}
           rows={8}
           onChange={(event) => edit({ instructions: event.currentTarget.value })}
@@ -321,14 +329,27 @@ function TypeEditor({
         <Button type="submit" variant="primary" hint="Saves this type for every workshop." pending={action.pending}>
           Save
         </Button>
-        <Button variant="ghost" hint="Closes the editor without saving." onClick={close}>
+        <Button
+          variant="ghost"
+          hint="Closes the editor without saving."
+          onClick={() => {
+            void form.discard()
+            close()
+          }}
+        >
           Cancel
         </Button>
         {type?.edited && type.source !== "user" && (
           <Button
             variant="ghost"
             hint="Drops your changes: the type is as it came again."
-            onClick={() => void change(null).then((r) => r.ok && close())}
+            onClick={() =>
+              void change(null).then((r) => {
+                if (!r.ok) return
+                void form.discard()
+                close()
+              })
+            }
           >
             Restore
           </Button>
@@ -337,7 +358,13 @@ function TypeEditor({
           <Button
             variant="danger"
             hint="Deletes this type. Subagents it already started keep their runs."
-            onClick={() => void change(null).then((r) => r.ok && close())}
+            onClick={() =>
+              void change(null).then((r) => {
+                if (!r.ok) return
+                void form.discard()
+                close()
+              })
+            }
           >
             Delete type
           </Button>

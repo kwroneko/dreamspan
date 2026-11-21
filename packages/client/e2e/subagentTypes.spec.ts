@@ -58,12 +58,14 @@ for (const width of [1440, 390])
         scope: '[data-subagent-type-editor="new"]'
       })
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-      // The editor is the URL's: a reload keeps it and what it shows.
+      // The editor is the URL's, and what's typed in it is kept as typed: a reload keeps both.
       await page.reload()
       await expect(page.locator('[data-subagent-type-editor="new"]')).toBeVisible()
-      await editor.getByLabel("Name", { exact: true }).fill("Check names")
-      await editor.getByLabel("Instructions", { exact: true }).fill("You check names. Report each mismatch.")
-      await editor.locator("[data-subagent-type-tools]").getByRole("checkbox").first().click()
+      await expect(editor.getByLabel("Name", { exact: true })).toHaveValue("Check names")
+      await expect(editor.getByLabel("Instructions", { exact: true })).toHaveValue(
+        "You check names. Report each mismatch."
+      )
+      await expect(editor).toContainText("1 picked")
       await editor.getByRole("button", { name: "Save" }).click()
       await expect(page).not.toHaveURL(/type=/)
       const mine = list.locator('[data-subagent-type="check-names"]')

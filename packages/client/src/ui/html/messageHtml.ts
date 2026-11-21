@@ -2,7 +2,7 @@ import { mediaQueue, mapCssMedia, PENDING_MEDIA } from "./mediaQueue.ts"
 import type { MediaPermit } from "./media.ts"
 // What message HTML needs from around it (spec/HTML-MESSAGES.md §3.2, §3.3): the viewer's choices,
 // the message a body belongs to, and the chat view's card styles in one constructed stylesheet.
-import { createContext } from "react"
+import { type ComponentType, createContext } from "react"
 import type { FrameSlots } from "./frames.ts"
 import type { PanelDataSource } from "./parts.ts"
 import type { SlotId } from "@dreamspan/shared/chat.ts"
@@ -41,6 +41,22 @@ export interface HtmlMessage {
   readonly fromTip?: number | null
   /** What its panels may run (spec/HTML-MESSAGES.md §3.4); absent, scripts stay off. */
   readonly permit?: PanelPermit
+  /** The version shown: what's typed into its HTML's text fields is kept per version. */
+  readonly versionId?: string
+  /**
+   * Renders a text field of the message's HTML so what's typed into it is kept (typed text is
+   * never lost), given by the chat; absent (no chat, no account), the field keeps its text only
+   * while it's shown.
+   */
+  readonly TextField?: ComponentType<HtmlTextFieldProps>
+}
+
+/** A text field of a message's HTML, by its place in the HTML (`fieldKey`), with its text as written (`initial`). */
+export interface HtmlTextFieldProps {
+  readonly fieldKey: string
+  readonly tag: "input" | "textarea"
+  readonly props: Record<string, unknown>
+  readonly initial: string
 }
 
 /**

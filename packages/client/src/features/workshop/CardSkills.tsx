@@ -20,6 +20,7 @@ import { SortableList } from "../../ui/SortableList.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import { FieldTools } from "../editor/controls.tsx"
+import { useDurableForm } from "../editor/durable.tsx"
 import { type EditorStore, useValue } from "../editor/store.ts"
 
 const PATH = ["extensions", CARD_SKILLS_NAMESPACE]
@@ -57,22 +58,32 @@ const labelOf = (entry: unknown) =>
 function SkillDialog({
   open,
   onOpenChange,
+  draftKey,
   entry,
   onSave
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** What the form is kept under as it's typed (editor/durable.tsx): the card and the skill. */
+  draftKey: string
   /** The skill being edited; null adds one. */
   entry: Entry | null
   onSave: (entry: Entry) => void
 }) {
-  const [draft, setDraft] = useState<Draft>(() => draftOf(entry))
-  const set = (key: keyof Draft) => (value: string) => setDraft((d) => ({ ...d, [key]: value }))
+  const [saved] = useState<Draft>(() => draftOf(entry))
+  const form = useDurableForm(draftKey, "Skill", saved)
+  const draft = form.values
+  const set = (key: keyof Draft) => (value: string) => form.edit({ [key]: value })
   const problems = cardSkillProblems(entryOf(draft, null), 0)
+  /** Closed without saving: what was typed goes to the bin, recoverable. */
+  const cancel = () => {
+    if (JSON.stringify(draft) !== JSON.stringify(saved)) void form.discard()
+    onOpenChange(false)
+  }
   return (
     <Dialog
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={(next) => !next && cancel()}
       title={entry ? `Edit ${labelOf(entry)}` : "Add a skill"}
       description="The assistant sees only the name until you allow it to load the skill."
     >
@@ -80,7 +91,9 @@ function SkillDialog({
         className="flex flex-col gap-4"
         onSubmit={(event) => {
           event.preventDefault()
+          // The skill is the card's draft now (EditorStore): this form's workspace is done with.
           onSave(entryOf(draft, entry))
+          void form.commit(async () => true)
           onOpenChange(false)
         }}
       >
@@ -90,6 +103,7 @@ function SkillDialog({
         >
           <Input
             value={draft.name}
+            readOnly={!form.ready}
             maxLength={CARD_SKILL_LIMITS.name}
             spellCheck={false}
             autoComplete="off"
@@ -100,6 +114,7 @@ function SkillDialog({
           <Textarea
             rows={2}
             value={draft.description}
+            readOnly={!form.ready}
             onChange={(event) => set("description")(event.currentTarget.value)}
           />
         </Field>
@@ -107,6 +122,7 @@ function SkillDialog({
           <Textarea
             rows={8}
             value={draft.instructions}
+            readOnly={!form.ready}
             onChange={(event) => set("instructions")(event.currentTarget.value)}
           />
         </Field>
@@ -116,6 +132,7 @@ function SkillDialog({
         >
           <Input
             value={draft.tools}
+            readOnly={!form.ready}
             spellCheck={false}
             autoComplete="off"
             className="font-mono"
@@ -130,7 +147,7 @@ function SkillDialog({
           </ul>
         )}
         <DialogActions>
-          <Button hint="Closes without changing the skill." onClick={() => onOpenChange(false)}>
+          <Button hint="Closes without changing the skill." onClick={cancel}>
             Cancel
           </Button>
           <Button type="submit" variant="primary" hint="Saves the skill to this card.">
@@ -309,6 +326,7 @@ export function CardSkills({ store }: { store: EditorStore }) {
       {editing !== null && (
         <SkillDialog
           key={String(editing)}
+          draftKey={`card-skill:${store.refId}:${editing === "new" ? "new" : `edit:${labelOf(current)}`}`}
           open
           onOpenChange={(open) => {
             if (!open) setEditing(null)

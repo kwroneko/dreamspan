@@ -306,14 +306,11 @@ export const chatPlaces = [
     shown: (page) =>
       page
         .getByRole("dialog", { name: "Merge a chat into this one", exact: true })
-        .getByRole("textbox", { name: "Framing line", exact: true }),
-    gaps: {
-      text: "MergeChatDialog keeps the framing line in useState: no server draft, no browser copy; the dialog reopens after a reload with the preset's line back"
-    }
+        .getByRole("textbox", { name: "Framing line", exact: true })
   }),
   place({
     name: "Text field in a message's HTML",
-    source: "ui/html/HtmlParts.tsx:59",
+    source: "features/chat/htmlTextField.tsx:7",
     setup: ({ rpc, tag }) =>
       rpc((api) =>
         Effect.gen(function* () {
@@ -331,9 +328,18 @@ export const chatPlaces = [
       await goChat(page, ctx, chatId)
       return page.getByRole("textbox", { name: "Story form field", exact: true })
     },
-    shown: (page) => page.getByRole("textbox", { name: "Story form field", exact: true }),
-    gaps: {
-      text: "A form field in a message's HTML is uncontrolled (defaultValue): what's typed in it is kept nowhere"
-    }
+    shown: (page) => page.getByRole("textbox", { name: "Story form field", exact: true })
+  }),
+  place({
+    name: "Inline chat rename",
+    source: "features/chat/ChatHeader.tsx:140",
+    setup: oneMessage,
+    open: async (page, { chatId }, ctx) => {
+      await goChat(page, ctx, chatId)
+      await page.getByRole("heading", { level: 1 }).getByRole("button").first().click()
+      return page.getByRole("textbox", { name: "Chat name", exact: true })
+    },
+    shown: (page) => page.getByRole("textbox", { name: "Chat name", exact: true }),
+    gaps: { mode: "ChatTitle keeps whether the name is being edited in useState: a reload shows the name, not the box" }
   })
 ]

@@ -34,6 +34,7 @@ import { Markdown } from "../../ui/Markdown.tsx"
 import { type CaretSpot, caretSpotAt, type EditCaret, locateEditCaret } from "../../ui/editCaret.ts"
 import { MessageBody } from "../../ui/messageCopy.tsx"
 import { HtmlMessageContext } from "../../ui/html/messageHtml.ts"
+import { HtmlTextField } from "./htmlTextField.tsx"
 import { Composition } from "./Composition.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
@@ -113,9 +114,12 @@ function BodyText({
       streaming,
       fromTip,
       media: current ? media : { ...media, scope: null, actions: [] },
-      ...(permit ? { permit: current ? permit : OFF } : {})
+      ...(permit ? { permit: current ? permit : OFF } : {}),
+      // What's typed into its HTML's text fields is kept per version (htmlTextField.tsx).
+      versionId: version.id,
+      TextField: HtmlTextField
     }),
-    [version.slotId, streaming, fromTip, media, permit, current]
+    [version.slotId, version.id, streaming, fromTip, media, permit, current]
   )
   return (
     <HtmlMessageContext value={html}>

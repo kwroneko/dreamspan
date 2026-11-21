@@ -30,6 +30,7 @@ import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { formatWhen } from "../chat/chatTitle.ts"
 import { AllowHostDialog } from "../credentials.tsx"
+import { useDurableForm } from "../editor/durable.tsx"
 import { useTitle } from "../shell.tsx"
 import {
   bytesLabel,
@@ -149,11 +150,13 @@ export function ServerSection(props: McpSectionProps) {
 
 function OwnServer({ connection }: McpSectionProps) {
   const action = useAction()
-  const [draft, setDraft] = useState<ServerDraft | null>(null)
+  // Kept as typed (editor/durable.tsx); keys and headers are secrets, set in their own dialogs.
+  const saved = draftOf(connection)
+  const form = useDurableForm<ServerDraft>(`mcp:${connection.id}`, "Settings", saved)
   const [check, setCheck] = useState<McpCheck | null>(null)
   const [submitted, setSubmitted] = useState(false)
-  const values = draft ?? draftOf(connection)
-  const edit = (change: Partial<ServerDraft>) => setDraft({ ...values, ...change })
+  const values = form.values
+  const edit = (change: Partial<ServerDraft>) => form.edit(change)
   const timeout = parseTimeout(values.timeoutS)
   const program = values.transport === "stdio"
   const problems = {
@@ -163,36 +166,40 @@ function OwnServer({ connection }: McpSectionProps) {
     timeoutS: timeout.problem
   }
   const shown = (problem: string | null) => (submitted ? problem : null)
-  const changed = draft !== null && JSON.stringify(draft) !== JSON.stringify(draftOf(connection))
+  const changed = JSON.stringify(values) !== JSON.stringify(saved)
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitted(true)
     if (Object.values(problems).some((problem) => problem !== null)) return focusFirstInvalid(event.currentTarget)
-    const result = await action.run(
-      (client) =>
-        client("UpdateMcpConnection", {
-          connectionId: connection.id,
-          expectedRowVersion: connection.rowVersion,
-          settings: {
-            name: values.name.trim(),
-            about: values.about.trim(),
-            transport: values.transport,
-            url: program ? "" : values.url.trim(),
-            ...(program ? { program: { command: values.command.trim(), args: parseArguments(values.args) } } : {}),
-            timeoutS: timeout.value
-          }
-        }),
-      ["mcp"]
-    )
-    if (result.ok) {
-      setDraft(null)
+    let checked: McpCheck | null = null
+    const ok = await form.commit(async () => {
+      const result = await action.run(
+        (client) =>
+          client("UpdateMcpConnection", {
+            connectionId: connection.id,
+            expectedRowVersion: connection.rowVersion,
+            settings: {
+              name: values.name.trim(),
+              about: values.about.trim(),
+              transport: values.transport,
+              url: program ? "" : values.url.trim(),
+              ...(program ? { program: { command: values.command.trim(), args: parseArguments(values.args) } } : {}),
+              timeoutS: timeout.value
+            }
+          }),
+        ["mcp"]
+      )
+      if (result.ok) checked = result.value.check
+      return result.ok
+    })
+    if (ok) {
       setSubmitted(false)
-      setCheck(result.value.check)
+      setCheck(checked)
     }
   }
   const discard = () => {
-    setDraft(null)
+    void form.discard()
     setSubmitted(false)
     action.clearError()
   }
@@ -209,7 +216,12 @@ function OwnServer({ connection }: McpSectionProps) {
           <Input value={values.name} onValueChange={(name) => edit({ name })} autoComplete="off" />
         </Field>
         <Field label="What it’s for" about="Shown to the model so it knows when to use these tools. In your own words.">
-          <Textarea value={values.about} onChange={(event) => edit({ about: event.currentTarget.value })} rows={2} />
+          <Textarea
+            value={values.about}
+            readOnly={!form.ready}
+            onChange={(event) => edit({ about: event.currentTarget.value })}
+            rows={2}
+          />
         </Field>
         <Field label="Transport" about="How the app talks to the server. Most servers speak Streamable HTTP.">
           <AsyncView atom={localProgramsAtom}>
@@ -228,6 +240,7 @@ function OwnServer({ connection }: McpSectionProps) {
             onCommandChange={(command) => edit({ command })}
             args={values.args}
             onArgsChange={(args) => edit({ args })}
+            readOnly={!form.ready}
             error={shown(problems.command)}
           />
         ) : (

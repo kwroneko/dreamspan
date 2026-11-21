@@ -185,7 +185,8 @@ for (const kind of ["composer", "editor"] as const) {
             }
           }
         }
-        expect(await browserCopy(back)).toEqual([])
+        // Every copy is acknowledged, the conflict picker's own (SaveRevision's workspace) once it's saved.
+        await expect.poll(() => browserCopy(back)).toEqual([])
       } finally {
         for (const context of contexts) await context.close()
         await server.stop()

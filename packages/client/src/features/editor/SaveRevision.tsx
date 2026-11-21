@@ -15,8 +15,14 @@ import { useUnsavedSource } from "../../ui/UnsavedChanges.tsx"
 import { SaveControls } from "../../ui/SaveControls.tsx"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 import { type Choice, type Conflict, ConflictPicker, chosen } from "./conflicts.tsx"
+import { useDurableForm } from "./durable.tsx"
 import { draftLabel } from "./fields.ts"
 import { type EditorStore, useEditorState, useHeld, useText } from "./store.ts"
+
+const NO_CONFLICTS: {
+  readonly conflicts: { readonly list: ReadonlyArray<Conflict>; readonly message: string | null } | null
+  readonly choices: Readonly<Record<string, Choice>>
+} = { conflicts: null, choices: {} }
 
 /** Whether a draft's content is text or JSON, for putting a picked value back. */
 const contentOf = (field: string, value: unknown) =>
@@ -46,8 +52,15 @@ export function SaveRevision({
   /** Why the last save failed, shown below the revision controls. */
   const [failure, setFailure] = useState<string | null>(null)
   const [error, setError] = useState<AppError | null>(null)
-  const [conflicts, setConflicts] = useState<{ list: ReadonlyArray<Conflict>; message: string | null } | null>(null)
-  const [choices, setChoices] = useState<Record<string, Choice>>({})
+  // The fields changed meanwhile and what's picked for each, "Edit it" text included, are kept
+  // as typed (durable.tsx), so a reload brings the dialog back as it was.
+  const picking = useDurableForm(`save-conflict:${ref.id}`, "Changed meanwhile", NO_CONFLICTS)
+  const { conflicts, choices } = picking.values
+  const setChoices = (next: Record<string, Choice>) => picking.edit({ choices: next })
+  /** Closes the dialog: what was picked or typed goes to the bin, recoverable. */
+  const cancel = () => {
+    if (conflicts !== null) void picking.discard()
+  }
 
   const save = async (message: string | null): Promise<boolean> => {
     if (clash) return false
@@ -62,16 +75,18 @@ export function SaveRevision({
     }
     if (result.cause instanceof EditConflict) {
       const doc = store.working().doc
-      setConflicts({
-        message,
-        list: result.cause.fields.map(({ field, saved, draft }) => ({
-          key: field,
-          label: draftLabel(ref.kind, doc, field),
-          mine: draft,
-          theirs: saved
-        }))
+      picking.replace({
+        conflicts: {
+          message,
+          list: result.cause.fields.map(({ field, saved, draft }) => ({
+            key: field,
+            label: draftLabel(ref.kind, doc, field),
+            mine: draft,
+            theirs: saved
+          }))
+        },
+        choices: Object.fromEntries(result.cause.fields.map(({ field }) => [field, { side: "mine" } as Choice]))
       })
-      setChoices(Object.fromEntries(result.cause.fields.map(({ field }) => [field, { side: "mine" } as Choice])))
       return false
     }
     setFailure(result.error.message)
@@ -91,7 +106,7 @@ export function SaveRevision({
     if (conflicts === null) return
     setPending(true)
     for (const conflict of conflicts.list) {
-      const choice = choices[conflict.key]!
+      const choice = choices[conflict.key] ?? { side: "mine" }
       const result = await store.rebase(
         conflict.key,
         choice.side === "theirs" ? null : contentOf(conflict.key, chosen(conflict, choice))
@@ -101,10 +116,10 @@ export function SaveRevision({
         return setFailure(result.error.message)
       }
     }
+    // Each pick is its field's draft now: this workspace is done with.
+    await picking.commit(async () => true)
     setPending(false)
-    const message = conflicts.message
-    setConflicts(null)
-    await save(message)
+    await save(conflicts.message)
   }
 
   return (
@@ -123,7 +138,7 @@ export function SaveRevision({
         <Dialog
           wide
           open
-          onOpenChange={(open) => !open && !pending && setConflicts(null)}
+          onOpenChange={(open) => !open && !pending && cancel()}
           title="Changed meanwhile"
           description="Someone changed these fields while you were editing. Choose which text to keep before saving."
         >
@@ -132,7 +147,7 @@ export function SaveRevision({
               <ConflictPicker
                 key={conflict.key}
                 conflict={conflict}
-                choice={choices[conflict.key]!}
+                choice={choices[conflict.key] ?? { side: "mine" }}
                 onChoice={(choice) => setChoices({ ...choices, [conflict.key]: choice })}
                 mineLabel="Your version"
                 theirsLabel="Saved version"
@@ -140,11 +155,7 @@ export function SaveRevision({
             ))}
           </ul>
           <DialogActions>
-            <Button
-              onClick={() => setConflicts(null)}
-              disabled={pending}
-              hint="Saves nothing; your text stays as it is."
-            >
+            <Button onClick={cancel} disabled={pending} hint="Saves nothing; your text stays as it is.">
               Cancel
             </Button>
             <Button

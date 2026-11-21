@@ -18,6 +18,7 @@ interface HastNode {
   readonly properties?: Record<string, unknown>
   readonly children?: ReadonlyArray<HastNode>
   readonly data?: { readonly html?: boolean }
+  readonly position?: { readonly start?: { readonly offset?: number } }
 }
 type Props = Record<string, unknown> & { node?: HastNode; children?: ReactNode }
 
@@ -43,20 +44,49 @@ function htmlAware(markdown: ComponentType<Props> | string): ComponentType<Props
   }
 }
 
+/** Input types whose value is text the user types (a password isn't kept). */
+const TEXT_TYPES = new Set(["", "text", "search", "email", "url", "tel", "number"])
+
+/**
+ * A text field the user types into: kept as typed by the chat's TextField (messageHtml.ts), keyed
+ * by the version and the field's place in the HTML; without one, uncontrolled as written.
+ */
+function TextField({
+  node,
+  tag,
+  props,
+  initial
+}: {
+  node: HastNode | undefined
+  tag: "input" | "textarea"
+  props: Record<string, unknown>
+  initial: string
+}) {
+  const message = useContext(HtmlMessageContext)
+  const at = node?.position?.start?.offset
+  if (message?.TextField && message.versionId !== undefined && typeof at === "number")
+    return <message.TextField fieldKey={`${message.versionId}:${at}`} tag={tag} props={props} initial={initial} />
+  return tag === "textarea" ? (
+    <textarea {...props} defaultValue={initial} />
+  ) : (
+    <input {...props} defaultValue={initial} />
+  )
+}
+
 /** Uncontrolled, so a click toggles a checkbox or radio, and typing changes a field. */
 function Input({ node, checked, value, ...raw }: Props) {
   const props = useQueuedMediaProps(raw, "input")
   if (!parsed(node)) return <input {...props} checked={checked as boolean} value={value as string} />
   const type = String(props.type ?? "").toLowerCase()
-  return type === "checkbox" || type === "radio" ? (
-    <input {...props} value={value as string} defaultChecked={checked as boolean} />
-  ) : (
-    <input {...props} defaultValue={value as string} />
-  )
+  if (type === "checkbox" || type === "radio")
+    return <input {...props} value={value as string} defaultChecked={checked as boolean} />
+  if (TEXT_TYPES.has(type)) return <TextField node={node} tag="input" props={props} initial={String(value ?? "")} />
+  return <input {...props} defaultValue={value as string} />
 }
 function Textarea({ node, children: _children, value, ...raw }: Props) {
   const props = useQueuedMediaProps(raw, "textarea")
-  return <textarea {...props} defaultValue={(value as string | undefined) ?? (node ? textOf(node) : "")} />
+  const initial = (value as string | undefined) ?? (node ? textOf(node) : "")
+  return <TextField node={node} tag="textarea" props={props} initial={initial} />
 }
 function Select({ node, value, ...raw }: Props) {
   const props = useQueuedMediaProps(raw, "select")

@@ -15,6 +15,7 @@ import {
   type MergeTimelines
 } from "@dreamspan/shared/mergeApi.ts"
 import { usePlaceParam } from "../../usePlaceParam.ts"
+import { useDurableForm } from "../editor/durable.tsx"
 import { useChatPlaceKey } from "./chatPlace.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { type ComponentType, useEffect, useMemo, useState, useSyncExternalStore } from "react"
@@ -38,6 +39,11 @@ import type { ChatSession } from "./session.ts"
 import { useSplitChats } from "./splitChats.ts"
 
 const NEWEST = "newest"
+/** The title and framing line as the dialog opens: the source's own and the preset's. */
+const NOTHING_TYPED: { readonly title: string | null; readonly framing: string | null } = {
+  title: null,
+  framing: null
+}
 const AT_JOIN = "join"
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`
@@ -341,9 +347,23 @@ export function MergeChatDialog({
   /** "What the model reads" for one character, with separate timelines; null: the first. */
   const reader_ = setup.reader ?? null
   const setReaderFor = (next: EntityId | null) => changeSetup({ reader: next })
-  /** null: the source's own title. */
-  const [title, setTitle] = useState<string | null>(null)
-  const [framing, setFraming] = useState<string | null>(null)
+  /** null: the source's own title, and the preset's framing line. Kept as typed (editor/durable.tsx). */
+  const typed = useDurableForm(
+    `merge-chat:${session.id}:${forkId ?? ""}:${ThreadPicker === undefined ? "merge" : "join"}`,
+    "Title and framing line",
+    NOTHING_TYPED
+  )
+  const { title, framing } = typed.values
+  const setTitle = (next: string | null) => typed.edit({ title: next })
+  const setFraming = (next: string | null) => typed.edit({ framing: next })
+  const resetTyped = () => {
+    if (title !== null || framing !== null) typed.replace(NOTHING_TYPED)
+  }
+  /** Cancelled: what was typed goes to the bin, recoverable. */
+  const cancel = () => {
+    if (title !== null || framing !== null) void typed.discard()
+    onClose()
+  }
   const [stale, setStale] = useState(false)
   /** The merged chat's notes ticked to bring (`MergeNote.id`). */
   const ticked = new Set(setup.notes ?? [])
@@ -472,6 +492,7 @@ export function MergeChatDialog({
           ["chats"]
         )
     if (result.ok) {
+      void typed.commit(async () => true)
       // The threads' joined state (ThreadsOf) is read again.
       if (joining) forksChanged(session.id)
       onClose()
@@ -508,7 +529,7 @@ export function MergeChatDialog({
       open
       wide
       placement="top"
-      onOpenChange={(open) => !open && !writer.pending && onClose()}
+      onOpenChange={(open) => !open && !writer.pending && cancel()}
       title={joining ? "Join threads" : "Merge a chat into this one"}
       description={
         joining
@@ -526,8 +547,7 @@ export function MergeChatDialog({
               chosen={sources}
               onChoose={(next) => {
                 setStale(false)
-                setTitle(null)
-                setFraming(null)
+                resetTyped()
                 setSources(next)
               }}
             />
@@ -540,8 +560,7 @@ export function MergeChatDialog({
               onChoose={(next) => {
                 // A new source: its own title, the default framing line and span again.
                 setStale(false)
-                setTitle(null)
-                setFraming(null)
+                resetTyped()
                 changeSetup({ sources: [next], start: null, includeLeftOut: false, notes: [], reader: null })
               }}
             />
@@ -769,6 +788,7 @@ export function MergeChatDialog({
               >
                 <Input
                   value={title ?? preview.sourceTitle}
+                  readOnly={!typed.ready}
                   maxLength={200}
                   onChange={(event) => setTitle(event.currentTarget.value)}
                 />
@@ -780,6 +800,7 @@ export function MergeChatDialog({
                 <Textarea
                   className="min-h-16!"
                   value={framingText}
+                  readOnly={!typed.ready}
                   maxLength={2000}
                   onChange={(event) => setFraming(event.currentTarget.value)}
                 />
@@ -846,7 +867,7 @@ export function MergeChatDialog({
       )}
       <ErrorAlert error={writer.error && writer.error.tag !== "MergeChanged" ? writer.error : null} />
       <DialogActions>
-        <Button hint={joining ? "Closes this without joining." : "Closes this without merging."} onClick={onClose}>
+        <Button hint={joining ? "Closes this without joining." : "Closes this without merging."} onClick={cancel}>
           Cancel
         </Button>
         <Button

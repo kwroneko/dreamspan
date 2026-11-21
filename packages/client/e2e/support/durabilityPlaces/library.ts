@@ -162,7 +162,9 @@ export const libraryPlaces: ReadonlyArray<Place> = [
       return scripts.getByRole("textbox", { name: "Sample text" })
     },
     shown: (page) => page.getByRole("textbox", { name: "Sample text" }),
-    gaps: { text: "TryIt keeps the sample in useState only: no draft, no browser copy" }
+    gaps: {
+      mode: "the Extra tab, the script's Edit and its Try it disclosure are React state: a reload shows the card's first tab with them closed"
+    }
   }),
   place({
     name: "Card skill instructions",
@@ -176,7 +178,7 @@ export const libraryPlaces: ReadonlyArray<Place> = [
     },
     shown: (page) => page.getByRole("dialog", { name: "Add a skill" }).getByRole("textbox", { name: "Instructions" }),
     gaps: {
-      text: "SkillDialog keeps its name, description and instructions in useState until Save: no draft, no browser copy"
+      mode: "the Extra tab and the Add a skill dialog are React state: a reload closes them (the form is a server draft)"
     }
   }),
   place({

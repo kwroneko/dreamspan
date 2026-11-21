@@ -21,6 +21,7 @@ import { RadioGroup } from "../../ui/Choice.tsx"
 import { Fieldset, Input } from "../../ui/Field.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { NameDialog } from "./NameDialog.tsx"
+import { useDurableText } from "../editor/durable.tsx"
 import { Avatar, PortraitOverflow } from "../../ui/Avatar.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Badge } from "../../ui/Surface.tsx"
@@ -66,7 +67,11 @@ function ChatTitle({
 }) {
   const split = useSplitChats(view.chat?.id ?? null, view.forkId)
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState("")
+  /** The name the box opens with: this chat's, or its group's. */
+  const [initial, setInitial] = useState("")
+  // The name as typed in place is kept (editor/durable.tsx): a reload doesn't lose it.
+  const typed = useDurableText(`chat-name:${session.id}`, "Name", initial)
+  const draft = typed.text
   const [open, setOpen] = useState(false)
   const [group, setGroup] = useState<{ group: ChatGroup; chats: ReadonlyArray<Chat> } | null>(null)
   const [scope, setScope] = useState<"chat" | "group">("chat")
@@ -87,11 +92,10 @@ function ChatTitle({
       current = resolved.value
     }
     if (!stillHere()) return
-    const initial = name?.name ?? current.group.title
     setGroup(null)
     setScope("chat")
     write.clear()
-    setDraft(initial)
+    setInitial(name?.name ?? current.group.title)
     if (current.group.id !== current.group.chatId) {
       setEditing(true)
       return
@@ -119,9 +123,12 @@ function ChatTitle({
   const save = async (event?: FormEvent) => {
     event?.preventDefault()
     if (write.pending || kept.current) return
-    if (draft.trim() === shown) return setEditing(false)
-    const result = await write.run(() => session.rename(draft))
-    if (result.ok) setEditing(false)
+    if (draft.trim() === shown) {
+      if (draft !== initial) void typed.discard()
+      return setEditing(false)
+    }
+    const ok = await typed.commit(async (text) => (await write.run(() => session.rename(text))).ok)
+    if (ok) setEditing(false)
     else input.current?.focus()
   }
   const many = group !== null && group.chats.length > 1
@@ -145,15 +152,18 @@ function ChatTitle({
             maxLength={200}
             autoFocus
             disabled={write.pending}
+            readOnly={!typed.ready}
             onFocus={(event) => {
               kept.current = false
               event.currentTarget.select()
             }}
-            onChange={(event) => setDraft(event.currentTarget.value)}
+            onChange={(event) => typed.setText(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.preventDefault()
                 kept.current = true
+                // Kept the name: what was typed goes to the bin, recoverable.
+                if (draft !== initial) void typed.discard()
                 setEditing(false)
                 write.clear()
               }
@@ -195,7 +205,7 @@ function ChatTitle({
         onOpenChange={setOpen}
         title="Rename chat"
         label="Name"
-        initial={draft}
+        initial={initial}
         description={
           <>
             Leave it empty to name it after its characters.

@@ -2,6 +2,7 @@
 // proxy is shown only as the server returns it: scheme, host and port.
 import type { NetworkSettings } from "@dreamspan/shared/api.ts"
 import { type FormEvent, useId, useState } from "react"
+import { useDurableForm } from "./editor/durable.tsx"
 import { AsyncView, ErrorAlert, useAction } from "../actions.tsx"
 import { routes } from "../routes.tsx"
 import { AppClient } from "../rpc.ts"
@@ -30,12 +31,15 @@ const draftOf = (settings: NetworkSettings): Draft => ({
 function NetworkForm({ settings }: { settings: NetworkSettings }) {
   const action = useAction()
   const proxyLegend = useId()
-  const [draft, setDraft] = useState<Draft | null>(null)
+  // Kept as typed (editor/durable.tsx); the proxy URL is a secret and stays in the form only.
+  const initial = draftOf(settings)
+  const form = useDurableForm<Draft>("network", "Settings", initial)
   const [saved, setSaved] = useState(false)
-  const values = draft ?? draftOf(settings)
+  const values = form.values
+  const changed = JSON.stringify(values) !== JSON.stringify(initial)
   const edit = (change: Partial<Draft>) => {
     setSaved(false)
-    setDraft({ ...values, ...change })
+    form.edit(change)
   }
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -45,18 +49,20 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line !== "")
-    const result = await action.run(
-      (client) =>
-        client("SetNetworkSettings", {
-          ...(values.proxy === "replace" ? { proxyUrl } : {}),
-          ...(values.proxy === "remove" ? { proxyUrl: null } : {}),
-          bypass,
-          forceProxy: values.forceProxy
-        }),
-      ["network"]
-    )
-    if (result.ok) {
-      setDraft(null)
+    const ok = await form.commit(async () => {
+      const result = await action.run(
+        (client) =>
+          client("SetNetworkSettings", {
+            ...(values.proxy === "replace" ? { proxyUrl } : {}),
+            ...(values.proxy === "remove" ? { proxyUrl: null } : {}),
+            bypass,
+            forceProxy: values.forceProxy
+          }),
+        ["network"]
+      )
+      return result.ok
+    })
+    if (ok) {
       setSaved(true)
     }
   }
@@ -104,7 +110,12 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
         label="Bypass list"
         about="Hosts that go direct, one per line: names, *.domain suffixes, IPs and CIDR ranges. Local networks are on it by default."
       >
-        <Textarea value={values.bypass} onChange={(event) => edit({ bypass: event.target.value })} spellCheck={false} />
+        <Textarea
+          value={values.bypass}
+          readOnly={!form.ready}
+          onChange={(event) => edit({ bypass: event.target.value })}
+          spellCheck={false}
+        />
       </Field>
       <Switch
         checked={values.forceProxy}
@@ -114,23 +125,23 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
         Require the proxy for everyone else
       </Switch>
       <ErrorAlert error={action.error} title="Not saved" />
-      {saved && draft === null && <Alert tone="success">Saved.</Alert>}
+      {saved && !changed && <Alert tone="success">Saved.</Alert>}
       <div className="flex flex-col gap-2 sm:flex-row">
         <Button
           hint="Saves the network settings."
           type="submit"
           variant="primary"
           pending={action.pending}
-          disabled={draft === null}
+          disabled={!changed}
         >
           Save
         </Button>
-        {draft !== null && (
+        {changed && (
           <Button
             hint="Discards unsaved network changes."
             variant="ghost"
             onClick={() => {
-              setDraft(null)
+              void form.discard()
               action.clearError()
             }}
           >
