@@ -94,7 +94,9 @@ const settled = async (slotId: SlotId, count: number) =>
 
 for (const width of [1440, 390]) {
   for (const theme of ["light", "dark"] as const) {
-    test(`edit → submit → edit → submit → ✕, the text and the bar surviving reloads (${width}px, ${theme})`, async ({ page }) => {
+    test(`edit → submit → edit → submit → ✕, the text and the bar surviving reloads (${width}px, ${theme})`, async ({
+      page
+    }) => {
       const { chatId, slotId } = await harbor()
       await settled(slotId, 1)
       await page.setViewportSize({ width, height: 844 })
@@ -338,9 +340,7 @@ for (const width of [1440, 390]) {
       if (sent._tag !== "Posted") throw new Error("Expected a posted message")
       parent = sent.entry.slotId
     }
-    const last = await rpc((api) =>
-      api.Generate({ chatId, parentSlotId: parent, branch: false, direction: "Tide." })
-    )
+    const last = await rpc((api) => api.Generate({ chatId, parentSlotId: parent, branch: false, direction: "Tide." }))
     if (last._tag !== "Posted") throw new Error("Expected a posted reply")
     const slotId = last.entry.slotId
     await settled(slotId, 1)
