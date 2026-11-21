@@ -105,10 +105,7 @@ export const chatPlaces = [
       return composer(page)
     },
     shown: composer,
-    mode: (page) => page.getByTestId("guidance-edit-bar"),
-    gaps: {
-      text: "GuidanceEditor holds the box's text in memory only: no server draft, no browser copy (job/guidancedurable1 fixes it)"
-    }
+    mode: (page) => page.getByTestId("guidance-edit-bar")
   }),
   place({
     name: "Queued message edit",

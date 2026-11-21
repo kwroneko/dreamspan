@@ -42,7 +42,7 @@ const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
 
   // Chat.
   "features/chat/Composer.tsx": [
-    { durable: "ComposerDraft", what: "the composer (and, today, the guidance-edit box; see the gap below)" }
+    { durable: "ComposerDraft", what: "the composer, guidance for a new version included" }
   ],
   "features/chat/QueuedMessages.tsx": [{ durable: "MessageDraft", what: "queued message edit (queue_edit draft)" }],
   "features/chat/insertMessage/InsertEditor.tsx": [
