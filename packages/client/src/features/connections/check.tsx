@@ -37,6 +37,14 @@ const failure = (reason: ProviderErrorReason | null, status: number | null): str
 
 const duration = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`)
 
+/** The model list line of a successful check: "1 model listed in 3 ms." */
+export const listSummary = (result: Pick<ConnectionTest, "catalog" | "models" | "ms">): string => {
+  const count = `${result.models} ${result.models === 1 ? "model" : "models"}`
+  return result.catalog
+    ? `${count} in the built-in list.`
+    : `${count} listed${result.ms === null ? "" : ` in ${duration(result.ms)}`}.`
+}
+
 export const TEST_HINT = "Lists the models, then sends one short message to the chosen model and shows its reply."
 const SEND_HINT = "Sends one short message to this model and shows its reply."
 
@@ -60,11 +68,7 @@ export function CheckResult({
     <Alert tone={result.ok ? "success" : "danger"} title={result.ok ? "It works" : "It doesn't work"}>
       <div className="flex flex-col gap-1">
         {result.reason === null ? (
-          <p>
-            {result.catalog
-              ? `${result.models} models in the built-in list.`
-              : `${result.models} models listed${result.ms === null ? "" : ` in ${duration(result.ms)}`}.`}
-          </p>
+          <p>{listSummary(result)}</p>
         ) : (
           <p>
             Model list: {failure(result.reason, result.status)}. <span className="text-muted">{result.detail}</span>

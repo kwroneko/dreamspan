@@ -2494,7 +2494,7 @@ export const layer = (options: ProvidersOptions = {}) =>
             Effect.map((listed) => ({
               ok: true,
               // A catalog is built in: nothing was sent to list it.
-              detail: catalog ? `${listed.length} models in the built-in list` : `${listed.length} models listed`,
+              detail: `${listed.length} ${listed.length === 1 ? "model" : "models"} ${catalog ? "in the built-in list" : "listed"}`,
               route,
               models: listed.length as number | null,
               reason: null as ProviderErrorReason | null,

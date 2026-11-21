@@ -692,7 +692,7 @@ describe("provider quirks", () => {
       assert.isAtLeast(ms!, 0)
       assert.deepStrictEqual(rest, {
         ok: true,
-        detail: "1 models listed",
+        detail: "1 model listed",
         route: "direct: no proxy configured",
         models: 1,
         reason: null,
