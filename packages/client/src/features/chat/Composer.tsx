@@ -264,10 +264,22 @@ export function Composer({
   const editor = guidanceEditor(session)
   const editing = useGuidanceEdit(session)
   const text = draftText
+  // A new version of a reply is not a send: who replies next follows the draft only for new turns.
+  const sendText = editing === null ? draftText : ""
   useEffect(() => {
     if (editing === null || !textReady) return
     const pending = editor.takePending()
-    if (pending !== null && draft.snapshot().text !== pending) draft.type(pending)
+    const before = draft.snapshot().text
+    if (pending === null || before === pending) return
+    if (before === "") {
+      draft.type(pending)
+      return
+    }
+    // The text there first reaches the server, so replacing it leaves it one step back in the
+    // history (a whole-text replacement is its own entry). Not saved, it stays in the box.
+    void draft.flush().then(() => {
+      if (draft.snapshot().text === before && !draft.isUnsaved()) draft.type(pending)
+    })
   }, [editor, editing, textReady, draft])
   const choices = composerChoice(session)
   const choice = useComposerChoice(session)
@@ -325,8 +337,8 @@ export function Composer({
   const pickedReply = choice.replyFrom !== null && faces.includes(choice.replyFrom) ? choice.replyFrom : null
   const hasImages = (attachmentInput?.count ?? 0) > 0
   const replyPlan = useMemo(
-    () => planReply(cast, turnEntries, speaker, pickedReply, draftText, hasImages, choice.noReplies),
-    [cast, turnEntries, speaker, pickedReply, draftText, hasImages, choice.noReplies]
+    () => planReply(cast, turnEntries, speaker, pickedReply, sendText, hasImages, choice.noReplies),
+    [cast, turnEntries, speaker, pickedReply, sendText, hasImages, choice.noReplies]
   )
   const { next, replier } = replyPlan
   const replierName = nameOf(castView, replier)
@@ -339,7 +351,7 @@ export function Composer({
   // "Who replies next" (DESIGN §2.3): with it on, the decision model picks Auto's replies when it
   // has two or more present characters to choose from, but whoever spoke last (the server's rule).
   const nextDecisionOn = useDecisionPointOn("next")
-  const lastSpeaker = draftText.trim() !== "" || hasImages ? speaker : (leaf?.version.speakerEntityId ?? null)
+  const lastSpeaker = sendText.trim() !== "" || hasImages ? speaker : (leaf?.version.speakerEntityId ?? null)
   const decides =
     nextDecisionOn &&
     replyPlan.auto &&
