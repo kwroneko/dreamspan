@@ -501,6 +501,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         const minimum = next.inputs.model.cacheLayout?.minTokens ?? documentedCacheMinimum(target)
         const nextEnd = lastBreakpoint(next)
         const nextTokens = nextEnd < 0 ? 0 : tokensBetween(next, 0, nextEnd, nextCount)
+        // The total the chip shows the uncached part out of, counted the same way and sent with it.
+        const requestTokens = tokensBetween(next, 0, next.request.messages.length - 1, nextCount)
         if (minimum !== null && end >= 0 && prefixTokens < minimum) {
           return {
             ...boundary,
@@ -523,6 +525,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                     expiresAt: null,
                     verified: false,
                     prefixTokens: 0,
+                    requestTokens,
                     ...speakerWarning,
                     changed: {
                       reason: `The last request was below the model's minimum cacheable size (${minimum.toLocaleString("en-US")} tokens), so nothing was cached.`,
@@ -558,6 +561,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                   expiresAt,
                   verified: (last.cache_read ?? 0) + (last.cache_write ?? 0) > 0,
                   prefixTokens: reusable,
+                  requestTokens,
                   ...speakerWarning,
                   changed
                 }
