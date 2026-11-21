@@ -9,6 +9,7 @@ import { editorExtensions } from "./editorExtensions.ts"
 import { proseTheme } from "./codeTheme.ts"
 import { loadLanguage } from "./codeLanguages.ts"
 import { FieldRevertButton } from "./FieldRevertButton.tsx"
+import { holdCaretAt } from "./holdCaret.ts"
 import { Dialog } from "./Dialog.tsx"
 import { chromeButton, FieldFrame } from "./FieldFrame.tsx"
 import { IconButton } from "./Tooltip.tsx"
@@ -320,12 +321,16 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       view.dispatch({ effects: options.reconfigure(attributes()) })
   }
   update(initial)
+  let releaseCaret = () => {}
   if (initial.autoFocus) {
     // The caret at the end, where an edit usually goes on, or where it was asked to be,
-    // scrolled into view with the page.
+    // scrolled into view with the page; given the place on screen its line had (a
+    // double-click's), held there instead (holdCaret.ts).
     const caret = Math.min(Math.max(0, initial.caret ?? view.state.doc.length), view.state.doc.length)
-    view.dispatch({ selection: { anchor: caret }, scrollIntoView: true })
+    const top = initial.caret === undefined ? undefined : initial.caretTop
+    view.dispatch({ selection: { anchor: caret }, scrollIntoView: top === undefined })
     view.focus()
+    if (top !== undefined) releaseCaret = holdCaretAt(view, top, () => props.onCaretPlaced?.())
   }
   return {
     update,
@@ -353,6 +358,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       }
     },
     destroy: () => {
+      releaseCaret()
       extensionVersion++
       language = "\0gone" // A mode still loading isn't applied to a destroyed view.
       unsubscribe()

@@ -31,7 +31,8 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
-import { MessageBody, sourceOffsetAt } from "../../ui/messageCopy.tsx"
+import { type CaretSpot, caretSpotAt, type EditCaret, locateEditCaret } from "../../ui/editCaret.ts"
+import { MessageBody } from "../../ui/messageCopy.tsx"
 import { HtmlMessageContext } from "../../ui/html/messageHtml.ts"
 import { Composition } from "./Composition.tsx"
 import { Badge } from "../../ui/Surface.tsx"
@@ -303,8 +304,8 @@ function Editor({
   source: Version | undefined
   session: ChatSession
   entry: PathEntry
-  /** Where the caret opens (a double-click's place in the text), else at the end. */
-  caret?: number | undefined
+  /** Where the caret opens (a double-click's place in the text, and its line's place on screen), else at the end. */
+  caret?: EditCaret | undefined
   onCaretTaken: () => void
   onScrollIntoView: () => void
   onSave: () => void
@@ -339,9 +340,10 @@ function Editor({
   // Beside another way to save ("Save in both"), Save says where it saves ("Save here").
   const shownSave = saves[0]?.here ?? saveLabel
   // The editor opens where the message is: when its text takes focus the first time, Save
-  // and Cancel under it come into view too, with the caret at the end just above them.
+  // and Cancel under it come into view too, with the caret at the end just above them. Opened
+  // at a double-click, the caret's line stays where the click was instead (CodeEditorView).
   const actions = useRef<HTMLDivElement>(null)
-  const revealed = useRef(false)
+  const revealed = useRef(initialCaret !== undefined)
   const commands: ChatCommandContext = {
     session,
     view: session.snapshot(),
@@ -418,7 +420,9 @@ function Editor({
               base,
               // Opened from the chat's other view, it leaves focus there (Composition.tsx).
               autoFocus: !draft.mirror,
-              caret: initialCaret,
+              caret: initialCaret?.offset,
+              caretTop: initialCaret?.top,
+              onCaretPlaced: onScrollIntoView,
               quietMarkers: true,
               // Text just added to your version: marked and scrolled to, focus left where it is.
               flash: added,
@@ -642,13 +646,8 @@ const canEditFrom = (target: EventTarget | null) =>
 const onControl = (target: EventTarget | null) =>
   target instanceof Element && target.closest("button, a, input, textarea, select, summary, [role='menuitem']")
 
-/** The browser's caret at a point, as a text position. */
-const caretFromPoint = (x: number, y: number): { node: Node; offset: number } | null => {
-  const position = document.caretPositionFromPoint?.(x, y)
-  if (position) return { node: position.offsetNode, offset: position.offset }
-  const range = document.caretRangeFromPoint?.(x, y)
-  return range ? { node: range.startContainer, offset: range.startOffset } : null
-}
+/** A double-click this close to its first press is on the spot pressed. */
+const SAME_SPOT_PX = 8
 
 /** A third click within this long of a double-click selects a paragraph instead of editing. */
 const TRIPLE_CLICK_MS = 450
@@ -781,7 +780,7 @@ export const Message = memo(function Message({
   // A double-click opens Edit, with the caret where it landed. It waits out a triple-click,
   // which selects a paragraph, and a double-click drag, which selects words, to copy them.
   const pendingEdit = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [caretAt, setCaretAt] = useState<number | undefined>(undefined)
+  const [caretAt, setCaretAt] = useState<EditCaret | undefined>(undefined)
   // Only the edit it opened starts there: a later Edit opens with the caret at the end.
   const caretTaken = useCallback(() => setCaretAt(undefined), [])
   useEffect(() => () => clearTimeout(pendingEdit.current ?? undefined), [])
@@ -791,9 +790,14 @@ export const Message = memo(function Message({
   useEffect(() => {
     now.current = { editing, generating, versionId: version.id }
   })
+  // Where a press landed, read before its click can move the text (ui/editCaret.ts): a
+  // double-click's caret is the spot its first click pressed.
+  const pressed = useRef<{ x: number; y: number; spot: CaretSpot | null } | null>(null)
   // Any press after the double-click (a triple-click's third, or another action begun within
   // the wait) is the user doing something else.
-  const onMouseDown = () => {
+  const onMouseDown = (event: MouseEvent) => {
+    if (event.detail <= 1 && !editing)
+      pressed.current = { x: event.clientX, y: event.clientY, spot: caretSpotAt(event.clientX, event.clientY) }
     if (pendingEdit.current === null) return
     clearTimeout(pendingEdit.current)
     pendingEdit.current = null
@@ -802,9 +806,14 @@ export const Message = memo(function Message({
     if (editing || generating || outside(event) || !canEditFrom(event.target)) return
     const context = { entry, session, branchFork, generated, generating, hidden, report, toast }
     if (messageActions.get("message.edit")?.available?.(context) === false) return
-    const point = caretFromPoint(event.clientX, event.clientY)
-    const mapped = point && sourceOffsetAt(point.node, point.offset)
-    const offset = mapped?.text === version.content ? mapped.offset : undefined
+    // The caret where it landed in the stored text (ui/editCaret.ts), else at the end.
+    const first = pressed.current
+    const spot =
+      first?.spot?.point.node.isConnected &&
+      Math.hypot(first.x - event.clientX, first.y - event.clientY) <= SAME_SPOT_PX
+        ? first.spot
+        : caretSpotAt(event.clientX, event.clientY)
+    const caret = (spot && locateEditCaret(spot, version.content)) ?? undefined
     clearTimeout(pendingEdit.current ?? undefined)
     const versionId = version.id
     pendingEdit.current = setTimeout(() => {
@@ -812,7 +821,7 @@ export const Message = memo(function Message({
       const current = now.current
       if (current.editing || current.generating || current.versionId !== versionId) return
       if (/\s/.test(window.getSelection()?.toString().trim() ?? "")) return
-      setCaretAt(offset)
+      setCaretAt(caret)
       void invokeMessageAction("message.edit", context, "button")
     }, TRIPLE_CLICK_MS)
   }

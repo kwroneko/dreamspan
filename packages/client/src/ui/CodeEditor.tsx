@@ -20,6 +20,10 @@ export interface CodeEditorProps {
   autoFocus?: boolean | undefined
   /** With `autoFocus`, the caret's offset in the text instead of its end. */
   caret?: number | undefined
+  /** With `caret`, the viewport y its line had where it was chosen (a double-click on the text): the box and the page scroll to keep it there. */
+  caretTop?: number | undefined
+  /** After `caretTop` scrolled anything: a virtualized list catches up with its offset. */
+  onCaretPlaced?: (() => void) | undefined
   /** The snippet editor's own text: its text actions don't offer sending it to a snippet. */
   source?: "snippet" | undefined
   /** False: no text actions under it, for text that isn't prose (a pattern, a template's markers). */
