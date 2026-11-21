@@ -218,32 +218,73 @@ const expandSource = (source: string, line: string, base = root) => {
 }
 
 /**
+ * What a stage gathers into a root folder with `cp -a --parents <paths> /<folder>`: the paths as
+ * relative to the stage's working directory, globs in a last component expanded like a COPY's.
+ * `context` says the stage copied the whole build context first (`COPY . .`), so a gathered path
+ * that isn't a build output is the repository's own file, subject to `.dockerignore`.
+ */
+const gathered = (stageText: string, folder: string, base: string) => {
+  const commands = stageText.replace(/\\\n/g, " ")
+  const paths = [...commands.matchAll(/cp -a --parents ((?:[^\s&;|]+\s+)+?)(\/[^\s&;|]+)(?=\s|$)/g)]
+    .filter((match) => match[2]!.replace(/\/$/, "") === folder)
+    .flatMap((match) => match[1]!.trim().split(/\s+/))
+  if (paths.some((path) => path.startsWith("/") || path.startsWith("-") || /[\[\]?$]/.test(path)))
+    throw new Error(`Unsupported gather into ${folder}`)
+  const context = /^COPY \. \.$/m.test(stageText)
+  return { paths: paths.flatMap((path) => expandSource(path, `cp into ${folder}`, base)), context }
+}
+
+/**
  * Final-stage COPY contract. Reject unsupported syntax rather than silently guessing: a `*` in a
  * build-context source's last component is expanded against the repository (Docker's own glob
- * for that case); `?`, `[`, `$`, JSON form and globs elsewhere are refused.
+ * for that case); `?`, `[`, `$`, JSON form and globs elsewhere are refused. A COPY of a root
+ * folder another stage gathered with `cp -a --parents` stands for the gathered paths.
  */
 const imageCopies = (text: string, base = root) => {
-  const final = text.split(/^FROM .+$/m).at(-1)!
+  const parts = text.split(/^(FROM .+)$/m)
+  const stages = new Map<string, string>()
+  for (let i = 1; i + 1 < parts.length; i += 2) {
+    const name = /\sAS\s+(\S+)\s*$/i.exec(parts[i]!)?.[1]
+    if (name) stages.set(name, parts[i + 1]!)
+  }
+  const final = parts.at(-1)!
   return final
     .split("\n")
     .filter((line) => line.startsWith("COPY "))
-    .flatMap((line) => {
+    .flatMap((line): Array<{ stage: string | null; source: string; destination: string; context?: true }> => {
       const words = line.split(/\s+/).slice(1)
       const stage = words[0]?.startsWith("--from=") ? words.shift()!.slice(7) : null
       if (words.length < 2 || words.some((word) => /[\[\]?$]/.test(word))) throw new Error(`Unsupported COPY: ${line}`)
       const destination = words.pop()!.replace(/^\.\//, "").replace(/\/$/, "") || "."
       if (destination.includes("*") || (stage !== null && words.some((word) => word.includes("*"))))
         throw new Error(`Unsupported COPY: ${line}`)
-      return words
-        .flatMap((source) => expandSource(source, line, base))
-        .map((source) => ({ stage, source: source.replace(/^\/app\//, "").replace(/\/$/, ""), destination }))
+      return words.flatMap((word) => {
+        const folder = word.replace(/\/$/, "")
+        const from = stage === null ? undefined : stages.get(stage)
+        if (from !== undefined && /^\/[^/]+$/.test(folder) && folder !== "/app") {
+          const { paths, context } = gathered(from, folder, base)
+          if (paths.length === 0) throw new Error(`COPY of a folder nothing is gathered into: ${line}`)
+          return paths.map((path) => ({
+            stage,
+            source: path,
+            destination: destination === "." ? path : join(destination, path),
+            ...(context ? { context: true as const } : {})
+          }))
+        }
+        return expandSource(word, line, base).map((source) => ({
+          stage,
+          source: source.replace(/^\/app\//, "").replace(/\/$/, ""),
+          destination
+        }))
+      })
     })
 }
 const copies = imageCopies(dockerfile)
 const copiedBy = (path: string, built: boolean, set = copies) =>
   set.some((copy) => {
     if (
-      (built ? copy.stage !== "build" : copy.stage !== null) ||
+      // A repository file comes from the build context, directly or gathered by the build stage.
+      (built ? copy.stage !== "build" : copy.stage !== null && !copy.context) ||
       !(path === copy.source || path.startsWith(copy.source + "/"))
     )
       return false
@@ -725,6 +766,22 @@ it("fails for reachable files absent from the final COPY set", () => {
     { stage: null, source: "a", destination: "." },
     { stage: null, source: "b", destination: "." }
   ])
+  // A root folder the build stage gathers into stands for the gathered paths, at the destination.
+  const gather =
+    "FROM node AS build\nCOPY . .\nRUN npm run build \\\n  && mkdir /out \\\n  && cp -a --parents package.json packages/server/src \\\n    packages/server/dist /out \\\n  && test -d /out\nFROM node\nCOPY --from=build /out/ ./"
+  expect(imageCopies(gather)).toEqual([
+    { stage: "build", source: "package.json", destination: "package.json", context: true },
+    { stage: "build", source: "packages/server/src", destination: "packages/server/src", context: true },
+    { stage: "build", source: "packages/server/dist", destination: "packages/server/dist", context: true }
+  ])
+  expect(copiedBy("packages/server/src/main.ts", false, imageCopies(gather))).toBe(true)
+  expect(copiedBy("packages/server/dist/workers", true, imageCopies(gather))).toBe(true)
+  expect(copiedBy("packages/client/src/main.tsx", false, imageCopies(gather))).toBe(false)
+  // Without the whole context in the build stage, a gathered path is only a build output.
+  expect(copiedBy("packages/server/src/main.ts", false, imageCopies(gather.replace("COPY . .", "")))).toBe(false)
+  expect(() => imageCopies("FROM node AS build\nRUN mkdir /out\nFROM node\nCOPY --from=build /out/ ./")).toThrow(
+    "nothing is gathered"
+  )
   expect(() => imageCopies('FROM node\nCOPY ["a", "b"]')).toThrow("Unsupported COPY")
   // A `*` in a source's last component is the repository's matching files; elsewhere it's refused.
   expect(imageCopies("FROM node\nCOPY spec/*.md spec/").map((copy) => copy.source)).toContain("spec/DESIGN.md")

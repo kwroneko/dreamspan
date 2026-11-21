@@ -35,10 +35,10 @@ const failure = (reason: ProviderErrorReason | null, status: number | null): str
   }
 }
 
-export const duration = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`)
+const duration = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`)
 
 export const TEST_HINT = "Lists the models, then sends one short message to the chosen model and shows its reply."
-export const SEND_HINT = "Sends one short message to this model and shows its reply."
+const SEND_HINT = "Sends one short message to this model and shows its reply."
 
 /**
  * A check's result: whether it works, the list, the reply, and the route. `picker` chooses the
