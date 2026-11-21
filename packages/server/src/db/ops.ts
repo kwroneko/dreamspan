@@ -1552,6 +1552,7 @@ const WriteOpsChatOwn = RpcGroup.make(
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       replyFromEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       noReplies: Schema.optionalKey(Schema.Boolean),
+      guidanceSlotId: Schema.optionalKey(Schema.NullOr(SlotId)),
       /** Consume a one-reply pick only if it still names this card. */
       consumeReplyFromEntityId: Schema.optionalKey(EntityId)
     },

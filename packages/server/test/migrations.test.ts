@@ -164,7 +164,8 @@ describe("0002_files", () => {
           "contract_records",
           "attachment_paths",
           "share_invitations",
-          "share_birth"
+          "share_birth",
+          "guidance_target"
         ]
       )
       // The existing row is kept, an image by default.
@@ -443,7 +444,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0007_contract_records",
       "0008_attachment_paths",
       "0009_share_invitations",
-      "0010_share_birth"
+      "0010_share_birth",
+      "0011_guidance_target"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -516,6 +518,7 @@ describe("0005_preview_macro", () => {
         "0008_attachment_paths": _newest,
         "0009_share_invitations": _last,
         "0010_share_birth": _last10,
+        "0011_guidance_target": _later11,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -552,6 +555,7 @@ describe("0006_persona_locks", () => {
         "0008_attachment_paths": _latest,
         "0009_share_invitations": _last,
         "0010_share_birth": _last10,
+        "0011_guidance_target": _later11,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -599,6 +603,7 @@ describe("0007_contract_records", () => {
         "0008_attachment_paths": _later,
         "0009_share_invitations": _last,
         "0010_share_birth": _last10,
+        "0011_guidance_target": _later11,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -625,6 +630,7 @@ describe("0008_attachment_paths", () => {
         "0008_attachment_paths": _new,
         "0009_share_invitations": _later,
         "0010_share_birth": _later10,
+        "0011_guidance_target": _later11,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -645,7 +651,12 @@ describe("0009_share_invitations", () => {
   it.effect("binds a database at 0008's shares to their folder, keeping them, and adds invitations", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0009_share_invitations": _new, "0010_share_birth": _last10, ...before } = migrations
+      const {
+        "0009_share_invitations": _new,
+        "0010_share_birth": _last10,
+        "0011_guidance_target": _later11,
+        ...before
+      } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       for (const user of ["u", "v"])
         yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES (${user}, ${user}, 'Owner', 'user', 0)`
@@ -669,7 +680,7 @@ describe("0010_share_birth", () => {
   it.effect("adds birth times to shares and invitations and a declined mark, keeping what's there", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0010_share_birth": _new, ...before } = migrations
+      const { "0010_share_birth": _new, "0011_guidance_target": _later11, ...before } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       for (const user of ["u", "v"])
         yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES (${user}, ${user}, 'Owner', 'user', 0)`
@@ -689,6 +700,24 @@ describe("0010_share_birth", () => {
   )
 })
 
+describe("0011_guidance_target", () => {
+  it.effect("adds the reply a composer's guidance is for, null on the drafts already there", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { "0011_guidance_target": _new, ...before } = migrations
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'chat', 'active', 0)`
+      yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, content, updated_at)
+        VALUES ('d', 'u', 'composer', 'c', 'Typed.', 0)`
+      yield* Effect.scoped(Layer.build(Migrations))
+      assert.deepStrictEqual(yield* sql`SELECT id, content, guidance_slot_id FROM drafts`, [
+        { id: "d", content: "Typed.", guidance_slot_id: null }
+      ])
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
 describe("released migrations", () => {
   // A migration's SQL must never change once released, so it can't be built from helpers that
   // later edits could change (review files23 finding 1). The baseline is exempt: it may still
@@ -703,7 +732,8 @@ describe("released migrations", () => {
       "migrationPersonaLocks.ts",
       "migrationAttachmentPaths.ts",
       "migrationShareInvitations.ts",
-      "migrationShareBirth.ts"
+      "migrationShareBirth.ts",
+      "migrationGuidanceTarget.ts"
     ]
     for (const module of modules)
       assert.deepStrictEqual(

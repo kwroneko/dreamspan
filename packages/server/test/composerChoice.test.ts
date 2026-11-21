@@ -178,4 +178,55 @@ describe("the composer's choice", () => {
       assert.isTrue((yield* api.GetComposerChoice({ chatId: chat.id, draftId: moved.id })).noReplies)
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
+
+  it.live(
+    "keeps the reply a new version's guidance is written for, only a live slot of its chat, and publishes it",
+    () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const ana = yield* card(api, "Ana")
+        const chat = yield* api.CreateChat({ title: "Lantern" })
+        const other = yield* api.CreateChat({ title: "Elsewhere" })
+        const events: Array<ChatEvent> = []
+        yield* api.SubscribeChat({ chatId: chat.id }).pipe(
+          Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+          Effect.forkScoped
+        )
+        yield* eventually(() => events.length > 0)
+        const sent = yield* posted(
+          api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "Hi.", speakerEntityId: ana })
+        )
+        const elsewhere = yield* posted(
+          api.SendMessage({ chatId: other.id, parentSlotId: null, branch: false, content: "Hi.", speakerEntityId: ana })
+        )
+        const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
+        assert.isNull((yield* api.GetComposerChoice({ chatId: chat.id, draftId: draft.id })).guidanceSlotId ?? null)
+        const aimed = yield* api.SetComposerChoice({
+          chatId: chat.id,
+          draftId: draft.id,
+          guidanceSlotId: sent.entry.slotId
+        })
+        assert.strictEqual(aimed.guidanceSlotId, sent.entry.slotId)
+        yield* eventually(() =>
+          events.some((e) => e._tag === "ComposerChoice" && e.choice.guidanceSlotId === sent.entry.slotId)
+        )
+        // Other choices leave it as it is; it is read back with the draft.
+        yield* api.SetComposerChoice({ chatId: chat.id, draftId: draft.id, guidance: true })
+        assert.strictEqual(
+          (yield* api.GetComposerChoice({ chatId: chat.id, draftId: draft.id })).guidanceSlotId,
+          sent.entry.slotId
+        )
+        // Another chat's slot is refused, and nothing changes.
+        const refused = yield* outcome(
+          api.SetComposerChoice({ chatId: chat.id, draftId: draft.id, guidanceSlotId: elsewhere.entry.slotId })
+        )
+        assert.strictEqual(refused, "NotFound")
+        assert.strictEqual(
+          (yield* api.GetComposerChoice({ chatId: chat.id, draftId: draft.id })).guidanceSlotId,
+          sent.entry.slotId
+        )
+        const cleared = yield* api.SetComposerChoice({ chatId: chat.id, draftId: draft.id, guidanceSlotId: null })
+        assert.isNull(cleared.guidanceSlotId)
+      }).pipe(Effect.scoped, withServer(testConfig()))
+  )
 })

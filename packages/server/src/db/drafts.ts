@@ -29,7 +29,7 @@ import {
 } from "@dreamspan/shared/drafts.ts"
 import { getAt, isHeldField, parseField } from "@dreamspan/shared/editing.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
-import type { MessageImages, EntityId } from "@dreamspan/shared/chat.ts"
+import type { MessageImages, EntityId, SlotId } from "@dreamspan/shared/chat.ts"
 import { ComposerChoice } from "@dreamspan/shared/composerApi.ts"
 import { EDIT_THINKING_FIELD } from "@dreamspan/shared/chatApi.ts"
 import { editableThinking, type ReplySections } from "@dreamspan/shared/replySections.ts"
@@ -64,6 +64,8 @@ interface DraftRow {
   readonly guidance: number
   /** 1 while the composer's Next is No one. */
   readonly no_replies: number
+  /** The reply a new version's guidance is written for (migration 0011_guidance_target). */
+  readonly guidance_slot_id: string | null
 }
 
 /** The draft a write took its text from: by its id, in the session it was typed in, with exactly that text. */
@@ -1192,7 +1194,8 @@ export const makeDraftStore = (
       guidance: row.guidance === 1,
       speakerEntityId: row.speaker_entity_id as EntityId | null,
       replyFromEntityId: row.reply_from_entity_id as EntityId | null,
-      noReplies: row.no_replies === 1
+      noReplies: row.no_replies === 1,
+      guidanceSlotId: row.guidance_slot_id as SlotId | null
     })
 
   /** The speaker and reply choice of a composer draft of the user's chat. */
@@ -1216,6 +1219,7 @@ export const makeDraftStore = (
       readonly replyFromEntityId?: EntityId | null
       readonly guidance?: boolean
       readonly noReplies?: boolean
+      readonly guidanceSlotId?: SlotId | null
       readonly consumeReplyFromEntityId?: EntityId
     }
   ) =>
@@ -1237,16 +1241,23 @@ export const makeDraftStore = (
           : change.replyFromEntityId === undefined
             ? draft.reply_from_entity_id
             : change.replyFromEntityId
+      if (change.guidanceSlotId !== undefined && change.guidanceSlotId !== null) {
+        const [slot] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM slots
+          WHERE id = ${change.guidanceSlotId} AND chat_id = ${chatId} AND deleted_at IS NULL`
+        if (slot!.n === 0) return yield* new NotFound({ entity: "slot", id: change.guidanceSlotId })
+      }
       const guidance = change.guidance === undefined ? draft.guidance : Number(change.guidance)
       const noReplies = change.noReplies === undefined ? draft.no_replies : Number(change.noReplies)
+      const guidanceSlot = change.guidanceSlotId === undefined ? draft.guidance_slot_id : change.guidanceSlotId
       yield* sql`UPDATE drafts SET speaker_entity_id = ${speaker}, reply_from_entity_id = ${replyFrom}, guidance = ${guidance},
-        no_replies = ${noReplies} WHERE id = ${draft.id}`
+        no_replies = ${noReplies}, guidance_slot_id = ${guidanceSlot} WHERE id = ${draft.id}`
       return choiceOf({
         ...draft,
         speaker_entity_id: speaker,
         reply_from_entity_id: replyFrom,
         guidance,
-        no_replies: noReplies
+        no_replies: noReplies,
+        guidance_slot_id: guidanceSlot
       })
     })
 
