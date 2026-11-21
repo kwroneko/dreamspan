@@ -3,8 +3,8 @@
 // it puts that guidance in the composer's box, with a bar above the composer naming the reply.
 // Neither changes the version shown: only a new version uses the text (owner, 2026-11-01). While the bar is up, any
 // submit makes a new version of that reply with the box's text, and the text stays for the
-// next one; that reply's swipes use the box as it is. ✕ gives the box back to new turns, with
-// the draft it held before. The composer's own draft is never written meanwhile (Composer.tsx).
+// next one; that reply's swipes use the box as it is. ✕ gives the box back to new turns. The box's
+// text is always the composer draft's (one box, one draft: owner 2026-11-21), so a reload keeps it.
 import type { EntityId, ForkId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
 import { useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
@@ -17,18 +17,50 @@ import { messageActions, viewOf } from "./messageActions.tsx"
 import { messageDirections } from "./presentation.tsx"
 import type { ChatSession, ChatView, GuidanceRequest } from "./session.ts"
 
-/** The reply whose guidance the composer's box holds, and the box's text. */
+/**
+ * The reply the composer's text is aimed at while its guidance is written (DESIGN §2.2). The
+ * text itself is the composer draft's (one box, one draft: owner 2026-11-21), saved and backed
+ * up like any typing; this only names the reply, kept in this browser per chat so a reload
+ * reopens it.
+ */
 export interface GuidanceEdit {
   readonly slotId: SlotId
   /** The fork it was opened in; showing another closes the bar. */
   readonly forkId: ForkId | null
   readonly speakerEntityId: EntityId | null
-  readonly text: string
+}
+
+const storageKey = (chatId: string) => `guidanceEdit:${chatId}`
+
+const readStored = (chatId: string | null): GuidanceEdit | null => {
+  if (chatId === null) return null
+  try {
+    const raw = localStorage.getItem(storageKey(chatId))
+    if (raw === null) return null
+    const value = JSON.parse(raw) as Partial<Record<keyof GuidanceEdit, unknown>>
+    return typeof value.slotId === "string"
+      ? {
+          slotId: value.slotId as SlotId,
+          forkId: typeof value.forkId === "string" ? (value.forkId as ForkId) : null,
+          speakerEntityId: typeof value.speakerEntityId === "string" ? (value.speakerEntityId as EntityId) : null
+        }
+      : null
+  } catch {
+    return null
+  }
 }
 
 export class GuidanceEditor {
-  private edit: GuidanceEdit | null = null
+  private edit: GuidanceEdit | null
+  /** Guidance the reply had, for the composer to put in its draft when opened. */
+  private pending: string | null = null
   private readonly listeners = new Set<() => void>()
+  private readonly chatId: string | null
+
+  constructor(chatId: string | null = null) {
+    this.chatId = chatId
+    this.edit = readStored(chatId)
+  }
 
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener)
@@ -39,25 +71,38 @@ export class GuidanceEditor {
 
   private set(edit: GuidanceEdit | null) {
     this.edit = edit
+    if (this.chatId !== null) {
+      try {
+        if (edit === null) localStorage.removeItem(storageKey(this.chatId))
+        else localStorage.setItem(storageKey(this.chatId), JSON.stringify(edit))
+      } catch {
+        // The mode is a convenience; the text is in the composer draft either way.
+      }
+    }
     for (const listener of this.listeners) listener()
   }
 
-  /** Puts the guidance of the version shown in the box, for new versions of its reply. */
+  /** Aims the composer at new versions of this reply; its guidance (if any) goes into the draft. */
   open(entry: PathEntry, forkId: ForkId | null) {
     const { version } = entry
+    const direction = version.writer === "model" ? (version.direction ?? "") : ""
+    this.pending = direction === "" ? null : direction
     this.set({
       slotId: entry.slotId,
       forkId,
-      speakerEntityId: version.speakerEntityId ?? entry.firstSpeakerEntityId,
-      text: version.writer === "model" ? (version.direction ?? "") : ""
+      speakerEntityId: version.speakerEntityId ?? entry.firstSpeakerEntityId
     })
   }
 
-  type(text: string) {
-    if (this.edit !== null && this.edit.text !== text) this.set({ ...this.edit, text })
+  /** The reply's guidance to put in the draft, once. */
+  takePending(): string | null {
+    const pending = this.pending
+    this.pending = null
+    return pending
   }
 
   close() {
+    this.pending = null
     if (this.edit !== null) this.set(null)
   }
 
@@ -66,8 +111,8 @@ export class GuidanceEditor {
    * reply being edited; none for Continue of another; undefined (the re-rolled version's own)
    * for a new version of any other reply.
    */
-  guidanceFor(slotId: SlotId, kind: "version" | "continue"): string | undefined {
-    if (this.edit?.slotId === slotId) return this.edit.text
+  guidanceFor(slotId: SlotId, kind: "version" | "continue", boxText: string): string | undefined {
+    if (this.edit?.slotId === slotId) return boxText
     return kind === "continue" && this.edit !== null ? "" : undefined
   }
 }
@@ -80,7 +125,7 @@ export class GuidanceEditor {
 export const composerGuidance =
   (editor: GuidanceEditor, toggleOn: () => boolean, boxText: () => string) =>
   ({ slotId, kind }: GuidanceRequest): string | undefined => {
-    if (editor.snapshot() !== null) return editor.guidanceFor(slotId, kind)
+    if (editor.snapshot() !== null) return editor.guidanceFor(slotId, kind, boxText())
     return kind === "continue" && toggleOn() ? boxText() : undefined
   }
 
@@ -94,7 +139,7 @@ const editors = new WeakMap<ChatSession, GuidanceEditor>()
 export const guidanceEditor = (session: ChatSession): GuidanceEditor => {
   let editor = editors.get(session)
   if (editor === undefined) {
-    editor = new GuidanceEditor()
+    editor = new GuidanceEditor(session.id)
     editors.set(session, editor)
   }
   return editor

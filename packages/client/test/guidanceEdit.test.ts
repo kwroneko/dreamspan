@@ -99,18 +99,19 @@ describe("what a new version is asked with", () => {
   it("for the reply being edited, uses the box as it is now, unsaved edits and an empty box included (rule 4)", async () => {
     const { s, requests } = session()
     const editor = new GuidanceEditor()
+    let box = "Make it rain."
     s.provideGuidance(
       composerGuidance(
         editor,
         () => false,
-        () => "Draft."
+        () => box
       )
     )
     editor.open(entry("s2", "Make it rain."), null)
     await s.regenerate(entry("s2", "Make it rain."))
-    editor.type("Make it snow.")
+    box = "Make it snow."
     await s.regenerate(entry("s2", "Make it rain."))
-    editor.type("")
+    box = ""
     await s.regenerate(entry("s2", "Make it rain."))
     // Any other reply keeps its own guidance; Continue of another reply takes none.
     await s.regenerate(entry("s1", "Wake up."))
@@ -127,22 +128,23 @@ describe("what a new version is asked with", () => {
 })
 
 describe("the guidance editor", () => {
-  it("opens with the guidance of the version shown, or an empty box, and closes (rules 3 and 5)", () => {
+  it("opens on a reply, handing the composer its guidance once (none for a reply without), and closes (rules 3 and 5)", () => {
     const editor = new GuidanceEditor()
     const seen: Array<unknown> = []
-    editor.subscribe(() => seen.push(editor.snapshot()?.text ?? null))
+    editor.subscribe(() => seen.push(editor.snapshot()?.slotId ?? null))
     editor.open(entry("s2", "Make it rain."), "f1" as ForkId)
-    expect(editor.snapshot()).toEqual({ slotId: "s2", forkId: "f1", speakerEntityId: aria, text: "Make it rain." })
+    expect(editor.snapshot()).toEqual({ slotId: "s2", forkId: "f1", speakerEntityId: aria })
+    expect(editor.takePending()).toBe("Make it rain.")
+    expect(editor.takePending()).toBeNull()
     editor.open(entry("s3", null), null)
-    expect(editor.snapshot()?.text).toBe("")
-    editor.type("Fog rolls in.")
+    expect(editor.takePending()).toBeNull()
     editor.close()
     expect(editor.snapshot()).toBeNull()
-    expect(seen).toEqual(["Make it rain.", "", "Fog rolls in.", null])
+    expect(seen).toEqual(["s2", "s3", null])
   })
 
   it("stays only while its reply is on the path shown, in the fork it was opened in (rule 5)", () => {
-    const edit = { slotId: "s2" as SlotId, forkId: "f1" as ForkId, speakerEntityId: aria, text: "" }
+    const edit = { slotId: "s2" as SlotId, forkId: "f1" as ForkId, speakerEntityId: aria }
     const entries = [entry("s1", null), entry("s2", "Rain.")]
     expect(editStillShown(edit, { forkId: "f1" as ForkId, entries })).toBe(true)
     expect(editStillShown(edit, { forkId: "f1" as ForkId, entries: entries.slice(0, 1) })).toBe(false)

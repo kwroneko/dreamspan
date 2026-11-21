@@ -259,11 +259,16 @@ export function Composer({
     error: saveError,
     draftId
   } = useSyncExternalStore(draft.subscribe, draft.snapshot)
-  // A reply's guidance being edited: the box shows it, and typing changes it, not the draft,
-  // so the draft (and a reload) still has what was typed before Edit.
+  // A reply's guidance being edited: the box is still the composer draft (one box, one draft),
+  // only aimed at a new version of that reply; the reply's guidance, if any, is typed into it.
   const editor = guidanceEditor(session)
   const editing = useGuidanceEdit(session)
-  const text = editing === null ? draftText : editing.text
+  const text = draftText
+  useEffect(() => {
+    if (editing === null || !textReady) return
+    const pending = editor.takePending()
+    if (pending !== null && draft.snapshot().text !== pending) draft.type(pending)
+  }, [editor, editing, textReady, draft])
   const choices = composerChoice(session)
   const choice = useComposerChoice(session)
   // The guidance toggle belongs to this composer, shown on while a reply's guidance is
@@ -606,10 +611,7 @@ export function Composer({
 
   const controls: ComposerControlContext = {
     draft: {
-      append: (text) => {
-        if (editing === null) draft.type(draft.snapshot().text + text)
-        else editor.type((editor.snapshot()?.text ?? "") + text)
-      }
+      append: (text) => draft.type(draft.snapshot().text + text)
     },
     compact: phone,
     recoverQueued: (withdrawn, images) => {
@@ -752,8 +754,8 @@ export function Composer({
           data-testid="composer"
           data-has-attachments={attachmentInput?.count ? true : undefined}
           value={text}
-          readOnly={editing === null && !textReady}
-          aria-busy={editing === null && !textReady}
+          readOnly={!textReady}
+          aria-busy={!textReady}
           aria-describedby={`${composerId}-hint`}
           placeholder={
             editing !== null
@@ -766,9 +768,7 @@ export function Composer({
                     ? "Queue…"
                     : "Message…"
           }
-          onChange={(event) =>
-            editing === null ? draft.type(event.currentTarget.value) : editor.type(event.currentTarget.value)
-          }
+          onChange={(event) => draft.type(event.currentTarget.value)}
           onKeyDown={onKeyDown}
         />
       </ComposerBox>
