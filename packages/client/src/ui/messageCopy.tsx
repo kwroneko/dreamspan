@@ -260,6 +260,13 @@ export function sourceOffsetAt(node: Node, offset: number): { text: string; offs
   return source === undefined ? null : { text, offset: source }
 }
 
+/** The message body (`MessageBody`) a node is in, with its source text; null outside one. */
+export function messageBodyAt(node: Node): { body: Element; text: string } | null {
+  const body = bodyAt(node)
+  const text = body ? bodies.get(body) : undefined
+  return body && text !== undefined ? { body, text } : null
+}
+
 /** Copy and native selection drags share the effective registered handler. */
 export function registerMessageCopy() {
   const dispose = messageCopyHandlers.register({ id: "message.source-copy", order: 0, copy: copyStoredSelection })

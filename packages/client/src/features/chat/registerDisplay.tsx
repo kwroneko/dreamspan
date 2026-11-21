@@ -3,6 +3,7 @@ import { Navigate } from "@tanstack/react-router"
 import { routes } from "../../routes.tsx"
 import { lazy } from "react"
 import { messageRenderers } from "../../ui/Markdown.tsx"
+import { registerEditCaret } from "../../ui/editCaret.ts"
 import { registerMessageCopy } from "../../ui/messageCopy.tsx"
 import { CardHeader } from "../../ui/Surface.tsx"
 import { appTools, useTitle } from "../shell.tsx"
@@ -33,6 +34,8 @@ function InterfacePage() {
 
 export const registerDisplay = () => [
   registerMessageCopy(),
+  // Where a double-click opens the message's edit (ui/editCaret.ts).
+  ...registerEditCaret(),
   routes.register({
     id: "settings.display",
     parent: "settings",
