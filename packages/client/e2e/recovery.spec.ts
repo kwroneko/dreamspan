@@ -294,7 +294,8 @@ test("the recovery warning counts additions, deletions and saved copies without 
       refId: card.id,
       field: textField([field]),
       content,
-      at: Date.now(),
+      // A stuck copy: the warning ignores copies younger than a normal save.
+      at: Date.now() - 60_000,
       ancestors: [],
       save: {
         kind: "editor",

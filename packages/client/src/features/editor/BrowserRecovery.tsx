@@ -9,6 +9,13 @@ import { copiesOfUser, type Copy, dropCopy, flushCopies, pendingOf, subscribeCop
 
 import { dropTypedBackup } from "./typedBackup.ts"
 
+/**
+ * How old a copy must be before the sidebar warning counts it. Normal typing keeps a copy
+ * only through its save delay and request; an older one didn't arrive (a failed save, a
+ * missing target, an expired session or a stalled request).
+ */
+const STUCK_MS = 10_000
+
 export function RecoveryNotice() {
   return (
     <p role="status">
@@ -37,13 +44,17 @@ export function BrowserRecovery({
   const [deleting, setDeleting] = useState<Copy | null>(null)
   const [pending, setPending] = useState(false)
   const [recovered, setRecovered] = useState(initiallyRecovered)
+  const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     let active = true
     let version = 0
     const refresh = () => {
       const current = ++version
       void copiesOfUser(userId).then((next) => {
-        if (active && current === version) setCopies(next)
+        if (active && current === version) {
+          setNow(Date.now())
+          setCopies(next)
+        }
       })
     }
     const unsubscribe = subscribeCopies(refresh)
@@ -53,10 +64,21 @@ export function BrowserRecovery({
       unsubscribe()
     }
   }, [userId])
+  // The warning counts only stuck copies, re-checking when the youngest one comes of age.
+  const stuck = copies.filter((copy) => now - copy.at >= STUCK_MS)
+  const nextStuck = copies.reduce(
+    (soonest, copy) => (now - copy.at < STUCK_MS ? Math.min(soonest, copy.at + STUCK_MS) : soonest),
+    Infinity
+  )
+  useEffect(() => {
+    if (!warning || nextStuck === Infinity) return
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, nextStuck - Date.now()) + 50)
+    return () => clearTimeout(timer)
+  }, [warning, nextStuck])
   const read = async () => setCopies(await copiesOfUser(userId))
   return (
     <>
-      {(!warning || copies.length > 0) && (
+      {(!warning || stuck.length > 0) && (
         <Button
           variant="ghost"
           className={
@@ -71,7 +93,7 @@ export function BrowserRecovery({
           }}
         >
           {warning && <Icon name="alert" />}
-          {warning ? `${copies.length} unsaved ${copies.length === 1 ? "text" : "texts"}` : "Unsaved text"}
+          {warning ? `${stuck.length} unsaved ${stuck.length === 1 ? "text" : "texts"}` : "Unsaved text"}
         </Button>
       )}
       <Dialog
