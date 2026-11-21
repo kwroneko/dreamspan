@@ -4,7 +4,7 @@ import { StSettingsImporter } from "./StSettingsImport.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
 // The connection list and the form for a new connection.
 import { providerBaseUrl } from "@dreamspan/shared/providerDefinitions.ts"
-import type { Credential, CredentialId, ProviderInfo } from "@dreamspan/shared/providers.ts"
+import type { ConnectionId, Credential, CredentialId, ProviderInfo } from "@dreamspan/shared/providers.ts"
 import { originOf } from "@dreamspan/shared/providers.ts"
 import type { ConnectionTest } from "@dreamspan/shared/api.ts"
 import { useAtomValue } from "@effect/atom-react"
@@ -13,6 +13,7 @@ import { Effect } from "effect"
 import { AsyncResult } from "effect/reactivity"
 import { type FormEvent, useRef, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
+import type { AppError } from "../../errors.ts"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Field, focusFirstInvalid, formText, Input, SecretInput } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
@@ -213,6 +214,8 @@ function NewConnectionForm({
   const [keyAccount, setKeyAccount] = useState<{ email: string; project: string | null } | null>(null)
   const [credentialId, setCredentialId] = useState<CredentialId | null>(credentials[0]?.id ?? null)
   const [submitted, setSubmitted] = useState(false)
+  /** A connection created here whose chosen default model then failed to be set. */
+  const [unsetDefault, setUnsetDefault] = useState<{ connectionId: ConnectionId; error: AppError } | null>(null)
 
   const provider = providers.find((entry) => entry.id === values.providerId) ?? providers[0]
   const api = provider?.apis.find((entry) => entry.id === values.apiId) ?? provider?.apis[0]
@@ -328,7 +331,10 @@ function NewConnectionForm({
                 ["models", "settings"]
               )
         freshConnections.set(connectionId, refresh?.ok ? refresh.value : null)
-        void navigate({ to: "/settings/connections/$connectionId", params: { connectionId } })
+        // Saved, but without the default the form required: say so here and point to its page
+        // to choose one. The form is replaced, so it can't create a second copy.
+        if (refresh && !refresh.ok) setUnsetDefault({ connectionId, error: refresh.error })
+        else void navigate({ to: "/settings/connections/$connectionId", params: { connectionId } })
       }
       return result.ok
     })
@@ -345,6 +351,27 @@ function NewConnectionForm({
   const typed = (name: keyof typeof noKeys) => (empty: boolean) =>
     setKeyEmpty((current) => ({ ...current, [name]: empty }))
   const editProvider = (draft: ProviderDraft) => edit({ provider: draft })
+  if (unsetDefault)
+    return (
+      <Card>
+        <CardHeader center inline title="New connection" />
+        <ErrorAlert
+          error={unsetDefault.error}
+          title="The connection was saved, but its default model wasn't set"
+          actions={
+            <Tooltip label="Opens the saved connection, where you choose the model new chats use.">
+              <Link
+                to="/settings/connections/$connectionId"
+                params={{ connectionId: unsetDefault.connectionId }}
+                className={buttonClass("primary")}
+              >
+                Choose the model
+              </Link>
+            </Tooltip>
+          }
+        />
+      </Card>
+    )
   return (
     <Card>
       <CardHeader center inline title="New connection" />

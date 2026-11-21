@@ -1,7 +1,8 @@
 // Testing a connection (owner, 2026-11-20): on the new connection form the values as typed are
 // tested with nothing saved, the test lists the models and sends one short message to the model
 // chosen, and with no default model yet the user picks it there. A connection's page has the
-// same test near its top. The layout audit runs at 1440 and 390 px with LAYOUT_AUDIT=1.
+// same test near its top. A connection saved whose chosen default then fails to be set says so
+// and leads to its page instead of leaving silently. The layout audit runs at 1440 and 390 px with LAYOUT_AUDIT=1.
 import { expect, type Page, test, type TestInfo } from "@playwright/test"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { chooseCustomServer, type FakeProvider, REPLY, startProvider } from "./support/provider.ts"
@@ -98,4 +99,54 @@ test("the new connection form tests the typed values without saving, and the use
   await page.setViewportSize({ width: 390, height: 844 })
   await page.reload()
   await expect(page.getByRole("button", { name: "Test", exact: true })).toBeInViewport()
+})
+
+test("a connection saved without its chosen default says so and leads to choosing one", async ({ page }, info) => {
+  // No default yet, so the form requires one; setting it fails after the connection is created.
+  await admin((api) => api.ChangeGenerationDefaults({ change: { model: null } }))
+  const before = (await admin((api) => api.ListConnections())).length
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string }) : null
+      if (request?.tag === "ChangeGenerationDefaults")
+        socket.send(
+          JSON.stringify({
+            _tag: "Exit",
+            requestId: request.id,
+            exit: {
+              _tag: "Failure",
+              cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Synthetic defaults refusal" } }]
+            }
+          })
+        )
+      else upstream.send(data)
+    })
+  })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/settings/connections/new`)
+  await chooseCustomServer(page)
+  await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
+  await page.getByLabel("API key", { exact: true }).fill("sk-typed-test-key-7782")
+  await page.getByLabel("Default model for new chats", { exact: true }).fill("fake-large")
+  await page.getByRole("button", { name: "Create connection" }).click()
+
+  // It stays, says what happened, and offers no second Create.
+  const alert = page
+    .getByRole("alert")
+    .filter({ hasText: "The connection was saved, but its default model wasn't set" })
+  await expect(alert).toBeVisible()
+  await expect(page).toHaveURL(/\/settings\/connections\/new$/)
+  await expect(page.getByRole("button", { name: "Create connection" })).toHaveCount(0)
+  expect((await admin((api) => api.ListConnections())).length).toBe(before + 1)
+  expect((await admin((api) => api.GetGenerationDefaults())).model).toBeNull()
+  await audit(page, info, "new-connection-default-unset")
+
+  // The saved connection's page is where the model is chosen.
+  await alert.getByRole("link", { name: "Choose the model" }).click()
+  await expect(page).toHaveURL(/\/settings\/connections\/(?!new$)[^/]+$/)
+  await expect(page.getByRole("status").filter({ hasText: "for new chats" })).toContainText(
+    "No model is set for new chats"
+  )
+  expect((await admin((api) => api.ListConnections())).length).toBe(before + 1)
 })
