@@ -4,7 +4,7 @@
 // (ST-GRIPES D8). A change made in any tab is published to every tab of the chat.
 //
 // One store per open chat, so the composer and the Cast tab read and change the same choice.
-import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { EntityId, SlotId } from "@dreamspan/shared/chat.ts"
 import type { ComposerChoice } from "@dreamspan/shared/composerApi.ts"
 import { useSyncExternalStore } from "react"
 import { focusComposer } from "./composerFocus.ts"
@@ -23,6 +23,8 @@ export interface ChoiceState {
   readonly replyFrom: EntityId | null
   /** Next is No one: a send asks for no reply until another choice; a pick still gets its one reply. */
   readonly noReplies: boolean
+  /** The reply whose new version the box's text is guidance for (guidanceEdit.tsx); null: new turns. */
+  readonly guidanceSlot: SlotId | null
 }
 
 type Change = {
@@ -30,6 +32,7 @@ type Change = {
   readonly speaker?: EntityId | null
   readonly replyFrom?: EntityId | null
   readonly noReplies?: boolean
+  readonly guidanceSlot?: SlotId | null
 }
 
 /** How long a choice that couldn't be read waits before it's read again. */
@@ -43,7 +46,8 @@ class ComposerChoices {
     speaker: null,
     replyFrom: null,
     noReplies: false,
-    guidance: false
+    guidance: false,
+    guidanceSlot: null
   }
   private readonly listeners = new Set<() => void>()
   /** Bumped by each read and change, so an older read's answer is dropped. */
@@ -79,7 +83,16 @@ class ComposerChoices {
   bind(draftId: string | null, guidance = false) {
     if (draftId === this.state.draftId) return
     this.reads++
-    this.setState({ draftId, loaded: false, saving: false, speaker: null, replyFrom: null, noReplies: false, guidance })
+    this.setState({
+      draftId,
+      loaded: false,
+      saving: false,
+      speaker: null,
+      replyFrom: null,
+      noReplies: false,
+      guidance,
+      guidanceSlot: null
+    })
     if (draftId !== null) void this.read()
   }
 
@@ -105,7 +118,8 @@ class ComposerChoices {
       speaker: choice?.speakerEntityId ?? null,
       replyFrom: choice?.replyFromEntityId ?? null,
       noReplies: choice?.noReplies ?? false,
-      guidance: choice?.guidance ?? false
+      guidance: choice?.guidance ?? false,
+      guidanceSlot: choice?.guidanceSlotId ?? null
     })
     if (this.early !== null) {
       const speaker = this.early
@@ -124,7 +138,8 @@ class ComposerChoices {
       speaker: choice.speakerEntityId,
       replyFrom: choice.replyFromEntityId,
       noReplies: choice.noReplies,
-      guidance: choice.guidance
+      guidance: choice.guidance,
+      guidanceSlot: choice.guidanceSlotId === undefined ? this.state.guidanceSlot : choice.guidanceSlotId
     })
   }
 
@@ -138,7 +153,10 @@ class ComposerChoices {
   /** Keeps the choice on the server, which tells the chat's other tabs. */
   async change(change: Change): Promise<Outcome<unknown>> {
     const { draftId } = this.state
-    if (draftId === null || (!this.state.loaded && change.guidance === undefined)) {
+    if (
+      draftId === null ||
+      (!this.state.loaded && change.guidance === undefined && change.guidanceSlot === undefined)
+    ) {
       if (change.speaker !== undefined) this.early = change.speaker
       return { ok: true, value: null }
     }
@@ -146,8 +164,14 @@ class ComposerChoices {
     this.writing++
     this.setState({
       ...this.state,
-      saving: this.state.saving || change.guidance === undefined,
-      guidance: change.guidance ?? this.state.guidance
+      // Guidance and the reply it's for show at once; a speaker or reply pick holds sends until saved.
+      saving:
+        this.state.saving ||
+        change.speaker !== undefined ||
+        change.replyFrom !== undefined ||
+        change.noReplies !== undefined,
+      guidance: change.guidance ?? this.state.guidance,
+      guidanceSlot: change.guidanceSlot === undefined ? this.state.guidanceSlot : change.guidanceSlot
     })
     // Rapid picks leave in click order. Keep the acknowledged choice visible and block a
     // send until it is saved, so a failed pick can't produce a wrong-persona message.
@@ -159,7 +183,8 @@ class ComposerChoices {
           ...(change.guidance === undefined ? {} : { guidance: change.guidance }),
           ...(change.speaker === undefined ? {} : { speakerEntityId: change.speaker }),
           ...(change.replyFrom === undefined ? {} : { replyFromEntityId: change.replyFrom }),
-          ...(change.noReplies === undefined ? {} : { noReplies: change.noReplies })
+          ...(change.noReplies === undefined ? {} : { noReplies: change.noReplies }),
+          ...(change.guidanceSlot === undefined ? {} : { guidanceSlotId: change.guidanceSlot })
         })
       )
     )

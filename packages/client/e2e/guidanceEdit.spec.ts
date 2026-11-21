@@ -94,7 +94,9 @@ const settled = async (slotId: SlotId, count: number) =>
 
 for (const width of [1440, 390]) {
   for (const theme of ["light", "dark"] as const) {
-    test(`edit → submit → edit → submit → ✕, the text and the bar surviving reloads (${width}px, ${theme})`, async ({ page }) => {
+    test(`edit → submit → edit → submit → ✕, the text and the bar surviving reloads (${width}px, ${theme})`, async ({
+      page
+    }) => {
       const { chatId, slotId } = await harbor()
       await settled(slotId, 1)
       await page.setViewportSize({ width, height: 844 })
@@ -319,74 +321,87 @@ for (const width of [1440, 390]) {
     await expect(box(page)).toHaveValue(guidance)
   })
 
-  test(`typing guidance keeps the composer and the messages still (${width}px)`, async ({ page }) => {
-    const { chatId, slotId: first } = await harbor()
-    await settled(first, 1)
-    // A third character, so naming one in the box could change who replies to a send.
-    await rpc((api) =>
-      Effect.gen(function* () {
-        const bo = (yield* api.CreateCard({ label: "Bo", name: "Bo" })).entityId
-        yield* api.ChangeCast({ chatId, slotId: null, change: { _tag: "Join", entityId: bo } })
-      })
-    )
-    // A chat long enough to scroll, its last reply written with guidance.
-    let parent = first
-    for (let i = 0; i < 12; i++) {
-      const sent = await rpc((api) =>
-        api.SendMessage({ chatId, parentSlotId: parent, branch: false, content: `Line ${i}.\n\nMore of line ${i}.` })
+  for (const reloaded of [false, true])
+    test(`typing guidance keeps the composer and the messages still${reloaded ? " after a reload" : ""} (${width}px)`, async ({
+      page
+    }) => {
+      const { chatId, slotId: first } = await harbor()
+      await settled(first, 1)
+      // A third character, so naming one in the box could change who replies to a send.
+      await rpc((api) =>
+        Effect.gen(function* () {
+          const bo = (yield* api.CreateCard({ label: "Bo", name: "Bo" })).entityId
+          yield* api.ChangeCast({ chatId, slotId: null, change: { _tag: "Join", entityId: bo } })
+        })
       )
-      if (sent._tag !== "Posted") throw new Error("Expected a posted message")
-      parent = sent.entry.slotId
-    }
-    const last = await rpc((api) =>
-      api.Generate({ chatId, parentSlotId: parent, branch: false, direction: "Tide." })
-    )
-    if (last._tag !== "Posted") throw new Error("Expected a posted reply")
-    const slotId = last.entry.slotId
-    await settled(slotId, 1)
-    await page.setViewportSize({ width, height: 844 })
-    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    await page.goto(`${server().url}/chats/${chatId}`)
-    await expect(toggle(page)).toBeEnabled()
-    const reply = page.getByRole("article").filter({ hasText: "Guidance: Tide." })
-    await reply.getByRole("button", { name: "New version with this guidance" }).click()
-    await expect(bar(page)).toBeVisible()
-    await expect(box(page)).toHaveValue("Tide.")
-    await box(page).press("End")
-    const measure = async () => {
-      const composer = (await box(page).boundingBox())!
-      const message = (await reply.boundingBox())!
-      return [composer.y, composer.height, message.y, message.height].map(Math.round).join(",")
-    }
-    await page.waitForTimeout(800)
-    const start = await measure()
-    // Every frame while typing: the box and the reply above it stay where they are.
-    await page.evaluate(() => {
-      const w = window as unknown as { frames_: Array<string>; stop_: boolean }
-      w.frames_ = []
-      w.stop_ = false
-      const tick = () => {
-        const composer = document.querySelector('[data-testid="composer"]')!.getBoundingClientRect()
-        const articles = document.querySelectorAll("article")
-        const message = articles[articles.length - 1]!.getBoundingClientRect()
-        w.frames_.push([composer.y, composer.height, message.y, message.height].map(Math.round).join(","))
-        if (!w.stop_) requestAnimationFrame(tick)
+      // A chat long enough to scroll, its last reply written with guidance.
+      let parent = first
+      for (let i = 0; i < 12; i++) {
+        const sent = await rpc((api) =>
+          api.SendMessage({ chatId, parentSlotId: parent, branch: false, content: `Line ${i}.\n\nMore of line ${i}.` })
+        )
+        if (sent._tag !== "Posted") throw new Error("Expected a posted message")
+        parent = sent.entry.slotId
       }
-      requestAnimationFrame(tick)
+      const last = await rpc((api) => api.Generate({ chatId, parentSlotId: parent, branch: false, direction: "Tide." }))
+      if (last._tag !== "Posted") throw new Error("Expected a posted reply")
+      const slotId = last.entry.slotId
+      await settled(slotId, 1)
+      await page.setViewportSize({ width, height: 844 })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/chats/${chatId}`)
+      await expect(toggle(page)).toBeEnabled()
+      const reply = page.getByRole("article").filter({ hasText: "Guidance: Tide." })
+      await reply.getByRole("button", { name: "New version with this guidance" }).click()
+      await expect(bar(page)).toBeVisible()
+      await expect(box(page)).toHaveValue("Tide.")
+      await box(page).press("End")
+      if (reloaded) {
+        // The owner's case: typed, reloaded with the bar open, typed again.
+        await box(page).pressSequentially(" Fog", { delay: 60 })
+        await expect
+          .poll(async () => (await rpc((api) => api.OpenComposer({ chatId, forkId: null }))).content)
+          .toBe("Tide. Fog")
+        await page.reload()
+        await expect(bar(page)).toBeVisible()
+        await expect(box(page)).toHaveValue("Tide. Fog")
+        await box(page).click()
+        await box(page).press("End")
+      }
+      const measure = async () => {
+        const composer = (await box(page).boundingBox())!
+        const message = (await reply.boundingBox())!
+        return [composer.y, composer.height, message.y, message.height].map(Math.round).join(",")
+      }
+      await page.waitForTimeout(800)
+      const start = await measure()
+      // Every frame while typing: the box and the reply above it stay where they are.
+      await page.evaluate(() => {
+        const w = window as unknown as { frames_: Array<string>; stop_: boolean }
+        w.frames_ = []
+        w.stop_ = false
+        const tick = () => {
+          const composer = document.querySelector('[data-testid="composer"]')!.getBoundingClientRect()
+          const articles = document.querySelectorAll("article")
+          const message = articles[articles.length - 1]!.getBoundingClientRect()
+          w.frames_.push([composer.y, composer.height, message.y, message.height].map(Math.round).join(","))
+          if (!w.stop_) requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      })
+      await box(page).pressSequentially(" Bo nods", { delay: 120 })
+      await page.waitForTimeout(400)
+      await box(page).pressSequentially(" at Sam", { delay: 450 })
+      // Emptied and typed again.
+      await box(page).fill("")
+      await box(page).pressSequentially("Bo", { delay: 450 })
+      await page.waitForTimeout(1200)
+      const frames = await page.evaluate(() => {
+        const w = window as unknown as { frames_: Array<string>; stop_: boolean }
+        w.stop_ = true
+        return w.frames_
+      })
+      expect(await measure()).toBe(start)
+      expect([...new Set(frames)]).toEqual([start])
     })
-    await box(page).pressSequentially(" Bo nods", { delay: 120 })
-    await page.waitForTimeout(400)
-    await box(page).pressSequentially(" at Sam", { delay: 450 })
-    // Emptied and typed again.
-    await box(page).fill("")
-    await box(page).pressSequentially("Bo", { delay: 450 })
-    await page.waitForTimeout(1200)
-    const frames = await page.evaluate(() => {
-      const w = window as unknown as { frames_: Array<string>; stop_: boolean }
-      w.stop_ = true
-      return w.frames_
-    })
-    expect(await measure()).toBe(start)
-    expect([...new Set(frames)]).toEqual([start])
-  })
 }

@@ -6,7 +6,7 @@
 // never just the fork: the server saves the text onto that draft (ARCHITECTURE §3.10).
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { ChatId, EntityId, ForkId } from "./chat.ts"
+import { ChatId, EntityId, ForkId, SlotId } from "./chat.ts"
 import { Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 
@@ -31,7 +31,12 @@ export class ComposerChoice extends Schema.Class<ComposerChoice>("ComposerChoice
   /** Who replies to the next send, picked for that one reply; null: the next in turn. */
   replyFromEntityId: Schema.NullOr(EntityId),
   /** Next is No one: a send asks for no reply, until another choice under Next (DESIGN §2.3). */
-  noReplies: Schema.Boolean
+  noReplies: Schema.Boolean,
+  /**
+   * The reply this composer's text is the guidance for while a new version of it is written
+   * (DESIGN §2.2, guidance on swipes); null: new turns. Absent where a write didn't touch it.
+   */
+  guidanceSlotId: Schema.optionalKey(Schema.NullOr(SlotId))
 }) {}
 
 /**
@@ -147,6 +152,8 @@ export class ComposerApi extends RpcGroup.make(
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       replyFromEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       noReplies: Schema.optionalKey(Schema.Boolean),
+      /** The reply a new version's guidance is written for (a slot of this chat), or null for new turns. */
+      guidanceSlotId: Schema.optionalKey(Schema.NullOr(SlotId)),
       /** Consume a one-reply pick only if it still names this card. */
       consumeReplyFromEntityId: Schema.optionalKey(EntityId)
     },

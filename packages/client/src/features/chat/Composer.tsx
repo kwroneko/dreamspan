@@ -381,6 +381,12 @@ export function Composer({
   /** The composer belongs to the fork shown (DESIGN §6.2). */
   useEffect(syncFork, [syncFork, view.forkId, view.leafSlotId, view.loading, view.opened])
 
+  // The reply kept with the draft (a reload, another tab or device) opens the bar here too.
+  useEffect(() => {
+    if (!choice.loaded || draftId === null || choice.draftId !== draftId || view.loading) return
+    editor.follow(choice.guidanceSlot, view)
+  }, [editor, choice.loaded, choice.draftId, choice.guidanceSlot, draftId, view])
+
   // The bar closes when its reply is deleted, or the chat view goes to another fork.
   useEffect(() => {
     if (editing !== null && !view.loading && !editStillShown(editing, view)) editor.close()
