@@ -1,7 +1,8 @@
 import { setGuidance } from "./support/composer.ts"
 // Guidance on swipes (DESIGN §2.2, owner 2026-10-29): Edit on a reply's guidance puts it in
 // the composer under a bar; each submit is a new version of that reply with the box's text,
-// which stays; ✕ gives back the draft typed before, which a reload also shows.
+// which stays; ✕ goes back to new turns. The box is always the composer draft (one box, one
+// draft: owner 2026-11-21), so a reload brings back the text and the bar.
 import { mkdirSync } from "node:fs"
 import { expect, type Page, test } from "@playwright/test"
 import type { ChatId, EntityId, SlotId } from "@dreamspan/shared/chat.ts"
@@ -93,7 +94,7 @@ const settled = async (slotId: SlotId, count: number) =>
 
 for (const width of [1440, 390]) {
   for (const theme of ["light", "dark"] as const) {
-    test(`edit → submit → edit → submit → ✕ gives back the draft (${width}px, ${theme})`, async ({ page }) => {
+    test(`edit → submit → edit → submit → ✕, the text and the bar surviving reloads (${width}px, ${theme})`, async ({ page }) => {
       const { chatId, slotId } = await harbor()
       await settled(slotId, 1)
       await page.setViewportSize({ width, height: 844 })
@@ -161,35 +162,79 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("article").last()).toContainText("Guidance: Aria hums an old sailors' song.")
       await expect(box(page)).toHaveValue("Aria hums an old sailors' song.")
       expect(await pathLength(chatId)).toBe(turns)
+      // The guidance typed is the composer draft's text, saved like any typing.
       await expect
         .poll(async () => (await rpc((api) => api.OpenComposer({ chatId, forkId: null }))).content)
-        .toBe(draft)
+        .toBe("Aria hums an old sailors' song.")
+      // The draft typed before Edit is one step back in its history.
+      const states = await rpc((api) =>
+        Effect.gen(function* () {
+          const composer = yield* api.OpenComposer({ chatId, forkId: null })
+          return yield* api.ComposerHistory({ chatId, draftId: composer.id, limit: 50 })
+        })
+      )
+      expect(states.some((state) => state.removed.includes("lighthouse keeper"))).toBe(true)
 
-      // ✕: the draft comes back, the box returns to messages, and the toggle as it was.
+      // Reload while editing: the text and the bar come back.
+      await box(page).fill("Aria counts the gulls.")
+      await page.reload()
+      await expect(bar(page)).toContainText("Guidance for a new version of Aria's reply")
+      await expect(box(page)).toHaveValue("Aria counts the gulls.")
+      await expect(toggle(page)).toBeChecked()
+
+      // ✕: the box returns to messages with its text, and the toggle as it was.
       await bar(page).getByRole("button", { name: "Close: back to new messages" }).click()
       await expect(bar(page)).toHaveCount(0)
-      await expect(box(page)).toHaveValue(draft)
+      await expect(box(page)).toHaveValue("Aria counts the gulls.")
       await expect(toggle(page)).not.toBeChecked()
       await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeVisible()
 
-      // The stored draft was never overwritten by the guidance: a reload shows it.
+      // Closed stays closed through a reload; the text stays too.
       await page.reload()
-      await expect(box(page)).toHaveValue(draft)
+      await expect(box(page)).toHaveValue("Aria counts the gulls.")
       await expect(bar(page)).toHaveCount(0)
       expect(await pathLength(chatId)).toBe(turns)
-
-      // Reload while editing, rather than only after closing: the server draft stays intact.
-      await page.getByRole("button", { name: "New version with this guidance" }).click()
-      await box(page).fill("An unsent revision, not the composer draft.")
-      await page.reload()
-      await expect(box(page)).toHaveValue(draft)
-      await expect(bar(page)).toHaveCount(0)
-      await expect(toggle(page)).not.toBeChecked()
     })
   }
 }
 
 for (const width of [1440, 390]) {
+  test(`guidance typed and reloaded before any save comes back from this browser, with its bar (${width}px)`, async ({
+    page
+  }) => {
+    // Saves dropped until the reload: the text is only in this browser's copy.
+    let dropSaves = true
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        if (dropSaves && typeof data === "string" && JSON.parse(data).tag === "SaveComposer") return
+        upstream.send(data)
+      })
+    })
+    const { chatId, slotId } = await harbor()
+    await settled(slotId, 1)
+    await page.setViewportSize({ width, height: 844 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/chats/${chatId}`)
+    await expect(toggle(page)).toBeEnabled()
+    await page.getByRole("button", { name: "New version with this guidance" }).click()
+    await expect(box(page)).toHaveValue("Aria looks out to sea.")
+    await box(page).fill("Aria sees a storm coming.")
+    await page.waitForTimeout(100)
+    expect((await rpc((api) => api.OpenComposer({ chatId, forkId: null }))).content).toBe("")
+    await page.reload()
+    dropSaves = false
+    await expect(box(page)).toHaveValue("Aria sees a storm coming.")
+    await expect(bar(page)).toContainText("Guidance for a new version of Aria's reply")
+    // It reaches the server once saves go through, and New version uses it.
+    await expect
+      .poll(async () => (await rpc((api) => api.OpenComposer({ chatId, forkId: null }))).content)
+      .toBe("Aria sees a storm coming.")
+    await page.getByRole("button", { name: "New version", exact: true }).click()
+    await settled(slotId, 2)
+    expect((await versions(slotId)).at(-1)!.direction).toBe("Aria sees a storm coming.")
+  })
+
   test(`New version stays available while unrelated speaker choices load (${width}px)`, async ({ page }) => {
     const held: Array<() => void> = []
     await page.routeWebSocket(/\/rpc$/, (socket) => {
@@ -215,7 +260,7 @@ for (const width of [1440, 390]) {
     for (const release of held) release()
   })
 
-  test(`live swipes, New version with guidance…, deletion and chat navigation preserve the draft (${width}px)`, async ({
+  test(`live swipes, New version with guidance…, deletion and chat navigation keep the box's text (${width}px)`, async ({
     page
   }) => {
     const { chatId, slotId } = await harbor()
@@ -231,8 +276,7 @@ for (const width of [1440, 390]) {
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chatId}`)
     await expect(toggle(page)).toBeEnabled()
-    const draft = "The next turn's original guidance."
-    await box(page).fill(draft)
+    await box(page).fill("The next turn's original guidance.")
     const reply = page.getByRole("article").filter({ hasText: "Guidance: Aria looks out to sea." })
     await reply.getByRole("button", { name: "New version with this guidance" }).click()
     await box(page).fill("Live unsaved guidance.")
@@ -253,15 +297,17 @@ for (const width of [1440, 390]) {
     await settled(slotId, 3)
     expect((await versions(slotId)).at(-1)!.direction).toBeNull()
     await bar(page).getByRole("button", { name: "Close: back to new messages" }).click()
-    await expect(box(page)).toHaveValue(draft)
+    await expect(box(page)).toHaveValue("")
     await expect(toggle(page)).toBeChecked()
+    // A reply without guidance leaves the box's text as it is, for its guidance.
+    await box(page).fill("Fog over the water.")
     const unguided = page.getByRole("article").nth(1)
     await messageMenu(unguided, "New version with guidance…")
-    await expect(box(page)).toHaveValue("")
+    await expect(box(page)).toHaveValue("Fog over the water.")
     await expect(bar(page)).toBeVisible()
     await messageMenu(unguided, "Delete all versions")
     await expect(bar(page)).toHaveCount(0)
-    await expect(box(page)).toHaveValue(draft)
+    await expect(box(page)).toHaveValue("Fog over the water.")
     await page.getByRole("button", { name: "New version with this guidance" }).click()
     await expect(bar(page)).toBeVisible()
     const guidance = await box(page).inputValue()
@@ -271,5 +317,76 @@ for (const width of [1440, 390]) {
     // Home opened in a tab of its own; the chat's tab kept its state (owner, 2026-11-05).
     await expect(bar(page)).toBeVisible()
     await expect(box(page)).toHaveValue(guidance)
+  })
+
+  test(`typing guidance keeps the composer and the messages still (${width}px)`, async ({ page }) => {
+    const { chatId, slotId: first } = await harbor()
+    await settled(first, 1)
+    // A third character, so naming one in the box could change who replies to a send.
+    await rpc((api) =>
+      Effect.gen(function* () {
+        const bo = (yield* api.CreateCard({ label: "Bo", name: "Bo" })).entityId
+        yield* api.ChangeCast({ chatId, slotId: null, change: { _tag: "Join", entityId: bo } })
+      })
+    )
+    // A chat long enough to scroll, its last reply written with guidance.
+    let parent = first
+    for (let i = 0; i < 12; i++) {
+      const sent = await rpc((api) =>
+        api.SendMessage({ chatId, parentSlotId: parent, branch: false, content: `Line ${i}.\n\nMore of line ${i}.` })
+      )
+      if (sent._tag !== "Posted") throw new Error("Expected a posted message")
+      parent = sent.entry.slotId
+    }
+    const last = await rpc((api) =>
+      api.Generate({ chatId, parentSlotId: parent, branch: false, direction: "Tide." })
+    )
+    if (last._tag !== "Posted") throw new Error("Expected a posted reply")
+    const slotId = last.entry.slotId
+    await settled(slotId, 1)
+    await page.setViewportSize({ width, height: 844 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/chats/${chatId}`)
+    await expect(toggle(page)).toBeEnabled()
+    const reply = page.getByRole("article").filter({ hasText: "Guidance: Tide." })
+    await reply.getByRole("button", { name: "New version with this guidance" }).click()
+    await expect(bar(page)).toBeVisible()
+    await expect(box(page)).toHaveValue("Tide.")
+    await box(page).press("End")
+    const measure = async () => {
+      const composer = (await box(page).boundingBox())!
+      const message = (await reply.boundingBox())!
+      return [composer.y, composer.height, message.y, message.height].map(Math.round).join(",")
+    }
+    await page.waitForTimeout(800)
+    const start = await measure()
+    // Every frame while typing: the box and the reply above it stay where they are.
+    await page.evaluate(() => {
+      const w = window as unknown as { frames_: Array<string>; stop_: boolean }
+      w.frames_ = []
+      w.stop_ = false
+      const tick = () => {
+        const composer = document.querySelector('[data-testid="composer"]')!.getBoundingClientRect()
+        const articles = document.querySelectorAll("article")
+        const message = articles[articles.length - 1]!.getBoundingClientRect()
+        w.frames_.push([composer.y, composer.height, message.y, message.height].map(Math.round).join(","))
+        if (!w.stop_) requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
+    })
+    await box(page).pressSequentially(" Bo nods", { delay: 120 })
+    await page.waitForTimeout(400)
+    await box(page).pressSequentially(" at Sam", { delay: 450 })
+    // Emptied and typed again.
+    await box(page).fill("")
+    await box(page).pressSequentially("Bo", { delay: 450 })
+    await page.waitForTimeout(1200)
+    const frames = await page.evaluate(() => {
+      const w = window as unknown as { frames_: Array<string>; stop_: boolean }
+      w.stop_ = true
+      return w.frames_
+    })
+    expect(await measure()).toBe(start)
+    expect([...new Set(frames)]).toEqual([start])
   })
 }
