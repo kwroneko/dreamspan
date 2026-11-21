@@ -200,8 +200,6 @@ test("a refused Guidance save rolls back visibly and a later choice can still sa
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
     test(`group reading space and controls (${width}px ${theme})`, async ({ page }, testInfo) => {
-      // This measures daily use after the one-time preset explanation has been acknowledged.
-      await rpc((api) => api.ImpersonationNotice({}))
       const chatId = await group()
       await rpc((api) => setGuidance(api, chatId, true))
       await page.setViewportSize({ width, height: 844 })

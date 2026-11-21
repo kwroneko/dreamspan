@@ -25,7 +25,7 @@ import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
 import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
-import { Button, buttonClass } from "../../ui/Button.tsx"
+import { buttonClass } from "../../ui/Button.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { defaultSpeaker, listNames, nameOf, recentSpeakers, replyFaces, useCast } from "./cast.ts"
@@ -298,7 +298,6 @@ export function Composer({
     [session, draft, editor, choices]
   )
   // Said once per preset when writing for a card the user plays (DESIGN §2.2).
-  const [impersonationNotice, setImpersonationNotice] = useState(false)
   // The speaker and the reply picked here or with "Write as" in the Cast tab, kept on the
   // server with this tip's draft (speaker.ts). Nothing is sent until they're read.
   useEffect(() => choices.bind(draftId, draftGuidance), [choices, draftId, draftGuidance])
@@ -547,10 +546,6 @@ export function Composer({
       report(outcome)
       setBusy(false)
     }
-    if (outcome.ok && speaker !== null && cast?.playedByMe.includes(speaker)) {
-      const notice = await session.impersonationNotice()
-      if (notice.ok && notice.value.show) setImpersonationNotice(true)
-    }
   }
 
   /**
@@ -781,30 +776,6 @@ export function Composer({
       <p id={`${composerId}-hint`} className="sr-only">
         {controls.hint}
       </p>
-      {impersonationNotice && (
-        <div
-          role="status"
-          className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 px-3 py-2 text-sm"
-        >
-          <span className="min-w-0 flex-1 basis-60 wrap-break-word">
-            This preset's rules against writing for {"{{user}}"} may need “not when writing as {"{{user}}"}”: in the
-            preset, set their condition to “When writing as a character”.
-          </span>
-          <Button
-            hint="Opens the active prompt preset."
-            variant="ghost"
-            onClick={() => {
-              setImpersonationNotice(false)
-              onSettings("preset")
-            }}
-          >
-            Open the preset
-          </Button>
-          <Button hint="Dismisses this notice." variant="ghost" onClick={() => setImpersonationNotice(false)}>
-            Dismiss
-          </Button>
-        </div>
-      )}
       {shownError && (
         <p role="alert" className="text-sm text-danger">
           {shownError.message}

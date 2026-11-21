@@ -32,7 +32,6 @@ import {
 } from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
-import { RefId } from "./library.ts"
 import { RawText } from "./regexScripts.ts"
 import { ReplySections } from "./replySections.ts"
 
@@ -995,16 +994,6 @@ export class ChatApi extends RpcGroup.make(
   Rpc.make("GetDisplayPrefs", { payload: {}, success: DisplayPrefs, error: ServerError }),
   /** Changes the user's display choices; answers with them as now stored. */
   Rpc.make("SetDisplayPrefs", { payload: { prefs: DisplayPrefsChange }, success: DisplayPrefs, error: ServerError }),
-  /**
-   * Asked as the user generates as a card they play (DESIGN §2.2): whether to say, once for
-   * this account and its current preset, that a preset with no prompt conditioned on writing
-   * as `{{user}}` may need its rules against writing for `{{user}}` marked. Asking marks it shown.
-   */
-  Rpc.make("ImpersonationNotice", {
-    payload: {},
-    success: Schema.Struct({ show: Schema.Boolean, preset: Schema.NullOr(RefId) }),
-    error: ServerError
-  }),
   /**
    * The alternates at `slotId`'s place (it and its siblings a path can reach), oldest first,
    * each with its first words as `forkId` (absent or null: the fork through it) shows them.

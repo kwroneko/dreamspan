@@ -1781,11 +1781,6 @@ export class ChatSession {
     return result
   }
 
-  /** Whether to say, once for this preset, that its anti-impersonation rules may need a condition. */
-  impersonationNotice() {
-    return this.call((client) => client("ImpersonationNotice", {}))
-  }
-
   /** Where guidance comes from; nothing here until a composer says (DESIGN §2.2). */
   private guidanceText: (request: GuidanceRequest) => string | undefined = () => undefined
 

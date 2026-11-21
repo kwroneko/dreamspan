@@ -4567,17 +4567,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     success: SourcePrefs,
     error: StorageError
   }),
-  /**
-   * Records that a one-time notice was shown for `key` (the impersonation notice: a preset's
-   * ref). Answers whether this call recorded it, so of two tabs only one shows it.
-   */
   /** What the migrations found and did when this writer started (db/migrations.ts `MigrationReport`). */
   Rpc.make("GetDatabaseStartup", { success: DatabaseStartup }),
-  Rpc.make("MarkNoticeShown", {
-    payload: { userId: UserId, notice: Schema.Literal("impersonation"), key: Schema.String },
-    success: Schema.Boolean,
-    error: StorageError
-  }),
   // --- Branches (DESIGN §3.2).
   /**
    * The fork to open for the alternate at `index` among `slotId`'s (the reachable siblings,

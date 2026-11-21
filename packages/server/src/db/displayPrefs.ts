@@ -9,7 +9,6 @@ import type { ReadOps, WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
 
 const KEY = "display"
-const NOTICES = "notices"
 
 /** Reasoning streams open until the user folds it during a run (DESIGN §7.4). */
 const DEFAULTS = DEFAULT_DISPLAY_PREFS
@@ -72,17 +71,6 @@ export const makeDisplayPrefsWriteHandlers = Effect.gen(function* () {
         }
         yield* putUserSetting(sql, userId, KEY, merged)
         return yield* read(sql, userId)
-      }).pipe(transaction(sql, "SetDisplayPrefs")),
-    // One-time notices, by notice, as the keys they were shown for (key `notices`).
-    MarkNoticeShown: ({ userId, notice, key }) =>
-      Effect.gen(function* () {
-        const [row] = yield* sql<{ value_json: string }>`
-          SELECT value_json FROM settings WHERE scope = 'user' AND scope_id = ${userId} AND key = ${NOTICES}`
-        const stored = row ? (JSON.parse(row.value_json) as Record<string, unknown>) : {}
-        const shown = Array.isArray(stored[notice]) ? (stored[notice] as Array<unknown>) : []
-        if (shown.includes(key)) return false
-        yield* putUserSetting(sql, userId, NOTICES, { ...stored, [notice]: [...shown, key] })
-        return true
-      }).pipe(transaction(sql, "MarkNoticeShown"))
+      }).pipe(transaction(sql, "SetDisplayPrefs"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
 })

@@ -26,8 +26,6 @@ import { TextTooLong } from "@dreamspan/shared/composerApi.ts"
 import { NotFound } from "@dreamspan/shared/errors.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { DraftHistoryPolicy } from "@dreamspan/shared/drafts.ts"
-import type { PresetPrompt, PromptOrderEntry } from "@dreamspan/shared/docs/preset.ts"
-import { conditionOf } from "@dreamspan/shared/presetConditions.ts"
 import { foldState, swappedCard } from "@dreamspan/shared/state.ts"
 import { Effect, Option, Stream } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
@@ -987,31 +985,6 @@ export const makeChatHandlers = Effect.gen(function* () {
     SetDisplayPrefs: ({ prefs }) =>
       Effect.flatMap(userId, (id) => writer.SetDisplayPrefs({ userId: id, prefs })).pipe(internal("SetDisplayPrefs")),
 
-    // Once per preset per account (DESIGN §2.2), unless a prompt of its order is marked for
-    // writing as {{user}}. The end-of-request text "when your card speaks" is outside the order
-    // and has no condition, so it doesn't count: a preset with only that shows the notice once.
-    ImpersonationNotice: () =>
-      Effect.gen(function* () {
-        const id = yield* userId
-        const { preset } = yield* reader.GetGenerationDefaults({ userId: id })
-        if (preset === null) return { show: false, preset }
-        const { doc } = yield* reader.OpenEditor({ userId: id, refId: preset })
-        const enabled = new Set(
-          ((doc.order ?? []) as ReadonlyArray<PromptOrderEntry>).filter((e) => e.enabled).map((e) => e.identifier)
-        )
-        // A prompt only for writing as {{user}}: by its condition, or its ST triggers.
-        const marked = ((doc.prompts ?? []) as ReadonlyArray<PresetPrompt>).some(
-          (p) =>
-            enabled.has(p.identifier) &&
-            (conditionOf(p) === "as_user" ||
-              (p.injection_trigger.length > 0 && p.injection_trigger.every((t) => t === "impersonate")))
-        )
-        if (marked) return { show: false, preset }
-        return { show: yield* writer.MarkNoticeShown({ userId: id, notice: "impersonation", key: preset }), preset }
-      }).pipe(
-        Effect.catchTag("NotFound", () => Effect.succeed({ show: false, preset: null })),
-        internal("ImpersonationNotice")
-      ),
     ListBranches: ({ slotId, forkId }) =>
       Effect.flatMap(userId, (id) => reader.ListBranches({ userId: id, slotId, forkId: forkId ?? null })).pipe(
         internal("ListBranches")

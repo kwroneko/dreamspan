@@ -39,6 +39,8 @@ const definitions: ReadonlyArray<SettingDefinition> = [
   { id: "media.external", scope: "user", schema: ExternalMediaPrefs },
   { id: "media.saved.hosts", scope: "user", schema: MediaHosts },
   { id: "display", scope: "user", schema: DisplayPrefs, agent: { description: "How chats are displayed." } },
+  // One-time notices shown, by notice. Nothing writes it since the impersonation notice was
+  // removed (2026-11-21); kept registered so rows already stored still read.
   { id: "notices", scope: "user", schema: Schema.Record(Schema.String, Schema.Array(Schema.String)) },
   {
     id: "shell.pinsCollapsed",

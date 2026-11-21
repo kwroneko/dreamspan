@@ -1,8 +1,7 @@
 import { setGuidance as setComposerGuidance } from "./support/composer.ts"
 // The RP loop (DESIGN §2.2, §3.5): the persona separate from the speaker, the composer's
-// guidance toggle, conditioned prompts in the preset editor, muting and the one-time
-// impersonation notice, on the realistic synthetic ST folder through a fake provider, so the
-// requests are the assembler's own. Every card, chat and preset here is made up.
+// guidance toggle, conditioned prompts in the preset editor and muting, on the realistic
+// synthetic ST folder through a fake provider, so the requests are the assembler's own. Every card, chat and preset here is made up.
 import { mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -286,8 +285,6 @@ for (const width of [1440, 390])
           .join("\n")
       ).toContain(`[Write ${personaName}'s next reply in their voice`)
       await expect.poll(async () => (await newestVersion()).status).toBe("complete")
-      // Night RP 3.1 has a prompt only for impersonation: no notice.
-      await expect(page.getByText(/may need “not when writing as/)).toHaveCount(0)
       await page.goto(`${server().url}/chats/${inn}/context/${(await newestVersion()).id}`)
       await inspectorEnd(page, "End of request: when your card speaks")
       await shot("10-inspector-impersonation")
@@ -354,24 +351,6 @@ for (const width of [1440, 390])
       await expect(warnings).toHaveCount(0)
       // Back as it was, and the server has it: the next test opens this preset in a fresh browser.
       await expect.poll(() => unsentEditorCopies(page)).toBe(0)
-
-      // The one-time notice, with a preset that marks no prompt for writing as {{user}}.
-      if (theme === "light") {
-        const label = width > 500 ? "Celia 4.2" : "Pixijb v18"
-        await usePreset(label)
-        await page.goto(`${server().url}/chats/${inn}`)
-        const write = page.getByRole("button", { name: `Generate ${personaName}`, exact: true })
-        await write.click()
-        const notice = page.getByRole("status").filter({ hasText: "may need “not when writing as" })
-        await expect(notice).toBeVisible()
-        await shot("13-impersonation-notice")
-        await notice.getByRole("button", { name: "Dismiss" }).click()
-        await expect.poll(async () => (await newestVersion()).status).toBe("complete")
-        await write.click()
-        await expect.poll(async () => (await newestVersion()).status).toBe("complete")
-        await expect(notice).toHaveCount(0)
-        await usePreset("Night RP 3.1")
-      }
     })
 
 test("guidance on a touch screen: Ctrl+Enter generates, Enter is a new line", async ({ browser }) => {
