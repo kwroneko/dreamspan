@@ -71,6 +71,39 @@ test("the composer's text is on the server: a reload and another tab show it, an
   await expect(box(page)).toHaveValue("")
 })
 
+test("typing, sending and reopening the chat moves nothing to the bin and says nothing about it", async ({ page }) => {
+  const chatId = await newChat(page, "Quiet harbor")
+  const opening = "The ferry leaves the harbor before dawn, lights low."
+  await box(page).pressSequentially(opening.slice(0, 30), { delay: 20 })
+  await expect.poll(() => onServer(chatId, null)).toBe(opening.slice(0, 30))
+  await box(page).pressSequentially(opening.slice(30), { delay: 20 })
+  await expect.poll(() => onServer(chatId, null)).toBe(opening)
+  // The page hides and comes back as it was (the back-forward cache), sending its text as it goes.
+  await page.evaluate(() => dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })))
+  await box(page).press("Backspace")
+  await box(page).pressSequentially(", engines humming.", { delay: 20 })
+  const typed = `${opening.slice(0, -1)}, engines humming.`
+  await expect.poll(() => onServer(chatId, null)).toBe(typed)
+  // All of it cut, then pasted back with a line more.
+  await box(page).fill("")
+  await expect.poll(() => onServer(chatId, null)).toBe("")
+  const sent = `${typed} Gulls follow.`
+  await box(page).fill(sent)
+  await expect.poll(() => onServer(chatId, null)).toBe(sent)
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await expect(page.getByRole("article", { name: "Your message" })).toHaveText(/Gulls follow/)
+  await expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
+  await box(page).fill("Next")
+  await expect.poll(() => onServer(chatId, null)).toBe("Next")
+  await page.reload()
+  await expect(box(page)).toHaveValue("Next")
+  // Nothing was lost, so nothing is in the bin, and neither the composer nor a toast mentions it.
+  await expect(page.getByText(/Recovered text|moved to the bin|kept when the page closed/)).toHaveCount(0)
+  await expect(page.locator("[data-toast]")).toHaveCount(0)
+  const recovered = await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))
+  expect(recovered.filter((text) => text.sourceId === chatId)).toEqual([])
+})
+
 test("an earlier text comes back from the server's history", async ({ page }) => {
   const chatId = await newChat(page, "History")
   const long = "A long paragraph about the lighthouse keeper and the storm. ".repeat(5).trim()
@@ -137,7 +170,7 @@ test("text too long to send as the page goes comes back from this browser on a r
   expect(await onServer(chatId, null)).toBe("")
   blocked = false
   await page.reload()
-  await expect(page.getByText("Text this browser kept")).toBeVisible()
+  // Back in the box as it was typed, which needs no word.
   await expect(box(page)).toHaveValue(long)
   await expect.poll(() => onServer(chatId, null)).toBe(long)
 })

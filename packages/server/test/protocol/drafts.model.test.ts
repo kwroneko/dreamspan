@@ -756,7 +756,10 @@ class World {
     }
   }
 
-  /** I5: a tab's write that put text in the recovered texts says so, and the tab shows it. */
+  /**
+   * I5: a tab's write that put text in the recovered texts says so, and an editor shows it.
+   * The composer says nothing: recovered text is there without a word (DESIGN §6.2).
+   */
   private checkRecovered(request: Request, before: number, value: Record<string, unknown>) {
     if (request.tag === "SaveComposer" && value.draft !== null) {
       const nested = (value.draft as { recovered: number }).recovered
@@ -774,7 +777,6 @@ class World {
     if (says === false) this.fail(`I5: ${request.tag} sent text to the recovered texts without saying so`)
     if (says && !request.silent && request.page.alive) {
       if (request.store !== null) expectEditorNotice.add(request.store)
-      else expectComposerNotice.add(request.page)
     }
   }
 
@@ -869,15 +871,6 @@ class World {
       (text) => !haystack.some((reachable) => reachable === text || reachable.includes(text))
     )
     if (missing.length > 0) this.fail(`I1: typed text is nowhere: ${missing.join(" ")}`)
-    // A page shows what came back once it has heard everything it asked.
-    for (const page of expectComposerNotice) {
-      if (!page.alive) expectComposerNotice.delete(page)
-      else if (page.outstanding === 0 && page.composer.snapshot().ready) {
-        if (!page.composer.snapshot().recovered)
-          this.fail(`I5: tab ${page.tab.id}'s composer doesn't say text went to the recovered texts`)
-        expectComposerNotice.delete(page)
-      }
-    }
     for (const store of expectEditorNotice) {
       if (store.state().recovered === 0) this.fail(`I5: the editor doesn't say text went to the recovered texts`)
     }
@@ -957,7 +950,6 @@ class World {
 type Draft = { id: string; content: string; session: number; status: string; targetId: string; targetKind: string }
 const commitsShown = new WeakMap<Request, Map<string, string>>()
 const commitStores = new WeakMap<Request, EditorStore>()
-const expectComposerNotice = new Set<Page>()
 const expectEditorNotice = new Set<EditorStore>()
 
 // --- What happens in a step.
@@ -1552,7 +1544,6 @@ const runOnce = (steps: ReadonlyArray<Step>, directed?: (w: World) => Promise<vo
   Effect.gen(function* () {
     gates.clear()
     idb.clear()
-    expectComposerNotice.clear()
     expectEditorNotice.clear()
     const config = testConfig()
     let serverScope = yield* Scope.make()

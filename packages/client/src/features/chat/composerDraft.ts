@@ -49,10 +49,6 @@ export interface ComposerState {
   readonly ready: boolean
   /** A replay displaced text saved elsewhere; kept until acknowledged or switched. */
   readonly conflict: ReplayConflict | null
-  /** The text came back from this browser's copy before the server had it. */
-  readonly restored: boolean
-  /** Text typed in this chat's composers went to the bin's recovered texts since the page opened. */
-  readonly recovered: boolean
   /** The last save that failed, until one succeeds. */
   readonly error: AppError | null
   /** The draft the box shows, once ready: its speaker and reply choice go with it (speaker.ts). */
@@ -87,8 +83,6 @@ export class ComposerDraft {
   private ready = false
   private conflict: ReplayConflict | null = null
   private replayedAt: number | null = null
-  private restored = false
-  private recovered = false
   private error: AppError | null = null
   /** A send is on its way: the box holds the next message, saved once the send is answered. */
   private held = false
@@ -96,7 +90,8 @@ export class ComposerDraft {
   private sending: { saved: boolean; readonly copy: Copy | null } | null = null
   /** This tab's copy of the box's text not sent to the server yet, for `base`. */
   private pending: Copy | null = null
-  private readonly inFlight = new WeakSet<Copy>()
+  /** Copies on their way to the server, by how many requests carry them. */
+  private readonly outgoing = new WeakMap<Copy, number>()
   private timer: unknown = null
   private queue: Promise<void> = Promise.resolve()
   private readonly listeners = new Set<() => void>()
@@ -104,9 +99,7 @@ export class ComposerDraft {
     text: "",
     guidance: false,
     ready: false,
-    restored: false,
     conflict: null,
-    recovered: false,
     error: null,
     draftId: null
   }
@@ -138,9 +131,16 @@ export class ComposerDraft {
   }
 
   private emit() {
-    const { text, ready, restored, conflict, recovered, error } = this
+    const { text, ready, conflict, error } = this
     const draftId = ready ? (this.base?.id ?? null) : null
-    this.state = { text, guidance: this.base?.guidance ?? false, ready, restored, conflict, recovered, error, draftId }
+    this.state = {
+      text,
+      guidance: this.base?.guidance ?? false,
+      ready,
+      conflict,
+      error,
+      draftId
+    }
     for (const listener of this.listeners) listener()
   }
 
@@ -173,7 +173,7 @@ export class ComposerDraft {
     const draft = this.base
     if (draft === null) return null
     const previous = this.pending
-    const replaces = previous !== null && previous.field === draft.id && !this.inFlight.has(previous)
+    const replaces = previous !== null && previous.field === draft.id && !this.inFlight(previous)
     const before = replaces && !rebase ? pendingOf(previous) : null
     const typedOn =
       before?.kind === "composer"
@@ -272,7 +272,7 @@ export class ComposerDraft {
   /** The fork's text in the box, with what this browser kept of it when a page closed. */
   private async show(fork: ForkId | null, opened: Draft) {
     this.error = null
-    const { draft, restored, conflict, recovered, unsent } = await this.saveCopies(opened)
+    const { draft, conflict, unsent } = await this.saveCopies(opened)
     this.take(draft)
     const save = unsent === null ? null : pendingOf(unsent)
     if (save?.kind === "composer") {
@@ -284,10 +284,6 @@ export class ComposerDraft {
     }
     this.replayedAt = unsent?.at ?? null
     this.conflict = conflict
-    this.restored = restored
-    // Stays for the page: text that went to the recovered texts as the box left its draft
-    // was lost there, and this is where the user still is.
-    this.recovered ||= recovered
     if (this.requested !== fork) return
     this.ready = true
     this.emit()
@@ -296,15 +292,14 @@ export class ComposerDraft {
 
   /**
    * Makes every save this browser kept for want of the server (a page closed first), any
-   * chat's, and says what they did to `opened`: its text came back (`restored`), or went to
-   * the recovered texts. A copy of `opened` that can't be saved now comes back as `unsent`.
+   * chat's, and says what they did to `opened`. Text that went to the recovered texts is
+   * there without a word (DESIGN §6.2). A copy of `opened` that can't be saved now comes back
+   * as `unsent`.
    * A copy that fails stays, whatever the reason: only an acknowledgement removes it.
    */
   private async saveCopies(opened: Draft) {
     let draft = opened
     let conflict: ReplayConflict | null = null
-    let restored = false
-    let recovered = false
     let unsent: Copy | null = null
     // Another draft's copy only once it's stale: a tab still typing there makes its own saves.
     const now = this.env.now()
@@ -356,7 +351,7 @@ export class ComposerDraft {
     for (const copy of copies) {
       const pending = pendingOf(copy)
       if (pending?.kind !== "composer") continue
-      const { chatId, draftId } = pending.payload
+      const { draftId } = pending.payload
       const deleted =
         draftId === draft.id && deletedSince(draft, { draftId, expectedRowVersion: pending.payload.rowVersion })
       // The writer can acknowledge an already-applied clear by its receipt, or
@@ -370,12 +365,10 @@ export class ComposerDraft {
       const now = saved.value.draft
       if (now?.id === opened.id) {
         if (now.displaced !== null) conflict = { ...now.displaced, typedAt: copy.at }
-        restored ||= shown(now) !== shown(draft)
         draft = now
       }
-      recovered ||= saved.value.recovered && chatId === this.chatId
     }
-    return { draft, conflict, restored: restored || unsent !== null, recovered, unsent }
+    return { draft, conflict, unsent }
   }
 
   /**
@@ -443,20 +436,38 @@ export class ComposerDraft {
   private async request(copy: Copy) {
     const save = pendingOf(copy)!
     if (save.kind !== "composer") throw new Error("expected a composer save")
-    this.inFlight.add(copy)
+    this.send(copy)
     try {
       return await this.session.call((client) => client("SaveComposer", save.payload))
     } finally {
-      this.inFlight.delete(copy)
+      this.arrived(copy)
     }
+  }
+
+  private send(copy: Copy) {
+    this.outgoing.set(copy, (this.outgoing.get(copy) ?? 0) + 1)
+  }
+
+  private arrived(copy: Copy) {
+    const left = (this.outgoing.get(copy) ?? 1) - 1
+    if (left > 0) this.outgoing.set(copy, left)
+    else this.outgoing.delete(copy)
+  }
+
+  private inFlight(copy: Copy) {
+    return this.outgoing.has(copy)
   }
 
   /** Saves the pending copy unchanged, with the base it was typed on. */
   private async save() {
     if (this.held || !this.unsaved) return
     const copy = this.pending ?? this.keep(this.text)!
+    await this.settle(copy, await this.request(copy))
+  }
+
+  /** What the server answered to a save of `copy`, for the box. */
+  private async settle(copy: Copy, saved: Awaited<ReturnType<ComposerDraft["request"]>>) {
     const sent = copy.content
-    const saved = await this.request(copy)
     if (!saved.ok) {
       this.error = saved.error
       this.superseded(copy)
@@ -467,7 +478,6 @@ export class ComposerDraft {
     const descendant = this.pending?.ancestors.includes(copy.key) === true
     this.acknowledge(copy)
     this.error = null
-    this.recovered ||= saved.value.recovered
     if (this.replayedAt !== null && saved.value.draft?.displaced != null)
       this.conflict = { ...saved.value.draft.displaced, typedAt: this.replayedAt }
     this.replayedAt = null
@@ -476,7 +486,7 @@ export class ComposerDraft {
       // The draft holds this tab's text: it's the base now, and what's typed since was typed
       // from it.
       this.base = now
-      if (this.pending !== null && !this.inFlight.has(this.pending)) this.keep(this.text, true)
+      if (this.pending !== null && !this.inFlight(this.pending)) this.keep(this.text, true)
     } else if (now !== null && unchanged) {
       // It holds another text: this one went to the recovered texts (its session ended), or
       // the server had it already and another tab typed on since. Nothing was typed here
@@ -529,8 +539,7 @@ export class ComposerDraft {
         sending.saved = true
         if (result.value.recovered || result.value.draft === null) {
           // Its session ended meanwhile (sent from another tab): the text is in the recovered
-          // texts, and the box says so rather than sending it from a draft it wasn't typed in.
-          this.recovered ||= result.value.recovered
+          // texts unless it was sent already, rather than sent from a draft it wasn't typed in.
           return this.settleSend(result.value.draft ?? (await this.reopen()))
         }
         // A save the server had already made (this browser's copy, sent as a page closed)
@@ -540,7 +549,6 @@ export class ComposerDraft {
       }
       const outcome = await run({ fork: forkOf(saved), draftId: saved.id, session: saved.session, text })
       if (!outcome.sent) return this.giveBack(text, saved)
-      this.recovered ||= outcome.recovered > 0
       const after = outcome.draft
       if (after !== null && after.id === saved.id && after.session !== saved.session && shown(after) === "") {
         // Committed: the box holds the next message, typed into the session the send began.
@@ -619,7 +627,6 @@ export class ComposerDraft {
         })
       )
       if (result.ok) {
-        this.recovered ||= result.value.recovered > 0
         if (!this.unsaved) this.take(result.value)
         this.emit()
         if (this.unsaved) this.schedule(0)
@@ -657,16 +664,26 @@ export class ComposerDraft {
       })
     })
     if (saves.length === 0 || new Blob([body]).size > KEEPALIVE_LIMIT) return
-    for (const copy of saves) this.inFlight.add(copy)
+    for (const copy of saves) this.send(copy)
     void this.env.keepalive("/library/drafts", body).then((ok) => {
+      for (const copy of saves) this.arrived(copy)
       if (!(typeof ok === "boolean" ? ok : ok.ok)) return
-      if (typeof ok !== "boolean") {
-        this.recovered ||= ok.recovered > 0
-        this.emit()
-      }
       // The browser copy is acknowledged; the live request still needs this identity
       // to reconcile its local draft with the writer's receipt.
       for (const copy of saves) void dropCopy(copy)
+      // The page stayed (the back-forward cache kept it): the box learns the draft as the
+      // server has it, by the same save again, which the writer answers from its receipt.
+      // Otherwise what's typed next would name the draft as it was before, and be saved
+      // over this text as another tab's.
+      const pending = this.pending
+      const mine =
+        pending === null ? undefined : saves.find((copy) => copy === pending || pending.ancestors.includes(copy.key))
+      if (mine !== undefined)
+        void this.enqueue(async () => {
+          const now = this.pending
+          if (now === null || (now !== mine && !now.ancestors.includes(mine.key))) return
+          await this.settle(mine, await this.request(mine))
+        })
     })
   }
 }

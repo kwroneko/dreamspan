@@ -20,7 +20,6 @@ import {
 import type { CastCard, EntityId, MessageImages } from "@dreamspan/shared/chat.ts"
 import type { DraftState } from "@dreamspan/shared/drafts.ts"
 import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
-import { Link } from "@tanstack/react-router"
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
@@ -253,9 +252,7 @@ export function Composer({
     text: draftText,
     guidance: draftGuidance,
     ready: textReady,
-    restored,
     conflict,
-    recovered,
     error: saveError,
     draftId
   } = useSyncExternalStore(draft.subscribe, draft.snapshot)
@@ -729,22 +726,6 @@ export function Composer({
                 acknowledge={() => draft.acknowledgeConflict()}
                 switchText={() => draft.switchConflict()}
               />
-            )}
-            {restored && !conflict && (
-              <p role="status" className="text-sm text-muted">
-                Text this browser kept when the page closed before the server had it is back in the box.
-              </p>
-            )}
-            {recovered && (
-              <p role="status" className="text-sm text-muted">
-                Earlier composer text is kept in the{" "}
-                <Tooltip label="Opens recovered text in the bin.">
-                  <Link to="/bin" search={{ section: "recovered" }}>
-                    bin, under Recovered text
-                  </Link>
-                </Tooltip>
-                .
-              </p>
             )}
           </>
         }

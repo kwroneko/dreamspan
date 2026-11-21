@@ -114,9 +114,10 @@ for (const kind of ["composer", "editor"] as const) {
         if (kind === "composer" && variant === "committed elsewhere") {
           await expectTextBox(box(back), "")
           await expect(back.getByRole("article", { name: "Your message" })).toContainText(elsewhere)
-          const notice = back.getByRole("status").filter({ hasText: "Earlier composer text" })
-          await expect(notice).toContainText("Recovered text")
-          await notice.getByRole("link").click()
+          // In the bin's recovered texts without a word: no line in the composer, no toast (DESIGN §6.2).
+          await expect(back.getByRole("status").filter({ hasText: "bin" })).toHaveCount(0)
+          await expect(back.locator("[data-toast]")).toHaveCount(0)
+          await back.goto(`${server.url}/bin?section=recovered`)
           await expect(back.getByText(offline, { exact: true })).toBeVisible()
           expect((await saved())?.content).toBe("")
         } else {
@@ -169,11 +170,10 @@ for (const kind of ["composer", "editor"] as const) {
             await expectTextBox(box(back), offline)
             await expect.poll(async () => (await saved())?.content).toBe(offline)
           } else {
-            await expect(
-              back
-                .getByRole("status")
-                .filter({ hasText: kind === "composer" ? "back in the box" : "Brought back from this browser" })
-            ).toBeVisible()
+            // The composer just shows the text as it was typed; an editor says where it came from.
+            if (kind === "editor")
+              await expect(back.getByRole("status").filter({ hasText: "Brought back from this browser" })).toBeVisible()
+            else await expect(back.locator("[data-toast]")).toHaveCount(0)
             if (variant === "committed elsewhere") {
               const revision = await rpc((api) => api.OpenEditor({ refId: card.id }))
               expect(revision.doc.description).toBe(elsewhere)
