@@ -431,7 +431,9 @@ export const CacheWarmth = Schema.Struct({
   /** The last request's tokens up to its last breakpoint: what a warm cache holds. */
   prefixTokens: Schema.Int,
   /** First difference in the mapped prefix, and the next prefix's uncached suffix tokens. */
-  changed: Schema.NullOr(Schema.Struct({ reason: Schema.String, tokens: Schema.Int }))
+  changed: Schema.NullOr(Schema.Struct({ reason: Schema.String, tokens: Schema.Int })),
+  /** The whole next request's tokens, counted as `changed.tokens` is; absent when it can't be counted. */
+  requestTokens: Schema.optionalKey(Schema.Int)
 })
 export type CacheWarmth = typeof CacheWarmth.Type
 

@@ -141,9 +141,11 @@ describe("the cache-warmth estimate", () => {
         expiresAt: request.startedAt + 300_000,
         verified: true,
         prefixTokens: warm!.prefixTokens,
+        requestTokens: warm!.requestTokens!,
         changed: null
       })
       assert.isAbove(warm!.prefixTokens, 0)
+      assert.isAtLeast(warm!.requestTokens!, warm!.prefixTokens)
 
       const window = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
       const sent = window.entries[1]!
@@ -158,6 +160,8 @@ describe("the cache-warmth estimate", () => {
       assert.strictEqual(cold!.changed!.reason, "Message 2 was edited, or another of its versions chosen.")
       const count = yield* Effect.promise(() => prepareTokenizer("o200k_base"))
       assert.strictEqual(cold!.changed!.tokens, count("The road washed out.") + 3 + count(version.content) + 3)
+      // The total the chip shows it out of is the whole request, counted the same way.
+      assert.isAtLeast(cold!.requestTokens!, cold!.changed!.tokens)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

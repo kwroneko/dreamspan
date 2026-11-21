@@ -2,7 +2,13 @@
 // placement follows the width, as a plugin's can.
 import type { CacheWarmth } from "@dreamspan/shared/inspectorApi.ts"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cacheNotes, cacheState, compactTokens, uncachedText } from "../src/features/chat/CacheIndicator.tsx"
+import {
+  cacheNotes,
+  cacheState,
+  compactTokens,
+  uncachedText,
+  uncachedTotal
+} from "../src/features/chat/CacheIndicator.tsx"
 import {
   availableComposerControls,
   composerControls,
@@ -60,6 +66,24 @@ describe("the cache chip", () => {
     expect(uncachedText(7_046, 7_046)).toBe("↻ 7.0k of 7.0k uncached")
     expect(uncachedText(2_926, 96_906)).toBe("↻ 2.9k of 97k uncached")
     expect(uncachedText(2_926, undefined)).toBe("↻ 2.9k uncached")
+  })
+
+  it("takes the total from the estimate itself, and shows none rather than one below the uncached part", () => {
+    const changed = { reason: "Message 2 was edited, or another of its versions chosen.", tokens: 2_926 }
+    // The normal case: the estimate's own total, counted as its uncached part is.
+    expect(uncachedTotal(2_926, warmth({ changed, requestTokens: 96_906 }))).toBe(96_906)
+    expect(uncachedText(2_926, uncachedTotal(2_926, warmth({ changed, requestTokens: 2_926 })))).toBe(
+      "↻ 2.9k of 2.9k uncached"
+    )
+    // A total below the uncached part (an expired cache counted on the last request) isn't raised to it.
+    const lower = uncachedTotal(7_046, warmth({ prefixTokens: 7_046, requestTokens: 5_000 }))
+    expect(lower).toBeUndefined()
+    expect(uncachedText(7_046, lower)).toBe("↻ 7.0k uncached")
+    // No total in the estimate: the chip reads as it did without one.
+    const missing = uncachedTotal(2_926, warmth({ changed }))
+    expect(missing).toBeUndefined()
+    expect(uncachedText(2_926, missing)).toBe("↻ 2.9k uncached")
+    expect(uncachedTotal(2_926, null)).toBeUndefined()
   })
 
   it("shows nothing when the estimate rounds to 0, or without a TTL and with nothing changed", () => {

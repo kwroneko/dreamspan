@@ -107,6 +107,16 @@ export const cacheState = (warmth: CacheWarmth | null, now: number): Shown => {
       }
 }
 
+/**
+ * The next request's total that the uncached count is shown out of: the estimate's own, counted
+ * as the uncached part is and sent with it. None when it's missing or below the uncached part
+ * (the uncached part then comes from the last request), so the chip never shows a made-up total.
+ */
+export const uncachedTotal = (tokens: number, warmth: CacheWarmth | null) => {
+  const total = warmth?.requestTokens
+  return total === undefined || total < tokens ? undefined : total
+}
+
 /** The chip's uncached count, out of the next request's total when it's known. */
 export const uncachedText = (tokens: number, total: number | undefined) =>
   total === undefined
@@ -210,9 +220,7 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
     }
   }
   const left = warm && countdown ? clock(expiresAt - now) : null
-  // The next request's estimated size, as the history note gives it; never below its uncached part.
-  const counted = view.history?.budget?.countedInput
-  const total = shown?.kind === "uncached" && counted !== undefined ? Math.max(counted, shown.tokens) : undefined
+  const total = shown?.kind === "uncached" ? uncachedTotal(shown.tokens, warmth) : undefined
   const ofTotal = total === undefined ? "" : ` of ${total.toLocaleString()}`
   const text =
     shown?.kind === "uncached"
