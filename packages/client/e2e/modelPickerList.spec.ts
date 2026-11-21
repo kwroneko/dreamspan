@@ -166,6 +166,59 @@ test("pins that load after the picker opens, or change in another tab, join Pinn
   await expect(pinRow(page, label, false)).toHaveAttribute("aria-pressed", "false")
 })
 
+test("the focused row keeps focus when pins arriving elsewhere push it down the list", async ({ page }) => {
+  const current = "Gateway UNO · uno.gemini-4-carbon"
+  const value = seeded.value(0, "uno.gemini-4-carbon")
+  // Twelve more pins above the chosen row move it well past the rows that were in view.
+  const added = Array.from({ length: 12 }, (_, i) => {
+    const author = ["anthropic", "openai", "meta-llama", "qwen", "mistralai", "deepseek"][i % 6]!
+    return seeded.value(1, `${author}/story-${String(30 + i).padStart(3, "0")}-v3.1`)
+  })
+  // Set from outside this page, then announced to it as another tab announces its own changes.
+  const other = await page.context().newPage()
+  await other.goto(`${server().url}/chats/${seeded.chat.id}`)
+  const setPins = async (pinned: boolean) => {
+    await withCookie(server(), "", (api) =>
+      api.SetDisplayPrefs({ prefs: { modelPins: Object.fromEntries(added.map((id) => [id, pinned])) } })
+    )
+    await other.evaluate(() => new BroadcastChannel("dreamspan.displayPrefs").postMessage("changed"))
+  }
+  // The chosen row's place in the list, or null while it isn't mounted.
+  const index = () =>
+    list(page)
+      .locator("[data-picker-row]")
+      .evaluateAll((els, chosen) => {
+        const el = els.find((each) => (each as HTMLElement).dataset.pickerRow === chosen) as HTMLElement | undefined
+        return el ? Number(el.dataset.modelIndex) : null
+      }, value)
+  const row = list(page).getByRole("radio", { name: current, exact: true })
+  await page.goto(`${server().url}/chats/${seeded.chat.id}`)
+  await modelChip(page).click()
+  await search(page).focus()
+  await page.keyboard.press("ArrowDown")
+  await expect(row).toBeFocused()
+  const start = (await index())!
+  try {
+    await setPins(true)
+    await expect.poll(index).toBe(start + added.length)
+    await expect(row).toBeFocused()
+    await expect(row).toBeInViewport()
+    // Arrow keys go on from the same row.
+    await page.keyboard.press("ArrowDown")
+    await expect(list(page).getByRole("radio", { name: `${current}-lite`, exact: true })).toBeFocused()
+    await page.keyboard.press("ArrowUp")
+    await expect(row).toBeFocused()
+    // The pins leaving again move it back up, and focus stays with it.
+    await setPins(false)
+    await expect.poll(index).toBe(start)
+    await expect(row).toBeFocused()
+    await expect(row).toBeInViewport()
+  } finally {
+    await setPins(false)
+    await other.close()
+  }
+})
+
 test("the sort is a labelled choice beside the connection filter", async ({ page }) => {
   await page.goto(`${server().url}/chats/${seeded.chat.id}`)
   await modelChip(page).click()

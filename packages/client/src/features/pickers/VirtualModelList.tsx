@@ -45,6 +45,18 @@ function Facts({ model, used, mixed }: { model: ModelChoice; used: number | unde
   )
 }
 
+/** Where the focused row is now; when it left the list, the selectable row nearest its old place. */
+function focusedIndex(rows: ReadonlyArray<ModelRow>, focus: { readonly key: string; readonly index: number } | null) {
+  if (!focus || rows.length === 0) return -1
+  const at = rows[focus.index]?.key === focus.key ? focus.index : rows.findIndex((row) => row.key === focus.key)
+  if (at >= 0) return at
+  const start = Math.min(focus.index, rows.length - 1)
+  for (let distance = 0; distance < rows.length; distance++)
+    for (const index of [start + distance, start - distance])
+      if (index >= 0 && index < rows.length && !("heading" in rows[index]!)) return index
+  return -1
+}
+
 export function VirtualModelList({
   ref,
   fallbackFocus,
@@ -72,8 +84,15 @@ export function VirtualModelList({
 }) {
   "use no memo"
   const parent = useRef<HTMLDivElement>(null)
-  const [focused, setFocused] = useState(-1)
+  // The focused row by key, and its place when it was focused: rows regrouped under it (pins
+  // changing elsewhere) keep it focused, or its neighbour when it left the list.
+  const [focus, setFocus] = useState<{ readonly key: string; readonly index: number } | null>(null)
+  // Whether focus is in the list, so a regroup that remounts or moves the row refocuses it.
+  const inside = useRef(false)
+  // A row the keys moved to that may mount only on the next render.
+  const pending = useRef(false)
   const windowed = rows.length > 60
+  const focused = focusedIndex(rows, focus)
   const current = Math.max(
     0,
     rows.findIndex((row) => value !== null && valueOf(row) === value)
@@ -102,7 +121,8 @@ export function VirtualModelList({
       return
     }
     if (index >= rows.length) return
-    setFocused(index)
+    setFocus({ key: rows[index]!.key, index })
+    pending.current = true
     if (windowed) virtualizer.scrollToIndex(index, { align: "auto" })
     // A mounted row may already be the retained index after focus returned to search.
     parent.current?.querySelector<HTMLElement>(`[data-model-index="${index}"] [role=radio]`)?.focus()
@@ -115,9 +135,18 @@ export function VirtualModelList({
     }
   }))
   useLayoutEffect(() => {
-    if (focused >= 0)
-      parent.current?.querySelector<HTMLElement>(`[data-model-index="${focused}"] [role=radio]`)?.focus()
-  }, [focused])
+    if (focused < 0) return
+    const row = parent.current?.querySelector<HTMLElement>(`[data-model-index="${focused}"] [role=radio]`)
+    if (focus && focus.index !== focused) {
+      // The rows moved under the focused one: follow it, keeping it in view if focus is here.
+      setFocus({ key: rows[focused]!.key, index: focused })
+      if (!inside.current) return
+      if (windowed) virtualizer.scrollToIndex(focused, { align: "auto" })
+      else row?.scrollIntoView({ block: "nearest" })
+    }
+    if (row && document.activeElement !== row && (inside.current || pending.current)) row.focus()
+    if (row) pending.current = false
+  }, [focus, focused, rows, windowed, virtualizer])
   return (
     <div
       ref={parent}
@@ -126,6 +155,20 @@ export function VirtualModelList({
       data-layout-audit-ignore="inset: Rows are full-width hover targets, edge to edge with the search field, their text 8 px in"
       aria-label="Model"
       className="scroll-thumb-only max-h-80 min-h-12 shrink overflow-y-auto"
+      onFocus={() => (inside.current = true)}
+      onBlur={(event) => {
+        const next = event.relatedTarget as Node | null
+        if (next) {
+          inside.current = parent.current?.contains(next) === true
+          return
+        }
+        // Focus went nowhere: a row unmounted or moved under it (the render refocuses it), or a
+        // click outside. Decided once this render has had its say.
+        const target = event.target
+        queueMicrotask(() => {
+          inside.current = !target.isConnected || parent.current?.contains(document.activeElement) === true
+        })
+      }}
       onKeyDown={(event) => {
         const index = Number(
           (event.target as HTMLElement).closest<HTMLElement>("[data-model-index]")?.dataset.modelIndex ?? -1
@@ -188,7 +231,10 @@ export function VirtualModelList({
                       ? { "aria-description": row.choice.description }
                       : {})}
                   ref={checked ? (focusRef as RefObject<HTMLButtonElement | null>) : undefined}
-                  onFocus={() => setFocused(item.index)}
+                  onFocus={() => {
+                    if (focus?.key !== row.key || focus.index !== item.index)
+                      setFocus({ key: row.key, index: item.index })
+                  }}
                   onClick={() => onChoose(choice.value)}
                   className="flex h-full min-w-0 flex-1 flex-col justify-center rounded-md px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
                 >
