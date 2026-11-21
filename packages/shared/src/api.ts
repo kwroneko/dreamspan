@@ -116,7 +116,7 @@ export class Health extends Schema.Class<Health>("Health")({
   readers: Schema.Int
 }) {}
 
-export { ConnectionTest, ConnectionTestReply, TEST_MODEL_KEYS } from "./providerApi.ts"
+export { ConnectionTest, ConnectionTestReply } from "./providerApi.ts"
 
 export class ModelRefresh extends Schema.Class<ModelRefresh>("ModelRefresh")({
   added: Schema.Int,

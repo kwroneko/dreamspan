@@ -22,7 +22,7 @@ export const scrollPane = (inside: Locator, move: Move) =>
  * What shows a vertical scrollbar around `inside`: the pane it's in, every element inside that
  * pane that scrolls with content to scroll, and the pane's scrolling ancestors and the document.
  */
-export const vertScrollers = (inside: Locator) =>
+const vertScrollers = (inside: Locator) =>
   inside.evaluate((element) => {
     let pane = element.parentElement
     while (pane && !["auto", "scroll"].includes(getComputedStyle(pane).overflowY)) pane = pane.parentElement
