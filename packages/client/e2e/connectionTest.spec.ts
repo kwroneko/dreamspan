@@ -72,6 +72,30 @@ test("the new connection form tests the typed values without saving, and the use
   expect(await admin((api) => api.ListCredentials())).toEqual([])
   expect((await admin((api) => api.GetGenerationDefaults())).model).toBeNull()
 
+  // A changed key makes the result stale: it goes until the next test.
+  const keyField = page.getByLabel("API key", { exact: true })
+  await keyField.fill("sk-typed-test-key-7782")
+  await expect(result).toHaveCount(0)
+  // So does a changed address.
+  await testButton.click()
+  await expect(result).toContainText("2 models listed")
+  await page.getByLabel("Base URL", { exact: true }).fill(`${provider.baseUrl}/`)
+  await expect(result).toHaveCount(0)
+  await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
+  // A test still running when a setting changes never shows its answer.
+  provider.hold()
+  const sent = provider.completions.length
+  await testButton.click()
+  await expect.poll(() => provider.completions.length).toBe(sent + 1)
+  await keyField.fill("sk-typed-test-key-7781")
+  await expect(result).toHaveCount(0)
+  provider.release()
+  await expect(testButton).not.toHaveAttribute("aria-busy")
+  await expect(result).toHaveCount(0)
+  await expect(page.getByRole("alert").filter({ hasText: "It doesn't work" })).toHaveCount(0)
+  await testButton.click()
+  await expect(result).toContainText("2 models listed")
+
   // An unreachable server fails in plain words.
   await page.getByLabel("Base URL", { exact: true }).fill("http://127.0.0.1:9/v1")
   await testButton.click()
@@ -94,6 +118,15 @@ test("the new connection form tests the typed values without saving, and the use
   await expect(pageResult).toContainText("fake-large replied in")
   await expect(pageResult).toContainText(REPLY)
   await audit(page, info, "connection-tested")
+  // A new key saved on the page makes the result stale.
+  await page.getByRole("button", { name: "Enter a new key" }).click()
+  const keyDialog = page.getByRole("dialog")
+  await keyDialog.getByLabel("Key", { exact: true }).fill("sk-replaced-test-key-4455")
+  await keyDialog.getByRole("button", { name: "Save key" }).click()
+  await expect(keyDialog).toBeHidden()
+  await expect(pageResult).toHaveCount(0)
+  await pageTest.click()
+  await expect(pageResult).toContainText("fake-large replied in")
 
   // On a phone the test is in reach too.
   await page.setViewportSize({ width: 390, height: 844 })

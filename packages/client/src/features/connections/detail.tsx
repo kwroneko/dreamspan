@@ -948,9 +948,14 @@ export function RouteSection({ connection }: ConnectionSectionProps) {
   )
 }
 
-export function TestSection({ connection }: ConnectionSectionProps) {
+export function TestSection({ connection, credentials }: ConnectionSectionProps) {
   const action = useAction()
-  const [result, setResult] = useState<ConnectionTest | null>(null)
+  // What a test sends: the saved connection and its key. A result shows only while they're unchanged.
+  const key = credentials.find((entry) => entry.id === connection.credentialId)
+  const inputs = JSON.stringify([connection, key ? [key.id, key.rowVersion] : null])
+  const [asked, setAsked] = useState<string | null>(null)
+  const [answer, setAnswer] = useState<{ readonly for: string; readonly result: ConnectionTest } | null>(null)
+  const result = answer?.for === inputs ? answer.result : null
   const [chosen, setChosen] = useState<ModelId | null>(null)
   const defaults = useAtomValue(generationDefaultsAtom)
   const models = useAtomValue(modelsAtom(connection.id, false))
@@ -960,10 +965,12 @@ export function TestSection({ connection }: ConnectionSectionProps) {
   const preferred = current?.connection === connection.id ? current.model : null
   const target = chosen ?? preferred
   const test = async (modelId: ModelId | null) => {
+    const sent = inputs
+    setAsked(sent)
     const outcome = await action.run((client) =>
       client("TestConnection", { connectionId: connection.id, ...(modelId === null ? {} : { modelId }) })
     )
-    setResult(outcome.ok ? outcome.value : null)
+    setAnswer(outcome.ok ? { for: sent, result: outcome.value } : null)
   }
   return (
     <Card>
@@ -996,7 +1003,7 @@ export function TestSection({ connection }: ConnectionSectionProps) {
           }
         />
       )}
-      <ErrorAlert error={action.error} title="It doesn't work" />
+      <ErrorAlert error={asked === inputs ? action.error : null} title="It doesn't work" />
     </Card>
   )
 }
