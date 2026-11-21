@@ -1,7 +1,8 @@
 // Shared by the provider browser gate and the focused layout audit. Synthetic HTTP only.
 import { expect, test } from "@playwright/test"
-import { json, startMockProvider } from "../../../server/test/support/mockProvider.ts"
+import { json, sse, startMockProvider } from "../../../server/test/support/mockProvider.ts"
 import { expectLayout } from "./layoutAudit.ts"
+import { chooseDefaultModelIfNone } from "./provider.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 
 export const googleConnectionTests = () => {
@@ -10,6 +11,18 @@ export const googleConnectionTests = () => {
   test.beforeAll(async () => {
     mock = await startMockProvider((request, res) => {
       expect(request.headers["x-goog-api-key"]).toBe("synthetic-google-browser-key")
+      // Test sends the default model one short message after listing the models.
+      if (request.path.startsWith("/v1beta/models/gemini-2.5-flash:streamGenerateContent?"))
+        return sse(
+          res,
+          [
+            {
+              candidates: [{ content: { parts: [{ text: "Hello." }] }, finishReason: "STOP" }],
+              usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2, totalTokenCount: 5 }
+            }
+          ],
+          { done: false }
+        )
       expect(request.path).toContain("/v1beta/models?")
       json(res, 200, {
         models: [
@@ -58,10 +71,13 @@ export const googleConnectionTests = () => {
         await page.getByLabel("Name", { exact: true }).fill(name)
         await page.getByLabel("Base URL", { exact: true }).fill(`${mock.url}/v1beta`)
         await page.getByLabel("API key", { exact: true }).fill("synthetic-google-browser-key")
+        await chooseDefaultModelIfNone(page, "gemini-2.5-flash")
         await page.getByRole("button", { name: "Create connection" }).click()
         await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible()
-        await page.getByRole("button", { name: "Check", exact: true }).click()
-        await expect(page.getByText("It works", { exact: true })).toBeVisible()
+        await page.getByRole("button", { name: "Test", exact: true }).click()
+        // Later variants share the account, whose default model is then on an earlier connection,
+        // so only the first sends a message; every one lists the models.
+        await expect(page.getByRole("status").filter({ hasText: "It works" })).toBeVisible()
         await page.getByRole("button", { name: "Refresh from provider", exact: true }).click()
         await expect(
           page.getByRole("list", { name: "Models", exact: true }).getByText("Synthetic Flash", { exact: true })

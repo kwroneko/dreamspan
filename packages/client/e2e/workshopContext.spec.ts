@@ -77,8 +77,9 @@ for (const width of [1440, 390])
       await expect(list).toBeVisible()
       const wide = list.locator("[data-picker-row]").filter({ hasText: "synthetic-wide" })
       const unreported = list.locator("[data-picker-row]").filter({ hasText: "synthetic-unreported" })
-      await expect(wide).toContainText("200k context ·")
-      await expect(unreported).toContainText("128k context (assumed) ·")
+      // The window is its own fact on the row's second line, after the name.
+      await expect(wide.getByText("200k context", { exact: true })).toBeVisible()
+      await expect(unreported.getByText("128k context (assumed)", { exact: true })).toBeVisible()
       await expect(unreported.locator(".text-warning")).toHaveText(/128k context \(assumed\)/)
       await unreported.getByRole("radio").hover()
       await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(

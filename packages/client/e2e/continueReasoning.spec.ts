@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import { expect, type Page, test } from "@playwright/test"
+import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { MORE, THOUGHT, startContinueProvider } from "./support/continueProvider.ts"
 import { messageMenu, showActions } from "./support/message.ts"
@@ -14,6 +14,10 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await provider.stop()
 })
+
+/** The action bar's Continue; a stopped reply also has a text Continue beside its status. */
+const actionBarContinue = (reply: Locator) =>
+  reply.getByRole("toolbar", { name: "Message actions" }).getByRole("button", { name: "Continue", exact: true })
 
 const shoot = async (page: Page, state: string) => {
   if (process.env.SCREENSHOT_DIR) {
@@ -93,7 +97,7 @@ for (const width of [1440, 390]) {
     )
     const originalVersion = source.entries.at(-1)!.version
     await showActions(reply)
-    await reply.getByRole("button", { name: "Continue", exact: true }).click()
+    await actionBarContinue(reply).click()
     await expect(reply.getByText("generating", { exact: true })).toBeVisible()
     await expect(reply.locator(".markdown").last()).toContainText(original)
     await expect(reasoning).toHaveAttribute("aria-expanded", "true")
@@ -198,7 +202,7 @@ for (const width of [1440, 390]) {
       )
     ).entries.at(-1)!.version
     const sentBefore = provider.requests.length
-    await reply.getByRole("button", { name: "Continue", exact: true }).click()
+    await actionBarContinue(reply).click()
     await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20000 })
     await expect(reply.locator(".markdown").last()).toContainText("Before the watch changes")
     await shoot(page, "09-continued-without-prefill")
@@ -247,7 +251,7 @@ for (const width of [1440, 390]) {
       await expect(reply.getByText("stopped", { exact: true })).toBeVisible()
       const original = await reply.locator(".markdown").last().innerText()
       await showActions(reply)
-      await reply.getByRole("button", { name: "Continue", exact: true }).click()
+      await actionBarContinue(reply).click()
       await expect(reply.locator(".markdown").last()).toContainText(original)
       await expect(reply.locator(".markdown").last()).toContainText("Before the watch changes", { timeout: 30000 })
       await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
@@ -307,7 +311,7 @@ for (const width of [1440, 390]) {
     await expect(reply.locator(".markdown").last()).toHaveText("The ledger is wrong,")
     await showActions(reply)
     await shoot(page, "07-edited-continue")
-    await reply.getByRole("button", { name: "Continue", exact: true }).click()
+    await actionBarContinue(reply).click()
     await expect(reply.locator(".markdown").last()).toContainText("The ledger is wrong," + MORE.trimEnd())
     await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
     expect(provider.requests.at(-1)!.messages.at(-1)).toEqual({ role: "assistant", content: "The ledger is wrong," })
