@@ -324,3 +324,34 @@ test("the recovery warning counts additions, deletions and saved copies without 
   await dialog.getByRole("button", { name: "Keep copies" }).click()
   await expect(warning).toHaveCount(0)
 })
+
+test("typing that saves never shows the recovery warning; a refused save shows it once stuck", async ({ page }) => {
+  const card = await admin((api) => api.CreateCard({ label: "Typing recovery", name: "Typing recovery" }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/library/${card.id}`)
+  const box = page.getByRole("textbox", { name: /^Description/ })
+  await expect(box).toBeVisible()
+  // Records any moment the warning is in the page, however brief.
+  await page.evaluate(() => {
+    const seen = () => /\d+ unsaved texts?/.test(document.body.innerText)
+    const w = window as unknown as { warned: boolean }
+    w.warned = seen()
+    new MutationObserver(() => {
+      if (seen()) w.warned = true
+    }).observe(document.body, { subtree: true, childList: true, characterData: true })
+  })
+  await box.click()
+  // Bursts with pauses past the save delay, so copies are kept, sent and dropped repeatedly.
+  for (let burst = 0; burst < 6; burst++) {
+    await box.pressSequentially(`burst ${burst} `, { delay: 30 })
+    await page.waitForTimeout(800)
+  }
+  await expect
+    .poll(() => admin((api) => api.OpenEditor({ refId: card.id })).then((x) => x.drafts[0]?.content))
+    .toBe(Array.from({ length: 6 }, (_, burst) => `burst ${burst} `).join(""))
+  await expect.poll(async () => (await copies(page)).length).toBe(0)
+  expect(await page.evaluate(() => (window as unknown as { warned: boolean }).warned)).toBe(false)
+  // The server refuses text this long: its copy stays, and the warning counts it once stuck.
+  await box.fill("REFUSED-" + "z".repeat(1_000_001))
+  await expect(page.getByRole("button", { name: "1 unsaved text", exact: true })).toBeVisible({ timeout: 20_000 })
+})
