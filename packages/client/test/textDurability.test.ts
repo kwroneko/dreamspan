@@ -8,20 +8,25 @@
 // ComposerDraft, FileDraft) or, for anything else, the generic one (editor/durable.tsx:
 // useDurableText, useDurableForm), and add a Place to the e2e guard.
 import { readdirSync, readFileSync } from "node:fs"
-import { dirname, relative, resolve } from "node:path"
+import { relative, resolve } from "node:path"
 import { expect, it } from "vitest"
+
+/** What keeps a field's text: a draft store, the generic hooks, the UI's durable fields, or the URL. */
+type Durable =
+  | "EditorStore"
+  | "useUserDraft"
+  | "useDurableText"
+  | "useDurableForm"
+  | "useDurableFields"
+  | "usePlaceParam"
+  | "MessageDraft"
+  | "SummaryDraft"
+  | "ComposerDraft"
+  | "FileDraft"
 
 type Site =
   | {
-      readonly durable:
-        | "EditorStore"
-        | "useUserDraft"
-        | "useDurableText"
-        | "useDurableForm"
-        | "MessageDraft"
-        | "SummaryDraft"
-        | "ComposerDraft"
-        | "FileDraft"
+      readonly durable: Durable
       readonly what: string
       /** The files that hold the store, when callers keep the text this file renders. */
       readonly via?: ReadonlyArray<string>
@@ -166,101 +171,185 @@ it("lists every multi-line text box with what keeps its text across a reload", (
   }
 })
 
-// Single-line fields in a dialog a reload opens again: if the dialog comes back, so must what
-// was typed in it. The dialogs are those of files that keep an open state in the URL
-// (`useOpenPlace`, `PlaceDetails`) and the dialog files they import. Secret inputs
-// (SecretInput, PasswordInput) are never kept, so they aren't counted.
-const INPUT = /<(?:Input|input)\b/g
+// Every single-line field the client renders: `Input`, a raw `<input>` that takes text, and the
+// components that are one (SecretInput, PasswordInput, OneLineField, PickerSearch), listed per
+// file as the boxes above are. Inputs that take no typed text (file, checkbox, radio, hidden,
+// colour) aren't counted. A secret is never kept anywhere (exempt), nor is a search or filter
+// query, which is retyped, not written; everything else is kept by a store or is a gap (what's
+// typed there is lost on a reload: listed to be fixed, not yet a place in the e2e guard).
+const INPUT = /<(?:Input|input|SecretInput|PasswordInput|OneLineField|PickerSearch)\b/g
+const NOT_TEXT = /\btype="(?:file|checkbox|radio|hidden|color)"/
 
-const DIALOG_INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
-  "features/cardForks/surfacesImpl.tsx": [{ exempt: "search: Parent card picker's filter" }],
+const kept = (durable: Durable, what: string, via?: ReadonlyArray<string>): Site =>
+  via ? { durable, what, via } : { durable, what }
+const secret: Site = { exempt: "a secret: never kept, in a draft or the browser" }
+const search = (what: string): Site => ({ exempt: `search: ${what}` })
+const gap = (what: string): Site => ({ gap: what })
+const times = (count: number, site: Site) => Array.from({ length: count }, () => site)
+
+const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
+  "ui/Field.tsx": [secret, secret],
+  "ui/InlineRename.tsx": [kept("useDurableFields", "a name renamed in place")],
+  "ui/OneLineField.tsx": [kept("useDurableFields", "a one-line field with Save and Cancel")],
+  "ui/SaveControls.tsx": [kept("useDurableFields", "Save with a message: the revision message")],
+  "ui/SearchReplace.tsx": [search("Find"), search("Replace with, beside Find")],
+  "ui/html/HtmlParts.tsx": [
+    { exempt: "a message's text input outside a message (its preview): nothing to keep it under" },
+    { exempt: "an input Markdown made (a task list's box)" },
+    { exempt: "a checkbox or radio of a message's HTML" },
+    { exempt: "another non-text input of a message's HTML (range, date): no typed text" }
+  ],
+  "features/accounts.tsx": [secret, secret, gap("New user: handle"), gap("New user: display name"), secret, secret],
+  "features/autoRun/AutoRun.tsx": times(2, kept("usePlaceParam", "Auto replies: replies and token limit")),
+  "features/bin/BinCapacity.tsx": [gap("Bin capacity: the size typed")],
+  "features/cardForks/surfacesImpl.tsx": [search("Parent card picker's filter")],
+  "features/cardSources/SourcesSettings.tsx": [secret, gap("Card sources: cache size limit")],
+  "features/cardSources/browse.tsx": times(4, search("a card source's filters (range, value, tag)")),
+  "features/characters/ArchiveUnused.tsx": [gap("Archive unused: an amount")],
+  "features/characters/CardGridControls.tsx": [search("a card source's query"), search("filter the cards")],
+  "features/characters/CardPage.tsx": [search("find a chat")],
   "features/characters/ShellBrowser.tsx": [
-    { exempt: "search: find a chat, branch or character" },
-    { exempt: "search: a card source's query" },
-    { exempt: "search: find in the list" }
+    search("find a branch"),
+    search("a card source's query"),
+    search("find in the list")
   ],
-  "features/chat/CardForkDialogs.tsx": [
-    { durable: "useUserDraft", what: "fork for this chat: display name" },
-    { durable: "useUserDraft", what: "fork for this chat: version" },
-    { durable: "useUserDraft", what: "fork for this chat: in-character name" }
-  ],
-  "features/chat/ChatHeader.tsx": [{ durable: "useDurableText", what: "inline chat name" }],
-  "features/chat/NameDialog.tsx": [{ durable: "useUserDraft", what: "chat, group and split names" }],
-  "features/chat/SpeakerSwitcher.tsx": [{ exempt: "search: filter the speakers" }],
+  "features/chat/BranchControl.tsx": [search("find a branch")],
+  "features/chat/CardForkDialogs.tsx": times(3, kept("useUserDraft", "fork for this chat: name, version, nickname")),
+  "features/chat/CastAdd.tsx": [search("find a character to add")],
+  "features/chat/ChatHeader.tsx": [kept("useDurableText", "inline chat name")],
+  "features/chat/ChatList.tsx": [search("find a chat")],
+  "features/chat/ChatsPage.tsx": [kept("useUserDraft", "title of the new chat")],
+  "features/chat/LcmFields.tsx": [gap("a summarization token number, until it's committed on blur")],
+  "features/chat/MacroBindings.tsx": [gap("a macro's name, until Use")],
+  "features/chat/MergeChatDialog.tsx": [search("chats to merge"), kept("useDurableForm", "merge title")],
+  "features/chat/NameDialog.tsx": [kept("useUserDraft", "chat, group and split names")],
+  "features/chat/SpeakerSwitcher.tsx": [search("filter the speakers")],
+  "features/chat/StartChatPage.tsx": [kept("useUserDraft", "title of the new chat")],
+  "features/chat/VersionPicker.tsx": [search("find in versions")],
+  "features/chat/agent/ToolsSection.tsx": [gap("model requests per reply, until it's valid and saved")],
+  "features/chat/htmlTextField.tsx": [kept("useDurableText", "a text input in a message's HTML")],
+  "features/chat/nextReplyStrip.tsx": [search("find in a next-reply list")],
   "features/connections/detail.tsx": [
-    { durable: "useUserDraft", what: "connection name" },
-    { durable: "useUserDraft", what: "base URL" },
-    { durable: "useUserDraft", what: "concurrent requests" },
-    { durable: "useUserDraft", what: "cache lifetime" },
-    { exempt: "a header's name, in the headers dialog: it travels with the header's secret value, never kept" }
+    ...times(4, kept("useUserDraft", "connection name, base URL, concurrency, cache lifetime")),
+    secret,
+    { exempt: "a header's name, in the headers dialog: it travels with the header's secret value, never kept" },
+    secret,
+    secret
   ],
-  "features/connections/models.tsx": [
-    { durable: "useUserDraft", what: "a context or output limit of the model" },
-    { durable: "useUserDraft", what: "model display name" },
-    { durable: "useUserDraft", what: "a sampler value" },
-    { durable: "useUserDraft", what: "Add a model: model id" }
+  "features/connections/list.tsx": [
+    kept("useUserDraft", "new connection: name"),
+    kept("useUserDraft", "new connection: base URL"),
+    secret,
+    kept("useUserDraft", "new connection: model"),
+    kept("useUserDraft", "new connection: concurrency")
   ],
+  "features/connections/models.tsx": times(4, kept("useUserDraft", "model limits, name, samplers, Add a model")),
+  "features/connections/providerFields.tsx": [
+    ...times(2, kept("useUserDraft", "region and project", ["features/connections/detail.tsx"])),
+    secret,
+    secret,
+    secret,
+    ...times(4, kept("useUserDraft", "cache settings", ["features/connections/detail.tsx"]))
+  ],
+  "features/costs.tsx": times(8, kept("useUserDraft", "pricing rules and rates")),
   "features/credentials.tsx": [
     { exempt: "an address in Allow for another address: the dialog takes the secret key, and doesn't reopen" },
+    secret,
+    secret,
     { exempt: "another address in Replace key: the dialog takes the secret key, and doesn't reopen" },
-    { durable: "useUserDraft", what: "Save a key: name" },
-    { durable: "useUserDraft", what: "Rename a key: name" }
+    kept("useUserDraft", "Save a key: name"),
+    secret,
+    kept("useUserDraft", "Rename a key: name")
   ],
-  "features/editor/NewCard.tsx": [
-    { durable: "useUserDraft", what: "new card: display name" },
-    { durable: "useUserDraft", what: "new card: in-chat nickname" },
-    { durable: "useUserDraft", what: "new card: version" }
+  "features/editor/CardEditor.tsx": [gap("a card's new tag, until Enter")],
+  "features/editor/LorebookEntryDetails.tsx": [kept("EditorStore", "an entry's number setting")],
+  "features/editor/LorebookMassEdit.tsx": [gap("mass edit: a value, until Apply")],
+  "features/editor/LorebookPicker.tsx": [search("the library's lorebooks")],
+  "features/editor/LorebookTable.tsx": [kept("EditorStore", "an entry's title"), search("filter the entries")],
+  "features/editor/NewCard.tsx": times(3, kept("useUserDraft", "new card: name, nickname, version")),
+  "features/editor/NewDocument.tsx": [kept("useDurableText", "new lorebook or note: name")],
+  "features/editor/NewPreset.tsx": [gap("New prompt preset: name")],
+  "features/editor/RefDialogs.tsx": times(3, kept("useUserDraft", "fork or variant: name, subtitle, nickname")),
+  "features/editor/RegexScripts.tsx": times(2, kept("EditorStore", "a script's text fields and depth")),
+  "features/editor/ReplySectionsSettings.tsx": times(3, kept("EditorStore", "tag pairs and send-back count")),
+  "features/editor/controls.tsx": times(2, kept("EditorStore", "TextField and NumberField")),
+  "features/editor/lorebookColumns.tsx": [kept("EditorStore", "a column's number"), search("find a lorebook")],
+  "features/editor/notes.tsx": [kept("EditorStore", "a note's depth"), search("pick a shared note")],
+  "features/files/FileBrowser.tsx": [kept("useDurableText", "rename, new folder and new file names")],
+  "features/files/FolderChip.tsx": [gap("the folder chip's new folder name")],
+  "features/files/ShareDialog.tsx": [gap("Share: account name")],
+  "features/gallery/Gallery.tsx": [gap("Rename an image: name")],
+  "features/library/list.tsx": [search("the library")],
+  "features/library/stImport.tsx": [gap("SillyTavern import: folder path")],
+  "features/login.tsx": [{ exempt: "sign-in handle, beside the password: never kept" }, secret],
+  "features/mcp/detail.tsx": [
+    ...times(3, kept("useDurableForm", "MCP server: name, URL, timeout")),
+    secret,
+    { exempt: "a header's name: it travels with the header's secret value, never kept" },
+    secret,
+    secret
   ],
-  "features/editor/NewDocument.tsx": [{ durable: "useDurableText", what: "new lorebook or note: name" }],
-  "features/editor/RefDialogs.tsx": [
-    { durable: "useUserDraft", what: "fork or variant: display name" },
-    { durable: "useUserDraft", what: "fork or variant: subtitle" },
-    { durable: "useUserDraft", what: "fork or variant: in-character name" }
+  "features/mcp/list.tsx": [
+    kept("useDurableForm", "new MCP server: name"),
+    kept("useDurableForm", "new MCP server: URL"),
+    secret,
+    kept("useDurableForm", "new MCP server: command")
   ],
-  "features/editor/RegexScripts.tsx": [
-    { durable: "EditorStore", what: "a script's text fields (local binding: its owner's useUserDraft)" },
-    { durable: "EditorStore", what: "a script's depth" }
-  ],
-  "features/editor/controls.tsx": [
-    { durable: "EditorStore", what: "TextField: single-line" },
-    { durable: "EditorStore", what: "NumberField" }
-  ]
+  "features/network.tsx": [secret],
+  "features/pickers/DocumentPickers.tsx": [search("find a document"), search("find a card")],
+  "features/pickers/ModelPicker.tsx": [search("find a model")],
+  "features/pickers/PickerParts.tsx": [search("PickerSearch itself; its uses are counted")],
+  "features/pickers/PresetPicker.tsx": [search("find a prompt preset")],
+  "features/plugins/index.tsx": [search("a plugin registry")],
+  "features/savedMedia/MediaSitesPage.tsx": [gap("Add a site: host")],
+  "features/snippets/index.tsx": [search("filter the snippets")],
+  "features/threads/StartThreadsDialog.tsx": [gap("Start threads: a thread's name")],
+  "features/workshop/CardSkills.tsx": times(2, kept("useDurableForm", "a card skill's name and tools")),
+  "features/workshop/ConvertPreset.tsx": [kept("useUserDraft", "Convert to workshop: name")],
+  "features/workshop/StartWorkshopPage.tsx": [kept("useUserDraft", "title of the new workshop")],
+  "features/workshop/SubagentModelsChip.tsx": [search("add a model")],
+  "features/workshop/SubagentSettings.tsx": times(4, kept("useDurableForm", "subagent limits and models")),
+  "features/workshop/SubagentTypes.tsx": times(3, kept("useDurableForm", "a subagent type's label, id, explanation"))
 }
 
-it("keeps what's typed in every single-line field of a dialog a reload reopens", () => {
+/** The opening tag at `at`, to its closing `>` outside braces. */
+const openingTag = (source: string, at: number) => {
+  let depth = 0
+  for (let i = at + 1; i < source.length; i++) {
+    const c = source[i]
+    if (c === "{") depth++
+    else if (c === "}") depth--
+    else if (c === ">" && depth === 0) return source.slice(at, i + 1)
+  }
+  return source.slice(at)
+}
+
+it("lists every single-line field with what keeps its text across a reload", () => {
   const root = resolve(import.meta.dirname, "../src")
-  const files: Array<string> = []
+  const found: Record<string, number> = {}
   const visit = (dir: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = resolve(dir, entry.name)
       if (entry.isDirectory()) visit(path)
-      else if (/\.tsx?$/.test(path)) files.push(path)
+      else if (/\.tsx?$/.test(path)) {
+        const source = readFileSync(path, "utf8")
+        const count = [...source.matchAll(INPUT)].filter((m) => !NOT_TEXT.test(openingTag(source, m.index))).length
+        if (count > 0) found[relative(root, path)] = count
+      }
     }
   }
-  visit(resolve(root, "features"))
-  const reopening = new Set<string>()
-  for (const file of files) {
-    if (file.endsWith("durable.tsx")) continue
-    const source = readFileSync(file, "utf8")
-    if (!/useOpenPlace\(|<PlaceDetails\b/.test(source)) continue
-    reopening.add(file)
-    for (const [, imported] of source.matchAll(/from "(\.[^"]+\.tsx)"/g)) {
-      const path = resolve(dirname(file), imported!)
-      if (files.includes(path) && readFileSync(path, "utf8").includes("<Dialog")) reopening.add(path)
+  visit(root)
+  const listed = Object.fromEntries(Object.entries(INPUTS).map(([file, sites]) => [file, sites.length]))
+  expect(found, "a single-line field was added or removed: list it in INPUTS with what keeps its text").toEqual(listed)
+  for (const [file, sites] of Object.entries(INPUTS))
+    for (const site of sites) {
+      if (!("durable" in site)) continue
+      const holders = (site.via ?? [file]).map((path) => readFileSync(resolve(root, path), "utf8"))
+      expect(
+        holders.some((source) => source.includes(site.durable)),
+        `${file} is listed as kept by ${site.durable}`
+      ).toBe(true)
     }
-  }
-  const found: Record<string, number> = {}
-  for (const file of reopening) {
-    const count = (readFileSync(file, "utf8").match(INPUT) ?? []).length
-    if (count > 0) found[relative(root, file)] = count
-  }
-  const listed = Object.fromEntries(Object.entries(DIALOG_INPUTS).map(([file, sites]) => [file, sites.length]))
-  expect(found, "a field was added to a reopening dialog: list it in DIALOG_INPUTS with what keeps it").toEqual(listed)
-  for (const [file, sites] of Object.entries(DIALOG_INPUTS)) {
-    const source = readFileSync(resolve(root, file), "utf8")
-    for (const site of sites)
-      if ("durable" in site) expect(source, `${file} is listed as kept by ${site.durable}`).toContain(site.durable)
-  }
 })
 
 // Names renamed in place (ui/InlineRename.tsx): its field keeps what's typed, and that it's

@@ -410,6 +410,25 @@ export const libraryPlaces: ReadonlyArray<Place> = [
     shown: (page) => renameField(page, "New name for Main Prompt")
   }),
   place({
+    name: "Save with a message: revision message",
+    source: "ui/OneLineField.tsx:52",
+    setup: card,
+    open: async (page, { refId }, ctx) => {
+      await goLibrary(page, ctx, refId)
+      const message = page.getByRole("textbox", { name: "Revision message", exact: true })
+      const description = field(page, /^Description/)
+      await description.or(message).first().waitFor()
+      if (!(await message.isVisible())) {
+        // Save with a message needs something to save.
+        await description.click()
+        await page.keyboard.insertText(" Changed.")
+        await page.getByRole("button", { name: "Save with message…", exact: true }).click()
+      }
+      return message
+    },
+    shown: (page) => page.getByRole("textbox", { name: "Revision message", exact: true })
+  }),
+  place({
     name: "Revision message (History)",
     source: "ui/RevisionMessage.tsx:55",
     setup: card,

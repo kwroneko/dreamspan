@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Button } from "./Button.tsx"
 import { Icon } from "./Icon.tsx"
+import { useDurableFields } from "./durableFields.tsx"
 import { OneLineField } from "./OneLineField.tsx"
 import { Spinner } from "./Spinner.tsx"
 import { WindowClose } from "./WindowClose.tsx"
@@ -17,6 +18,7 @@ const inert =
   "cursor-default bg-transparent! text-muted! opacity-50 data-disabled:pointer-events-auto! data-disabled:opacity-50! hover:bg-transparent!"
 
 export function SaveControls({
+  place,
   changed,
   pending = false,
   blocked = null,
@@ -25,6 +27,8 @@ export function SaveControls({
   onRevert,
   adds = null
 }: {
+  /** What's saved, unique to it (a ref's id): the revision message's open state and text are kept under it. */
+  place: string
   changed: boolean
   pending?: boolean
   blocked?: string | null
@@ -37,7 +41,7 @@ export function SaveControls({
   const saveHint = adds === null ? hints.save : `Saves your changes and adds ${adds} to your cards.`
   const messageHint =
     adds === null ? hints.message : `Saves your changes with a note saying what changed and adds ${adds} to your cards.`
-  const [writing, setWriting] = useState(false)
+  const [writing, setWriting] = useDurableFields().useOpen(`save-message:${place}`)
   const [reverting, setReverting] = useState(false)
   const [justSaved, setJustSaved] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -136,6 +140,7 @@ export function SaveControls({
             <WindowClose onClick={close} />
           </span>
           <OneLineField
+            place={`save-message:${place}`}
             label="Revision message"
             placeholder="What changed"
             saveLabel="Save with this message"

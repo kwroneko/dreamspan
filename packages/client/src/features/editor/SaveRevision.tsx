@@ -125,6 +125,7 @@ export function SaveRevision({
   return (
     <>
       <SaveControls
+        place={store.refId}
         changed={state.dirty > 0 || held !== ""}
         pending={pending}
         blocked={clash}

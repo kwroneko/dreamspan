@@ -37,6 +37,7 @@ import { ProgressBar } from "../../ui/Spinner.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { useDurableText, useOpenChoice } from "../editor/durable.tsx"
 import { FolderTree } from "./FolderTree.tsx"
 import { onFolderChanged } from "./live.ts"
 import type { FilesSource } from "./source.ts"
@@ -114,8 +115,10 @@ export function FileBrowser(props: FileBrowserProps) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [version, setVersion] = useState(0)
   const [sort, setSort] = useState<FileSort>("name")
-  const [renaming, setRenaming] = useState<string | null>(null)
-  const [creating, setCreating] = useState<"folder" | "file" | null>(null)
+  // What's open (a row's rename, a new item's name) is URL state, so a reload opens it again.
+  const [renaming, setRenaming] = useOpenChoice(`file-rename:${source.id}:${folder}/`)
+  const [creatingChoice, setCreating] = useOpenChoice(`file-new:${source.id}:${folder}/`)
+  const creating = creatingChoice === "folder" || creatingChoice === "file" ? creatingChoice : null
   const [moving, setMoving] = useState<FileEntry | null>(null)
   const [sharing, setSharing] = useState<FileEntry | null>(null)
   /** The file whose versions are shown. */
@@ -204,15 +207,24 @@ export function FileBrowser(props: FileBrowserProps) {
     }
   }
 
+  /** Shows why a name wasn't kept; the form stays open with it. */
+  const fail = (problem: string) => {
+    setFailure(problem)
+    return false
+  }
+
   const rename = async (entry: FileEntry, next: string) => {
     const problem = nameProblem(next)
-    if (problem) return setFailure(problem)
-    if (next === entry.name) return setRenaming(null)
-    if (names.has(next)) return setFailure(`“${next}” is taken here. Choose another name.`)
+    if (problem) return fail(problem)
+    if (next === entry.name) {
+      setRenaming(null)
+      return true
+    }
+    if (names.has(next)) return fail(`“${next}” is taken here. Choose another name.`)
     const from = joinPath(folder, entry.name)
     const to = joinPath(folder, next)
     const done = await change(() => source.move(from, to), `“${entry.name}” wasn't renamed`)
-    if (!done) return
+    if (!done) return false
     setRenaming(null)
     if (opened === entry.name) onOpened(next)
     showToast({
@@ -225,15 +237,16 @@ export function FileBrowser(props: FileBrowserProps) {
         }
       ]
     })
+    return true
   }
 
   const createFolder = async (name: string) => {
     const problem = nameProblem(name)
-    if (problem) return setFailure(problem)
-    if (names.has(name)) return setFailure(`“${name}” is taken here. Choose another name.`)
+    if (problem) return fail(problem)
+    if (names.has(name)) return fail(`“${name}” is taken here. Choose another name.`)
     const path = joinPath(folder, name)
     const done = await change(() => source.createFolder(path), "The folder wasn't made")
-    if (!done) return
+    if (!done) return false
     setCreating(null)
     showToast({
       title: `Made the folder “${name}”`,
@@ -245,15 +258,16 @@ export function FileBrowser(props: FileBrowserProps) {
         }
       ]
     })
+    return true
   }
 
   const createFile = async (name: string) => {
     const problem = nameProblem(name)
-    if (problem) return setFailure(problem)
-    if (names.has(name)) return setFailure(`“${name}” is taken here. Choose another name.`)
+    if (problem) return fail(problem)
+    if (names.has(name)) return fail(`“${name}” is taken here. Choose another name.`)
     const path = joinPath(folder, name)
     const done = await change(() => source.upload(path, new Blob([]), "ask"), `“${name}” wasn't made`)
-    if (!done) return
+    if (!done) return false
     setCreating(null)
     showToast({
       title: `Made the file “${name}”`,
@@ -265,6 +279,7 @@ export function FileBrowser(props: FileBrowserProps) {
         }
       ]
     })
+    return true
   }
 
   /** Moves an entry of this folder into `target`, under its own name. */
@@ -568,26 +583,28 @@ export function FileBrowser(props: FileBrowserProps) {
             <div className="flex min-w-0 flex-col gap-1">
               {creating === "folder" && (
                 <NameForm
+                  place={`new-folder:${source.id}:${folder}`}
                   label="Name of the new folder"
                   initial={names.has("New folder") ? keepBothName("New folder", names) : "New folder"}
                   fresh={false}
                   saveLabel="Make folder"
                   saveHint="Makes the folder with this name."
                   pending={busy}
-                  onSave={(name) => void createFolder(name)}
+                  onSave={createFolder}
                   onCancel={() => setCreating(null)}
                 />
               )}
               {creating === "file" && (
                 <NameForm
                   key="file"
+                  place={`new-file:${source.id}:${folder}`}
                   label="Name of the new file"
                   initial={names.has("Untitled.txt") ? keepBothName("Untitled.txt", names) : "Untitled.txt"}
                   fresh
                   saveLabel="Make file"
                   saveHint="Makes an empty file with this name."
                   pending={busy}
-                  onSave={(name) => void createFile(name)}
+                  onSave={createFile}
                   onCancel={() => setCreating(null)}
                 />
               )}
@@ -629,7 +646,7 @@ export function FileBrowser(props: FileBrowserProps) {
                         setFailure(null)
                         setRenaming(item.name)
                       }}
-                      onRenamed={(next) => void rename(item, next)}
+                      onRenamed={(next) => rename(item, next)}
                       onCancelRename={() => setRenaming(null)}
                       onDelete={() => askDelete(item)}
                       onMove={() => {
@@ -821,7 +838,7 @@ function EntryRow({
   renaming: boolean
   onOpen: () => void
   onRename: () => void
-  onRenamed: (next: string) => void
+  onRenamed: (next: string) => Promise<boolean>
   onCancelRename: () => void
   onDelete: () => void
   onMove: () => void
@@ -848,6 +865,7 @@ function EntryRow({
     return (
       <li className="py-1">
         <NameForm
+          place={`rename:${joinPath(folder, entry.name)}`}
           label={`New name for ${entry.name}`}
           initial={entry.name}
           fresh
@@ -1000,6 +1018,7 @@ function EntryRow({
 
 /** A name being typed: a new folder's, or a rename. Enter saves, Escape cancels; both are buttons too. */
 function NameForm({
+  place,
   label,
   initial,
   fresh,
@@ -1009,16 +1028,24 @@ function NameForm({
   onSave,
   onCancel
 }: {
+  /** What it names, unique to it: the key what's typed is kept under (with the source and folder). */
+  place: string
   label: string
   initial: string
   fresh: boolean
   saveLabel: string
   saveHint: string
   pending: boolean
-  onSave: (name: string) => void
+  /** Keeps the name; false leaves the form open. */
+  onSave: (name: string) => Promise<boolean>
   onCancel: () => void
 }) {
-  const [value, setValue] = useState(initial)
+  const durable = useDurableText(`file-name:${place}`, "Name", initial)
+  const value = durable.text
+  const cancel = () => {
+    void durable.discard()
+    onCancel()
+  }
   const field = useRef<HTMLInputElement>(null)
   useEffect(() => {
     const input = field.current
@@ -1033,26 +1060,27 @@ function NameForm({
       className="flex min-w-0 flex-wrap items-center gap-2 rounded-md border border-border bg-surface p-2"
       onSubmit={(event) => {
         event.preventDefault()
-        onSave(value.trim())
+        void durable.commit(() => onSave(value.trim()))
       }}
     >
       <Input
         ref={field}
         aria-label={label}
         value={value}
+        readOnly={!durable.ready}
         className="min-w-0 flex-1 basis-40"
-        onChange={(event) => setValue(event.currentTarget.value)}
+        onChange={(event) => durable.setText(event.currentTarget.value)}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault()
-            onCancel()
+            cancel()
           }
         }}
       />
       <Button type="submit" variant="primary" hint={saveHint} pending={pending}>
         {saveLabel}
       </Button>
-      <Button hint="Leaves it as it was." onClick={onCancel}>
+      <Button hint="Leaves it as it was." onClick={cancel}>
         Cancel
       </Button>
     </form>

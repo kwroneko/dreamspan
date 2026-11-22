@@ -75,6 +75,24 @@ export function useOpenPlace(id: string) {
   return [shown, set] as const
 }
 
+/**
+ * One of several things open at a time under `prefix` (the row being renamed, which new
+ * item's form is open), kept as `<prefix><choice>` in the same URL list; null: none.
+ */
+export function useOpenChoice(prefix: string) {
+  const [open, setOpen] = usePlaceList("open")
+  const id = open.find((other) => other.startsWith(prefix))
+  const set = useCallback(
+    (next: string | null) => {
+      const choice = next === null ? undefined : `${prefix}${next}`
+      if (choice === id) return
+      setOpen([...open.filter((other) => other !== id), ...(choice ? [choice] : [])], true)
+    },
+    [open, id, prefix, setOpen]
+  )
+  return [id === undefined ? null : id.slice(prefix.length), set] as const
+}
+
 /** A disclosure whose open state is URL state (`useOpenPlace(place)`), so a reload opens it again. */
 export function PlaceDetails({ place, ...props }: ComponentProps<"details"> & { place: string }) {
   const [open, setOpen] = useOpenPlace(place)

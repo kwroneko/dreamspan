@@ -173,6 +173,42 @@ export const settingsPlaces = [
     shown: (page, { name }) => page.getByRole("textbox", { name: `Contents of ${name}` })
   }),
   place({
+    name: "Files: rename a file",
+    source: "features/files/FileBrowser.tsx:867",
+    setup: async ({ tag }) => ({ name: `rename-${tag}.txt` }),
+    open: async (page, { name }, ctx) => {
+      const files = filesOf(page.request, ctx.server.url)
+      if (!(await files.has(`/files/${name}`))) await files.put(`/files/${name}`, "Synthetic line.\n")
+      await go(page, ctx, `/files?${new URLSearchParams({ path: "/files" })}`)
+      const field = page.getByRole("textbox", { name: `New name for ${name}`, exact: true })
+      const actions = page.getByRole("button", { name: `Actions for ${name}`, exact: true })
+      await actions.or(field).first().waitFor()
+      if (!(await field.isVisible())) {
+        await actions.click()
+        await page
+          .getByRole("menu", { name: `Actions for ${name}` })
+          .getByRole("menuitem", { name: "Rename" })
+          .click()
+      }
+      return field
+    },
+    shown: (page, { name }) => page.getByRole("textbox", { name: `New name for ${name}`, exact: true })
+  }),
+  place({
+    name: "Files: new folder name",
+    source: "features/files/FileBrowser.tsx:585",
+    setup: async () => null,
+    open: async (page, _, ctx) => {
+      await go(page, ctx, `/files?${new URLSearchParams({ path: "/files" })}`)
+      const field = page.getByRole("textbox", { name: "Name of the new folder", exact: true })
+      const button = page.getByRole("button", { name: "New folder", exact: true })
+      await button.or(field).first().waitFor()
+      if (!(await field.isVisible())) await button.click()
+      return field
+    },
+    shown: (page) => page.getByRole("textbox", { name: "Name of the new folder", exact: true })
+  }),
+  place({
     name: "New workshop: first message",
     source: "features/workshop/PendingWorkshop.tsx:428",
     setup: async () => null,
