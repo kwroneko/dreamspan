@@ -15,7 +15,16 @@ const { ComposerDraft } = await import("../../../client/src/features/chat/compos
 type Api = Effect.Success<ReturnType<typeof client>>
 
 /** A page: its own timers, run by hand, and the composer of one chat. */
-const page = (api: Api, chatId: string, owner: string, time: BigInt64Array) => {
+const page = (
+  api: Api,
+  chatId: string,
+  owner: string,
+  time: BigInt64Array,
+  /** Runs after each OpenComposer is answered, before the page goes on: a race laid out by hand. */
+  afterOpen: () => Promise<unknown> = async () => {}
+) => {
+  /** What this page's keepalive requests wait for before they reach the server (`hold`). */
+  let network: Promise<unknown> = Promise.resolve()
   const timers = new Map<number, () => void>()
   let next = 0
   const keepalives: Array<Promise<unknown>> = []
@@ -25,12 +34,15 @@ const page = (api: Api, chatId: string, owner: string, time: BigInt64Array) => {
       fn: (client: (tag: string, p: never) => Effect.Effect<unknown, unknown>) => Effect.Effect<unknown, unknown>
     ) => {
       try {
-        return {
-          ok: true,
-          value: await Effect.runPromise(
-            fn((tag, p) => (api as never as Record<string, (p: never) => Effect.Effect<unknown, unknown>>)[tag]!(p))
-          )
-        }
+        let opened = false
+        const value = await Effect.runPromise(
+          fn((tag, p) => {
+            opened ||= tag === "OpenComposer"
+            return (api as never as Record<string, (p: never) => Effect.Effect<unknown, unknown>>)[tag]!(p)
+          })
+        )
+        if (opened) await afterOpen()
+        return { ok: true, value }
       } catch (error) {
         return { ok: false, error: { tag: "Failed", message: String(error), problems: [], reason: null } }
       }
@@ -45,10 +57,12 @@ const page = (api: Api, chatId: string, owner: string, time: BigInt64Array) => {
     now: () => Number(Atomics.load(time, 0)),
     keepalive: (_path, body) => {
       const { composers } = JSON.parse(body) as { composers: Array<never> }
-      const sent = Promise.all(composers.map((save) => Effect.runPromise(api.SaveComposer(save)))).then(
-        (results) => ({ ok: true, recovered: results.filter((r) => r.recovered).length }),
-        () => false as const
-      )
+      const sent = network
+        .then(() => Promise.all(composers.map((save) => Effect.runPromise(api.SaveComposer(save)))))
+        .then(
+          (results) => ({ ok: true, recovered: results.filter((r) => r.recovered).length }),
+          () => false as const
+        )
       keepalives.push(sent)
       return sent
     }
@@ -64,7 +78,13 @@ const page = (api: Api, chatId: string, owner: string, time: BigInt64Array) => {
       await store.flush()
     }
   }
-  return { store, pause, keepalives }
+  /** Keepalive requests from now on reach the server only once `release` is called. */
+  const hold = () => {
+    let release = () => {}
+    network = new Promise<void>((resolve) => (release = resolve))
+    return release
+  }
+  return { store, pause, keepalives, hold }
 }
 
 const open = async (store: InstanceType<typeof ComposerDraft>) => {
@@ -178,11 +198,19 @@ for (const scenario of scenarios)
         } else {
           text = `${opening} Wind`
           first.store.type(text)
-          // The page closes before the save; its keepalive arrives after the new page opened.
-          first.store.beacon()
-          first = page(api, chat.id, owner, time)
+          // The page closes before the save; its keepalive arrives after the new page read the
+          // composer, and before it looks for this browser's copies (the closing page, still
+          // running, drops its copy once the keepalive is answered).
+          const closing = first
+          const release = closing.hold()
+          closing.store.beacon()
+          first = page(api, chat.id, owner, time, async () => {
+            release()
+            await Promise.all(closing.keepalives)
+            await vi.waitFor(async () => assert.lengthOf(await copiesOfUser(owner), 0))
+          })
           await open(first.store)
-          await Promise.all(first.keepalives)
+          assert.strictEqual(first.store.snapshot().text, text, "the reopened box has the last keystrokes")
           text = `${first.store.snapshot().text} howls outside.`
           first.store.type(text)
         }

@@ -242,6 +242,9 @@ export class ComposerDraft {
     // A branch starts from the composer as the server has it, so what's typed is saved first.
     if (branch) await this.save()
     const copyFrom = branch && this.base !== null ? { copyFrom: this.base.id } : {}
+    // This browser's copies as they were before the read: one gone by the time they're saved
+    // was answered meanwhile (a closing page's keepalive), maybe after the read (`show`).
+    const before = await copiesOfUser(this.userId)
     const opened = await this.session.call((client) =>
       client("OpenComposer", { chatId: this.chatId, forkId: fork, ...copyFrom })
     )
@@ -266,13 +269,22 @@ export class ComposerDraft {
     // stays in this browser, and comes back when that composer opens.
     await this.save()
     this.pending = null
-    if (this.requested === fork) await this.show(fork, draft)
+    if (this.requested === fork) await this.show(fork, draft, before)
   }
 
   /** The fork's text in the box, with what this browser kept of it when a page closed. */
-  private async show(fork: ForkId | null, opened: Draft) {
+  private async show(fork: ForkId | null, opened: Draft, before: ReadonlyArray<Copy>) {
     this.error = null
-    const { draft, conflict, unsent } = await this.saveCopies(opened)
+    const saved = await this.saveCopies(opened, before)
+    const { conflict, unsent } = saved
+    let { draft } = saved
+    if (saved.answered && unsent === null) {
+      // A copy of this draft was saved after the read, so the read may lack its text: the box
+      // would show older text, and what's typed on it would go over the newer text as another
+      // tab's. Read again: the server has it now.
+      const again = await this.reopen()
+      if (again !== null && again.id === draft.id) draft = again
+    }
     this.take(draft)
     const save = unsent === null ? null : pendingOf(unsent)
     if (save?.kind === "composer") {
@@ -297,7 +309,7 @@ export class ComposerDraft {
    * as `unsent`.
    * A copy that fails stays, whatever the reason: only an acknowledgement removes it.
    */
-  private async saveCopies(opened: Draft) {
+  private async saveCopies(opened: Draft, before: ReadonlyArray<Copy>) {
     let draft = opened
     let conflict: ReplayConflict | null = null
     let unsent: Copy | null = null
@@ -336,7 +348,13 @@ export class ComposerDraft {
       )
       await keepCopy(adopted, copy)
     }
-    const copies = (await copiesOfUser(this.userId)).filter(
+    const kept = await copiesOfUser(this.userId)
+    const keys = new Set(kept.map((copy) => copy.key))
+    // A copy of `opened` that was here before the read and is gone now: its save was answered.
+    const answered = before.some(
+      (copy) => copy.refId.startsWith(COPIES) && copy.field === opened.id && !keys.has(copy.key)
+    )
+    const copies = kept.filter(
       (copy) => copy.refId.startsWith(COPIES) && (copy.field === opened.id || now - copy.at > STALE_COPY_MS)
     )
     copies.sort((a, b) => {
@@ -368,7 +386,7 @@ export class ComposerDraft {
         draft = now
       }
     }
-    return { draft, conflict, unsent }
+    return { draft, conflict, unsent, answered }
   }
 
   /**
