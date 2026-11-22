@@ -7,14 +7,16 @@ import { checkCardNames } from "./checkCardNames.ts"
 // the same form and flow; its card is made in the persona folder (owner, 2026-11-07).
 import type { LibraryRef, RefId } from "@dreamspan/shared/library.ts"
 import { useNavigate } from "@tanstack/react-router"
-import { type FormEvent, useState } from "react"
+import type { FormEvent } from "react"
+import { useOpenPlace } from "./durable.tsx"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 
 export function NewCardButton({ persona = false }: { persona?: boolean }) {
-  const [open, setOpen] = useState(false)
+  // URL state, so a reload opens the form again with its names (a durable draft).
+  const [open, setOpen] = useOpenPlace(persona ? "new-persona" : "new-card")
   return (
     <>
       <Button hint={`Opens a form to create a ${persona ? "persona" : "card"}.`} onClick={() => setOpen(true)}>

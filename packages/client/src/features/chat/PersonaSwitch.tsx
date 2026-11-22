@@ -11,7 +11,16 @@ import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { pendingPersonaPickerRows } from "./presentation.tsx"
 
-export function PersonaSwitch({ session, trigger }: { session: ChatSession; trigger?: ReactNode }) {
+export function PersonaSwitch({
+  session,
+  trigger,
+  place
+}: {
+  session: ChatSession
+  trigger?: ReactNode
+  /** Where on the page it is ("cast", "this-chat"), as SpeakerSwitcher's `place`. */
+  place: string
+}) {
   const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
   const view = useMemo(() => castView(cast), [cast])
   const listCards = useCallback(() => session.listCards(), [session])
@@ -31,6 +40,7 @@ export function PersonaSwitch({ session, trigger }: { session: ChatSession; trig
           recent={[]}
           persona
           trigger={trigger}
+          place={`${place}:${session.chatId}`}
           onPick={(card) => void pick(card)}
         />
       </CastContext>
@@ -59,6 +69,7 @@ export function PendingPersonaSwitch({ pending, trigger }: { pending: PendingCha
         persona
         pending
         trigger={trigger}
+        place="pending-cast"
         onPick={(card) => pending.setPersona(card.entityId)}
         onNone={() => pending.setPersona(null)}
         header={<SlotOutlet slot={pendingPersonaPickerRows} props={{ pending }} />}

@@ -2,6 +2,7 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 import { AboutHint, LabelWithHelp } from "../../ui/AboutHint.tsx"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { useAtomValue } from "@effect/atom-react"
+import { useOpenPlace } from "../editor/durable.tsx"
 import { AsyncResult } from "effect/reactivity"
 import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import { DEFAULT_RESPONSE, DEFAULT_SAMPLERS, ModelSettings } from "@dreamspan/shared/modelSettings.ts"
@@ -1056,7 +1057,8 @@ export function ModelsSection({ connection }: ConnectionSectionProps) {
       ? "This model is no longer available on this connection."
       : null
   )
-  const [adding, setAdding] = useState(false)
+  // A URL place (editor/durable.tsx): a reload opens Add a model again, with the id as typed.
+  const [adding, setAdding] = useOpenPlace(`add-model:${connection.id}`)
   const [refreshed, setRefreshed] = useState<ModelRefresh | null>(null)
   return (
     <Card>

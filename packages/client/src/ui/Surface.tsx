@@ -158,18 +158,23 @@ export function Disclosure({
   defaultOpen = false,
   className = "",
   lazy = false,
-  hint
+  hint,
+  open,
+  onOpenChange
 }: {
   title: ReactNode
   children: ReactNode
   hint?: string
   defaultOpen?: boolean
+  /** Controlled: whether it's open, kept by the caller (a URL place, so a reload opens it again). */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   className?: string
   /** Mount the contents only once opened: for heavy contents (code editors) most visits never open. */
   lazy?: boolean
 }) {
-  const [opened, setOpened] = useState(defaultOpen)
-  const [expanded, setExpanded] = useState(defaultOpen)
+  const [opened, setOpened] = useState(open ?? defaultOpen)
+  const [expanded, setExpanded] = useState(open ?? defaultOpen)
   const summary = (
     <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-sm font-medium text-muted outline-none select-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
       <svg
@@ -191,22 +196,23 @@ export function Disclosure({
   )
   return (
     <details
-      open={defaultOpen}
+      open={open ?? defaultOpen}
       className={`group ${className}`}
       onToggle={(event) => {
         setExpanded(event.currentTarget.open)
         if (lazy && event.currentTarget.open) setOpened(true)
+        if (open !== undefined && open !== event.currentTarget.open) onOpenChange?.(event.currentTarget.open)
       }}
     >
       <Tooltip
         label={
           hint ??
-          `Click to ${expanded ? "collapse" : "expand"} ${typeof title === "string" ? title.toLowerCase() : "this section"}.`
+          `Click to ${(open ?? expanded) ? "collapse" : "expand"} ${typeof title === "string" ? title.toLowerCase() : "this section"}.`
         }
       >
         {summary}
       </Tooltip>
-      <div className="flex flex-col gap-4 pt-3 pb-2 pl-5">{!lazy || opened ? children : null}</div>
+      <div className="flex flex-col gap-4 pt-3 pb-2 pl-5">{!lazy || opened || open ? children : null}</div>
     </details>
   )
 }

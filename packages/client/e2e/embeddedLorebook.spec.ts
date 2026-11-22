@@ -263,7 +263,7 @@ test("an absent embedded book can be authored, including an empty book after rem
   await save(page)
   await page.reload()
   await expect(page.getByText("No entries yet.")).toBeVisible()
-  await page.getByText("Book settings").click()
+  // Book settings were open: the reload opens them again (URL state).
   await expect(page.getByRole("textbox", { name: "Lorebook name", exact: true })).toHaveValue("New book")
   const opened = await admin((api) => api.OpenEditor({ refId: card.id }))
   expect((opened.doc.character_book as LorebookDoc).entries).toEqual([])

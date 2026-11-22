@@ -2,9 +2,10 @@
 // reads the status again when the window regains focus and whenever the entry's head moves.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
-import { lazy, Suspense, useEffect, useRef, useState } from "react"
+import { lazy, Suspense, useEffect, useRef } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Alert } from "../../ui/Surface.tsx"
+import { useOpenPlace } from "../editor/durable.tsx"
 import { type EditorStore, useEditorState } from "../editor/store.ts"
 import { kindWord, linkedByHand, revisionsLine, sourceOf, statusQuery } from "./status.ts"
 
@@ -33,7 +34,8 @@ function Notice({
   const atom = statusQuery(refId)
   const result = useAtomValue(atom)
   const refresh = useAtomRefresh(atom)
-  const [open, setOpen] = useState(false)
+  // URL state, so a reload opens the review again; its choices are a durable draft.
+  const [open, setOpen] = useOpenPlace(`merge-review:${refId}`)
   useEffect(() => {
     window.addEventListener("focus", refresh)
     return () => window.removeEventListener("focus", refresh)

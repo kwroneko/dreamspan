@@ -53,8 +53,7 @@ export const settingsPlaces = [
       await page.getByRole("button", { name: "Save a key" }).click()
       return page.getByRole("dialog").getByLabel("Addresses it may be sent to", { exact: true })
     },
-    shown: (page) => page.getByRole("dialog").getByLabel("Addresses it may be sent to", { exact: true }),
-    gaps: { mode: "The Save a key dialog is component state: a reload closes it (the text waits in its draft)" }
+    shown: (page) => page.getByRole("dialog").getByLabel("Addresses it may be sent to", { exact: true })
   }),
   place({
     name: "Rename a key",
@@ -68,8 +67,7 @@ export const settingsPlaces = [
       await page.locator("li").filter({ hasText: credential.name }).getByRole("button", { name: "Rename" }).click()
       return page.getByRole("dialog").getByLabel("Name", { exact: true })
     },
-    shown: (page) => page.getByRole("dialog").getByLabel("Name", { exact: true }),
-    gaps: { mode: "The Rename dialog is component state: a reload closes it (the text waits in its draft)" }
+    shown: (page) => page.getByRole("dialog").getByLabel("Name", { exact: true })
   }),
   place({
     name: "Network: bypass list",
@@ -147,8 +145,7 @@ export const settingsPlaces = [
       await page.getByRole("button", { name: "Add a model", exact: true }).click()
       return page.getByRole("dialog").getByLabel("Model id", { exact: true })
     },
-    shown: (page) => page.getByRole("dialog").getByLabel("Model id", { exact: true }),
-    gaps: { mode: "Add a model is component state (useState adding): a reload closes it (the text waits in its draft)" }
+    shown: (page) => page.getByRole("dialog").getByLabel("Model id", { exact: true })
   }),
   place({
     name: "Costs: pricing formula",

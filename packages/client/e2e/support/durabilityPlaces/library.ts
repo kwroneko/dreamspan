@@ -142,10 +142,7 @@ export const libraryPlaces: ReadonlyArray<Place> = [
       if ((await edit.getAttribute("aria-expanded")) !== "true") await edit.click()
       return scripts.getByRole("textbox", { name: /^Replace with/ })
     },
-    shown: (page) => page.getByRole("list", { name: "Regex scripts" }).getByRole("textbox", { name: /^Replace with/ }),
-    gaps: {
-      mode: "the Extra tab and the script's Edit are React state (StoreScript useState): a reload shows the card's first tab with the script closed"
-    }
+    shown: (page) => page.getByRole("list", { name: "Regex scripts" }).getByRole("textbox", { name: /^Replace with/ })
   }),
   place({
     name: "Card regex Try it sample",
@@ -161,10 +158,7 @@ export const libraryPlaces: ReadonlyArray<Place> = [
       await scripts.getByText("Try it", { exact: true }).click()
       return scripts.getByRole("textbox", { name: "Sample text" })
     },
-    shown: (page) => page.getByRole("textbox", { name: "Sample text" }),
-    gaps: {
-      mode: "the Extra tab, the script's Edit and its Try it disclosure are React state: a reload shows the card's first tab with them closed"
-    }
+    shown: (page) => page.getByRole("textbox", { name: "Sample text" })
   }),
   place({
     name: "Card skill instructions",
@@ -176,10 +170,7 @@ export const libraryPlaces: ReadonlyArray<Place> = [
       await page.getByRole("button", { name: "Add a skill", exact: true }).click()
       return page.getByRole("dialog", { name: "Add a skill" }).getByRole("textbox", { name: "Instructions" })
     },
-    shown: (page) => page.getByRole("dialog", { name: "Add a skill" }).getByRole("textbox", { name: "Instructions" }),
-    gaps: {
-      mode: "the Extra tab and the Add a skill dialog are React state: a reload closes them (the form is a server draft)"
-    }
+    shown: (page) => page.getByRole("dialog", { name: "Add a skill" }).getByRole("textbox", { name: "Instructions" })
   }),
   place({
     name: "New card dialog",
@@ -191,8 +182,27 @@ export const libraryPlaces: ReadonlyArray<Place> = [
       if (!(await dialog.isVisible())) await page.getByRole("button", { name: "New card" }).first().click()
       return dialog.getByRole("textbox", { name: "Display name", exact: true })
     },
-    shown: (page) => page.getByRole("dialog", { name: "New card" }).getByRole("textbox", { name: "Display name" }),
-    gaps: { mode: "the New card dialog's open state is React state: a reload closes it (its text is a server draft)" }
+    shown: (page) => page.getByRole("dialog", { name: "New card" }).getByRole("textbox", { name: "Display name" })
+  }),
+  place({
+    name: "New card dialog (card switcher)",
+    source: "features/editor/DocumentSwitcher.tsx:96",
+    setup: card,
+    open: async (page, { refId }, ctx) => {
+      await goLibrary(page, ctx, refId)
+      await page.getByRole("button", { name: "Switch card", exact: true }).click()
+      await page
+        .getByRole("dialog", { name: "Card", exact: true })
+        .getByRole("button", { name: "New card…", exact: true })
+        .click()
+      return page
+        .getByRole("dialog", { name: "New card", exact: true })
+        .getByRole("textbox", { name: "Display name", exact: true })
+    },
+    shown: (page) =>
+      page
+        .getByRole("dialog", { name: "New card", exact: true })
+        .getByRole("textbox", { name: "Display name", exact: true })
   }),
   place({
     name: "Fork card dialog",
@@ -204,8 +214,7 @@ export const libraryPlaces: ReadonlyArray<Place> = [
       return page.getByRole("dialog", { name: "Fork card" }).getByRole("textbox", { name: "Display name", exact: true })
     },
     shown: (page) =>
-      page.getByRole("dialog", { name: "Fork card" }).getByRole("textbox", { name: "Display name", exact: true }),
-    gaps: { mode: "the Fork dialog's open state is React state: a reload closes it (its names are a server draft)" }
+      page.getByRole("dialog", { name: "Fork card" }).getByRole("textbox", { name: "Display name", exact: true })
   }),
   place({
     name: "Preset prompt text",
@@ -237,10 +246,7 @@ export const libraryPlaces: ReadonlyArray<Place> = [
       await conflictItem(page).getByRole("radio", { name: "Edit it" }).click()
       return conflictItem(page).getByRole("textbox")
     },
-    shown: (page) => conflictItem(page).getByRole("textbox"),
-    gaps: {
-      mode: "the Review and merge dialog is React state (an open flag): its choices are a server draft, but a reload closes it"
-    }
+    shown: (page) => conflictItem(page).getByRole("textbox")
   }),
   place({
     name: "Lorebook description",
@@ -250,8 +256,7 @@ export const libraryPlaces: ReadonlyArray<Place> = [
       await goLibrary(page, ctx, await lorebook(page, ctx, state))
       return bookSettings(page)
     },
-    shown: (page) => field(page, "Lorebook description"),
-    gaps: { mode: "Book settings is an uncontrolled <details>: a reload closes it, hiding the field" }
+    shown: (page) => field(page, "Lorebook description")
   }),
   place({
     name: "Open large (Lorebook description)",
@@ -263,8 +268,7 @@ export const libraryPlaces: ReadonlyArray<Place> = [
       await page.getByRole("button", { name: "Open Lorebook description large" }).click()
       return page.getByRole("dialog", { name: "Lorebook description" }).getByRole("textbox")
     },
-    shown: (page) => page.getByRole("dialog", { name: "Lorebook description" }).getByRole("textbox"),
-    gaps: { mode: "TextField's Open large is useState (`large`): a reload closes the dialog" }
+    shown: (page) => page.getByRole("dialog", { name: "Lorebook description" }).getByRole("textbox")
   }),
   place({
     name: "Lorebook entry content",
@@ -348,9 +352,6 @@ export const libraryPlaces: ReadonlyArray<Place> = [
       return box
     },
     shown: (page) =>
-      page.getByRole("list", { name: "Global regex scripts" }).getByRole("textbox", { name: "Replace with" }),
-    gaps: {
-      mode: "GlobalRegexForm keeps which scripts are open in useState: a reload shows the list with the script closed"
-    }
+      page.getByRole("list", { name: "Global regex scripts" }).getByRole("textbox", { name: "Replace with" })
   })
 ]

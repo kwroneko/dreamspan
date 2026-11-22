@@ -1,3 +1,4 @@
+import { viewParams } from "../../tabLayoutParams.ts"
 import { tabKinds } from "../workbench/kinds.ts"
 import { panelEditorActions, PanelHistory, PanelVariant } from "./panelActions.tsx"
 import { replyHooks } from "../chat/replyHooks.ts"
@@ -57,6 +58,9 @@ function LazyEditorPage() {
 
 export const register = () => {
   navigationNotices.register({ id: "editor.browser-recovery", order: 10, component: BrowserRecoveryWarning })
+  // The dialogs and disclosures open on a page (durable.tsx `useOpenPlace`): opening one isn't
+  // going anywhere, so the phone's menu stays open over a dialog opened from it.
+  viewParams.register({ id: "editor.open-places", keys: ["open"] })
   panelEditorActions.register({ id: "editor.panel.history", order: 10, component: PanelHistory })
   panelEditorActions.register({ id: "editor.panel.variant", order: 20, component: PanelVariant })
   editorExtensions.register({

@@ -73,6 +73,8 @@ export const registerChatHeader = () => [
   }),
   chatCommands.register({
     id: "chat.split",
+    // Its new chat's name is typed text: a reload opens the dialog again (editor/durable.tsx).
+    dialogInUrl: true,
     label: "Make this branch its own chat",
     description: "Moves this branch and the branches made from it into a chat of their own.",
     order: 2.5,

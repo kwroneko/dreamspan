@@ -64,7 +64,7 @@ export const registerComposerControls = () => [
     order: 10,
     placement: "speaker",
     // Left of the box, as at the chat's composer: the chip names who's speaking.
-    component: ({ speaker, compact }) => <SpeakerSwitcher {...speaker} compact={compact} />
+    component: ({ speaker, compact }) => <SpeakerSwitcher {...speaker} compact={compact} place="composer" />
   }),
   pendingComposerControls.register({
     id: "pending.guidance",
@@ -196,7 +196,7 @@ export const registerComposerControls = () => [
     placement: "speaker",
     component: ({ speaker, recent, onRecent, compact }) => (
       <>
-        <SpeakerSwitcher {...speaker} compact={compact ?? false} />
+        <SpeakerSwitcher {...speaker} compact={compact ?? false} place="composer" />
         {/* The speakers used last, one tap each, where the box can spare the width. */}
         {!compact &&
           recent.map(({ id, name, mediaId, crop }) => (

@@ -18,6 +18,7 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { buttonClass } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Input } from "../../ui/Field.tsx"
+import { useOpenPlace } from "../editor/durable.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
@@ -248,7 +249,8 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   personas,
   onAddToChat,
   compact = false,
-  header
+  header,
+  place = "speaker"
 }: {
   /** The library's cards, which the persona is picked from. */
   listCards?: () => Promise<Outcome<ReadonlyArray<CastCard>>>
@@ -274,6 +276,8 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   onAddToChat?: () => void
   /** The trigger shows the portrait alone (the name is its label and tooltip). */
   compact?: boolean
+  /** Where on the page it is ("composer", "cast"): names its New persona form in the URL, so a reload opens it again. */
+  place?: string
   /** Rows above the search field, as a picker's lock switch (the persona lock, DESIGN §2.2). */
   header?: ReactNode
 }) {
@@ -281,7 +285,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   const defaultPersona = useDefaultPersona()
   const defaultLabel = pending && persona && speaker !== null && speaker === defaultPersona ? " (default)" : ""
   const [open, setOpen] = useState(false)
-  const [making, setMaking] = useState(false)
+  const [making, setMaking] = useOpenPlace(`new-persona:${place}`)
   const [tab, setTab] = useState<SwitcherTab>("personas")
   const [all, setAll] = useState<ReadonlyArray<CastCard> | null>(null)
   const [query, setQuery] = useState("")

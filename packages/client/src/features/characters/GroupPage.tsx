@@ -1,3 +1,4 @@
+import { useOpenPlace } from "../editor/durable.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 // A group's page (DESIGN §2.1; ST's group tile opened): who's in it, Continue (its latest
 // chat), New chat (`/groups/$chatId/new`, made on its first send), and every chat of the group, latest message first. A group is named by any of its
@@ -8,7 +9,7 @@ import type { Chat, ChatId } from "@dreamspan/shared/chat.ts"
 import type { ChatGroup } from "@dreamspan/shared/chatSetupApi.ts"
 import { Link, useNavigate, useParams } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { FailureView, useAction } from "../../actions.tsx"
 import { describeCause } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
@@ -30,7 +31,8 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
   const { chatId } = useParams({ strict: false }) as { chatId: ChatId }
   const navigate = useNavigate()
   const openCharacter = useOpenCharacter()
-  const [renaming, setRenaming] = useState(false)
+  // A URL place (editor/durable.tsx): a reload opens Rename again, with the name as typed.
+  const [renaming, setRenaming] = useOpenPlace(`rename-group:${chatId}`)
   const rename = useAction()
   return (
     <div className="flex flex-col gap-5">

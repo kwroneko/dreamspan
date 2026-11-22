@@ -8,6 +8,7 @@ import type { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
 import type { FieldPath } from "@dreamspan/shared/editing.ts"
 import { Button } from "../../ui/Button.tsx"
 import { NumberField, TextField } from "./controls.tsx"
+import { useOpenPlace } from "./durable.tsx"
 import { InheritedSwitch } from "./LorebookEntryDetails.tsx"
 import { addEntry } from "./lorebookTable.ts"
 import { LorebookTable } from "./LorebookTable.tsx"
@@ -15,9 +16,11 @@ import { type EditorStore, useValue } from "./store.ts"
 
 /** The book's own settings: name, description and what it overrides of the chat's. */
 export function BookSettings({ store, root, entries }: { store: EditorStore; root: FieldPath; entries: number }) {
-  const [open, setOpen] = useState(false)
+  // URL state, so a reload opens them again with the field typed in.
+  const [open, setOpen] = useOpenPlace(`book-settings:${store.refId}:${root.join(".")}`)
   return (
     <details
+      open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
       className="@container group rounded-lg border border-border p-3"
     >

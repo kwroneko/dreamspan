@@ -17,7 +17,8 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
   const durable = useUserDraft("global-regex", "Global regex scripts", JSON.stringify(saved))
   const values = JSON.parse(durable.text) as GlobalRegex
   const action = useAction()
-  const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
+  // The script just added opens; which are open is URL state (ScriptItem's place), so a reload keeps them.
+  const [added, setAdded] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const edit = (scripts: ReadonlyArray<RegexScript>) => {
     setMessage(null)
@@ -30,12 +31,6 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
     const [script] = next.splice(index, 1)
     next.splice(index + by, 0, script!)
     edit(next)
-  }
-  const toggle = (id: string, next: boolean) => {
-    const ids = new Set(open)
-    if (next) ids.add(id)
-    else ids.delete(id)
-    setOpen(ids)
   }
   const stale = action.error?.tag === "StaleWrite"
 
@@ -112,8 +107,8 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
                   script={script}
                   name={name}
                   binding={{ kind: "local", script, change: (patch) => change(index, patch) }}
-                  open={open.has(script.id)}
-                  onOpenChange={(next) => toggle(script.id, next)}
+                  place={`regex-script:global:${script.id}`}
+                  opening={added === script.id}
                   actions={
                     <>
                       <Button
@@ -153,7 +148,7 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
             onClick={() => {
               const script = newScript()
               edit([...values.scripts, script])
-              toggle(script.id, true)
+              setAdded(script.id)
             }}
           >
             Add a script

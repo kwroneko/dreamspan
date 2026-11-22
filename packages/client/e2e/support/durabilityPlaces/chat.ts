@@ -57,6 +57,24 @@ const guidedReply = ({ rpc, tag }: PlaceContext) =>
     })
   )
 
+/** Two chats of the same name and characters: a group. */
+const group = ({ rpc, tag }: PlaceContext) =>
+  rpc((api) =>
+    Effect.gen(function* () {
+      const a = yield* api.CreateCard({ label: `Ana ${tag}`, name: "Ana" })
+      const b = yield* api.CreateCard({ label: `Bo ${tag}`, name: "Bo" })
+      const ids: Array<ChatId> = []
+      for (let i = 0; i < 2; i++) {
+        const chat = yield* api.CreateChat({ title: `Harbor ${tag}` })
+        for (const card of [a, b])
+          yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
+        yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "The lamp is lit." })
+        ids.push(chat.id)
+      }
+      return { chatId: ids[0]! }
+    })
+  )
+
 export const chatPlaces = [
   place({
     name: "Composer",
@@ -241,10 +259,7 @@ export const chatPlaces = [
       await openSummarySettings(page)
       return page.getByRole("textbox", { name: "This chat's summarization instruction", exact: true })
     },
-    shown: (page) => page.getByRole("textbox", { name: "This chat's summarization instruction", exact: true }),
-    gaps: {
-      mode: "The Summary settings disclosure keeps its open state in memory: after a reload it's closed, and the instruction shows only once it's opened again"
-    }
+    shown: (page) => page.getByRole("textbox", { name: "This chat's summarization instruction", exact: true })
   }),
   place({
     name: "First message of a card's new chat",
@@ -339,7 +354,106 @@ export const chatPlaces = [
       await page.getByRole("heading", { level: 1 }).getByRole("button").first().click()
       return page.getByRole("textbox", { name: "Chat name", exact: true })
     },
-    shown: (page) => page.getByRole("textbox", { name: "Chat name", exact: true }),
-    gaps: { mode: "ChatTitle keeps whether the name is being edited in useState: a reload shows the name, not the box" }
+    shown: (page) => page.getByRole("textbox", { name: "Chat name", exact: true })
+  }),
+  place({
+    name: "Group rename dialog",
+    source: "features/chat/NameDialog.tsx:99",
+    // Two chats of the same name and characters are a group: renaming one asks which.
+    setup: ({ rpc, tag }) =>
+      rpc((api) =>
+        Effect.gen(function* () {
+          const a = yield* api.CreateCard({ label: `Ana ${tag}`, name: "Ana" })
+          const b = yield* api.CreateCard({ label: `Bo ${tag}`, name: "Bo" })
+          const ids: Array<ChatId> = []
+          for (let i = 0; i < 2; i++) {
+            const chat = yield* api.CreateChat({ title: `Harbor ${tag}` })
+            for (const card of [a, b])
+              yield* api.ChangeCast({
+                chatId: chat.id,
+                slotId: null,
+                change: { _tag: "Join", entityId: card.entityId }
+              })
+            yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "The lamp is lit." })
+            ids.push(chat.id)
+          }
+          return { chatId: ids[0]! }
+        })
+      ),
+    open: async (page, { chatId }, ctx) => {
+      await goChat(page, ctx, chatId)
+      await page.getByRole("heading", { level: 1 }).getByRole("button").first().click()
+      return page.getByRole("dialog", { name: "Rename chat" }).getByRole("textbox", { name: "Name" })
+    },
+    shown: (page) => page.getByRole("dialog", { name: "Rename chat" }).getByRole("textbox", { name: "Name" })
+  }),
+  place({
+    name: "Group page rename",
+    source: "features/characters/GroupPage.tsx:121",
+    setup: group,
+    open: async (page, { chatId }, { server }) => {
+      await page.goto(`${server.url}/groups/${chatId}`)
+      await page.getByRole("button", { name: "Rename group" }).click()
+      return page.getByRole("dialog", { name: "Rename group" }).getByRole("textbox", { name: "Name" })
+    },
+    shown: (page) => page.getByRole("dialog", { name: "Rename group" }).getByRole("textbox", { name: "Name" })
+  }),
+  place({
+    name: "Make this branch its own chat",
+    source: "features/chat/SplitChatDialog.tsx:78",
+    setup: ({ rpc, tag }) =>
+      rpc((api) =>
+        Effect.gen(function* () {
+          const chat = yield* api.CreateChat({ title: `Durable ${tag}` })
+          const sent = yield* api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: null,
+            branch: false,
+            content: "The lamp is lit."
+          })
+          if (sent._tag !== "Posted") throw new Error("Expected a posted message")
+          const fork = yield* api.CreateFork({
+            chatId: chat.id,
+            fromForkId: chat.currentForkId,
+            atSlotId: sent.entry.slotId
+          })
+          return { chatId: chat.id, forkId: fork.fork.id as string }
+        })
+      ),
+    open: async (page, { chatId, forkId }, { server }) => {
+      await page.goto(`${server.url}/chats/${chatId}?fork=${forkId}`)
+      await page.getByRole("button", { name: "Chat actions", exact: true }).click()
+      await page.getByRole("menuitem", { name: "Make this branch its own chat", exact: true }).click()
+      return page
+        .getByRole("dialog", { name: "Make this branch its own chat?" })
+        .getByLabel("Chat title", { exact: true })
+    },
+    shown: (page) =>
+      page.getByRole("dialog", { name: "Make this branch its own chat?" }).getByLabel("Chat title", { exact: true })
+  }),
+  place({
+    name: "Fork for this chat dialog",
+    source: "features/chat/CardForkDialogs.tsx:122",
+    setup: ({ rpc, tag }) =>
+      rpc((api) =>
+        Effect.gen(function* () {
+          const name = `Mira${tag}`
+          const card = yield* api.CreateCard({ label: name, name })
+          const chat = yield* api.CreateChat({ title: `Durable ${tag}` })
+          yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
+          yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "The lamp is lit." })
+          return { chatId: chat.id, name }
+        })
+      ),
+    open: async (page, { chatId, name }, ctx) => {
+      await goChat(page, ctx, chatId)
+      await openPanel(page, name)
+      await page.getByRole("button", { name: `Fork for this chat: ${name}`, exact: true }).click()
+      return page
+        .getByRole("dialog", { name: "Fork for this chat" })
+        .getByRole("textbox", { name: "In-character name" })
+    },
+    shown: (page) =>
+      page.getByRole("dialog", { name: "Fork for this chat" }).getByRole("textbox", { name: "In-character name" })
   })
 ]

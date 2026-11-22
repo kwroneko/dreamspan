@@ -10,7 +10,7 @@
 //
 // What was open, a dialog or a disclosure the box is in, is URL state (`useOpenPlace`), like
 // the app's other views: a reload opens it again, and the box in it reads its text back.
-import { useCallback } from "react"
+import { type ComponentProps, useCallback } from "react"
 import { usePlaceList } from "../../usePlaceParam.ts"
 import { useUserDraft } from "./userDraft.tsx"
 
@@ -61,8 +61,7 @@ export function useDurableForm<T extends object>(key: string, field: string, sav
  * reload opens it again. Several can be open at once; ids name what they open
  * ("new-card", "rename-key:<id>").
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- the boxes that open in a dialog or disclosure use it next
-function useOpenPlace(id: string) {
+export function useOpenPlace(id: string) {
   const [open, setOpen] = usePlaceList("open")
   const shown = open.includes(id)
   const set = useCallback(
@@ -73,4 +72,10 @@ function useOpenPlace(id: string) {
     [open, id, shown, setOpen]
   )
   return [shown, set] as const
+}
+
+/** A disclosure whose open state is URL state (`useOpenPlace(place)`), so a reload opens it again. */
+export function PlaceDetails({ place, ...props }: ComponentProps<"details"> & { place: string }) {
+  const [open, setOpen] = useOpenPlace(place)
+  return <details {...props} open={open} onToggle={(event) => setOpen(event.currentTarget.open)} />
 }

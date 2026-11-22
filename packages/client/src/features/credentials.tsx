@@ -1,3 +1,4 @@
+import { useOpenPlace } from "./editor/durable.tsx"
 import { useUserDraft, UserDraftStatus } from "./editor/userDraft.tsx"
 // Saved keys (ARCHITECTURE §3.12). A key goes in and never comes out, and it's sent only
 // to the origins the user confirmed. Every origin is confirmed by the user, one by one:
@@ -371,7 +372,20 @@ function RenameDialog({ credential, onOpenChange }: { credential: Credential; on
   )
 }
 
-type Open = { readonly dialog: "rename" | "replace" | "allow" | "delete"; readonly credential: Credential } | null
+type Open = { readonly dialog: "replace" | "allow" | "delete"; readonly credential: Credential } | null
+
+/** Rename, and its dialog: a URL place (editor/durable.tsx), so a reload opens it again with the name as typed. */
+function RenameKey({ credential }: { credential: Credential }) {
+  const [open, setOpen] = useOpenPlace(`rename-key:${credential.id}`)
+  return (
+    <>
+      <Button hint="Opens the credential’s name editor." variant="ghost" onClick={() => setOpen(true)}>
+        Rename
+      </Button>
+      {open && <RenameDialog credential={credential} onOpenChange={setOpen} />}
+    </>
+  )
+}
 
 function CredentialList({
   credentials,
@@ -407,13 +421,7 @@ function CredentialList({
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button
-                  hint="Opens the credential’s name editor."
-                  variant="ghost"
-                  onClick={() => setOpen({ dialog: "rename", credential })}
-                >
-                  Rename
-                </Button>
+                <RenameKey credential={credential} />
                 <Button
                   variant="ghost"
                   hint="Lets the key go to one more address. You type the key again to confirm."
@@ -453,7 +461,6 @@ function CredentialList({
           </li>
         ))}
       </ul>
-      {open?.dialog === "rename" && <RenameDialog credential={open.credential} onOpenChange={close} />}
       {open?.dialog === "replace" && (
         <ReplaceKeyDialog credential={open.credential} connections={connections} setup={setup} onOpenChange={close} />
       )}
@@ -489,7 +496,7 @@ function CredentialList({
 
 function CredentialsPage() {
   useTitle("Keys")
-  const [creating, setCreating] = useState(false)
+  const [creating, setCreating] = useOpenPlace("save-key")
   return (
     <Card>
       <CardHeader

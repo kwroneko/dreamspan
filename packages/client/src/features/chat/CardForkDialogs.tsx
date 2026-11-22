@@ -7,6 +7,7 @@ import type { ChatCard } from "@dreamspan/shared/chatSetupApi.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { useMemo, useState } from "react"
+import { useOpenPlace } from "../editor/durable.tsx"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { IconButton, IconLink } from "../../ui/Tooltip.tsx"
@@ -32,6 +33,8 @@ export interface ChatCardActionProps {
   presentation?: "header" | undefined
   /** The card the user plays here (the persona's tab): actions for a character in the chat leave it out. */
   persona?: boolean | undefined
+  /** Where it's shown, when more than its card's tab shows it (the cast's menu): a dialog it opens is that place's. */
+  surface?: "cast" | undefined
 }
 
 /** The full card editor, over the chat (the chat stays as it was); without the workspace, its page. */
@@ -77,8 +80,12 @@ export function EditChatCard({ session, card, info, presentation }: ChatCardActi
     </MenuAction>
   )
 }
-export function ForkChatCard({ session, card, info, persona }: ChatCardActionProps) {
-  const [open, setOpen] = useState(false)
+export function ForkChatCard({ session, card, info, persona, surface }: ChatCardActionProps) {
+  // A URL place (editor/durable.tsx): a reload opens the dialog again, with its names as typed.
+  // The cast's menu stays mounted beside the card's tab, so each surface has its own.
+  const [open, setOpen] = useOpenPlace(
+    `card-fork:${session?.id ?? "pending"}:${card.entityId}${surface ? `:${surface}` : ""}`
+  )
   if (persona || session === null) return null
   return (
     <>

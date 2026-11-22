@@ -22,6 +22,7 @@ import { useCaller } from "../editor/caller.ts"
 import { ValueDiff } from "../editor/diff.tsx"
 import { changedFields, fieldLabel } from "../editor/fields.ts"
 import { ForkDialog } from "../editor/RefDialogs.tsx"
+import { useOpenPlace } from "../editor/durable.tsx"
 import { EditorStore } from "../editor/store.ts"
 import type { CardMenuProps, CardSurfaceContext } from "./surfaces.tsx"
 
@@ -209,31 +210,37 @@ export function ForkCommand({
   command
 }: CardSurfaceContext & { command: "fork" | "family" | "compare" | "parent" | "unlink" }) {
   const result = useAtomValue(useMemo(() => familyQuery(entityId), [entityId]))
-  const [open, setOpen] = useState<"fork" | "family" | "compare" | "parent" | null>(null)
+  const [open, setOpen] = useState<"family" | "compare" | "parent" | null>(null)
+  // The fork's form is URL state, so a reload opens it again with its names (a durable draft).
+  const [forking, setForking] = useOpenPlace(`fork:${entityId}`)
   const [forkStore, setForkStore] = useState<EditorStore | null>(null)
   const action = useAction()
   const call = useCaller()
   const user = useSession().user.id
-  const [loading, setLoading] = useState(false)
   const family = AsyncResult.isSuccess(result) ? result.value : null
   const member = family?.members.find((m) => m.entityId === entityId)
-  const fork = async () => {
-    if (store) {
-      setOpen("fork")
-      return
+  const refId = member?.refId
+  // Without the card's editor here, the fork's form reads the card first, opened by a click or by the URL.
+  const needsStore = command === "fork" && forking && !store && forkStore === null
+  const loading = needsStore
+  useEffect(() => {
+    if (!needsStore || !refId) return
+    let live = true
+    const next = new EditorStore(refId, user, call)
+    void next.load().then(() => {
+      if (live) setForkStore(next)
+    })
+    return () => {
+      live = false
     }
-    if (!member?.refId) return
-    setLoading(true)
-    const next = new EditorStore(member.refId, user, call)
-    await next.load()
-    setLoading(false)
-    setForkStore(next)
-    setOpen("fork")
+  }, [needsStore, refId, user, call])
+  const fork = () => {
+    if (store || refId) setForking(true)
   }
   return (
     <>
       {command === "fork" && (
-        <Button disabled={!member?.refId} pending={loading} hint={EXPLAIN.fork} onClick={() => void fork()}>
+        <Button disabled={!member?.refId} pending={loading} hint={EXPLAIN.fork} onClick={fork}>
           Fork
         </Button>
       )}
@@ -268,10 +275,10 @@ export function ForkCommand({
         </Button>
       )}
       <ErrorAlert error={action.error} />
-      {open === "fork" && (store || forkStore)?.snapshot && (
-        <ForkDialog store={(store || forkStore)!} onClose={() => setOpen(null)} />
+      {command === "fork" && forking && (store || forkStore)?.snapshot && (
+        <ForkDialog store={(store || forkStore)!} onClose={() => setForking(false)} />
       )}
-      {open === "fork" && forkStore?.loadError && <ErrorAlert error={forkStore.loadError} />}
+      {command === "fork" && forking && forkStore?.loadError && <ErrorAlert error={forkStore.loadError} />}
       {open === "family" && <FamilyDialog entityId={entityId} onClose={() => setOpen(null)} />}
       {open === "parent" && <ParentDialog entityId={entityId} onClose={() => setOpen(null)} />}
       {open === "compare" && family && member && (

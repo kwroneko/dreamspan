@@ -21,6 +21,7 @@ import { CodeEditor } from "../../ui/CodeEditor.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Field, Fieldset } from "../../ui/Field.tsx"
 import { Disclosure } from "../../ui/Surface.tsx"
+import { useOpenPlace } from "../editor/durable.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { useCast } from "./cast.ts"
 import { chatDisplayName } from "./chatTitle.ts"
@@ -206,7 +207,7 @@ export function ChatIdentity({ session }: { session: ChatSession }) {
           {persona ? <PersonaBadge played /> : <span className="text-xs text-muted">You play</span>}
           <span className="font-medium [overflow-wrap:anywhere]">{persona?.name ?? (cast ? "No persona" : "…")}</span>
         </div>
-        <PersonaSwitch session={session} trigger="Switch persona" />
+        <PersonaSwitch session={session} trigger="Switch persona" place="this-chat" />
       </div>
     </section>
   )
@@ -302,8 +303,9 @@ function SummaryModel({ session, account }: { session: ChatSession; account: Lcm
 /** How this chat's summaries are written and sent, each the chat's own or the account default's. */
 export function SummarySettings({ session }: { session: ChatSession }) {
   const { view, settings, error, write } = useLcmSettings(session)
+  const [open, setOpen] = useOpenPlace(`summary-settings:${session.id}`)
   return (
-    <Disclosure title="Summary settings">
+    <Disclosure title="Summary settings" open={open} onOpenChange={setOpen}>
       <section aria-label="Summary settings" className="flex flex-col gap-4">
         {chatKinds.get(view.chat?.kind ?? "")?.summaryTranscript && (
           <Tooltip label="New workshops start with summaries on. Summarizing sends only this workshop’s conversation and tool steps to the summary connection. Token use and cost appear in Activity.">

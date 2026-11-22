@@ -19,6 +19,7 @@ import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
 import { SortableList } from "../../ui/SortableList.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
+import { usePlaceParam } from "../../usePlaceParam.ts"
 import { FieldTools } from "../editor/controls.tsx"
 import { useDurableForm } from "../editor/durable.tsx"
 import { type EditorStore, useValue } from "../editor/store.ts"
@@ -263,8 +264,9 @@ export function CardSkills({ store }: { store: EditorStore }) {
   const extensions = useValue<Entry | undefined>(store, ["extensions"])
   const list = cardSkillList(extensions)
   const duplicates = duplicateSkillNames(list)
-  // null: closed; "new": adding; a number: editing that entry.
-  const [editing, setEditing] = useState<number | "new" | null>(null)
+  // URL state, so a reload opens the dialog again (its form is a durable draft): "" closed,
+  // "new" adding, otherwise the name of the skill being edited.
+  const [opened, setOpened] = usePlaceParam(`cardSkill:${store.refId}`, "")
   const write = (next: ReadonlyArray<unknown>) => {
     const { skills: _skills, ...rest } = ours && typeof ours === "object" ? ours : {}
     store.setValue(PATH, next.length === 0 ? rest : { ...rest, skills: next })
@@ -284,6 +286,11 @@ export function CardSkills({ store }: { store: EditorStore }) {
     seen.set(name, nth + 1)
     return `${name}:${nth}`
   })
+  const found = opened === "" || opened === "new" ? -1 : list.findIndex((e) => !isReference(e) && labelOf(e) === opened)
+  // null: closed; "new": adding; a number: editing that entry.
+  const editing: number | "new" | null = opened === "new" ? "new" : found >= 0 ? found : null
+  const setEditing = (next: number | "new" | null) =>
+    setOpened(next === null ? "" : next === "new" ? "new" : labelOf(list[next]), true)
   const current = typeof editing === "number" ? ((list[editing] as Entry | undefined) ?? null) : null
   return (
     <Card>

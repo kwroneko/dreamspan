@@ -19,6 +19,7 @@ import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { ReplayNotice } from "./ReplayNotice.tsx"
 import { FieldRevert, linesText } from "./FieldRevert.tsx"
 import { CardTextEditor } from "./CardTextEditor.tsx"
+import { useOpenPlace } from "./durable.tsx"
 import { type FieldViewExtra, fieldViews } from "./fieldViews.ts"
 import type { CallResult } from "./caller.ts"
 import { draftLabel } from "./fields.ts"
@@ -166,7 +167,8 @@ export function TextField({
   /** Text just added (a snippet's sent text), marked briefly and scrolled into view; the code editor box only. */
   flash?: { readonly at: number; readonly length: number } | undefined
 }) {
-  const [large, setLarge] = useState(false)
+  // URL state, so a reload opens it large again: the text is the field's own draft.
+  const [large, setLarge] = useOpenPlace(`large:${store.refId}:${textField(path)}`)
   const highlights = useSearchHighlights(store, path)
   const match = useSearchMatch(path)
   const target = useRef<HTMLDivElement>(null)

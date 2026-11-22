@@ -69,7 +69,7 @@ function MemberMore({
       <MenuItem description="Edit their card here." onClick={() => showPanel(`card:${card.entityId}`)}>
         Edit the card here
       </MenuItem>
-      <ChatCardActions session={session} card={card} info={info} persona={persona} />
+      <ChatCardActions session={session} card={card} info={info} persona={persona} surface="cast" />
       {!persona && (
         <>
           <MenuCheckboxItem
@@ -301,7 +301,7 @@ export function CastTab({ session }: { session: ChatSession }) {
   return (
     <div className="flex flex-col gap-4">
       <You card={persona === null ? undefined : view.cards.get(persona)}>
-        <PersonaSwitch session={session} trigger="Switch" />
+        <PersonaSwitch session={session} trigger="Switch" place="cast" />
         {persona !== null && view.cards.has(persona) && (
           <MemberMore
             session={session}

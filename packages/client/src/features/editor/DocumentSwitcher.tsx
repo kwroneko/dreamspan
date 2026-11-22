@@ -2,10 +2,10 @@ import { useAtomValue } from "@effect/atom-react"
 import type { EntityKind, RefId } from "@dreamspan/shared/library.ts"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { useState } from "react"
 import { shellAtom } from "../characters/shellData.tsx"
 import { libraryListAtom } from "../library/queries.ts"
 import { type DocumentChoice, HeaderSwitcher, type NewDocument } from "../pickers/DocumentPickers.tsx"
+import { useOpenPlace } from "./durable.tsx"
 import { NewCardDialog } from "./NewCard.tsx"
 import { NewDocumentDialog } from "./NewDocument.tsx"
 
@@ -72,7 +72,14 @@ function CardSwitcher({ refId, label, open }: { refId: RefId; label: string; ope
   const shell = useAtomValue(shellAtom)
   const persona = AsyncResult.isSuccess(shell) && shell.value.personas.some((p) => p.card.refId === refId)
   // The library's New card form, outliving the list it's started from; the card opens here.
-  const [making, setMaking] = useState<"card" | "persona" | null>(null)
+  // URL state, so a reload opens the form again with its names (a durable draft).
+  const [makingCard, setMakingCard] = useOpenPlace(`new-card:switcher:${refId}`)
+  const [makingPersona, setMakingPersona] = useOpenPlace(`new-persona:switcher:${refId}`)
+  const making = makingPersona ? "persona" : makingCard ? "card" : null
+  const setMaking = (next: "card" | "persona" | null) => {
+    setMakingCard(next === "card")
+    setMakingPersona(next === "persona")
+  }
   return (
     <>
       <HeaderSwitcher
@@ -117,7 +124,7 @@ function LibrarySwitcher({
   open: (refId: RefId) => void
 }) {
   const result = useAtomValue(libraryListAtom(kind))
-  const [making, setMaking] = useState(false)
+  const [making, setMaking] = useOpenPlace(`new-document:switcher:${kind}:${props.refId}`)
   const choices = AsyncResult.isSuccess(result)
     ? result.value.map((ref) => ({ value: ref.id, label: ref.label, subtitle: ref.subtitle, updatedAt: ref.updatedAt }))
     : []

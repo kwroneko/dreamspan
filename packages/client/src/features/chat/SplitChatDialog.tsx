@@ -1,9 +1,11 @@
 // "Make this branch its own chat" (DESIGN §10.1, splitconfirm): every entry point asks here first.
 // It says what splitting does and lets the new chat be titled, prefilled with the branch's own
 // name, else the title of the chat it leaves. The title and split are one guarded write.
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import type { ChatId, Fork, ForkId } from "@dreamspan/shared/chat.ts"
 import { useAction } from "../../actions.tsx"
+import { usePlaceParam } from "../../usePlaceParam.ts"
+import { useChatPlaceKey } from "./chatPlace.ts"
 import type { ChatCommandDialogProps } from "./commands.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { branchLabel, forksChanged } from "./forks.ts"
@@ -103,6 +105,23 @@ export function SplitChatDialog({
 
 /** The ⋯ menu's entry: the branch shown when it opened. */
 export function SplitChatCommandDialog({ context, onClose }: ChatCommandDialogProps) {
-  const [forkId] = useState(context.view.forkId ?? context.view.chat?.currentForkId ?? null)
-  return forkId ? <SplitChatDialog chatId={context.session.id} forkId={forkId} onClose={onClose} /> : null
+  const shown = context.view.forkId ?? context.view.chat?.currentForkId ?? null
+  // The dialog is in the URL (a reload opens it again, its title as typed), and so is its branch:
+  // once another branch shows (this one deleted, or another picked), it's done, rather than
+  // asking about a branch no longer in view.
+  const [target, setTarget] = usePlaceParam(useChatPlaceKey("splitFork"), "")
+  const forkId = (target || shown) as ForkId | null
+  useEffect(() => {
+    if (target === "" && shown !== null) setTarget(shown, true)
+  }, [target, shown, setTarget])
+  const close = useCallback(() => {
+    setTarget("", true)
+    onClose()
+  }, [setTarget, onClose])
+  useEffect(() => {
+    if (target !== "" && shown !== null && shown !== target) close()
+  }, [target, shown, close])
+  return forkId && (target === "" || target === shown) ? (
+    <SplitChatDialog chatId={context.session.id} forkId={forkId} onClose={close} />
+  ) : null
 }

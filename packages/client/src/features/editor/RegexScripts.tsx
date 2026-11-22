@@ -20,7 +20,7 @@ import type { DisplayResult } from "../chat/displayPipeline.ts"
 import { runRegexJob } from "../chat/displayWorker.ts"
 import type { Caller } from "./caller.ts"
 import { LinesField, NumberField, SelectField, SwitchField, TextField } from "./controls.tsx"
-import { useDurableText } from "./durable.tsx"
+import { PlaceDetails, useDurableText, useOpenPlace } from "./durable.tsx"
 import { addScriptChange } from "./regexAdd.ts"
 import { SearchNavigation } from "./searchNavigation.ts"
 import { type EditorStore, useEditorState, useText, useValue } from "./store.ts"
@@ -346,7 +346,7 @@ function TryIt({ script }: { script: RegexScript }) {
   }, [sample, script])
   const shown = sample !== "" && script.find_regex !== "" && result?.sample === sample ? result.value : null
   return (
-    <details className="group rounded-md border border-border">
+    <PlaceDetails place={`regex-sample:${script.id}`} className="group rounded-md border border-border">
       <Tooltip label="Opens a scratch area to try this script.">
         <summary className="cursor-pointer px-3 py-2 text-sm font-medium select-none">Try it</summary>
       </Tooltip>
@@ -380,7 +380,7 @@ function TryIt({ script }: { script: RegexScript }) {
           </section>
         )}
       </div>
-    </details>
+    </PlaceDetails>
   )
 }
 
@@ -421,18 +421,28 @@ export function ScriptItem({
   script,
   name,
   binding,
-  open,
-  onOpenChange,
+  place,
+  opening = false,
   actions
 }: {
   script: RegexScript
   name: string
   binding: ScriptBinding
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  /** What its being open is kept as (durable.tsx `useOpenPlace`), so a reload opens it again. */
+  place: string
+  /** Opens it now: search went to one of its fields, or it was just added. */
+  opening?: boolean
   /** Under the fields: delete, and moves in a list that orders its scripts. */
   actions: ReactNode
 }) {
+  const [open, onOpenChange] = useOpenPlace(place)
+  useEffect(() => {
+    if (!opening) return
+    const frame = requestAnimationFrame(() => onOpenChange(true))
+    return () => cancelAnimationFrame(frame)
+    // Opening is a request when it turns on; closing it afterwards is the user's.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opening])
   const setOn = (on: boolean) =>
     binding.kind === "store"
       ? binding.store.setValue([...binding.at, "disabled"], !on)
@@ -475,19 +485,13 @@ function StoreScript({ store, script }: { store: EditorStore; script: RegexScrip
   const at = ["regex", `id=${script.id}`]
   const name = useText(store, [...at, "name"]) || "Unnamed script"
   const match = useContext(SearchNavigation)
-  const [open, setOpen] = useState(false)
-  useEffect(() => {
-    if (match?.path[0] !== "regex" || match.path[1] !== `id=${script.id}`) return
-    const frame = requestAnimationFrame(() => setOpen(true))
-    return () => cancelAnimationFrame(frame)
-  }, [match, script.id])
   return (
     <ScriptItem
       script={script}
       name={name}
       binding={{ kind: "store", store, at }}
-      open={open}
-      onOpenChange={setOpen}
+      place={`regex-script:${store.refId}:${script.id}`}
+      opening={match?.path[0] === "regex" && match.path[1] === `id=${script.id}`}
       actions={
         <Button variant="ghost" hint="Removed when you save." onClick={() => void store.removeItem(at)}>
           Delete the script

@@ -1,3 +1,4 @@
+import { useOpenPlace } from "../editor/durable.tsx"
 import { archivedCardActions, cardSearchExtras } from "./homeSlots.ts"
 import { sidebarMessageResults, sidebarSearchTools, useMessageSearch } from "./MessageSearch.tsx"
 import { useSplitChats } from "../chat/splitChats.ts"
@@ -242,7 +243,8 @@ function BranchesButton({ fork, entity = null }: { fork: ShellFork; entity?: Ent
 
 /** Makes the selected branch its own chat, after the explanatory confirmation (owner, 2026-11-05). */
 function SplitBranchButton({ fork, label }: { fork: ShellFork; label: string }) {
-  const [open, setOpen] = useState(false)
+  // A URL place (editor/durable.tsx): a reload opens the dialog again, with the name as typed.
+  const [open, setOpen] = useOpenPlace(`split-chat:${fork.forkId}`)
   return (
     <>
       <IconButton

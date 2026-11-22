@@ -164,9 +164,10 @@ test("a stale comparison keeps the choices and compares again", async ({ page })
   await failed.getByRole("button", { name: "Compare again" }).click()
   await expect(failed).toHaveCount(0)
   await expect(rows.nth(0).getByRole("textbox")).toHaveValue("Write {{char}}'s next reply, harbour at night.")
-  // Carried choices must become a draft of this comparison even without another edit.
+  // Carried choices must become a draft of this comparison even without another edit. The
+  // review was open, so the reload opens it again (URL state).
   await page.reload()
-  await notice(page).getByRole("button", { name: "Review and merge" }).click()
+  await expect(dialog).toBeVisible()
   await expect(rows.nth(0).getByRole("textbox")).toHaveValue("Write {{char}}'s next reply, harbour at night.")
   await dialog.getByRole("button", { name: "Merge", exact: true }).click()
   await expect(dialog).toHaveCount(0)
@@ -447,8 +448,9 @@ test("merge waits for saved exclusions to load after reopening", async ({ page }
     })
     upstream.onMessage((data) => socket.send(data))
   })
+  // The review was open, so the reload opens it again (URL state).
   await page.reload()
-  await notice(page).getByRole("button", { name: "Review and merge" }).click()
+  await expect(dialog).toBeVisible()
   await expect.poll(() => !!release).toBe(true)
   await expect(dialog.getByRole("button", { name: "Merge", exact: true })).not.toBeEnabled()
   await capture(page, info, dialog, "merge-choices-loading")

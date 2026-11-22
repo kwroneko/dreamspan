@@ -7,6 +7,7 @@ import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
+import { useOpenPlace } from "./durable.tsx"
 
 type NewDocumentKind = "lorebook" | "note"
 
@@ -94,7 +95,7 @@ export function NewDocumentDialog({
 }
 
 export function NewDocumentButton({ kind }: { kind: NewDocumentKind }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useOpenPlace(`new-document:${kind}`)
   const navigate = useNavigate()
   return (
     <>

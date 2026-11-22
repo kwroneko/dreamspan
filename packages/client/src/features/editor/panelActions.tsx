@@ -7,6 +7,7 @@ import { useCaller } from "./caller.ts"
 import { RevisionsDialog } from "./RevisionsDialog.tsx"
 import { type EditorStore, useEditorState } from "./store.ts"
 import { ForkDialog } from "./RefDialogs.tsx"
+import { useOpenPlace } from "./durable.tsx"
 
 export const PanelVariantNavigation = createContext<((ref: RefId) => void) | undefined>(undefined)
 
@@ -37,7 +38,8 @@ export function PanelHistory({ store }: { store: EditorStore }) {
 export function PanelVariant({ store }: { store: EditorStore }) {
   const onCreated = useContext(PanelVariantNavigation)
   const snapshot = useEditorState(store).snapshot
-  const [open, setOpen] = useState(false)
+  // URL state, so a reload opens the form again with its names (a durable draft).
+  const [open, setOpen] = useOpenPlace(`variant:${store.refId}`)
   if (snapshot?.ref.kind !== "lorebook") return null
   return (
     <>

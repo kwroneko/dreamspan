@@ -21,7 +21,7 @@ import { RadioGroup } from "../../ui/Choice.tsx"
 import { Fieldset, Input } from "../../ui/Field.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { NameDialog } from "./NameDialog.tsx"
-import { useDurableText } from "../editor/durable.tsx"
+import { useDurableText, useOpenPlace } from "../editor/durable.tsx"
 import { Avatar, PortraitOverflow } from "../../ui/Avatar.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Badge } from "../../ui/Surface.tsx"
@@ -66,13 +66,15 @@ function ChatTitle({
   request: number
 }) {
   const split = useSplitChats(view.chat?.id ?? null, view.forkId)
-  const [editing, setEditing] = useState(false)
-  /** The name the box opens with: this chat's, or its group's. */
-  const [initial, setInitial] = useState("")
-  // The name as typed in place is kept (editor/durable.tsx): a reload doesn't lose it.
+  // Renaming in place, and the group's dialog, are URL places (editor/durable.tsx): a reload
+  // opens them again, with the name as typed.
+  const [editing, setEditing] = useOpenPlace(`chat-name:${session.id}`)
+  /** The name the box opens with: this chat's, or its group's (after a reload, the chat's). */
+  const [opened, setInitial] = useState<string | null>(null)
+  const initial = opened ?? name?.name ?? ""
   const typed = useDurableText(`chat-name:${session.id}`, "Name", initial)
   const draft = typed.text
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useOpenPlace(`group-rename:${session.id}`)
   const [group, setGroup] = useState<{ group: ChatGroup; chats: ReadonlyArray<Chat> } | null>(null)
   const [scope, setScope] = useState<"chat" | "group">("chat")
   const write = useWrite()
@@ -111,6 +113,19 @@ function ChatTitle({
     if (found !== null && found.chats.length > 1) return setOpen(true)
     setEditing(true)
   }
+  // The group's dialog opened again by a reload: what the group is, read again.
+  useEffect(() => {
+    if (!open || group !== null || view.chat === null) return
+    let live = true
+    void session
+      .call((client) => client("ListGroupChats", { chatId: view.chat!.id }))
+      .then((result) => {
+        if (live && result.ok) setGroup(result.value)
+      })
+    return () => {
+      live = false
+    }
+  }, [open, group, view.chat, session])
   const handled = useRef(request)
   useEffect(() => {
     if (request === handled.current) return

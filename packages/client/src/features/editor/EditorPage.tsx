@@ -113,15 +113,10 @@ export function Editor({
   const userId = useSession().user.id
   const [store] = useState(() => suppliedStore ?? new EditorStore(refId, userId, call))
   const [searchMatch, setSearchMatch] = useState<SearchMatch | null>(null)
-  const [dialog, setDialog] = usePlaceParam("editorDialog", "", ["", "history", "search"])
-  const [transient, setTransient] = useState<Open>(null)
-  const open = transient ?? (dialog || null)
-  const setOpen = (next: Open) => {
-    if (next === "history" || next === "search" || next === null) {
-      setTransient(null)
-      setDialog(next ?? "")
-    } else setTransient(next)
-  }
+  // Every dialog is URL state, so a reload opens it again: the fork's names are a durable draft.
+  const [dialog, setDialog] = usePlaceParam("editorDialog", "", ["", "history", "search", "fork"])
+  const open: Open = dialog || null
+  const setOpen = (next: Open) => setDialog(next ?? "")
   // A preset's search sits in the sticky bar, so its matches stay beside the document; it's
   // folded away until asked for.
   const [presetToolbar, setPresetToolbar] = useState<HTMLDivElement | null>(null)
