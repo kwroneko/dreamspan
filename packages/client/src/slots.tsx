@@ -1,6 +1,7 @@
 // UI slots (spec/PLUGINS.md §8): a place in a screen that renders whatever is registered
 // for it, in order, so features add to a screen without the screen knowing them.
 import { useSyncExternalStore, type ComponentType } from "react"
+import { OwnedBy } from "./placeOwner.tsx"
 import { makeRegistry, type Registry } from "./registry.ts"
 
 interface SlotEntry<Props> {
@@ -35,5 +36,9 @@ export function SlotOutlet<Props extends object>({
   return [...snapshot.entries]
     .filter((entry) => (only === undefined || entry.id === only) && !except.includes(entry.id))
     .sort((a, b) => a.order - b.order)
-    .map((entry) => <entry.component key={entry.id} {...props} />)
+    .map((entry) => (
+      <OwnedBy key={entry.id} registry={slot} entry={entry}>
+        <entry.component {...props} />
+      </OwnedBy>
+    ))
 }

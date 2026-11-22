@@ -200,13 +200,23 @@ test("card contributions update every mounted placement and restore built-ins", 
     await expect(host.getByText(/^Plugin card /)).toHaveCount(0)
     await expect(host.getByText("Added card action", { exact: true })).toHaveCount(0)
     await expect(fork).toBeEnabled()
-    // Disabling an action also unmounts its open dialog.
+    // Disabling an action also unmounts its open dialog, and restoring the action doesn't
+    // bring the dialog back (its URL open entry went with it); what was typed in it stays.
     await fork.click()
-    await expect(page.getByRole("dialog", { name: "Fork card", exact: true })).toBeVisible()
+    const dialog = page.getByRole("dialog", { name: "Fork card", exact: true })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("seam draft")
     await contribution(page, "install", "card-hide")
-    await expect(page.getByRole("dialog", { name: "Fork card", exact: true })).toHaveCount(0)
+    await expect(dialog).toHaveCount(0)
     await contribution(page, "close", "card-hide")
     await expect(fork).toBeEnabled()
+    await expect(dialog).toHaveCount(0)
+    await fork.click()
+    await expect(dialog.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true })).toHaveValue(
+      "seam draft"
+    )
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+    await expect(dialog).toHaveCount(0)
   }
   // The library item: its overflow menu lists the card contributions' and the library's own
   // registered actions, live, and an action's dialog goes when the action does.

@@ -7,6 +7,7 @@ import { useState, useSyncExternalStore, type ComponentType } from "react"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import type { EditorStore } from "../editor/store.ts"
 import { makeRegistry } from "../../registry.ts"
+import { OwnedBy } from "../../placeOwner.tsx"
 
 export interface CardSurfaceContext {
   readonly entityId: EntityId
@@ -65,7 +66,14 @@ export function CardSurface({
     .filter((entry) => entry.placement === placement)
     .filter((entry) => overflow === undefined || (entry.overflow ?? false) === overflow)
     .sort((a, b) => a.order - b.order)
-    .map((entry) => (entry.component ? <entry.component key={entry.id} {...context} /> : null))
+    .map((entry) =>
+      entry.component ? (
+        // A dialog an action keeps open in the URL closes when the action goes (placeOwner.tsx).
+        <OwnedBy key={entry.id} registry={cardContributions} entry={entry}>
+          <entry.component {...context} />
+        </OwnedBy>
+      ) : null
+    )
 }
 
 /** The registered card menu actions and their dialogs, hosted beside compact-editor History. */
