@@ -42,7 +42,7 @@ const linkClass =
 
 export function PresetTabPicker({ session }: { session: ChatSession | null }) {
   const selection = usePresetSelection(session)
-  const created = useNewPreset(selection)
+  const created = useNewPreset(selection, "panel")
   const label = selection.label
   return (
     <section aria-label="Choose the prompt preset" className="mb-3 flex flex-col gap-1.5 border-b border-border pb-3">
@@ -51,6 +51,7 @@ export function PresetTabPicker({ session }: { session: ChatSession | null }) {
           <Loading label="Prompt preset for the next reply" />
         ) : (
           <PresetPickerPopover
+            place="panel"
             selection={selection}
             side="bottom"
             triggerClassName={dropdown}

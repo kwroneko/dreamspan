@@ -209,6 +209,55 @@ export const settingsPlaces = [
     shown: (page) => page.getByRole("textbox", { name: "Name of the new folder", exact: true })
   }),
   place({
+    name: "New user: handle",
+    source: "features/accounts.tsx:142",
+    setup: async () => null,
+    open: async (page, _, ctx) => {
+      await go(page, ctx, "/settings/users")
+      const dialog = page.getByRole("dialog", { name: "New user", exact: true })
+      const button = page.getByRole("button", { name: "New user", exact: true })
+      await button.or(dialog).first().waitFor()
+      if (!(await dialog.isVisible())) await button.click()
+      return dialog.getByRole("textbox", { name: "Handle", exact: true })
+    },
+    shown: (page) =>
+      page.getByRole("dialog", { name: "New user", exact: true }).getByRole("textbox", { name: "Handle", exact: true })
+  }),
+  place({
+    name: "Media sites: Add a site",
+    source: "features/savedMedia/MediaSitesPage.tsx:112",
+    setup: async () => null,
+    open: async (page, _, ctx) => {
+      await go(page, ctx, "/settings/media-sites")
+      return page.getByRole("textbox", { name: "Site", exact: true })
+    },
+    shown: (page) => page.getByRole("textbox", { name: "Site", exact: true })
+  }),
+  place({
+    name: "SillyTavern import: folder path",
+    source: "features/library/stImport.tsx:834",
+    setup: async () => null,
+    open: async (page, _, ctx) => {
+      await go(page, ctx, "/import/st")
+      return page.getByRole("textbox", { name: "Folder path", exact: true })
+    },
+    shown: (page) => page.getByRole("textbox", { name: "Folder path", exact: true })
+  }),
+  place({
+    name: "Bin capacity: item limit",
+    source: "features/bin/BinCapacity.tsx:67",
+    setup: async () => null,
+    open: async (page, _, ctx) => {
+      await go(page, ctx, "/bin")
+      const field = page.getByRole("textbox", { name: "Deleted items: item limit", exact: true })
+      const toggle = page.getByText("Bin capacity", { exact: true })
+      await toggle.or(field).first().waitFor()
+      if (!(await field.isVisible())) await toggle.click()
+      return field
+    },
+    shown: (page) => page.getByRole("textbox", { name: "Deleted items: item limit", exact: true })
+  }),
+  place({
     name: "New workshop: first message",
     source: "features/workshop/PendingWorkshop.tsx:428",
     setup: async () => null,

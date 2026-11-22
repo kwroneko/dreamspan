@@ -15,6 +15,7 @@ import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
+import { useOpenPlace } from "../editor/durable.tsx"
 import { NEW_PRESET_HINT, NewPresetDialog, newPresetName } from "../editor/NewPreset.tsx"
 import {
   type PickerBodyProps,
@@ -214,12 +215,14 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
 }
 
 /** After "New preset": it's chosen, as a choice in the list would be, and opened for editing. */
-export function useNewPreset(selection: PresetSelection) {
+/** `place`: where it's opened from (the composer, the panel), unique to it: its dialog's open state and name are kept under it. */
+export function useNewPreset(selection: PresetSelection, place: string) {
   const workspace = usePresetWorkspace()
   const navigate = useNavigate()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useOpenPlace(`new-preset:${place}`)
   const dialog = (
     <NewPresetDialog
+      place={place}
       open={open}
       onOpenChange={setOpen}
       name={newPresetName([...selection.live, ...selection.archived].map((ref) => ref.label))}
@@ -246,7 +249,8 @@ export function PresetPickerPopover({
   triggerClassName,
   hint,
   side,
-  footer
+  footer,
+  place
 }: {
   selection: PresetSelection
   trigger: ReactNode
@@ -255,8 +259,10 @@ export function PresetPickerPopover({
   hint?: ReactNode
   side?: "top" | "bottom"
   footer?: (close: () => void) => ReactNode
+  /** Where it's opened from, unique to it ("composer", "panel"): its New preset dialog is kept under it. */
+  place: string
 }) {
-  const created = useNewPreset(selection)
+  const created = useNewPreset(selection, `picker:${place}`)
   return (
     <>
       <PickerPopover

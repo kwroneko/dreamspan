@@ -1,5 +1,6 @@
 // The names the prompt uses for you and the character, `{{user}}` and `{{char}}` (DESIGN §5.3):
 // they follow the cast, and can be kept fixed so choosing a speaker never changes them.
+import { useDurableText } from "../editor/durable.tsx"
 import { useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
@@ -23,13 +24,10 @@ function Binding({
   resolved: string
   pinned: boolean
 }) {
-  const [text, setText] = useState(resolved)
-  const [base, setBase] = useState(resolved)
-  // A remote change refreshes the saved value without discarding a typed override.
-  if (base !== resolved) {
-    setBase(resolved)
-    if (text === base) setText(resolved)
-  }
+  // Kept as typed; until something is, it shows the value as it resolves (a remote change too).
+  const typed = useDurableText(`macro:${session.id}:${name}`, "Name", resolved)
+  const text = typed.text
+  const setText = typed.setText
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const write = async (value: string | null) => {
@@ -37,6 +35,7 @@ function Binding({
     const result = await session.changeCast({ _tag: "MacroBinding", name, value })
     setPending(false)
     setError(result.ok ? null : result.error.message)
+    if (result.ok) void typed.commit(async () => true)
   }
   const { label, follows } = LABELS[name]
   return (

@@ -430,6 +430,7 @@ function PresetHeaderSwitcher({
   const selection = useEditedPresetSelection(value, label, open)
   return (
     <PresetPickerPopover
+      place="header"
       selection={selection}
       side="bottom"
       triggerClassName={headerSwitcherClass}

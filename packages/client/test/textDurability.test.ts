@@ -175,8 +175,8 @@ it("lists every multi-line text box with what keeps its text across a reload", (
 // components that are one (SecretInput, PasswordInput, OneLineField, PickerSearch), listed per
 // file as the boxes above are. Inputs that take no typed text (file, checkbox, radio, hidden,
 // colour) aren't counted. A secret is never kept anywhere (exempt), nor is a search or filter
-// query, which is retyped, not written; everything else is kept by a store or is a gap (what's
-// typed there is lost on a reload: listed to be fixed, not yet a place in the e2e guard).
+// query, which is retyped, not written; everything else is kept by a store. None may be a gap:
+// a new field is backed (the generic hooks fit any) before it's listed.
 const INPUT = /<(?:Input|input|SecretInput|PasswordInput|OneLineField|PickerSearch)\b/g
 const NOT_TEXT = /\btype="(?:file|checkbox|radio|hidden|color)"/
 
@@ -184,7 +184,6 @@ const kept = (durable: Durable, what: string, via?: ReadonlyArray<string>): Site
   via ? { durable, what, via } : { durable, what }
 const secret: Site = { exempt: "a secret: never kept, in a draft or the browser" }
 const search = (what: string): Site => ({ exempt: `search: ${what}` })
-const gap = (what: string): Site => ({ gap: what })
 const times = (count: number, site: Site) => Array.from({ length: count }, () => site)
 
 const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
@@ -199,13 +198,23 @@ const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
     { exempt: "a checkbox or radio of a message's HTML" },
     { exempt: "another non-text input of a message's HTML (range, date): no typed text" }
   ],
-  "features/accounts.tsx": [secret, secret, gap("New user: handle"), gap("New user: display name"), secret, secret],
+  "features/accounts.tsx": [
+    secret,
+    secret,
+    kept("useDurableForm", "New user: handle"),
+    kept("useDurableForm", "New user: display name"),
+    secret,
+    secret
+  ],
   "features/autoRun/AutoRun.tsx": times(2, kept("usePlaceParam", "Auto replies: replies and token limit")),
-  "features/bin/BinCapacity.tsx": [gap("Bin capacity: the size typed")],
+  "features/bin/BinCapacity.tsx": [kept("useDurableForm", "Bin capacity: the size typed and its unit")],
   "features/cardForks/surfacesImpl.tsx": [search("Parent card picker's filter")],
-  "features/cardSources/SourcesSettings.tsx": [secret, gap("Card sources: cache size limit")],
+  "features/cardSources/SourcesSettings.tsx": [
+    secret,
+    kept("useDurableForm", "Card sources: cache size limit and unit")
+  ],
   "features/cardSources/browse.tsx": times(4, search("a card source's filters (range, value, tag)")),
-  "features/characters/ArchiveUnused.tsx": [gap("Archive unused: an amount")],
+  "features/characters/ArchiveUnused.tsx": [kept("useDurableForm", "Archive unused: each rule's amount, as typed")],
   "features/characters/CardGridControls.tsx": [search("a card source's query"), search("filter the cards")],
   "features/characters/CardPage.tsx": [search("find a chat")],
   "features/characters/ShellBrowser.tsx": [
@@ -219,14 +228,14 @@ const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
   "features/chat/ChatHeader.tsx": [kept("useDurableText", "inline chat name")],
   "features/chat/ChatList.tsx": [search("find a chat")],
   "features/chat/ChatsPage.tsx": [kept("useUserDraft", "title of the new chat")],
-  "features/chat/LcmFields.tsx": [gap("a summarization token number, until it's committed on blur")],
-  "features/chat/MacroBindings.tsx": [gap("a macro's name, until Use")],
+  "features/chat/LcmFields.tsx": [kept("useDurableText", "a summarization token number, until it's written")],
+  "features/chat/MacroBindings.tsx": [kept("useDurableText", "a macro's name, until Use")],
   "features/chat/MergeChatDialog.tsx": [search("chats to merge"), kept("useDurableForm", "merge title")],
   "features/chat/NameDialog.tsx": [kept("useUserDraft", "chat, group and split names")],
   "features/chat/SpeakerSwitcher.tsx": [search("filter the speakers")],
   "features/chat/StartChatPage.tsx": [kept("useUserDraft", "title of the new chat")],
   "features/chat/VersionPicker.tsx": [search("find in versions")],
-  "features/chat/agent/ToolsSection.tsx": [gap("model requests per reply, until it's valid and saved")],
+  "features/chat/agent/ToolsSection.tsx": [kept("useDurableText", "model requests per reply, until it's saved")],
   "features/chat/htmlTextField.tsx": [kept("useDurableText", "a text input in a message's HTML")],
   "features/chat/nextReplyStrip.tsx": [search("find in a next-reply list")],
   "features/connections/detail.tsx": [
@@ -261,14 +270,14 @@ const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
     secret,
     kept("useUserDraft", "Rename a key: name")
   ],
-  "features/editor/CardEditor.tsx": [gap("a card's new tag, until Enter")],
+  "features/editor/CardEditor.tsx": [kept("useDurableText", "a card's new tag, until it's added")],
   "features/editor/LorebookEntryDetails.tsx": [kept("EditorStore", "an entry's number setting")],
-  "features/editor/LorebookMassEdit.tsx": [gap("mass edit: a value, until Apply")],
+  "features/editor/LorebookMassEdit.tsx": [kept("useDurableForm", "mass edit: the ticked settings, until Apply")],
   "features/editor/LorebookPicker.tsx": [search("the library's lorebooks")],
   "features/editor/LorebookTable.tsx": [kept("EditorStore", "an entry's title"), search("filter the entries")],
   "features/editor/NewCard.tsx": times(3, kept("useUserDraft", "new card: name, nickname, version")),
   "features/editor/NewDocument.tsx": [kept("useDurableText", "new lorebook or note: name")],
-  "features/editor/NewPreset.tsx": [gap("New prompt preset: name")],
+  "features/editor/NewPreset.tsx": [kept("useDurableText", "New prompt preset: name")],
   "features/editor/RefDialogs.tsx": times(3, kept("useUserDraft", "fork or variant: name, subtitle, nickname")),
   "features/editor/RegexScripts.tsx": times(2, kept("EditorStore", "a script's text fields and depth")),
   "features/editor/ReplySectionsSettings.tsx": times(3, kept("EditorStore", "tag pairs and send-back count")),
@@ -276,11 +285,11 @@ const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
   "features/editor/lorebookColumns.tsx": [kept("EditorStore", "a column's number"), search("find a lorebook")],
   "features/editor/notes.tsx": [kept("EditorStore", "a note's depth"), search("pick a shared note")],
   "features/files/FileBrowser.tsx": [kept("useDurableText", "rename, new folder and new file names")],
-  "features/files/FolderChip.tsx": [gap("the folder chip's new folder name")],
-  "features/files/ShareDialog.tsx": [gap("Share: account name")],
-  "features/gallery/Gallery.tsx": [gap("Rename an image: name")],
+  "features/files/FolderChip.tsx": [kept("useDurableText", "the folder chip's new folder name")],
+  "features/files/ShareDialog.tsx": [kept("useDurableText", "Share: account name")],
+  "features/gallery/Gallery.tsx": [kept("useDurableText", "Rename image: name")],
   "features/library/list.tsx": [search("the library")],
-  "features/library/stImport.tsx": [gap("SillyTavern import: folder path")],
+  "features/library/stImport.tsx": [kept("useDurableText", "SillyTavern import: folder path")],
   "features/login.tsx": [{ exempt: "sign-in handle, beside the password: never kept" }, secret],
   "features/mcp/detail.tsx": [
     ...times(3, kept("useDurableForm", "MCP server: name, URL, timeout")),
@@ -301,9 +310,9 @@ const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
   "features/pickers/PickerParts.tsx": [search("PickerSearch itself; its uses are counted")],
   "features/pickers/PresetPicker.tsx": [search("find a prompt preset")],
   "features/plugins/index.tsx": [search("a plugin registry")],
-  "features/savedMedia/MediaSitesPage.tsx": [gap("Add a site: host")],
+  "features/savedMedia/MediaSitesPage.tsx": [kept("useDurableText", "Add a site: host")],
   "features/snippets/index.tsx": [search("filter the snippets")],
-  "features/threads/StartThreadsDialog.tsx": [gap("Start threads: a thread's name")],
+  "features/threads/StartThreadsDialog.tsx": [kept("useDurableText", "Start threads: the rows, names included")],
   "features/workshop/CardSkills.tsx": times(2, kept("useDurableForm", "a card skill's name and tools")),
   "features/workshop/ConvertPreset.tsx": [kept("useUserDraft", "Convert to workshop: name")],
   "features/workshop/StartWorkshopPage.tsx": [kept("useUserDraft", "title of the new workshop")],
@@ -343,6 +352,7 @@ it("lists every single-line field with what keeps its text across a reload", () 
   expect(found, "a single-line field was added or removed: list it in INPUTS with what keeps its text").toEqual(listed)
   for (const [file, sites] of Object.entries(INPUTS))
     for (const site of sites) {
+      expect("gap" in site, `${file}: a single-line field loses what's typed: back it before listing it`).toBe(false)
       if (!("durable" in site)) continue
       const holders = (site.via ?? [file]).map((path) => readFileSync(resolve(root, path), "utf8"))
       expect(

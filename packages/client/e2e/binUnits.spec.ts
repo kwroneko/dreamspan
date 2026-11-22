@@ -57,7 +57,7 @@ for (const width of [390, 1440]) {
     expect(Math.abs(unitBox!.x - inputBox!.x - inputBox!.width - 8)).toBeLessThan(1)
     expect(Math.abs(saveBox!.x - unitBox!.x - unitBox!.width - 8)).toBeLessThan(1)
     await page.reload()
-    await page.getByText("Bin capacity", { exact: true }).click()
+    // Bin capacity stays open through the reload (URL state).
     await expect(items).toHaveValue("12,345")
     await expect(size).toHaveValue("256")
     expect((await admin((api) => api.GetBinLimits())).deletedBytes).toBe(268435456)

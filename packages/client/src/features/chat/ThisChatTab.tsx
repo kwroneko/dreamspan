@@ -323,6 +323,7 @@ export function SummarySettings({ session }: { session: ChatSession }) {
             <SlotOutlet
               slot={summarySettingFields}
               props={{
+                place: `chat:${session.id}`,
                 scope: "chat",
                 transcriptOnly: chatKinds.get(view.chat?.kind ?? "")?.summaryTranscript === true,
                 view: settings,

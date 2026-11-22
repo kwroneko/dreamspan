@@ -3,6 +3,7 @@
 // Files/Shared/<your name>/<folder>. Whether a name is an account isn't said: an invitation is
 // listed under the name as typed either way. A share whose folder is no longer at its path
 // (moved by a command, replaced, or deleted and restored) is unavailable until shared again.
+import { useDurableText } from "../editor/durable.tsx"
 import type { FolderShare, ShareMode } from "@dreamspan/shared/files.ts"
 import { useEffect, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
@@ -37,7 +38,10 @@ export function ShareDialog({
   onClose: () => void
 }) {
   const [shares, setShares] = useState<{ for: string; list: ReadonlyArray<FolderShare> } | null>(null)
-  const [handle, setHandle] = useState("")
+  // The name typed is kept per folder until it's shared or the dialog is closed.
+  const typed = useDurableText(`share:${path ?? ""}`, "Account name", "")
+  const handle = typed.text
+  const setHandle = typed.setText
   const [mode, setMode] = useState<ShareMode>("view")
   const [failure, setFailure] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -88,7 +92,7 @@ export function ShareDialog({
       open={path !== null}
       onOpenChange={(open) => {
         if (open) return
-        setHandle("")
+        void typed.discard()
         setFailure(null)
         onClose()
       }}
@@ -100,12 +104,13 @@ export function ShareDialog({
         onSubmit={(event) => {
           event.preventDefault()
           if (handle.trim() === "") return
-          void share(handle.trim(), mode).then((ok) => ok && setHandle(""))
+          void typed.commit((text) => share(text.trim(), mode))
         }}
       >
         <Field label="Account name">
           <Input
             value={handle}
+            readOnly={!typed.ready}
             onChange={(event) => setHandle(event.target.value)}
             autoComplete="off"
             spellCheck={false}

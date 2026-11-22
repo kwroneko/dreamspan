@@ -11,6 +11,7 @@ import { ConfirmDialog, Dialog, DialogActions } from "../ui/Dialog.tsx"
 import { Field, formText, Input, PasswordInput } from "../ui/Field.tsx"
 import { Select } from "../ui/Select.tsx"
 import { Alert, Badge, Card, CardHeader } from "../ui/Surface.tsx"
+import { useDurableForm, useOpenPlace } from "./editor/durable.tsx"
 import { LogoutButton, useTitle } from "./shell.tsx"
 
 const usersAtom = AppClient.query("ListUsers", undefined, { reactivityKeys: ["users"] })
@@ -117,37 +118,53 @@ const roleItems = [
 
 function CreateUserDialog({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
   const action = useAction()
-  const [handle, setHandle] = useState("")
-  const [displayName, setDisplayName] = useState("")
-  const [role, setRole] = useState<UserRole>("user")
+  // The password is a secret, never kept; the rest is kept as typed.
+  const form = useDurableForm("new-user", "New user", { handle: "", displayName: "", role: "user" as UserRole })
+  const { handle, displayName, role } = form.values
   const [passwordEmpty, setPasswordEmpty] = useState(true)
+  const close = () => {
+    void form.discard()
+    onOpenChange(false)
+  }
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const password = formText(event.currentTarget, "password")
-    const result = await action.run(
-      (client) => client("CreateUser", { handle, displayName, role, password }),
-      ["users"]
-    )
-    if (result.ok) onOpenChange(false)
+    await form.commit(async (values) => {
+      const result = await action.run((client) => client("CreateUser", { ...values, password }), ["users"])
+      if (result.ok) onOpenChange(false)
+      return result.ok
+    })
   }
   return (
-    <Dialog open onOpenChange={onOpenChange} title="New user">
+    <Dialog open onOpenChange={(open) => !open && close()} title="New user">
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Field label="Handle" about="The sign-in name: letters, digits, '.', '_' and '-'.">
-          <Input value={handle} onValueChange={setHandle} autoCapitalize="none" spellCheck={false} autoComplete="off" />
+          <Input
+            value={handle}
+            readOnly={!form.ready}
+            onValueChange={(next) => form.edit({ handle: next })}
+            autoCapitalize="none"
+            spellCheck={false}
+            autoComplete="off"
+          />
         </Field>
         <Field label="Display name (optional)">
-          <Input value={displayName} onValueChange={setDisplayName} autoComplete="off" />
+          <Input
+            value={displayName}
+            readOnly={!form.ready}
+            onValueChange={(next) => form.edit({ displayName: next })}
+            autoComplete="off"
+          />
         </Field>
         <Field label="Role">
-          <Select items={roleItems} value={role} onValueChange={setRole} />
+          <Select items={roleItems} value={role} onValueChange={(next) => form.edit({ role: next })} />
         </Field>
         <Field label="Password" about="At least 8 characters.">
           <PasswordInput name="password" autoComplete="new-password" onEmptyChange={setPasswordEmpty} />
         </Field>
         <ErrorAlert error={action.error} title="No user created" />
         <DialogActions>
-          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+          <Button hint="Closes this dialog without applying changes." onClick={close}>
             Cancel
           </Button>
           <Button
@@ -279,7 +296,7 @@ function UserRow({ user, self }: { user: UserAccount; self: UserId }) {
 function UsersPage() {
   useTitle("Users")
   const session = useSession()
-  const [creating, setCreating] = useState(false)
+  const [creating, setCreating] = useOpenPlace("new-user")
   return (
     <Card>
       <CardHeader

@@ -15,6 +15,7 @@ import { PICTURE_ACCEPT } from "../../ui/portraitParts.ts"
 import { mediaUrl } from "../../ui/mediaImage.ts"
 import { revealAdded } from "../../ui/reveal.ts"
 import type { CardTabProps } from "../editor/cardTabs.ts"
+import { useDurableText, useOpenChoice } from "../editor/durable.tsx"
 import { useEditorState, useValue } from "../editor/store.ts"
 import { galleryPortraits } from "./portraits.ts"
 
@@ -34,8 +35,10 @@ export function Gallery({ store, call }: Pick<CardTabProps, "store" | "call">) {
   const [pending, setPending] = useState(false)
   const [over, setOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [rename, setRename] = useState<CardAsset | null>(null)
-  const [newName, setNewName] = useState("")
+  // The image being renamed is URL state (its uri), so a reload opens its dialog again.
+  const [renaming, setRenaming] = useOpenChoice(`image-rename:${store.refId}:`)
+  const rename = (assets ?? []).find((asset) => asset.uri === renaming) ?? null
+  const setRename = (asset: CardAsset | null) => setRenaming(asset?.uri ?? null)
   const [added, setAdded] = useState<ReadonlyArray<string>>([])
   useLayoutEffect(() => {
     if (!added.length) return
@@ -45,7 +48,7 @@ export function Gallery({ store, call }: Pick<CardTabProps, "store" | "call">) {
 
   async function change(asset: CardAsset, change: typeof AssetChange.Type) {
     const ref = store.snapshot?.ref
-    if (!ref) return
+    if (!ref) return false
     setPending(true)
     setError(null)
     const result = await call(
@@ -67,6 +70,7 @@ export function Gallery({ store, call }: Pick<CardTabProps, "store" | "call">) {
       }
     }
     setPending(false)
+    return result.ok
   }
   async function add(files: ReadonlyArray<File>) {
     if (pending || !files.length) return
@@ -209,13 +213,7 @@ export function Gallery({ store, call }: Pick<CardTabProps, "store" | "call">) {
                               />
                             }
                           >
-                            <MenuItem
-                              description="Change this image's name."
-                              onClick={() => {
-                                setRename(asset)
-                                setNewName(asset.name)
-                              }}
-                            >
+                            <MenuItem description="Change this image's name." onClick={() => setRename(asset)}>
                               Rename
                             </MenuItem>
                             <MenuSubmenu label="Kind" description="Choose how this image is grouped and exported.">
@@ -281,33 +279,73 @@ export function Gallery({ store, call }: Pick<CardTabProps, "store" | "call">) {
         )}
       </Card>
       {rename && (
-        <Dialog open onOpenChange={(open) => !open && setRename(null)} title="Rename image">
-          <form
-            className="flex flex-col gap-4"
-            onSubmit={(e) => {
-              e.preventDefault()
-              void change(rename, { action: "rename", name: newName })
-            }}
-          >
-            <Field label="Name" about="The image's name in this gallery and in exported cards.">
-              <Input autoFocus value={newName} maxLength={255} onChange={(e) => setNewName(e.currentTarget.value)} />
-            </Field>
-            <DialogActions>
-              <Button variant="secondary" hint="Keep the image's current name." onClick={() => setRename(null)}>
-                Cancel
-              </Button>
-              <Button type="submit" hint="Save the image's new name." disabled={pending}>
-                Save name
-              </Button>
-            </DialogActions>
-            {error && (
-              <p role="alert" className="text-sm text-danger">
-                {error}
-              </p>
-            )}
-          </form>
-        </Dialog>
+        <RenameImageDialog
+          key={rename.uri}
+          place={`${store.refId}:${rename.uri}`}
+          name={rename.name}
+          pending={pending}
+          error={error}
+          onSave={(name) => change(rename, { action: "rename", name })}
+          onClose={() => setRename(null)}
+        />
       )}
     </div>
+  )
+}
+
+/** Rename image: the name typed is kept under the card and image until saved or cancelled. */
+function RenameImageDialog({
+  place,
+  name,
+  pending,
+  error,
+  onSave,
+  onClose
+}: {
+  place: string
+  name: string
+  pending: boolean
+  error: string | null
+  onSave: (name: string) => Promise<boolean>
+  onClose: () => void
+}) {
+  const typed = useDurableText(`image-name:${place}`, "Name", name)
+  const close = () => {
+    void typed.discard()
+    onClose()
+  }
+  return (
+    <Dialog open onOpenChange={(open) => !open && close()} title="Rename image">
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void typed.commit(onSave)
+        }}
+      >
+        <Field label="Name" about="The image's name in this gallery and in exported cards.">
+          <Input
+            autoFocus
+            value={typed.text}
+            readOnly={!typed.ready}
+            maxLength={255}
+            onChange={(e) => typed.setText(e.currentTarget.value)}
+          />
+        </Field>
+        <DialogActions>
+          <Button variant="secondary" hint="Keep the image's current name." onClick={close}>
+            Cancel
+          </Button>
+          <Button type="submit" hint="Save the image's new name." disabled={pending}>
+            Save name
+          </Button>
+        </DialogActions>
+        {error && (
+          <p role="alert" className="text-sm text-danger">
+            {error}
+          </p>
+        )}
+      </form>
+    </Dialog>
   )
 }

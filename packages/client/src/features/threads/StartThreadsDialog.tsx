@@ -6,6 +6,7 @@
 import type { CastCard, EntityId, ForkId, PathEntry } from "@dreamspan/shared/chat.ts"
 import type { Cast } from "@dreamspan/shared/chatSetupApi.ts"
 import { useEffect, useState, useSyncExternalStore } from "react"
+import { useDurableText } from "../editor/durable.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
@@ -152,6 +153,17 @@ function ThreadRow({
 }
 
 /** The dialog for a message of the fork shown: `entry`, and the newest message's position when known. */
+/** The rows kept as typed, or null when nothing was (or it doesn't read as rows). */
+const keptThreads = (text: string): ReadonlyArray<DraftThread> | null => {
+  if (text === "") return null
+  try {
+    const rows: unknown = JSON.parse(text)
+    return Array.isArray(rows) && rows.length >= 2 ? (rows as ReadonlyArray<DraftThread>) : null
+  } catch {
+    return null
+  }
+}
+
 function StartThreadsDialog({
   session,
   entry,
@@ -169,7 +181,15 @@ function StartThreadsDialog({
   const undo = useUndoThreads()
   const [read, setRead] = useState<Cast | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
-  const [threads, setThreads] = useState<ReadonlyArray<DraftThread> | null>(null)
+  // The rows as read (who's in the chat at this message), and as typed and chosen since, kept.
+  const [initial, setInitial] = useState<ReadonlyArray<DraftThread> | null>(null)
+  const kept = useDurableText(`start-threads:${session.id}:${entry.slotId}`, "Threads", "")
+  const threads = initial === null ? null : (keptThreads(kept.text) ?? initial)
+  const setThreads = (next: ReadonlyArray<DraftThread>) => kept.setText(JSON.stringify(next))
+  const close = () => {
+    void kept.discard()
+    onClose()
+  }
   const [pending, setPending] = useState(false)
   // Who's in the chat at this message, not at the newest.
   useEffect(() => {
@@ -180,7 +200,7 @@ function StartThreadsDialog({
         if (!live) return
         if (!result.ok) return setFailure(result.error.message)
         setRead(result.value)
-        setThreads(initialThreads(startCast(result.value)))
+        setInitial(initialThreads(startCast(result.value)))
       })
     return () => {
       live = false
@@ -210,6 +230,7 @@ function StartThreadsDialog({
     setPending(false)
     if (!result.ok) return setFailure(result.error.message)
     forksChanged(session.id)
+    void kept.commit(async () => true)
     onClose()
     const started = result.value
     const second = threads[1]!
@@ -245,7 +266,7 @@ function StartThreadsDialog({
   return (
     <Dialog
       open
-      onOpenChange={(open) => !open && onClose()}
+      onOpenChange={(open) => !open && close()}
       title={`Threads from #${at + 1}`}
       description={START_HINT}
       placement="top"
@@ -307,7 +328,7 @@ function StartThreadsDialog({
         </p>
       )}
       <DialogActions>
-        <Button variant="ghost" hint="Closes without starting threads." onClick={onClose}>
+        <Button variant="ghost" hint="Closes without starting threads." onClick={close}>
           Cancel
         </Button>
         <Button

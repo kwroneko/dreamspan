@@ -113,6 +113,7 @@ function PendingPresetChip({ selection }: { selection: PresetSelection }) {
   if (!selection.loaded || label === null) return <LoadingChip label="Prompt preset" />
   return (
     <PresetPickerPopover
+      place="workshop"
       selection={selection}
       triggerLabel={`Prompt preset: ${label}. Change the preset`}
       hint={`Prompt preset for this workshop's replies: ${label}`}

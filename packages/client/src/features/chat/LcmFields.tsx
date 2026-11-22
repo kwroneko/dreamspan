@@ -1,3 +1,4 @@
+import { useDurableText } from "../editor/durable.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 // The summarization settings (DESIGN §8), shared by the side panel's This chat tab (a chat's own,
 // each falling back to the account default) and Settings → Chats (the account default for new
@@ -91,6 +92,7 @@ function Origin({
  * empty field as "automatic" (null).
  */
 function TokensInput({
+  place,
   label,
   value,
   onCommit,
@@ -99,6 +101,8 @@ function TokensInput({
   optional = false,
   about
 }: {
+  /** The settings it's in ("chat:<id>", "account"): the key what's typed is kept under, with the label. */
+  place: string
   label: string
   value: number | null
   onCommit: (value: number | null) => Promise<string | null>
@@ -107,26 +111,21 @@ function TokensInput({
   optional?: boolean
   about?: string
 }) {
-  const [text, setText] = useState(value === null ? "" : String(value))
+  // Kept as typed until it's written; until then a new value from the server shows.
+  const typed = useDurableText(`lcm:${place}`, label, value === null ? "" : String(value))
+  const text = typed.text
   const [problem, setProblem] = useState<string | null>(null)
-  const [editing, setEditing] = useState(false)
-  // A new value from the server shows unless something is being typed.
-  const [synced, setSynced] = useState(value)
-  if (!editing && value !== synced) {
-    setSynced(value)
-    setText(value === null ? "" : String(value))
+  const written = (next: string | null) => {
+    setProblem(next)
+    if (next === null) void typed.commit(async () => true)
   }
   const commit = async () => {
-    setEditing(false)
     const trimmed = text.replace(/[,\s_]/g, "")
-    if (trimmed === "" && optional) {
-      if (value !== null) setProblem(await onCommit(null))
-      return
-    }
+    if (trimmed === "" && optional) return written(value !== null ? await onCommit(null) : null)
     const n = Number(trimmed)
     if (!Number.isInteger(n) || n <= 0) return setProblem("A whole number of tokens, above 0.")
-    if (n === value) return setProblem(null)
-    setProblem(await onCommit(n))
+    if (n === value) return written(null)
+    written(await onCommit(n))
   }
   return (
     <Field label={label} about={about} error={problem} className="w-36">
@@ -136,10 +135,8 @@ function TokensInput({
         disabled={disabled}
         placeholder={optional ? "Automatic" : undefined}
         aria-invalid={invalid || problem !== null || undefined}
-        onValueChange={(next) => {
-          setEditing(true)
-          setText(next)
-        }}
+        readOnly={!typed.ready}
+        onValueChange={typed.setText}
         onBlur={() => void commit()}
         onKeyDown={(event) => {
           if (event.key === "Enter") void commit()
@@ -206,6 +203,7 @@ function PairOrigin({
 
 /** A target and a maximum, with the figure the next context has now. */
 function Pair({
+  place,
   legend,
   about,
   scope,
@@ -220,6 +218,7 @@ function Pair({
   write,
   disabled
 }: {
+  place: string
   legend: string
   about: string
   scope: "chat" | "account"
@@ -272,6 +271,7 @@ function Pair({
       <div className="flex flex-wrap items-end gap-3">
         {([target, maximum] as const).map((field) => (
           <TokensInput
+            place={`${place}:${field}`}
             key={field}
             label={field === target ? "Target" : "Maximum"}
             value={resolved[field]}
@@ -325,6 +325,7 @@ function Pair({
  * when it runs, and under Advanced the chunk size and summary length.
  */
 export function LcmFields({
+  place,
   scope,
   view,
   fallback,
@@ -333,6 +334,8 @@ export function LcmFields({
   instruction,
   transcriptOnly = false
 }: {
+  /** Whose settings ("chat:<id>", "account"): what's typed in its number fields is kept under it. */
+  place: string
   scope: "chat" | "account"
   /** The settings as they resolve, the fit and the figures (an account default has no figures). */
   view: Pick<LcmSettingsView, "resolved" | "fit" | "now" | "fitted">
@@ -407,6 +410,7 @@ export function LcmFields({
             {specific && (
               <div className="flex min-w-0 items-center gap-2">
                 <PresetPickerPopover
+                  place="summary"
                   selection={{
                     ...presets,
                     usage: "summary",
@@ -481,6 +485,7 @@ export function LcmFields({
       </Fieldset>
       {instruction}
       <Pair
+        place={place}
         legend="Recent messages kept as written"
         about="Keep recent messages as written up to the maximum: past it, the oldest are summarized until the recent part is back at the target."
         scope={scope}
@@ -501,6 +506,7 @@ export function LcmFields({
         disabled={disabled}
       />
       <Pair
+        place={place}
         legend="Summary block"
         about="Keep the summaries within the maximum: past it, the oldest are condensed until the block is back at the target."
         scope={scope}
@@ -579,6 +585,7 @@ export function LcmFields({
         <div className="mt-3 flex flex-col gap-4">
           <div className="flex flex-col gap-1">
             <TokensInput
+              place={place}
               label="Chunk size"
               about="Choose how many tokens of messages one summary covers. Empty chooses automatically."
               value={resolved.leafInput}
@@ -600,6 +607,7 @@ export function LcmFields({
           </div>
           <div className="flex flex-col gap-1">
             <TokensInput
+              place={place}
               label="Summary length"
               about="Choose the length to ask for, in tokens. The instruction uses an approximate word count through {{words}}."
               value={resolved.leafTarget}

@@ -1,6 +1,7 @@
 // Settings → Card sources (spec/CARD-SOURCES.md §5.2): per source, the user's switch, the
 // admin's switch for every account, the API key (write-only) and clearing what's cached; for
 // admins, the instance's cache cap. Nothing here contacts a source.
+import { useDurableForm } from "../editor/durable.tsx"
 import type { SourceInfo, SourceList } from "@dreamspan/shared/cardSources.ts"
 import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import { useState } from "react"
@@ -145,8 +146,13 @@ function SourceCard({ source, isAdmin }: { source: SourceInfo; isAdmin: boolean 
 
 function CacheCap({ cache }: { cache: NonNullable<SourceList["cache"]> }) {
   const initial = editableByteSize(cache.capBytes)
-  const [text, setText] = useState(initial.text)
-  const [unit, setUnit] = useState<SizeUnit>(initial.unit)
+  const form = useDurableForm("source-cache-cap", "Cache size limit", {
+    text: initial.text,
+    unit: initial.unit as SizeUnit
+  })
+  const { text, unit } = form.values
+  const setText = (next: string) => form.edit({ text: next })
+  const setUnit = (next: SizeUnit) => form.edit({ unit: next })
   const action = useAction()
   const bytes = parseByteSize(text, unit)
   const valid = bytes !== null && bytes >= 16 * 1024 ** 2 && bytes <= 1024 ** 4
@@ -157,7 +163,11 @@ function CacheCap({ cache }: { cache: NonNullable<SourceList["cache"]> }) {
         noValidate
         onSubmit={(event) => {
           event.preventDefault()
-          if (valid) void action.run((client) => client("SetSourceCacheCap", { bytes }), [SOURCES_KEY])
+          if (valid)
+            void form.commit(async () => {
+              const result = await action.run((client) => client("SetSourceCacheCap", { bytes }), [SOURCES_KEY])
+              return result.ok
+            })
         }}
       >
         <CardHeader
