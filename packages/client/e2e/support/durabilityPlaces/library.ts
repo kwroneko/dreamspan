@@ -185,6 +185,21 @@ export const libraryPlaces: ReadonlyArray<Place> = [
     shown: (page) => page.getByRole("dialog", { name: "New card" }).getByRole("textbox", { name: "Display name" })
   }),
   place({
+    name: "New lorebook dialog",
+    source: "features/editor/NewDocument.tsx:69",
+    setup: lazy,
+    open: async (page, _state, { server }) => {
+      await page.goto(`${server.url}/library?kind=lorebook`)
+      const dialog = page.getByRole("dialog", { name: "New lorebook", exact: true })
+      if (!(await dialog.isVisible())) await page.getByRole("button", { name: "New lorebook", exact: true }).click()
+      return dialog.getByRole("textbox", { name: "Name", exact: true })
+    },
+    shown: (page) =>
+      page
+        .getByRole("dialog", { name: "New lorebook", exact: true })
+        .getByRole("textbox", { name: "Name", exact: true })
+  }),
+  place({
     name: "New card dialog (card switcher)",
     source: "features/editor/DocumentSwitcher.tsx:96",
     setup: card,

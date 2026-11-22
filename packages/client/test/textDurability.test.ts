@@ -8,7 +8,7 @@
 // ComposerDraft, FileDraft) or, for anything else, the generic one (editor/durable.tsx:
 // useDurableText, useDurableForm), and add a Place to the e2e guard.
 import { readdirSync, readFileSync } from "node:fs"
-import { relative, resolve } from "node:path"
+import { dirname, relative, resolve } from "node:path"
 import { expect, it } from "vitest"
 
 type Site =
@@ -163,5 +163,102 @@ it("lists every multi-line text box with what keeps its text across a reload", (
         `${file} is listed as kept by ${site.durable}`
       ).toBe(true)
     }
+  }
+})
+
+// Single-line fields in a dialog a reload opens again: if the dialog comes back, so must what
+// was typed in it. The dialogs are those of files that keep an open state in the URL
+// (`useOpenPlace`, `PlaceDetails`) and the dialog files they import. Secret inputs
+// (SecretInput, PasswordInput) are never kept, so they aren't counted.
+const INPUT = /<(?:Input|input)\b/g
+
+const DIALOG_INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
+  "features/cardForks/surfacesImpl.tsx": [{ exempt: "search: Parent card picker's filter" }],
+  "features/characters/ShellBrowser.tsx": [
+    { exempt: "search: find a chat, branch or character" },
+    { exempt: "search: a card source's query" },
+    { exempt: "search: find in the list" }
+  ],
+  "features/chat/CardForkDialogs.tsx": [
+    { durable: "useUserDraft", what: "fork for this chat: display name" },
+    { durable: "useUserDraft", what: "fork for this chat: version" },
+    { durable: "useUserDraft", what: "fork for this chat: in-character name" }
+  ],
+  "features/chat/ChatHeader.tsx": [{ durable: "useDurableText", what: "inline chat name" }],
+  "features/chat/NameDialog.tsx": [{ durable: "useUserDraft", what: "chat, group and split names" }],
+  "features/chat/SpeakerSwitcher.tsx": [{ exempt: "search: filter the speakers" }],
+  "features/connections/detail.tsx": [
+    { durable: "useUserDraft", what: "connection name" },
+    { durable: "useUserDraft", what: "base URL" },
+    { durable: "useUserDraft", what: "concurrent requests" },
+    { durable: "useUserDraft", what: "cache lifetime" },
+    { exempt: "a header's name, in the headers dialog: it travels with the header's secret value, never kept" }
+  ],
+  "features/connections/models.tsx": [
+    { durable: "useUserDraft", what: "a context or output limit of the model" },
+    { durable: "useUserDraft", what: "model display name" },
+    { durable: "useUserDraft", what: "a sampler value" },
+    { durable: "useUserDraft", what: "Add a model: model id" }
+  ],
+  "features/credentials.tsx": [
+    { exempt: "an address in Allow for another address: the dialog takes the secret key, and doesn't reopen" },
+    { exempt: "another address in Replace key: the dialog takes the secret key, and doesn't reopen" },
+    { durable: "useUserDraft", what: "Save a key: name" },
+    { durable: "useUserDraft", what: "Rename a key: name" }
+  ],
+  "features/editor/NewCard.tsx": [
+    { durable: "useUserDraft", what: "new card: display name" },
+    { durable: "useUserDraft", what: "new card: in-chat nickname" },
+    { durable: "useUserDraft", what: "new card: version" }
+  ],
+  "features/editor/NewDocument.tsx": [{ durable: "useDurableText", what: "new lorebook or note: name" }],
+  "features/editor/RefDialogs.tsx": [
+    { durable: "useUserDraft", what: "fork or variant: display name" },
+    { durable: "useUserDraft", what: "fork or variant: subtitle" },
+    { durable: "useUserDraft", what: "fork or variant: in-character name" }
+  ],
+  "features/editor/RegexScripts.tsx": [
+    { durable: "EditorStore", what: "a script's text fields (local binding: its owner's useUserDraft)" },
+    { durable: "EditorStore", what: "a script's depth" }
+  ],
+  "features/editor/controls.tsx": [
+    { durable: "EditorStore", what: "TextField: single-line" },
+    { durable: "EditorStore", what: "NumberField" }
+  ]
+}
+
+it("keeps what's typed in every single-line field of a dialog a reload reopens", () => {
+  const root = resolve(import.meta.dirname, "../src")
+  const files: Array<string> = []
+  const visit = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = resolve(dir, entry.name)
+      if (entry.isDirectory()) visit(path)
+      else if (/\.tsx?$/.test(path)) files.push(path)
+    }
+  }
+  visit(resolve(root, "features"))
+  const reopening = new Set<string>()
+  for (const file of files) {
+    if (file.endsWith("durable.tsx")) continue
+    const source = readFileSync(file, "utf8")
+    if (!/useOpenPlace\(|<PlaceDetails\b/.test(source)) continue
+    reopening.add(file)
+    for (const [, imported] of source.matchAll(/from "(\.[^"]+\.tsx)"/g)) {
+      const path = resolve(dirname(file), imported!)
+      if (files.includes(path) && readFileSync(path, "utf8").includes("<Dialog")) reopening.add(path)
+    }
+  }
+  const found: Record<string, number> = {}
+  for (const file of reopening) {
+    const count = (readFileSync(file, "utf8").match(INPUT) ?? []).length
+    if (count > 0) found[relative(root, file)] = count
+  }
+  const listed = Object.fromEntries(Object.entries(DIALOG_INPUTS).map(([file, sites]) => [file, sites.length]))
+  expect(found, "a field was added to a reopening dialog: list it in DIALOG_INPUTS with what keeps it").toEqual(listed)
+  for (const [file, sites] of Object.entries(DIALOG_INPUTS)) {
+    const source = readFileSync(resolve(root, file), "utf8")
+    for (const site of sites)
+      if ("durable" in site) expect(source, `${file} is listed as kept by ${site.durable}`).toContain(site.durable)
   }
 })

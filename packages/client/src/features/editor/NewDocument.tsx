@@ -7,7 +7,7 @@ import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
-import { useOpenPlace } from "./durable.tsx"
+import { useDurableText, useOpenPlace } from "./durable.tsx"
 
 type NewDocumentKind = "lorebook" | "note"
 
@@ -23,22 +23,24 @@ export function NewDocumentDialog({
   onCreated: (ref: LibraryRef) => Promise<void | boolean> | void | boolean
 }) {
   const action = useAction()
-  const [name, setName] = useState("")
+  // The name typed is kept as typed (durable.tsx): a reload reopens the dialog with it.
+  const durable = useDurableText(`new-document:${kind}`, "Name", "")
+  const name = durable.text
   const [created, setCreated] = useState<LibraryRef | null>(null)
+  const [createdName, setCreatedName] = useState("")
   const [finishing, setFinishing] = useState(false)
   const [finishError, setFinishError] = useState<string | null>(null)
   const [wasOpen, setWasOpen] = useState(open)
   if (open !== wasOpen) {
     setWasOpen(open)
     if (open) {
-      setName("")
       setCreated(null)
       setFinishError(null)
     }
   }
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (!name.trim() || action.pending || finishing) return
+    if ((created === null && !name.trim()) || action.pending || finishing) return
     const result = created
       ? { ok: true as const, value: created }
       : await action.run(
@@ -50,6 +52,12 @@ export function NewDocumentDialog({
           ["library"]
         )
     if (result.ok) {
+      // Created: the name is the document's now, so the next dialog starts empty; this one
+      // keeps showing it while the document is attached (and retried).
+      if (!created) {
+        setCreatedName(name)
+        void durable.commit(async () => true)
+      }
       setCreated(result.value)
       setFinishing(true)
       const finished = await onCreated(result.value)
@@ -62,9 +70,10 @@ export function NewDocumentDialog({
       <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
         <Field label="Name">
           <Input
-            value={name}
+            value={created ? createdName : name}
             disabled={created !== null}
-            onChange={(event) => setName(event.currentTarget.value)}
+            readOnly={!durable.ready}
+            onChange={(event) => durable.setText(event.currentTarget.value)}
             maxLength={200}
             required
           />
@@ -76,14 +85,20 @@ export function NewDocumentDialog({
           </p>
         )}
         <DialogActions>
-          <Button hint="Closes this dialog." onClick={() => onOpenChange(false)}>
+          <Button
+            hint="Closes this dialog."
+            onClick={() => {
+              void durable.discard()
+              onOpenChange(false)
+            }}
+          >
             Cancel
           </Button>
           <Button
             type="submit"
             variant="primary"
             pending={action.pending || finishing}
-            disabled={!name.trim()}
+            disabled={created === null && !name.trim()}
             hint={`Creates an empty ${kind} and opens its editor.`}
           >
             Create
