@@ -132,6 +132,12 @@ interface SubagentHost {
   ) => void
   /** A background subagent's progress note, delivered with the run's next request (§4). */
   readonly note?: (handle: string, message: import("@earendil-works/pi-agent-core").AgentMessage) => void
+  /**
+   * Resolves once a resumed run has run its dangling calls (at once when it has none): a
+   * background subagent it carries on sends nothing before, so a dangling message to it is in its
+   * mailbox for its first request (§8).
+   */
+  readonly dangled?: Effect.Effect<void>
 }
 
 /** What a tool returns to the model: text, or a failure the model can correct. */
