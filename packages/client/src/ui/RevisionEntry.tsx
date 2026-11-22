@@ -13,6 +13,7 @@ const when = (at: number) => new Date(at).toLocaleString(undefined, { dateStyle:
 export const revisionName = (number: number | undefined) => (number === undefined ? "Revision" : `Revision ${number}`)
 
 export function RevisionEntry({
+  place,
   number,
   createdAt,
   title,
@@ -24,6 +25,8 @@ export function RevisionEntry({
   onSelect,
   onMessage
 }: {
+  /** The revision, unique to it ("revision:<id>"). */
+  place: string
   number: number | undefined
   createdAt: number
   /** What made it, in words (and a link to the reply that used it). */
@@ -51,7 +54,7 @@ export function RevisionEntry({
           {when(createdAt)}
         </time>
       </div>
-      <RevisionMessage message={message} name={name} onMessage={onMessage} />
+      <RevisionMessage place={place} message={message} name={name} onMessage={onMessage} />
       {title && <div className="text-sm [overflow-wrap:anywhere]">{title}</div>}
       <div role="group" aria-label={`${name} actions`} className="flex flex-wrap items-center gap-2">
         {restore}

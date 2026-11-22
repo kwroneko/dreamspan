@@ -1,14 +1,18 @@
 import { SearchHighlights, type HighlightRange } from "./SearchHighlights.tsx"
 // A name with a pencil beside it: the pencil turns the name into a field with Save and Cancel
 // beside it; Enter saves, Escape cancels. The usual way to rename one thing in place.
-// `lastLine` keeps the pencil after the last visible line of a clamped heading.
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react"
+// `lastLine` keeps the pencil after the last visible line of a clamped heading. What's typed,
+// and that the field is open, are kept under `place` (ui/durableFields.tsx): a reload opens
+// the field again with the text typed in it.
+import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react"
+import { type DurableText, useDurableFields } from "./durableFields.tsx"
 import { Input } from "./Field.tsx"
 import { IconButton } from "./Tooltip.tsx"
 import { Button } from "./Button.tsx"
 import { Icon } from "./Icon.tsx"
 
 export function InlineRename({
+  place,
   compact = false,
   value,
   label,
@@ -30,6 +34,8 @@ export function InlineRename({
   maxLength,
   onEditingChange
 }: {
+  /** What's renamed, unique to it ("branch:<fork>", "card-name:<ref>"): the key its typing is kept under. */
+  place: string
   /** Fit a branch title without increasing its height. */
   compact?: boolean
   /** The name as it is, what the field starts with. */
@@ -63,13 +69,12 @@ export function InlineRename({
   maxLength?: number
   onEditingChange?: (editing: boolean) => void
 }) {
-  // Mounted by a Go to (a prompt opened at a match in its name): already renaming.
-  const [typed, setTyped] = useState<string | null>(() => (goTo ? value : null))
-  useEffect(() => onEditingChange?.(typed !== null), [typed, onEditingChange])
-  const input = useRef<HTMLInputElement>(null)
+  const fields = useDurableFields()
+  const [editing, setEditing] = fields.useOpen(`rename:${place}`)
+  useEffect(() => onEditingChange?.(editing), [editing, onEditingChange])
   const display = useRef<HTMLSpanElement>(null)
   useLayoutEffect(() => {
-    if (!lastLine || typed !== null) return
+    if (!lastLine || editing) return
     const root = display.current!
     const text = root.querySelector<HTMLElement>("[data-inline-rename-text]")!
     const pencil = root.querySelector<HTMLElement>("button")!
@@ -102,32 +107,14 @@ export function InlineRename({
       active = false
       observer.disconnect()
     }
-  }, [lastLine, typed, children])
-  const [lastGoTo, setLastGoTo] = useState(goTo)
-  if (goTo !== lastGoTo) {
-    setLastGoTo(goTo)
-    if (goTo) setTyped(value)
-  }
+  }, [lastLine, editing, children])
+  // A Go to (a prompt opened at a match in its name) opens the field at the match.
+  // Only a new Go to opens it: closing it afterwards stays closed.
+  const openAtMatch = useEffectEvent(() => setEditing(true))
   useEffect(() => {
-    if (!goTo) return
-    const frame = requestAnimationFrame(() => {
-      input.current?.focus({ preventScroll: true })
-      input.current?.setSelectionRange(goTo.at, goTo.at + goTo.length)
-      input.current?.scrollIntoView({ block: "center" })
-    })
-    return () => cancelAnimationFrame(frame)
+    if (goTo) openAtMatch()
   }, [goTo])
-  const [pending, setPending] = useState(false)
-  const save = async () => {
-    if (typed === null || pending) return
-    if (!allowEmpty && typed.trim() === "") return
-    if (typed === value) return setTyped(null)
-    setPending(true)
-    const kept = await onRename(allowEmpty ? typed : typed.trim())
-    setPending(false)
-    if (kept !== false) setTyped(null)
-  }
-  if (typed === null)
+  if (!editing)
     return (
       <span
         ref={display}
@@ -143,7 +130,7 @@ export function InlineRename({
             className="h-8 px-2"
             aria-label={editLabel ?? `Rename ${label}`}
             hint={hint}
-            onClick={() => setTyped(value)}
+            onClick={() => setEditing(true)}
           >
             <Icon name="edit" />
             {editText}
@@ -157,11 +144,105 @@ export function InlineRename({
               lastLine ? "Pencil follows the text inside the blank part of a multiline heading's box" : undefined
             }
             className={`${compact ? "size-5! [&_svg]:size-3!" : "size-7!"} shrink-0 ${lastLine ? "absolute" : ""}`}
-            onClick={() => setTyped(value)}
+            onClick={() => setEditing(true)}
           />
         )}
       </span>
     )
+  return (
+    <RenameField
+      useText={fields.useText}
+      place={place}
+      value={value}
+      label={label}
+      compact={compact}
+      className={className}
+      inputClassName={inputClassName}
+      placeholder={placeholder}
+      fieldLabel={fieldLabel}
+      goTo={goTo}
+      highlights={highlights}
+      saveLabel={saveLabel}
+      cancelLabel={cancelLabel}
+      maxLength={maxLength}
+      allowEmpty={allowEmpty}
+      onRename={onRename}
+      close={() => setEditing(false)}
+    >
+      {children}
+    </RenameField>
+  )
+}
+
+/** The open field: its text is read and kept only while it's open, so a list of names reads nothing. */
+function RenameField({
+  useText,
+  place,
+  value,
+  label,
+  compact,
+  className,
+  inputClassName,
+  placeholder,
+  fieldLabel,
+  goTo,
+  highlights,
+  saveLabel,
+  cancelLabel,
+  maxLength,
+  allowEmpty,
+  onRename,
+  close,
+  children
+}: {
+  useText: (key: string, field: string, saved: string) => DurableText
+  place: string
+  value: string
+  label: string
+  compact: boolean
+  className: string
+  inputClassName: string
+  placeholder: string | undefined
+  fieldLabel: string | undefined
+  goTo: { readonly at: number; readonly length: number } | undefined
+  highlights: ReadonlyArray<HighlightRange>
+  saveLabel: string
+  cancelLabel: string
+  maxLength: number | undefined
+  allowEmpty: boolean
+  onRename: (next: string) => boolean | void | Promise<boolean | void>
+  close: () => void
+  children: ReactNode
+}) {
+  const draft = useText(`rename:${place}`, "Name", value)
+  const input = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!goTo) return
+    const frame = requestAnimationFrame(() => {
+      input.current?.focus({ preventScroll: true })
+      input.current?.setSelectionRange(goTo.at, goTo.at + goTo.length)
+      input.current?.scrollIntoView({ block: "center" })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [goTo])
+  const typed = draft.text
+  const [pending, setPending] = useState(false)
+  const cancel = () => {
+    draft.discard()
+    close()
+  }
+  const save = async () => {
+    if (pending) return
+    if (!allowEmpty && typed.trim() === "") return
+    if (typed === value) return cancel()
+    setPending(true)
+    const kept = await onRename(allowEmpty ? typed : typed.trim())
+    setPending(false)
+    if (kept !== false) {
+      draft.commit()
+      close()
+    }
+  }
   const editor = (
     <span
       data-renaming=""
@@ -174,11 +255,12 @@ export function InlineRename({
           value={typed}
           placeholder={placeholder}
           maxLength={maxLength}
+          readOnly={!draft.ready}
           autoFocus
           onFocus={(event) => {
             if (!goTo) event.currentTarget.select()
           }}
-          onChange={(event) => setTyped(event.currentTarget.value)}
+          onChange={(event) => draft.setText(event.currentTarget.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault()
@@ -186,7 +268,7 @@ export function InlineRename({
             } else if (event.key === "Escape") {
               event.preventDefault()
               event.stopPropagation()
-              setTyped(null)
+              cancel()
             }
           }}
           className={`h-8 min-w-0 flex-1 ${compact ? "h-5! px-1! py-0! text-sm!" : ""} ${inputClassName}`}
@@ -203,7 +285,7 @@ export function InlineRename({
         label={cancelLabel}
         hint={cancelLabel === "Cancel renaming" ? "Cancel (Escape)" : `${cancelLabel} (Escape)`}
         icon="close"
-        onClick={() => setTyped(null)}
+        onClick={cancel}
       />
     </span>
   )

@@ -3,7 +3,7 @@
 import type { Page } from "@playwright/test"
 import type { ChatId, EntityId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
-import { place, type PlaceContext } from "../durability.ts"
+import { openRename, place, renameField, type PlaceContext } from "../durability.ts"
 import { messageMenu, showActions } from "../message.ts"
 import { noteText } from "../notes.ts"
 import { openPanel, openSummarySettings } from "../panel.ts"
@@ -224,6 +224,42 @@ export const chatPlaces = [
       return noteText(panel, "Note")
     },
     shown: (page) => page.getByRole("region", { name: "Note Note" }).getByRole("textbox", { name: "Text of Note" })
+  }),
+  place({
+    name: "Chat note title (rename in place)",
+    source: "features/editor/NoteList.tsx:344",
+    setup: oneMessage,
+    open: async (page, { chatId }, ctx) => {
+      await goChat(page, ctx, chatId)
+      const panel = await openPanel(page, "Notes")
+      const own = panel.getByRole("region", { name: "This chat's notes" })
+      const note = panel.getByRole("region", { name: "Note Note" })
+      await own.getByRole("button", { name: "Add note", exact: true }).or(note).first().waitFor()
+      if ((await note.count()) === 0) await own.getByRole("button", { name: "Add note", exact: true }).click()
+      return openRename(note, "Rename Note", "New name for Note")
+    },
+    shown: (page) => renameField(page.getByRole("region", { name: "Note Note" }), "New name for Note")
+  }),
+  place({
+    name: "Branch name in the sidebar (rename in place)",
+    source: "features/characters/ShellBrowser.tsx:367",
+    setup: ({ rpc, tag }) =>
+      rpc((api) =>
+        Effect.gen(function* () {
+          const chat = yield* api.CreateChat({ title: `Branches ${tag}` })
+          yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "The lamp is lit." })
+          const fork = (yield* api.ListForks({ chatId: chat.id }))[0]!
+          yield* api.NameFork({ forkId: fork.id, name: "Lamplight" })
+          return { chatId: chat.id, forkId: fork.id }
+        })
+      ),
+    open: async (page, { chatId, forkId }, { server }) => {
+      await page.goto(`${server.url}/chats/${chatId}?fork=${forkId}&side=chats&forks=${chatId}`)
+      const sidebar = page.getByRole("complementary", { name: "Sidebar", exact: true })
+      return openRename(sidebar, "Rename branch Lamplight", "New name for branch Lamplight")
+    },
+    shown: (page) =>
+      renameField(page.getByRole("complementary", { name: "Sidebar", exact: true }), "New name for branch Lamplight")
   }),
   place({
     name: "Card text in the chat panel",

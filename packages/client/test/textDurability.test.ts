@@ -262,3 +262,57 @@ it("keeps what's typed in every single-line field of a dialog a reload reopens",
       if ("durable" in site) expect(source, `${file} is listed as kept by ${site.durable}`).toContain(site.durable)
   }
 })
+
+// Names renamed in place (ui/InlineRename.tsx): its field keeps what's typed, and that it's
+// open, under the `place` its caller gives (the app's durable fields, provided by the shell).
+// Every use is listed with its place, so a new one, or two sharing a key, fails here.
+const RENAMES: Readonly<Record<string, ReadonlyArray<string>>> = {
+  "features/characters/ShellBrowser.tsx": ["`branch-list:${fork.forkId}`"],
+  "features/chat/BranchControl.tsx": ["`branch:${fork.id}`"],
+  "features/editor/CardNameHeader.tsx": [
+    "`card-name:${store.refId}`",
+    "`card-version:${store.refId}`",
+    "`card-nickname:${store.refId}`"
+  ],
+  "features/editor/LorebookPanelEditor.tsx": ['`book-name:${store.refId}:${root.join("/")}`'],
+  "features/editor/NoteList.tsx": [
+    '`note-title:${ref.id}:${chatNote?.chatId ?? ""}:${chatNote?.forkId ?? ""}:${chatNote?.slotId ?? ""}`'
+  ],
+  "features/editor/PromptDocument.tsx": ["`prompt-name:${store.refId}:${entry.identifier}`"],
+  "features/editor/RefDialogs.tsx": ["`ref-name:${ref.id}`"],
+  "features/snippets/SnippetLarge.tsx": ["`snippet-title:large:${refId}`"],
+  "features/snippets/index.tsx": ["`snippet-title:${item.ref.id}`"],
+  "features/threads/ThreadsSection.tsx": ["`thread:${thread.forkId}:${thread.ordinal}`"],
+  // RevisionEntry's place, from CardRevisionBrowser: `revision:${revision.id}`.
+  "ui/RevisionMessage.tsx": ["place"]
+}
+
+it("keeps what's typed in every name renamed in place, under a place of its own", () => {
+  const root = resolve(import.meta.dirname, "../src")
+  const rename = readFileSync(resolve(root, "ui/InlineRename.tsx"), "utf8")
+  expect(rename).toMatch(/useDurableFields\(\)/)
+  expect(rename).toMatch(/\.useOpen\(`rename:\$\{place\}`\)/)
+  expect(rename).toMatch(/useText\(`rename:\$\{place\}`/)
+  expect(readFileSync(resolve(root, "features/shell.tsx"), "utf8")).toContain(
+    "<DurableFieldsContext value={appDurableFields}>"
+  )
+  const found: Record<string, Array<string>> = {}
+  const visit = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = resolve(dir, entry.name)
+      if (entry.isDirectory()) visit(path)
+      else if (/\.tsx?$/.test(path) && !path.endsWith("ui/InlineRename.tsx")) {
+        const source = readFileSync(path, "utf8")
+        for (const use of source.matchAll(/<InlineRename\b/g)) {
+          const head = source.slice(use.index).split("\n").slice(0, 2).join(" ")
+          const place = /^<InlineRename\s+place=\{(.+?)\}(?:\s|>|$)/.exec(head)
+          ;(found[relative(root, path)] ??= []).push(place?.[1] ?? "(none)")
+        }
+      }
+    }
+  }
+  visit(root)
+  expect(found, "an InlineRename was added or its place changed: list it in RENAMES").toEqual(RENAMES)
+  const places = Object.values(RENAMES).flat()
+  expect(new Set(places).size, "two InlineRenames share a place").toBe(places.length)
+})

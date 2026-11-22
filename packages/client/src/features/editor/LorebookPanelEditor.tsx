@@ -57,7 +57,12 @@ export function BookName({
     )
   const shown = typed || fallback
   return (
-    <InlineRename value={typed ?? ""} label={shown} onRename={(next) => store.setText([...root, "name"], next)}>
+    <InlineRename
+      place={`book-name:${store.refId}:${root.join("/")}`}
+      value={typed ?? ""}
+      label={shown}
+      onRename={(next) => store.setText([...root, "name"], next)}
+    >
       {children ?? <span className="min-w-0 [overflow-wrap:anywhere]">{shown}</span>}
     </InlineRename>
   )

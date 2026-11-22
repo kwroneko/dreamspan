@@ -6,7 +6,7 @@ import type { RefId } from "@dreamspan/shared/library.ts"
 import { textField } from "@dreamspan/shared/editing.ts"
 import { Effect } from "effect"
 import { cardFieldsTab } from "../cardEditor.ts"
-import { place, type Place, type PlaceContext } from "../durability.ts"
+import { openRename, place, renameField, type Place, type PlaceContext } from "../durability.ts"
 import { openEntry } from "../lorebook.ts"
 import { openPanel } from "../panel.ts"
 
@@ -368,5 +368,84 @@ export const libraryPlaces: ReadonlyArray<Place> = [
     },
     shown: (page) =>
       page.getByRole("list", { name: "Global regex scripts" }).getByRole("textbox", { name: "Replace with" })
+  }),
+  place({
+    name: "Card display name (rename in place)",
+    source: "features/editor/CardNameHeader.tsx:266",
+    setup: card,
+    open: async (page, { refId }, ctx) => {
+      await goLibrary(page, ctx, refId)
+      return openRename(page, "Rename the display name", "Display name")
+    },
+    shown: (page) => renameField(page, "Display name")
+  }),
+  place({
+    name: "Card nickname (rename in place)",
+    source: "features/editor/CardNameHeader.tsx:338",
+    setup: card,
+    open: async (page, { refId }, ctx) => {
+      await goLibrary(page, ctx, refId)
+      return openRename(page, "Rename the nickname", "In-chat nickname")
+    },
+    shown: (page) => renameField(page, "In-chat nickname")
+  }),
+  place({
+    name: "Lorebook name (rename in place)",
+    source: "features/editor/RefDialogs.tsx:187",
+    setup: lazy,
+    open: async (page, state, ctx) => {
+      await goLibrary(page, ctx, await lorebook(page, ctx, state))
+      return openRename(page, `Rename Saltmarsh ${ctx.tag}`, `New name for Saltmarsh ${ctx.tag}`)
+    },
+    shown: (page) => renameField(page, /^New name for Saltmarsh /)
+  }),
+  place({
+    name: "Preset prompt name (rename in place)",
+    source: "features/editor/PromptDocument.tsx:517",
+    setup: lazy,
+    open: async (page, state, ctx) => {
+      await goLibrary(page, ctx, await preset(page, ctx, state))
+      return openRename(page, "Rename Main Prompt", "New name for Main Prompt")
+    },
+    shown: (page) => renameField(page, "New name for Main Prompt")
+  }),
+  place({
+    name: "Revision message (History)",
+    source: "ui/RevisionMessage.tsx:55",
+    setup: card,
+    open: async (page, { refId }, ctx) => {
+      await goLibrary(page, ctx, refId)
+      const history = page.getByRole("dialog", { name: "History", exact: true })
+      if (!(await history.isVisible())) await page.getByRole("button", { name: "History", exact: true }).click()
+      return openRename(history, /^(Add message to|Edit message of) Revision /, /^Message of Revision /)
+    },
+    shown: (page) => renameField(page.getByRole("dialog", { name: "History", exact: true }), /^Message of Revision /)
+  }),
+  place({
+    name: "Snippet title in the chat panel (rename in place)",
+    source: "features/snippets/index.tsx:216",
+    setup: snippetChat,
+    open: async (page, { chatId, title }, { server }) => {
+      await page.goto(`${server.url}/chats/${chatId}`)
+      const panel = await openPanel(page, "Snippets")
+      return openRename(panel, `Rename ${title}`, `New name for ${title}`)
+    },
+    shown: (page, { title }) => renameField(page.getByRole("tabpanel", { name: "Snippets" }), `New name for ${title}`)
+  }),
+  place({
+    name: "Snippet title in the large editor (rename in place)",
+    source: "features/snippets/SnippetLarge.tsx:93",
+    setup: snippetChat,
+    open: async (page, { chatId, title }, { server }) => {
+      await page.goto(`${server.url}/chats/${chatId}`)
+      const editor = page.getByRole("region", { name: "Snippet editor" })
+      if (!(await editor.isVisible())) {
+        const panel = await openPanel(page, "Snippets")
+        await panel.getByRole("button", { name: `Open ${title} in the large editor`, exact: true }).click()
+      }
+      return openRename(editor, `Rename ${title}`, `New name for ${title}`)
+    },
+    shown: (page, { title }) =>
+      renameField(page.getByRole("region", { name: "Snippet editor" }), `New name for ${title}`)
   })
 ]

@@ -102,6 +102,7 @@ function BranchRow({
       <div data-row-text className="min-w-0">
         <div data-branch-title-line className="flex h-5 min-w-0 items-center gap-x-1 text-sm">
           <InlineRename
+            place={`branch:${fork.id}`}
             compact
             value={fork.name ?? ""}
             label={label}

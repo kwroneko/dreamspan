@@ -264,6 +264,7 @@ export function CardNameHeader({
         >
           <div className="flex min-w-[min(100%,calc(2*var(--card-name-min)+0.25rem))] flex-1 items-center gap-1 has-[[data-renaming]]:min-w-[min(100%,calc(4*var(--card-name-min)+0.75rem))]">
             <InlineRename
+              place={`card-name:${store.refId}`}
               value={name}
               label="the display name"
               hint={DISPLAY_HINT}
@@ -289,6 +290,7 @@ export function CardNameHeader({
               </Tooltip>
             </InlineRename>
             <InlineRename
+              place={`card-version:${store.refId}`}
               value={version}
               label="the version"
               hint={VERSION_HINT}
@@ -336,6 +338,7 @@ export function CardNameHeader({
       </Identity>
       <div data-card-header-row="nickname" className="flex min-h-7 min-w-0 max-w-full items-center">
         <InlineRename
+          place={`card-nickname:${store.refId}`}
           value={nickname}
           label="the nickname"
           hint={NICKNAME_HINT}

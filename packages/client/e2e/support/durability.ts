@@ -50,3 +50,20 @@ export interface Place<S = unknown> {
 
 /** Keeps a place's state type while listing places of different states together. */
 export const place = <S>(definition: Place<S>): Place => definition as Place
+
+/** A name renamed in place (ui/InlineRename.tsx): its field, opened with its pencil unless a reload kept it open. */
+export const renameField = (scope: Locator | Page, field: string | RegExp) =>
+  scope
+    .locator("[data-renaming]")
+    .getByRole("textbox", typeof field === "string" ? { name: field, exact: true } : { name: field })
+
+export const openRename = async (scope: Locator | Page, pencil: string | RegExp, field: string | RegExp) => {
+  const box = renameField(scope, field)
+  const button = scope.getByRole(
+    "button",
+    typeof pencil === "string" ? { name: pencil, exact: true } : { name: pencil }
+  )
+  await button.or(box).first().waitFor({ timeout: 30_000 })
+  if (!(await box.isVisible())) await button.first().click()
+  return box
+}

@@ -365,6 +365,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
         <div data-branch-title-line className="flex h-5 min-w-0 items-center gap-x-1 text-sm">
           {here && !thread ? (
             <InlineRename
+              place={`branch-list:${fork.forkId}`}
               compact
               value={fork.named ? fork.name : ""}
               label={`branch ${label}`}

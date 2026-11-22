@@ -11,6 +11,7 @@
 // What was open, a dialog or a disclosure the box is in, is URL state (`useOpenPlace`), like
 // the app's other views: a reload opens it again, and the box in it reads its text back.
 import { type ComponentProps, useCallback } from "react"
+import type { DurableFields, DurableText } from "../../ui/durableFields.tsx"
 import { usePlaceList } from "../../usePlaceParam.ts"
 import { useUserDraft } from "./userDraft.tsx"
 
@@ -79,3 +80,17 @@ export function PlaceDetails({ place, ...props }: ComponentProps<"details"> & { 
   const [open, setOpen] = useOpenPlace(place)
   return <details {...props} open={open} onToggle={(event) => setOpen(event.currentTarget.open)} />
 }
+
+function useAppText(key: string, field: string, saved: string): DurableText {
+  const durable = useDurableText(key, field, saved)
+  return {
+    text: durable.text,
+    ready: durable.ready,
+    setText: durable.setText,
+    commit: () => void durable.commit(async () => true),
+    discard: () => void durable.discard()
+  }
+}
+
+/** The UI's own text boxes (ui/durableFields.tsx), kept as the app's are; the shell provides it. */
+export const appDurableFields: DurableFields = { useText: useAppText, useOpen: useOpenPlace }

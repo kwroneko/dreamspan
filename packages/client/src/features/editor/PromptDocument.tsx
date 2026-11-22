@@ -515,6 +515,7 @@ function PromptBlock({
     title
   ) : full ? (
     <InlineRename
+      place={`prompt-name:${store.refId}:${entry.identifier}`}
       value={typed}
       label={name}
       // Search and replace's Go to a match in the name: its field opens with the match selected.

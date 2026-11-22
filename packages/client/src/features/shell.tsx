@@ -28,6 +28,8 @@ import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../actions.tsx"
 import { BrowserRecovery, RecoveryNotice } from "./editor/BrowserRecovery.tsx"
+import { appDurableFields } from "./editor/durable.tsx"
+import { DurableFieldsContext } from "../ui/durableFields.tsx"
 import { describeCause } from "../errors.ts"
 import { fullPath, navEntries, routes } from "../routes.tsx"
 import { logout, SessionContext, sessionAtom, useSession } from "../session.ts"
@@ -351,26 +353,28 @@ function AppShell() {
   }
   return (
     <SessionContext value={result.value}>
-      <ShellNavigation key={result.value.user.id}>
-        <Notices />
-        <a
-          href="#content"
-          className="sr-only rounded-md bg-surface px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:ring-2 focus:ring-focus"
-        >
-          Skip to content
-        </a>
-        <Toasts>
-          <SlotOutlet slot={appTools} props={{}} />
-          <div className="flex h-dvh">
-            <DesktopSidebarColumn key={result.value.user.id} />
-            <div className="flex min-w-0 flex-1 flex-col">
-              <PhoneBar />
-              <SlotOutlet slot={appBanners} props={{}} />
-              <Main />
+      <DurableFieldsContext value={appDurableFields}>
+        <ShellNavigation key={result.value.user.id}>
+          <Notices />
+          <a
+            href="#content"
+            className="sr-only rounded-md bg-surface px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:ring-2 focus:ring-focus"
+          >
+            Skip to content
+          </a>
+          <Toasts>
+            <SlotOutlet slot={appTools} props={{}} />
+            <div className="flex h-dvh">
+              <DesktopSidebarColumn key={result.value.user.id} />
+              <div className="flex min-w-0 flex-1 flex-col">
+                <PhoneBar />
+                <SlotOutlet slot={appBanners} props={{}} />
+                <Main />
+              </div>
             </div>
-          </div>
-        </Toasts>
-      </ShellNavigation>
+          </Toasts>
+        </ShellNavigation>
+      </DurableFieldsContext>
     </SessionContext>
   )
 }

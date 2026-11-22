@@ -185,6 +185,7 @@ export function RefName({
   return (
     <span className="flex min-w-0 flex-col gap-1">
       <InlineRename
+        place={`ref-name:${ref.id}`}
         value={ref.label}
         label={ref.label}
         onRename={async (label) => {

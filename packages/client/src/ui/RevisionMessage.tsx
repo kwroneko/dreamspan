@@ -7,10 +7,13 @@ import { Tooltip } from "./Tooltip.tsx"
 import { useTruncated } from "./useTruncated.ts"
 
 export function RevisionMessage({
+  place,
   message,
   name,
   onMessage
 }: {
+  /** The revision, unique to it: what a message typed in it is kept under. */
+  place: string
   message: string | null
   name: string
   onMessage?: ((message: string) => Promise<boolean>) | undefined
@@ -53,6 +56,7 @@ export function RevisionMessage({
       <div data-revision-message-row className="flex h-8 min-w-0 items-center">
         {onMessage ? (
           <InlineRename
+            place={place}
             value={message ?? ""}
             label={`message of ${name}`}
             fieldLabel={`Message of ${name}`}

@@ -91,6 +91,7 @@ export function SnippetLarge({
         <header className={`flex min-w-0 items-center gap-2 ${compactHeaderControls}`}>
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <InlineRename
+              place={`snippet-title:large:${refId}`}
               value={typedTitle}
               label={title}
               className="min-w-0"

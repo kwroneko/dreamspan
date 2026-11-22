@@ -342,6 +342,7 @@ export function NoteBlock({
               )}
               {loaded ? (
                 <InlineRename
+                  place={`note-title:${ref.id}:${chatNote?.chatId ?? ""}:${chatNote?.forkId ?? ""}:${chatNote?.slotId ?? ""}`}
                   value={typedTitle}
                   label={title}
                   hint="Renames this note"

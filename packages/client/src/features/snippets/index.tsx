@@ -214,6 +214,7 @@ function SnippetBlock({
         <BlockHeader>
           {loaded ? (
             <InlineRename
+              place={`snippet-title:${item.ref.id}`}
               value={typedTitle}
               label={title}
               className="min-w-0 flex-1"

@@ -413,6 +413,7 @@ export function CardRevisionBrowser({
           const content = (
             <>
               <RevisionEntry
+                place={`revision:${revision.id}`}
                 number={revision.number}
                 createdAt={revision.createdAt}
                 title={

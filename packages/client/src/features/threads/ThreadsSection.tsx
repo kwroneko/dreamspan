@@ -92,6 +92,7 @@ function ThreadRow({
       <div data-row-text className="min-w-0">
         <div data-branch-title-line className="flex h-5 min-w-0 items-center gap-x-1 text-sm">
           <InlineRename
+            place={`thread:${thread.forkId}:${thread.ordinal}`}
             compact
             value={thread.name ?? ""}
             label={name}
