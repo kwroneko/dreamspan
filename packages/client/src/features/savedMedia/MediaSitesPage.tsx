@@ -1,5 +1,6 @@
 // Settings → Media sites (spec/SAVED-MEDIA.md §3.2): the sites this account saves card media
 // from without asking. Removing one doesn't delete what was saved from it.
+import { useDurableText } from "../editor/durable.tsx"
 import { isHostName, normalizeHost, type MediaHosts } from "@dreamspan/shared/savedMedia.ts"
 import { useEffect, useState, type FormEvent } from "react"
 import { ErrorAlert } from "../../actions.tsx"
@@ -20,7 +21,8 @@ export function MediaSitesPage() {
   const [hosts, setHosts] = useState<MediaHosts | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   const [pending, setPending] = useState<string | null>(null)
-  const [host, setHost] = useState("")
+  const typed = useDurableText("media-sites:add", "Site", "")
+  const host = typed.text
   const [subdomains, setSubdomains] = useState(false)
   const [invalid, setInvalid] = useState<string | null>(null)
 
@@ -52,7 +54,7 @@ export function MediaSitesPage() {
     if (!isHostName(name)) return setInvalid("Enter a site's name, like i.example.com.")
     setInvalid(null)
     if (await change("add", { add: { host: name, subdomains } })) {
-      setHost("")
+      void typed.commit(async () => true)
       setSubdomains(false)
     }
   }
@@ -109,7 +111,8 @@ export function MediaSitesPage() {
             <Field label="Site" error={invalid}>
               <Input
                 value={host}
-                onChange={(event) => setHost(event.target.value)}
+                readOnly={!typed.ready}
+                onChange={(event) => typed.setText(event.target.value)}
                 placeholder="i.example.com"
                 autoComplete="off"
                 spellCheck={false}

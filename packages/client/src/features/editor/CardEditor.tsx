@@ -1,3 +1,4 @@
+import { useDurableText } from "./durable.tsx"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // The card editor: every card field and the card's notes (DESIGN §4.1, §4.1a), in tabs (owner,
 // 2026-11-01), the same component in the chat's character tab (`layout: "panel"`, a narrow
@@ -171,11 +172,12 @@ function Greetings({
 function Tags({ store }: { store: EditorStore }) {
   const path = ["tags"]
   const tags = useValue<ReadonlyArray<string>>(store, path) ?? []
-  const [tag, setTag] = useState("")
+  const typed = useDurableText(`new-tag:${store.refId}`, "New tag", "")
+  const tag = typed.text
   const add = () => {
     const trimmed = tag.trim()
     if (trimmed !== "" && !tags.includes(trimmed)) store.setValue(path, [...tags, trimmed])
-    setTag("")
+    void typed.commit(async () => true)
   }
   return (
     <Fieldset legend="Tags" about={HINTS.tags}>
@@ -214,7 +216,8 @@ function Tags({ store }: { store: EditorStore }) {
             placeholder="New tag"
             size={Math.max(7, [...tag].length + 1)}
             className="max-w-48 min-w-0 bg-transparent outline-none placeholder:text-muted"
-            onChange={(event) => setTag(event.currentTarget.value)}
+            readOnly={!typed.ready}
+            onChange={(event) => typed.setText(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault()

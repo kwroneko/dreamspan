@@ -1,3 +1,4 @@
+import { useDurableText } from "../editor/durable.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 // Importing a SillyTavern data folder (DESIGN §1.4, ARCHITECTURE.md §13). The page lists the
 // user's imports, running and past, each opening to its report, and starts one: a folder
@@ -689,7 +690,9 @@ function StartForm({ open, close, again }: StImportSectionProps & { close: (() =
   const last = AsyncResult.isSuccess(jobs) ? lastFolder(user.id, jobs.value) : null
   // Null until the user types or opens a folder: the field shows where the browser starts
   // (the last folder, else IMPORT_START_DIR, else the home folder), so a deployment can point it at ST's data.
-  const [typedPath, setFolderPath] = useState<string | null>(null)
+  const typedFolder = useDurableText("st-import", "Folder path", "")
+  const typedPath = typedFolder.text === "" ? null : typedFolder.text
+  const setFolderPath = typedFolder.setText
   const startAtom = useMemo(() => AppClient.query("ListFolder", { path: null }), [])
   const start = useAtomValue(startAtom)
   const folderPath = typedPath ?? last ?? (AsyncResult.isSuccess(start) ? start.value.path : "")
@@ -718,6 +721,8 @@ function StartForm({ open, close, again }: StImportSectionProps & { close: (() =
     setScanning(true)
     const scanned = await action.run((client) => client("ScanStFolder", { path })).finally(() => setScanning(false))
     if (!scanned.ok) return
+    // Looked in, it's the last folder now: what was typed is done with.
+    void typedFolder.commit(async () => true)
     try {
       localStorage.setItem(lastFolderKey(user.id), scanned.value.root)
     } catch {

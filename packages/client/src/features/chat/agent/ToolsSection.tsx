@@ -1,4 +1,5 @@
 // Tools and instructions are independent of card layout; the allowed list survives switching off.
+import { useDurableText } from "../../editor/durable.tsx"
 import { useState, useSyncExternalStore } from "react"
 import type { CastChange } from "@dreamspan/shared/chatSetupApi.ts"
 import { DEFAULT_REQUEST_CAP, MAX_REQUEST_CAP } from "@dreamspan/shared/state.ts"
@@ -37,22 +38,28 @@ const CAP_ABOUT = `A reply that uses tools sends the model a request, gets back 
 
 /** The request cap, typed and saved when it's a whole number in range and the field is left. */
 function RequestCapField({
+  place,
   cap,
   disabled,
   onSave
 }: {
+  /** The chat: the key what's typed is kept under. */
+  place: string
   cap: number
   disabled: boolean
   onSave: (cap: number | null) => void
 }) {
-  const [draft, setDraft] = useState<string | null>(null)
-  const text = draft ?? String(cap)
+  const typed = useDurableText(`request-cap:${place}`, "Model requests per reply", String(cap))
+  const text = typed.text
+  const setDraft = typed.setText
   const value = Number(text)
   const valid = /^\d+$/.test(text.trim()) && value >= 1 && value <= MAX_REQUEST_CAP
   const commit = () => {
-    if (draft === null) return
-    setDraft(null)
-    if (valid && value !== cap) onSave(value === DEFAULT_REQUEST_CAP ? null : value)
+    if (text === String(cap)) return
+    // Left with a number out of range, it goes back to the saved one, as before.
+    if (!valid) return void typed.discard()
+    if (value !== cap) onSave(value === DEFAULT_REQUEST_CAP ? null : value)
+    void typed.commit(async () => true)
   }
   return (
     <Field
@@ -175,6 +182,7 @@ export function ToolsSection({ session }: { session: ChatSession }) {
       )}
       {on && (
         <RequestCapField
+          place={session.id}
           cap={cast.requestCap ?? DEFAULT_REQUEST_CAP}
           disabled={pending}
           onSave={(cap) => void write({ _tag: "RequestCap", cap })}

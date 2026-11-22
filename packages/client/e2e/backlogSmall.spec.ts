@@ -71,7 +71,7 @@ for (const width of [1440, 390])
       ).toBeDisabled()
       await shot("bin-capacity")
       await page.reload()
-      await page.getByText("Bin capacity", { exact: true }).click()
+      // Bin capacity stays open through the reload (URL state).
       await expect(field).toHaveValue(capacity.toLocaleString("en-US"))
 
       await page.goto(`${server().url}/settings/notifications`)

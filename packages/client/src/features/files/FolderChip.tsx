@@ -8,6 +8,7 @@
 // again by its inode, shows the warning tone: the next turn starts at the top. An admin, where the
 // server lists HOST_FOLDERS, also gets Folder on the server… (§3.7): a folder outside Files, shown
 // with a server badge. Where the workshop runs commands without a sandbox, the chip says so.
+import { useDurableText, useOpenPlace } from "../editor/durable.tsx"
 import { FILES_TOP, isTop, joinPath, nameOf, nameProblem } from "@dreamspan/shared/files.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
@@ -96,9 +97,11 @@ export const useFolderChoices = (session: ChatSession, enabled = true) => {
 export function FolderChip({ session }: ComposerControlContext) {
   const folder = useFolderChoices(session)
   const source = useFilesSource()
-  const [open, setOpen] = useState(false)
+  // The popover and its New folder form are URL state; the name typed is kept.
+  const [open, setOpen] = useOpenPlace(`folder-chip:${session.chatId}`)
   const [error, setError] = useState<string | null>(null)
-  const [naming, setNaming] = useState(false)
+  const [naming, setNaming] = useOpenPlace(`folder-chip-new:${session.chatId}`)
+  const typedName = useDurableText(`folder-chip-new:${session.chatId}`, "Name", "New folder")
   const [pending, setPending] = useState(false)
   const [browsing, setBrowsing] = useState(false)
   const [hostPick, setHostPick] = useState<string | null>(null)
@@ -134,6 +137,7 @@ export function FolderChip({ session }: ComposerControlContext) {
     try {
       const made = await source.createFolder(joinPath(shown, name))
       setPending(false)
+      void typedName.commit(async () => true)
       await pick(made.path)
     } catch (cause) {
       setPending(false)
@@ -253,14 +257,15 @@ export function FolderChip({ session }: ComposerControlContext) {
               className="flex min-w-0 flex-wrap items-center gap-2 px-2"
               onSubmit={(event) => {
                 event.preventDefault()
-                const value = new FormData(event.currentTarget).get("name")
-                void makeFolder(String(value ?? "").trim())
+                void makeFolder(typedName.text.trim())
               }}
             >
               <Input
                 name="name"
                 aria-label="Name of the new folder"
-                defaultValue="New folder"
+                value={typedName.text}
+                readOnly={!typedName.ready}
+                onChange={(event) => typedName.setText(event.currentTarget.value)}
                 autoFocus
                 className="min-w-0 flex-1 basis-32"
               />
@@ -272,7 +277,13 @@ export function FolderChip({ session }: ComposerControlContext) {
               >
                 Make folder
               </Button>
-              <Button hint="Leaves the folder as it is." onClick={() => setNaming(false)}>
+              <Button
+                hint="Leaves the folder as it is."
+                onClick={() => {
+                  void typedName.discard()
+                  setNaming(false)
+                }}
+              >
                 Cancel
               </Button>
             </form>

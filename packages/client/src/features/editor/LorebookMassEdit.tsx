@@ -3,9 +3,9 @@
 // greyed with the value the entries share or "Mixed"; ticked, its value goes on every selected
 // entry, and an empty text or number clears it. Several settings apply at once, as unsaved
 // changes like any edit (lorebookMass.ts).
+import { useDurableForm } from "./durable.tsx"
 import type { LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
 import type { FieldPath } from "@dreamspan/shared/editing.ts"
-import { useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
@@ -161,7 +161,25 @@ export function MassEditDialog({
     return entry ? [entry] : []
   })
   // The ticked settings and their values (undefined: nothing chosen yet).
-  const [ticked, setTicked] = useState<Readonly<Record<string, MassValue | undefined>>>({})
+  // Kept as typed: each ticked setting as { v } (absent v: nothing chosen yet), since JSON has no undefined.
+  const form = useDurableForm<{ ticked: Readonly<Record<string, { v?: MassValue }>> }>(
+    `mass-edit:${store.refId}:${root.join("/")}`,
+    "Mass edit",
+    { ticked: {} }
+  )
+  const ticked: Readonly<Record<string, MassValue | undefined>> = Object.fromEntries(
+    Object.entries(form.values.ticked).map(([id, kept]) => [id, kept.v])
+  )
+  const setTicked = (
+    change: (all: Readonly<Record<string, MassValue | undefined>>) => Readonly<Record<string, MassValue | undefined>>
+  ) =>
+    form.edit({
+      ticked: Object.fromEntries(Object.entries(change(ticked)).map(([id, v]) => [id, v === undefined ? {} : { v }]))
+    })
+  const close = () => {
+    void form.discard()
+    onClose()
+  }
   if (entries.length === 0) return null
   const settings = sections.flatMap((item) => item.settings)
   const edits = patchEdits(root, entries, manyPatch(settings, ticked))
@@ -169,10 +187,11 @@ export function MassEditDialog({
   const changedNames = settings.filter((setting) => setting.id in ticked).map((setting) => setting.label)
   const apply = () => {
     applyMassChange(store, `Changed ${changedNames.join(", ")} on ${entriesLabel(count)}`, edits)
+    void form.commit(async () => true)
     onClose()
   }
   return (
-    <Dialog open wide onOpenChange={(open) => !open && onClose()} title={`Edit ${entriesLabel(entries.length)}`}>
+    <Dialog open wide onOpenChange={(open) => !open && close()} title={`Edit ${entriesLabel(entries.length)}`}>
       <SettingsLayout
         sections={sections}
         accordion={false}
@@ -202,7 +221,7 @@ export function MassEditDialog({
         }}
       />
       <DialogActions>
-        <Button variant="ghost" hint="Closes this without changing any entry." onClick={onClose}>
+        <Button variant="ghost" hint="Closes this without changing any entry." onClick={close}>
           Cancel
         </Button>
         <Button

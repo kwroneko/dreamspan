@@ -113,6 +113,7 @@ export function PresetChip({
   if (view.loading || label === null) return <LoadingChip label="Prompt preset" />
   return (
     <PresetPickerPopover
+      place="composer"
       selection={selection}
       triggerLabel={`Prompt preset: ${label}. Change the preset`}
       hint={`Prompt preset for the next reply: ${label}`}

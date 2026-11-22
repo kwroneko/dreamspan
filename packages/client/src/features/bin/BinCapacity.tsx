@@ -1,5 +1,5 @@
+import { useDurableForm, useOpenPlace } from "../editor/durable.tsx"
 import type { BinLimits } from "@dreamspan/shared/bin.ts"
-import { useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -24,8 +24,13 @@ const grouped = (text: string) => (/^\d+$/.test(text) ? text.replace(/\B(?=(\d{3
 function CapacityField({ field, label, value }: { field: keyof BinLimits; label: string; value: number }) {
   const size = field === "deletedBytes" || field === "recoveredBytes"
   const initial = editableByteSize(value)
-  const [text, setText] = useState(size ? initial.text : grouped(String(value)))
-  const [unit, setUnit] = useState<SizeUnit>(initial.unit)
+  const form = useDurableForm(`bin-capacity:${field}`, label, {
+    text: size ? initial.text : grouped(String(value)),
+    unit: initial.unit as SizeUnit
+  })
+  const { text, unit } = form.values
+  const setText = (next: string) => form.edit({ text: next })
+  const setUnit = (next: SizeUnit) => form.edit({ unit: next })
   const action = useAction()
   const plain = text.replaceAll(",", "")
   const number = size ? parseByteSize(text, unit) : /^\d+$/.test(plain) ? Number(plain) : null
@@ -36,7 +41,14 @@ function CapacityField({ field, label, value }: { field: keyof BinLimits; label:
       noValidate
       onSubmit={(event) => {
         event.preventDefault()
-        if (valid) void action.run((client) => client("ChangeBinLimit", { key: field, value: number }), ["bin.limits"])
+        if (valid)
+          void form.commit(async () => {
+            const result = await action.run(
+              (client) => client("ChangeBinLimit", { key: field, value: number }),
+              ["bin.limits"]
+            )
+            return result.ok
+          })
       }}
     >
       <Field
@@ -86,8 +98,9 @@ function CapacityField({ field, label, value }: { field: keyof BinLimits; label:
 }
 
 export function BinCapacity() {
+  const [open, setOpen] = useOpenPlace("bin-capacity")
   return (
-    <Disclosure title="Bin capacity" className="rounded-md border border-border p-3">
+    <Disclosure title="Bin capacity" className="rounded-md border border-border p-3" open={open} onOpenChange={setOpen}>
       <AsyncView atom={limitsAtom} loading="Reading capacities…">
         {(limits) => (
           <div className="grid min-w-0 gap-3 pb-2 lg:grid-cols-2">

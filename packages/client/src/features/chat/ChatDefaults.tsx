@@ -336,6 +336,7 @@ export function SummaryDefaults({
         <SlotOutlet
           slot={summarySettingFields}
           props={{
+            place: "account",
             scope: "account",
             view: { resolved: account, fit: lcmMisfits(account, null), now: null, fitted: null },
             fallback: LCM_BUILTIN,

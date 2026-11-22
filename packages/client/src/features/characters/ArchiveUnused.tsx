@@ -1,3 +1,4 @@
+import { useDurableForm, useOpenPlace } from "../editor/durable.tsx"
 import { useAtomValue } from "@effect/atom-react"
 import { useState } from "react"
 import { AsyncResult, Atom } from "effect/reactivity"
@@ -141,21 +142,31 @@ function ArchiveDialog({ close }: { close: () => void }) {
   const sourceNames = useSourceNames()
   // A criterion for card sources shows only while one is on.
   const entries = cardArchiveCriteria.list().filter((entry) => !entry.forCardSources || sourceNames.length > 0)
-  const [amounts, setAmounts] = useState<Record<string, number>>(() =>
-    Object.fromEntries(entries.map((entry) => [entry.id, entry.initial]))
-  )
-  const [enabled, setEnabled] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(entries.map((entry) => [entry.id, entry.enabled]))
-  )
+  // The rules as typed (each amount as its text) and ticked, kept until the dialog closes.
+  const form = useDurableForm("archive-unused", "Rules", {
+    amounts: Object.fromEntries(entries.map((entry) => [entry.id, String(entry.initial)])) as Record<string, string>,
+    enabled: Object.fromEntries(entries.map((entry) => [entry.id, entry.enabled])) as Record<string, boolean>
+  })
+  const { enabled } = form.values
+  const valueOf = (id: string, initial: number) => {
+    const next = Number(form.values.amounts[id])
+    return Number.isInteger(next) && next >= 1 && next <= 36000 ? next : initial
+  }
+  const setEnabled = (change: (old: Record<string, boolean>) => Record<string, boolean>) =>
+    form.edit({ enabled: change(enabled) })
+  const closeDialog = () => {
+    void form.discard()
+    close()
+  }
   const criteria = Object.fromEntries(
-    entries.filter((entry) => enabled[entry.id]).map((entry) => [entry.id, amounts[entry.id] ?? entry.initial])
+    entries.filter((entry) => enabled[entry.id]).map((entry) => [entry.id, valueOf(entry.id, entry.initial)])
   )
   const key = JSON.stringify(criteria)
   return (
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) close()
+        if (!open) closeDialog()
       }}
       title="Archive unused cards"
       placement="top"
@@ -166,7 +177,7 @@ function ArchiveDialog({ close }: { close: () => void }) {
       </p>
       {entries.map((entry) => {
         const label = entry.forCardSources?.(sourceNames) ?? entry.label
-        const amount = amounts[entry.id] ?? entry.initial
+        const amount = valueOf(entry.id, entry.initial)
         return (
           <div key={entry.id} className="flex flex-col gap-2" data-archive-criterion={entry.id}>
             <Checkbox
@@ -184,12 +195,11 @@ function ArchiveDialog({ close }: { close: () => void }) {
                   aria-label={entry.inputLabel}
                   min={1}
                   max={36000}
-                  value={amount}
-                  onChange={(event) => {
-                    const next = event.currentTarget.valueAsNumber
-                    if (Number.isInteger(next) && next >= 1 && next <= 36000)
-                      setAmounts((old) => ({ ...old, [entry.id]: next }))
-                  }}
+                  value={form.values.amounts[entry.id] ?? String(entry.initial)}
+                  readOnly={!form.ready}
+                  onChange={(event) =>
+                    form.edit({ amounts: { ...form.values.amounts, [entry.id]: event.currentTarget.value } })
+                  }
                 />
                 <span className="text-sm text-muted">{entry.unit}</span>
                 {entry.forCardSources && <MatchCount id={entry.id} amount={amount} />}
@@ -199,14 +209,14 @@ function ArchiveDialog({ close }: { close: () => void }) {
         )
       })}
       <AsyncView atom={candidates(key)} loading="Finding cards…">
-        {(cards) => <Selection key={key} cards={cards} criteria={criteria} close={close} />}
+        {(cards) => <Selection key={key} cards={cards} criteria={criteria} close={closeDialog} />}
       </AsyncView>
     </Dialog>
   )
 }
 
 export function ArchiveUnused() {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useOpenPlace("archive-unused")
   return (
     <div>
       <Button hint="Review older unused cards to archive together" aria-pressed={open} onClick={() => setOpen(true)}>

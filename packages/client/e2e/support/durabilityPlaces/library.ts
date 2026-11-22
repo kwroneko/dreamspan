@@ -370,6 +370,34 @@ export const libraryPlaces: ReadonlyArray<Place> = [
       page.getByRole("list", { name: "Global regex scripts" }).getByRole("textbox", { name: "Replace with" })
   }),
   place({
+    name: "New prompt preset dialog",
+    source: "features/editor/NewPreset.tsx:82",
+    setup: lazy,
+    open: async (page, _state, { server }) => {
+      await page.goto(`${server.url}/library?kind=preset`)
+      const dialog = page.getByRole("dialog", { name: "New prompt preset", exact: true })
+      const button = page.getByRole("button", { name: "New prompt preset", exact: true })
+      await button.or(dialog).first().waitFor()
+      if (!(await dialog.isVisible())) await button.click()
+      return dialog.getByRole("textbox", { name: "Name", exact: true })
+    },
+    shown: (page) =>
+      page
+        .getByRole("dialog", { name: "New prompt preset", exact: true })
+        .getByRole("textbox", { name: "Name", exact: true })
+  }),
+  place({
+    name: "Card: new tag",
+    source: "features/editor/CardEditor.tsx:213",
+    setup: card,
+    open: async (page, { refId }, ctx) => {
+      await goLibrary(page, ctx, refId)
+      const metadata = await cardFieldsTab(page, "Metadata")
+      return metadata.getByRole("list", { name: "Tags" }).getByRole("textbox", { name: "New tag" })
+    },
+    shown: (page) => page.getByRole("list", { name: "Tags" }).getByRole("textbox", { name: "New tag" })
+  }),
+  place({
     name: "Card display name (rename in place)",
     source: "features/editor/CardNameHeader.tsx:266",
     setup: card,
