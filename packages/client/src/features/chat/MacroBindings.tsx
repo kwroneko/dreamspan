@@ -1,6 +1,6 @@
 // The names the prompt uses for you and the character, `{{user}}` and `{{char}}` (DESIGN §5.3):
 // they follow the cast, and can be kept fixed so choosing a speaker never changes them.
-import { useDurableText } from "../editor/durable.tsx"
+import { useDurableText, useOpenPlace } from "../editor/durable.tsx"
 import { useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
@@ -90,9 +90,11 @@ function Binding({
 export function MacroBindings({ session }: { session: ChatSession }) {
   const { cast } = useCast()
   const forkId = useSyncExternalStore(session.subscribe, () => session.snapshot().forkId)
+  // Open is URL state: a reload shows the names again, with what was typed in them.
+  const [open, setOpen] = useOpenPlace(`macro-names:${session.id}`)
   if (!cast) return null
   return (
-    <Disclosure title="Advanced: names in prompts">
+    <Disclosure title="Advanced: names in prompts" open={open} onOpenChange={setOpen}>
       <section aria-label="Names in prompts" className="flex flex-col gap-4">
         {(["user", "char"] as const).map((name) => (
           <Binding

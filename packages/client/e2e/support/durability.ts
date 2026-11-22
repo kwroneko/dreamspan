@@ -44,6 +44,8 @@ export interface Place<S = unknown> {
   readonly gaps?: { readonly text?: string; readonly mode?: string }
   /** Types the marker; the default clicks into the box, goes to its end and inserts it. */
   readonly type?: (box: Locator, marker: string) => Promise<void>
+  /** A number field (type="number"): the marker is a number, filled in. */
+  readonly numeric?: boolean
   /** Wide screens only, or a viewport of its own. */
   readonly viewport?: { readonly width: number; readonly height: number }
 }

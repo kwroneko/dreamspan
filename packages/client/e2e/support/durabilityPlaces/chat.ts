@@ -75,6 +75,32 @@ const group = ({ rpc, tag }: PlaceContext) =>
     })
   )
 
+/** A chat with Mira and Wren, and a line of Mira's: someone to move to a new thread. */
+const twoInCast = ({ rpc, tag }: PlaceContext) =>
+  rpc((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: `Durable ${tag}` })
+      const mira = yield* api.CreateCard({ label: `Mira ${tag}`, name: "Mira" })
+      const wren = yield* api.CreateCard({ label: `Wren ${tag}`, name: "Wren" })
+      for (const card of [mira, wren])
+        yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
+      yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        content: "Mira counts the crates.",
+        speakerEntityId: mira.entityId as EntityId
+      })
+      return { chatId: chat.id }
+    })
+  )
+
+const threadsDialog = (page: Page) => page.getByRole("dialog", { name: "Threads from #1", exact: true })
+const threadName = (page: Page) =>
+  threadsDialog(page).locator('[data-thread-row="1"]').getByRole("textbox", { name: "Name" })
+const macroName = (page: Page) =>
+  page.getByRole("form", { name: "Your name in prompts", exact: true }).getByRole("textbox")
+
 export const chatPlaces = [
   place({
     name: "Composer",
@@ -239,6 +265,32 @@ export const chatPlaces = [
       return openRename(note, "Rename Note", "New name for Note")
     },
     shown: (page) => renameField(page.getByRole("region", { name: "Note Note" }), "New name for Note")
+  }),
+  place({
+    name: "Start parallel threads: a thread's name",
+    source: "features/threads/StartThreadsDialog.tsx:186",
+    setup: twoInCast,
+    open: async (page, { chatId }, ctx) => {
+      await goChat(page, ctx, chatId)
+      await messageMenu(rows(page).first(), "Start parallel threads here…")
+      await threadName(page).waitFor()
+      return threadName(page)
+    },
+    shown: threadName
+  }),
+  place({
+    name: "This chat: your name in prompts",
+    source: "features/chat/MacroBindings.tsx:28",
+    setup: twoInCast,
+    open: async (page, { chatId }, ctx) => {
+      await goChat(page, ctx, chatId)
+      const panel = await openPanel(page, "This chat")
+      const toggle = panel.getByText("Advanced: names in prompts", { exact: true })
+      await toggle.waitFor()
+      if (!(await macroName(page).isVisible())) await toggle.click()
+      return macroName(page)
+    },
+    shown: macroName
   }),
   place({
     name: "Branch name in the sidebar (rename in place)",

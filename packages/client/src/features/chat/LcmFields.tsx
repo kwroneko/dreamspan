@@ -1,4 +1,4 @@
-import { useDurableText } from "../editor/durable.tsx"
+import { useDurableText, useOpenPlace } from "../editor/durable.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 // The summarization settings (DESIGN §8), shared by the side panel's This chat tab (a chat's own,
 // each falling back to the account default) and Settings → Chats (the account default for new
@@ -349,6 +349,8 @@ export function LcmFields({
   transcriptOnly?: boolean
 }) {
   const { resolved, fit, now, fitted } = view
+  // Advanced open is URL state: a reload shows its fields again, with what was typed in them.
+  const [advanced, setAdvanced] = useOpenPlace(`lcm-advanced:${place}`)
   const presets = usePresetSelection(null)
   const workspace = usePresetWorkspace()
   const specific = resolved.withPreset === "specific"
@@ -578,7 +580,7 @@ export function LcmFields({
         />
         {errorFor("when") && <p className="text-sm text-danger">{errorFor("when")}</p>}
       </Fieldset>
-      <details className="group">
+      <details className="group" open={advanced} onToggle={(event) => setAdvanced(event.currentTarget.open)}>
         <Tooltip label="Shows chunk size and summary length settings.">
           <summary className="cursor-pointer text-sm font-medium text-text">Advanced</summary>
         </Tooltip>

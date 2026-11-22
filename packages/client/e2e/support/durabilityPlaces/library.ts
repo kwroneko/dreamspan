@@ -9,6 +9,7 @@ import { cardFieldsTab } from "../cardEditor.ts"
 import { openRename, place, renameField, type Place, type PlaceContext } from "../durability.ts"
 import { openEntry } from "../lorebook.ts"
 import { openPanel } from "../panel.ts"
+import { portraitPng } from "../portrait.ts"
 
 /** Fixtures made from the page (an import is an HTTP upload with the page's login), once per test. */
 interface Lazy {
@@ -43,6 +44,18 @@ const worldInfo = (name: string) =>
     })
   )
 
+// The same with a second entry, for editing several at once.
+const twoEntries = (name: string) =>
+  Buffer.from(
+    JSON.stringify({
+      name,
+      entries: {
+        0: { uid: 0, key: ["harbour"], comment: "Harbour", content: "Boats rock at the quay.", order: 10 },
+        1: { uid: 1, key: ["lamp"], comment: "Lamp", content: "The lamp is lit.", order: 20 }
+      }
+    })
+  )
+
 const goLibrary = async (page: Page, { server }: PlaceContext, refId: string) => {
   await page.goto(`${server.url}/library/${refId}`)
   await page.getByRole("heading", { level: 1 }).first().waitFor()
@@ -56,6 +69,11 @@ const preset = async (page: Page, ctx: PlaceContext, state: Lazy) =>
 
 const lorebook = async (page: Page, ctx: PlaceContext, state: Lazy) =>
   (state.refId ??= await importFile(page, ctx, `Saltmarsh ${ctx.tag}.json`, worldInfo(`Saltmarsh ${ctx.tag}`)))
+
+const massGroup = (page: Page) =>
+  page.getByRole("dialog", { name: "Edit 2 entries", exact: true }).getByRole("textbox", { name: "Group", exact: true })
+const imageName = (page: Page) =>
+  page.getByRole("dialog", { name: "Rename image", exact: true }).getByRole("textbox", { name: "Name", exact: true })
 
 const field = (page: Page, name: string | RegExp) => page.getByRole("textbox", { name })
 const harbour = (page: Page) => page.getByRole("group", { name: "Lorebook entry 0", exact: true })
@@ -494,5 +512,42 @@ export const libraryPlaces: ReadonlyArray<Place> = [
     },
     shown: (page, { title }) =>
       renameField(page.getByRole("region", { name: "Snippet editor" }), `New name for ${title}`)
+  }),
+  place<Lazy>({
+    name: "Lorebook: edit several entries at once",
+    source: "features/editor/LorebookMassEdit.tsx:165",
+    setup: async () => ({}),
+    open: async (page, state, ctx) => {
+      state.refId ??= await importFile(page, ctx, `Tides ${ctx.tag}.json`, twoEntries(`Tides ${ctx.tag}`))
+      await goLibrary(page, ctx, state.refId)
+      for (const title of ["Harbour", "Lamp"])
+        await page.getByRole("checkbox", { name: `Select ${title}`, exact: true }).click()
+      await page.getByRole("button", { name: "Edit 2 entries", exact: true }).click()
+      const dialog = page.getByRole("dialog", { name: "Edit 2 entries", exact: true })
+      await dialog.getByRole("checkbox", { name: "Change Group", exact: true }).click()
+      return massGroup(page)
+    },
+    shown: massGroup
+  }),
+  place({
+    name: "Gallery: rename an image",
+    source: "features/gallery/Gallery.tsx:312",
+    setup: card,
+    open: async (page, { refId }, ctx) => {
+      await page.goto(`${ctx.server.url}/library/${refId}?cardTab=Extra`)
+      await page.getByRole("tab", { name: "Extra", exact: true }).click()
+      const add = page.locator("[data-gallery]").getByRole("button", { name: "Add images", exact: true })
+      await add.waitFor()
+      if ((await page.locator("[data-gallery-image]").count()) === 0) {
+        const chooser = page.waitForEvent("filechooser")
+        await add.click()
+        await (await chooser).setFiles([{ name: "Coat.png", mimeType: "image/png", buffer: portraitPng([], 1) }])
+        await page.locator("[data-gallery-image]").first().waitFor()
+      }
+      await page.getByRole("button", { name: "Actions for Coat", exact: true }).click()
+      await page.getByRole("menuitem", { name: "Rename", exact: true }).click()
+      return imageName(page)
+    },
+    shown: imageName
   })
 ]

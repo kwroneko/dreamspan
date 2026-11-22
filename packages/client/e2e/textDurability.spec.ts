@@ -108,8 +108,11 @@ for (const at of places) {
     await authenticate(page)
     const state = await at.setup(ctx)
     const box = await at.open(page, state, ctx)
-    const marker = `durable-${ctx.tag}-${when.replace(" ", "-")}`
-    await (at.type ?? typeMarker)(box, marker)
+    // A number field takes a number: one per test, none a default.
+    const marker = at.numeric
+      ? { "before save": "271", "after save": "314", mode: "161" }[when]
+      : `durable-${ctx.tag}-${when.replace(" ", "-")}`
+    await (at.type ?? (at.numeric ? (field: Locator, value: string) => field.fill(value) : typeMarker))(box, marker)
     await expect.poll(() => valueOf(box)).toContain(marker)
     if (when === "before save") await page.waitForTimeout(150)
     else await settle(page, marker)

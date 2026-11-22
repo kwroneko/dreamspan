@@ -54,6 +54,8 @@ export const register = () => [
       hint: START_HINT,
       onSelect: () => openDialog("message.threads")
     })),
+    // The dialog and its message are URL state: a reload opens it again at that message.
+    dialogInUrl: true,
     dialog: StartThreadsHereDialog
   }),
   chatCommands.register({
@@ -64,6 +66,7 @@ export const register = () => [
     order: 2.55,
     icon: "threads",
     available: ({ view }) => view.chat !== null && view.entries.length > 0,
+    dialogInUrl: true,
     dialog: StartThreadsCommandDialog
   }),
   // Joining (§7.1): offered while another thread has something not yet joined here.

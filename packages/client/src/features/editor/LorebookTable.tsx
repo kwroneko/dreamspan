@@ -43,6 +43,7 @@ import { EntryDetails, KeysLine } from "./LorebookEntryDetails.tsx"
 import { BlockOptionsToggle } from "../../ui/Block.tsx"
 import { EXPLAIN } from "./lorebookExplain.ts"
 import { applyMassChange, enableAllEdits } from "./lorebookMass.ts"
+import { useOpenChoice } from "./durable.tsx"
 import { MassEditDialog } from "./LorebookMassEdit.tsx"
 import { useOpenEntries } from "./lorebookOpen.ts"
 import {
@@ -701,7 +702,15 @@ export function LorebookTable(props: {
   const [dialog, setDialog] = useState<{ uid: number; action: ComponentType<LorebookActionProps> } | null>(null)
   // The selected entries, for editing several at once.
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set())
-  const [massEdit, setMassEdit] = useState(false)
+  // Editing several at once is URL state with the entries it edits, so a reload opens it again on them.
+  const [massEdit, setMassEdit] = useOpenChoice(`mass-edit:${store.refId}:${root.join("/")}:`)
+  const massUids =
+    massEdit === null
+      ? []
+      : massEdit
+          .split(",")
+          .map(Number)
+          .filter((uid) => book.entries.some((entry) => entry.uid === uid))
   const sort = sorts.find((s) => s.id === sortId) ?? sorts[0]
 
   // The order is worked out when what decides it changes, not on every edit.
@@ -880,7 +889,7 @@ export function LorebookTable(props: {
         variant="primary"
         className="h-6! px-2! text-xs"
         hint="Edits the settings of every selected entry at once."
-        onClick={() => setMassEdit(true)}
+        onClick={() => setMassEdit(live.join(","))}
       >
         Edit {entriesLabel(live.length)}
       </Button>
@@ -1110,7 +1119,9 @@ export function LorebookTable(props: {
           onClose={() => setDialog(null)}
         />
       )}
-      {massEdit && <MassEditDialog store={store} root={root} uids={live} onClose={() => setMassEdit(false)} />}
+      {massEdit !== null && (
+        <MassEditDialog store={store} root={root} uids={massUids} onClose={() => setMassEdit(null)} />
+      )}
     </div>
   )
 }

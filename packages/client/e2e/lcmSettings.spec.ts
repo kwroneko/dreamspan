@@ -204,7 +204,7 @@ for (const width of [1440, 390])
     await expect(section.getByRole("radio", { name: "With the next reply" })).toBeChecked()
     await expect(section.getByRole("button", { name: "With tools" })).toHaveAttribute("aria-pressed", "true")
     await expect(section.getByRole("switch", { name: "Include notes in summary requests" })).toBeChecked()
-    await section.getByText("Advanced", { exact: true }).click()
+    // Advanced stays open through the reload.
     await expect(section.getByLabel("Chunk size", { exact: true })).toHaveValue("3000")
     await expect(section.getByLabel("Summary length", { exact: true })).toHaveValue("500")
     // Back to the defaults for the next viewport.

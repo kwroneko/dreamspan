@@ -147,7 +147,7 @@ for (const width of [1440, 390])
       await expect(names.getByText("Kept as you set it: Mira.", { exact: true })).toBeVisible()
       await page.reload()
       const again = await openPanel(page, "This chat")
-      await again.getByText("Advanced: names in prompts", { exact: true }).click()
+      // The names stay open through the reload.
       const reloaded = again.getByRole("region", { name: "Names in prompts" })
       await expect(reloaded.getByLabel("Your name in prompts {{user}}", { exact: true })).toHaveValue("Captain")
       if (process.env.SCREENSHOT_DIR)

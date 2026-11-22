@@ -30,10 +30,39 @@ const mcpSettings = (tag: string) => ({
   timeoutS: 30
 })
 
+const chunkSize = (page: Page) => page.getByRole("textbox", { name: "Chunk size", exact: true })
+const archiveDays = (page: Page) =>
+  page.getByRole("dialog", { name: "Archive unused cards", exact: true }).getByRole("spinbutton", { name: "Days" })
+
 const subagentNote = (page: Page) =>
   page.locator('[data-subagent-model-row="same"]').getByLabel("What it's for", { exact: true })
 
 export const settingsPlaces = [
+  place({
+    name: "Settings, chats: summarization chunk size (Advanced)",
+    source: "features/chat/LcmFields.tsx:115",
+    setup: async () => null,
+    open: async (page, _, ctx) => {
+      await go(page, ctx, "/settings/chats")
+      const advanced = page.getByText("Advanced", { exact: true })
+      await advanced.or(chunkSize(page)).first().waitFor()
+      if (!(await chunkSize(page).isVisible())) await advanced.click()
+      return chunkSize(page)
+    },
+    shown: chunkSize
+  }),
+  place({
+    name: "Archive unused cards: days",
+    source: "features/characters/ArchiveUnused.tsx:146",
+    setup: async () => null,
+    numeric: true,
+    open: async (page, _, ctx) => {
+      await go(page, ctx, "/?show=archived")
+      await page.getByRole("button", { name: "Archive unused cards…", exact: true }).click()
+      return archiveDays(page)
+    },
+    shown: archiveDays
+  }),
   place({
     name: "Settings, chats: summarization instruction",
     source: "features/chat/ChatDefaults.tsx:303",
