@@ -10,7 +10,7 @@ import { Effect } from "effect"
 import type { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { Mailbox } from "../src/agent/mailbox.ts"
-import { Writer } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import { serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished } from "./support/generation.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
@@ -408,6 +408,191 @@ describe("subagents after review", () => {
         .at(-1)!
         .messages.filter((m) => text(m).includes("Also count the notes."))
       assert.lengthOf(read, 1)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a dangling message whose lookup still saw the stopped subagent goes to the run that carries it on", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const main = scripted({
+        parent: (messages) => {
+          if (reported(messages)) return "Summed up."
+          const done = toolsDone(messages)
+          if (done === 1) return until(() => main.isHeld()).then(() => message("msg", "Also count the notes."))
+          return done === 0 ? spawn("spawn", { background: true }) : "Waiting."
+        },
+        child: (messages) =>
+          toolsDone(messages) === 0
+            ? LIST
+            : messages.some((m) => text(m).includes("Also count the notes."))
+              ? "Cards and notes."
+              : "Two cards."
+      })
+      main.holdChild(1)
+      const { api, chat, events, mock } = yield* workshop(main.handler)
+      yield* task(api, chat, "message it, looked up late")
+      yield* eventually(() => stepsEvents(events).some((e) => e.waitingFor === 1) && main.isHeld())
+      const waiting = stepsEvents(events).find((e) => e.waitingFor === 1)!.versionId
+      yield* api.StopGeneration({ versionId: waiting })
+      yield* eventually(() => finished(events, waiting) !== undefined)
+      yield* cutAfterCall(config.dataDir, waiting, "msg")
+      main.holdChild(null)
+      // The message's lookup reads before the run carrying the subagent on is saved, and its answer
+      // (the stopped run) comes back only once that run is in place, as on a busy machine.
+      const reader = (yield* Reader) as { FindSubagentByHandle: Reader["Service"]["FindSubagentByHandle"] }
+      const lookup = reader.FindSubagentByHandle
+      let late = true
+      reader.FindSubagentByHandle = ((payload: Parameters<typeof lookup>[0]) =>
+        lookup(payload).pipe(
+          Effect.tap(() =>
+            Effect.gen(function* () {
+              if (!late) return
+              late = false
+              while ((yield* childRollouts(config.dataDir)).length < 2) yield* Effect.sleep("10 millis")
+              yield* Effect.sleep("200 millis")
+            })
+          )
+        )) as typeof lookup
+      yield* Effect.addFinalizer(() => Effect.sync(() => (reader.FindSubagentByHandle = lookup)))
+      yield* resume(api, chat, waiting)
+      yield* eventually(() => summedUp(events))
+      assert.isFalse(late, "the lookup was held")
+      assert.deepStrictEqual(
+        (yield* childRollouts(config.dataDir)).map((r) => [r["spawned_by_call_id"], r["status"]]),
+        [
+          ["spawn", "stopped"],
+          ["spawn", "completed"]
+        ]
+      )
+      assert.include(JSON.stringify(parents(mock.requests()).at(-1)!.messages), "Cards and notes.")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a dangling message whose lookup finds the carrying run before it's in place waits for it", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const main = scripted({
+        parent: (messages) => {
+          if (reported(messages)) return "Summed up."
+          const done = toolsDone(messages)
+          if (done === 1) return until(() => main.isHeld()).then(() => message("msg", "Also count the notes."))
+          return done === 0 ? spawn("spawn", { background: true }) : "Waiting."
+        },
+        child: (messages) =>
+          toolsDone(messages) === 0
+            ? LIST
+            : messages.some((m) => text(m).includes("Also count the notes."))
+              ? "Cards and notes."
+              : "Two cards."
+      })
+      main.holdChild(1)
+      const { api, chat, events, mock } = yield* workshop(main.handler)
+      yield* task(api, chat, "message it, saved but not running")
+      yield* eventually(() => stepsEvents(events).some((e) => e.waitingFor === 1) && main.isHeld())
+      const waiting = stepsEvents(events).find((e) => e.waitingFor === 1)!.versionId
+      yield* api.StopGeneration({ versionId: waiting })
+      yield* eventually(() => finished(events, waiting) !== undefined)
+      yield* cutAfterCall(config.dataDir, waiting, "msg")
+      main.holdChild(null)
+      // The run carrying the subagent on is saved, and the message's lookup finds it there, before
+      // that run is in place to take messages: the answer to its save comes back only after.
+      const reader = (yield* Reader) as { FindSubagentByHandle: Reader["Service"]["FindSubagentByHandle"] }
+      const writer = (yield* Writer) as { ResumeSubagent: Writer["Service"]["ResumeSubagent"] }
+      const lookup = reader.FindSubagentByHandle
+      const save = writer.ResumeSubagent
+      let saved = false
+      let looked = false
+      const until$ = (check: () => boolean) =>
+        Effect.gen(function* () {
+          while (!check()) yield* Effect.sleep("10 millis")
+        })
+      reader.FindSubagentByHandle = ((payload: Parameters<typeof lookup>[0]) =>
+        looked
+          ? lookup(payload)
+          : until$(() => saved).pipe(
+              Effect.andThen(lookup(payload)),
+              Effect.tap(() => Effect.sync(() => (looked = true)))
+            )) as typeof lookup
+      writer.ResumeSubagent = ((payload: Parameters<typeof save>[0]) =>
+        save(payload).pipe(
+          Effect.tap(() => Effect.sync(() => (saved = true))),
+          Effect.tap(() => until$(() => looked))
+        )) as typeof save
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          reader.FindSubagentByHandle = lookup
+          writer.ResumeSubagent = save
+        })
+      )
+      yield* resume(api, chat, waiting)
+      yield* eventually(() => summedUp(events))
+      assert.isTrue(looked, "the lookup came after the save")
+      assert.deepStrictEqual(
+        (yield* childRollouts(config.dataDir)).map((r) => [r["spawned_by_call_id"], r["status"]]),
+        [
+          ["spawn", "stopped"],
+          ["spawn", "completed"]
+        ]
+      )
+      const parent = parents(mock.requests()).at(-1)!.messages
+      assert.include(JSON.stringify(parent), "Cards and notes.")
+      assert.notInclude(JSON.stringify(parent), "couldn't")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a subagent carried on by Resume sends nothing before the reply's dangling message to it has run", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const main = scripted({
+        parent: (messages) => {
+          if (reported(messages)) return "Summed up."
+          const done = toolsDone(messages)
+          if (done === 1) return until(() => main.isHeld()).then(() => message("msg", "Also count the notes."))
+          return done === 0 ? spawn("spawn", { background: true }) : "Waiting."
+        },
+        child: (messages) =>
+          toolsDone(messages) === 0
+            ? LIST
+            : messages.some((m) => text(m).includes("Also count the notes."))
+              ? "Cards and notes."
+              : "Two cards."
+      })
+      main.holdChild(1)
+      const { api, chat, events, mock } = yield* workshop(main.handler)
+      yield* task(api, chat, "message it slowly")
+      yield* eventually(() => stepsEvents(events).some((e) => e.waitingFor === 1) && main.isHeld())
+      const waiting = stepsEvents(events).find((e) => e.waitingFor === 1)!.versionId
+      yield* api.StopGeneration({ versionId: waiting })
+      yield* eventually(() => finished(events, waiting) !== undefined)
+      yield* cutAfterCall(config.dataDir, waiting, "msg")
+      // Under Ask first both the carry and the dangling message ask: the message's answer comes last,
+      // however late, as a slow lookup or a busy machine can make it come.
+      yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "subagents", mode: "ask" })
+      main.holdChild(null)
+      const sent = children(mock.requests()).length
+      yield* resume(api, chat, waiting)
+      yield* answer(api, yield* prompted(events, "spawn", () => true), "allow")
+      const asked = yield* prompted(events, "msg", () => true)
+      while ((yield* childRollouts(config.dataDir)).length < 2) yield* Effect.sleep("10 millis")
+      // The carried-on run is in place: it waits for the message instead of reporting without it.
+      yield* Effect.sleep("300 millis")
+      assert.lengthOf(children(mock.requests()), sent, "nothing is sent before the message's call has run")
+      yield* answer(api, asked, "allow")
+      yield* eventually(() => summedUp(events))
+      assert.deepStrictEqual(
+        (yield* childRollouts(config.dataDir)).map((r) => [r["spawned_by_call_id"], r["status"]]),
+        [
+          ["spawn", "stopped"],
+          ["spawn", "completed"]
+        ]
+      )
+      const first = children(mock.requests()).at(sent)!
+      assert.lengthOf(
+        first.messages.filter((m) => text(m).includes("Also count the notes.")),
+        1,
+        "its first request reads the message"
+      )
+      assert.include(JSON.stringify(parents(mock.requests()).at(-1)!.messages), "Cards and notes.")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

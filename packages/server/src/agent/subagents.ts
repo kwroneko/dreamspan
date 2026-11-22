@@ -405,6 +405,8 @@ interface ChildStart {
   readonly background?: boolean
   /** Called once it's in `running`, where a message to it is delivered. */
   readonly onRunning?: () => void
+  /** What it waits for before its first request: its resumed parent's dangling calls (§8). */
+  readonly ready?: Effect.Effect<void>
   /** A fork (§2.3): its requests send its parent's tool definitions and cache layout. */
   readonly fork?: ForkWire
   /** Where it works on files (§3.3); a copy is made again for a run carrying it on. */
@@ -1182,7 +1184,15 @@ const carryOn = (
   ctx: ToolContext,
   host: Host,
   prior: Prior,
-  onRunning?: () => void
+  /**
+   * Carried on with its resumed reply in the background (§8): the run's id just before it's saved,
+   * when it's in place, and what it waits for.
+   */
+  carry?: {
+    readonly saving: (rolloutId: string) => void
+    readonly onRunning: () => void
+    readonly ready?: Effect.Effect<void>
+  }
 ): Effect.Effect<ToolOutput, never, Scope.Scope> =>
   Effect.gen(function* () {
     const { userId, writer } = ctx
@@ -1315,6 +1325,7 @@ const carryOn = (
     const kind = yield* registeredType(snapshot.subagent?.type)
     const caps = snapshot.subagent?.caps ?? capsFor(kind, now, undefined)
     const rolloutId = uuidv7()
+    carry?.saving(rolloutId)
     const resumed = yield* writer
       .ResumeSubagent({
         userId,
@@ -1357,7 +1368,8 @@ const carryOn = (
       },
       // The parent's messages the stop kept it from reading reach it first (§4).
       ...(unread.length > 0 ? { inbox: unread.map(fromParent) } : {}),
-      ...(onRunning ? { onRunning } : {}),
+      ...(carry ? { onRunning: carry.onRunning } : {}),
+      ...(carry?.ready ? { ready: carry.ready } : {}),
       ...(fork ? { fork } : {}),
       ...(workspace ? { workspace } : {})
     })
@@ -1592,6 +1604,8 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
       host.show(row)
     }
     const child = Effect.gen(function* () {
+      // Carried on with its resumed reply: a dangling message to it is in its mailbox first (§8).
+      if (start.ready) yield* start.ready
       yield* enter(ctx.rolloutId, start.limits.runConcurrent, queued)
       yield* enter(userId, start.limits.accountConcurrent, queued)
       if (row.status === "queued") {
@@ -1932,12 +1946,17 @@ const resumeBackground = (ctx: ToolContext, tool: RolloutTool<never>, args: unkn
       return
     }
     // A message to it meanwhile (a dangling message_agent) waits until it runs again, so the same
-    // subagent is never carried on twice (once here, once as the message's continuation).
+    // subagent is never carried on twice (once here, once as the message's continuation). The mark
+    // is on the stopped run and on the run carrying it on (from just before that run is saved), and
+    // stays until the carry ends: whichever of the two a lookup finds, however late it comes back,
+    // the message waits for the run to be in place.
     const carried = Deferred.makeUnsafe<void>()
+    const marked = [prior.rolloutId]
     carrying.set(prior.rolloutId, carried)
-    const release = () => {
-      if (carrying.get(prior.rolloutId) === carried) carrying.delete(prior.rolloutId)
-      Deferred.doneUnsafe(carried, Effect.void)
+    const release = () => Deferred.doneUnsafe(carried, Effect.void)
+    const end = () => {
+      for (const id of marked) if (carrying.get(id) === carried) carrying.delete(id)
+      release()
     }
     host.background(
       ctx.toolCallId,
@@ -1947,15 +1966,23 @@ const resumeBackground = (ctx: ToolContext, tool: RolloutTool<never>, args: unkn
           ? yield* host.run.permit({ tool, context: ctx, args, dangling: true, onWaiting: host.wait })
           : ({ run: true } as const)
         if (!permit.run) return reportOf(ctx, prior.row, { text: permit.text, isError: true })
-        const out = yield* carryOn(ctx, host, prior, release)
+        const out = yield* carryOn(ctx, host, prior, {
+          saving: (rolloutId) => {
+            marked.push(rolloutId)
+            carrying.set(rolloutId, carried)
+          },
+          onRunning: release,
+          ...(host.dangled ? { ready: host.dangled } : {})
+        })
         return reportOf(ctx, prior.row, out)
-      }).pipe(Effect.ensuring(Effect.sync(release)))
+      }).pipe(Effect.ensuring(Effect.sync(end)))
     )
   })
 
 /**
- * Subagents a resumed reply is carrying on in the background (by the stopped run's rollout),
- * until the run that carries each on is in place.
+ * Subagents a resumed reply is carrying on in the background, by the stopped run's rollout and
+ * the carrying run's: each resolves once the run that carries it on is in place, and goes when
+ * that carry ends.
  */
 const carrying = new Map<string, Deferred.Deferred<void>>()
 

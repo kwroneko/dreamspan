@@ -22,7 +22,7 @@ import {
   Type
 } from "@earendil-works/pi-ai"
 import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
-import { Cause, Effect, Exit, Fiber, Option, Queue, Result, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Option, Queue, Result, Stream } from "effect"
 import type { AssembledRequest, Generation } from "../assembler/types.ts"
 import { providerRequest } from "../assembler/wire.ts"
 import type { Reader, Writer } from "../db/Database.ts"
@@ -305,6 +305,12 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       /** The run's own scope: background subagents run in it, so a stop stops them (spec/SUBAGENTS.md §3.2). */
       const runScope = yield* Effect.scope
       const mailbox = run.mailbox ?? new Mailbox()
+      /**
+       * Its dangling calls have run (a resumed run's, §8): a background subagent it carries on
+       * waits for this before its first request, so a dangling message to it is read there.
+       */
+      const dangled = Deferred.makeUnsafe<void>()
+      yield* Effect.addFinalizer(() => Deferred.done(dangled, Exit.void))
       /** Background subagents the run waits for, shown on the working message while it does. */
       let waitingFor = 0
       // A turn that may call tools can't be prefilled (spec/AGENTIC.md §3.2).
@@ -758,7 +764,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                           )
                         )
                       },
-                      note: (handle: string, message: AgentMessage) => mailbox.note(handle, message)
+                      note: (handle: string, message: AgentMessage) => mailbox.note(handle, message),
+                      dangled: Deferred.await(dangled)
                     }
                   : {})
               }
@@ -1546,6 +1553,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         }
         yield* Effect.promise(() => flush())
       }
+      Deferred.doneUnsafe(dangled, Effect.void)
       showSteps(false)
       // The call carried on was the message itself (or the pass).
       if (sent !== undefined || passed) {
