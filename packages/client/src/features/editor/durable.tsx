@@ -10,9 +10,11 @@
 //
 // What was open, a dialog or a disclosure the box is in, is URL state (`useOpenPlace`), like
 // the app's other views: a reload opens it again, and the box in it reads its text back.
-import { type ComponentProps, useCallback } from "react"
+import { useRouter } from "@tanstack/react-router"
+import { type ComponentProps, useCallback, useEffect } from "react"
+import { usePlaceOwner } from "../../placeOwner.tsx"
 import type { DurableFields, DurableText } from "../../ui/durableFields.tsx"
-import { usePlaceList } from "../../usePlaceParam.ts"
+import { usePlaceList, writePlaceValue } from "../../usePlaceParam.ts"
 import { useUserDraft } from "./userDraft.tsx"
 
 /** One text kept as typed under `key`; `saved` is the text it starts from. */
@@ -58,13 +60,36 @@ export function useDurableForm<T extends object>(key: string, field: string, sav
 }
 
 /**
+ * While `id` is open, if the component unmounts because the registered entry it belongs to
+ * went away (placeOwner.tsx), takes `id` out of the URL: restoring the entry doesn't reopen
+ * it. A reload or leaving the page keeps it (the entry is still there), so a reload reopens
+ * it; what was typed stays in its draft either way.
+ */
+function useDropWithOwner(id: string | undefined) {
+  const owner = usePlaceOwner()
+  const router = useRouter()
+  useEffect(() => {
+    if (id === undefined || owner === null) return
+    return () => {
+      if (owner.present()) return
+      writePlaceValue(router, "open", (current) => {
+        if (!Array.isArray(current)) return current
+        const next = current.filter((other) => other !== id)
+        return next.length ? next : undefined
+      })
+    }
+  }, [id, owner, router])
+}
+
+/**
  * Whether the dialog, editor or disclosure `id` is open, kept in the URL (`open`), so a
  * reload opens it again. Several can be open at once; ids name what they open
- * ("new-card", "rename-key:<id>").
+ * ("new-card", "rename-key:<id>"). It closes when the registered entry it's under goes away.
  */
 export function useOpenPlace(id: string) {
   const [open, setOpen] = usePlaceList("open")
   const shown = open.includes(id)
+  useDropWithOwner(shown ? id : undefined)
   const set = useCallback(
     (next: boolean) => {
       if (next === shown) return
@@ -82,6 +107,7 @@ export function useOpenPlace(id: string) {
 export function useOpenChoice(prefix: string) {
   const [open, setOpen] = usePlaceList("open")
   const id = open.find((other) => other.startsWith(prefix))
+  useDropWithOwner(id)
   const set = useCallback(
     (next: string | null) => {
       const choice = next === null ? undefined : `${prefix}${next}`
