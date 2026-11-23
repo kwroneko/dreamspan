@@ -140,17 +140,16 @@ for (const width of [1440, 390])
       await page.reload()
       await page.getByRole("button", { name: "Edit synthetic", exact: true }).click()
       await page.getByLabel("Display name", { exact: true }).fill("Uncommitted model name")
-      await page.getByLabel("Advanced model settings (JSON)", { exact: true }).fill('{"stop":["STILL WRITING"')
+      await page.getByRole("button", { name: "Add a stop string", exact: true }).click()
+      await page.getByLabel("Stop string 1", { exact: true }).fill("STILL WRITING")
       await expect
         .poll(async () => JSON.parse((await draftText(`model:${model.id}`, "Custom settings")) ?? "{}").name)
         .toBe("Uncommitted model name")
       await page.reload()
       await expect(page.getByRole("dialog", { name: "Edit synthetic", exact: true })).toBeVisible()
       await expect(page.getByLabel("Display name", { exact: true })).toHaveValue("Uncommitted model name")
-      await expect(page.getByLabel("Advanced model settings (JSON)", { exact: true })).toHaveValue(
-        '{"stop":["STILL WRITING"'
-      )
-      await page.getByLabel("Advanced model settings (JSON)", { exact: true }).scrollIntoViewIfNeeded()
+      await expect(page.getByLabel("Stop string 1", { exact: true })).toHaveValue("STILL WRITING")
+      await page.getByLabel("Stop string 1", { exact: true }).scrollIntoViewIfNeeded()
       await shot(page, `model-${width}-${theme}`)
       await page.goto(`${server().url}/cards/${ref.entityId}/chat`)
       const message = page.getByRole("textbox", { name: "Message", exact: true })
@@ -186,9 +185,7 @@ for (const width of [1440, 390])
         `Uncommitted connection ${width}`
       )
       await device.getByRole("button", { name: "Edit synthetic", exact: true }).click()
-      await expect(device.getByLabel("Advanced model settings (JSON)", { exact: true })).toHaveValue(
-        '{"stop":["STILL WRITING"'
-      )
+      await expect(device.getByLabel("Stop string 1", { exact: true })).toHaveValue("STILL WRITING")
       await fresh.close()
     })
   }

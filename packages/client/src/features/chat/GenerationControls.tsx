@@ -20,7 +20,7 @@ import { usePresetSelection } from "../pickers/presetSelection.ts"
 import { defaultsAtom, useRefreshOnContext } from "../pickers/defaults.ts"
 
 /** The account's selections, as the pickers read them (refreshed when the chat's context changes). */
-function useSelections(session: ChatSession) {
+function useSelections(session: ChatSession | null) {
   const action = useAction()
   const result = useAtomValue(defaultsAtom)
   useRefreshOnContext(session, defaultsAtom)
@@ -156,7 +156,8 @@ export function GenerationSettingsPanel({
   view,
   kind
 }: {
-  session: ChatSession
+  /** Null in a chat not made yet: the account's model, whose settings don't need the chat. */
+  session: ChatSession | null
   view: ChatView
   kind: "model" | "preset"
 }) {

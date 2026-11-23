@@ -118,7 +118,7 @@ for (const width of [1440, 390]) {
     await audit(page, `connection-keys-${width}`)
     await page.getByRole("button", { name: "Edit synthetic", exact: true }).click()
     const model = page.getByRole("dialog")
-    const pencil = model.getByRole("button", { name: "Set the longest reply yourself", exact: true })
+    const pencil = model.getByRole("button", { name: "Set the output limit yourself", exact: true })
     const limitRow = pencil.locator("..")
     const limitBefore = await boxes(limitRow)
     await pencil.click()

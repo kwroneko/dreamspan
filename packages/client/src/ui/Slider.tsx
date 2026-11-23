@@ -127,3 +127,55 @@ export function ToolbarSlider({
     </BaseSlider.Root>
   )
 }
+
+/**
+ * A slider beside a field of its own (a number to type): no label row, `label` its accessible
+ * name. It follows the drag, as `Slider` does.
+ */
+export function FieldSlider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  largeStep,
+  valueText,
+  disabled = false,
+  onValueChange
+}: {
+  label: string
+  value: number
+  min: number
+  max: number
+  step: number
+  largeStep?: number
+  valueText: (value: number) => string
+  disabled?: boolean
+  onValueChange: (value: number) => void
+}) {
+  return (
+    <BaseSlider.Root
+      value={Math.min(max, Math.max(min, value))}
+      min={min}
+      max={max}
+      step={step}
+      largeStep={largeStep ?? step * 10}
+      disabled={disabled}
+      thumbAlignment="edge"
+      onValueChange={(next) => onValueChange(next)}
+      className="flex w-full data-disabled:opacity-50"
+    >
+      <BaseSlider.Control className="flex h-6 w-full touch-none items-center select-none">
+        <BaseSlider.Track className="h-1.5 w-full rounded-full bg-surface-raised ring-1 ring-border">
+          <BaseSlider.Indicator className="rounded-full bg-accent" />
+          <BaseSlider.Thumb
+            data-layout-overlay="Slider thumb rides over its track and fill"
+            aria-label={label}
+            getAriaValueText={(_formatted, current) => valueText(current)}
+            className="size-5 rounded-full border border-border bg-surface shadow-sm outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus"
+          />
+        </BaseSlider.Track>
+      </BaseSlider.Control>
+    </BaseSlider.Root>
+  )
+}
