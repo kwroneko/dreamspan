@@ -11,6 +11,7 @@ import { typeInto } from "./support/composer.ts"
 import { messageMenu } from "./support/message.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "40" })
 
@@ -50,11 +51,11 @@ test("the composer's text is on the server: a reload and another tab show it, an
   await box(page).fill("Half a thought about the harbor")
   await expect.poll(() => onServer(chatId, null)).toBe("Half a thought about the harbor")
   await page.reload()
-  await expect(box(page)).toHaveValue("Half a thought about the harbor")
+  await expectTextBox(box(page), "Half a thought about the harbor")
 
   const other = await context.newPage()
   await other.goto(page.url())
-  await expect(box(other)).toHaveValue("Half a thought about the harbor")
+  await expectTextBox(box(other), "Half a thought about the harbor")
   await other.close()
 
   await page.getByRole("button", { name: "Send", exact: true }).click()
@@ -64,11 +65,11 @@ test("the composer's text is on the server: a reload and another tab show it, an
   await box(page).fill("And then")
   await expect.poll(async () => onServer(chatId, null)).toBe("And then")
   await page.reload()
-  await expect(box(page)).toHaveValue("And then")
+  await expectTextBox(box(page), "And then")
   await box(page).fill("")
   await expect.poll(async () => onServer(chatId, null)).toBe("")
   await page.reload()
-  await expect(box(page)).toHaveValue("")
+  await expectTextBox(box(page), "")
 })
 
 test("typing, sending and reopening the chat moves nothing to the bin and says nothing about it", async ({ page }) => {
@@ -96,7 +97,7 @@ test("typing, sending and reopening the chat moves nothing to the bin and says n
   await box(page).fill("Next")
   await expect.poll(() => onServer(chatId, null)).toBe("Next")
   await page.reload()
-  await expect(box(page)).toHaveValue("Next")
+  await expectTextBox(box(page), "Next")
   // Nothing was lost, so nothing is in the bin, and neither the composer nor a toast mentions it.
   await expect(page.getByText(/Recovered text|moved to the bin|kept when the page closed/)).toHaveCount(0)
   await expect(page.locator("[data-toast]")).toHaveCount(0)
@@ -118,7 +119,7 @@ test("an earlier text comes back from the server's history", async ({ page }) =>
     .getByRole("button")
     .filter({ hasText: `${long.length} characters` })
     .click()
-  await expect(box(page)).toHaveValue(long)
+  await expectTextBox(box(page), long)
   await expect.poll(() => onServer(chatId, null)).toBe(long)
 })
 
@@ -171,7 +172,7 @@ test("text too long to send as the page goes comes back from this browser on a r
   blocked = false
   await page.reload()
   // Back in the box as it was typed, which needs no word.
-  await expect(box(page)).toHaveValue(long)
+  await expectTextBox(box(page), long)
   await expect.poll(() => onServer(chatId, null)).toBe(long)
 })
 
@@ -237,7 +238,7 @@ test("a send takes the text as it was at the click; typing while it's saved is t
   save.release()
   await expect(message(page, "This is the message")).toContainText(long)
   await replied(page)
-  await expect(box(page)).toHaveValue("x")
+  await expectTextBox(box(page), "x")
   await expect.poll(async () => onServer(chatId, null)).toBe("x")
 })
 
@@ -256,7 +257,7 @@ test("a send whose branch changed before it went isn't sent, and stays in that b
   const save = await holdRequest(page, "SaveComposer")
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${setup.chatId}`)
-  await expect(box(page)).toHaveValue("saved draft B")
+  await expectTextBox(box(page), "saved draft B")
   save.arm()
   await box(page).fill("new typing for B")
   await page.getByRole("button", { name: "Send", exact: true }).click()
@@ -265,7 +266,7 @@ test("a send whose branch changed before it went isn't sent, and stays in that b
   await expect(message(page, "branch A")).toBeVisible()
   save.release()
   await expect(page.getByRole("alert")).toContainText("The branch changed before this was sent")
-  await expect(box(page)).toHaveValue("saved draft A")
+  await expectTextBox(box(page), "saved draft A")
   await expect.poll(() => onServer(setup.chatId, setup.b)).toBe("new typing for B")
   expect(await onServer(setup.chatId, setup.a)).toBe("saved draft A")
   await expect(message(page, "new typing for B")).toHaveCount(0)
@@ -281,7 +282,7 @@ test("a tab that typed nothing takes another tab's newer text when the leaf move
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${setup.chatId}`)
-  await expect(box(page)).toHaveValue("alpha")
+  await expectTextBox(box(page), "alpha")
   const appended = await admin((api) =>
     Effect.gen(function* () {
       yield* typeInto(api, setup.chatId, null, "alpha plus", setup.draft)
@@ -289,7 +290,7 @@ test("a tab that typed nothing takes another tab's newer text when the leaf move
     })
   )
   await expect(message(page, "from the other tab")).toBeVisible()
-  await expect(box(page)).toHaveValue("alpha plus")
+  await expectTextBox(box(page), "alpha plus")
   await page.waitForTimeout(1000)
   void appended
   expect(await onServer(setup.chatId, null)).toBe("alpha plus")
@@ -320,7 +321,7 @@ test("going through branches quickly saves each text on the branch it was typed 
   await expect(page.getByRole("group", { name: "Branches: 3 of 3" })).toBeVisible()
   open.release()
   await expect(box(page)).toBeEditable()
-  await expect(box(page)).toHaveValue("")
+  await expectTextBox(box(page), "")
   expect(await onServer(setup.chatId, setup.a)).toBe("unsaved typing for A")
   expect(await onServer(setup.chatId, setup.b)).toBe("")
 })
@@ -338,7 +339,7 @@ test("a send that another tab typed past keeps that tab's text in the composer",
   sending.release()
   await expect(message(page, "text sent from this tab")).toBeVisible()
   await replied(page)
-  await expect(box(page)).toHaveValue(newer)
+  await expectTextBox(box(page), newer)
   await page.waitForTimeout(1000)
   expect(await onServer(chatId, null)).toBe(newer)
 })
@@ -362,7 +363,7 @@ test("text typed while an earlier text is being restored stays, on top of it", a
   await box(page).fill("x, and typed on")
   restore.release()
   await expect.poll(() => onServer(chatId, null)).toBe("x, and typed on")
-  await expect(box(page)).toHaveValue("x, and typed on")
+  await expectTextBox(box(page), "x, and typed on")
 })
 
 test("going back to a branch's tip shows its own composer, not the one typed in on the way", async ({ page }) => {
@@ -380,7 +381,7 @@ test("going back to a branch's tip shows its own composer, not the one typed in 
   await page.goBack()
   await expect(message(page, "a message made in this tab")).toBeVisible()
   await expect(box(page)).toBeEditable()
-  await expect(box(page)).toHaveValue("draft at the tip")
+  await expectTextBox(box(page), "draft at the tip")
 })
 
 test("starting a branch copies the composer into it", async ({ page }) => {
@@ -395,10 +396,10 @@ test("starting a branch copies the composer into it", async ({ page }) => {
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${setup.chatId}`)
-  await expect(box(page)).toHaveValue("half typed continuation")
+  await expectTextBox(box(page), "half typed continuation")
   await messageMenu(message(page, "root to branch from"), "Branch from here")
   await expect(box(page)).toBeEditable()
-  await expect(box(page)).toHaveValue("half typed continuation")
+  await expectTextBox(box(page), "half typed continuation")
   // In the fork made, which is the current one now.
   expect(await onServer(setup.chatId, null)).toBe("half typed continuation")
   // A copy: the fork it came from keeps its own.
@@ -443,7 +444,7 @@ test("closing while a send is out keeps what was typed after it", async ({ page 
   armed = false
   cut = false
   await page.reload()
-  await expect(box(page)).toHaveValue("the next message")
+  await expectTextBox(box(page), "the next message")
   expect(await onServer(chatId, null)).toBe("the next message")
 })
 

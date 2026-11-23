@@ -157,7 +157,7 @@ for (const width of [1440, 390])
       await guidanceSwitch(page).click()
       await expect(guidanceSwitch(page)).toBeChecked()
       const guidance = page.getByRole("textbox", { name: "Guidance", exact: true })
-      await expect(guidance).toHaveAttribute("placeholder", "Guidance for the next message…")
+      await expect(guidance).toHaveAttribute("aria-placeholder", "Guidance for the next message…")
       await expect(page.locator("[data-guidance]").first()).toBeVisible()
       await expect(
         page.getByTestId("composer-controls").getByRole("button", { name: /^(?:Send|.* repl(?:y|ies)$)/ })

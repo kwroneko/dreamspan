@@ -9,6 +9,7 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { pluginFiles } from "./support/plugin.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 let cookie = ""
@@ -354,7 +355,7 @@ test("local enable syncs routes, explains reload and retains the composer draft"
   )
   await page.getByRole("button", { name: "Reload", exact: true }).click()
   await page.goto(`${server().url}/chats/${chat.id}`)
-  await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Keep this composer draft")
+  await expectTextBox(page.getByLabel("Message", { exact: true }), "Keep this composer draft")
 })
 
 test("detail URLs reject extra separators and encoded invalid ids", async ({ page }) => {

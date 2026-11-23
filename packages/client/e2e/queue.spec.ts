@@ -2,6 +2,7 @@
 import { expect, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { asPage } from "./support/rpc.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 // A reply lasts at least 100 seconds, beyond this test's 60-second deadline. The
 // test stops it explicitly; the other chat flows keep their short synthetic replies.
@@ -96,11 +97,11 @@ for (const width of [1440, 390]) {
     await expect(queue.getByRole("button", { name: "View image 1" })).toBeVisible()
     await queue.getByRole("button", { name: "Withdraw", exact: true }).click()
     await expect(queue).toHaveCount(0)
-    await expect(composer(page)).toHaveValue("An image with a durable queued edit.")
+    await expectTextBox(composer(page), "An image with a durable queued edit.")
     await expect(page.getByRole("list", { name: "Attached images" }).getByRole("img")).toHaveCount(1)
     await page.getByRole("button", { name: "Stop", exact: true }).first().click()
     await page.reload()
-    await expect(composer(page)).toHaveValue("An image with a durable queued edit.")
+    await expectTextBox(composer(page), "An image with a durable queued edit.")
     await expect(page.getByRole("list", { name: "Attached images" }).getByRole("img")).toHaveCount(1)
   })
 }

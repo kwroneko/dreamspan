@@ -3,6 +3,7 @@ import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { messageMenu } from "./support/message.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60", FAKE_GENERATOR_TOKENS: "600" })
 test("hide and unhide during a streamed reply preserve its text and the composer draft", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -35,5 +36,5 @@ test("hide and unhide during a streamed reply preserve its text and the composer
   await expect(page.locator("article[data-slot]")).toHaveCount(2)
   await page.reload()
   await expect.poll(() => reply.locator(".markdown").innerText()).toBe(completed)
-  await expect(page.getByLabel("Message", { exact: true })).toHaveValue("The next turn, still being drafted.")
+  await expectTextBox(page.getByLabel("Message", { exact: true }), "The next turn, still being drafted.")
 })

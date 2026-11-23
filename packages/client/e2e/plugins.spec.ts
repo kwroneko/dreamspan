@@ -6,6 +6,7 @@ import { loginCookie, withCookie } from "./support/rpc.ts"
 import { pluginFiles } from "./support/plugin.ts"
 import { openPanel, closePanel } from "./support/panel.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "20", FAKE_GENERATOR_TOKENS: "400" })
 let adminCookie: Promise<string> | undefined
@@ -69,7 +70,7 @@ for (const width of [1440, 390])
         "busy,compact,draft,ready"
       )
       await expect(page.getByRole("button", { name: `Roll ${id}` })).toHaveAttribute("data-plugin-draft", "append")
-      await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Kept draft 🎲 20")
+      await expectTextBox(page.getByLabel("Message", { exact: true }), "Kept draft 🎲 20")
       await expectLayout(page, info, "plugin composer")
       await openPanel(page, id)
       await expect(page.getByText(`Plugin panel for ${chat}`)).toBeVisible()
@@ -123,7 +124,7 @@ test("other tabs offer reload; live disable removes an open panel and focused co
   await expect(other.getByRole("status", { name: "Plugins" })).toContainText("Plugins changed")
   await sync(page)
   await expect(page.getByText(`Plugin panel for ${chat}`)).toHaveCount(0)
-  await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Keep me")
+  await expectTextBox(page.getByLabel("Message", { exact: true }), "Keep me")
   expect(await admin((api) => api.EnablePlugin({ scope: "instance", id, commit, consent: true }))).toMatchObject({
     ok: true
   })
@@ -354,7 +355,7 @@ test("live changes preserve a draft and an already streaming reply", async ({ pa
   await page.getByRole("button", { name: `Roll ${id}` }).focus()
   await admin((api) => api.DisablePlugin({ scope: "instance", id }))
   await sync(page)
-  await expect(draft).toHaveValue("Keep this during the reply")
+  await expectTextBox(draft, "Keep this during the reply")
   await expect(draft).toBeFocused()
   await expect(stop).toBeVisible()
   expect(await admin((api) => api.EnablePlugin({ scope: "instance", id, commit, consent: true }))).toMatchObject({
@@ -362,7 +363,7 @@ test("live changes preserve a draft and an already streaming reply", async ({ pa
   })
   await sync(page)
   await expect(page.getByRole("button", { name: `Roll ${id}` })).toBeVisible()
-  await expect(draft).toHaveValue("Keep this during the reply")
+  await expectTextBox(draft, "Keep this during the reply")
   await expect(stop).toBeVisible()
   await stop.click()
 })

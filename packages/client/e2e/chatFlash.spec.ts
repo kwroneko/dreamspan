@@ -9,6 +9,7 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { showAppNavigation } from "./support/appMenu.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({
   ...withAdmin,
@@ -261,14 +262,14 @@ test("a superseded chat read cannot replace the latest pick", async ({ page }) =
   await pick(0)
   await expect(page.locator("main [inert]")).toHaveCount(0)
   await expect(heading).toHaveText(chats[0]!.title)
-  await expect(draft).toHaveValue("Keep this draft during the handover.")
+  await expectTextBox(draft, "Keep this draft during the handover.")
   // A later pick in the preview tab cancels the held destination, which can't replace it.
   await pick(2)
   await expect(heading).toHaveText(chats[2]!.title)
   release!()
   await pick(0)
   await expect(heading).toHaveText(chats[0]!.title)
-  await expect(draft).toHaveValue("Keep this draft during the handover.")
+  await expectTextBox(draft, "Keep this draft during the handover.")
   const tabs = page.getByRole("tablist", { name: "Open tabs", exact: true })
   await expect(tabs.getByRole("tab", { name: chats[2]!.title })).toHaveCount(1)
   await expect(tabs.getByRole("tab", { name: chats[1]!.title })).toHaveCount(0)

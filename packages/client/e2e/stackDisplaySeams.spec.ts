@@ -12,6 +12,7 @@ import { closePanel, openPanel } from "./support/panel.ts"
 import { startProvider } from "./support/provider.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 let cookie: string
@@ -134,7 +135,7 @@ for (const width of [1440, 390])
         await expect(articles.last()).toContainText("DISPLAYONLY")
         await expect(page.getByRole("heading", { name: `Display ${width} ${theme}`, exact: true })).toBeVisible()
         await expect(page.getByText("import unfinished", { exact: true }).first()).toBeVisible()
-        await expect(page.getByTestId("composer")).toHaveValue("")
+        await expectTextBox(page.getByTestId("composer"), "")
         const marks = page.locator("[data-state-markers]")
         await expect(marks).toContainText("2 changes")
         await marks.getByRole("button", { name: /2 changes/ }).click()

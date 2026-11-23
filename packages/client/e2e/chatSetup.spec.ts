@@ -11,6 +11,7 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { markPersona } from "./support/library.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { addToCast, pickPendingPersona } from "./support/cast.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 // About four seconds a reply: long enough to queue behind and to stop.
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "40", FAKE_GENERATOR_TOKENS: "160" })
@@ -201,7 +202,7 @@ test("Send as a card added to the chat, and Generate with guidance that a swipe 
   await page.getByRole("button", { name: "Generate Mira" }).click()
   const reply = replies(page).last()
   await expect(reply).toContainText("Guidance: Mira tells a story about the storm.")
-  await expect(guidance).toHaveValue("")
+  await expectTextBox(guidance, "")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   await shoot(page, "generate-with-direction")
   // A swipe reuses the guidance of the version it re-rolls.
@@ -235,7 +236,7 @@ test("a message sent during a reply waits, then posts after it", async ({ page }
   const queued = page.getByRole("list", { name: "Queued messages" })
   await expect(queued).toContainText("While you were talking.")
   await shoot(page, "queued-message")
-  await expect(composer(page)).toHaveValue("")
+  await expectTextBox(composer(page), "")
   // It posts when the reply finishes, and gets a reply of its own.
   await expect(queued).toHaveCount(0, { timeout: 20_000 })
   await expect(page.getByRole("article", { name: "Your message" }).last()).toContainText("While you were talking.")
@@ -261,7 +262,7 @@ test("a queued message posts right after a stopped reply, and one withdrawn neve
   // Withdrawn, it comes back to the composer if that's empty.
   await queued.getByRole("listitem").first().getByRole("button", { name: "Withdraw" }).click()
   await expect(queued.getByRole("listitem")).toHaveCount(1)
-  await expect(composer(page)).toHaveValue("Never mind.")
+  await expectTextBox(composer(page), "Never mind.")
   await composer(page).fill("")
 
   // Stopped: the queued message posts right after the stopped version.
@@ -293,7 +294,7 @@ test("withdrawing while typing keeps both texts in the composer", async ({ page 
   await composer(page).fill("A new draft.")
   await queued.getByRole("button", { name: "Withdraw" }).click()
   await expect(queued).toHaveCount(0)
-  await expect(composer(page)).toHaveValue("A new draft.\n\nImportant queued text.")
+  await expectTextBox(composer(page), "A new draft.\n\nImportant queued text.")
   await page.getByRole("button", { name: "Stop", exact: true }).first().click()
 })
 
@@ -324,7 +325,7 @@ test("text typed while Generate is on its way stays in the composer", async ({ p
   await guidance.fill("Typed while it was on its way.")
   release!()
   await expect(replies(page).last()).toContainText("Guidance: A held direction.")
-  await expect(guidance).toHaveValue("Typed while it was on its way.")
+  await expectTextBox(guidance, "Typed while it was on its way.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   await setGuidance(page, false)
 })
@@ -365,12 +366,12 @@ test("text typed while the first send makes the chat goes along to the chat's co
   await composer(page).fill("Take me across.")
   await page.getByRole("button", { name: /^Send/ }).click()
   await expect.poll(() => release !== null).toBe(true)
-  await expect(composer(page)).toHaveValue("")
+  await expectTextBox(composer(page), "")
   await composer(page).fill("And bring the lantern.")
   release!()
   await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
   await expect(page.getByRole("article", { name: "Your message" })).toContainText("Take me across.")
-  await expect(composer(page)).toHaveValue("And bring the lantern.")
+  await expectTextBox(composer(page), "And bring the lantern.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
 })
 
@@ -427,7 +428,7 @@ test("a new chat of a group: each character greets in turn, and the first send m
   // What's typed is kept in this browser, per group, until it's sent.
   await composer(page).fill("Is the ferry running?")
   await page.reload()
-  await expect(composer(page)).toHaveValue("Is the ferry running?")
+  await expectTextBox(composer(page), "Is the ferry running?")
   // Who answers first is picked in the Cast tab, as who replies is in a saved chat.
   const cast = await openPanel(page, "Cast")
   // The label has its (i) beside it now, so the picker is named by role (settingscopy).

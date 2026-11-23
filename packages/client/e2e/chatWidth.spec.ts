@@ -15,6 +15,7 @@ import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { nextReply } from "./support/strip.ts"
+import {} from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -186,7 +187,7 @@ for (const [width, height] of [
       try {
         await box(page).fill("Avani sets the letter on the desk.")
         await box(page).press("Enter")
-        await expect(box(page)).toHaveAttribute("placeholder", "Queue…")
+        await expect(box(page)).toHaveAttribute("aria-placeholder", "Queue…")
         await box(page).fill("She waits for him to read it.")
         await box(page).press("Enter")
         const queue = page.getByRole("list", { name: "Queued messages" })

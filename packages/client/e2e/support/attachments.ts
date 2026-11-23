@@ -12,14 +12,22 @@ export async function removeAttachment(x: Locator) {
 /** Where the composer's text and control row stand on screen, and its box's edges. */
 export const composerPlaces = (page: Page) =>
   page.evaluate(() => {
-    const at = (selector: string) => {
-      const box = document.querySelector(selector)!.getBoundingClientRect()
+    const place = (element: Element) => {
+      const box = element.getBoundingClientRect()
       return { top: Math.round(box.top), bottom: Math.round(box.bottom), left: Math.round(box.left) }
     }
-    const text = document.querySelector<HTMLTextAreaElement>('[data-testid="composer"]')!
+    const at = (selector: string) => place(document.querySelector(selector)!)
+    // The chat composer's text box is an editor in a shadow root (its box is `data-composer-text`,
+    // its scroll the editor's scroller); a new chat's is a textarea.
+    const wrapper = document.querySelector("[data-composer-text]")
+    const content = wrapper
+      ? [...wrapper.querySelectorAll("*")]
+          .map((host) => host.shadowRoot?.querySelector('[data-testid="composer"]'))
+          .find((found) => found !== null && found !== undefined)!
+      : document.querySelector('[data-testid="composer"]')!
     return {
-      text: at('[data-testid="composer"]'),
-      scroll: text.scrollTop,
+      text: place(wrapper ?? content),
+      scroll: (content.closest(".cm-scroller") ?? content).scrollTop,
       controls: at('[data-testid="composer-controls"]'),
       box: at('[data-testid="composer-box"]')
     }

@@ -1,7 +1,7 @@
 import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textActions.tsx"
 import { defaultKeymap, history, historyKeymap, isolateHistory } from "@codemirror/commands"
-import { Compartment, EditorState, StateEffect, StateField, Transaction } from "@codemirror/state"
-import { Decoration, type DecorationSet, EditorView, keymap } from "@codemirror/view"
+import { Compartment, EditorState, Prec, StateEffect, StateField, Transaction } from "@codemirror/state"
+import { Decoration, type DecorationSet, EditorView, keymap, placeholder } from "@codemirror/view"
 import { type CSSProperties, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react"
 import type { CodeEditorProps } from "./CodeEditor.tsx"
 import { changeGutter, comparisonBase, lineChanges, quietMarkers } from "./codeChanges.ts"
@@ -202,6 +202,12 @@ const searchHighlights = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field)
 })
 
+const sameAttributes = (a: CodeEditorProps["contentAttributes"], b: CodeEditorProps["contentAttributes"]) => {
+  if (a === b) return true
+  const keys = Object.keys(a ?? {})
+  return keys.length === Object.keys(b ?? {}).length && keys.every((key) => a?.[key] === b?.[key])
+}
+
 function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (text: string) => void) {
   const root = host.shadowRoot ?? host.attachShadow({ mode: "open" })
   const options = new Compartment()
@@ -214,10 +220,12 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
   const attributes = () => [
     EditorState.readOnly.of(props.readOnly ?? false),
     EditorView.contentAttributes.of({
+      ...props.contentAttributes,
       "aria-label": props.label,
       "aria-multiline": "true",
       spellcheck: String(!props.mono)
-    })
+    }),
+    props.placeholder ? placeholder(props.placeholder) : []
   ]
   const view = new EditorView({
     root,
@@ -254,10 +262,33 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
           blur: () => {
             props.onBlur?.()
           }
-        })
+        }),
+        // The host's keys and files come first; true from one leaves the event to the host.
+        Prec.highest(
+          EditorView.domEventHandlers({
+            keydown: (event) => props.onKeyDown?.(event) === true,
+            paste: (event) => event.clipboardData !== null && props.hostFiles?.(event.clipboardData) === true,
+            drop: (event) => event.dataTransfer !== null && props.hostFiles?.(event.dataTransfer) === true
+          })
+        )
       ]
     })
   })
+  // Focus given from code (a command, a closing dialog, the panel focus guard) keeps the editor's
+  // own caret and selection, as a textarea's does: the content's plain focus would let the browser
+  // place the caret, which the editor then takes as the user's. `view.focus()` focuses the content
+  // through this same method, so the inner call is the browser's own.
+  const nativeFocus = HTMLElement.prototype.focus
+  let focusing = false
+  view.contentDOM.focus = function (this: HTMLElement, focusOptions?: FocusOptions) {
+    if (focusing) return nativeFocus.call(this, focusOptions)
+    focusing = true
+    try {
+      view.focus()
+    } finally {
+      focusing = false
+    }
+  }
   let extensionVersion = 0
   const refreshExtensions = () => {
     const version = ++extensionVersion
@@ -364,7 +395,13 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       view.dispatch({ effects: comparisonBase.of(base) })
     }
     if (next.extensions !== oldProps.extensions) view.dispatch({ effects: own.reconfigure(next.extensions ?? []) })
-    if (oldProps.readOnly !== next.readOnly || oldProps.label !== next.label || oldProps.mono !== next.mono)
+    if (
+      oldProps.readOnly !== next.readOnly ||
+      oldProps.label !== next.label ||
+      oldProps.mono !== next.mono ||
+      oldProps.placeholder !== next.placeholder ||
+      !sameAttributes(oldProps.contentAttributes, next.contentAttributes)
+    )
       view.dispatch({ effects: options.reconfigure(attributes()) })
   }
   update(initial)

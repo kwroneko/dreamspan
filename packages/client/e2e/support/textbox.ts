@@ -14,8 +14,10 @@ export const textBoxValue = (box: Locator) =>
     return content.cmTile.root.view.state.doc.toString()
   })
 
-export const expectTextBox = async (box: Locator, value: string) => {
-  await expect.poll(() => textBoxValue(box)).toBe(value)
+/** The box's whole text is `value`, or matches it; the chat composer is a CodeMirror editor too. */
+export const expectTextBox = async (box: Locator, value: string | RegExp, options?: { timeout?: number }) => {
+  if (typeof value === "string") await expect.poll(() => textBoxValue(box), options).toBe(value)
+  else await expect.poll(() => textBoxValue(box), options).toMatch(value)
 }
 
 /** Replace the complete editor document through its own keyboard selection,

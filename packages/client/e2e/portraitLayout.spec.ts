@@ -3,6 +3,7 @@ import { openPanel, panelTab } from "./support/panel.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60" })
 test.setTimeout(240_000)
@@ -88,12 +89,12 @@ test("permitted sidebar widths keep a group composer and Send inside the chat", 
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(panel.x)
     expect((await message.boundingBox())!.width).toBeGreaterThanOrEqual(120)
     await send.click({ trial: true })
-    await expect(message).toHaveValue(draft)
+    await expectTextBox(message, draft)
   }
   await check()
   await shoot(page, "max-resize-1440")
   await page.reload()
-  await expect(message).toHaveValue(draft)
+  await expectTextBox(message, draft)
   await check()
   await shoot(page, "resize-reload-1440")
   await page.setViewportSize({ width: 1024, height: 900 })
@@ -103,7 +104,7 @@ test("permitted sidebar widths keep a group composer and Send inside the chat", 
   await page.getByRole("button", { name: "Close", exact: true }).click()
   expect((await message.boundingBox())!.width).toBeGreaterThanOrEqual(120)
   await page.getByRole("button", { name: /^Send as / }).click({ trial: true })
-  await expect(message).toHaveValue(draft)
+  await expectTextBox(message, draft)
   await shoot(page, "composer-390")
 })
 

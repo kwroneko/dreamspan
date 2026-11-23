@@ -16,13 +16,15 @@ import {
 // or taken back.
 //
 // The text is a server draft per branch tip (composerDraft.ts), held in a store of its own,
-// so typing re-renders nothing else.
+// so typing re-renders nothing else. Its box is the message editor's (the `message.text-editor`
+// slot): a message is typed styled as it will render, guidance plain.
 import type { CastCard, EntityId, MessageImages } from "@dreamspan/shared/chat.ts"
 import type { DraftState } from "@dreamspan/shared/drafts.ts"
-import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
-import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
+import { SlotOutlet } from "../../slots.tsx"
+import { loadMessageTextEditor } from "../../ui/messageTextLoader.ts"
 import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
 import { buttonClass } from "../../ui/Button.tsx"
 import { Popover } from "../../ui/Popover.tsx"
@@ -37,9 +39,17 @@ import { NO_ONE } from "./ReplyFrom.tsx"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { type ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
 import { composerGuidance, editStillShown, guidanceEditor, useGuidanceEdit } from "./guidanceEdit.tsx"
+import { messageTextEditor } from "./editorHistory.tsx"
+import { FILE_PATH_MIME } from "./fileAttachments.ts"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 import { requestCastAdd } from "./castAddState.ts"
 import { useDecisionPointOn } from "../decisions/index.tsx"
+
+// The text box's code, fetched as soon as the composer's is (the chat page waits for it too).
+void loadMessageTextEditor().catch(() => undefined)
+
+/** A pasted or dropped file, or a file dragged from the Files tab: an attachment, not text. */
+const attachmentData = (data: DataTransfer) => data.files.length > 0 || data.types.includes(FILE_PATH_MIME)
 
 /** A phone's width, the composers' compact layout's breakpoint. */
 const COMPACT_WIDTH = 640
@@ -240,7 +250,6 @@ export function Composer({
   onSettings: (tab: "model" | "preset" | "cast") => void
   attachmentInput?: AttachmentInput
 }) {
-  const composerId = useId()
   const { compact: phone, ref: composerRef } = useCompactComposer()
   const castView = useCast()
   const { cast } = castView
@@ -716,6 +725,28 @@ export function Composer({
     () => invokeComposerControl(guidance ? "composer.generate" : "composer.send", controls, "keyboard"),
     viewPrefs.prefs.enterSends
   )
+  const placeholder =
+    editing !== null
+      ? "Guidance for this reply…"
+      : !textReady
+        ? "Loading…"
+        : guidance
+          ? "Guidance for the next message…"
+          : leafGenerating
+            ? "Queue…"
+            : "Message…"
+  const hasAttachments = !!attachmentInput?.count
+  const empty = text === ""
+  // Compared by value, so typing reconfigures nothing: `data-empty` changes only as the box empties or fills.
+  const contentAttributes: Record<string, string> = {
+    "data-testid": "composer",
+    "aria-busy": String(!textReady),
+    // What the text is for, read with the box (a description by id can't reach into the editor's
+    // shadow root); the guidance switch's tooltip shows it.
+    "aria-description": controls.hint,
+    ...(hasAttachments ? { "data-has-attachments": "true" } : {}),
+    ...(empty ? { "data-empty": "true" } : {})
+  }
 
   return (
     <div
@@ -749,35 +780,30 @@ export function Composer({
         }
         end={<ComposerControls placement="actions" context={controls} />}
       >
-        {/* Named on itself, not by a label's `for`: two frames can each show a composer. */}
-        <AutoGrowTextarea
-          aria-label={guidance ? "Guidance" : "Message"}
-          id={composerId}
-          data-testid="composer"
-          data-has-attachments={attachmentInput?.count ? true : undefined}
-          value={text}
-          readOnly={!textReady}
-          aria-busy={!textReady}
-          aria-describedby={`${composerId}-hint`}
-          placeholder={
-            editing !== null
-              ? "Guidance for this reply…"
-              : !textReady
-                ? "Loading…"
-                : guidance
-                  ? "Guidance for the next message…"
-                  : leafGenerating
-                    ? "Queue…"
-                    : "Message…"
-          }
-          onChange={(event) => draft.type(event.currentTarget.value)}
-          onKeyDown={onKeyDown}
-        />
+        {/* The message editor's box (`message.text-editor`), named on itself: two frames can each
+            show a composer. Guidance is plain; only the styling changes with it, nothing else. */}
+        <div data-composer-text className="grid min-w-0">
+          <SlotOutlet
+            slot={messageTextEditor}
+            props={{
+              label: guidance ? "Guidance" : "Message",
+              value: text,
+              base: "",
+              bare: true,
+              plain: guidance,
+              expand: false,
+              textActions: false,
+              readOnly: !textReady,
+              placeholder,
+              contentAttributes,
+              surfaceClass: `composer-text text-base sm:text-sm${guidance ? "" : " composer-message"}`,
+              onKeyDown,
+              hostFiles: attachmentData,
+              onChange: (value) => draft.type(value)
+            }}
+          />
+        </div>
       </ComposerBox>
-      {/* What the text is for, read with the box. */}
-      <p id={`${composerId}-hint`} className="sr-only">
-        {controls.hint}
-      </p>
       {shownError && (
         <p role="alert" className="text-sm text-danger">
           {shownError.message}

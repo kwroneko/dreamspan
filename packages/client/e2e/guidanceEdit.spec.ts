@@ -13,6 +13,7 @@ import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { showAppNavigation } from "./support/appMenu.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
+import { expectTextBox, textBoxValue } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -146,7 +147,7 @@ for (const width of [1440, 390]) {
 
       // The bar names the reply; the box holds its guidance, as guidance, toggle on meanwhile.
       await expect(bar(page)).toContainText("Guidance for a new swipe of Aria's reply")
-      await expect(box(page)).toHaveValue("Aria looks out to sea.")
+      await expectTextBox(box(page), "Aria looks out to sea.")
       await expect(toggle(page)).toBeChecked()
       await expect(toggle(page)).toBeDisabled()
       await expect(page.getByRole("button", { name: "New swipe", exact: true })).toBeVisible()
@@ -161,7 +162,7 @@ for (const width of [1440, 390]) {
       await box(page).press("Enter")
       await settled(slotId, 2)
       expect((await versions(slotId)).at(-1)!.direction).toBe("Aria spots a ship on the horizon.")
-      await expect(box(page)).toHaveValue("Aria spots a ship on the horizon.")
+      await expectTextBox(box(page), "Aria spots a ship on the horizon.")
       await expect(bar(page)).toBeVisible()
 
       // Edit again, and the visible button: another new version, never a new turn.
@@ -174,7 +175,7 @@ for (const width of [1440, 390]) {
         "Aria hums an old sailors' song."
       ])
       await expect(page.getByRole("article").last()).toContainText("Guidance: Aria hums an old sailors' song.")
-      await expect(box(page)).toHaveValue("Aria hums an old sailors' song.")
+      await expectTextBox(box(page), "Aria hums an old sailors' song.")
       expect(await pathLength(chatId)).toBe(turns)
       // The guidance typed is the composer draft's text, saved like any typing.
       await expect
@@ -193,19 +194,19 @@ for (const width of [1440, 390]) {
       await box(page).fill("Aria counts the gulls.")
       await page.reload()
       await expect(bar(page)).toContainText("Guidance for a new swipe of Aria's reply")
-      await expect(box(page)).toHaveValue("Aria counts the gulls.")
+      await expectTextBox(box(page), "Aria counts the gulls.")
       await expect(toggle(page)).toBeChecked()
 
       // ✕: the box returns to messages with its text, and the toggle as it was.
       await bar(page).getByRole("button", { name: "Close: back to new messages" }).click()
       await expect(bar(page)).toHaveCount(0)
-      await expect(box(page)).toHaveValue("Aria counts the gulls.")
+      await expectTextBox(box(page), "Aria counts the gulls.")
       await expect(toggle(page)).not.toBeChecked()
       await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeVisible()
 
       // Closed stays closed through a reload; the text stays too.
       await page.reload()
-      await expect(box(page)).toHaveValue("Aria counts the gulls.")
+      await expectTextBox(box(page), "Aria counts the gulls.")
       await expect(bar(page)).toHaveCount(0)
       expect(await pathLength(chatId)).toBe(turns)
     })
@@ -232,13 +233,13 @@ for (const width of [1440, 390]) {
     await page.goto(`${server().url}/chats/${chatId}`)
     await expect(toggle(page)).toBeEnabled()
     await page.getByRole("button", { name: "Edit this guidance" }).click()
-    await expect(box(page)).toHaveValue("Aria looks out to sea.")
+    await expectTextBox(box(page), "Aria looks out to sea.")
     await box(page).fill("Aria sees a storm coming.")
     await page.waitForTimeout(100)
     expect((await rpc((api) => api.OpenComposer({ chatId, forkId: null }))).content).toBe("")
     await page.reload()
     dropSaves = false
-    await expect(box(page)).toHaveValue("Aria sees a storm coming.")
+    await expectTextBox(box(page), "Aria sees a storm coming.")
     await expect(bar(page)).toContainText("Guidance for a new swipe of Aria's reply")
     // It reaches the server once saves go through, and New version uses it.
     await expect
@@ -304,33 +305,33 @@ for (const width of [1440, 390]) {
     await other.getByRole("button", { name: "Generate another swipe", exact: true }).click()
     await settled(secondId, 2)
     expect((await versions(secondId)).at(-1)!.direction).toBe("A different reply's guidance.")
-    await expect(box(page)).toHaveValue("Live unsaved guidance.")
+    await expectTextBox(box(page), "Live unsaved guidance.")
     // An explicit empty box removes guidance; New version with guidance… offers the same editor again.
     await box(page).fill("")
     await page.getByRole("button", { name: "New swipe", exact: true }).click()
     await settled(slotId, 3)
     expect((await versions(slotId)).at(-1)!.direction).toBeNull()
     await bar(page).getByRole("button", { name: "Close: back to new messages" }).click()
-    await expect(box(page)).toHaveValue("")
+    await expectTextBox(box(page), "")
     await expect(toggle(page)).toBeChecked()
     // A reply without guidance leaves the box's text as it is, for its guidance.
     await box(page).fill("Fog over the water.")
     const unguided = page.getByRole("article").nth(1)
     await messageMenu(unguided, "New swipe with guidance…")
-    await expect(box(page)).toHaveValue("Fog over the water.")
+    await expectTextBox(box(page), "Fog over the water.")
     await expect(bar(page)).toBeVisible()
     await messageMenu(unguided, "Delete all swipes")
     await expect(bar(page)).toHaveCount(0)
-    await expect(box(page)).toHaveValue("Fog over the water.")
+    await expectTextBox(box(page), "Fog over the water.")
     await page.getByRole("button", { name: "Edit this guidance" }).click()
     await expect(bar(page)).toBeVisible()
-    const guidance = await box(page).inputValue()
+    const guidance = await textBoxValue(box(page))
     await showAppNavigation(page)
     await page.getByRole("link", { name: "Home", exact: true }).filter({ visible: true }).first().click()
     await page.goBack()
     // Home opened in a tab of its own; the chat's tab kept its state (owner, 2026-11-05).
     await expect(bar(page)).toBeVisible()
-    await expect(box(page)).toHaveValue(guidance)
+    await expectTextBox(box(page), guidance)
   })
 
   for (const reloaded of [false, true])
@@ -366,7 +367,7 @@ for (const width of [1440, 390]) {
       const reply = page.getByRole("article").filter({ hasText: "Guidance: Tide." })
       await reply.getByRole("button", { name: "Edit this guidance" }).click()
       await expect(bar(page)).toBeVisible()
-      await expect(box(page)).toHaveValue("Tide.")
+      await expectTextBox(box(page), "Tide.")
       await box(page).press("End")
       if (reloaded) {
         // The owner's case: typed, reloaded with the bar open, typed again.
@@ -376,7 +377,7 @@ for (const width of [1440, 390]) {
           .toBe("Tide. Fog")
         await page.reload()
         await expect(bar(page)).toBeVisible()
-        await expect(box(page)).toHaveValue("Tide. Fog")
+        await expectTextBox(box(page), "Tide. Fog")
         await box(page).click()
         await box(page).press("End")
       }
@@ -393,7 +394,7 @@ for (const width of [1440, 390]) {
         w.frames_ = []
         w.stop_ = false
         const tick = () => {
-          const composer = document.querySelector('[data-testid="composer"]')!.getBoundingClientRect()
+          const composer = document.querySelector("[data-composer-text]")!.getBoundingClientRect()
           const articles = document.querySelectorAll("article")
           const message = articles[articles.length - 1]!.getBoundingClientRect()
           w.frames_.push([composer.y, composer.height, message.y, message.height].map(Math.round).join(","))

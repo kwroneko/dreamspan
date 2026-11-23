@@ -12,6 +12,7 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { useSideChatProvider } from "./support/workshopSideChat.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const shots = process.env.SCREENSHOT_DIR
 
@@ -54,7 +55,7 @@ test.describe("chats started from the Chats page", () => {
       await page.reload()
       await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible({ timeout: 30_000 })
       await expect(page.getByLabel("Title of the new chat")).toHaveValue(title)
-      await expect(box).toHaveValue("A note to keep.")
+      await expectTextBox(box, "A note to keep.")
       expect((await chats()).length).toBe(before)
 
       // The first send makes it, under that title, and its page opens in place.

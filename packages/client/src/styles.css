@@ -344,6 +344,25 @@ main:has(> [data-fill]) {
 .markdown h3 {
   font-size: 1.1em;
 }
+/*
+ * The chat composer's text box (features/chat/Composer.tsx): the message editor's, in a box of its
+ * own, with the composer's font and size in both of its modes (only the styling changes with
+ * guidance). One line tall when empty, growing with its text to a third of the screen, then
+ * scrolling; the padding is inside the scrolled box, as a textarea's.
+ */
+.composer-text {
+  --bare-padding: 0.375rem 0.5rem;
+  --bare-min-height: 2.25rem;
+  --bare-max-height: 33vh;
+  --bare-overflow: auto;
+  /* Whole pixels, as a textarea's lines are: a fractional height moved the list held above it by a pixel. */
+  --bare-paragraph-gap: round(var(--message-paragraph-gap, 0.75em), 1px);
+  color: var(--text);
+}
+/* A message (not guidance): the main color of the rendered text, as the message editor's. */
+.composer-text.composer-message {
+  color: var(--color-message-main);
+}
 .markdown em {
   color: var(--color-message-italics);
   font-style: italic;

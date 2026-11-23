@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, DB_WORKERS: "bundle" })
 type Api = Parameters<Parameters<typeof asUser>[3]>[0]
@@ -146,11 +147,11 @@ for (const scheme of ["light", "dark"] as const)
         await branch.click()
         await list.getByRole("link", { name: /^Old road/ }).click()
         await expect(page.getByTestId("messages").getByText("The named road", { exact: true })).toBeVisible()
-        await expect(message).toHaveValue("Important unsent paragraph")
+        await expectTextBox(message, "Important unsent paragraph")
         await shot(page, "restored-branch-original-draft", width)
         await branch.click()
         await list.getByRole("link", { name: /^Original/ }).click()
-        await expect(message).toHaveValue("Draft typed on the surviving branch")
+        await expectTextBox(message, "Draft typed on the surviving branch")
         await expect
           .poll(() => admin((api) => Effect.map(api.OpenComposer({ chatId, forkId: first }), (draft) => draft.content)))
           .toBe("Draft typed on the surviving branch")

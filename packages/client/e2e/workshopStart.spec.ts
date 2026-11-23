@@ -11,6 +11,7 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { makeStory, SIDE_ANSWER, sidePanel, useSideChatProvider } from "./support/workshopSideChat.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const shots = process.env.SCREENSHOT_DIR
 const QUESTION = "What has happened in the harbor so far?"
@@ -85,7 +86,7 @@ test.describe("a workshop made by its first message", () => {
         await expect(side.getByRole("article").filter({ hasText: QUESTION })).toHaveCount(1)
         await expect(side.getByRole("article").filter({ hasText: SIDE_ANSWER })).toHaveCount(1, { timeout: 60_000 })
         await expect(panel.locator("[data-side-chat-intro]")).toHaveCount(0)
-        await expect(side.getByLabel("Message", { exact: true })).toHaveValue("")
+        await expectTextBox(side.getByLabel("Message", { exact: true }), "")
         const attached = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
           api.ListAttachedWorkshops({ chatId: story.id })
         )

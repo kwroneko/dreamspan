@@ -8,6 +8,7 @@ import { startWorkshopProvider } from "./support/workshopProvider.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
+import { expectTextBox } from "./support/textbox.ts"
 
 test.describe("workshop plugin consent and dice", () => {
   const server = serverPerFile(withAdmin)
@@ -124,7 +125,7 @@ test.describe("workshop plugin consent and dice", () => {
         const die = page.getByRole("button", { name: "🎲", exact: true })
         await expect(die).toBeVisible({ timeout: 30000 })
         await die.click()
-        await expect(page.getByLabel("Message", { exact: true })).toHaveValue(/🎲 (?:[1-9]|1[0-9]|20)$/)
+        await expectTextBox(page.getByLabel("Message", { exact: true }), /🎲 (?:[1-9]|1[0-9]|20)$/)
         await expectLayout(page, info, `plugin-dice-${width}-${theme}`)
         // Drop server notices to reproduce the cross-tab subscription gap. The local
         // management broadcast still offers Reload, retaining already evaluated code.
@@ -149,7 +150,7 @@ test.describe("workshop plugin consent and dice", () => {
         await reloadNotice.getByRole("button", { name: "Reload", exact: true }).click()
         await expect(other.getByRole("button", { name: "🎲", exact: true })).toHaveCount(0)
         await other.close()
-        await expect(page.getByLabel("Message", { exact: true })).toHaveValue(/🎲 /)
+        await expectTextBox(page.getByLabel("Message", { exact: true }), /🎲 /)
         // Next task declines: no extra code runs. The existing checked version can be requested again.
         const details = await admin((api) => api.GetPlugin({ scope: "user", id: pluginId }))
         expect(details.pin?.suspended).toBeTruthy()

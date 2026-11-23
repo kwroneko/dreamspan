@@ -63,5 +63,9 @@ export const budgets = {
   /** All the page's script per keystroke there: the editor, the draft, the styling. */
   editScriptMsPerKey: 16,
   /** From a key event to the frame after its paint, 95th percentile. */
-  editKeyToPaintP95Ms: 50
+  editKeyToPaintP95Ms: 50,
+  /** Typing into a 20,000 character draft in the composer (composerStyle.perf.ts), the same three. */
+  composerStylingMsPerKey: 4,
+  composerScriptMsPerKey: 16,
+  composerKeyToPaintP95Ms: 50
 }

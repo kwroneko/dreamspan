@@ -10,6 +10,7 @@ import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { closePortrait } from "./support/portrait.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "40" })
 test.setTimeout(240_000)
@@ -162,6 +163,6 @@ for (const width of [1440, 390])
       await page.getByRole("button", { name: /Speaking as .*Change the speaker/ }).click()
       await shoot(page, `speaker-portraits-${width}-${colorScheme}`)
       await page.keyboard.press("Escape")
-      await expect(page.getByLabel("Message", { exact: true })).toHaveValue(draft)
+      await expectTextBox(page.getByLabel("Message", { exact: true }), draft)
     })
   }

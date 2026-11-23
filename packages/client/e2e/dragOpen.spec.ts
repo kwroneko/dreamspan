@@ -18,6 +18,7 @@ import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { removeAttachment } from "./support/attachments.ts"
 import { SHAPES, shapeCard } from "./support/shapes.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 test.setTimeout(120_000)
@@ -352,7 +353,7 @@ for (const theme of ["light", "dark"] as const) {
     await expect(page.getByRole("region", { name: "Card editor" })).toBeVisible()
     await frame.locator(`${STRIP_TAB} [role=tab]`).first().click()
     await expect(message).toBeVisible()
-    await expect(message).toHaveValue("")
+    await expectTextBox(message, "")
     await expect(attachments(page)).toHaveCount(0)
     await expect(page.getByText("reload to retry")).toHaveCount(0)
 
