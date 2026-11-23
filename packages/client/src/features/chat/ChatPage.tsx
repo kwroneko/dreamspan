@@ -1103,7 +1103,7 @@ function ChatSurface({
                 // One line, not a block: it stays while the chat is read for hours.
                 <div
                   role="status"
-                  className="chat-column flex items-center gap-2 border-b border-border px-2 pb-1 text-sm text-muted"
+                  className="chat-column flex items-center gap-2 border-b border-border px-2 pb-2 text-sm text-muted"
                 >
                   {/* A phone's line has room for the gist only; the button says the rest. */}
                   <span className="min-w-0 flex-1 truncate">
