@@ -13,6 +13,7 @@ import { timelineBoundaries, timelineSummaries } from "./presentation.tsx"
 import type { TimelineTransformV1, TimelineInputV1, TimelineRowV1 } from "../../../../plugin-api/src/display.ts"
 import { mergeTimeline, historyTimeline, lcmTimeline } from "./timelineParts.ts"
 import { Markdown } from "../../ui/Markdown.tsx"
+import { hiddenLineText } from "./historyLines.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
 interface RenderContext {
@@ -38,6 +39,8 @@ export interface TimelineContext {
   readonly summaries: boolean
   readonly divider: number
   readonly historyDivider: number
+  /** Where the hidden line goes (historyLines.ts); absent or -1: none. */
+  readonly hiddenDivider?: number
 }
 export interface TimelineTransform {
   readonly id: string
@@ -118,6 +121,7 @@ export const timelineInput = (rows: ReadonlyArray<TimelineRow>, context: Timelin
     hasBudget: !!context.view.history?.budget,
     assemblyError: !!context.view.history?.assemblyError,
     historyDivider: context.historyDivider,
+    hiddenDivider: context.hiddenDivider ?? -1,
     divider: context.divider,
     summaries: context.summaries,
     lcm: context.lcm
@@ -229,6 +233,14 @@ const builtinTimelineBodies: ReadonlyArray<Parameters<typeof timelineBodies.regi
         )
       }
     }
+  },
+  {
+    id: "hidden-history",
+    source: import.meta.url,
+    row: (_body, context, fields) => ({
+      ...fields,
+      render: () => <Alert tone="neutral">{hiddenLineText(context.view.history?.summaryNotes)}</Alert>
+    })
   },
   {
     id: "lcm-tabs",

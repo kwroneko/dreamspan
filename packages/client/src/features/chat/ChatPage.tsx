@@ -67,6 +67,7 @@ import { type ContextMark, Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
 import { ChatSession, type ChatView } from "./session.ts"
 import { boundaryIndex, placeOf } from "./summaryBoundary.ts"
+import { historyLines } from "./historyLines.ts"
 import { LET_GO } from "./composition.ts"
 import { flashWhenShown } from "./jumpFlash.ts"
 import { kindRootProps, summarizes, useChatKindLook } from "./kindLooks.ts"
@@ -203,20 +204,9 @@ export function MessageList({
     document.addEventListener("click", dismiss)
     return () => document.removeEventListener("click", dismiss)
   }, [spacing, revealed])
-  let historyDivider = -1
-  if (budget && entries.length > 0) {
-    const start = history.historyStart
-    if (start && (entries.some(outOfContext) || (view.older !== null && start.depth > (through ?? -1) + 1))) {
-      const first = entries.findIndex(
-        (e) => !e.contextExcluded && placeOf(e) >= start.depth && placeOf(e) > (through ?? -1)
-      )
-      if (first < 0) {
-        if (view.newer === null) historyDivider = entries.length
-      } else if (first > 0 || placeOf(entries[first]!) === start.depth) historyDivider = first
-    } else if (budget.nonHistoryTokens + budget.responseReserve > budget.maximum && view.newer === null) {
-      historyDivider = entries.length
-    }
-  }
+  // The size line under the last message the budget left out, and the hidden line above the
+  // first message sent after a hidden run (historyLines.ts).
+  const { size: historyDivider, hidden: hiddenDivider } = historyLines(view, through)
   // The divider is a row of its own, before the entry at `divider` (-1: none).
   const divider =
     boundarySlots.entries.length === 0
@@ -228,8 +218,8 @@ export function MessageList({
   // A transform's own inputs (the threads' sets) changed: the rows are made again.
   const inputs = useTimelineInputs()
   const timelineContext = useMemo(
-    () => ({ view, lcm, summaries, divider, historyDivider }),
-    [view, lcm, summaries, divider, historyDivider]
+    () => ({ view, lcm, summaries, divider, historyDivider, hiddenDivider }),
+    [view, lcm, summaries, divider, historyDivider, hiddenDivider]
   )
   const rows = useTransformedRows(entries, transforms.entries, timelineContext, inputs)
   const rowCount = rows.length
