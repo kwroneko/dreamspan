@@ -1666,15 +1666,16 @@ export function SourceChips({ browse }: { browse: SourceBrowse }) {
         {hidden.label} hidden (default)
       </Chip>
     )
-  if (chips.length === 0) return null
+  if (chips.length === 0 && browse.filterCount === 0) return null
   return (
     <div role="group" aria-label="Active filters" className="flex min-w-0 flex-wrap items-center gap-1.5">
       {chips}
-      {chosen > 0 && (
+      {/* Also when only a default was switched off (covers included): every filter back to its default. */}
+      {(chosen > 0 || browse.filterCount > 0) && (
         <Button
           variant="ghost"
           className="h-7 px-2 text-xs"
-          hint="Removes every filter you chose."
+          hint="Puts every filter back to its default."
           onClick={() => clearFilters(browse)}
         >
           Clear all

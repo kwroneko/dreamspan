@@ -164,6 +164,12 @@ for (const width of [1440, 390])
       await expect(chips).not.toContainText("without a cover")
       controls = await filterControls(page, main)
       await expect(controls.getByRole("checkbox", { name: "Only cards with a cover", exact: true })).not.toBeChecked()
+      // Clear all puts every filter back to its default: the box is ticked again, its chip back.
+      await closeSheet(page)
+      await chips.getByRole("button", { name: "Clear all", exact: true }).click()
+      await expect(chips).toContainText("Cards without a cover hidden (default)")
+      controls = await filterControls(page, main)
+      await expect(controls.getByRole("checkbox", { name: "Only cards with a cover", exact: true })).toBeChecked()
 
       // On a narrow bar, Show results closes the sheet to the cards.
       if (width === 390) {

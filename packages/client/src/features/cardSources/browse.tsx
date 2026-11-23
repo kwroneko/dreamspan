@@ -380,7 +380,8 @@ export function SourceFiltersButton({
     <Tooltip label={`Click to show every filter ${browse.info?.name ?? ""} offers`}>
       <Button
         variant="ghost"
-        className={`h-8 gap-1 px-2 @xl:hidden ${pressedButtonClass}`}
+        // Compact, the size of the bar's other icon buttons; the count is a small badge in its corner.
+        className={`${compact ? "relative size-8! px-0!" : "h-8! gap-1 px-2!"} @xl:hidden ${pressedButtonClass}`}
         aria-pressed={browse.filtersOpen}
         aria-expanded={browse.filtersOpen}
         aria-controls={panelId}
@@ -389,7 +390,18 @@ export function SourceFiltersButton({
       >
         <Icon name="sliders" />
         {!compact && "Filters"}
-        {count > 0 && <span className="text-muted tabular-nums">{count}</span>}
+        {count > 0 &&
+          (compact ? (
+            <span
+              aria-hidden="true"
+              data-layout-audit-ignore="overlap: The count is a badge on the icon's corner, keeping the button the size of its neighbours"
+              className="absolute top-0.5 right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-accent px-0.5 text-[10px] leading-none text-accent-contrast tabular-nums"
+            >
+              {count}
+            </span>
+          ) : (
+            <span className="text-muted tabular-nums">{count}</span>
+          ))}
       </Button>
     </Tooltip>
   )

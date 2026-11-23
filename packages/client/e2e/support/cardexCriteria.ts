@@ -140,11 +140,12 @@ export function cardexCriteriaTests() {
             await closeSheet(page)
             await expect(chips).not.toContainText("without a cover")
             await expect(page).toHaveURL(/has_cover%22%3A%22false|has_cover":"false/)
-            // Ticked again, the default is back.
-            controls = await filterControls(page, scope)
-            await controls.getByRole("checkbox", { name: "Only cards with a cover", exact: true }).click()
-            await closeSheet(page)
+            // Clear all puts it back to its default, ticked again.
+            await chips.getByRole("button", { name: "Clear all", exact: true }).click()
             await expect(chips).toContainText("Cards without a cover hidden (default)")
+            controls = await filterControls(page, scope)
+            await expect(controls.getByRole("checkbox", { name: "Only cards with a cover", exact: true })).toBeChecked()
+            await closeSheet(page)
             // Alternatives: "or" makes a tag an alternative to one required.
             controls = await filterControls(page, scope)
             const tagField = controls.getByRole("textbox", { name: "Tags", exact: true })
@@ -209,18 +210,14 @@ export function cardexCriteriaTests() {
             await chips.getByRole("button", { name: "Not fantasy", exact: true }).click()
             await expect(chips.getByRole("button", { name: "+fantasy", exact: true })).toBeVisible()
             await clear()
+            // The sidebar's narrow bar (Show, sort, Filters) and its cards, with the sheet closed.
+            const sidebarBar = ":has(> [data-shell-list])"
             // Audit the bar, and with a panel open: its popover, or the sheet that covers the page.
             for (const title of ["", "Sites", "Creators", "Tokens", "Created"]) {
               if (title) await openPanel(page, scope, title)
               const inSheet = await page.locator("[data-filter-sheet]").isVisible()
               await expectLayout(page, info, `cardex-panel-${place}-${title || "folded"}-${width}-${theme}`, {
-                scope: inSheet
-                  ? "[data-filter-sheet]"
-                  : title
-                    ? "body"
-                    : place === "home"
-                      ? "main"
-                      : "[data-shell-list]"
+                scope: inSheet ? "[data-filter-sheet]" : title ? "body" : place === "home" ? "main" : sidebarBar
               })
               if (title) await closePanel(page, title)
             }
@@ -368,9 +365,9 @@ export function cardexCriteriaTests() {
               expect(JSON.parse(restored.searchParams.get(key("sxtags"))!)).toEqual(["horror"])
             }
             await expectFilters(page)
-            // Every chip at once, the long ones included.
+            // Every chip at once, the long ones included, and the sidebar's bar with its count.
             await expectLayout(page, info, `cardex-all-chips-${place}-${width}-${theme}`, {
-              scope: place === "home" ? "main" : "[data-shell-list]"
+              scope: place === "home" ? "main" : sidebarBar
             })
             await page.reload()
             await revealSidebar(page)
