@@ -79,8 +79,8 @@ test("the model list says where each window comes from, and marks an assumed one
   await local.getByRole("button", { name: "Edit my-local-finetune" }).click()
   const dialog = page.getByRole("dialog")
   // The provider's limits, read-only (ftabs): the assumed window, and why it's assumed.
-  await expect(dialog).toContainText("128,000 tokens")
-  await expect(dialog).toContainText("Assumed: nothing reports this model's window")
+  await expect(dialog).toContainText("Max 128,000 (assumed)")
+  await expect(dialog).toContainText("Assumed: nothing reports this model’s window")
   await shoot(page, "model-assumed-1440-light")
 })
 

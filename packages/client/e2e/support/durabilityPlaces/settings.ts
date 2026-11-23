@@ -1,5 +1,5 @@
 // Text typed in settings, connections, files, workshops and other pages outside a chat.
-import type { Page } from "@playwright/test"
+import type { Locator, Page } from "@playwright/test"
 import { place, type PlaceContext } from "../durability.ts"
 import { filesOf } from "../files.ts"
 import { chooseCustomServer } from "../provider.ts"
@@ -150,20 +150,38 @@ export const settingsPlaces = [
     },
     shown: (page) => page.getByLabel("Name", { exact: true })
   }),
-  place({
-    name: "Model settings: advanced JSON",
-    source: "features/connections/models.tsx:653",
-    setup: async (ctx) => {
-      const saved = await connection(ctx)
-      await ctx.rpc((api) => api.AddUserModel({ connectionId: saved.id, key: `durable-${ctx.tag}`, overrides: {} }))
-      return { id: saved.id, key: `durable-${ctx.tag}` }
-    },
-    open: async (page, { id, key }, ctx) => {
-      await go(page, ctx, `/settings/connections/${id}`)
-      await page.getByRole("button", { name: `Edit ${key}`, exact: true }).click()
-      return page.getByRole("dialog").getByLabel("Advanced model settings (JSON)", { exact: true })
-    },
-    shown: (page) => page.getByRole("dialog").getByLabel("Advanced model settings (JSON)", { exact: true })
+  ...(
+    [
+      ["Model settings: a sampler's number", "modelControls.tsx:187", false, "Temperature"],
+      ["Model settings: a stop string", "modelControls.tsx:279", false, "Stop string 1"],
+      ["Model settings: an extra request parameter (Advanced)", "modelControls.tsx:279", true, "Parameter value 1"]
+    ] as const
+  ).map(([name, source, advanced, label]) => {
+    const box = (scope: Locator) => scope.getByRole("textbox", { name: label, exact: true })
+    return place({
+      name,
+      source: `features/connections/${source}`,
+      setup: async (ctx) => {
+        const saved = await connection(ctx)
+        const key = `durable-${ctx.tag}`
+        await ctx.rpc((api) =>
+          api.AddUserModel({
+            connectionId: saved.id,
+            key,
+            overrides: { settings: { stop: ["END"] }, sampling: { top_n_sigma: 1 } }
+          })
+        )
+        return { id: saved.id, key }
+      },
+      open: async (page, { id, key }, ctx) => {
+        await go(page, ctx, `/settings/connections/${id}`)
+        await page.getByRole("button", { name: `Edit ${key}`, exact: true }).click()
+        const dialog = page.getByRole("dialog")
+        if (advanced && !(await box(dialog).isVisible())) await dialog.getByText("Advanced", { exact: true }).click()
+        return box(dialog)
+      },
+      shown: (page) => box(page.getByRole("dialog"))
+    })
   }),
   place({
     name: "Models: filter",
@@ -181,7 +199,7 @@ export const settingsPlaces = [
   }),
   place({
     name: "Add a model: model id",
-    source: "features/connections/models.tsx:810",
+    source: "features/connections/models.tsx:162",
     setup: connection,
     open: async (page, saved, ctx) => {
       await go(page, ctx, `/settings/connections/${saved.id}`)

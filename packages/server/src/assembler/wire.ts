@@ -6,47 +6,11 @@ import { Predicate } from "effect"
 import { REPLY_TOOL, replyTool, schemaPrefillBudget } from "./prefill.ts"
 import type { Api, AssistantMessage, Context, Message, Model } from "@earendil-works/pi-ai"
 import type { AssembledRequest, ModelInput, RequestImage, RequestMessage, WireContext } from "./types.ts"
+import { claudeRules, modelRules } from "@dreamspan/shared/samplerRules.ts"
 
 /** The messages with the prefill appended as the start of the reply, where the model takes one. */
 const withPrefill = (request: AssembledRequest): ReadonlyArray<RequestMessage> =>
   request.prefill ? [...request.messages, { role: "assistant", content: request.prefill }] : request.messages
-
-const drop = (fields: Record<string, unknown>, ...keys: ReadonlyArray<string>) => {
-  for (const key of keys) delete fields[key]
-}
-
-/**
- * ST's rules for models that refuse some samplers: OpenAI's o-series, GPT-5 and GPT-6
- * Astra take `max_completion_tokens` and fewer samplers; Claude's newest models take none.
- */
-const modelRules = (fields: Record<string, unknown>, kind: string, key: string) => {
-  const gpt = kind === "openai-chat" || kind === "openrouter" || kind === "openai-responses"
-  // Responses has its own field for the length, which pi-ai sets.
-  const toCompletionTokens = () => {
-    if (kind === "openai-responses") return
-    fields.max_completion_tokens = fields.max_tokens
-    fields.max_tokens = undefined
-  }
-  if (gpt && (/^(o1|o3|o4)/.test(key) || (kind === "openrouter" && /^openai\/(o1|o3|o4)/.test(key)))) {
-    toCompletionTokens()
-    drop(fields, "temperature", "top_p", "frequency_penalty", "presence_penalty")
-  }
-  if (gpt && /gpt-5/.test(key)) {
-    toCompletionTokens()
-    if (/gpt-5-chat-latest/.test(key)) {
-      // As it is.
-    } else if (/gpt-5\.(1|2|3|4)/.test(key)) drop(fields, "frequency_penalty", "presence_penalty")
-    else drop(fields, "temperature", "top_p", "frequency_penalty", "presence_penalty")
-  }
-  if (gpt && /gpt-6-astra/.test(key)) {
-    toCompletionTokens()
-    drop(fields, "temperature", "top_p")
-  }
-  if (/claude-(fable|opus-5|sonnet-5)/.test(key)) {
-    drop(fields, "temperature", "top_p", "top_k", "frequency_penalty", "presence_penalty")
-  }
-  return fields
-}
 
 /**
  * The Chat Completions fields the assembler decides, as ST sends them: its custom source
@@ -92,18 +56,15 @@ export const chatCompletionsFields = (request: AssembledRequest, kind: string, k
 /** ST's Claude samplers: the limited models take temperature or top_p, the newest none. */
 const claudeSamplers = (request: AssembledRequest, key: string) => {
   const s = request.samplers
-  const fields: Record<string, unknown> = {
-    temperature: s.temperature,
-    top_p: s.top_p,
-    ...(s.top_k > 0 ? { top_k: s.top_k } : {})
-  }
-  if (/^claude-(opus-4-1|sonnet-4-5|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6)/.test(key)) {
-    drop(fields, (s.top_p < 1 ? "temperature" : "top_p") as string)
-  }
-  if (/^claude-(opus-4-7|opus-4-8)/.test(key) || /claude-(fable|opus-5|sonnet-5)/.test(key)) {
-    drop(fields, "temperature", "top_p", "top_k")
-  }
-  return fields
+  return claudeRules(
+    {
+      temperature: s.temperature,
+      top_p: s.top_p,
+      ...(s.top_k > 0 ? { top_k: s.top_k } : {})
+    },
+    key,
+    s.top_p
+  )
 }
 
 /** ST's Claude conversion of a message's name: examples get the bound names, others their own. */

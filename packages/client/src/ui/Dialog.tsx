@@ -18,6 +18,7 @@ export function Dialog({
   title,
   description,
   wide = false,
+  size = "normal",
   placement = "center",
   insetScroll = false,
   finalFocus,
@@ -30,6 +31,11 @@ export function Dialog({
   description?: ReactNode
   /** Room for two columns side by side on a wide screen. */
   wide?: boolean
+  /**
+   * "wide": most of a large screen, up to min(94vw, 1500px) and nearly its full height, for a
+   * form laid out in columns. On a narrow screen it's the usual full-width dialog.
+   */
+  size?: "normal" | "wide"
   /** Top placement keeps inline expansions from moving their trigger. */
   placement?: "center" | "top"
   /** Keep the scrollbar inside the padding, with equal visible content insets. */
@@ -79,7 +85,7 @@ export function Dialog({
           ref={content}
           finalFocus={finalFocus}
           initialFocus={focusOnOpen}
-          className={`${popup} ${wide ? "sm:max-w-5xl" : ""} ${placement === "top" ? "top-4! translate-y-0! [scrollbar-gutter:stable]" : ""} ${insetScroll ? "overflow-y-hidden! [scrollbar-gutter:auto]! [container-type:inline-size]" : ""}`}
+          className={`${popup} ${size === "wide" ? "sm:max-w-[min(94vw,1500px)] sm:max-h-[calc(100dvh-3rem)]" : wide ? "sm:max-w-5xl" : ""} ${placement === "top" ? "top-4! translate-y-0! [scrollbar-gutter:stable]" : ""} ${insetScroll ? "overflow-y-hidden! [scrollbar-gutter:auto]! [container-type:inline-size]" : ""}`}
         >
           {insetScroll ? (
             <div className="-my-5 -mr-5 min-h-0 overflow-y-auto py-5 [scrollbar-gutter:stable]" data-dialog-scroll>

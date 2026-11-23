@@ -49,9 +49,17 @@ export const registerPanels = () => [
         })),
       "model"
     ),
-    // The model is the account's: it's chosen here before the first send too; its settings show once saved.
+    // The model is the account's: chosen and its settings edited here before the first send too.
     pending: lazyPending(
-      () => import("../pickers/PanelPickers.tsx").then((p) => ({ default: () => <p.ModelTabPicker session={null} /> })),
+      () =>
+        Promise.all([import("./GenerationControls.tsx"), import("../pickers/PanelPickers.tsx")]).then(([m, p]) => ({
+          default: ({ view }: PendingPanelProps) => (
+            <>
+              <p.ModelTabPicker session={null} />
+              <m.GenerationSettingsPanel session={null} view={view} kind="model" />
+            </>
+          )
+        })),
       "model"
     )
   }),

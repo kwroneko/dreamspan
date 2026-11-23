@@ -119,10 +119,6 @@ const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
 
   // Settings and other pages.
   "features/credentials.tsx": [{ durable: "useUserDraft", what: "a new key's addresses" }],
-  "features/connections/models.tsx": [
-    { durable: "useUserDraft", what: "advanced model settings JSON" },
-    { durable: "useUserDraft", what: "capability overrides JSON" }
-  ],
   "features/network.tsx": [{ durable: "useDurableForm", what: "proxy bypass list (network settings form)" }],
   "features/mcp/list.tsx": [
     { durable: "useDurableForm", what: "new MCP server's \"What it's for\"" },
@@ -252,8 +248,18 @@ const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
     kept("useUserDraft", "new connection: model"),
     kept("useUserDraft", "new connection: concurrency")
   ],
-  "features/connections/models.tsx": times(4, kept("useUserDraft", "model limits, name, samplers, Add a model")),
   "features/connections/modelTable.tsx": [kept("usePlaceParam", "the model list's filter, in the URL (q)")],
+  "features/connections/models.tsx": [kept("useUserDraft", "Add a model: model id")],
+  "features/connections/ModelSettingsEditor.tsx": times(
+    8,
+    kept("useUserDraft", "model settings: name, history target, seed, images, caching, routing lists")
+  ),
+  "features/connections/modelControls.tsx": times(
+    4,
+    kept("useUserDraft", "model settings: a number, a limit, a row's name and value", [
+      "features/connections/ModelSettingsEditor.tsx"
+    ])
+  ),
   "features/connections/providerFields.tsx": [
     ...times(2, kept("useUserDraft", "region and project", ["features/connections/detail.tsx"])),
     secret,

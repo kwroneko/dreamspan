@@ -288,7 +288,7 @@ export function AwsKeyFields({
   )
 }
 
-const breakpointItems = [
+export const breakpointItems = [
   {
     value: "auto" as const,
     label: "Automatic",

@@ -666,6 +666,12 @@ export const resolveModel = (
   }
   const breakpoints = pick("cacheBreakpoints", "auto" as const)
   const cacheLayout = pick("cacheLayout", {})
+  // Reasoning nobody reports is assumed on (owner, 2026-11-23: "Every model today has thinking"),
+  // so a chosen effort is sent. Assumed, it changes nothing else: no effort sends no "off" value
+  // (the model's own default stands), and system messages keep the system role.
+  const reasoning = pick("reasoning", true)
+  const assumed = reasoning.source === "unknown"
+  const levels = pick("thinkingLevels", null)
   return {
     name: pick("name", key),
     context: pick("context", ASSUMED_CONTEXT),
@@ -673,8 +679,9 @@ export const resolveModel = (
     vision: pick("vision", false),
     maxImages: pick("maxImages", 4),
     midChatSystem: pick("midChatSystem", false),
-    reasoning: pick("reasoning", false),
-    thinkingLevels: pick("thinkingLevels", null),
+    reasoning,
+    thinkingLevels:
+      assumed && levels.value?.off === undefined ? { ...levels, value: { ...levels.value, off: null } } : levels,
     tools: pick("tools", false),
     prefill: pick("prefill", "none" as const),
     cacheTtlS: pick("cacheTtlS", null),
@@ -686,7 +693,12 @@ export const resolveModel = (
       cacheLayout.source === "user" || Object.keys(layout).length === 0
         ? cacheLayout
         : { value: { ...cacheLayout.value, ...layout }, source: "provider" },
-    compat: { ...connectionCompat, ...upstream.compat, ...overrides.compat },
+    compat: {
+      ...(assumed ? { supportsDeveloperRole: false } : {}),
+      ...connectionCompat,
+      ...upstream.compat,
+      ...overrides.compat
+    },
     sampling: { ...upstream.sampling, ...overrides.sampling },
     settings: { ...upstream.settings, ...overrides.settings },
     price: priced.price,
