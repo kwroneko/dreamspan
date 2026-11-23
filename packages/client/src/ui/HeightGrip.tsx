@@ -11,11 +11,14 @@ const HINT = "Drag to change the box's height. Double-click to let it fit its te
 const MIN_DRAGGED_HEIGHT = 64
 
 export function HeightGrip({
+  corner = false,
   label,
   height,
   onHeight,
   onReset
 }: {
+  /** Over the box's bottom-right corner, in its bottom padding, for a box with no strip to hold it. */
+  corner?: boolean
   /** The box's name, for the grip's accessible name. */
   label: string
   /** The box's height now, in pixels, where a drag starts from. */
@@ -30,8 +33,13 @@ export function HeightGrip({
       <span
         aria-label={`Resize ${label}`}
         data-height-grip
+        {...(corner
+          ? { "data-layout-overlay": "Height grip in the box's bottom padding, as a textarea's corner" }
+          : {})}
         // Pointer only, as a textarea's corner is: a tab stop on every text box would be in the way.
-        className="-mr-1.5 flex size-4 shrink-0 cursor-ns-resize touch-none items-end justify-end self-end pb-0.5 text-muted select-none hover:text-text max-sm:size-8"
+        className={`flex cursor-ns-resize touch-none items-end justify-end text-muted select-none hover:text-text ${
+          corner ? "absolute right-px bottom-0 h-2 w-3" : "-mr-1.5 size-4 shrink-0 self-end pb-0.5 max-sm:size-8"
+        }`}
         onPointerDown={(event) => {
           if (event.button !== 0) return
           // Keeps the editor's focus and selection, and stops a text selection starting.
@@ -52,7 +60,13 @@ export function HeightGrip({
         onLostPointerCapture={() => (drag.current = null)}
         onDoubleClick={onReset}
       >
-        <svg aria-hidden="true" viewBox="0 0 10 10" className="size-2.5" fill="none" stroke="currentColor">
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 10 10"
+          className={corner ? "size-2" : "size-2.5"}
+          fill="none"
+          stroke="currentColor"
+        >
           <path d="M9 1 1 9M9 5 5 9" strokeWidth="1.2" strokeLinecap="round" />
         </svg>
       </span>

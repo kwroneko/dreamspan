@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs"
 import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { expect, type Locator, type Page, test } from "@playwright/test"
+import { filesOf } from "./support/files.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -193,4 +194,51 @@ test("a textarea's corner resizes it past its max height; a double-click there u
   at = await corner()
   await page.mouse.dblclick(at.x, at.y)
   await expect.poll(() => height(keys)).toBeCloseTo(start, 0)
+})
+
+// A box with no strip (a text file's editor) has the grip over its corner, in its bottom padding:
+// at rest it's as tall as it was before the grip, its text and scrollbar uncovered.
+test("a box without a strip has its grip over the corner and keeps its height", async ({ page }, testInfo) => {
+  await login(page)
+  const files = filesOf(page.request, server().url)
+  await files.put("/files/grip/short.txt", "One line.")
+  await files.put("/files/grip/long.txt", longText)
+  for (const name of ["short.txt", "long.txt"]) {
+    await page.goto(`${server().url}/files?${new URLSearchParams({ path: "/files/grip", file: name })}`)
+    const opened = page.locator(`[data-file-open="/files/grip/${name}"]`)
+    await expect(opened.getByRole("textbox", { name: `Contents of ${name}` })).toContainText(
+      name === "short.txt" ? "One line." : "Line 1 of the harbour log."
+    )
+    const grip = opened.locator(`[aria-label="Resize Contents of ${name}"]`)
+    await expect(grip).toBeVisible()
+    const frame = frameOf(page, grip)
+    await expect(frame.locator("[data-field-chrome]")).toHaveCount(0)
+    const host = frame.locator("> div").first()
+    const scroller = frame.locator(".cm-scroller")
+
+    // The grip covers neither the scroller (its text and scrollbar) nor anything outside the box.
+    const gripBox = (await grip.boundingBox())!
+    const scrollerBox = (await scroller.boundingBox())!
+    const frameBox = (await frame.boundingBox())!
+    expect(gripBox.y).toBeGreaterThanOrEqual(scrollerBox.y + scrollerBox.height - 0.5)
+    expect(gripBox.y + gripBox.height).toBeLessThanOrEqual(frameBox.y + frameBox.height)
+    expect(gripBox.x + gripBox.width).toBeLessThanOrEqual(frameBox.x + frameBox.width)
+    if (name === "long.txt")
+      expect(await scroller.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+
+    // As tall as with master's styling (no grip room) at rest.
+    const withGrip = await height(frame)
+    await host.evaluate((element) => element.style.setProperty("--editor-grip-room", "0px"))
+    expect(await height(frame)).toBeCloseTo(withGrip, 1)
+    await host.evaluate((element) => element.style.setProperty("--editor-grip-room", "8px"))
+    expect(await height(frame)).toBeCloseTo(withGrip, 1)
+
+    if (name === "long.txt") {
+      await expectLayout(page, testInfo, "file-editor-corner-grip", { scope: "[data-file-open]" })
+      await drag(page, grip, 200)
+      await expect.poll(() => height(frame)).toBeGreaterThan(withGrip + 150)
+      await grip.dblclick()
+      await expect.poll(() => height(frame)).toBeCloseTo(withGrip, 1)
+    }
+  }
 })

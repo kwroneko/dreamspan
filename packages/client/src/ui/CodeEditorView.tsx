@@ -2,7 +2,7 @@ import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textAct
 import { defaultKeymap, history, historyKeymap, isolateHistory } from "@codemirror/commands"
 import { Compartment, EditorState, StateEffect, StateField, Transaction } from "@codemirror/state"
 import { Decoration, type DecorationSet, EditorView, keymap } from "@codemirror/view"
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react"
+import { type CSSProperties, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react"
 import type { CodeEditorProps } from "./CodeEditor.tsx"
 import { changeGutter, comparisonBase, lineChanges, quietMarkers } from "./codeChanges.ts"
 import { editorExtensions } from "./editorExtensions.ts"
@@ -30,6 +30,13 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
   const expand = props.expand !== false && props.textActions !== false && !props.readOnly
   // A corner grip sets the box's height, as a textarea's corner does.
   const resizable = props.resizable !== false
+  const strip =
+    props.textActions !== false ||
+    props.tools !== undefined ||
+    props.status !== undefined ||
+    props.lastRevision !== undefined
+  // Without a strip, the grip sits over the box's bottom-right corner, in its bottom padding.
+  const cornerGrip = resizable && !strip
   useLayoutEffect(() => {
     const mounted = mountEditor(host.current!, props, setSelected)
     controller.current = mounted
@@ -72,16 +79,12 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
         // The text actions and the field's own controls in the strip inside its bottom border.
         <FieldFrame
           side="bottom"
-          strip={
-            props.textActions !== false ||
-            props.tools !== undefined ||
-            props.status !== undefined ||
-            props.lastRevision !== undefined
-          }
+          strip={strip}
           status={props.status}
           grip={
             resizable ? (
               <HeightGrip
+                corner={cornerGrip}
                 label={props.label}
                 height={() => host.current!.getBoundingClientRect().height}
                 onHeight={(height) => controller.current?.setHeight(height)}
@@ -126,6 +129,7 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
             data-layout-audit-ignore="inset: Editor surface fills its own bordered field"
             ref={host}
             className="min-w-0 overflow-hidden rounded-md"
+            style={cornerGrip ? ({ "--editor-grip-room": "8px" } as CSSProperties) : undefined}
           />
         </FieldFrame>
       )}

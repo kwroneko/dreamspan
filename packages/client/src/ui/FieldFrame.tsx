@@ -35,7 +35,7 @@ export function FieldFrame({
   status?: ReactNode
   /** The controls, at the strip's end; the strip takes its room even when there are none now. */
   tools: ReactNode
-  /** A box's height grip (`HeightGrip`), in the strip's end corner, always shown; it brings the strip with it. */
+  /** A box's height grip (`HeightGrip`), always shown: at the strip's end, or over the box's corner without a strip. */
   grip?: ReactNode
   children: ReactNode
   className?: string
@@ -46,7 +46,7 @@ export function FieldFrame({
       className={`${frame} ${side === "bottom" ? "flex-col" : "flex-row items-center"} ${className}`}
     >
       {children}
-      {(strip || grip !== undefined) && (
+      {strip && (
         <div
           data-field-chrome
           // Its controls are compact by design, along the box's own border (DESIGN §10.1): the box's
@@ -65,6 +65,7 @@ export function FieldFrame({
           {grip}
         </div>
       )}
+      {!strip && grip}
     </div>
   )
 }
