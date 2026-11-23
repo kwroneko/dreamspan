@@ -7,6 +7,7 @@ import type { RewriteOptions } from "../../src/assembler/scriptSources.ts"
 import type { NoteDoc } from "@dreamspan/shared/docs/note.ts"
 import type { LegacyPresetDoc as PresetDoc } from "@dreamspan/shared/docs/preset.ts"
 import type { FoldableEvent } from "@dreamspan/shared/state.ts"
+import type { ModelSettings } from "@dreamspan/shared/modelSettings.ts"
 import { Effect, Layer, Scope } from "effect"
 import { type Assembler, makeAssembler } from "../../src/assembler/assembler.ts"
 import { AssemblySources, type PositionedEvent } from "../../src/assembler/pipeline.ts"
@@ -75,6 +76,43 @@ export interface AssemblyFixture {
 }
 
 const event = (data: FoldableEvent["data"]): PositionedEvent => ({ depth: null, event: { scope: null, data } })
+
+/**
+ * The model's settings a fixture's legacy (ST-shaped) preset doc spells out: its samplers, context
+ * and reply length, history target and wire formatting. The assembler never reads these from a
+ * preset; the fixture moves them onto its model, so a test sizes the budget through the model.
+ */
+const modelSettingsOf = (doc: PresetDoc): ModelSettings => ({
+  samplers: doc.samplers,
+  names_behavior: doc.names_behavior,
+  squash: doc.squash,
+  postprocess: doc.postprocess,
+  use_sysprompt: doc.use_sysprompt,
+  ...(doc.context_target === undefined ? {} : { context_target: doc.context_target })
+})
+
+/** The model a fixture that names none generates with: a plain chat-completions model, window unknown. */
+const FIXTURE_MODEL: ModelInput = {
+  connectionId: "fixture-connection",
+  modelId: "fixture-model",
+  kind: "openai-chat",
+  api: "openai-completions",
+  key: "fixture-model",
+  prefill: "none",
+  cacheBreakpoints: "auto",
+  context: null,
+  presetOverride: null
+}
+
+/**
+ * A fixture model without settings of its own takes the ones its preset doc spells out; a fixture
+ * naming no model gets `FIXTURE_MODEL` so, and `model: null` means no model at all.
+ */
+const fixtureModel = (fixture: AssemblyFixture): ModelInput | null => {
+  const model = fixture.model === undefined ? FIXTURE_MODEL : fixture.model
+  if (model === null || model.settings) return model
+  return { ...model, settings: modelSettingsOf(fixture.preset) }
+}
 
 const fixtureSources = (fixture: AssemblyFixture) => {
   const slot = (i: number) => `slot-${i}`
@@ -185,7 +223,7 @@ const fixtureSources = (fixture: AssemblyFixture) => {
     model: (binding) =>
       Effect.sync(() => {
         fixture.modelAsked?.push(binding)
-        return fixture.model ?? null
+        return fixtureModel(fixture)
       }),
     ...(fixture.lcmDefaults !== undefined ? { lcmDefaults: () => Effect.succeed(fixture.lcmDefaults ?? null) } : {}),
     preset: () => Effect.succeed({ ref: "ref-preset", revision: "rev-preset", scope: "chat", doc: fixture.preset })

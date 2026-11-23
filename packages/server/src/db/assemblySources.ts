@@ -1093,7 +1093,16 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             AND e.owner_user_id=${userId} AND e.kind='preset' AND e.deleted_at IS NULL AND e.archived_at IS NULL`
           if (available) {
             const found = yield* presetFrom(chain.summary, "user")
-            if (found) return found
+            if (found)
+              return {
+                ...found,
+                doc: withModelSettings(
+                  found.doc,
+                  resolvedModel?.settings ?? {},
+                  resolvedModel?.context,
+                  resolvedModel?.maxOutput
+                )
+              }
           }
         }
         const user = chain.chat ? (chain.chat.ref ?? null) : (yield* defaults).preset

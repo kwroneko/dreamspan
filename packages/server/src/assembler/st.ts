@@ -325,8 +325,8 @@ export const compose = (input: {
     throw new AssemblyFailed({
       reason: "budget",
       message:
-        "The preset's prompts and the cards don't fit in the context the preset allows " +
-        "(its context size less its response length). Raise the context size, or turn prompts off."
+        "The preset's prompts and the cards don't fit in the context this model allows " +
+        "(its context size less its reply length). Raise the model's context size, or turn prompts off."
     })
   }
 
@@ -419,9 +419,10 @@ export const compose = (input: {
     historyBudget,
     messages: afterTail ? messages : [...messages, ...control],
     historySent,
-    historyTotal: input.chat.filter((line) => line.kind === "history").length,
+    // An order without the marker (or with it off) sends none by choice: nothing was cut.
+    historyTotal: has("chatHistory") ? input.chat.filter((line) => line.kind === "history").length : 0,
     examplesSent,
-    examplesTotal: input.examples.length
+    examplesTotal: has("dialogueExamples") ? input.examples.length : 0
   }
 }
 

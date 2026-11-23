@@ -39,7 +39,7 @@ import { lcmStage, summaryBlock } from "./lcm.ts"
 import { knowledgeStage, withoutUnknown } from "./knowledge.ts"
 import { imageTokensStage, limitImageEstimates } from "./imageTokens.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
-import { contextBudget, targetBudget, loreAllowance, loreBudget } from "./budget.ts"
+import { contextBudget, contextLimit, targetBudget, loreAllowance, loreBudget } from "./budget.ts"
 // The built-in assembler stages, in registration order (ARCHITECTURE §15 lists them).
 import type { ChatMessage } from "@dreamspan/shared/macros/context.ts"
 import type { CardFields } from "@dreamspan/shared/macros/context.ts"
@@ -287,12 +287,13 @@ const presetStage: AssemblerStage = {
         connection: null,
         ...(settings?.withPreset === "specific" && settings.preset ? { summary: settings.preset } : {})
       })
+      // The budget, samplers and wire settings are always the model's (or, with no model, the
+      // defaults over the assumed window): whatever a preset document carries never applies.
       const model = assembly.model
-      if (model?.settings)
-        assembly.preset = {
-          ...assembly.preset,
-          doc: withModelSettings(assembly.preset.doc, model.settings, model.context, model.maxOutput)
-        }
+      assembly.preset = {
+        ...assembly.preset,
+        doc: withModelSettings(assembly.preset.doc, model?.settings ?? {}, model?.context, model?.maxOutput)
+      }
       // A planner that sizes its turns' replies from the model (spec/WORKSHOP-CONTEXT.md §1.2):
       // the model's max output within a quarter of the context size; its own setting still wins.
       if (
@@ -2680,7 +2681,8 @@ const composeStage = sync("compose", (assembly) => {
         (n, failure) => n + countMessage({ content: assembly.pieces[failure.piece]!.text }),
         0
       ),
-    examplesTotal: examples.length
+    // Examples only count as cut when the order sends them: with the marker off, none were meant to go.
+    examplesTotal: actualPlacement.collection.some((p) => p.identifier === "dialogueExamples") ? examples.length : 0
   }
   assembly.postNames = postNames
   assembly.composition = composition
@@ -2727,8 +2729,8 @@ const composeStage = sync("compose", (assembly) => {
             )
             .join(" ")
         : composition.historySent === 1
-          ? "The context holds only the last message: older ones don't fit the preset's context size."
-          : `The context holds the last ${composition.historySent} messages: older ones don't fit the preset's context size.`
+          ? `The context holds only the last message: older ones don't fit ${contextLimit(assembly)}.`
+          : `The context holds the last ${composition.historySent} messages: older ones don't fit ${contextLimit(assembly)}.`
     })
   }
   if (composition.examplesSent < composition.examplesTotal) {
@@ -2736,8 +2738,8 @@ const composeStage = sync("compose", (assembly) => {
       kind: "examples_truncated",
       message:
         composition.examplesTotal - composition.examplesSent === 1
-          ? "1 example dialogue didn't fit the preset's context size."
-          : `${composition.examplesTotal - composition.examplesSent} example dialogues didn't fit the preset's context size.`
+          ? `1 example dialogue didn't fit ${contextLimit(assembly)}.`
+          : `${composition.examplesTotal - composition.examplesSent} example dialogues didn't fit ${contextLimit(assembly)}.`
     })
   }
 })
