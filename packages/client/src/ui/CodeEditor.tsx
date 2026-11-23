@@ -1,4 +1,11 @@
-import { lazy, type ReactNode, Suspense } from "react"
+import type { Extension } from "@codemirror/state"
+import { lazy, type ReactNode, type Ref, Suspense } from "react"
+
+/** What a text box offers its owner beyond its props. */
+interface TextSurfaceHandle {
+  /** Focus the text, with the caret at `at` (an offset in the text) when given, else where it was. */
+  readonly focus: (at?: number) => void
+}
 
 export interface CodeEditorProps {
   highlights?: ReadonlyArray<{ readonly at: number; readonly length: number }> | undefined
@@ -47,6 +54,11 @@ export interface CodeEditorProps {
   onSelectionRangeChange?: ((range: { readonly at: number; readonly length: number }) => void) | undefined
   onSelectionChange?: ((text: string) => void) | undefined
   onBlur?: (() => void) | undefined
+  /** More CodeMirror extensions for this box (the message editor's styling); a new value reconfigures them. */
+  extensions?: Extension | undefined
+  /** A class on the element holding the text, for what the text inherits there (its font, line height). */
+  surfaceClass?: string | undefined
+  ref?: Ref<TextSurfaceHandle> | undefined
 }
 
 const Editor = lazy(() => import("./CodeEditorView.tsx"))

@@ -10,15 +10,9 @@ import {
 } from "react"
 import { diff } from "@codemirror/merge"
 import rehypeRaw from "rehype-raw"
-import {
-  Block,
-  type BlockProps,
-  defaultRehypePlugins,
-  defaultRemarkPlugins,
-  parseMarkdownIntoBlocks,
-  Streamdown
-} from "streamdown"
-import { fixMarkdownMapped, fixMarkdownRuns, stFormatting } from "./stFormatting.ts"
+import { Block, type BlockProps, defaultRehypePlugins, Streamdown } from "streamdown"
+import { fixMarkdownMapped, fixMarkdownRuns } from "./stFormatting.ts"
+import { stBlocks, stHtmlRemarkPlugins, stRemarkPlugins } from "./stPipeline.ts"
 import { MESSAGE_SCOPE, messageFontClass, scopeStyles } from "./html/css.ts"
 import { BlockedMediaNote, htmlComponents, MediaBlocked } from "./html/HtmlParts.tsx"
 import {
@@ -33,7 +27,6 @@ import { effectiveSchema, htmlPartsRevision, subscribeHtmlParts } from "./html/p
 import { htmlFinish, htmlMark, htmlPrepare, htmlRaw, htmlSanitize, urlAddress } from "./html/rehypeHtml.ts"
 import { savedMediaRevision, subscribeSavedMedia } from "./html/savedMedia.ts"
 import type { MessageTextProps } from "./Markdown.tsx"
-import { withDefinitions } from "./referenceDefinitions.ts"
 import {
   sourcePositions,
   packSourceOffsets,
@@ -134,11 +127,8 @@ function Strong({ node: _node, ...props }: ComponentProps<"strong"> & { node?: u
 // ins survives the unchanged sanitizer. Only our Markdown AST emits it; raw HTML
 // is still text. The React component then supplies the underline presentation.
 const components = { a: Link, ins: Underline, strong: Strong }
-const remarkPlugins = [...Object.values(defaultRemarkPlugins), stFormatting]
-const htmlRemarkPlugins = [
-  ...Object.values(defaultRemarkPlugins),
-  [stFormatting, { html: true }]
-] as typeof remarkPlugins
+const remarkPlugins = stRemarkPlugins
+const htmlRemarkPlugins = stHtmlRemarkPlugins
 const SourceBlocks = createContext<ReadonlyArray<string>>([])
 /** How this text's blocks render HTML: null shows it as text. */
 const BlockHtml = createContext<{
@@ -228,17 +218,12 @@ export function StMarkdown({ text, sourceText = text }: MessageTextProps) {
   const { fixed, renderedBlocks, sourceBlocks } = useMemo(() => {
     const indexed = fixMarkdownRuns(text)
     const normalized = indexed.text.replace(/\r\n|\r/g, "\n")
-    const parsed = parseMarkdownIntoBlocks(normalized)
+    const { blocks: parsed, starts, rendered } = stBlocks(normalized)
     // While a display transform catches up with a stream, its previous answer can
     // still be an unchanged prefix. Those characters have the same source offsets.
     if (sourceText.startsWith(text) && normalized === indexed.text) {
-      let cursor = 0
-      const sourceBlocks = parsed.map((block) => {
-        const start = normalized.indexOf(block, cursor)
-        cursor = start + block.length
-        return packSourceRuns(indexed.runs, start, cursor)
-      })
-      return { fixed: normalized, renderedBlocks: [...withDefinitions(normalized, parsed)], sourceBlocks }
+      const sourceBlocks = parsed.map((block, i) => packSourceRuns(indexed.runs, starts[i]!, starts[i]! + block.length))
+      return { fixed: normalized, renderedBlocks: [...rendered], sourceBlocks }
     }
     const fixed = fixMarkdownMapped(text)
     const display = displayRanges(sourceText, text)
@@ -252,14 +237,10 @@ export function StMarkdown({ text, sourceText = text }: MessageTextProps) {
       offsets.push(first && last ? [first[0], last[1]] : null)
       return char === "\r\n" || char === "\r" ? "\n" : char
     })
-    let cursor = 0
-    const sourceBlocks: string[] = []
-    for (const block of parsed) {
-      const start = normalized.indexOf(block, cursor)
-      cursor = start + block.length
-      sourceBlocks.push(packSourceOffsets(offsets.slice(start, cursor)))
-    }
-    return { fixed: normalized, renderedBlocks: [...withDefinitions(normalized, parsed)], sourceBlocks }
+    const sourceBlocks = parsed.map((block, i) =>
+      packSourceOffsets(offsets.slice(starts[i]!, starts[i]! + block.length))
+    )
+    return { fixed: normalized, renderedBlocks: [...rendered], sourceBlocks }
   }, [text, sourceText])
   const blocks = useCallback(() => renderedBlocks, [renderedBlocks])
   const blocked = html !== null && mediaScope === null && (blockedText === text || styles?.blocked === true)

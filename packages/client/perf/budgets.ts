@@ -57,5 +57,11 @@ export const budgets = {
   tabCodeWaits: 0,
   tabShownMs: 6000,
   /** From navigation to an editor ready, for a 50 KB card or a 100-prompt preset. */
-  editorOpenMs: 8000
+  editorOpenMs: 8000,
+  /** Typing into a 20,000 character message being edited (editStyle.perf.ts), per keystroke: the styling's own page script. */
+  editStylingMsPerKey: 4,
+  /** All the page's script per keystroke there: the editor, the draft, the styling. */
+  editScriptMsPerKey: 16,
+  /** From a key event to the frame after its paint, 95th percentile. */
+  editKeyToPaintP95Ms: 50
 }

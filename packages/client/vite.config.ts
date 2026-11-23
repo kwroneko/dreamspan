@@ -93,8 +93,23 @@ const frameLibraries: Plugin = {
   }
 }
 
+/**
+ * Workers get a package's worker build where it has one: Markdown's entity decoding
+ * (micromark) has a browser build that decodes through `document`, which a worker hasn't
+ * (src/ui/messageStyles.worker.ts parses Markdown). Its package names the build for workers.
+ */
+const WORKER_BUILDS: Record<string, string> = {
+  "decode-named-character-reference": "decode-named-character-reference/index.js"
+}
+const workerBuilds = (): Plugin => ({
+  name: "worker-builds",
+  enforce: "pre",
+  resolveId: (source) => (source in WORKER_BUILDS ? moduleFile(WORKER_BUILDS[source]!) : null)
+})
+
 export default defineConfig({
   define: { "import.meta.env.VITE_BUILD_ID": JSON.stringify(buildId) },
+  worker: { plugins: () => [workerBuilds()] },
   plugins: [
     react(),
     // Cached per file across builds (scripts/babelCache.ts): a UI change recompiles only what changed.
