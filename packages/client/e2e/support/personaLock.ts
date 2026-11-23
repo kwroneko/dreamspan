@@ -83,8 +83,11 @@ export function personaLockTests() {
           const rowBox = (await lockRow(name(mapmaker)).boundingBox())!
           expect(rowBox.y).toBeGreaterThanOrEqual(listBox.y + listBox.height - 1)
           expect(rowBox.height).toBeLessThanOrEqual(20)
+          // The row is under the list on every tab; picking a persona is on Personas.
+          await picker.getByRole("tab", { name: "Personas", exact: true }).click()
+          await expect(lockRow(name(mapmaker))).toBeVisible()
           await picker
-            .getByRole("group", { name: "Your persona" })
+            .getByRole("tabpanel", { name: "Personas" })
             .getByRole("option", { name: name(pilot), exact: true })
             .click()
           await expect(speaking(page, name(pilot))).toBeVisible()

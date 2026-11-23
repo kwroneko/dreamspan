@@ -124,8 +124,9 @@ test("the persona's tab is a full card, with switching kept under the composer",
   await expect(tab.getByRole("button", { name: /^Playing as / })).toHaveCount(0)
   await closePanel(page)
   await page.getByRole("button", { name: /^Speaking as / }).click()
+  await page.getByRole("tab", { name: "Personas", exact: true }).click()
   await page
-    .getByRole("group", { name: "Your persona", exact: true })
+    .getByRole("tabpanel", { name: "Personas", exact: true })
     .getByRole("option", { name: "Wren", exact: true })
     .click()
   const switched = await openPanel(page, "Wren")

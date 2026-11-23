@@ -7,7 +7,7 @@ import type { AppError } from "../../errors.ts"
 import { castView, CastContext } from "./cast.ts"
 import type { PendingChat } from "./pendingChat.ts"
 import type { ChatSession } from "./session.ts"
-import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
+import { CardSwitcher } from "./SpeakerSwitcher.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { pendingPersonaPickerRows } from "./presentation.tsx"
 
@@ -34,7 +34,7 @@ export function PersonaSwitch({
   return (
     <>
       <CastContext value={view}>
-        <SpeakerSwitcher
+        <CardSwitcher
           listCards={listCards}
           speaker={persona}
           recent={[]}
@@ -62,7 +62,7 @@ export function PendingPersonaSwitch({ pending, trigger }: { pending: PendingCha
   )
   return (
     <CastContext value={view}>
-      <SpeakerSwitcher
+      <CardSwitcher
         listCards={pending.listCards}
         speaker={state.persona}
         recent={[]}

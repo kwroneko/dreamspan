@@ -468,11 +468,12 @@ function Pending({
       recent: [],
       pending: true,
       onPick: (picked) => setSelectedSpeaker(picked.entityId),
-      // Your persona, under Speak as, as at the saved chat's composer: it changes only this chat.
+      // The persona tabs after Speak as, as at the saved chat's composer: it changes only this chat.
       personas: {
         current: persona,
         listCards: pending.listCards,
-        onPick: (picked) => pending.setPersona(picked.entityId)
+        onPick: (picked) => pending.setPersona(picked.entityId),
+        onNone: () => pending.setPersona(null)
       },
       // The same rows as the Cast tab's persona picker: the persona lock.
       footer: <SlotOutlet slot={pendingPersonaPickerRows} props={{ pending }} />

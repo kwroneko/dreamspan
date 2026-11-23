@@ -71,15 +71,17 @@ for (const [width, theme, model, asCard] of [
     const picker = page.getByRole("dialog", { name: "Speak as", exact: true })
     // The same persona also appears under Your persona, a different action
     // (ARCHITECTURE §12, Speaker search). Choose only who writes the next turn.
-    const speakers = picker.getByRole("group", { name: "Speak as", exact: true })
+    const speakers = picker.getByRole("tabpanel", { name: "Speak as", exact: true })
     await expect(speakers.getByRole("option", { name, exact: true })).toBeVisible()
     await expect(speakers.getByRole("option", { name: personaName, exact: true })).toBeVisible()
     await expect(speakers.getByRole("option")).toHaveCount(2)
+    await picker.getByRole("tab", { name: "Personas", exact: true }).click()
     await expect(
       picker
-        .getByRole("group", { name: "Your persona", exact: true })
+        .getByRole("tabpanel", { name: "Personas", exact: true })
         .getByRole("option", { name: personaName, exact: true })
     ).toBeVisible()
+    await picker.getByRole("tab", { name: "Speak as", exact: true }).click()
     const selected = asCard ? name : personaName
     const speakerId = asCard ? cardId : personaId
     await speakers.getByRole("option", { name: selected, exact: true }).click()
