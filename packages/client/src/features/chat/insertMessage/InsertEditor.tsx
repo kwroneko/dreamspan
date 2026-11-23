@@ -17,7 +17,7 @@ import type { MessageDraft } from "../messageDraft.ts"
 import { positionOf } from "../position.ts"
 import type { ChatSession, Outcome } from "../session.ts"
 import { useComposerChoice } from "../speaker.ts"
-import { CardSwitcher } from "../SpeakerSwitcher.tsx"
+import { SpeakerSwitcher } from "../SpeakerSwitcher.tsx"
 import { cacheNotes } from "../CacheIndicator.tsx"
 import { editorKey } from "../messageDraft.ts"
 import { cacheLine, insertEstimates, insertPosition, rereadCount } from "./estimates.ts"
@@ -180,7 +180,7 @@ export function InsertEditor({
       {!phone && <h3 className="text-sm font-semibold">{title}</h3>}
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="text-muted">Speaker</span>
-        <CardSwitcher
+        <SpeakerSwitcher
           speaker={speaker}
           recent={recentSpeakers(view.entries, 4).filter((id) => id !== speaker)}
           onPick={(card) => setPicked(card.entityId)}

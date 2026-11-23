@@ -259,10 +259,7 @@ for (const width of [1440, 390])
       await expect(nextChip(page)).not.toHaveAccessibleName(nextName(mutedChoice))
       // Writing as a member (the muted one, explicitly) doesn't change who {{user}} is.
       await page.getByRole("button", { name: /^Speaking as / }).click()
-      await page
-        .getByRole("tabpanel", { name: "Speak as" })
-        .getByRole("option", { name: mutedName, exact: true })
-        .click()
+      await page.getByRole("group", { name: "Speak as" }).getByRole("option", { name: mutedName, exact: true }).click()
       await expect(page.getByRole("button", { name: `Speaking as ${mutedName}. Change the speaker` })).toBeVisible()
       const castAgain = await openPanel(page, "Cast")
       await expect(
@@ -275,7 +272,7 @@ for (const width of [1440, 390])
       const personaName = personaLabel!.replace(/^Playing as /, "").replace(/\. Change your persona$/, "")
       // In "Speak as": the popover's "Your persona" section lists them too, to play another persona.
       await page
-        .getByRole("tabpanel", { name: "Speak as" })
+        .getByRole("group", { name: "Speak as" })
         .getByRole("option", { name: personaName, exact: true })
         .click()
       const impersonated = provider.completions.length

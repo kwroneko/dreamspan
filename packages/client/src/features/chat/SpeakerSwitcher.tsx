@@ -1,14 +1,12 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
-// The one picker of who speaks and who the user plays (`{{user}}`, DESIGN §2.2), registered as
-// `chat.card-switcher` (presentation.tsx) and rendered through `CardSwitcher` everywhere: the
-// composer's chip (saved and new chats, workshops), the Cast and This chat tabs' Switch, a
-// workshop's start card, the insert editor. A search field on top, focused as it opens: typing
-// filters by name, the arrow keys move through what's left, Enter picks, Escape closes. Picking
-// a persona has the same tabs, rows, row menus, lock row and buttons wherever it is: Members (a
-// saved chat's), Personas, All cards (not for a workshop, whose persona comes from the folder),
-// opening on Personas. The composer's adds a Speak as tab before them, the one it opens on:
-// anyone in the chat, the speakers used last first. A library of hundreds of cards is filtered
-// in memory and only the rows in view are drawn.
+// The composer's speaker, always visible; it opens the chat's cast, the persona and the cards
+// in the chat (DESIGN §2.2: to speak as another card, add it to the chat first), with a search
+// field on top, focused as it opens: typing filters by name, the arrow keys move through
+// what's left, Enter picks, Escape closes. With nothing typed, the speakers used last come
+// first, then the cast. At the composer it has a second section, Your persona, the persona
+// folder with the current persona ticked; the same search filters both. The same switcher picks the persona (who `{{user}}` is) from
+// Members / Personas / All cards, opening on Personas: a library of hundreds of cards is
+// filtered in memory and only the first rows are drawn.
 import { CardSurface } from "../cardForks/surfaces.tsx"
 import { CardVersion } from "./CardVersion.tsx"
 import { useDefaultPersona } from "../characters/defaultPersona.tsx"
@@ -31,10 +29,8 @@ import { NewCardDialog } from "../editor/NewCard.tsx"
 import { Button } from "../../ui/Button.tsx"
 import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { useShowPanel } from "./panels.tsx"
-import { SlotOutlet } from "../../slots.tsx"
-import { cardSwitchers } from "./presentation.tsx"
 
-type SwitcherTab = "cast" | "members" | "personas" | "all"
+type SwitcherTab = "members" | "personas" | "all"
 
 // A 48 px portrait plus the row's 6 px top and bottom padding.
 const CARD_ROW_HEIGHT = 60
@@ -182,61 +178,63 @@ function CardOptions({
   )
 }
 
-/** The persona part of the composer's picker: who `{{user}}` is, picked on its persona tabs. */
+/** One row of the composer's sectioned list: a card, ticked when it's the current one. */
+function SectionRow({
+  id,
+  card,
+  index,
+  active,
+  current,
+  played,
+  onActive,
+  onPick
+}: {
+  id: string
+  card: CastCard
+  index: number
+  active: boolean
+  current: boolean
+  played: boolean
+  onActive: (index: number) => void
+  onPick: (card: CastCard) => void
+}) {
+  const away = (useCast().cast?.away ?? []).includes(card.entityId)
+  return (
+    <div
+      id={`${id}-${index}`}
+      role="option"
+      aria-label={card.name}
+      aria-description={card.subtitle?.trim() ? `Version: ${card.subtitle.trim()}` : undefined}
+      aria-selected={active}
+      aria-current={current || undefined}
+      onPointerDown={(event) => event.preventDefault()}
+      onPointerMove={() => !active && onActive(index)}
+      onClick={() => onPick(card)}
+      className="flex min-h-11 w-full shrink-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left text-sm aria-[current]:font-medium aria-selected:bg-surface-raised aria-selected:ring-1 aria-selected:ring-border"
+    >
+      <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="md" />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="[overflow-wrap:anywhere]">{card.name}</span>
+        <CardVersion card={card} />
+      </span>
+      {away && <span className="shrink-0 text-xs text-muted">away</span>}
+      {(played || card.persona) && <PersonaBadge played={played} />}
+      <CardSurface placement="persona-badge" entityId={card.entityId} />
+      {card.persona && (
+        <span onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+          <CardSurface placement="persona-menu" entityId={card.entityId} label={card.name} />
+        </span>
+      )}
+      {current && <Icon name="check" size={16} className="text-accent" />}
+    </div>
+  )
+}
+
+/** The composer's persona section: who `{{user}}` is, picked from the persona folder. */
 export interface PersonaSection {
   readonly current: EntityId | null
   readonly listCards: () => Promise<Outcome<ReadonlyArray<CastCard>>>
   readonly onPick: (card: CastCard) => void
-  /** Offered as "No persona" on the persona tabs. */
-  readonly onNone?: (() => void) | undefined
-}
-
-export interface SpeakerSwitcherProps {
-  /** The library's cards, which the persona is picked from. */
-  readonly listCards?: (() => Promise<Outcome<ReadonlyArray<CastCard>>>) | undefined
-  /** The card speaking, or with `persona`, the one the user plays. */
-  readonly speaker: EntityId | null
-  /** The speakers of the latest messages, most recent first: listed first. */
-  readonly recent: ReadonlyArray<EntityId>
-  readonly onPick: (card: CastCard) => void
-  /**
-   * Picks the persona alone (DESIGN §2.2: who `{{user}}` is), from the library: it opens on
-   * Personas every time.
-   */
-  readonly persona?: boolean | undefined
-  /** A chat not made yet: there are no members to join. */
-  readonly pending?: boolean | undefined
-  /** Offered as "No persona" (with `persona`). */
-  readonly onNone?: (() => void) | undefined
-  /** Its button's content in place of the chip ("Switch persona" where the name is already shown). */
-  readonly trigger?: ReactNode
-  /** The trigger's accessible name in place of "Playing as …" or "Speaking as …". */
-  readonly triggerLabel?: string | undefined
-  /** With `trigger`, its class in place of a secondary button's. */
-  readonly triggerClassName?: string | undefined
-  /**
-   * The composer's persona part: a Speak as tab (who the next message is from: anyone in the
-   * chat) comes first, then the persona tabs every persona picker has.
-   */
-  readonly personas?: PersonaSection | undefined
-  /** Only cards in the persona folder can be the persona (a workshop's): no All cards tab. */
-  readonly personasOnly?: boolean | undefined
-  /** Offered when no one in the chat has the name searched for: adding a card is the Cast tab's. */
-  readonly onAddToChat?: (() => void) | undefined
-  /** The trigger shows the portrait alone (the name is its label and tooltip). */
-  readonly compact?: boolean | undefined
-  /** Where on the page it is ("composer", "cast"): names its New persona form in the URL, so a reload opens it again. */
-  readonly place?: string | undefined
-  /** Rows under the list, inset as its rows are: the persona lock (DESIGN §2.2). */
-  readonly footer?: ReactNode
-}
-
-/**
- * The one speaker and persona picker, as registered (`chat.card-switcher`, presentation.tsx):
- * every place that picks who speaks or who the user plays renders this.
- */
-export function CardSwitcher(props: SpeakerSwitcherProps) {
-  return <SlotOutlet slot={cardSwitchers} props={props} />
 }
 
 export const SpeakerSwitcher = memo(function SpeakerSwitcher({
@@ -248,24 +246,47 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   pending = false,
   onNone,
   trigger,
-  triggerLabel,
-  triggerClassName,
   personas,
-  personasOnly = false,
   onAddToChat,
   compact = false,
-  footer,
+  header,
   place = "speaker"
-}: SpeakerSwitcherProps) {
+}: {
+  /** The library's cards, which the persona is picked from. */
+  listCards?: () => Promise<Outcome<ReadonlyArray<CastCard>>>
+  /** The card speaking, or with `persona`, the one the user plays. */
+  speaker: EntityId | null
+  /** The speakers of the latest messages, most recent first: listed first. */
+  recent: ReadonlyArray<EntityId>
+  onPick: (card: CastCard) => void
+  /**
+   * Picks the persona instead (DESIGN §2.2: who `{{user}}` is), from the library: it opens on
+   * Personas every time.
+   */
+  persona?: boolean
+  /** A chat not made yet: there are no members to join. */
+  pending?: boolean
+  /** Offered as "No persona". */
+  onNone?: () => void
+  /** Its button's text in place of the chip ("Switch persona" where the name is already shown). */
+  trigger?: ReactNode
+  /** The composer's second section, "Your persona", under "Speak as"; one search filters both. */
+  personas?: PersonaSection
+  /** Offered when no one in the chat has the name searched for: adding a card is the Cast tab's. */
+  onAddToChat?: () => void
+  /** The trigger shows the portrait alone (the name is its label and tooltip). */
+  compact?: boolean
+  /** Where on the page it is ("composer", "cast"): names its New persona form in the URL, so a reload opens it again. */
+  place?: string
+  /** Rows above the search field, as a picker's lock switch (the persona lock, DESIGN §2.2). */
+  header?: ReactNode
+}) {
   const view = useCast()
   const defaultPersona = useDefaultPersona()
   const defaultLabel = pending && persona && speaker !== null && speaker === defaultPersona ? " (default)" : ""
-  // Whether it picks a persona at all; with `personas`, also the speaker (its Speak as tab).
-  const picksPersona = persona || personas !== undefined
-  const firstTab: SwitcherTab = personas !== undefined ? "cast" : "personas"
   const [open, setOpen] = useState(false)
   const [making, setMaking] = useOpenPlace(`new-persona:${place}`)
-  const [tab, setTab] = useState<SwitcherTab>(firstTab)
+  const [tab, setTab] = useState<SwitcherTab>("personas")
   const [all, setAll] = useState<ReadonlyArray<CastCard> | null>(null)
   const [query, setQuery] = useState("")
   const [active, setActive] = useState(0)
@@ -290,34 +311,40 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
       }),
     [memberIds, view.cards]
   )
-  // Picking on this tab picks the speaker; on the others, the persona.
-  const speakerTab = !picksPersona || tab === "cast"
-  // The persona now: with `persona` the chip's card, else the composer's persona part's.
-  const personaNow = persona ? speaker : (personas?.current ?? null)
-  const pickPersona = persona ? onPick : (personas?.onPick ?? onPick)
-  const noPersona = persona ? onNone : personas?.onNone
   // A card in the chat by the name the chat uses for it (its own version's, say).
   const cards = useMemo(() => (all ?? []).map((card) => view.cards.get(card.entityId) ?? card), [all, view.cards])
   const shown = useMemo(() => {
-    if (speakerTab)
-      return ranked(
-        castIds.flatMap((id) => view.cards.get(id) ?? []),
-        query,
-        recent,
-        castIds
-      )
-    // The persona played comes first, then the members.
-    const first = personaNow === null ? [] : [personaNow]
-    const source = tab === "members" ? members : tab === "personas" ? cards.filter((card) => card.persona) : cards
-    return ranked(source, query, first, memberIds)
-  }, [speakerTab, castIds, view.cards, query, recent, personaNow, tab, members, cards, memberIds])
+    const source = !persona
+      ? castIds.flatMap((id) => view.cards.get(id) ?? [])
+      : tab === "members"
+        ? members
+        : tab === "personas"
+          ? cards.filter((card) => card.persona)
+          : cards
+    return ranked(source, query, recent, persona ? memberIds : castIds)
+  }, [persona, castIds, view.cards, tab, members, cards, query, recent, memberIds])
+  // The composer's persona section: the persona folder, the current persona first.
+  const personaShown = useMemo(
+    () =>
+      personas === undefined
+        ? []
+        : ranked(
+            cards.filter((card) => card.persona),
+            query,
+            personas.current === null ? [] : [personas.current],
+            []
+          ),
+    [personas, cards, query]
+  )
+  // Arrow keys and Enter move through both sections as one list.
+  const options = personas === undefined ? shown : [...shown, ...personaShown]
 
   const openChange = (next: boolean) => {
     setOpen(next)
     setQuery("")
     setActive(0)
-    if (!next || !picksPersona) return
-    setTab(firstTab)
+    if (!next || !(persona || personas)) return
+    setTab("personas")
     const list = personas?.listCards ?? listCards
     // Another selector or editor may have created a persona since this picker last opened.
     if (list)
@@ -327,11 +354,11 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
       })
   }
   const pickAt = (index: number) => {
-    const card = shown[index]
+    const card = options[index]
     if (card === undefined) return
     openChange(false)
-    if (speakerTab) onPick(card)
-    else pickPersona(card)
+    if (personas !== undefined && index >= shown.length) personas.onPick(card)
+    else onPick(card)
   }
   const pick = (card: CastCard) => pickAt(shown.indexOf(card))
   const showPanel = useShowPanel()
@@ -347,7 +374,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
     const card = result.value.find((c) => c.entityId === ref.entityId)
     if (!card) return
     reveal.current = card.entityId
-    pickPersona(card)
+    ;(personas ?? { onPick }).onPick(card)
   }
   useEffect(() => {
     const entity = reveal.current
@@ -358,11 +385,11 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault()
-      const last = Math.max(0, shown.length - 1)
+      const last = Math.max(0, options.length - 1)
       setActive((at) => (event.key === "ArrowDown" ? Math.min(at + 1, last) : Math.max(at - 1, 0)))
     } else if (event.key === "Home" || event.key === "End") {
       event.preventDefault()
-      setActive(event.key === "Home" ? 0 : Math.max(0, shown.length - 1))
+      setActive(event.key === "Home" ? 0 : Math.max(0, options.length - 1))
     } else if (event.key === "Escape") {
       // Closes at once, typed text or not (a search field would clear itself first).
       event.preventDefault()
@@ -374,16 +401,14 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
     }
   }
   const memberSet = useMemo(() => new Set(memberIds), [memberIds])
-  const loading = !speakerTab && tab !== "members" && all === null
+  const loading = (persona || personas !== undefined) && all === null && tab !== "members"
   const typed = query.trim()
   const empty =
     typed !== ""
-      ? speakerTab
-        ? `No one in this chat is called “${typed}”.`
-        : tab === "personas"
-          ? `No persona is called “${typed}”.`
-          : `No card's name has “${typed}”.`
-      : speakerTab
+      ? persona
+        ? `No card's name has “${typed}”.`
+        : `No one in this chat is called “${typed}”.`
+      : !persona
         ? "No one is in the chat yet. Add cards in the Cast tab."
         : tab === "members"
           ? "No one has joined yet."
@@ -392,64 +417,123 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
             : tab === "personas"
               ? "No cards in the persona folder."
               : "No cards yet."
-  const addToChat = onAddToChat && speakerTab && shown.length === 0 && typed !== "" && (
-    <p className="px-1 text-sm">
-      <Tooltip label="Opens the character picker to add to this chat.">
-        <button
-          type="button"
-          onClick={() => {
-            openChange(false)
-            onAddToChat()
-          }}
-          className="rounded-sm text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+  const addToChat = onAddToChat && !persona && (
+    <Tooltip label="Opens the character picker to add to this chat.">
+      <button
+        type="button"
+        onClick={() => {
+          openChange(false)
+          onAddToChat()
+        }}
+        className="rounded-sm text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        Add to chat
+      </button>
+    </Tooltip>
+  )
+  const list =
+    personas !== undefined ? (
+      <div
+        id={listId}
+        role="listbox"
+        aria-label="Speak as, or your persona"
+        className="flex min-h-0 flex-col overflow-y-auto p-2"
+      >
+        <div role="group" aria-label="Speak as" aria-describedby={`${listId}-speak-as`} className="flex flex-col">
+          <p id={`${listId}-speak-as`} className="px-2 pb-1 text-xs text-muted">
+            Who your next message is from: anyone in this chat.
+          </p>
+          {shown.length === 0 ? (
+            <p className="flex flex-wrap gap-x-1.5 px-2 py-1.5 text-sm text-muted">
+              <span>{empty}</span>
+              {typed !== "" && addToChat && <span aria-hidden="true">·</span>}
+              {typed !== "" && addToChat}
+            </p>
+          ) : (
+            shown.map((card, index) => (
+              <SectionRow
+                key={card.entityId}
+                id={listId}
+                card={card}
+                index={index}
+                active={index === active}
+                current={card.entityId === speaker}
+                played={card.entityId === personas.current}
+                onActive={setActive}
+                onPick={() => pickAt(index)}
+              />
+            ))
+          )}
+        </div>
+        <div
+          role="group"
+          aria-labelledby={`${listId}-personas`}
+          aria-describedby={`${listId}-personas-about`}
+          className="mt-2 flex flex-col border-t border-border pt-2"
         >
-          Add to chat
-        </button>
-      </Tooltip>
-    </p>
-  )
-  const list = (
-    <CardOptions
-      personaOnly={tab === "personas" && !speakerTab}
-      id={listId}
-      cards={loading ? [] : shown}
-      active={active}
-      current={speakerTab ? speaker : personaNow}
-      currentLabel={speakerTab ? "speaking" : "your persona"}
-      played={personaNow ?? view.cast?.playedByMe[0] ?? null}
-      // Played as the persona, a character card not in a saved chat joins it.
-      members={pending || speakerTab ? null : memberSet}
-      empty={empty}
-      onActive={setActive}
-      onPick={pick}
-    />
-  )
-  const tabs: ReadonlyArray<{ value: SwitcherTab; label: string }> = [
-    ...(personas !== undefined ? [{ value: "cast" as const, label: "Speak as" }] : []),
-    ...(pending ? [] : [{ value: "members" as const, label: "Members" }]),
-    { value: "personas" as const, label: "Personas" },
-    ...(personasOnly ? [] : [{ value: "all" as const, label: "All cards" }])
-  ]
+          <p id={`${listId}-personas`} className="px-2 text-sm font-semibold">
+            Your persona
+          </p>
+          <p id={`${listId}-personas-about`} className="px-2 pb-1 text-xs text-muted">
+            Who you are in this chat, {"{{user}}"}: it takes the place of the one you play now.
+          </p>
+          {personaShown.length === 0 ? (
+            <p className="px-2 py-1.5 text-sm text-muted">
+              {loading
+                ? "Loading…"
+                : typed !== ""
+                  ? `No persona is called “${typed}”.`
+                  : "No cards in the persona folder."}
+            </p>
+          ) : (
+            personaShown.map((card, at) => (
+              <SectionRow
+                key={card.entityId}
+                id={listId}
+                card={card}
+                index={shown.length + at}
+                active={shown.length + at === active}
+                current={card.entityId === personas.current}
+                played={card.entityId === personas.current}
+                onActive={setActive}
+                onPick={() => pickAt(shown.length + at)}
+              />
+            ))
+          )}
+        </div>
+      </div>
+    ) : (
+      <CardOptions
+        personaOnly={persona && tab === "personas"}
+        id={listId}
+        cards={loading ? [] : shown}
+        active={active}
+        current={speaker}
+        currentLabel={persona ? "your persona" : "speaking"}
+        played={persona ? speaker : (view.cast?.playedByMe[0] ?? null)}
+        members={pending || !persona ? null : memberSet}
+        empty={empty}
+        onActive={setActive}
+        onPick={pick}
+      />
+    )
   return (
     <>
       <Popover
         open={open}
         onOpenChange={openChange}
         initialFocus={search}
-        // The composer's has a tab more: room for its tabs on one line.
+        // Two sections at the composer: room for the cast and the personas under it.
         wide={personas !== undefined}
         triggerLabel={
-          triggerLabel ??
-          (persona
-            ? `Playing as ${name}${defaultLabel}. Change your persona`
-            : `Speaking as ${name}. Change the speaker`)
+          persona ? `Playing as ${name}${defaultLabel}. Change your persona` : `Speaking as ${name}. Change the speaker`
         }
         hint={
           persona ? `You play ${name} ({{user}}). Change who you play` : `Speaking as ${name}. Change who's speaking`
         }
         triggerClassName={
           trigger
-            ? (triggerClassName ?? buttonClass("secondary"))
+            ? buttonClass("secondary")
             : `inline-flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface-raised py-1 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus ${compact ? "pr-1.5 pl-1" : "max-w-44 pr-2.5 pl-1"}`
         }
         title={persona ? "Your persona" : "Speak as"}
@@ -481,22 +565,23 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
           )
         }
       >
+        {header}
         <Input
           ref={search}
           type="search"
           role="combobox"
           aria-label={
-            !speakerTab
+            persona
               ? "Find a card to play as"
               : personas
-                ? "Find someone to speak as"
+                ? "Find someone to speak as, or a persona"
                 : "Find someone in this chat to speak as"
           }
           aria-expanded="true"
           aria-controls={listId}
           aria-autocomplete="list"
-          aria-activedescendant={shown.length > 0 && !loading ? `${listId}-${active}` : undefined}
-          placeholder={speakerTab ? "Find by name" : "Find a card by name"}
+          aria-activedescendant={options.length > 0 ? `${listId}-${active}` : undefined}
+          placeholder={persona ? "Find a card by name" : "Find by name"}
           autoComplete="off"
           value={query}
           onChange={(event) => {
@@ -506,9 +591,9 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
           onKeyDown={onKeyDown}
           className="shrink-0"
         />
-        {picksPersona ? (
+        {persona ? (
           <Tabs
-            label={personas !== undefined ? "Speak as, or play as" : "Cards to play as"}
+            label="Cards to play as"
             // The list shrinks to the popover's height, scrolling, rather than running under its buttons.
             panelClassName="flex flex-col"
             value={tab}
@@ -517,31 +602,29 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
               setActive(0)
             }}
             onPointerActivate={() => search.current?.focus()}
-            tabs={tabs.map((entry) => ({
-              ...entry,
-              panel:
-                tab === entry.value ? (
-                  <>
-                    {list}
-                    {addToChat}
-                  </>
-                ) : null
-            }))}
+            tabs={[
+              ...(pending
+                ? []
+                : [{ value: "members" as const, label: "Members", panel: tab === "members" ? list : null }]),
+              { value: "personas", label: "Personas", panel: tab === "personas" ? list : null },
+              { value: "all", label: "All cards", panel: tab === "all" ? list : null }
+            ]}
           />
-        ) : (
+        ) : personas === undefined && shown.length === 0 && typed !== "" && addToChat ? (
           <>
             {list}
-            {addToChat}
+            <p className="px-1 text-sm">{addToChat}</p>
           </>
+        ) : (
+          list
         )}
-        {footer}
-        {noPersona && !speakerTab && (
+        {onNone && (
           <Tooltip label="Uses no persona for this chat.">
             <button
               type="button"
               onClick={() => {
                 openChange(false)
-                noPersona()
+                onNone()
               }}
               className="shrink-0 rounded-md px-2 py-1.5 text-left text-sm text-muted outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
             >
@@ -549,7 +632,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
             </button>
           </Tooltip>
         )}
-        {picksPersona && (
+        {(persona || personas) && (
           <Button
             hint="Opens a form to create a persona to play in this chat."
             onClick={() => {
@@ -562,7 +645,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
           </Button>
         )}
       </Popover>
-      {picksPersona && (
+      {(persona || personas) && (
         <NewCardDialog persona open={making} onOpenChange={setMaking} onCreated={(_, ref) => void created(ref)} />
       )}
     </>

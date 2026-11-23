@@ -10,8 +10,7 @@ import { DraftContextChip } from "./draftRequest.tsx"
 import { ModelChip, PresetChip } from "./GenerationControls.tsx"
 import { GenerateIcon, SendIcon } from "./icons.tsx"
 import { NextReplyChip } from "./ReplyFrom.tsx"
-import { CardSwitcher, SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
-import { cardSwitchers } from "./presentation.tsx"
+import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import { composerControls } from "./composerControls.tsx"
 
 /**
@@ -59,8 +58,6 @@ const generateHint = (context: PendingComposerContext) =>
     : `Generate ${context.speakerName}'s first turn with the model${context.guidance ? ", following your guidance" : ""}.`
 
 export const registerComposerControls = () => [
-  // The one speaker and persona picker, which every place picking either renders (CardSwitcher).
-  cardSwitchers.register({ id: "chat.card-switcher", order: 10, component: SpeakerSwitcher }),
   composerControls.register({
     id: "composer.queue",
     order: 10,
@@ -76,7 +73,7 @@ export const registerComposerControls = () => [
     order: 10,
     placement: "speaker",
     // Left of the box, as at the chat's composer: the chip names who's speaking.
-    component: ({ speaker, compact }) => <CardSwitcher {...speaker} compact={compact} place="composer" />
+    component: ({ speaker, compact }) => <SpeakerSwitcher {...speaker} compact={compact} place="composer" />
   }),
   pendingComposerControls.register({
     id: "pending.guidance",
@@ -208,7 +205,7 @@ export const registerComposerControls = () => [
     placement: "speaker",
     component: ({ speaker, recent, onRecent, compact }) => (
       <>
-        <CardSwitcher {...speaker} compact={compact ?? false} place="composer" />
+        <SpeakerSwitcher {...speaker} compact={compact ?? false} place="composer" />
         {/* The speakers used last, one tap each, where the box can spare the width. */}
         {!compact &&
           recent.map(({ id, name, mediaId, crop }) => (

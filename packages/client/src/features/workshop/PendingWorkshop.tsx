@@ -1,7 +1,7 @@
 // A workshop before it exists (owner, 2026-11-17: "It should be a chat UI already open with the
 // composer ... The chat is created when the first message is sent."): the chat's own surface at
 // once, a brief intro where its messages will be, and the saved workshop's composer, focused:
-// the speaker chip (with its persona tabs), Guidance, Generate and Send in the box, and the strip's
+// the speaker chip (with Your persona), Guidance, Generate and Send in the box, and the strip's
 // model, preset and capability chips. What's chosen there before the first send (the speaker,
 // guidance, the persona, the preset, what the assistant may do) is held here, as a pending story
 // chat holds its choices (`PendingChat`), and the first send makes the workshop with them in one
@@ -176,7 +176,7 @@ export function PendingWorkshop({
   /** Its title, typed before the first send ("" the server's default). */
   title?: string
   start: WorkshopStart
-  /** The persona picked on the speaker chip's persona tabs: this workshop's only. */
+  /** The persona picked at the speaker chip's Your persona: this workshop's only. */
   onPersona: (persona: string) => void
   header: ReactNode
   /** What stands where its messages will be until the first send. */
@@ -363,15 +363,12 @@ export function PendingWorkshop({
       recent: [],
       pending: true,
       onPick: (card) => setPicked(card.entityId),
-      // The persona tabs after Speak as, as at the saved composer: it changes only this workshop.
+      // Your persona, under Speak as, as at the saved composer: it changes only this workshop.
       personas: {
         current: playing?.entityId ?? null,
         listCards: list,
-        onPick: (card) => onPersona(card.entityId),
-        onNone: () => onPersona(NO_PERSONA)
-      },
-      // A workshop's persona comes from the persona folder (StartCard.tsx).
-      personasOnly: true
+        onPick: (card) => onPersona(card.entityId)
+      }
     },
     speakerName,
     submitHint: composerSubmitHint(viewPrefs.prefs.enterSends),

@@ -72,7 +72,7 @@ export function StartWorkshopPage() {
     <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col">
       <PendingWorkshop
         start={{ card, persona }}
-        // The persona picked on the speaker chip is the same choice as the card's You.
+        // Your persona at the speaker chip is the same choice as the card's You.
         onPersona={(id) => setPersona(id === stored?.persona ? "" : id)}
         title={titleDraft.text}
         header={header}

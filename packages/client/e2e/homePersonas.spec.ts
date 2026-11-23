@@ -143,7 +143,7 @@ for (const width of [1440, 390]) {
     await closePanel(page)
     await page.getByRole("button", { name: /^Speaking as Pia/ }).click()
     const switcher = page.getByRole("dialog", { name: "Speak as", exact: true })
-    const speak = switcher.getByRole("tabpanel", { name: "Speak as", exact: true })
+    const speak = switcher.getByRole("group", { name: "Speak as", exact: true })
     await expect(speak.getByRole("option", { name: "Pia", exact: true }).locator("[data-persona-badge]")).toHaveText(
       "You"
     )

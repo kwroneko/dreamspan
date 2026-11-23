@@ -33,8 +33,7 @@ for (const width of [1440, 390])
       const speaker = page.getByRole("button", { name: /^Speaking as / })
       await expect(speaker).toHaveAccessibleName(/^Speaking as You\b/)
       await speaker.click()
-      await page.getByRole("tab", { name: "Personas", exact: true }).click()
-      await expect(page.getByRole("tabpanel", { name: "Personas", exact: true })).toContainText(
+      await expect(page.getByRole("group", { name: "Your persona", exact: true })).toContainText(
         "No cards in the persona folder."
       )
       await page.screenshot({ path: info.outputPath("pending-no-personas.png") })
@@ -65,9 +64,8 @@ for (const width of [1440, 390])
       if (width === 390) await closePanel(page)
       await expect(speaker).toHaveAccessibleName(new RegExp(`^Speaking as ${secondName}\\b`))
       await speaker.click()
-      await page.getByRole("tab", { name: "Personas", exact: true }).click()
       await expect(
-        page.getByRole("tabpanel", { name: "Personas", exact: true }).getByRole("option", { name: secondName })
+        page.getByRole("group", { name: "Your persona", exact: true }).getByRole("option", { name: secondName })
       ).toHaveAttribute("aria-current", "true")
       await page.keyboard.press("Escape")
       await page.getByLabel("Message", { exact: true }).fill("The new keeper arrives.")

@@ -8,17 +8,14 @@
 import { useAtomValue } from "@effect/atom-react"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
-import type { EntityId } from "@dreamspan/shared/chat.ts"
-import { type ReactNode, useCallback, useEffect } from "react"
+import { type ReactNode, useEffect } from "react"
 import { SlotOutlet } from "../../slots.tsx"
 import { Card, CardHeader } from "../../ui/Surface.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { browsable, shellAtom } from "../characters/shellData.tsx"
 import { StartChatForm } from "../chat/ChatsPage.tsx"
-import { CardSwitcher } from "../chat/SpeakerSwitcher.tsx"
-import { useCaller } from "../editor/caller.ts"
 import { cardPickers } from "../pickers/DocumentPickers.tsx"
-import { PickerPopover } from "../pickers/PickerParts.tsx"
+import { PickerFooterButton, PickerPopover } from "../pickers/PickerParts.tsx"
 import { workshopDefaultsAtom } from "./workshopPersona.tsx"
 import { NEW_WORKSHOP_TITLE, NO_PERSONA, WORKSHOP_CARD_KEY, WORKSHOP_PERSONA_KEY } from "./workshopStart.ts"
 
@@ -26,21 +23,20 @@ const CARD_KEY = WORKSHOP_CARD_KEY
 const PERSONA_KEY = WORKSHOP_PERSONA_KEY
 const NONE = NO_PERSONA
 
-const CHOICE_TRIGGER =
-  "flex h-8 min-w-0 max-w-full items-center rounded-md border border-border px-2 text-left text-text outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus/40 data-popup-open:bg-surface-raised"
-
 function Choice({
   label,
   title,
   name,
   hint,
-  children
+  children,
+  footer
 }: {
   label: string
   title: string
   name: string
   hint: string
   children: Parameters<typeof PickerPopover>[0]["children"]
+  footer?: Parameters<typeof PickerPopover>[0]["footer"]
 }) {
   return (
     <div className="flex min-w-0 items-center gap-2 text-sm">
@@ -53,9 +49,10 @@ function Choice({
           </span>
         }
         triggerLabel={`${label}: ${name}`}
-        triggerClassName={CHOICE_TRIGGER}
+        triggerClassName="flex h-8 min-w-0 max-w-full items-center rounded-md border border-border px-2 text-left text-text outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus/40 data-popup-open:bg-surface-raised"
         hint={hint}
         side="bottom"
+        {...(footer ? { footer } : {})}
       >
         {children}
       </PickerPopover>
@@ -95,8 +92,6 @@ export function StartChoices({
     if (stalePersona) setPersona("", true)
   }, [stalePersona, setPersona])
   const cardName = byEntity.get(cardId)?.card.label ?? "Assistant"
-  const call = useCaller()
-  const listCards = useCallback(() => call((client) => client("ListCards", undefined)), [call])
   const personaName =
     persona === NONE
       ? "No persona"
@@ -126,28 +121,40 @@ export function StartChoices({
           />
         )}
       </Choice>
-      {/* The one persona picker (CardSwitcher): the same tabs, rows and buttons as a chat's. */}
-      <div className="flex min-w-0 items-center gap-2 text-sm">
-        <span className="w-20 shrink-0 text-muted">You</span>
-        <CardSwitcher
-          persona
-          pending
-          personasOnly
-          speaker={personaId === "" ? null : (personaId as EntityId)}
-          recent={[]}
-          listCards={listCards}
-          place="workshop-start"
-          trigger={
-            <span data-layout-name className="min-w-0 truncate">
-              {personaName}
-            </span>
-          }
-          triggerLabel={`You: ${personaName}`}
-          triggerClassName={CHOICE_TRIGGER}
-          onPick={(chosen) => setPersona(chosen.entityId === stored?.persona ? "" : chosen.entityId)}
-          onNone={() => setPersona(NONE)}
-        />
-      </div>
+      <Choice
+        label="You"
+        title="Your persona"
+        name={personaName}
+        hint="Who you are in this workshop. Changing it here changes only this workshop."
+        footer={(close) => (
+          <PickerFooterButton
+            hint="You take part as yourself, with no persona."
+            onClick={() => {
+              setPersona(NONE)
+              close()
+            }}
+          >
+            No persona
+          </PickerFooterButton>
+        )}
+      >
+        {(body) => (
+          <SlotOutlet
+            slot={cardPickers}
+            props={{
+              ...body,
+              value: (byEntity.get(personaId)?.card.refId ?? "") as RefId,
+              persona: true,
+              personasOnly: true,
+              rowHint: ({ current }) => (current ? "Your persona now" : "You take part as this persona"),
+              onChoose: (refId) => {
+                const chosen = byRef.get(refId)
+                if (chosen) setPersona(chosen.card.entityId === stored?.persona ? "" : chosen.card.entityId)
+              }
+            }}
+          />
+        )}
+      </Choice>
     </div>
   )
 }

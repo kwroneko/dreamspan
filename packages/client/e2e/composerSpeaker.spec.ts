@@ -30,8 +30,8 @@ const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server
 const composer = (page: Page) => page.getByLabel("Message", { exact: true })
 const generating = (page: Page) => page.getByText("generating", { exact: true })
 const whoReplies = (page: Page) => choices(page, "Who replies next")
-/** The composer switcher's first tab, the one it opens on: the chat's cast. */
-const speakAs = (page: Page) => page.getByRole("tabpanel", { name: "Speak as", exact: true })
+/** The composer switcher's first section: the chat's cast, without the persona folder below it. */
+const speakAs = (page: Page) => page.getByRole("group", { name: "Speak as", exact: true })
 const speakerChip = (page: Page) => page.getByRole("button", { name: /^Speaking as / })
 const lastHeader = (page: Page) => page.locator("article[data-slot]").last().locator("header").first()
 
@@ -194,16 +194,10 @@ for (const [width, height] of [
       })
     )
     await page.goto(`${server().url}/chats/${chatId}`)
-    const search = page.getByRole("combobox", { name: "Find someone to speak as", exact: true })
+    const search = page.getByRole("combobox", { name: "Find someone to speak as, or a persona", exact: true })
     await speakerChip(page).click()
     await expect(search).toBeFocused()
-    // The persona picker's tabs, after its own Speak as.
-    await expect(page.getByRole("dialog", { name: "Speak as" }).getByRole("tab")).toHaveText([
-      "Speak as",
-      "Members",
-      "Personas",
-      "All cards"
-    ])
+    await expect(page.getByRole("tab")).toHaveCount(0)
     await expect(speakAs(page).getByRole("option")).toHaveText(
       // The selected persona first, then the rest of the cast in its order.
       ["Ana", "Mira", "Tobin", "Bo"].map((name) => new RegExp(name)),
@@ -322,7 +316,7 @@ test("the speaker stays chosen through a reload and in every tab; the switcher s
 
   // The search field has focus as the switcher opens; type part of a name, then Enter.
   await speakerChip(page).click()
-  const search = page.getByRole("combobox", { name: "Find someone to speak as", exact: true })
+  const search = page.getByRole("combobox", { name: "Find someone to speak as, or a persona", exact: true })
   await expect(search).toBeFocused()
   await page.keyboard.type("bo")
   await expect(speakAs(page).getByRole("option")).toHaveCount(1)
@@ -414,7 +408,7 @@ test("a phone names the Generate action in full on its icon and keeps an empty i
   const chatId = await chatWith(["Mira", "Captain Rhee"])
   await page.goto(`${server().url}/chats/${chatId}`)
   await speakerChip(page).click()
-  await page.getByRole("combobox", { name: "Find someone to speak as", exact: true }).fill("rhee")
+  await page.getByRole("combobox", { name: "Find someone to speak as, or a persona", exact: true }).fill("rhee")
   await page.keyboard.press("Enter")
   await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Captain Rhee/)
   // An icon on a phone, its full name its label (and tooltip), never a cut-off "Generate Capt…".
@@ -573,10 +567,9 @@ for (const [width, height] of [
       }
       await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Ana\b/)
       await speakerChip(page).click()
-      await expect(page.getByRole("combobox", { name: "Find someone to speak as" })).toBeFocused()
+      await expect(page.getByRole("combobox", { name: "Find someone to speak as, or a persona" })).toBeFocused()
       await expect(speakAs(page).getByRole("option")).toHaveText([/Ana/, new RegExp(name)], { useInnerText: true })
-      await page.getByRole("tab", { name: "Personas", exact: true }).click()
-      const yours = page.getByRole("tabpanel", { name: "Personas", exact: true })
+      const yours = page.getByRole("group", { name: "Your persona", exact: true })
       await expect(yours.getByRole("option", { name: "Ana", exact: true })).toHaveAttribute("aria-current", "true")
       await expect(yours.getByRole("option", { name: "Bo", exact: true })).toBeVisible()
       await expectLayout(page, test.info(), `pending-speaker-personas-${width}`, { scope: '[role="dialog"]' })
