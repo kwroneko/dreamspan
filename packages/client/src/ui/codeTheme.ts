@@ -4,7 +4,14 @@ import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate
 // A shadow root lets style-mod use a constructed stylesheet under our strict CSP.
 // All colors and fonts inherit the app's semantic tokens, including live theme changes.
 export const proseTheme = EditorView.theme({
-  "&": { backgroundColor: "var(--surface)", color: "var(--text)", fontSize: "16px", borderRadius: "6px" },
+  "&": {
+    backgroundColor: "var(--surface)",
+    color: "var(--text)",
+    fontSize: "16px",
+    borderRadius: "6px",
+    // Set while a height dragged with the box's grip holds (CodeEditorView.tsx).
+    height: "var(--editor-height, auto)"
+  },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": {
     fontFamily: "var(--editor-font, var(--font-sans))",

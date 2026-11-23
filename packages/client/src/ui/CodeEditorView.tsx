@@ -13,6 +13,7 @@ import { holdCaretAt } from "./holdCaret.ts"
 import { Dialog } from "./Dialog.tsx"
 import { chromeButton, FieldFrame } from "./FieldFrame.tsx"
 import { IconButton } from "./Tooltip.tsx"
+import { HeightGrip } from "./HeightGrip.tsx"
 
 /** One persistent view: controlled echoes never reset selection or undo history. */
 export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
@@ -27,6 +28,8 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
   const [large, setLarge] = useState(false)
   const [reverting, setReverting] = useState(false)
   const expand = props.expand !== false && props.textActions !== false && !props.readOnly
+  // A corner grip sets the box's height, as a textarea's corner does.
+  const resizable = props.resizable !== false
   useLayoutEffect(() => {
     const mounted = mountEditor(host.current!, props, setSelected)
     controller.current = mounted
@@ -76,6 +79,16 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
             props.lastRevision !== undefined
           }
           status={props.status}
+          grip={
+            resizable ? (
+              <HeightGrip
+                label={props.label}
+                height={() => host.current!.getBoundingClientRect().height}
+                onHeight={(height) => controller.current?.setHeight(height)}
+                onReset={() => controller.current?.setHeight(null)}
+              />
+            ) : undefined
+          }
           tools={
             <>
               {props.textActions !== false && (
@@ -135,6 +148,7 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
             selection={undefined}
             minHeight="min(65dvh, 48rem)"
             fullHeight
+            resizable={false}
           />
         </Dialog>
       )}
@@ -279,12 +293,25 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
   let fade: ReturnType<typeof setTimeout> | undefined
   let base: string | null = null
   let language: string | null = null
+  // A height dragged with the box's grip (HeightGrip.tsx): it replaces growing with the text,
+  // within the cap, until a double-click on the grip returns to that.
+  let chosenHeight: number | null = null
+  const size = () => {
+    if (chosenHeight !== null) {
+      host.style.setProperty("--editor-height", `${chosenHeight}px`)
+      host.style.setProperty("--editor-max-height", "none")
+      host.style.setProperty("--editor-min-height", "100%")
+      return
+    }
+    host.style.removeProperty("--editor-height")
+    host.style.setProperty("--editor-max-height", props.fullHeight ? "none" : "min(60vh, 32rem)")
+    host.style.setProperty("--editor-min-height", props.minHeight ?? `${Math.min(props.rows ?? 4, 10) * 1.6}em`)
+  }
   const update = (next: CodeEditorProps) => {
     const oldProps = props
     props = next
     host.style.setProperty("--editor-font", next.mono ? "var(--font-mono)" : "var(--font-sans)")
-    host.style.setProperty("--editor-max-height", next.fullHeight ? "none" : "min(60vh, 32rem)")
-    host.style.setProperty("--editor-min-height", next.minHeight ?? `${Math.min(next.rows ?? 4, 10) * 1.6}em`)
+    size()
     if (view.composing && next.value !== view.state.doc.toString()) deferred = next.value
     else {
       // An equal-text echo also supersedes any earlier queued external value.
@@ -347,6 +374,11 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
   }
   return {
     update,
+    setHeight: (height: number | null) => {
+      chosenHeight = height
+      size()
+      view.requestMeasure()
+    },
     /** The selected text now, which a render may not have caught up with. */
     selection: () => view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to),
     focus: (at?: number) => {
