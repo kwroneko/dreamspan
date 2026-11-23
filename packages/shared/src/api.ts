@@ -72,6 +72,7 @@ import {
   ProviderKindInfo,
   ProxyMode
 } from "./providers.ts"
+import { ModelPatches, ModelPatchResult } from "./modelPatch.ts"
 import {
   COUNT_TOKENS_CHARS,
   COUNT_TOKENS_TEXTS,
@@ -515,6 +516,20 @@ export class AuthenticatedStImportPlanApi extends StImportPlanApi.middleware(Aut
 
 export class AuthenticatedPluginApi extends PluginApi.middleware(Authentication) {}
 
+/**
+ * Several models' settings at once (the model list's Edit N…), in a layer of its own: AppCoreApi
+ * is at TypeScript's instantiation depth. Each patch's paths are set to its values on its models;
+ * NotFound, changing none, when any isn't the user's. `changed` holds, per model that changed,
+ * what the changed paths held before: sent back as patches, it is the Undo.
+ */
+export class AuthenticatedModelEditApi extends RpcGroup.make(
+  Rpc.make("EditModels", {
+    payload: { patches: ModelPatches },
+    success: ModelPatchResult,
+    error: Schema.Union([...StorageErrors])
+  })
+).middleware(Authentication) {}
+
 /** Admins only: what the database writer found when it last started (Settings → Server status). */
 export class DatabaseStatusApi extends RpcGroup.make(
   Rpc.make("GetDatabaseStartup", { success: DatabaseStartup, error: Schema.Union([Forbidden, ServerError]) })
@@ -522,6 +537,7 @@ export class DatabaseStatusApi extends RpcGroup.make(
 
 export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(DatabaseStatusApi)
+  .merge(AuthenticatedModelEditApi)
   .merge(AuthenticatedMoveApi)
   .merge(AuthenticatedPluginApi)
   .merge(AuthenticatedOwnTurnNoteApi)

@@ -269,6 +269,7 @@ import {
   UsageSource
 } from "@dreamspan/shared/usage.ts"
 import { AvatarCrop } from "@dreamspan/shared/media.ts"
+import { ModelPatches, ModelPatchResult } from "@dreamspan/shared/modelPatch.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { mergeOps } from "./opsOf.ts"
@@ -2179,6 +2180,16 @@ const WriteOpsChatOwn = RpcGroup.make(
   Rpc.make("SetModelsHidden", {
     payload: { userId: UserId, modelIds: ModelIds, hidden: Schema.Boolean },
     success: Schema.Struct({ changed: Schema.Array(ModelId) }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Sets some paths of many of the user's models' overrides in one transaction (the model list's
+   * Edit N…); NotFound, changing none, when any isn't theirs. Returns, per model that changed,
+   * the paths that changed and their values before: applied again, that is the Undo.
+   */
+  Rpc.make("EditModels", {
+    payload: { userId: UserId, patches: ModelPatches },
+    success: ModelPatchResult,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Instance-wide settings (admin). Callers check the role; storage doesn't know it. */

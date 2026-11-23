@@ -17,8 +17,9 @@ import { TabRow } from "../../ui/Tabs.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { usePlaceNotice, usePlaceParam } from "../../usePlaceParam.ts"
-import { useOpenPlace } from "../editor/durable.tsx"
+import { useOpenChoice, useOpenPlace } from "../editor/durable.tsx"
 import { modelsAtom } from "./data.ts"
+import { ModelMassEditDialog, selectionDigest } from "./ModelMassEdit.tsx"
 import type { ConnectionSectionProps } from "./detail.tsx"
 import {
   AddModelDialog,
@@ -136,6 +137,7 @@ export function ModelsSection({ connection }: ConnectionSectionProps) {
             ) : (
               <ModelTable
                 key={connection.id}
+                connectionId={connection.id}
                 models={models}
                 compat={connection.compat}
                 priceEndpoint={connection.providerSettings?.priceEndpoint === true}
@@ -158,11 +160,13 @@ export function ModelsSection({ connection }: ConnectionSectionProps) {
 }
 
 function ModelTable({
+  connectionId,
   models,
   compat,
   priceEndpoint,
   onEdit
 }: {
+  connectionId: string
   models: ReadonlyArray<Model>
   compat: ConnectionSectionProps["connection"]["compat"]
   priceEndpoint: boolean
@@ -241,6 +245,14 @@ function ModelTable({
     },
     [shown]
   )
+
+  // Edit N…: the dialog's place names the selection; the ids it edits stay in memory, and in its draft.
+  const [massEdit, setMassEdit] = useOpenChoice(`model-mass-edit:${connectionId}:`)
+  const [massIds, setMassIds] = useState<ReadonlyArray<ModelId> | null>(null)
+  const closeMassEdit = useCallback(() => {
+    setMassEdit(null)
+    setMassIds(null)
+  }, [setMassEdit])
 
   const bulk = useAction()
   const apply = async (ids: ReadonlyArray<ModelId>, hidden: boolean) => {
@@ -341,6 +353,7 @@ function ModelTable({
       />
       <SelectionBar
         selected={selected.length}
+        toEdit={selectedShown.length}
         notShown={notShown}
         toHide={toHide.length}
         toShow={toShow.length}
@@ -359,18 +372,33 @@ function ModelTable({
           })
         }
         onClear={() => setPicked(new Set())}
+        onEdit={() => {
+          const ids = selectedShown.map((row) => row.model.id)
+          setMassIds(ids)
+          setMassEdit(selectionDigest(ids))
+        }}
       />
       {table}
+      {massEdit !== null && (
+        <ModelMassEditDialog
+          key={massEdit}
+          place={`${connectionId}:${massEdit}`}
+          ids={massIds}
+          models={models}
+          onClose={closeMassEdit}
+        />
+      )}
     </div>
   )
 }
 
 /**
- * Bulk Hide and Show over the selected rows shown, the selection's count, Invert and Clear. Always
- * there at the same height, so ticking the first row moves nothing.
+ * Bulk Edit, Hide and Show over the selected rows shown, the selection's count, Invert and Clear. Always
+ * there at the same height (narrow, room for its buttons on two lines), so ticking the first row moves nothing.
  */
 function SelectionBar({
   selected,
+  toEdit,
   notShown,
   toHide,
   toShow,
@@ -379,9 +407,12 @@ function SelectionBar({
   onHide,
   onShow,
   onInvert,
-  onClear
+  onClear,
+  onEdit
 }: {
   selected: number
+  /** The selected rows shown, which Edit N… edits. */
+  toEdit: number
   notShown: number
   toHide: number
   toShow: number
@@ -391,13 +422,14 @@ function SelectionBar({
   onShow: () => void
   onInvert: () => void
   onClear: () => void
+  onEdit: () => void
 }) {
   return (
     <div
       role="toolbar"
       aria-label="Selected models"
       data-selection-bar=""
-      className="grid h-[4.75rem] grid-cols-[minmax(0,1fr)_auto] content-center items-center gap-x-2 gap-y-1 @xl:h-10 @xl:grid-cols-[auto_auto_minmax(0,1fr)_auto]"
+      className="grid h-[7.25rem] grid-cols-[minmax(0,1fr)_auto] content-center items-center gap-x-2 gap-y-1 @xl:h-10 @xl:grid-cols-[auto_auto_minmax(0,1fr)_auto]"
     >
       <p
         aria-live="polite"
@@ -422,7 +454,18 @@ function SelectionBar({
       >
         Clear selection
       </Button>
-      <div className="flex gap-2 [grid-area:2/1/3/3] @xl:[grid-area:1/1/2/3]">
+      <div className="flex flex-wrap gap-2 [grid-area:2/1/3/3] @xl:flex-nowrap @xl:[grid-area:1/1/2/3]">
+        <Button
+          disabled={toEdit === 0}
+          hint={
+            toEdit === 0
+              ? "Tick models shown here to change their settings together."
+              : "Changes settings of the selected models shown here, all at once."
+          }
+          onClick={onEdit}
+        >
+          Edit {toEdit.toLocaleString()}…
+        </Button>
         <Button
           disabled={toHide === 0}
           pending={pending && toHide > 0}
@@ -597,7 +640,9 @@ const ModelRow = memo(function ModelRow({
       <div role="cell" className={`${TICK} flex self-start @xl:self-center`}>
         <RowTick
           label={`Select ${model.key}`}
-          hint={checked ? `Unticks ${name}.` : `Ticks ${name}, to hide or show it with others. Shift ticks a range.`}
+          hint={
+            checked ? `Unticks ${name}.` : `Ticks ${name}, to hide, show or edit it with others. Shift ticks a range.`
+          }
           checked={checked}
           onToggle={(on, shift) => toggle(model.id, on, shift)}
         />

@@ -21,7 +21,7 @@ import type { EditorStore } from "./store.ts"
 const entriesLabel = (count: number) => `${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}`
 
 /** The quiet marker beside a setting whose entries differ; its hover says how. */
-function MixedMarker({ breakdown }: { breakdown: string }) {
+export function MixedMarker({ breakdown }: { breakdown: string }) {
   return (
     <Tooltip label={breakdown}>
       <span

@@ -155,7 +155,7 @@ export const typeOf = (value: unknown) =>
             : "group"
 
 /** A stored value as a row shows it: text that reads as something else gets its quotes. */
-export const showTyped = (value: unknown): string => {
+const showTyped = (value: unknown): string => {
   if (typeof value === "string") {
     const reads = parseTyped(value)
     return reads === value ? value : `"${value}"`
