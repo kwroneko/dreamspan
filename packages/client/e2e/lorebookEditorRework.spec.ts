@@ -311,6 +311,58 @@ test("Edit N entries changes two settings at once, shows Mixed, and clears an em
   await expect(lamp.getByRole("spinbutton", { name: "Order of Lamp", exact: true })).toHaveValue("77")
 })
 
+// Owner, 2026-11-23: on a large screen the dialog was a narrow column to scroll through.
+for (const [width, height] of [
+  [2560, 1440],
+  [1440, 1000],
+  [390, 844]
+] as const)
+  test(`Edit N entries uses the screen's width at ${width}`, async ({ page }) => {
+    const tag = `bulkwide${width}`
+    const { panel } = await setUp(page, tag, width)
+    await page.setViewportSize({ width, height })
+    const editor = await openBook(page, panel, tag)
+    await editor.getByRole("checkbox", { name: "Select Harbour", exact: true }).click()
+    await editor.getByRole("checkbox", { name: "Select Lamp", exact: true }).click()
+    await editor.getByRole("button", { name: "Edit 2 entries", exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: "Edit 2 entries", exact: true })
+    await expect(dialog.getByRole("region", { name: "Card export only" })).toBeVisible()
+    // Let the opening scale settle before measuring.
+    await expect
+      .poll(() => dialog.evaluate((el) => getComputedStyle(el).scale), { timeout: 2000 })
+      .toMatch(/^(none|1)$/)
+    await page.screenshot({ path: join(shots, `mass-edit-${width}.png`) })
+    const size = await dialog.evaluate((el) => ({
+      width: el.getBoundingClientRect().width,
+      scroll: el.scrollHeight - el.clientHeight
+    }))
+    const columns = async (names: ReadonlyArray<string>) =>
+      new Set(
+        await Promise.all(names.map(async (name) => Math.round((await box(dialog.getByRole("region", { name }))).x)))
+      ).size
+    const boxes = ["Secondary keys", "Matching", "Inclusion group", "Recursion and budget", "Timing and filters"]
+    if (width === 2560) {
+      expect(size.width).toBeGreaterThan(1400)
+      expect(size.scroll, "no vertical scrollbar").toBeLessThanOrEqual(0)
+      expect(await columns(boxes), "boxed groups in columns").toBeGreaterThanOrEqual(3)
+      // The top fields side by side.
+      const order = await box(dialog.getByRole("spinbutton", { name: "Order", exact: true }))
+      const depth = await box(dialog.getByRole("spinbutton", { name: "Depth", exact: true }))
+      expect(Math.abs(order.y - depth.y)).toBeLessThan(2)
+    }
+    if (width === 1440) expect(await columns(boxes)).toBeGreaterThanOrEqual(2)
+    if (width === 390) {
+      expect(await columns(boxes), "one column on a phone").toBe(1)
+      expect(size.width).toBeLessThanOrEqual(390)
+    }
+    expect.soft(await layoutAudit(page, { scope: '[role="dialog"]' }), `layout findings at ${width}`).toEqual([])
+    // Still applies.
+    await dialog.getByRole("checkbox", { name: "Change Order", exact: true }).click()
+    await dialog.getByRole("spinbutton", { name: "Order", exact: true }).fill("55")
+    await dialog.getByRole("button", { name: "Apply to 2 entries", exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+  })
+
 test("the Lorebooks list shows every source and count, the twin, and the placement switch", async ({ page }) => {
   const tag = "list"
   const { panel } = await setUp(page, tag, 1440)

@@ -131,14 +131,14 @@ function ManySetting({
       <Tooltip
         label={ticked ? "Leaves this setting as each entry has it." : "Changes this setting on every selected entry."}
       >
-        <span className="inline-flex shrink-0 pt-0.5">
+        <span className="mt-0.5 inline-flex shrink-0">
           <Checkbox labelHidden checked={ticked} onCheckedChange={onTick}>
             {`Change ${setting.label}`}
           </Checkbox>
         </span>
       </Tooltip>
       <div className={`min-w-0 flex-1 ${ticked ? "" : "opacity-60"}`}>{control}</div>
-      {marker && <span className="shrink-0 pt-1">{marker}</span>}
+      {marker && <span className="mt-1 shrink-0">{marker}</span>}
     </div>
   )
 }
@@ -191,11 +191,12 @@ export function MassEditDialog({
     onClose()
   }
   return (
-    <Dialog open wide onOpenChange={(open) => !open && close()} title={`Edit ${entriesLabel(entries.length)}`}>
+    <Dialog open size="wide" onOpenChange={(open) => !open && close()} title={`Edit ${entriesLabel(entries.length)}`}>
       <SettingsLayout
         sections={sections}
         accordion={false}
-        wide={window.matchMedia("(min-width: 40rem)").matches}
+        wide={false}
+        flow
         label={`${entriesLabel(entries.length)}`}
         render={(setting) => {
           const common = commonValue(setting, entries)
