@@ -19,21 +19,29 @@ test.describe("row menus in a scrolling list", () => {
     await trigger.click()
     const menu = page.getByRole("menu", { name: label, exact: true })
     await expect(menu.getByRole("menuitem", { name: "Set as default persona" })).toBeVisible()
-    // Scrolling inside the menu itself would leave it open; the list scrolling closes it.
+    // Scrolling the row out of the list closes it (inside the menu, or the row still in view, it stays).
     await list.evaluate((element) => {
-      element.scrollTop += 150
+      element.scrollTop = element.scrollHeight
     })
     await expect(menu).toHaveCount(0)
     await expect(picker).toBeVisible()
 
     // Opened from the keyboard on a half-hidden row, the list scrolls to show it: the menu stays.
-    await list.evaluate((element) => {
-      element.scrollTop = 0
-    })
-    const lower = list.getByRole("button", { name: /^Persona actions for / }).nth(3)
-    const lowerLabel = (await lower.getAttribute("aria-label"))!
-    await lower.press("Enter")
-    const lowerMenu = page.getByRole("menu", { name: lowerLabel, exact: true })
+    // Scrolled so half the first row's … is above the list's top edge.
+    await list.evaluate(
+      (element, name) =>
+        new Promise((done) => {
+          element.scrollTop = 0
+          const button = element.querySelector(`[aria-label="${name}"]`)!.getBoundingClientRect()
+          element.scrollTop = button.top - element.getBoundingClientRect().top + button.height / 2
+          requestAnimationFrame(() => requestAnimationFrame(done))
+        }),
+      label
+    )
+    const half = list.getByRole("button", { name: label, exact: true })
+    expect((await half.boundingBox())!.y).toBeLessThan((await list.boundingBox())!.y)
+    await half.press("Enter")
+    const lowerMenu = page.getByRole("menu", { name: label, exact: true })
     await expect(lowerMenu).toBeVisible()
     await page.waitForTimeout(300)
     await expect(lowerMenu).toBeVisible()
