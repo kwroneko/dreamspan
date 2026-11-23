@@ -651,6 +651,28 @@ export function MessageList({
       list.removeEventListener("scroll", onScroll, { capture: true })
     }
   }, [hold, spacing])
+  // The list held at the end stays there when it gets shorter: the composer below growing with
+  // a line of text, or a note above it appearing. The browser keeps the scroll position, which
+  // left the last message behind the list's edge until something else rendered the list.
+  const following = useRef(view.follow)
+  useEffect(() => {
+    following.current = view.follow
+  })
+  useEffect(() => {
+    const list = parent.current
+    if (list === null || typeof ResizeObserver === "undefined") return
+    let height = list.clientHeight
+    const observer = new ResizeObserver(() => {
+      const shorter = list.clientHeight < height
+      height = list.clientHeight
+      if (!shorter || !follow.stuck || !following.current) return
+      // Before this frame paints (the virtualizer's own scroll lands a frame later), then theirs.
+      list.scrollTop = list.scrollHeight - list.clientHeight
+      virtualizer.scrollToEnd()
+    })
+    observer.observe(list)
+    return () => observer.disconnect()
+  }, [follow, virtualizer])
   useEffect(() => {
     const list = parent.current
     if (list === null || entries.length === 0 || !view.follow) return
