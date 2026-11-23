@@ -2,7 +2,8 @@ import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
 import { defaultsAtom } from "../pickers/defaults.ts"
 // A chat not sent yet shows its first request (DESIGN §2.1): the next-reply strip's Context
-// chip, with its size and a popover, and the request in a dialog (`request=first` in the URL).
+// chip, with its size and a popover, and the request in an inspector tab (`/request/first`,
+// FirstRequestPage.tsx, which reads what the pending chat's view publishes, firstRequest.ts).
 // The server builds it with the assembler a send uses and counts it locally (`PreviewChat`):
 // nothing is written and nothing goes to a provider. It's asked again, after a pause, whenever
 // what the first send would send changes: the greetings picked, the persona, who speaks or
@@ -10,29 +11,26 @@ import { defaultsAtom } from "../pickers/defaults.ts"
 import type { DraftChatPreview } from "@dreamspan/shared/inspectorApi.ts"
 import type { AppRpcs } from "@dreamspan/shared/api.ts"
 import type { Rpc } from "effect/rpc"
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react"
-import { Button } from "../../ui/Button.tsx"
-import { Dialog } from "../../ui/Dialog.tsx"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Button, LinkButton } from "../../ui/Button.tsx"
 import { Popover } from "../../ui/Popover.tsx"
-import { Loading } from "../../ui/Spinner.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { tokenizerText } from "../editor/tokenCounts.ts"
 import { compactTokens } from "./CacheIndicator.tsx"
 import { chipClass } from "./nextReplyStrip.tsx"
 import type { PendingComposerContext } from "./pendingComposerControls.tsx"
 
-// The inspector's views load when the dialog opens, not with every pending chat.
-const DraftRequestView = lazy(() => import("./ContextPage.tsx").then((m) => ({ default: m.DraftRequestView })))
-
 export type PreviewInput = Rpc.Payload<Extract<AppRpcs, { readonly _tag: "PreviewChat" }>>
 
-/** The pending chat's first request, as the chip and the dialog read it. */
+/** The pending chat's first request, as the chip and its inspector tab read it. */
 export interface DraftPreviewState {
   readonly preview: DraftChatPreview | null
   readonly loading: boolean
   readonly error: string | null
-  /** Opens the request in its dialog. */
+  /** Opens the request in its inspector tab. */
   readonly openRequest: () => void
+  /** That tab's URL, for the link's open menu and a middle click. */
+  readonly requestHref?: string
 }
 
 /** How long typing pauses before the request is built again. */
@@ -44,7 +42,12 @@ const PAUSE_MS = 400
  * at a time: a change while one is out is asked for when it returns, so a slow build (a huge
  * greeting) never piles up reads ahead of the first send.
  */
-export function useDraftPreview(input: PreviewInput | null, key: string, openRequest: () => void): DraftPreviewState {
+export function useDraftPreview(
+  input: PreviewInput | null,
+  key: string,
+  openRequest: () => void,
+  requestHref?: string
+): DraftPreviewState {
   const call = useCaller()
   // The same account selection the model/preset chips read, invalidated by settings and
   // library changes. Its timestamp also catches a saved note/book whose id stays the same.
@@ -96,9 +99,12 @@ export function useDraftPreview(input: PreviewInput | null, key: string, openReq
     preview: state.asked === asked ? state.preview : null,
     loading: asked !== null && state.asked !== asked,
     error: state.asked === asked ? state.error : null,
-    openRequest
+    openRequest,
+    ...(requestHref === undefined ? {} : { requestHref })
   }
 }
+
+const VIEW_REQUEST_HINT = "Opens an approximate preview of your first request, message by message."
 
 const tokensOf = (preview: DraftChatPreview) => preview.request?.messages.reduce((sum, m) => sum + m.tokens, 0) ?? 0
 
@@ -165,53 +171,31 @@ export function DraftContextChip({ draft }: PendingComposerContext) {
         <p className="text-xs text-muted">
           Random choices, the current time and automatic decisions can change it when you send.
         </p>
-        <Button
-          className="self-start"
-          hint="Opens an approximate preview of your first request, message by message."
-          onClick={() => {
-            setOpen(false)
-            draft.openRequest()
-          }}
-        >
-          View request
-        </Button>
+        {draft.requestHref ? (
+          <LinkButton
+            className="self-start"
+            href={draft.requestHref}
+            hint={VIEW_REQUEST_HINT}
+            onOpen={() => {
+              setOpen(false)
+              draft.openRequest()
+            }}
+          >
+            View request
+          </LinkButton>
+        ) : (
+          <Button
+            className="self-start"
+            hint={VIEW_REQUEST_HINT}
+            onClick={() => {
+              setOpen(false)
+              draft.openRequest()
+            }}
+          >
+            View request
+          </Button>
+        )}
       </div>
     </Popover>
-  )
-}
-
-/** The first request in a dialog, the inspector's way. */
-export function DraftRequestDialog({
-  open,
-  onClose,
-  draft
-}: {
-  open: boolean
-  onClose: () => void
-  draft: DraftPreviewState
-}) {
-  const request = draft.preview?.request ?? null
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) onClose()
-      }}
-      title="Your first request"
-      description="An approximate preview of your first request. Random choices, the current time and automatic decisions can change it when you send. Nothing has been sent."
-      wide
-    >
-      {request !== null ? (
-        <Suspense fallback={<Loading label="Loading the request…" />}>
-          <DraftRequestView request={request} />
-        </Suspense>
-      ) : draft.loading ? (
-        <Loading label="Building the request…" />
-      ) : (
-        <p className="text-sm">
-          {draft.error ?? draft.preview?.assemblyError ?? "Choose a model for this chat to see its first request."}
-        </p>
-      )}
-    </Dialog>
   )
 }

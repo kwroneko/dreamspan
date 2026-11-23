@@ -4,6 +4,7 @@ import { Button as BaseButton } from "@base-ui/react/button"
 import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip"
 import { type ComponentProps, type ReactNode, useId } from "react"
 import { Spinner } from "./Spinner.tsx"
+import { linkMenuProps } from "./linkMenuState.ts"
 import { openOnPlainClick } from "./links.ts"
 
 type Variant = "primary" | "secondary" | "ghost" | "danger"
@@ -21,7 +22,8 @@ export const buttonClass = (variant: Variant = "secondary") =>
 
 /**
  * A `Button` that's a link, for what opens in the center column (owner, 2026-11-05: it opens
- * in a new browser tab too): a plain click runs `onOpen`.
+ * in a new browser tab too): a plain click runs `onOpen`; a right-click shows its open menu
+ * (LinkMenu.tsx).
  */
 export function LinkButton({
   href,
@@ -52,6 +54,7 @@ export function LinkButton({
               aria-describedby={id}
               className={`${buttonClass(variant)} ${className}`}
               onClick={openOnPlainClick(onOpen)}
+              {...linkMenuProps}
             >
               {children}
             </a>

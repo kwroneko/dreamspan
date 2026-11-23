@@ -45,6 +45,7 @@ import { ShellBrowser } from "./characters/ShellBrowser.tsx"
 import { ShellNavigation, useShellNavigation } from "./characters/shellData.tsx"
 import { sidebarSearch } from "./characters/sidebarSearch.ts"
 import { setPageTitle, useNotices } from "./notices.tsx"
+import { LinkMenu } from "../ui/LinkMenu.tsx"
 import { useTabFocused, useTabInStrips, useTabMeta } from "./workbench/tab.tsx"
 import { layoutKeys, layoutParams, useLayoutParam, viewKeys, writeLayoutParam } from "../tabLayoutParams.ts"
 
@@ -356,6 +357,8 @@ function AppShell() {
       <DurableFieldsContext value={appDurableFields}>
         <ShellNavigation key={result.value.user.id}>
           <Notices />
+          {/* Every app link's right-click menu: Open, Open beside, Open in a new browser tab. */}
+          <LinkMenu />
           <a
             href="#content"
             className="sr-only rounded-md bg-surface px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:ring-2 focus:ring-focus"

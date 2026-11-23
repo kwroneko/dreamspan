@@ -273,3 +273,77 @@ describe("workbench layout", () => {
     expect(allTabs(restored).filter((tab) => tab.preview)).toHaveLength(1)
   })
 })
+
+// Kind affinity (owner, 2026-11-23): the request inspector opens where an inspector is showing.
+describe("kind affinity", () => {
+  const affinity = (href: string) => (href.includes("/context/") ? "request" : null)
+  /** A kept chat on the left, an inspector of `first` beside it; focus back on the chat. */
+  const chatAndInspector = (first: string, keep = false) => {
+    let layout = initialLayout("/chats/a")
+    layout = pinTab(layout, focusedTab(layout)!.id)
+    const chatFrame = focusedFrame(layout).id
+    layout = splitFrame(layout, chatFrame, "row", { empty: true })
+    const inspectorFrame = focusedFrame(layout).id
+    layout = openTab(layout, first, keyOf, { frame: inspectorFrame, preview: !keep })
+    return { layout: focusFrame(layout, chatFrame), chatFrame, inspectorFrame }
+  }
+
+  it("replaces the italic inspector beside the chat, which keeps its frame", () => {
+    const { layout: start, chatFrame, inspectorFrame } = chatAndInspector("/chats/a/context/1")
+    const layout = openTab(start, "/chats/a/context/2", keyOf, { frame: chatFrame, affinity })
+    expect(titles(layout)).toEqual([["/chats/a"], ["/chats/a/context/2"]])
+    expect(focusedFrame(layout).id).toBe(inspectorFrame)
+    expect(focusedTab(layout)?.preview).toBe(true)
+  })
+
+  it("opens a new italic tab beside a kept inspector", () => {
+    const { layout: start, chatFrame } = chatAndInspector("/chats/a/context/1", true)
+    const layout = openTab(start, "/chats/a/context/2", keyOf, { frame: chatFrame, affinity })
+    expect(titles(layout)).toEqual([["/chats/a"], ["/chats/a/context/1", "/chats/a/context/2"]])
+    expect(focusedTab(layout)?.preview).toBe(true)
+  })
+
+  it("doesn't count an inspector hidden behind another tab", () => {
+    const { layout: start, chatFrame, inspectorFrame } = chatAndInspector("/chats/a/context/1", true)
+    // The inspector's frame now shows a chat in front of it.
+    const covered = focusFrame(openTab(start, "/chats/b", keyOf, { frame: inspectorFrame }), chatFrame)
+    const layout = openTab(covered, "/chats/a/context/2", keyOf, { frame: chatFrame, affinity })
+    expect(titles(layout)).toEqual([
+      ["/chats/a", "/chats/a/context/2"],
+      ["/chats/a/context/1", "/chats/b"]
+    ])
+    expect(focusedFrame(layout).id).toBe(chatFrame)
+  })
+
+  it("picks the most recently focused of two frames showing inspectors", () => {
+    const { layout: start, chatFrame, inspectorFrame } = chatAndInspector("/chats/a/context/1", true)
+    let layout = splitFrame(start, inspectorFrame, "row", { empty: true })
+    const second = focusedFrame(layout).id
+    layout = openTab(layout, "/chats/a/context/9", keyOf, { frame: second, preview: false })
+    // The first inspector's frame was focused after the second's.
+    const firstLater = focusFrame(focusFrame(layout, inspectorFrame), chatFrame)
+    const next = openTab(firstLater, "/chats/a/context/2", keyOf, { frame: chatFrame, affinity })
+    expect(titles(next)).toEqual([["/chats/a"], ["/chats/a/context/1", "/chats/a/context/2"], ["/chats/a/context/9"]])
+    expect(focusedFrame(next).id).toBe(inspectorFrame)
+    // And the other way round.
+    const secondLater = focusFrame(focusFrame(firstLater, second), chatFrame)
+    const other = openTab(secondLater, "/chats/a/context/2", keyOf, { frame: chatFrame, affinity })
+    expect(titles(other)).toEqual([["/chats/a"], ["/chats/a/context/1"], ["/chats/a/context/9", "/chats/a/context/2"]])
+    expect(focusedFrame(other).id).toBe(second)
+  })
+
+  it("opens as before when no frame shows an inspector", () => {
+    let layout = initialLayout("/chats/a")
+    layout = pinTab(layout, focusedTab(layout)!.id)
+    const plain = openTab(layout, "/chats/a/context/2", keyOf, { id: "t" })
+    const affine = openTab(layout, "/chats/a/context/2", keyOf, { id: "t", affinity })
+    expect(affine).toEqual(plain)
+    expect(titles(plain)).toEqual([["/chats/a", "/chats/a/context/2"]])
+  })
+
+  it("leaves items of kinds without an affinity where they open", () => {
+    const { layout: start, chatFrame } = chatAndInspector("/chats/a/context/1")
+    const layout = openTab(start, "/chats/b", keyOf, { frame: chatFrame, affinity })
+    expect(titles(layout)).toEqual([["/chats/a", "/chats/b"], ["/chats/a/context/1"]])
+  })
+})

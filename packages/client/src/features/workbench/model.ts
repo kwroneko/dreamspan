@@ -235,13 +235,49 @@ export interface OpenOptions {
   readonly background?: boolean
   /** The new tab's id, when the caller needs to know it. */
   readonly id?: string
+  /**
+   * Kind affinity (`TabKind.opensWhereShown`): the group an item opens with, or null. Given, an
+   * item of such a kind opens in the frame most recently focused whose shown tab is of its group,
+   * in place of `frame` and the focused one; with none showing one, as without it.
+   */
+  readonly affinity?: AffinityOf
+}
+
+/** The kind an item's tab opens beside (`TabKind.opensWhereShown`), or null when it has none. */
+export type AffinityOf = (href: string) => string | null
+
+/**
+ * The frame an item with an affinity opens in: of the frames whose shown tab has the item's
+ * group (a tab behind another doesn't count, nor a frame behind a maximized one), one already
+ * showing the item, else the one focused most recently. Undefined when none shows one.
+ */
+export const affinityFrame = (layout: Layout, href: string, keyOf: KeyOf, affinity: AffinityOf) => {
+  const group = affinity(href)
+  if (group === null) return undefined
+  const shown = (f: Frame) => f.tabs.find((t) => t.id === f.active)
+  const candidates = frames(layout.root).filter((f) => {
+    if (layout.maximized && layout.maximized !== f.id) return false
+    const tab = shown(f)
+    return tab !== undefined && affinity(tab.href) === group
+  })
+  if (candidates.length === 0) return undefined
+  const key = keyOf(href)
+  const same = candidates.find((f) => keyOf(shown(f)!.href) === key)
+  if (same) return same
+  const rank = (f: Frame) => {
+    if (f.id === layout.focused) return -1
+    const at = layout.recent.findIndex((id) => f.tabs.some((t) => t.id === id))
+    return at < 0 ? Number.MAX_SAFE_INTEGER : at
+  }
+  return [...candidates].sort((a, b) => rank(a) - rank(b))[0]
 }
 
 /**
  * Opens an item: the frame's own tab with that item is focused and shown at `href`; with no
  * frame named, so is another frame's (VS Code's reveal if open); else the item opens in the
  * frame's preview tab, which keeps its id (VS Code reuses the preview for any open), else in a
- * new tab beside the shown one.
+ * new tab beside the shown one. With `affinity`, the frame is the one showing the item's kind
+ * (`affinityFrame`) when there is one.
  */
 export const openTab = (layout: Layout, href: string, keyOf: KeyOf, options: OpenOptions = {}): Layout =>
   openTabAt(layout, href, keyOf, options).layout
@@ -255,10 +291,13 @@ export const openTabAt = (
 ): { layout: Layout; tabId: string } => {
   const preview = options.preview ?? true
   const key = keyOf(href)
-  const target = (options.frame && findFrame(layout, options.frame)) || focusedFrame(layout)
+  // An item of a kind with an affinity opens where its kind is shown (the request inspector
+  // beside a chat), not in the opener's frame.
+  const affine = options.affinity ? affinityFrame(layout, href, keyOf, options.affinity) : undefined
+  const target = affine ?? ((options.frame && findFrame(layout, options.frame)) || focusedFrame(layout))
   const existing =
     target.tabs.find((t) => keyOf(t.href) === key) ??
-    (options.frame ? undefined : allTabs(layout).find((t) => keyOf(t.href) === key))
+    (options.frame || affine ? undefined : allTabs(layout).find((t) => keyOf(t.href) === key))
   if (existing) {
     let next = setTabHref(layout, existing.id, href)
     if (!preview) next = pinTab(next, existing.id)

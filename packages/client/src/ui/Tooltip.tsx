@@ -5,6 +5,7 @@ import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip"
 import type { ComponentProps, ReactElement, ReactNode } from "react"
 import { Button, tooltipPopupClass } from "./Button.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
+import { linkMenuProps } from "./linkMenuState.ts"
 import { openOnPlainClick } from "./links.ts"
 
 /** Shares one delay among the tooltips inside, so moving along a toolbar shows each at once. */
@@ -97,7 +98,8 @@ export function IconButton({
 
 /**
  * An `IconButton` that's a link (owner, 2026-11-05: what opens in the center column can open in
- * a new browser tab): a plain click runs `onOpen`, a middle click is the browser's.
+ * a new browser tab): a plain click runs `onOpen`, a middle click is the browser's, and a
+ * right-click shows its open menu (LinkMenu.tsx).
  */
 export function IconLink({
   label,
@@ -121,6 +123,7 @@ export function IconLink({
       <a
         {...(disabled ? { "aria-disabled": true, role: "link" } : { href })}
         aria-label={label}
+        {...linkMenuProps}
         className={`${iconButtonClass()} ${disabled ? "opacity-50" : ""} ${className}`}
         onClick={(event) => {
           if (disabled) return event.preventDefault()
