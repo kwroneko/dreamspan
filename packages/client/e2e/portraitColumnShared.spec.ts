@@ -13,6 +13,7 @@ import { addToCast } from "./support/cast.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel, panelTab } from "./support/panel.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { removeAttachment } from "./support/attachments.ts"
 import { SHAPES, shapeCard } from "./support/shapes.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "20" })
@@ -394,7 +395,7 @@ const withAttachment = async (page: Page) => {
   // An image an earlier test left attached (a file dropped from outside) goes first.
   const left = page.getByRole("list", { name: "Attached images" }).getByRole("button", { name: /^Remove / })
   for (let count = await left.count(); count > 0; count--) {
-    await left.first().click()
+    await removeAttachment(left.first())
     await expect(left).toHaveCount(count - 1)
   }
   await page.getByLabel("Message", { exact: true }).fill("A harbor sketch.")

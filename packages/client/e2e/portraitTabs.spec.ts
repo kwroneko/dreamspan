@@ -7,6 +7,7 @@ import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { removeAttachment } from "./support/attachments.ts"
 import { SHAPES, shapeCard } from "./support/shapes.ts"
 import { storedLayout } from "./support/workbench.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -235,7 +236,7 @@ const withAttachment = async (page: Page) => {
   // An image an earlier test left attached (a file dropped from outside) goes first.
   const left = page.getByRole("list", { name: "Attached images" }).getByRole("button", { name: /^Remove / })
   for (let count = await left.count(); count > 0; count--) {
-    await left.first().click()
+    await removeAttachment(left.first())
     await expect(left).toHaveCount(count - 1)
   }
   await page.getByLabel("Message", { exact: true }).fill("A lighthouse sketch.")

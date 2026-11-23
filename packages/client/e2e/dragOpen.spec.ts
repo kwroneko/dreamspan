@@ -16,6 +16,7 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel, panelTab } from "./support/panel.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { removeAttachment } from "./support/attachments.ts"
 import { SHAPES, shapeCard } from "./support/shapes.ts"
 
 const server = serverPerFile(withAdmin)
@@ -370,7 +371,7 @@ for (const theme of ["light", "dark"] as const) {
     if (process.env.LAYOUT_AUDIT)
       await expectLayout(page, info, `composer-outside-file-1440-${theme}`, { scope: "form" })
     // The draft is kept per chat: leave none for the next theme's run.
-    await frame.getByRole("button", { name: "Remove outside.png" }).click()
+    await removeAttachment(frame.getByRole("button", { name: "Remove outside.png" }))
     await expect(attachments(page)).toHaveCount(0)
   })
 }
