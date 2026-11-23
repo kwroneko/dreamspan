@@ -159,6 +159,7 @@ export function RowTick({
   label,
   hint,
   disabled = false,
+  indeterminate = false,
   className = ""
 }: {
   checked: boolean
@@ -166,6 +167,8 @@ export function RowTick({
   label: string
   hint: string
   disabled?: boolean
+  /** Some but not all of the rows it stands for are ticked: a list's header tick. */
+  indeterminate?: boolean
   className?: string
 }) {
   // The pointer or key that toggles it, read before Base UI reports the change.
@@ -179,6 +182,7 @@ export function RowTick({
       <BaseCheckbox.Root
         aria-label={label}
         checked={checked}
+        indeterminate={indeterminate}
         readOnly={disabled}
         {...(disabled ? { "aria-disabled": true } : {})}
         onPointerDown={note}
@@ -189,10 +193,10 @@ export function RowTick({
         }}
         className={`group/tick flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-hover ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"} ${focusRing} ${className}`}
       >
-        <span className="flex size-4 items-center justify-center rounded-[4px] border border-border bg-surface text-accent-contrast group-data-checked/tick:border-accent group-data-checked/tick:bg-accent">
+        <span className="flex size-4 items-center justify-center rounded-[4px] border border-border bg-surface text-accent-contrast group-data-checked/tick:border-accent group-data-checked/tick:bg-accent group-data-indeterminate/tick:border-accent group-data-indeterminate/tick:bg-accent">
           <BaseCheckbox.Indicator className="flex data-unchecked:hidden">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
-              <path d="m2.5 8.5 4 4 7-9" strokeWidth="2" />
+              <path d={indeterminate ? "M3.5 8h9" : "m2.5 8.5 4 4 7-9"} strokeWidth="2" />
             </svg>
           </BaseCheckbox.Indicator>
         </span>

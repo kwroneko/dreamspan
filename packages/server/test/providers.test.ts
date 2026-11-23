@@ -140,6 +140,61 @@ describe("connections", () => {
         "NotFound"
       )
       yield* fails(writer.SetModelHidden({ userId: bo, modelId: model.id, hidden: true }), "NotFound")
+      yield* fails(writer.SetModelsHidden({ userId: bo, modelIds: [model.id], hidden: true }), "NotFound")
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.effect("hides and shows many models in one change, reporting only those that changed", () =>
+    Effect.gen(function* () {
+      const { writer, reader, ana, bo, create } = yield* setup
+      const conn = yield* create(ana)
+      const keys = Array.from({ length: 1500 }, (_, i) => `synthetic-${String(i).padStart(4, "0")}`)
+      yield* writer.SyncFetchedModels({
+        userId: ana,
+        connectionId: conn.id,
+        models: keys.map((key) => ({ key, upstream: {} })),
+        fetchedAt: 1
+      })
+      const all = yield* reader.ListModels({ userId: ana, connectionId: conn.id, includeHidden: true })
+      assert.strictEqual(all.length, 1500)
+      const first = all.slice(0, 1000).map((m) => m.id)
+      yield* writer.SetModelHidden({ userId: ana, modelId: first[0]!, hidden: true })
+
+      // One already hidden: the rest change, and only they are reported (the Undo's ids).
+      const hid = yield* writer.SetModelsHidden({ userId: ana, modelIds: first, hidden: true })
+      assert.strictEqual(hid.changed.length, 999)
+      assert.notInclude(hid.changed, first[0])
+      const visible = yield* reader.ListModels({ userId: ana, connectionId: conn.id, includeHidden: false })
+      assert.strictEqual(visible.length, 500)
+      const bumped = (yield* reader.ListModels({ userId: ana, connectionId: conn.id, includeHidden: true })).find(
+        (m) => m.id === first[1]
+      )!
+      assert.strictEqual(bumped.rowVersion, all[1]!.rowVersion + 1)
+
+      // Repeating it changes nothing.
+      assert.deepStrictEqual(
+        (yield* writer.SetModelsHidden({ userId: ana, modelIds: first, hidden: true })).changed,
+        []
+      )
+
+      // Undo: the changed ones shown again; the one hidden before stays hidden.
+      const undone = yield* writer.SetModelsHidden({ userId: ana, modelIds: hid.changed, hidden: false })
+      assert.strictEqual(undone.changed.length, 999)
+      const after = yield* reader.ListModels({ userId: ana, connectionId: conn.id, includeHidden: false })
+      assert.strictEqual(after.length, 1499)
+
+      // One model of another user's in the list: refused, and nothing changes.
+      const other = yield* create(bo)
+      const foreign = yield* writer.AddUserModel({ userId: bo, connectionId: other.id, key: "theirs", overrides: {} })
+      yield* fails(
+        writer.SetModelsHidden({ userId: ana, modelIds: [...first.slice(1, 10), foreign.id], hidden: true }),
+        "NotFound"
+      )
+      assert.strictEqual(
+        (yield* reader.ListModels({ userId: ana, connectionId: conn.id, includeHidden: false })).length,
+        1499
+      )
+      assert.isFalse((yield* reader.GetModel({ userId: bo, modelId: foreign.id })).hidden)
     }).pipe(Effect.provide(database()))
   )
 

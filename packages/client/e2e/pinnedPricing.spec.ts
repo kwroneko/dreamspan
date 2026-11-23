@@ -102,10 +102,10 @@ for (const [width, height] of [
       await page.goto(`${server().url}/settings/connections/${connectionId}`)
 
       // The row's price changes from the model's general one to Together's once its list is in.
-      const row = page.getByRole("listitem").filter({ has: page.getByRole("button", { name: `Edit ${PINNED}` }) })
-      await expect(row.locator('[data-price-source="pinned"]')).toContainText("$0.2 / $0.6 per M tokens, from Together")
+      const row = page.getByRole("row").filter({ has: page.getByRole("button", { name: `Edit ${PINNED}` }) })
+      await expect(row.locator('[data-price-source="pinned"]')).toHaveText("$0.2 / $0.6")
       await expect(row).not.toContainText("$50")
-      await hover(page, /per M tokens, from Together/, /Together.s own price, because the routing pins it/)
+      await hover(page, "$0.2 / $0.6", /Together.s own price, because the routing pins it/)
       expect(provider.endpointRequests).toContain(PINNED)
 
       await page.getByRole("button", { name: `Edit ${PINNED}`, exact: true }).click()
@@ -121,10 +121,10 @@ for (const [width, height] of [
       // A pinned provider the list has no price for: the general price, and a note saying so.
       await expect(
         page
-          .getByRole("listitem")
+          .getByRole("row")
           .filter({ has: page.getByRole("button", { name: `Edit ${FAILING}` }) })
           .locator('[data-price-source="fallback"]')
-      ).toContainText("$50 / $150 per M tokens")
+      ).toHaveText("$50 / $150")
       await page.getByRole("button", { name: `Edit ${FAILING}`, exact: true }).click()
       const failing = page.getByRole("dialog").getByRole("region", { name: "Provider rules", exact: true })
       await failing.scrollIntoViewIfNeeded()

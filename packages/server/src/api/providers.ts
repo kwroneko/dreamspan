@@ -203,6 +203,10 @@ export const makeProviderHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => writer.SetModelHidden({ userId: id, modelId, hidden })).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], toServerError("SetModelHidden"))
       ),
+    SetModelsHidden: ({ modelIds, hidden }) =>
+      Effect.flatMap(userId, (id) => writer.SetModelsHidden({ userId: id, modelIds, hidden })).pipe(
+        Effect.catchTag(["StorageError", "RpcClientError"], toServerError("SetModelsHidden"))
+      ),
     GetNetworkSettings: () =>
       admin.pipe(
         Effect.andThen(network.view),

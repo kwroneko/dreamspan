@@ -319,6 +319,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SetMessageHidden: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetThinkingHidden: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetModelHidden: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  SetModelsHidden: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetNetworkSettings: "User-only security, consent, account, credential or network configuration.",
   SetPassword: "User-only security, consent, account, credential or network configuration.",
   SetRegexApproval: "User-only security, consent, account, credential or network configuration.",

@@ -1,9 +1,5 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { AboutHint, LabelWithHelp } from "../../ui/AboutHint.tsx"
-import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
-import { useAtomValue } from "@effect/atom-react"
-import { useOpenPlace } from "../editor/durable.tsx"
-import { AsyncResult } from "effect/reactivity"
 import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import { DEFAULT_RESPONSE, DEFAULT_SAMPLERS, ModelSettings } from "@dreamspan/shared/modelSettings.ts"
 import { Schema } from "effect"
@@ -11,7 +7,6 @@ import { StSettingsImporter } from "./StSettingsImport.tsx"
 import { ReasoningEffortSelect } from "./ReasoningEffort.tsx"
 // A connection's models: what the provider lists, merged with the user's edits
 // (spec/PROVIDERS.md §3.1). Each field shows where its value came from.
-import type { ModelRefresh } from "@dreamspan/shared/api.ts"
 import {
   type CatalogMatch,
   ENDPOINTS_RETRY_MS,
@@ -26,18 +21,16 @@ import {
   routedUpstream
 } from "@dreamspan/shared/providers.ts"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
-import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
+import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Fieldset, focusFirstInvalid, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
-import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
+import { Alert } from "../../ui/Surface.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
-import { modelsAtom, parseOptionalInt } from "./data.ts"
-import type { ConnectionSectionProps } from "./detail.tsx"
+import { parseOptionalInt } from "./data.ts"
 
-const tokens = (n: number) => (n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n))
+export const tokens = (n: number) => (n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n))
 
 /** Where a field's value came from, in words. */
 export const sourceTitle = (
@@ -56,7 +49,7 @@ export const sourceTitle = (
           : "Reported by the provider"
 
 /** A field's value, marked when no source knows it (the default is shown, never as fact). */
-function Value({
+export function Value({
   resolved,
   model,
   show,
@@ -92,7 +85,7 @@ function Value({
 /** The model settings fields a link can open at. */
 export type ModelField = "context" | "maxOutput" | "openai_max_context" | "openai_max_tokens"
 
-const capabilityBadges = (model: ReturnType<typeof resolveModel>) =>
+export const capabilityBadges = (model: ReturnType<typeof resolveModel>) =>
   (
     [
       ["vision", model.vision],
@@ -730,7 +723,7 @@ export function ModelSettingsEditor({
   )
 }
 
-function EditModelDialog({
+export function EditModelDialog({
   model,
   onOpenChange,
   focus
@@ -800,7 +793,7 @@ export function ModelSettingsDialog({
   )
 }
 
-function AddModelDialog({
+export function AddModelDialog({
   connectionId,
   onOpenChange
 }: {
@@ -855,7 +848,7 @@ function AddModelDialog({
 const endpointsAsked = new Map<string, number>()
 
 /** Asks for the model's per-provider prices once its routing pins one provider and none are stored or they're stale. */
-function useEndpointsFetch(model: Model, pinned: boolean) {
+export function useEndpointsFetch(model: Model, pinned: boolean) {
   const fetch = useAction()
   const run = fetch.run
   useEffect(() => {
@@ -892,7 +885,7 @@ const fetchedFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", 
  * them: this server's price list when the user turned it on, a pinned provider's own price, the
  * provider's model list, else the app's built-in prices.
  */
-const shownPrice = (model: Model, resolved: ReturnType<typeof resolveModel>, priceEndpoint: boolean) => {
+export const shownPrice = (model: Model, resolved: ReturnType<typeof resolveModel>, priceEndpoint: boolean) => {
   const feed = priceEndpoint ? model.upstream.priceFeed : undefined
   if (feed?.price && feed.available !== false)
     return {
@@ -929,7 +922,7 @@ const shownPrice = (model: Model, resolved: ReturnType<typeof resolveModel>, pri
 }
 
 /** The routes a price endpoint lists for a model (PRICES §4.4): where it may send it, at what price. */
-function FeedRoutes({ feed }: { feed: Model["upstream"]["priceFeed"] }) {
+export function FeedRoutes({ feed }: { feed: Model["upstream"]["priceFeed"] }) {
   const routes = (feed?.routes ?? []).filter((route) => route.price !== null)
   if (routes.length === 0) return null
   return (
@@ -946,186 +939,5 @@ function FeedRoutes({ feed }: { feed: Model["upstream"]["priceFeed"] }) {
           .join(", ")}
       </span>
     </Tooltip>
-  )
-}
-
-function ModelRow({
-  model,
-  compat,
-  priceEndpoint
-}: {
-  model: Model
-  compat: ConnectionSectionProps["connection"]["compat"]
-  priceEndpoint: boolean
-}) {
-  const hide = useAction()
-  const [selectedModel, setSelectedModel] = usePlaceParam("model", "")
-  const editing = selectedModel === model.id
-  const setEditing = (on: boolean) => setSelectedModel(on ? model.id : "")
-  const resolved = resolveModel(model.key, model.upstream, model.overrides, compat)
-  const shown = shownPrice(model, resolved, priceEndpoint)
-  useEndpointsFetch(model, pinnedRoute({ ...model.upstream.settings, ...model.overrides.settings }.routing) !== null)
-  return (
-    <li className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between">
-      <div className="flex min-w-0 flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium [overflow-wrap:anywhere]">{resolved.name.value}</span>
-          {model.source === "user" && <Badge>added by you</Badge>}
-          {model.hidden && <Badge>hidden</Badge>}
-          {model.missingSince !== null && <Badge tone="warning">no longer listed</Badge>}
-          {priceEndpoint && model.upstream.priceFeed?.available === false && (
-            <Badge tone="warning">unavailable on this server</Badge>
-          )}
-        </div>
-        {resolved.name.value !== model.key && (
-          <p className="font-mono text-xs text-muted [overflow-wrap:anywhere]">{model.key}</p>
-        )}
-        <p className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
-          <span>
-            Context <Value resolved={resolved.context} model={resolved} show={tokens} assumed />
-          </span>
-          <span>
-            Output <Value resolved={resolved.maxOutput} model={resolved} show={tokens} />
-          </span>
-          {shown && (
-            <Tooltip label={shown.hint}>
-              <span className="text-muted" data-price-source={shown.source}>
-                ${shown.price.input} / ${shown.price.output} per M tokens, {shown.text}
-              </span>
-            </Tooltip>
-          )}
-          {priceEndpoint && <FeedRoutes feed={model.upstream.priceFeed} />}
-          {capabilityBadges(resolved).map(([label]) => (
-            <Badge key={label} tone="accent">
-              {label}
-            </Badge>
-          ))}
-          {resolved.prefill.value === "assistant" && <Badge tone="accent">prefill</Badge>}
-        </p>
-        <ErrorAlert error={hide.error} />
-      </div>
-      <div className="flex shrink-0 gap-2">
-        <Button
-          hint="Opens this model’s settings."
-          variant="ghost"
-          onClick={() => setEditing(true)}
-          aria-label={`Edit ${model.key}`}
-        >
-          Edit
-        </Button>
-        <Button
-          variant="ghost"
-          pending={hide.pending}
-          aria-label={`${model.hidden ? "Show" : "Hide"} ${model.key}`}
-          hint={
-            model.hidden
-              ? "Lists it again where you choose a model."
-              : "Leaves it out of the lists where you choose a model."
-          }
-          onClick={() =>
-            void hide.run(
-              (client) => client("SetModelHidden", { modelId: model.id, hidden: !model.hidden }),
-              ["models"]
-            )
-          }
-        >
-          {model.hidden ? "Show" : "Hide"}
-        </Button>
-      </div>
-      {editing && <EditModelDialog model={model} onOpenChange={setEditing} />}
-    </li>
-  )
-}
-
-const refreshSummary = (refresh: ModelRefresh) =>
-  [
-    `${refresh.added} added`,
-    `${refresh.updated} updated`,
-    ...(refresh.missing > 0 ? [`${refresh.missing} no longer listed`] : [])
-  ].join(", ")
-
-export function ModelsSection({ connection }: ConnectionSectionProps) {
-  const refresh = useAction()
-  const [hidden, setHidden] = usePlaceParam("models", "visible", ["visible", "all"])
-  const includeHidden = hidden === "all"
-  const setIncludeHidden = (on: boolean) => setHidden(on ? "all" : "visible", true)
-  const [selectedModel] = usePlaceParam("model", "")
-  const modelAtom = modelsAtom(connection.id, includeHidden || selectedModel !== "")
-  const modelList = useAtomValue(modelAtom)
-  usePlaceNotice(
-    selectedModel && AsyncResult.isSuccess(modelList) && !modelList.value.some((m) => m.id === selectedModel)
-      ? "This model is no longer available on this connection."
-      : null
-  )
-  // A URL place (editor/durable.tsx): a reload opens Add a model again, with the id as typed.
-  const [adding, setAdding] = useOpenPlace(`add-model:${connection.id}`)
-  const [refreshed, setRefreshed] = useState<ModelRefresh | null>(null)
-  return (
-    <Card>
-      <CardHeader
-        title="Models"
-        about="* marks your own values, ? values nobody reports; a context size nobody reports is assumed."
-        actions={
-          <>
-            <Button
-              pending={refresh.pending}
-              hint="Reads the provider’s model list again. Your own settings for each model stay."
-              onClick={async () => {
-                setRefreshed(null)
-                const result = await refresh.run(
-                  (client) => client("RefreshModels", { connectionId: connection.id }),
-                  ["models"]
-                )
-                if (result.ok) setRefreshed(result.value)
-              }}
-            >
-              Refresh from provider
-            </Button>
-            <Button
-              variant="ghost"
-              hint="Adds one the provider doesn’t list, by its id."
-              onClick={() => setAdding(true)}
-            >
-              Add a model
-            </Button>
-          </>
-        }
-      />
-      <div className="flex flex-col gap-4">
-        {refreshed && (
-          <Alert tone="success" title="Model list refreshed">
-            <p>{refreshSummary(refreshed)}.</p>
-            {refreshed.route && <p className="text-muted">Route: {refreshed.route}</p>}
-          </Alert>
-        )}
-        <ErrorAlert error={refresh.error} title="The model list couldn't be fetched" />
-        <Switch checked={includeHidden} onCheckedChange={setIncludeHidden}>
-          Show hidden models
-        </Switch>
-        <AsyncView atom={modelAtom} loading="Loading models…">
-          {(models) =>
-            models.length === 0 ? (
-              <EmptyState title="No models">
-                <p>Refresh from the provider, or add one by its id.</p>
-              </EmptyState>
-            ) : (
-              <ul className="flex flex-col divide-y divide-border" aria-label="Models">
-                {models
-                  .filter((model) => includeHidden || !model.hidden || model.id === selectedModel)
-                  .map((model) => (
-                    <ModelRow
-                      key={model.id}
-                      model={model}
-                      compat={connection.compat}
-                      priceEndpoint={connection.providerSettings?.priceEndpoint === true}
-                    />
-                  ))}
-              </ul>
-            )
-          }
-        </AsyncView>
-      </div>
-      {adding && <AddModelDialog connectionId={connection.id} onOpenChange={setAdding} />}
-    </Card>
   )
 }

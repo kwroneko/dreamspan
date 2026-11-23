@@ -80,7 +80,7 @@ export const googleConnectionTests = () => {
         await expect(page.getByRole("status").filter({ hasText: "It works" })).toBeVisible()
         await page.getByRole("button", { name: "Refresh from provider", exact: true }).click()
         await expect(
-          page.getByRole("list", { name: "Models", exact: true }).getByText("Synthetic Flash", { exact: true })
+          page.getByRole("table", { name: "Models", exact: true }).getByText("Synthetic Flash", { exact: true })
         ).toBeVisible()
         await page.getByText("Advanced", { exact: true }).click()
         await expectLayout(page, info, `google-detail-${width}-${theme}`, { scope: "main" })

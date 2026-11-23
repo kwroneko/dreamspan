@@ -75,10 +75,10 @@ for (const [width, height] of [
       // Off by default: a refresh asks for models only.
       const before = provider.priceRequests
       await page.getByRole("button", { name: "Refresh from provider" }).click()
-      const row = page.getByRole("listitem").filter({ has: page.getByRole("button", { name: `Edit ${MODEL}` }) })
-      await expect(row.locator("[data-price-source]")).toContainText(
-        "$1 / $2 per M tokens, from the provider’s model list"
-      )
+      const row = page.getByRole("row").filter({ has: page.getByRole("button", { name: `Edit ${MODEL}` }) })
+      // The price in its column; where it came from in its hover.
+      await expect(row.locator('[data-price-source="list"]')).toHaveText("$1 / $2")
+      await hover(page, "$1 / $2", /from the provider’s model list/)
       expect(provider.priceRequests).toBe(before)
 
       await page.getByText("Advanced", { exact: true }).click()
@@ -96,16 +96,14 @@ for (const [width, height] of [
       await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
 
       await page.getByRole("button", { name: "Refresh from provider" }).click()
-      await expect(row.locator('[data-price-source="endpoint"]')).toContainText(
-        "$0.25 / $0.75 per M tokens, from this server’s price list, fetched"
-      )
-      await expect(row.locator('[data-price-source="endpoint"]')).toContainText("80 % of list price")
+      await expect(row.locator('[data-price-source="endpoint"]')).toHaveText("$0.25 / $0.75")
+      await hover(page, "$0.25 / $0.75", /from this server’s price list, fetched .*, 80 % of list price/)
       // The routes the server lists, with their own prices (PRICES §4.4).
       await expect(row.locator("[data-price-routes]")).toHaveText("Routes: fast $0.3 / $0.9 (90 %)")
       await hover(page, /^Routes: fast/, /Where this server may send the model/)
       expect(provider.priceRequests).toBe(before + 1)
       // The switch says what the server answered last (PRICES §4.5).
       await expect(page.locator('[data-price-feed="supported"]')).toContainText("Prices fetched")
-      await hover(page, /from this server’s price list/, /This server’s own price for the model/)
+      await hover(page, "$0.25 / $0.75", /This server’s own price for the model/)
       await expectLayout(page, info, `price-endpoint-row-${width}-${theme}`)
     })
