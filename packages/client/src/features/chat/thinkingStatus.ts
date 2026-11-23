@@ -16,7 +16,10 @@ export interface ThinkingStatus {
 
 const WHY: Record<Exclude<ThinkingSendReason, "sent" | "hidden">, string> = {
   changed: "an earlier message changed since it was written, so the provider would refuse it",
-  model: "another model or connection wrote it, so this one would refuse it",
+  end: "this model takes it back only with everything before it unchanged, and the end-of-request text it was written after isn't kept in the chat",
+  chain:
+    "this model takes earlier reasoning only as an unbroken run, and a later reply's reasoning that followed it isn't sent",
+  model: "another model or connection wrote it, so this one can't use it",
   provider: "this provider doesn't take earlier replies' reasoning",
   ignored: "this provider ignores earlier replies' reasoning",
   unrecorded: "there's nothing from the provider to send: it was edited, continued, imported or written in a tool run",

@@ -80,7 +80,10 @@ const runPlainReply = ({
           modelId: model.modelId,
           ...(model.connectionRevision !== undefined ? { connectionRevision: model.connectionRevision } : {}),
           prefix: requestDigest(generation.request.messages),
+          // Without the end-of-request message, which the history never repeats.
+          ...(generation.request.endMessage ? { bare: requestDigest(generation.request.messages.slice(0, -1)) } : {}),
           parts,
+          ...(message.providerThinkingLevel !== undefined ? { level: message.providerThinkingLevel } : {}),
           ...(message.thinkingRecord !== undefined ? { record: message.thinkingRecord } : {})
         }
       }
@@ -94,6 +97,7 @@ const runPlainReply = ({
           options: {
             ...(model.settings?.cacheRetention ? { cacheRetention: model.settings.cacheRetention } : {}),
             ...(request.outputBudget ? { outputBudget: request.outputBudget } : {}),
+            ...(generation.request.replayReasoning ? { replayReasoning: true } : {}),
             ...(output.replyTool ? { replyTool: output.replyTool } : {}),
             ...(wire.temperature !== undefined ? { temperature: wire.temperature } : {}),
             ...(wire.maxTokens !== undefined ? { maxTokens: wire.maxTokens } : {}),

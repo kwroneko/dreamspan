@@ -273,7 +273,10 @@ const withReplay = (request: AssembledRequest, model: ModelInput, wire: Provider
         model: model.key,
         usage: emptyUsage(),
         stopReason: "stop" as const,
-        timestamp: 0
+        timestamp: 0,
+        // pi-ai puts the effort it was written at back before it (a mid-conversation system
+        // message, on models that take one), as the request it answered had it.
+        ...(r.native.level !== undefined ? { providerThinkingLevel: r.native.level } : {})
       } satisfies AssistantMessage,
       { [HISTORY_REPLAY]: true },
       r.native.record === undefined ? {} : { thinkingRecord: r.native.record }

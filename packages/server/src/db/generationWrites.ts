@@ -222,7 +222,8 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
     RecordSentContext: ({ userId, rolloutId, wire, issues }) =>
       Effect.gen(function* () {
         yield* ownedRollout(userId, rolloutId)
-        yield* sql`UPDATE rollout_payloads SET sent_context_json = ${wire} WHERE rollout_id = ${rolloutId}`
+        if (wire !== undefined)
+          yield* sql`UPDATE rollout_payloads SET sent_context_json = ${wire} WHERE rollout_id = ${rolloutId}`
         // The provider layer's notes join the reply's, once each (thinkingBinding.ts).
         for (const issue of issues ?? []) {
           const json = JSON.stringify(issue)
@@ -230,6 +231,11 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
             SET context_issues_json = json_insert(coalesce(context_issues_json, '[]'), '$[#]', json(${json}))
             WHERE id = ${rolloutId} AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(context_issues_json, '[]')) i
               WHERE i.value ->> 'kind' = ${issue.kind} AND i.value ->> 'message' = ${issue.message})`
+          // Notes from after the response join the sent context's too, which the inspector shows.
+          if (wire === undefined)
+            yield* sql`UPDATE rollout_payloads
+              SET sent_context_json = json_insert(sent_context_json, '$.display.issues[#]', json(${json}))
+              WHERE rollout_id = ${rolloutId} AND json_type(sent_context_json, '$.display.issues') = 'array'`
         }
       }).pipe(transaction(sql, "RecordSentContext")),
 

@@ -95,7 +95,10 @@ import {
   DROP_NOTES,
   HISTORY_DROP_NOTES,
   type RecordedAssistant,
+  providerDropNote,
+  providerDroppedThinking,
   refusesSigned,
+  replayTerms,
   signsReasoning,
   stampHistoryReplay,
   type ThinkingBinding,
@@ -165,6 +168,12 @@ export interface StreamRequest {
     readonly reasoning?: ThinkingLevel
     readonly maxTokens?: number
     readonly outputBudget?: { remaining: number }
+    /**
+     * The chat sends earlier replies' reasoning back (assembler/reasoningReplay.ts): on a model
+     * that binds it to its prefix, no mid-conversation effort messages, which a later request
+     * couldn't repeat as they were; the effort goes as the request's own setting.
+     */
+    readonly replayReasoning?: boolean
     readonly temperature?: number
     readonly sampling?: Readonly<Record<string, unknown>>
     readonly sessionId?: string
@@ -1575,6 +1584,8 @@ export const layer = (options: ProvidersOptions = {}) =>
         // A plain chat's earlier replies sending their reasoning back are this model's turns
         // (thinkingBinding.ts HISTORY_REPLAY); the binding below decides whether they may go.
         const history = carriesHistoryReplay(incoming.context.messages)
+        // What this provider checks of them (thinkingBinding.ts `replayTerms`).
+        const replay = history ? replayTerms({ api: prepared.api, key: model.key }) : undefined
         const request: StreamRequest = history
           ? {
               ...incoming,
@@ -1620,6 +1631,8 @@ export const layer = (options: ProvidersOptions = {}) =>
           silentFor: null as number | null,
           gate: undefined as ReturnType<typeof stagger.join> | undefined,
           release: undefined as "first-chunk" | "complete" | "timeout" | "leader-ended" | undefined,
+          /** Sent earlier replies' thinking blocks the provider reports it dropped. */
+          providerDropped: 0,
           /** The images the final payload sent, for image token calibration. */
           textPayload: null as ReturnType<typeof payloadText> | null,
           sentImages: null as ReturnType<typeof payloadImages> | null,
@@ -2083,7 +2096,16 @@ export const layer = (options: ProvidersOptions = {}) =>
                 state.refused = "Not sent: auto replies ended because the chat, settings or server changed."
                 throw error
               })
-              const events = prepared.kind.streams.streamSimple(piModel, transcript, {
+              // pi-ai's managed effort puts a system message before the reply and before each
+              // earlier reply it knows the effort of; those are part of a bound block's prefix.
+              const streamModel =
+                options.replayReasoning &&
+                (piModel.compat as { readonly supportsMidConvoEffort?: boolean } | undefined)
+                  ?.supportsMidConvoEffort === true &&
+                replayTerms({ api: prepared.api, key: model.key }).prefix
+                  ? ({ ...piModel, compat: { ...piModel.compat, supportsMidConvoEffort: false } } as PiModel<Api>)
+                  : piModel
+              const events = prepared.kind.streams.streamSimple(streamModel, transcript, {
                 // A keyless local server still needs a value; pi's direct calls require one. A
                 // kind with its own transport authorizes the request itself from the stored key,
                 // so the SDK never holds it: a service account's key file has line breaks, which
@@ -2118,6 +2140,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                 // Registered observers read the raw events (usage capture, PROVIDERS §9.2).
                 onProviderStreamEvent: (data) => {
                   toolArguments.observe(data)
+                  // Earlier replies' reasoning the provider says it left out (the binding beta's report).
+                  if (replay) state.providerDropped = providerDroppedThinking(data) ?? state.providerDropped
                   for (const observer of observers) observer.observe(data, state.capture)
                   if ((prepared.kind.cacheRelease ?? defaultCacheRelease).after === "first-chunk") {
                     state.gate?.release("first-chunk")
@@ -2186,13 +2210,20 @@ export const layer = (options: ProvidersOptions = {}) =>
                         modelId: model.id,
                         connectionStamp,
                         mode: bindingMode,
-                        history
+                        ...(replay ? { history: replay } : {})
                       })
                     : { payload: limited, dropped: 0, reason: null }
+                  // Sending earlier replies' reasoning to a bound-thinking model opts into the
+                  // provider's own check, whatever the account's age: a block the check above let
+                  // through wrongly is dropped (and reported), not refused or read stale.
+                  const netted =
+                    replay?.prefix && binding?.dropOnMismatch && carriesSigned(binding, bound.payload)
+                      ? binding.dropOnMismatch(bound.payload)
+                      : bound.payload
                   const budget = options.outputBudget
                   if (budget && (!prepared.kind.limitOutput || budget.remaining < 1))
                     throw new Error("The reply's token limit is exhausted or this provider cannot enforce it.")
-                  const final = budget ? prepared.kind.limitOutput!(bound.payload, budget.remaining) : bound.payload
+                  const final = budget ? prepared.kind.limitOutput!(netted, budget.remaining) : netted
                   state.binding = binding
                   state.sent = final
                   state.signed = {
@@ -2330,6 +2361,20 @@ export const layer = (options: ProvidersOptions = {}) =>
               } finally {
                 clearInterval(watch)
                 await recording
+                // For the request inspector only, as what the check above left out.
+                const rolloutId = request.attribution.rolloutId
+                if (state.providerDropped > 0 && rolloutId)
+                  await Effect.runPromise(
+                    fromStorage(
+                      writer.RecordSentContext({
+                        userId: request.userId,
+                        rolloutId,
+                        issues: [{ kind: "reasoning_left_out", message: providerDropNote(state.providerDropped) }]
+                      })
+                    )
+                  ).catch((error: unknown) =>
+                    Effect.runPromise(Effect.logWarning(`recording ${rolloutId}'s dropped reasoning failed`, error))
+                  )
               }
             },
             catch: (error) => error

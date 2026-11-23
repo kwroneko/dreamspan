@@ -188,6 +188,13 @@ export interface AssembledRequest {
    * preset's `reasoning_send_back`); absent: none, the request as it always was.
    */
   readonly replay?: ReadonlyArray<import("./reasoningReplay.ts").ReplayedReasoning> | undefined
+  /**
+   * The last message is the end-of-request message (DESIGN §2.2) or its fallback, which later
+   * requests don't repeat; absent: it isn't.
+   */
+  readonly endMessage?: true
+  /** The preset sends the provider's reasoning back in this plain chat (`reasoning-replay`); absent: it doesn't. */
+  readonly replayReasoning?: true
 }
 
 export type Issue = ContextIssue

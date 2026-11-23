@@ -76,3 +76,24 @@ export const claudeThinkingDefaults = (
     }
   }
 }
+
+/**
+ * Bound thinking: the model's signed thinking blocks are bound to what preceded them and to
+ * the model that wrote them (Anthropic's preserved thinking, 2026-11 documentation: Fable and
+ * Mythos 5.1 and 5.2, Opus, Sonnet and Haiku 5.5; later versions of these families are assumed
+ * to bind too). A block is valid only while `system`, `tools` and every earlier message are what
+ * they were when it was written, and while each sent block but the first has the same previous
+ * thinking block as then: leaving out the oldest or the newest is allowed, one in between not.
+ * Not compared: `cache_control` markers, request parameters, JSON key order, the reply's own text
+ * after the block. Fable and Mythos 5.2 refuse a mismatch for every account ("The block is bound
+ * to a different conversation"); the others for accounts created from 2026-08-31 (older ones only
+ * record it), so a request that sends such blocks back opts into enforcement with
+ * `thinking.block_binding.prefix_mismatch_behavior: "drop_block"` (beta
+ * `thinking-binding-controls-2026-08-01`). Earlier models (Opus 5, Sonnet 5, Fable 5, 4.x) check
+ * only the signature.
+ */
+export const claudeBoundThinking = (key: string): boolean => {
+  const v = claudeVersion(key)
+  if (!v) return false
+  return v.family === "fable" || v.family === "mythos" ? atLeast(v, 5, 1) : atLeast(v, 5, 5)
+}

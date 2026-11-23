@@ -4202,7 +4202,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     payload: {
       userId: UserId,
       rolloutId: Schema.String,
-      wire: Schema.String,
+      /** Absent: only notes to add, after the response (what the provider says it left out). */
+      wire: Schema.optionalKey(Schema.String),
       issues: Schema.optionalKey(Schema.Array(ContextIssue))
     },
     success: Schema.Void,
