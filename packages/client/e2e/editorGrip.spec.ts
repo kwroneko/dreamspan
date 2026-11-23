@@ -209,9 +209,10 @@ test("a box without a strip has its grip over the corner and keeps its height", 
     await expect(opened.getByRole("textbox", { name: `Contents of ${name}` })).toContainText(
       name === "short.txt" ? "One line." : "Line 1 of the harbour log."
     )
-    const grip = opened.locator(`[aria-label="Resize Contents of ${name}"]`)
+    const grip = page.locator(`[aria-label="Resize Contents of ${name}"]`)
     await expect(grip).toBeVisible()
     const frame = frameOf(page, grip)
+    await expect(frame).toHaveCount(1)
     await expect(frame.locator("[data-field-chrome]")).toHaveCount(0)
     const host = frame.locator("> div").first()
     const scroller = frame.locator(".cm-scroller")
