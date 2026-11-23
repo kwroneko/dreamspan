@@ -242,18 +242,15 @@ export const chatPlaces = [
   }),
   place({
     name: "Edit thinking",
-    source: "features/chat/editThinking.tsx:121",
+    source: "features/chat/editThinking.tsx:158",
     setup: oneMessage,
     open: async (page, { chatId }, ctx) => {
       await goChat(page, ctx, chatId)
       const row = rows(page).first()
-      if ((await row.getByLabel("Message text", { exact: true }).count()) === 0) {
-        await showActions(row)
-        await row.getByRole("button", { name: "Edit", exact: true }).click()
-      }
       const box = row.getByRole("textbox", { name: "Thinking", exact: true })
-      await row.getByLabel("Message text", { exact: true }).waitFor()
-      if ((await box.count()) === 0) await row.getByRole("button", { name: "Add thinking", exact: true }).click()
+      await row.locator(".markdown").first().waitFor()
+      // Its own editor, opened by the message's Add thinking; a reload opens it again from its draft.
+      if ((await box.count()) === 0) await messageMenu(row, "Add thinking")
       return box
     },
     shown: (page) => rows(page).first().getByRole("textbox", { name: "Thinking", exact: true })

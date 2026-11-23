@@ -1,6 +1,5 @@
 import { useMediaPermit } from "./externalMedia.tsx"
 import { messageTextEditor } from "./editorHistory.tsx"
-import { forgetThinking, messageEditorThinking, thinkingKey, useThinkingOpen } from "./editThinking.tsx"
 import {
   EditControls,
   editKeys,
@@ -23,6 +22,7 @@ import { positionOf } from "./position.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { BinItem } from "@dreamspan/shared/bin.ts"
 import type { ForkId, PathEntry, SlotId, ThinkingPart, Version } from "@dreamspan/shared/chat.ts"
+import { editableThinking } from "@dreamspan/shared/replySections.ts"
 import {
   memo,
   type MouseEvent,
@@ -45,6 +45,7 @@ import { Markdown } from "../../ui/Markdown.tsx"
 import { type CaretSpot, caretSpotAt, type EditCaret, locateEditCaret } from "../../ui/editCaret.ts"
 import { MessageBody } from "../../ui/messageCopy.tsx"
 import { HtmlMessageContext } from "../../ui/html/messageHtml.ts"
+import { openThinking, thinkingKey, thinkingPanel } from "./editThinking.tsx"
 import { HtmlTextField } from "./htmlTextField.tsx"
 import { Composition } from "./Composition.tsx"
 import { Badge } from "../../ui/Surface.tsx"
@@ -189,10 +190,6 @@ function StatusRow({ text, action }: { text: string; action: ReactNode }) {
 interface BodyEdit {
   /** Its text box once its saved text is read (null until then: the text stays), given the text's height as it opened. */
   readonly text: ((height: number | null) => ReactNode) | null
-  /** Its thinking field (editThinking.tsx), above the text. */
-  readonly thinking: ReactNode
-  /** Whether that field stands in for the thinking panels now (opened, changed or removed). */
-  readonly thinkingOpen: boolean
 }
 
 function VersionBody({
@@ -242,17 +239,14 @@ function VersionBody({
   const editText = edit?.text && held !== null ? edit.text(held.height) : null
   return (
     <div className="flex flex-col gap-2 compact:gap-1">
-      {/* Its thinking panels stay as they are in an edit, until its thinking field stands in for them. */}
-      <div className="contents" hidden={edit?.thinkingOpen}>
-        <ReasoningPanels
-          version={version}
-          session={session}
-          hiddenThinking={hiddenThinking}
-          parentSlotId={parentSlotId}
-          depth={depth}
-        />
-      </div>
-      {edit?.thinking}
+      {/* Its thinking panels stay as they are in an edit: the thinking is edited on its own (editThinking.tsx). */}
+      <ReasoningPanels
+        version={version}
+        session={session}
+        hiddenThinking={hiddenThinking}
+        parentSlotId={parentSlotId}
+        depth={depth}
+      />
       {editText}
       <div ref={textBox} className="flex flex-col gap-2 compact:gap-1" hidden={editText !== null}>
         {text === "" && generating ? (
@@ -549,6 +543,22 @@ const SAME_SPOT_PX = 8
 /** Where an edit of `source` opens for a double-click on `spot` (ui/editCaret.ts); null where unknown. */
 const locateSpot = (spot: CaretSpot | null, source: string): EditCaret | null => spot && locateEditCaret(spot, source)
 
+/** A thinking panel a press landed in: its kind. */
+interface ThinkingSpot {
+  readonly kind: string | null
+}
+
+/**
+ * The thinking panel under `target`, if any: a double-click there opens the thinking's own
+ * editor. Inside an open thinking editor it is the editor's own (selecting a word).
+ */
+const thinkingAt = (target: EventTarget | null): ThinkingSpot | null => {
+  if (!(target instanceof Element)) return null
+  const panel = target.closest("[data-reasoning-panel]")
+  if (!panel) return null
+  return { kind: target.closest("[data-thinking-edit]") ? null : panel.getAttribute("data-reasoning-panel") }
+}
+
 /** A third click within this long of a double-click selects a paragraph instead of editing. */
 const TRIPLE_CLICK_MS = 450
 
@@ -620,7 +630,6 @@ export const Message = memo(function Message({
   const inPlace = editing === "edit" ? editEditor : undefined
   const { source: editSource, base: editBase } = useEditSource(session, entry, inPlace, [version, ...(versions ?? [])])
   const editLoaded = useDraftLoaded(inPlace)
-  const thinkingOpen = useThinkingOpen(session, inPlace, editSource)
   // A fresh one per edit, so an edit never starts with the last one's selection.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const selection = useMemo(() => editSelection(), [inPlace])
@@ -695,38 +704,65 @@ export const Message = memo(function Message({
   // double-click's caret is the spot its first click pressed. It's placed in the stored text
   // at once: the text pressed can be gone by the second click (the plain text shown while the
   // renderer loads, replaced by the rendered one), and the same point then is another word.
-  const pressed = useRef<{ x: number; y: number; versionId: string; caret: EditCaret | null } | null>(null)
+  const pressed = useRef<{
+    x: number
+    y: number
+    versionId: string
+    caret: EditCaret | null
+    thinking: ThinkingSpot | null
+  } | null>(null)
   // Any press after the double-click (a triple-click's third, or another action begun within
   // the wait) is the user doing something else.
   const onMouseDown = (event: MouseEvent) => {
-    if (event.detail <= 1 && !editing) {
-      const caret = locateSpot(caretSpotAt(event.clientX, event.clientY), version.content)
-      pressed.current = { x: event.clientX, y: event.clientY, versionId: version.id, caret }
+    // A press in the thinking places its own editor's caret, in the thinking (editThinking.tsx).
+    const thinking = thinkingAt(event.target)
+    if (event.detail <= 1 && (thinking || !editing)) {
+      const source = thinking ? editableThinking(version) : version.content
+      const caret = locateSpot(caretSpotAt(event.clientX, event.clientY), source)
+      pressed.current = { x: event.clientX, y: event.clientY, versionId: version.id, caret, thinking }
     }
     if (pendingEdit.current === null) return
     clearTimeout(pendingEdit.current)
     pendingEdit.current = null
   }
   const onDoubleClick = (event: MouseEvent) => {
-    if (editing || generating || outside(event) || !canEditFrom(event.target)) return
-    const context = { entry, session, branchFork, generated, generating, hidden, report, toast }
-    if (messageActions.get("message.edit")?.available?.(context) === false) return
+    if (generating || outside(event) || !canEditFrom(event.target)) return
+    // In the thinking: its own editor, never the message's (owner, 2026-11-23).
+    const thinking = thinkingAt(event.target)
+    if (thinking) {
+      if (thinking.kind !== thinkingPanel(version) || session.editor(thinkingKey(version.id))) return
+    } else {
+      if (editing) return
+      const context = { entry, session, branchFork, generated, generating, hidden, report, toast }
+      if (messageActions.get("message.edit")?.available?.(context) === false) return
+    }
     // The caret where it landed in the stored text (ui/editCaret.ts), else at the end.
     const first = pressed.current
     const caret =
       (first?.caret &&
       first.versionId === version.id &&
+      first.thinking?.kind === thinking?.kind &&
       Math.hypot(first.x - event.clientX, first.y - event.clientY) <= SAME_SPOT_PX
         ? first.caret
-        : locateSpot(caretSpotAt(event.clientX, event.clientY), version.content)) ?? undefined
+        : locateSpot(
+            caretSpotAt(event.clientX, event.clientY),
+            thinking ? editableThinking(version) : version.content
+          )) ?? undefined
     clearTimeout(pendingEdit.current ?? undefined)
     const versionId = version.id
     pendingEdit.current = setTimeout(() => {
       pendingEdit.current = null
       const current = now.current
-      if (current.editing || current.generating || current.versionId !== versionId) return
+      if (current.generating || current.versionId !== versionId) return
       if (/\s/.test(window.getSelection()?.toString().trim() ?? "")) return
+      if (thinking) {
+        if (session.editor(thinkingKey(versionId))) return
+        window.getSelection()?.removeAllRanges()
+        return openThinking(session, entry, caret)
+      }
+      if (current.editing) return
       setCaretAt(caret)
+      const context = { entry, session, branchFork, generated, generating, hidden, report, toast }
       void invokeMessageAction("message.edit", context, "button")
     }, TRIPLE_CLICK_MS)
   }
@@ -837,12 +873,7 @@ export const Message = memo(function Message({
               selection={selection}
             />
           )
-        : null,
-    // An edit's thinking, above its text as the thinking panel is above the reply (editThinking.tsx).
-    thinking: (
-      <SlotOutlet slot={messageEditorThinking} props={{ session, entry, draft: inPlace, source: editSource }} />
-    ),
-    thinkingOpen
+        : null
   }
   const versionBody = (
     <VersionBody
@@ -890,28 +921,15 @@ export const Message = memo(function Message({
     const source =
       target._tag === "Edit" ? (await load(true))?.find((candidate) => candidate.id === target.versionId) : undefined
     if (target._tag === "Edit" && source === undefined) return
-    // The edit's thinking field (editThinking.tsx), saved with its text.
-    const thinkingEditor = target._tag === "Edit" ? session.editor(thinkingKey(target.versionId)) : undefined
+    // The text only: its thinking stays as it is (it's edited on its own, editThinking.tsx).
     const submitted = await editor.ready()
-    const thought = thinkingEditor === undefined ? undefined : await thinkingEditor.ready()
     const { text, draft, images } = submitted
     const outcome =
       editing === "edit"
-        ? await session.edit(
-            { ...entry, version: source! },
-            text,
-            draft,
-            images,
-            thought && { text: thought.text, draft: thought.draft }
-          )
+        ? await session.edit({ ...entry, version: source! }, text, draft, images)
         : await session.writeVersion(entry, text, draft, images)
     report(outcome)
     if (!outcome.ok) return
-    if (thinkingEditor !== undefined && thought !== undefined && thinkingEditor.committed(thought)) {
-      if (thought.draft === null) await thinkingEditor.discard()
-      session.closeEditor(thinkingEditor)
-      if (target._tag === "Edit") forgetThinking(target.versionId)
-    }
     await after?.(text)
     // An edit of a generated version, or of one being written, is saved as a new one; so is
     // your own version, which shows where it went among the many it was composed from.
@@ -927,15 +945,9 @@ export const Message = memo(function Message({
   const cancelEdit = async () => {
     if (editor === undefined) return
     // Its text goes to the bin's recovered texts, never nowhere (DESIGN §6.2).
-    const target = editor.target
-    const thinkingEditor = target._tag === "Edit" ? session.editor(thinkingKey(target.versionId)) : undefined
-    const thought = thinkingEditor === undefined ? undefined : await thinkingEditor.discard()
-    if (thought !== undefined && !thought.ok) return report(thought)
     const outcome = await editor.discard()
     report(outcome)
     if (!outcome.ok) return
-    if (thinkingEditor !== undefined) session.closeEditor(thinkingEditor)
-    if (target._tag === "Edit") forgetThinking(target.versionId)
     session.closeEditor(editor)
   }
   const onSave = () => void saveEdit()

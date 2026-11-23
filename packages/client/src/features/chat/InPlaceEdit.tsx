@@ -3,8 +3,8 @@
 // the message's body (Message.tsx `VersionBody`), as tall as the text was and with its metrics
 // (styles.css `.message-edit-text`, the editor's `bare` mode), so its lines fall where the text's
 // were; Save, Cancel and the edit's tools take the place of the message's actions in its footer
-// row, which every message has; the thinking panels stay as they are until Edit thinking opens
-// the field in their place (editThinking.tsx). Its text is the same server draft and browser
+// row, which every message has; the thinking panels stay as they are: the edit never involves the
+// thinking, which is edited on its own (editThinking.tsx). Its text is the same server draft and browser
 // copy as any message edit (messageDraft.ts).
 //
 // The text box is the registered `messageTextEditor` (editorHistory.tsx): a surface replacing it
@@ -80,9 +80,18 @@ const editCommands = (session: ChatSession, onSave: () => void): ChatCommandCont
 export const saveEdit = (session: ChatSession, onSave: () => void) =>
   invokeChatCommand("message.save", editCommands(session, onSave))
 
-/** The edit's keys, on what holds it: Ctrl+Enter saves, Escape cancels. */
+/** Whether a key was pressed in this edit rather than in an edit nested in it. */
+const ownKey = (event: KeyboardEvent) =>
+  !(event.target instanceof Element) || event.target.closest("[data-edit-keys]") === event.currentTarget
+
+/**
+ * The edit's keys, on what holds it: Ctrl+Enter saves, Escape cancels. A key in another edit
+ * inside it (the thinking's editor in a message being edited) is that one's, not this one's.
+ */
 export const editKeys = (session: ChatSession, onSave: () => void, onCancel: () => void) => ({
+  "data-edit-keys": "",
   onKeyDownCapture: (event: KeyboardEvent) => {
+    if (!ownKey(event)) return
     // Handle Save before CodeMirror's Mod+Enter binding inserts a blank line.
     if (
       event.key === "Enter" &&
@@ -98,6 +107,7 @@ export const editKeys = (session: ChatSession, onSave: () => void, onCancel: () 
     // trigger. Escape belongs to that modal, even when its target is here.
     if (
       event.key === "Escape" &&
+      ownKey(event) &&
       event.currentTarget.contains(event.target as Node) &&
       !event.defaultPrevented &&
       !popupOpen()

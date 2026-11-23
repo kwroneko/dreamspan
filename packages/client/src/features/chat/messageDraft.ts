@@ -388,16 +388,6 @@ export class MessageDraft {
   }
 
   /**
-   * Saves the text as it stands when the server holds no open draft of it: another field of
-   * the same edit (its thinking) was typed into, and the edit must open again with it after a
-   * reload, which opens message editors from their drafts.
-   */
-  keepOpen() {
-    if (this.local !== null || this.view.loading || !this.opened || this.draft?.status === "active") return
-    this.setText(this.view.text)
-  }
-
-  /**
    * Adds text to the end, after a blank line (the composition, composition.ts): once the saved
    * text is read, so it's added to what's there. Saved as typing is.
    */

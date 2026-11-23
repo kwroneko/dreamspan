@@ -1,15 +1,18 @@
-// A reply's thinking in its edit (thinkedit1; SillyTavern's reasoning block edit, Add and
-// remove): the thinking field above the text, its hover explanation, a changed thinking saved
-// as a new version, removed and added again on the user's own version, the field's text kept
-// across a reload before Save, and the ST export carrying it as extra.reasoning. At desktop and
-// phone widths, light and dark, with a layout audit of the open editor. Synthetic chat only.
+// A reply's thinking, edited on its own (thinkedit2; SillyTavern's reasoning block edit, Add and
+// remove): the message's edit never shows it; the panel's Edit, explained on hover, opens it in
+// the panel's place, its Save, Cancel and Delete and token count in the strip inside its box; a
+// double-click on the thinking opens it with the caret there, never the message's edit;
+// cancelled, nothing changes; changed, saved as a new swipe with the text as it was; deleted and added again (from the message's actions) on the user's own version, the
+// text kept across a reload before Save; and the ST export carrying it as extra.reasoning. At
+// desktop and phone widths, light and dark, with a layout audit of the open editor. Synthetic
+// chat only.
 import { mkdirSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
-import { showActions } from "./support/message.ts"
-import { asUser } from "./support/rpc.ts"
+import { messageMenu, showActions } from "./support/message.ts"
+import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox, replaceEditorText } from "./support/textbox.ts"
 
@@ -21,8 +24,17 @@ const server = serverPerFile({
 })
 const shots = process.env.SCREENSHOT_DIR
 
+// One login per server, not one per poll: logins at once beyond the password checks' limit
+// are refused (Accounts.ts), and four tests share the server.
+let session: { url: string; cookie: Promise<string> } | undefined
+const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => {
+  if (session?.url !== server().url)
+    session = { url: server().url, cookie: loginCookie(server(), ADMIN.handle, ADMIN.password) }
+  return session.cookie.then((cookie) => withCookie(server(), cookie, use))
+}
+
 const lastEntry = (chatId: string) =>
-  asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+  admin((api) =>
     api
       .ReadPath({ chatId: chatId as never, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
       .pipe(Effect.map((path) => path.entries.at(-1)!))
@@ -30,7 +42,7 @@ const lastEntry = (chatId: string) =>
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
-    test(`a reply's thinking is edited, removed and added in its edit, and exported, at ${width} ${theme}`, async ({
+    test(`a reply's thinking is edited, deleted and added on its own, and exported, at ${width} ${theme}`, async ({
       page
     }, info) => {
       test.setTimeout(120_000)
@@ -47,7 +59,7 @@ for (const width of [1440, 390])
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       }
       const title = `Edit thinking ${width} ${theme}`
-      const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      const chat = await admin((api) =>
         Effect.gen(function* () {
           const chat = yield* api.CreateChat({ title })
           const sent = yield* api.SendMessage({
@@ -69,72 +81,133 @@ for (const width of [1440, 390])
       const generated = (await lastEntry(chat.id)).version
       expect(generated.reasoning).toMatch(/\S/)
       const reply = page.getByRole("article").last()
+      const panel = reply.locator('[data-reasoning-panel="reasoning"]')
       const thinking = reply.getByRole("textbox", { name: "Thinking", exact: true })
-      const edit = async () => {
-        await showActions(reply)
-        await reply.getByRole("button", { name: "Edit", exact: true }).click()
-        await expect(reply.getByRole("textbox", { name: "Message text", exact: true })).toBeVisible()
-      }
-      const save = async () => {
-        await reply.getByRole("button", { name: "Save", exact: true }).click()
-        await expect(reply.getByRole("textbox", { name: "Message text", exact: true })).toHaveCount(0)
+      // Its controls, in the strip inside its box (as a note's or a card field's).
+      const thinkingControls = reply.locator("[data-thinking-edit] [data-field-chrome]")
+      const editThinking = panel.getByRole("button", { name: "Edit thinking", exact: true })
+      const saveThinking = async () => {
+        await thinkingControls.getByRole("button", { name: "Save thinking", exact: true }).click()
+        await expect(thinking).toHaveCount(0)
       }
 
-      // The edit opens with the reply's thinking folded as it was, so nothing moves; Edit thinking
-      // opens it above the text, in the panel's place, explained on hover.
-      const editThinking = reply.getByRole("button", { name: "Edit thinking", exact: true })
-      await edit()
+      // Editing the message never involves its thinking: no thinking field, no thinking tools,
+      // and the panel stays as it was.
+      await showActions(reply)
+      await reply.getByRole("button", { name: "Edit", exact: true }).click()
+      await expect(reply.getByRole("textbox", { name: "Message text", exact: true })).toBeVisible()
       await expect(thinking).toHaveCount(0)
-      await expect(reply.locator('[data-reasoning-panel="reasoning"]')).toBeVisible()
+      const messageEdit = reply.getByRole("group", { name: "Edit", exact: true })
+      await expect(messageEdit.getByRole("button", { name: /thinking/i })).toHaveCount(0)
+      await expect(panel).toBeVisible()
+      await messageEdit.getByRole("button", { name: "Cancel", exact: true }).click()
+      await expect(reply.getByRole("textbox", { name: "Message text", exact: true })).toHaveCount(0)
+
+      // The panel's own Edit, explained on hover, opens the thinking in the panel's place.
+      await editThinking.hover()
+      await expect(
+        page.getByText(/Edit this thinking in its place, apart from the message's text/).last()
+      ).toBeVisible()
       await editThinking.click()
       await expect(thinking).toBeFocused()
-      await expect(reply.locator('[data-reasoning-panel="reasoning"]')).toBeHidden()
       await expectTextBox(thinking, generated.reasoning!)
-      const about = reply.getByRole("button", { name: "About Thinking", exact: true })
-      await about.hover()
-      await expect(page.getByText(/saved as plain text, without the provider's signature/).last()).toBeVisible()
+      await expect(reply.getByRole("textbox", { name: "Message text", exact: true })).toHaveCount(0)
+      await expect(editThinking).toHaveCount(0)
+      // Save, Cancel and Delete over the box's lower right corner, its token count at the strip's
+      // start, counted with the model's tokenizer.
+      await expect(thinkingControls.getByRole("button", { name: "Save thinking", exact: true })).toBeVisible()
+      await expect(thinkingControls.getByRole("button", { name: "Cancel", exact: true })).toBeVisible()
+      await expect(thinkingControls.getByRole("button", { name: "Delete thinking", exact: true })).toBeVisible()
+      await expect(thinkingControls.locator("[data-field-tokens]")).toHaveText(/^~?\d[\d,]* tokens$/)
+      const frame = await reply.locator("[data-thinking-edit] [data-field-frame]").boundingBox()
+      const save = await thinkingControls.getByRole("button", { name: "Save thinking", exact: true }).boundingBox()
+      // In the lower right corner, with only the box's height grip after it.
+      expect(frame!.x + frame!.width - (save!.x + save!.width)).toBeLessThan(48)
+      expect(frame!.y + frame!.height - (save!.y + save!.height)).toBeLessThan(10)
       await shot("edit-thinking")
       await expectLayout(page, info, `edit-thinking-${width}-${theme}`, { scope: "article:last-of-type" })
 
-      // Changed: a new version with the thinking typed, the reply as it came kept among its versions.
+      // Cancelled: nothing saved, the panel as it was.
+      await replaceEditorText(thinking, "Not this.")
+      await thinkingControls.getByRole("button", { name: "Cancel", exact: true }).click()
+      await expect(thinking).toHaveCount(0)
+      expect((await lastEntry(chat.id)).version.reasoning).toBe(generated.reasoning)
+      expect((await lastEntry(chat.id)).versionCount).toBe(1)
+
+      // Changed: a new version with the thinking typed and the text as it was, the reply as it
+      // came kept among its versions.
+      await editThinking.click()
       await replaceEditorText(thinking, "My own plan for the road.")
-      await save()
+      await saveThinking()
       await expect.poll(async () => (await lastEntry(chat.id)).version.reasoning).toBe("My own plan for the road.")
       expect((await lastEntry(chat.id)).versionCount).toBe(2)
-      const panel = reply.locator('[data-reasoning-panel="reasoning"]')
+      expect((await lastEntry(chat.id)).version.content).toBe(generated.content)
       await panel.locator("button[aria-expanded]").click()
       await expect(reply.getByRole("region", { name: "Reasoning" })).toHaveText(/My own plan for the road\./)
 
-      // Removed: the field goes, Add thinking stands in for it; saved, the reply has none.
-      await edit()
-      await editThinking.click()
-      await reply.getByRole("button", { name: "Remove thinking", exact: true }).click()
+      // A double-click on the thinking opens its own editor, never the message's, with the caret
+      // in the word double-clicked, as a double-click on the message's text does.
+      const word = await reply.getByRole("region", { name: "Reasoning" }).evaluate((node) => {
+        const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT)
+        for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+          const at = text.textContent!.indexOf("plan")
+          if (at < 0) continue
+          const range = document.createRange()
+          range.setStart(text, at + 1)
+          range.setEnd(text, at + 2)
+          const rect = range.getBoundingClientRect()
+          return { x: rect.left + 1, y: rect.top + rect.height / 2 }
+        }
+        throw new Error("no word")
+      })
+      await page.mouse.move(word.x, word.y)
+      await page.mouse.dblclick(word.x, word.y)
+      await expect(thinking).toBeFocused()
+      await expect(reply.getByRole("textbox", { name: "Message text", exact: true })).toHaveCount(0)
+      const head = await thinking.evaluate(
+        (element) =>
+          (
+            element as HTMLElement & {
+              cmTile?: { root: { view: { state: { selection: { main: { head: number } } } } } }
+            }
+          ).cmTile!.root.view.state.selection.main.head
+      )
+      const planAt = "My own plan for the road.".indexOf("plan")
+      expect(head).toBeGreaterThanOrEqual(planAt)
+      expect(head).toBeLessThanOrEqual(planAt + "plan".length)
+      // Escape closes it, as Cancel does; the message's editor never opened.
+      await page.keyboard.press("Escape")
       await expect(thinking).toHaveCount(0)
-      const add = reply.getByRole("button", { name: "Add thinking", exact: true })
-      await expect(add).toBeVisible()
+      await expect(reply.getByRole("textbox", { name: "Message text", exact: true })).toHaveCount(0)
+
+      // Deleted from the editor's strip; saved, the reply has none.
+      await editThinking.click()
+      await reply.getByRole("button", { name: "Delete thinking", exact: true }).click()
+      await expectTextBox(thinking, "")
       await shot("edit-thinking-removed")
       await expectLayout(page, info, `edit-thinking-removed-${width}-${theme}`, { scope: "article:last-of-type" })
-      await save()
+      await saveThinking()
       await expect.poll(async () => (await lastEntry(chat.id)).version.reasoning).toBeUndefined()
       await expect(panel).toHaveCount(0)
       // The user's own version changed in place: no new version.
       expect((await lastEntry(chat.id)).versionCount).toBe(2)
 
-      // Added again; what's typed outlives a reload before Save.
-      await edit()
-      await add.click()
+      // Added again from the message's actions, where the panel would be; what's typed outlives
+      // a reload before Save.
+      await messageMenu(reply, "Add thinking")
       await expect(thinking).toBeFocused()
       await page.keyboard.insertText("Added after the flood.")
       await expect
         .poll(async () =>
-          (await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.MessageDrafts({ chatId: chat.id }))).some(
+          (await admin((api) => api.MessageDrafts({ chatId: chat.id }))).some(
             (draft) => draft.key.field === "reasoning" && draft.content === "Added after the flood."
           )
         )
         .toBe(true)
       await page.reload()
-      await expectTextBox(reply.getByRole("textbox", { name: "Thinking", exact: true }), "Added after the flood.")
-      await save()
+      await expectTextBox(thinking, "Added after the flood.")
+      await expect(reply.getByRole("textbox", { name: "Message text", exact: true })).toHaveCount(0)
+      await saveThinking()
       await expect.poll(async () => (await lastEntry(chat.id)).version.reasoning).toBe("Added after the flood.")
 
       // The ST export carries it as the message's extra.reasoning.
