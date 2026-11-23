@@ -1,10 +1,22 @@
-// A menu opened from a row of a scrolling list closes when that list (or the page around it)
-// scrolls, as platform menus do: otherwise it follows its row out of the list and floats over
-// whatever is above or below it. Scrolling inside the menu itself never closes it, and a scroll
-// event that leaves the trigger where it was (a list nudged to show its active row) is ignored.
-// The trigger's place is taken two frames after the menu opens: focusing a half-hidden trigger
-// (Tab, then Enter) scrolls its list to show it, and that scroll arrives after the menu opened.
+// A menu opened from a row of a scrolling list closes once scrolling takes its row out of the
+// list's visible area: otherwise it follows its row out of the list and floats over whatever is
+// above or below it. A scroll that leaves the row whole in view keeps the menu (a chat following
+// a reply as it streams), as does one that brings the row further into view (a half-hidden row
+// focused from the keyboard, its list scrolling to show it, smoothly or not). Scrolling inside
+// the menu itself never closes it.
 import { type RefObject, useEffect, useRef } from "react"
+
+/** How much of `row` lies outside the part of `scroller` its content shows in, in pixels. */
+const clipped = (row: DOMRect, scroller: Element) => {
+  let top = 0
+  let bottom = window.innerHeight
+  if (scroller !== document.documentElement) {
+    const box = scroller.getBoundingClientRect()
+    top = box.top + scroller.clientTop
+    bottom = top + scroller.clientHeight
+  }
+  return Math.max(0, top - row.top) + Math.max(0, row.bottom - bottom)
+}
 
 export function useCloseOnAnchorScroll(open: boolean, trigger: RefObject<HTMLElement | null>, close: () => void) {
   const latest = useRef(close)
@@ -14,26 +26,24 @@ export function useCloseOnAnchorScroll(open: boolean, trigger: RefObject<HTMLEle
   useEffect(() => {
     const anchor = trigger.current
     if (!open || anchor === null) return
-    let start: DOMRect | null = null
-    let frame = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(() => {
-        start = anchor.getBoundingClientRect()
-      })
-    })
+    // How hidden the trigger was in each scroller around it as the menu opened, then at each scroll.
+    const hidden = new Map<Element, number>()
+    const row = anchor.getBoundingClientRect()
+    for (let at = anchor.parentElement; at !== null; at = at.parentElement) hidden.set(at, clipped(row, at))
     const onScroll = (event: Event) => {
       const target = event.target
       const scroller = target instanceof Document ? target.documentElement : target instanceof Element ? target : null
-      if (start === null || scroller === null) return
+      if (scroller === null) return
       // A virtualized list's row may be gone already: its menu goes with it.
       if (!anchor.isConnected) return latest.current()
       if (!scroller.contains(anchor)) return
-      const now = anchor.getBoundingClientRect()
-      if (now.top !== start.top || now.left !== start.left) latest.current()
+      const now = clipped(anchor.getBoundingClientRect(), scroller)
+      const before = hidden.get(scroller) ?? now
+      hidden.set(scroller, now)
+      // A pixel's slack for rounding.
+      if (now > before + 1) latest.current()
     }
     document.addEventListener("scroll", onScroll, { capture: true, passive: true })
-    return () => {
-      cancelAnimationFrame(frame)
-      document.removeEventListener("scroll", onScroll, { capture: true })
-    }
+    return () => document.removeEventListener("scroll", onScroll, { capture: true })
   }, [open, trigger])
 }
