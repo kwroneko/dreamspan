@@ -638,7 +638,8 @@ const ModelRow = memo(function ModelRow({
         )}
       </div>
       <div className={LIMITS}>
-        <div role="cell" className={`${CONTEXT} tabular-nums whitespace-nowrap`}>
+        {/* In its column, an assumed window's "(assumed)" goes under the figure: both don't fit. */}
+        <div role="cell" className={`${CONTEXT} tabular-nums whitespace-nowrap @xl:whitespace-normal`}>
           <span className="text-muted @xl:hidden">Context </span>
           <Value resolved={resolved.context} model={resolved} show={tokens} assumed />
         </div>

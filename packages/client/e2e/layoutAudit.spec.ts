@@ -1213,6 +1213,7 @@ test.describe("synthetic library and every app surface", () => {
         if (process.env.LAYOUT_AUDIT_SETTINGS_ONLY === "1") {
           for (const section of [
             "connections",
+            `connections/${connectionId}`,
             "keys",
             "network",
             "costs",
@@ -2115,8 +2116,13 @@ test.describe("synthetic library and every app surface", () => {
         }
         if (process.env.LAYOUT_AUDIT_NOTES_ONLY === "1") {
           await go("group-chat", `/chats/${chatId}`)
-          await openPanel(page, "Notes")
+          const notes = await openPanel(page, "Notes")
           await audit("panel-Notes")
+          // An open note's header adds its save cluster beside its settings and ⋯.
+          const expand = notes.getByRole("button", { name: /^Expand / })
+          if ((await expand.count()) > 0) await expand.first().click()
+          await expect(notes.locator("[data-note-save]").first()).toBeVisible()
+          await audit("panel-Notes-open")
           return
         }
         if (process.env.LAYOUT_AUDIT_PERSONA_TOGGLE_ONLY === "1") {
