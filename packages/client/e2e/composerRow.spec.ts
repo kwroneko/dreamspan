@@ -150,7 +150,14 @@ for (const width of [1440, 1024, 390])
         // Clicking dismisses the explanation until the pointer leaves the toggle.
         await page.mouse.move(0, 0)
         await guidance.hover()
-        await expect(page.getByText(`Click to turn guidance ${on ? "off" : "on"}`, { exact: false })).toBeVisible()
+        await expect(
+          page.getByText(
+            on
+              ? `Click to switch back to writing the message yourself. What you type is then sent as ${longName}'s message.`
+              : `Click to switch to Guidance mode. In Guidance mode, you describe what ${longName} does next, and the model writes the actual turn for you.`,
+            { exact: true }
+          )
+        ).toBeVisible()
         await guidance.focus()
         await page.keyboard.press("Tab")
         await expect(generate).toBeFocused()

@@ -619,7 +619,6 @@ function Pending({
                 value={text}
                 // Short, so it fits one line on a phone, as the chat's composer does.
                 placeholder={guidance ? "Guidance for the next message…" : "Message…"}
-                aria-describedby={text.trim() !== "" || guidance ? `${composerId}-hint` : undefined}
                 onKeyDown={(event) =>
                   composerKeyDown(async () => {
                     await invokePendingComposer(controls)
@@ -635,13 +634,6 @@ function Pending({
                 }}
               />
             </ComposerBox>
-            {(guidance || text.trim() !== "") && (
-              <p id={`${composerId}-hint`} className="text-xs text-muted">
-                {guidance
-                  ? `Guidance: one-turn guidance for ${speakerName}'s first reply. It leaves the box when you submit it.`
-                  : "Write doesn't use this text: turn guidance on to direct the reply with it."}
-              </p>
-            )}
             <ErrorAlert error={action.error} />
             <StripRow scroll={phone}>
               <PendingComposerControls placement="strip" context={controls} />
