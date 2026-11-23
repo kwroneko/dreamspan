@@ -581,15 +581,20 @@ const timings = (request: InspectorUsage) => {
   }
 }
 
+/**
+ * Each attempt's usage, by its own width, not the window's (a workbench frame can be narrow on
+ * a wide screen): a table where its nine columns fit (about 680 px with a retried attempt),
+ * else label and value pairs, four to a row where they fit and two on the narrowest frames.
+ */
 function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
   if (requests.length === 0) return <p className="text-sm text-muted">No request was sent.</p>
   return (
-    <div>
-      <div className="flex flex-col gap-3 sm:hidden" aria-label="Usage by attempt">
+    <div className="@container">
+      <div className="flex flex-col gap-3 @min-[44rem]:hidden" aria-label="Usage by attempt">
         {requests.map((request, i) => (
           <dl
             key={request.id}
-            className="grid grid-cols-2 gap-x-3 gap-y-2 border-t border-border py-2 text-sm tabular-nums"
+            className="grid grid-cols-2 gap-x-3 gap-y-2 border-t border-border py-2 text-sm tabular-nums @min-[28rem]:grid-cols-4"
           >
             {[
               [
@@ -605,7 +610,7 @@ function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
               ["First token", timings(request).firstToken],
               ["Tokens/s", timings(request).speed]
             ].map(([label, value]) => (
-              <div key={label} className={label === "Attempt" ? "col-span-2" : ""}>
+              <div key={label} className={label === "Attempt" ? "col-span-full" : ""}>
                 <dt className="text-muted">{label}</dt>
                 <dd className="whitespace-nowrap">{value}</dd>
               </div>
@@ -613,7 +618,7 @@ function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
           </dl>
         ))}
       </div>
-      <table className="w-full text-left text-sm tabular-nums max-sm:hidden [&_td]:whitespace-nowrap">
+      <table className="w-full text-left text-sm tabular-nums hidden @min-[44rem]:table [&_td]:whitespace-nowrap">
         <thead className="text-muted">
           <tr>
             <th className="py-1 pr-3 font-medium">Attempt</th>
@@ -812,7 +817,7 @@ function Inspector({ run }: { run: RunContext }) {
               : ""}
           </p>
         )}
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm [&_dd]:break-words">
           <dt className="text-muted">Model</dt>
           <dd>{run.model ? `${run.model.model} on ${run.model.connection} (${run.model.kind})` : "none"}</dd>
           <dt className="text-muted">Preset</dt>
@@ -899,7 +904,7 @@ export function DraftRequestView({ request }: { request: DraftRequest }) {
           title="Request"
           description={`Built now: ${counted(request.messages.length, "message")}, about ${counted(tokens, "token")}. ${request.tokenizer ? tokenizerText(request.tokenizer) : ""}`}
         />
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm [&_dd]:break-words">
           <dt className="text-muted">Model</dt>
           <dd>
             {request.model ? `${request.model.model} on ${request.model.connection} (${request.model.kind})` : "none"}
@@ -972,7 +977,7 @@ function ReplyContext({
   useTitle("Request")
   const atom = useMemo(() => AppClient.query("GetRunContext", { versionId }), [versionId])
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+    <div data-request-inspector className="mx-auto flex w-full max-w-3xl flex-col gap-4">
       <header className="flex flex-wrap items-center gap-3">
         <CenterHeaderContent>
           <h1 className="text-lg font-semibold">The request a reply was generated from</h1>
