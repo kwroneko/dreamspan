@@ -90,11 +90,14 @@ import { fetchEndpoints, ModelListError } from "./modelLists.ts"
 import { type ProviderKindEntry, ProviderRegistry, type RequestTarget, type StableEndpoint } from "./registry.ts"
 import {
   bindThinking,
+  carriesHistoryReplay,
   carriesSigned,
   DROP_NOTES,
+  HISTORY_DROP_NOTES,
   type RecordedAssistant,
   refusesSigned,
   signsReasoning,
+  stampHistoryReplay,
   type ThinkingBinding,
   thinkingRecord
 } from "./thinkingBinding.ts"
@@ -1559,7 +1562,7 @@ export const layer = (options: ProvidersOptions = {}) =>
         model: Model,
         piModel: PiModel<Api>,
         knownContext: number | undefined,
-        request: StreamRequest,
+        incoming: StreamRequest,
         offer: (event: ProviderEvent) => void,
         number: number,
         pricing: import("./userCosts.ts").UserPricing,
@@ -1569,6 +1572,15 @@ export const layer = (options: ProvidersOptions = {}) =>
         /** Signed thinking: checked against what it was written after, all left out, or all sent. */
         bindingMode: "check" | "strip" | "keep" = "check"
       ) => {
+        // A plain chat's earlier replies sending their reasoning back are this model's turns
+        // (thinkingBinding.ts HISTORY_REPLAY); the binding below decides whether they may go.
+        const history = carriesHistoryReplay(incoming.context.messages)
+        const request: StreamRequest = history
+          ? {
+              ...incoming,
+              context: { ...incoming.context, messages: stampHistoryReplay(incoming.context.messages, piModel) }
+            }
+          : incoming
         const connectionStamp = createHash("sha256")
           .update(
             JSON.stringify([
@@ -2173,7 +2185,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                         connectionId: prepared.connection.id,
                         modelId: model.id,
                         connectionStamp,
-                        mode: bindingMode
+                        mode: bindingMode,
+                        history
                       })
                     : { payload: limited, dropped: 0, reason: null }
                   const budget = options.outputBudget
@@ -2186,10 +2199,13 @@ export const layer = (options: ProvidersOptions = {}) =>
                     sent: binding !== undefined && carriesSigned(binding, final),
                     dropped: bound.dropped > 0
                   }
+                  // Earlier replies' reasoning left out is the request inspector's to show only.
                   const thinkingNotes =
                     bound.reason === null
                       ? []
-                      : [{ kind: "thinking_left_out" as const, message: DROP_NOTES[bound.reason] }]
+                      : history
+                        ? [{ kind: "reasoning_left_out" as const, message: HISTORY_DROP_NOTES[bound.reason] }]
+                        : [{ kind: "thinking_left_out" as const, message: DROP_NOTES[bound.reason] }]
                   await Effect.runPromise(open(final), { signal })
                   const policy = documentedCachePolicy(
                     { provider: prepared.cacheContract ?? "", api: prepared.api, model: model.key },

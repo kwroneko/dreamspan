@@ -470,7 +470,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           summarizedThrough,
           // The next request's images, and those whose model hasn't counted them (for ImageTokenCounts).
           ...imagePreview,
-          ...(next instanceof AssemblyFailed || !next.imagesLeftOut ? {} : { images: next.imagesLeftOut })
+          ...(next instanceof AssemblyFailed || !next.imagesLeftOut ? {} : { images: next.imagesLeftOut }),
+          ...(next instanceof AssemblyFailed || !next.thinkingSends ? {} : { thinking: next.thinkingSends })
         }
         if (next instanceof AssemblyFailed || !next.inputs.model || !last?.snapshot || last.model_id === null) {
           return { ...boundary, warmth: null }
@@ -710,7 +711,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           historyStart: null,
           summarizedThrough: null,
           ...(built instanceof AssemblyFailed ? {} : nextImages(built)),
-          ...(built instanceof AssemblyFailed || !built.imagesLeftOut ? {} : { images: built.imagesLeftOut })
+          ...(built instanceof AssemblyFailed || !built.imagesLeftOut ? {} : { images: built.imagesLeftOut }),
+          ...(built instanceof AssemblyFailed || !built.thinkingSends ? {} : { thinking: built.thinkingSends })
         }
         const model = built instanceof AssemblyFailed ? null : built.inputs.model
         if (built instanceof AssemblyFailed || model === null || view === null) return { ...base, request: null }

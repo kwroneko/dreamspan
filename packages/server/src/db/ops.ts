@@ -3430,6 +3430,11 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       reasoning: Schema.optionalKey(Schema.String),
       /** The reply's leading tagged sections; left as they are when absent. */
       replySections: Schema.optionalKey(ReplySections),
+      /**
+       * A complete plain reply's reasoning as the provider sent it, JSON (`NativeReasoning`,
+       * assembler/reasoningReplay.ts), kept to send back where the preset asks (ARCHITECTURE §15).
+       */
+      nativeReasoning: Schema.optionalKey(Schema.String),
       status: VersionStatus,
       error: Schema.NullOr(VersionError),
       /** What regex scripts did to `content` and `reasoning` as it finished, and the text before. */

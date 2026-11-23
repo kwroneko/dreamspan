@@ -19,7 +19,8 @@ const props: ReasoningActionProps = {
   kind: "reasoning",
   hidden: false,
   first: true,
-  session: {} as ChatSession
+  // What the next request sends back: here, nothing (the default).
+  session: { snapshot: () => ({ entries: [] }), subscribe: () => () => {} } as unknown as ChatSession
 }
 const render = () =>
   renderToStaticMarkup(createElement(SlotOutlet<ReasoningActionProps>, { slot: reasoningActions, props }))
@@ -33,7 +34,7 @@ describe("reasoning actions", () => {
     for (const close of dispose) close()
   })
 
-  it("registers Copy reasoning, Hide from the model and Collapse all, in order, each replaceable or removable", () => {
+  it("registers Copy reasoning, the sent-to-the-model toggle and Collapse all, in order, each replaceable or removable", () => {
     expect([...reasoningActions.snapshot().entries].map((entry) => entry.id)).toEqual([
       "reasoning.copy",
       "reasoning.hide",
@@ -52,16 +53,25 @@ describe("reasoning actions", () => {
     expect(render()).not.toContain("Collapse all")
   })
 
-  it("offers Hide from the model on each panel, Show to the model again once hidden, and waits for the reply", () => {
+  it("shows on each panel whether its thinking is sent, clickable only where a click changes that", () => {
     const of = (extra: Partial<ReasoningActionProps>) =>
       renderToStaticMarkup(
         createElement(SlotOutlet<ReasoningActionProps>, { slot: reasoningActions, props: { ...props, ...extra } })
       )
-    expect(of({})).toContain("Hide from the model")
-    expect(of({ kind: "sections" })).toContain("Hide from the model")
-    expect(of({ hidden: true })).toContain("Show to the model again")
-    expect(of({ hidden: true })).toContain('aria-pressed="true"')
-    expect(of({ streaming: true })).not.toContain('aria-disabled="true"')
+    // The preset sends nothing back: not sent, and a click wouldn't change it.
+    for (const kind of ["reasoning", "sections"] as const) {
+      expect(of({ kind })).toContain("Not sent to the model")
+      expect(of({ kind })).toContain('aria-pressed="false"')
+      expect(of({ kind })).toContain('aria-disabled="true"')
+    }
+    // Left out by the user: marked so, and a click sends it again.
+    expect(of({ hidden: true })).toContain("data-thinking-hidden")
+    expect(of({ hidden: true })).not.toContain('aria-disabled="true"')
+    // A tool run's reply being written keeps its thinking for the run.
+    const agent = { version: { agent: true } as unknown as Version, streaming: true }
+    expect(of(agent)).toContain("Sent to the model")
+    expect(of(agent)).toContain('aria-pressed="true"')
+    expect(of(agent)).not.toContain('aria-disabled="true"')
   })
 
   it("offers Show as reply text only on a finished reply-section panel", () => {

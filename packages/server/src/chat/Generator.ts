@@ -63,7 +63,8 @@ export interface GenerationRequest {
 
 /**
  * What a generator streams: text as plain strings, the model's reasoning ("thinking") apart
- * from it, kept on the version and never sent back (DESIGN §7.4), and the reply sections.
+ * from it, kept on the version and sent back only where the preset asks (DESIGN §7.4), and the
+ * reply sections.
  */
 export type GenerationChunk =
   | string
@@ -84,6 +85,12 @@ export type GenerationChunk =
       }
     }
   | { readonly reasoning: string }
+  /**
+   * A plain reply's reasoning as the provider sent it (`NativeReasoning` JSON, assembler/
+   * reasoningReplay.ts), once it ended: saved with its final text, to send back where the
+   * preset asks. Not shown.
+   */
+  | { readonly native: string }
   /**
    * The reply's leading tagged sections as parsed so far (a reply parser's, replySections.ts),
    * and the text this adds to their panel.

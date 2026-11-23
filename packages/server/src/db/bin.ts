@@ -1385,6 +1385,11 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
              WHERE ${versions}`,
             [now]
           )
+          // The provider's reasoning kept to send back is the reply's prose too (not in version_records).
+          yield* run(
+            `UPDATE version_texts SET native_reasoning = NULL
+             WHERE native_reasoning IS NOT NULL AND version_seq IN (SELECT seq FROM versions WHERE ${versions})`
+          )
           yield* run(`DELETE FROM version_history WHERE version_id IN (SELECT id FROM versions WHERE ${versions})`)
           yield* run(`DELETE FROM version_attachments WHERE version_id IN (SELECT id FROM versions WHERE ${versions})`)
           yield* run(

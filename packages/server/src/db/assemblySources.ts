@@ -970,6 +970,19 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     // Frozen rows (`chat_merge_messages_frozen`): a rebuild reads them again, unpinned.
     mergeRows: (mergeIds) => readMergeRows(sql, chatId, owned, mergeIds),
 
+    // A reply's reasoning and what the provider sent never change once it's written: unpinned.
+    nativeReasoning: (versionIds) =>
+      versionIds.length === 0
+        ? Effect.succeed([])
+        : sql<{ version_id: string; reasoning: number; native: string | null }>`
+            SELECT v.id AS version_id, coalesce(t.reasoning, '') <> '' AS reasoning, t.native_reasoning AS native
+            FROM versions v JOIN version_texts t ON t.version_seq = v.seq JOIN slots s ON s.id = v.slot_id
+            WHERE s.chat_id = ${chatId} AND ${owned} AND v.id IN ${sql.in(versionIds)}`.pipe(
+            Effect.map((rows) =>
+              rows.map((row) => ({ versionId: row.version_id, reasoning: row.reasoning === 1, native: row.native }))
+            )
+          ),
+
     knewThrough: (leaf, viewer, through, aliases) =>
       Effect.gen(function* () {
         const selected = yield* shown(leaf, "s")
@@ -1328,6 +1341,7 @@ const replaySources = (
     knowers: (versionIds) =>
       Effect.map(pinned(pins.knowers ?? [], keyOf(versionIds), "who knew the messages"), ({ found }) => found),
     ...(live.mergeRows ? { mergeRows: live.mergeRows } : {}),
+    ...(live.nativeReasoning ? { nativeReasoning: live.nativeReasoning } : {}),
     knewThrough: (leaf, viewer, through, aliases) =>
       Effect.map(
         pinned(

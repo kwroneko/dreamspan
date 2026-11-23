@@ -151,7 +151,9 @@ export const ContextIssue = Schema.Struct({
     "note_replacement",
     "compatibility",
     // Thinking kept out of a request: hidden by the user, or signed thinking the provider would refuse.
-    "thinking_left_out"
+    "thinking_left_out",
+    // Earlier replies' reasoning the preset sends back but this request couldn't: inspector only.
+    "reasoning_left_out"
   ]),
   message: Schema.String
 })
@@ -261,7 +263,8 @@ export class Version extends Schema.Class<Version>("Version")({
   error: Schema.NullOr(VersionError),
   /**
    * The reasoning ("thinking") the model streamed before or beside its text, kept as it came
-   * and shown apart from it. Never sent back in a context (ARCHITECTURE §15). Absent without any.
+   * and shown apart from it. Sent back only where the preset says and the provider takes it
+   * (ARCHITECTURE §15, "Reasoning sent back"). Absent without any.
    */
   reasoning: Schema.optionalKey(Schema.String),
   /**

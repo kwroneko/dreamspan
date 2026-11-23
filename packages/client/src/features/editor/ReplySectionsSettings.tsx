@@ -1,12 +1,14 @@
 // Tagged sections at the start of a reply (spec/REPLY-SECTIONS.md): which opening and closing
 // tags take a leading section out of the reply into its own panel, whether that's on, and
-// how many recent replies send theirs back. Tags are text matched as written, as SillyTavern's
+// how many recent replies send theirs back, and the provider's own reasoning theirs (owner,
+// 2026-11-23: off by default, never hardcoded). Tags are text matched as written, as SillyTavern's
 // prefix and suffix are; a pair is a regular expression only when "Treat as a regex" is on
 // (owner, 2026-11-02). The whole setting is one field of the preset; absent, the defaults show
 // and the first change writes them out.
 import {
   DEFAULT_REPLY_SECTIONS,
   DEFAULT_SECTION_PAIRS,
+  reasoningSendBack,
   type ReplySectionSettings,
   type SectionPair
 } from "@dreamspan/shared/replySections.ts"
@@ -135,11 +137,44 @@ function PairRow({
   )
 }
 
+/** A count of recent replies, 0 to 1000; what's typed shows until it's a valid count (empty, say). */
+function CountField({
+  label,
+  about,
+  value,
+  onChange
+}: {
+  label: string
+  about: string
+  value: number
+  onChange: (value: number) => void
+}) {
+  const [typed, setTyped] = useState<string | null>(null)
+  return (
+    <Field label={label} about={about}>
+      <Input
+        type="number"
+        min={0}
+        max={1000}
+        step={1}
+        inputMode="numeric"
+        className="max-w-28"
+        value={typed ?? String(value)}
+        onChange={(event) => {
+          const text = event.currentTarget.value
+          setTyped(text)
+          const count = Number(text)
+          if (text.trim() !== "" && Number.isInteger(count) && count >= 0 && count <= 1000) onChange(count)
+        }}
+        onBlur={() => setTyped(null)}
+      />
+    </Field>
+  )
+}
+
 export function ReplySectionsSettings({ store }: { store: EditorStore }) {
   const stored = useValue<ReplySectionSettings | undefined>(store, PATH)
   const settings = stored ?? DEFAULT_REPLY_SECTIONS
-  // What's typed in the number field while it isn't a valid count yet (empty, say).
-  const [typed, setTyped] = useState<string | null>(null)
   const list = useRef<HTMLUListElement>(null)
   const added = useRef<number | null>(null)
   useEffect(() => {
@@ -190,28 +225,21 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
           >
             Move tagged thinking into its own panel
           </Switch>
-          <Field
-            label="Send thinking back for the last replies"
-            about="How many of the most recent replies with thinking send it back to the model, in its tags. 0: never; the model sees only the reply text."
-          >
-            <Input
-              type="number"
-              min={0}
-              max={1000}
-              step={1}
-              inputMode="numeric"
-              className="max-w-28"
-              value={typed ?? String(settings.send_back)}
-              onChange={(event) => {
-                const text = event.currentTarget.value
-                setTyped(text)
-                const value = Number(text)
-                if (text.trim() !== "" && Number.isInteger(value) && value >= 0 && value <= 1000)
-                  change({ send_back: value })
-              }}
-              onBlur={() => setTyped(null)}
+          {/* What the request's history carries of earlier replies' thinking: each kind its own last N. */}
+          <div data-thinking-send-back className="flex flex-col gap-4">
+            <CountField
+              label="Send thinking back for the last replies"
+              about="How many of the most recent replies with thinking send it back to the model, in its tags. 0: never; the model sees only the reply text."
+              value={settings.send_back}
+              onChange={(send_back) => change({ send_back })}
             />
-          </Field>
+            <CountField
+              label="Send the provider's reasoning back for the last replies"
+              about="How many of the most recent replies with the provider's own reasoning send it back, where the provider takes it. 0: never. Changes the cached prefix only when replies drop out of the last N."
+              value={reasoningSendBack(settings)}
+              onChange={(reasoning_send_back) => change({ reasoning_send_back })}
+            />
+          </div>
         </div>
       </div>
     </Card>

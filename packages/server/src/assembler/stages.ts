@@ -60,6 +60,7 @@ import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
 import { cachePrefixDigests, placeBreakpoints, summaryLevelOf } from "./breakpoints.ts"
 import { DEFAULT_MAX_IMAGES, imagesStage, messageImagesOf } from "./images.ts"
+import { reasoningReplayStage } from "./reasoningReplay.ts"
 import { attachmentLines } from "./attachments.ts"
 import { cardBlock, personaBlock } from "./layouts.ts"
 import { cardFieldKey, replacementFor, replacementsStage } from "./replacements.ts"
@@ -687,6 +688,8 @@ const replySectionsStage = sync("reply-sections", (assembly) => {
   const scripted = new Map(need(assembly, "scripted"))
   let left = sendBack
   let hidden = 0
+  // What the thinking panels show as sent or not (`reasoning-replay` records it).
+  const sent: Array<import("@dreamspan/shared/thinkingSends.ts").ThinkingSend> = []
   for (const entry of [...need(assembly, "history")].reverse()) {
     if (left === 0) break
     // Another card's (both known and different) are skipped without counting.
@@ -699,6 +702,12 @@ const replySectionsStage = sync("reply-sections", (assembly) => {
     if (entry.thinkingHidden?.includes("sections")) {
       hidden++
       left--
+      sent.push({
+        versionId: entry.versionId as import("@dreamspan/shared/chat.ts").VersionId,
+        part: "sections",
+        sent: false,
+        reason: "hidden"
+      })
       continue
     }
     // Each section's text through the prompt-only reasoning scripts at the message's depth,
@@ -720,8 +729,15 @@ const replySectionsStage = sync("reply-sections", (assembly) => {
       volatile: true,
       ...(applied.length ? { applied } : {})
     })
+    sent.push({
+      versionId: entry.versionId as import("@dreamspan/shared/chat.ts").VersionId,
+      part: "sections",
+      sent: true,
+      reason: "sent"
+    })
     left--
   }
+  assembly.thinkingSent = sent
   if (hidden > 0)
     assembly.issues.push({
       kind: "thinking_left_out",
@@ -3154,7 +3170,8 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   messagesStage,
   breakpointsStage,
   requestStage,
-  imagesStage
+  imagesStage,
+  reasoningReplayStage()
 ]
 
 export const registerBuiltinStages = (registry: StageRegistry): Effect.Effect<void, never, Scope.Scope> =>
