@@ -10,7 +10,7 @@
 // The text box is the registered `messageTextEditor` (editorHistory.tsx): a surface replacing it
 // gets `bare`, keeps the metrics contract (ARCHITECTURE §12, "Editing"), and grows with its text.
 import type { PathEntry, Version } from "@dreamspan/shared/chat.ts"
-import { type KeyboardEvent, useEffect, useState, useSyncExternalStore } from "react"
+import { type KeyboardEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { SlotOutlet } from "../../slots.tsx"
 import { EditorTextActions } from "../../textActions.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -19,6 +19,7 @@ import { Icon } from "../../ui/Icon.tsx"
 import { popupOpen } from "../../ui/openPopups.ts"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
+import { tokenizerText, tokensText, useTokenCounts } from "../editor/tokenCounts.ts"
 import {
   availableCommands,
   type ChatCommandContext,
@@ -344,9 +345,36 @@ export function EditControls({
         </Button>
       </div>
       <span className="flex-1" />
+      <EditTokens text={text} />
       {selection && <EditorTextActions text={text} selection={selected} shown size="row" />}
       {tools}
     </div>
+  )
+}
+
+/**
+ * The edited text's tokens with the chat model's tokenizer, counted once typing rests, as a card
+ * field's are (editor/tokenCounts.ts). Beside the editor's icon buttons, away from Save and
+ * Cancel. Its width is reserved and its digits are tabular, so the row stays put as the number
+ * changes; on a phone the number alone, its word in its name and explanation.
+ */
+function EditTokens({ text }: { text: string }) {
+  const texts = useMemo(() => [text], [text])
+  const { counts, tokenizer, pending } = useTokenCounts(texts)
+  const shown = tokensText(counts[0] ?? null, tokenizer, pending)
+  return (
+    <Tooltip label={`The tokens in this message's text. ${tokenizerText(tokenizer)}`}>
+      <span
+        tabIndex={0}
+        data-edit-tokens
+        aria-label={shown}
+        aria-busy={pending || undefined}
+        className="min-w-[7ch] px-1 shrink-0 rounded text-right text-xs whitespace-nowrap text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus sm:min-w-[14ch]"
+      >
+        {shown.replace(/ tokens$/, "")}
+        <span className="max-sm:hidden"> tokens</span>
+      </span>
+    </Tooltip>
   )
 }
 

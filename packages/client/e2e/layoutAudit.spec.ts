@@ -1013,6 +1013,8 @@ test.describe("synthetic library and every app surface", () => {
           )
           await messageMenu(message, "Edit")
           const footer = message.locator("footer").filter({ has: page.getByRole("group", { name: "Edit" }) })
+          // The edit's token count, beside its icon buttons, once it's counted.
+          await expect(footer.locator("[data-edit-tokens]")).toHaveText(/^~?[\d,]+( tokens)?$/, { timeout: 15000 })
           await row("message-editor", footer, "article[data-slot] footer")
           return
         }
