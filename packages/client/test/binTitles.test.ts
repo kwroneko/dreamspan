@@ -10,19 +10,19 @@ test("bin readable chat names preserve quotes in an imported group name", () => 
     id: "bin",
     kind: "version",
     targetId: "version",
-    title: `Version of a message in "${title}"`,
+    title: `Swipe of a message in "${title}"`,
     excerpt: "",
     origin: { chatTitle: title },
     byteSize: 0,
     deletedAt: 0
   })
-  expect(binTitle(item)).toBe(`Version of a message in “The "Lantern" Inn, started ${day}”`)
+  expect(binTitle(item)).toBe(`Swipe of a message in “The "Lantern" Inn, started ${day}”`)
 })
 
 test("bin labels use structured kind and origin rather than arbitrary display quotes", () => {
   for (const [kind, label] of [
     ["message", "Message"],
-    ["version", "Version of a message"],
+    ["version", "Swipe of a message"],
     ["branch", "Branch of 3 messages"]
   ] as const) {
     const item = new BinItem({
@@ -60,7 +60,7 @@ test("recovered sources preserve embedded quotes using the source kind's full la
 test("a message or version in the bin is named by its number in the chat", () => {
   for (const [kind, label] of [
     ["message", "Message 12"],
-    ["version", "Version of message 12"]
+    ["version", "Swipe of message 12"]
   ] as const) {
     const item = new BinItem({
       id: "bin",

@@ -493,16 +493,12 @@ test("swipe through versions", async ({ page }) => {
   await onScreen(page, target)
   const from = await now(page)
   for (let i = 0; i < 3; i++) {
-    await row.getByRole("button", { name: "Previous version" }).click()
-    await expect(
-      row.getByRole("button", { name: `Version ${3 - i} of 4: choose a version`, exact: true })
-    ).toBeVisible()
+    await row.getByRole("button", { name: "Previous swipe" }).click()
+    await expect(row.getByRole("button", { name: `Swipe ${3 - i} of 4: choose a swipe`, exact: true })).toBeVisible()
   }
   for (let i = 0; i < 3; i++) {
-    await row.getByRole("button", { name: "Next version" }).click()
-    await expect(
-      row.getByRole("button", { name: `Version ${2 + i} of 4: choose a version`, exact: true })
-    ).toBeVisible()
+    await row.getByRole("button", { name: "Next swipe" }).click()
+    await expect(row.getByRole("button", { name: `Swipe ${2 + i} of 4: choose a swipe`, exact: true })).toBeVisible()
   }
   const measured = await since(page, from)
   const clicks = measured.events.filter((e) => e.name === "click" || e.name === "pointerup" || e.name === "pointerdown")
@@ -799,7 +795,7 @@ test("parallel swipes under one slot", async ({ page }) => {
   const row = page.locator(`article[data-slot="${swipes.slot}"]`)
   await expect(row.getByText("generating", { exact: true })).toBeVisible()
   await expect(
-    row.getByRole("button", { name: `Version ${swipes.versions} of ${swipes.versions}: choose a version`, exact: true })
+    row.getByRole("button", { name: `Swipe ${swipes.versions} of ${swipes.versions}: choose a swipe`, exact: true })
   ).toBeVisible()
   await page.waitForTimeout(1000)
   const from = await now(page)
@@ -812,10 +808,10 @@ test("parallel swipes under one slot", async ({ page }) => {
   const rows = measured.perf.rowRenders! - counters0.rowRenders!
 
   // The one before, still generating off screen, kept its text: it shows it, and it grows.
-  await row.getByRole("button", { name: "Previous version" }).click()
+  await row.getByRole("button", { name: "Previous swipe" }).click()
   await expect(
     row.getByRole("button", {
-      name: `Version ${swipes.versions - 1} of ${swipes.versions}: choose a version`,
+      name: `Swipe ${swipes.versions - 1} of ${swipes.versions}: choose a swipe`,
       exact: true
     })
   ).toBeVisible()

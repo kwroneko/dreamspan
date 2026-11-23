@@ -117,8 +117,8 @@ for (const kind of ["message", "summary"] as const) {
       const { chat, slotId } = await chatWithMessage()
       await page.goto(`${server().url}/chats/${chat.id}`)
       const message = page.locator(`article[data-slot="${slotId}"]`)
-      await messageMenu(message, "Write your own version")
-      box = message.getByLabel("Your version", { exact: true })
+      await messageMenu(message, "Write your own swipe")
+      box = message.getByLabel("Your swipe", { exact: true })
       cancel = message.getByRole("button", { name: "Cancel", exact: true })
     }
     await expect(box).toBeEnabled()

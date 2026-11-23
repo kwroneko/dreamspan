@@ -149,31 +149,31 @@ test("a message shows its number and versions; one is picked from the list, and 
   await page.goto(`${server().url}/chats/${chatId}`)
   const first = message(page, "The tide is in.")
   await expect(first.getByText("#1", { exact: true })).toBeVisible()
-  const versions = first.getByRole("group", { name: "Versions" })
+  const versions = first.getByRole("group", { name: "Swipes" })
   await expect(versions).toContainText("2/2")
-  await versions.getByRole("button", { name: /choose a version/ }).click()
+  await versions.getByRole("button", { name: /choose a swipe/ }).click()
   await page
-    .getByRole("dialog", { name: "Versions of message #1" })
-    .getByRole("button", { name: /^Version 1, .*The tide is out\./ })
+    .getByRole("dialog", { name: "Swipes of message #1" })
+    .getByRole("button", { name: /^Swipe 1, .*The tide is out\./ })
     .click()
-  await expect(message(page, "The tide is out.").getByRole("group", { name: "Versions" })).toContainText("1/2")
+  await expect(message(page, "The tide is out.").getByRole("group", { name: "Swipes" })).toContainText("1/2")
 
   // Its actions show on hover; the rarer ones are in its menu.
   const shown = await pinned(page, "The tide is out.")
   await showActions(shown)
-  await expect(shown.getByRole("button", { name: "Delete version" })).toBeVisible()
-  await messageMenu(shown, "Write your own version")
-  await shown.getByRole("textbox", { name: "Your version" }).fill("The tide turns.")
-  await shown.getByRole("button", { name: "Add as a new version" }).click()
-  await expect(message(page, "The tide turns.").getByRole("group", { name: "Versions" })).toContainText("3/3")
+  await expect(shown.getByRole("button", { name: "Delete swipe" })).toBeVisible()
+  await messageMenu(shown, "Write your own swipe")
+  await shown.getByRole("textbox", { name: "Your swipe" }).fill("The tide turns.")
+  await shown.getByRole("button", { name: "Add as a new swipe" }).click()
+  await expect(message(page, "The tide turns.").getByRole("group", { name: "Swipes" })).toContainText("3/3")
 
   // Deleting the version shown is the delete at hand; Undo puts it back.
   const turned = message(page, "The tide turns.")
   await showActions(turned)
-  await turned.getByRole("button", { name: "Delete version" }).click()
+  await turned.getByRole("button", { name: "Delete swipe" }).click()
   await expect(message(page, "The tide turns.")).toHaveCount(0)
   await page.getByRole("button", { name: "Undo" }).click()
-  await expect(page.locator("article[data-slot]").first().getByRole("group", { name: "Versions" })).toContainText("/3")
+  await expect(page.locator("article[data-slot]").first().getByRole("group", { name: "Swipes" })).toContainText("/3")
 })
 
 test("on a phone a tap on a message shows its actions", async ({ page }) => {

@@ -193,7 +193,7 @@ test("a message shows its model with its lab's mark, its date and time, and its 
 
   // The other swipe: another lab, its own figures.
   await reply.hover()
-  await reply.getByRole("button", { name: "Previous version" }).click()
+  await reply.getByRole("button", { name: "Previous swipe" }).click()
   await expect(reply).toContainText("We go over, not around.")
   // OpenAI isn't in Simple Icons: our own drawing.
   await expectMark(head, "openai", "OpenAI", "lobehub")
@@ -213,19 +213,19 @@ test("a message shows its model with its lab's mark, its date and time, and its 
     await shoot(page, `03-details-${width}-${theme}`)
     // The other swipe's logo in this theme, then back to where the loop found it.
     await shown.hover()
-    await shown.getByRole("button", { name: "Next version" }).click()
+    await shown.getByRole("button", { name: "Next swipe" }).click()
     await expectMark(shown.locator("header"), "anthropic", "Anthropic", "simple-icons")
     await shoot(page, `03-logo-${width}-${theme}`)
     await shown.hover()
-    await shown.getByRole("button", { name: "Previous version" }).click()
+    await shown.getByRole("button", { name: "Previous swipe" }).click()
     await expect(shown).toContainText("We go over, not around.")
   })
 
   // A version generated here: its connection and model, and its time and tokens from the ledger.
   await reply.hover()
-  await reply.getByRole("button", { name: "Next version" }).click()
+  await reply.getByRole("button", { name: "Next swipe" }).click()
   await reply.hover()
-  await reply.getByRole("button", { name: "Generate another version" }).click()
+  await reply.getByRole("button", { name: "Generate another swipe" }).click()
   await expect(reply).toContainText("The bridge holds.")
   await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
   await expect(head).toContainText("fake-large")

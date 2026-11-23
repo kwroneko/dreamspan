@@ -56,7 +56,7 @@ it("a snippet's editor adds to the composition used last that still shows", () =
   // No composition shown: the button keeps its place, unavailable, saying why.
   expect(offered("", {}, "snippet")).toEqual([["version.add-text", "Whole version", false]])
   expect(textActions.get("version.add-text")!.unavailable!({ text: "Some text", source: "snippet" })).toBe(
-    "Open “Write your own version” on a message to add text to it."
+    "Open “Write your own swipe” on a message to add text to it."
   )
   const element = (connected: boolean) => ({ isConnected: connected }) as HTMLElement
   const first = { name: "message #2", add: vi.fn() }
@@ -69,7 +69,7 @@ it("a snippet's editor adds to the composition used last that still shows", () =
   textActions.get("version.add-text")!.run({ text: "Snippet text", source: "snippet" })
   expect(first.add).toHaveBeenCalledWith("Snippet text")
   const description = textActions.get("version.add-text")!.description as (c: { text: string }) => string
-  expect(description({ text: "x" })).toBe("Adds this snippet's text to the end of your version of message #2.")
+  expect(description({ text: "x" })).toBe("Adds this snippet's text to the end of your swipe of message #2.")
   a.forget()
   expect(compositionTarget()).toBe(second)
   b.forget()

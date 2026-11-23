@@ -139,7 +139,7 @@ function ShowAsReplyText({ version, kind, streaming, session }: ReasoningActionP
     if (!result.ok) showToast({ title: "Couldn't show the thinking as reply text", description: result.error.message })
   }
   return (
-    <Tooltip label="Make this thinking part of the reply's text, as a new version; this one stays.">
+    <Tooltip label="Make this thinking part of the reply's text, as a new swipe; this one stays.">
       <button type="button" className={actionClass} disabled={busy} onClick={() => void run()}>
         Show as reply text
       </button>

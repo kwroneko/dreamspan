@@ -51,7 +51,7 @@ const describe = (ticked: ReadonlyArray<Ticked>) => {
   const copied = ticked.filter((t) => t.copies.length > 0).length
   const what =
     versions > ticked.length
-      ? `${ticked.length === 1 ? "It moves" : "They move"} to the bin with all ${plural(versions, "version", "versions")}.`
+      ? `${ticked.length === 1 ? "It moves" : "They move"} to the bin with all ${plural(versions, "swipe", "swipes")}.`
       : `${ticked.length === 1 ? "It moves" : "They move"} to the bin.`
   return [
     what,

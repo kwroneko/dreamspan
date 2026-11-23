@@ -106,9 +106,9 @@ export function LibraryArchiveCard() {
       />
       <p className="mb-3 text-sm text-muted">
         Includes archived entries and exportable card notes. Leaves out deleted items, workshops, chat pictures, saved
-        card assets, chat notes, summaries, history, version marks, who wrote each version, status, and privacy or
-        thread boundaries. Separate contexts become one transcript. SillyTavern ignores own-turn note rules. Changes
-        made during export may appear in the files.
+        card assets, chat notes, summaries, history, swipe marks, who wrote each swipe, status, and privacy or thread
+        boundaries. Separate contexts become one transcript. SillyTavern ignores own-turn note rules. Changes made
+        during export may appear in the files.
       </p>
       {error !== null && <Alert tone="danger">{error}</Alert>}
       <div className="mt-auto flex flex-wrap items-center gap-3">

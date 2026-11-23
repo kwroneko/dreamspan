@@ -110,14 +110,14 @@ test("narrow keyboard: Tab reaches the concealed version controls", async ({ pag
     ;(el as HTMLElement).focus({ preventScroll: true })
   })
   await expect(row.locator(".markdown")).toBeFocused()
-  const previous = row.getByRole("button", { name: "Previous version", exact: true })
+  const previous = row.getByRole("button", { name: "Previous swipe", exact: true })
   for (let step = 0; step < 10; step++) {
     await page.keyboard.press("Tab")
     if (await previous.evaluate((el) => el === document.activeElement)) break
   }
   await expect(previous).toBeFocused()
   await expect(row.locator(".message-footer")).toHaveCSS("opacity", "1")
-  await expect(row.getByRole("button", { name: "Previous version", exact: true })).toBeInViewport()
+  await expect(row.getByRole("button", { name: "Previous swipe", exact: true })).toBeInViewport()
   await expect(row.getByRole("button", { name: "More actions", exact: true })).toBeVisible()
 })
 
@@ -264,7 +264,7 @@ for (const width of [1440, 390])
           const box = (await button.boundingBox())!
           expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(24)
         }
-      await versioned.getByRole("button", { name: /Version .*50|50 versions|Choose.*version/ }).click()
+      await versioned.getByRole("button", { name: /Swipe .*50|50 swipes|choose a swipe/ }).click()
       await page.keyboard.press("Escape")
       await level1(server().dataDir, chatId, data.path.entries.slice(0, 2), "Synthetic summary of the harbor opening.")
       await admin((api) => api.SetDisplayPrefs({ prefs: { timeline: "summaries" } }))

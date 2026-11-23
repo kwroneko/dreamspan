@@ -180,7 +180,7 @@ describe("the cache-warmth estimate", () => {
         expectedRowVersion: sent.rowVersion
       })
       const cold = yield* estimate(events, before, (w) => w?.changed != null)
-      assert.strictEqual(cold!.changed!.reason, "Message 2 was edited, or another of its versions chosen.")
+      assert.strictEqual(cold!.changed!.reason, "Message 2 was edited, or another of its swipes chosen.")
       const count = yield* Effect.promise(() => prepareTokenizer("o200k_base"))
       assert.strictEqual(cold!.changed!.tokens, count("The road washed out.") + 3 + count(version.content) + 3)
       // The total the chip shows it out of is the whole request, counted the same way.

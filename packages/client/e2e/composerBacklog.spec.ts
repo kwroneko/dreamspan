@@ -196,8 +196,8 @@ test("a running swipe outside the selected version can still be selected and sto
   )
   await page.goto(`${server().url}/chats/${started.chat.id}`)
   const reply = page.getByRole("article", { name: "Reply", exact: true }).last()
-  await reply.getByRole("button", { name: "Generate another version" }).click()
-  await expect(reply.getByRole("group", { name: "Versions" })).toContainText("2/2")
+  await reply.getByRole("button", { name: "Generate another swipe" }).click()
+  await expect(reply.getByRole("group", { name: "Swipes" })).toContainText("2/2")
   await reply.getByRole("button", { name: "Stop", exact: true }).click()
   await expect(reply.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0)
   await expect
@@ -205,8 +205,8 @@ test("a running swipe outside the selected version can still be selected and sto
       rpc((api) => api.ListVersions({ slotId: started.entry.slotId })).then((versions) => versions[0]?.status)
     )
     .toBe("generating")
-  await reply.getByRole("button", { name: "Version 2 of 2: choose a version" }).click()
-  await page.getByRole("button", { name: /^Version 1,/ }).click()
+  await reply.getByRole("button", { name: "Swipe 2 of 2: choose a swipe" }).click()
+  await page.getByRole("button", { name: /^Swipe 1,/ }).click()
   await reply.getByRole("button", { name: "Stop", exact: true }).click()
   await expect
     .poll(() =>

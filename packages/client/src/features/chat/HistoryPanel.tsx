@@ -544,8 +544,8 @@ function HistorySearchPair({
                 })
               }
               options={[
-                { value: "messages", label: "Messages", description: "Searches the version each message shows." },
-                { value: "swipes", label: "Swipes", description: "Searches each message's other versions." },
+                { value: "messages", label: "Messages", description: "Searches the swipe each message shows." },
+                { value: "swipes", label: "Swipes", description: "Searches each message's other swipes." },
                 {
                   value: "summaries",
                   label: "Summaries",

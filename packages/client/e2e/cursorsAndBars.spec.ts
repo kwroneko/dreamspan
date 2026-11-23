@@ -136,7 +136,7 @@ for (const theme of ["light", "dark"] as const)
     expect(mineMore.background).not.toBe("rgba(0, 0, 0, 0)")
     // The version arrow is the same button.
     await showActions(reply)
-    const arrow = await hovered(reply.getByRole("button", { name: "Generate another version" }))
+    const arrow = await hovered(reply.getByRole("button", { name: "Generate another swipe" }))
     expect(arrow.background).toBe(replyMore.background)
     expect(arrow.cursor).toBe("pointer")
 

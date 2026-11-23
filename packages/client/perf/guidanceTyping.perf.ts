@@ -78,7 +78,7 @@ test("typing guidance for a new version keeps the last message and the composer 
     const row = rows.nth(i)
     await row.hover()
     await row.getByRole("button", { name: "More actions" }).click()
-    const item = page.getByRole("menuitem", { name: "New version with guidance…" })
+    const item = page.getByRole("menuitem", { name: "New swipe with guidance…" })
     if ((await item.count()) > 0) {
       await item.click()
       opened = true

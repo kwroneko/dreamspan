@@ -211,7 +211,7 @@ function GuidanceEditBar({ session }: ComposerControlContext) {
     >
       <Icon name="guidance" size={16} className="shrink-0" />
       <span className="min-w-0 flex-1 truncate font-medium">
-        Guidance for a new version of {name ? `${name}'s` : "this"} reply
+        Guidance for a new swipe of {name ? `${name}'s` : "this"} reply
       </span>
       <IconButton
         label="Close: back to new messages"
@@ -232,9 +232,9 @@ export const registerGuidanceEdit = () => [
     available: ({ entry }) => entry.version.writer === "model" && !entry.version.direction,
     disabled: ({ generating }) => (generating ? "Wait for this reply to finish before adding guidance." : null),
     describe: viewOf(({ session, entry }) => ({
-      label: "New version with guidance…",
+      label: "New swipe with guidance…",
       icon: "guidance",
-      hint: "Guide a new version of this reply from the composer.",
+      hint: "Guide a new swipe of this reply from the composer.",
       onSelect: () => editGuidance(session, entry)
     }))
   }),

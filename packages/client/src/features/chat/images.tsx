@@ -520,9 +520,9 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
       <AttachButton
         disabled={busy}
         onFiles={(files) => void add(files)}
-        pickerLabel="Choose images for this version"
+        pickerLabel="Choose images for this swipe"
         size="sm"
-        hint="Attach images to this version. You can also paste an image or drop it on the editor."
+        hint="Attach images to this swipe. You can also paste an image or drop it on the editor."
       />
       {busy && (
         <span className="text-xs text-muted" role="status">
@@ -532,7 +532,7 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
       {current.length > 0 && (
         <div className="order-first basis-full">
           <AttachmentList
-            label="Images of this version"
+            label="Images of this swipe"
             items={current.map((image, index) => ({
               id: `${index}:${image.mediaId}`,
               name: image.name ?? attachmentName(image.altText, null, index, current.length),

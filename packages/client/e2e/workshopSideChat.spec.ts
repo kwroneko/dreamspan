@@ -117,7 +117,7 @@ test.describe("two chats on one page", () => {
     const storyReply = storyList.getByRole("article").filter({ hasText: STORY_REPLY })
     await showActions(storyReply)
     stats.armed = true
-    await storyReply.getByRole("button", { name: "Generate another version", exact: true }).click()
+    await storyReply.getByRole("button", { name: "Generate another swipe", exact: true }).click()
     await expect.poll(() => stats.slotFrames).toBeGreaterThan(0)
     await steady(page, stats, "story")
     await expect(storyList.getByRole("article")).toHaveCount(storyCount)
@@ -129,7 +129,7 @@ test.describe("two chats on one page", () => {
     stats.slotFrames = 0
     const answer = side.getByRole("article").filter({ hasText: SIDE_ANSWER })
     await showActions(answer)
-    await answer.getByRole("button", { name: "Generate another version", exact: true }).click()
+    await answer.getByRole("button", { name: "Generate another swipe", exact: true }).click()
     await expect.poll(() => stats.slotFrames).toBeGreaterThan(0)
     await steady(page, stats, "workshop")
     await expect(side.getByRole("article")).toHaveCount(sideCount)

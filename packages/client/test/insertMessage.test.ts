@@ -302,7 +302,7 @@ describe("the insertion actions", () => {
       ({ entry: target, session: s, generating }) as unknown as ActionContext
     expect(insert.duplicateRefusal(context(a))).toBeNull()
     expect(insert.duplicateRefusal(context(entry("f", "a", 1, { status: "failed" })))).toBe(
-      "A failed version has nothing to duplicate."
+      "A failed swipe has nothing to duplicate."
     )
     expect(insert.duplicateRefusal(context(entry("g", "a", 1, { status: "generating" }), true))).toBe(
       "It's still being written. Duplicate it once it's finished."

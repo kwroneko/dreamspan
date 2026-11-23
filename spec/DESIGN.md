@@ -235,7 +235,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[P]** Mapping: **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §13).
   - single and group chats → chats with N participants
   - ST branch files (linked by metadata) → one message graph
-  - swipes → versions
+  - swipes → versions (the data model's name; **superseded for wording** by the owner's 2026-11-23 decision in §3.1: the user sees "swipes")
   - personas → cards in the persona folder, with their original images (ST's card-to-persona conversion blurs them)
   - global, chat-bound and embedded lorebooks → lorebooks
   - presets → presets
@@ -446,6 +446,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 
 ### 3.1 Slots and versions
 
+- **[D] The user sees "swipes", never "versions"** (owner, 2026-11-23: "Why are we calling them versions? Everyone calls these 'swipes'."). Everywhere the user can read it, a message's alternative generations are swipes: button labels, aria-labels, hover explanations, menu items, notes under messages, the request inspector, settings, the bin, errors and toasts, and server messages shown to the user ("New swipe", "This swipe stays", "Swipe 3 of 5", "Delete swipe", "Write your own swipe"). The code, API, database and stored data keep the name *version*, as do ST's import and export formats. Other meanings of "version" stay: card and preset revisions, edit history, file and plugin versions, app releases, schema versions, a card's Version field, model versions. Earlier entries in this document that quote UI wording with "version" ("Write your own version", "Saved as version N", "version arrows") are superseded for wording by this one.
 - **[D]** Remove the message action to generate with another model and the refusal-specific "Retry with…" picker; choose the model below the composer and swipe instead (owner, 2026-11-02: "I don't get it. There's a model switch right below the composer. What's the point of having a dedicated button for something you can do by switching and then swiping? That's what everyone does. Same with refusals with another model."). Per-generation model recording stays. **Built; obsolete as an implementation plan** (nomodelretry, 2026-11-02; ARCHITECTURE §12).
 
 **[O]** **How the model is presented to users** (owner, 2026-10-14): "the UX for how we translate our immutable and version controlled data model to something that users understand and which doesn't cause surprises for them still hasn't been worked out or discussed properly." The rules below (generated text frozen, edits of it as new versions, the user's own text amended with undo history, branches as forks, layered cards, re-imports merged) are decided; how each shows up in the UI, and what the user is told when one applies, was the open question at that date. **Largely overtaken** by the later owner decisions on edit/amend, per-note fork inheritance, editor shape and independent forks (§3.4, §6.2a, §10.3), whose concrete UI is built (ARCHITECTURE §12, §14). Owner acceptance of the resulting UX remains unverified.

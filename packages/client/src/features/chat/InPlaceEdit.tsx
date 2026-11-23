@@ -336,7 +336,7 @@ export function EditControls({
           className={footer ? "max-sm:w-8 max-sm:px-0" : ""}
           hint={
             draft.target._tag === "Write"
-              ? "Closes the editor without adding a message version."
+              ? "Closes the editor without adding a swipe."
               : "Closes the message editor without saving."
           }
         >

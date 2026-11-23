@@ -115,8 +115,8 @@ const lastMessage = (page: Page) => page.locator("article[data-slot]").last()
 /** The latest reply's › past its last version, shown without a hover at every width. */
 const regenerateLatest = (page: Page) =>
   lastMessage(page)
-    .getByRole("group", { name: "Versions" })
-    .getByRole("button", { name: "Generate another version" })
+    .getByRole("group", { name: "Swipes" })
+    .getByRole("button", { name: "Generate another swipe" })
     .click()
 /** The inspector's list draws rows as they scroll in: its end, where the tail is. */
 const inspectorEnd = async (page: Page, text: string) => {

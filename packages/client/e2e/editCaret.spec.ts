@@ -154,10 +154,10 @@ for (const width of [1440, 390])
     const reply = page.getByRole("article", { name: "Reply", exact: true })
     await showActions(reply)
     await reply
-      .getByRole("group", { name: "Versions", exact: true })
-      .getByRole("button", { name: "Generate another version" })
+      .getByRole("group", { name: "Swipes", exact: true })
+      .getByRole("button", { name: "Generate another swipe" })
       .click()
-    await expect(reply.getByRole("group", { name: "Versions", exact: true })).toContainText("2/2")
+    await expect(reply.getByRole("group", { name: "Swipes", exact: true })).toContainText("2/2")
     await settled(page)
     const replyBody = reply.locator(".markdown")
     const word = await replyBody.evaluate((node) => {

@@ -105,7 +105,7 @@ export function workshopSideChatEffectsTests() {
           await expectLayout(page, info, `side-change-undo-${width}-${theme}`, { scope: "[data-side-chat]" })
           const first = side.getByRole("article").filter({ hasText: opening })
           await showActions(first)
-          await first.getByRole("button", { name: "Generate another version", exact: true }).click()
+          await first.getByRole("button", { name: "Generate another swipe", exact: true }).click()
           const warning = page.getByRole("dialog", { name: "This reply changed things outside the chat" })
           await expect(warning).toContainText("Side keeper")
           await expectLayout(page, info, `side-change-warning-${width}-${theme}`, { scope: '[role="dialog"]' })

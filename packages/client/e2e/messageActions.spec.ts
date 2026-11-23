@@ -68,8 +68,8 @@ const newChat = async (page: Page, title: string) => {
   await page.getByRole("button", { name: "Send", exact: true }).click()
   await expect(reply(page)).toBeVisible()
   await settled(page)
-  await reply(page).getByRole("button", { name: "Generate another version", exact: true }).click()
-  await expect(reply(page).getByRole("group", { name: "Versions", exact: true })).toContainText("2/2")
+  await reply(page).getByRole("button", { name: "Generate another swipe", exact: true }).click()
+  await expect(reply(page).getByRole("group", { name: "Swipes", exact: true })).toContainText("2/2")
   await settled(page)
   return page.url()
 }
@@ -93,8 +93,8 @@ const openMenu = async (message: Locator) => {
 const EVERY_REPLY_ACTION = [
   "Edit",
   "Continue",
-  "Write your own version",
-  "New version with guidance…",
+  "Write your own swipe",
+  "New swipe with guidance…",
   "Branch from here",
   "Start parallel threads here…",
   "Insert message below",
@@ -108,8 +108,8 @@ const EVERY_REPLY_ACTION = [
   "Copy text",
   "Copy link",
   "Select messages",
-  "Delete version",
-  "Delete all versions"
+  "Delete swipe",
+  "Delete all swipes"
 ]
 
 for (const width of [1440, 390] as const) {
@@ -120,13 +120,7 @@ for (const width of [1440, 390] as const) {
       width === 390 ? await phoneContext(browser) : await browser.newContext({ viewport: { width, height: 900 } })
     const page = await context.newPage()
     const url = await newChat(page, `Quay ${width}`)
-    expect(await buttons(reply(page))).toEqual([
-      "Edit",
-      "Continue",
-      "Branch from here",
-      "Delete version",
-      "More actions"
-    ])
+    expect(await buttons(reply(page))).toEqual(["Edit", "Continue", "Branch from here", "Delete swipe", "More actions"])
 
     await openMenu(reply(page))
     const items = menu(page).getByRole("menuitem")
@@ -136,7 +130,7 @@ for (const width of [1440, 390] as const) {
       const checkbox = menu(page).getByRole("menuitemcheckbox", { name: `Show ${name} on the message`, exact: true })
       await expect(checkbox).toHaveAttribute(
         "aria-checked",
-        ["Edit", "Continue", "Branch from here", "Delete version"].includes(name) ? "true" : "false"
+        ["Edit", "Continue", "Branch from here", "Delete swipe"].includes(name) ? "true" : "false"
       )
     }
     // No two actions share an icon.
@@ -176,7 +170,7 @@ for (const width of [1440, 390] as const) {
     await expect(toolbar(reply(page)).getByRole("button", { name: "Copy link", exact: true })).toBeVisible()
     await page.keyboard.press("Escape")
     await expect(menu(page)).toHaveCount(0)
-    const pinned = ["Continue", "Branch from here", "Copy text", "Copy link", "Delete version", "More actions"]
+    const pinned = ["Continue", "Branch from here", "Copy text", "Copy link", "Delete swipe", "More actions"]
     expect(await buttons(reply(page))).toEqual(pinned)
 
     // The account's choice: after a reload, and in another browser of the same account.
@@ -260,11 +254,11 @@ for (const width of [1440, 390]) {
     for (const message of [reply(page), mine(page)]) {
       expect(await buttons(message)).toContain("Copy text")
       await expect(
-        message.getByRole("button", { name: /Regenerate with|Generate a version with|Retry with/ })
+        message.getByRole("button", { name: /Regenerate with|Generate a swipe with|Retry with/ })
       ).toHaveCount(0)
       await openMenu(message)
       await expect(
-        menu(page).getByRole("menuitem", { name: /Regenerate with|Generate a version with|Retry with/ })
+        menu(page).getByRole("menuitem", { name: /Regenerate with|Generate a swipe with|Retry with/ })
       ).toHaveCount(0)
       await expect(menu(page).getByRole("menuitem", { name: "Copy text", exact: true })).toBeVisible()
       await page.keyboard.press("Escape")

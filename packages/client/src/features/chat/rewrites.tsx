@@ -77,7 +77,7 @@ function OriginalText({ session, entry, report, closeDialog }: MessageActionProp
       wide
       onOpenChange={(open) => !open && closeDialog()}
       title="The original text"
-      description="The text before your regex scripts changed it. Restore it to add it as a new version, which scripts leave alone."
+      description="The text before your regex scripts changed it. Restore it to add it as a new swipe, which scripts leave alone."
     >
       <ErrorAlert error={error} />
       {raw === null && error === null && <p className="text-sm text-muted">Loading…</p>}
@@ -102,7 +102,7 @@ function OriginalText({ session, entry, report, closeDialog }: MessageActionProp
             </section>
           )}
           {raw.content === null && raw.reasoning === null && raw.sections === null && (
-            <p className="text-sm text-muted">The scripts didn't change this version's text.</p>
+            <p className="text-sm text-muted">The scripts didn't change this swipe's text.</p>
           )}
         </div>
       )}
@@ -111,7 +111,7 @@ function OriginalText({ session, entry, report, closeDialog }: MessageActionProp
           variant="primary"
           pending={pending}
           disabled={raw === null || (raw.content === null && raw.reasoning === null && raw.sections === null)}
-          hint="Adds the original text as a new message version without applying scripts."
+          hint="Adds the original text as a new swipe without applying scripts."
           onClick={() => void restore()}
         >
           Restore it

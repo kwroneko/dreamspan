@@ -89,10 +89,10 @@ test("two views keep their composer labels, drafts and panels independent while 
   await right
     .locator("article[data-slot]")
     .last()
-    .getByRole("button", { name: "Generate another version", exact: true })
+    .getByRole("button", { name: "Generate another swipe", exact: true })
     .click()
   await expect(
-    left.locator("article[data-slot]").last().getByRole("group", { name: "Versions", exact: true })
+    left.locator("article[data-slot]").last().getByRole("group", { name: "Swipes", exact: true })
   ).toContainText("2/2")
   await expect(right.getByRole("button", { name: "Stop", exact: true })).toBeVisible()
   await left.getByRole("button", { name: "Close Two views", exact: true }).click()

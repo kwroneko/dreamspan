@@ -126,7 +126,7 @@ test("a new chat from a card: the greeting follows the persona until the first s
   // The greeting picked, as a version of the first message, with its macros resolved for Bo.
   const first = replies(page).first()
   await expect(first).toContainText("Mira waves at Bo from the pier.")
-  await expect(first.getByRole("group", { name: "Versions" })).toContainText("2")
+  await expect(first.getByRole("group", { name: "Swipes" })).toContainText("2")
   await expect(page.getByRole("article", { name: "Your message" })).toContainText("Bo")
   await expect(replies(page)).toHaveCount(2)
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
@@ -205,14 +205,14 @@ test("Send as a card added to the chat, and Generate with guidance that a swipe 
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   await shoot(page, "generate-with-direction")
   // A swipe reuses the guidance of the version it re-rolls.
-  await reply.getByRole("button", { name: "Generate another version" }).click()
-  await expect(reply.getByRole("group", { name: "Versions" })).toContainText("2/2")
+  await reply.getByRole("button", { name: "Generate another swipe" }).click()
+  await expect(reply.getByRole("group", { name: "Swipes" })).toContainText("2/2")
   await expect(reply).toContainText("Guidance: Mira tells a story about the storm.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   // With guidance off too; the next turn doesn't get it.
   await setGuidance(page, false)
-  await reply.getByRole("button", { name: "Generate another version" }).click()
-  await expect(reply.getByRole("group", { name: "Versions" })).toContainText("3/3")
+  await reply.getByRole("button", { name: "Generate another swipe" }).click()
+  await expect(reply.getByRole("group", { name: "Swipes" })).toContainText("3/3")
   await expect(reply).toContainText("Guidance: Mira tells a story about the storm.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   await page.getByRole("button", { name: "Generate Mira" }).click()

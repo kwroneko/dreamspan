@@ -416,15 +416,15 @@ for (const [name, viewport] of [
           })
         ).toBeVisible()
         await expect(article.getByText("Retry with…")).toHaveCount(0)
-        await expect(article.getByRole("button", { name: /Regenerate with|Generate a version with/ })).toHaveCount(0)
+        await expect(article.getByRole("button", { name: /Regenerate with|Generate a swipe with/ })).toHaveCount(0)
         await showActions(article)
         await article.getByRole("button", { name: "More actions" }).click()
-        await expect(page.getByRole("menuitem", { name: /Regenerate with|Generate a version with/ })).toHaveCount(0)
+        await expect(page.getByRole("menuitem", { name: /Regenerate with|Generate a swipe with/ })).toHaveCount(0)
         await page.keyboard.press("Escape")
         const before = provider.completions.length
-        await article.getByRole("button", { name: "Generate another version", exact: true }).click()
+        await article.getByRole("button", { name: "Generate another swipe", exact: true }).click()
         await expect.poll(() => provider.completions.length).toBeGreaterThan(before)
-        await expect(article.getByRole("group", { name: "Versions", exact: true })).toContainText("2/2")
+        await expect(article.getByRole("group", { name: "Swipes", exact: true })).toContainText("2/2")
       })
 
     test("the context view names a summary source with its level, range and revision", async ({ page }) => {

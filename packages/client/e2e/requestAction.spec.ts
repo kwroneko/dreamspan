@@ -60,8 +60,8 @@ for (const width of [1440, 390])
       // navigation target and explanation as the reply finishes naturally too.
       provider.release()
       await showActions(reply)
-      await reply.getByRole("button", { name: "Generate another version", exact: true }).click()
-      await expect(reply.getByRole("button", { name: /Version 2 of 2/ })).toBeVisible()
+      await reply.getByRole("button", { name: "Generate another swipe", exact: true }).click()
+      await expect(reply.getByRole("button", { name: /Swipe 2 of 2/ })).toBeVisible()
       await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
       await showActions(reply)
       await reply.getByRole("button", { name: "More actions", exact: true }).click()
@@ -76,7 +76,7 @@ for (const width of [1440, 390])
         })
       await link.hover()
       await expect(
-        page.getByText("Shows everything the model was sent for this version, and where each part came from.", {
+        page.getByText("Shows everything the model was sent for this swipe, and where each part came from.", {
           exact: true
         })
       ).toBeVisible()

@@ -933,7 +933,7 @@ export function UsesSection({ connection }: McpSectionProps) {
           Workshops
         </Switch>
         <p className="text-xs text-muted">
-          Changes a server makes outside the app aren’t undone by a swipe, a branch or a new version.
+          Changes a server makes outside the app aren’t undone by a new swipe or a branch.
         </p>
         <ErrorAlert error={action.error} title="Not changed" />
       </div>

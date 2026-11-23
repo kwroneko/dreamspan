@@ -103,16 +103,14 @@ function Warning({ asked }: { asked: WarningRequest }) {
       <ErrorAlert
         error={error}
         title={
-          readFailed
-            ? "The changes couldn't be read. Close this and try again."
-            : "Not all undone, so no new version yet"
+          readFailed ? "The changes couldn't be read. Close this and try again." : "Not all undone, so no new swipe yet"
         }
       />
       <DialogActions>
         <Button
           variant="ghost"
           disabled={pending !== null}
-          hint="Closes this. Nothing is undone and no new version is made."
+          hint="Closes this. Nothing is undone and no new swipe is made."
           onClick={() => asked.settle(false)}
         >
           Cancel
@@ -120,13 +118,13 @@ function Warning({ asked }: { asked: WarningRequest }) {
         <Button
           disabled={readFailed || pending === "undo"}
           pending={pending === "keep"}
-          hint="Leaves these changes as they are and asks for a new version."
+          hint="Leaves these changes as they are and asks for a new swipe."
           onClick={() => {
             setPending("keep")
             asked.settle(true)
           }}
         >
-          Keep them and make a new version
+          Keep them and make a new swipe
         </Button>
         <Button
           variant="primary"
@@ -134,12 +132,12 @@ function Warning({ asked }: { asked: WarningRequest }) {
           pending={pending === "undo"}
           hint={
             fixed > 0
-              ? "Undoes the changes that can be undone, newest first, then asks for a new version."
-              : "Undoes these changes, newest first, then asks for a new version."
+              ? "Undoes the changes that can be undone, newest first, then asks for a new swipe."
+              : "Undoes these changes, newest first, then asks for a new swipe."
           }
           onClick={() => void undoAll()}
         >
-          Undo them, then make a new version
+          Undo them, then make a new swipe
         </Button>
       </DialogActions>
     </Dialog>

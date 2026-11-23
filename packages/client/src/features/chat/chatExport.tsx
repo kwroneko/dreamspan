@@ -18,7 +18,7 @@ type Scope = "branch" | "all"
 const leftOut = (format: ExportFormat) =>
   format === "txt"
     ? "Only the shown text; no pictures (the chat’s own picture included), reasoning, notes, summaries, deleted messages, or privacy and thread boundaries."
-    : "Not in the file: pictures (the chat’s own picture included), notes, summaries, edit history, deleted messages or branches, version marks, who wrote each version, status, and privacy or thread boundaries. Separate contexts and away periods become one transcript; changes during export may appear."
+    : "Not in the file: pictures (the chat’s own picture included), notes, summaries, edit history, deleted messages or branches, swipe marks, who wrote each swipe, status, and privacy or thread boundaries. Separate contexts and away periods become one transcript; changes during export may appear."
 
 export function ExportChatDialog({ context, onClose }: ChatCommandDialogProps) {
   const { session, view } = context
@@ -68,7 +68,7 @@ export function ExportChatDialog({ context, onClose }: ChatCommandDialogProps) {
           ...(value === "jsonl"
             ? {
                 label: "SillyTavern (.jsonl)",
-                description: "Every version of each message, which one is shown, hidden messages and reasoning."
+                description: "Every swipe of each message, which one is shown, hidden messages and reasoning."
               }
             : { label: "Plain text (.txt)", description: "Easy to read: each message as “Name: text”." })
         }))}

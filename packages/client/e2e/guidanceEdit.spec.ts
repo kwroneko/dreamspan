@@ -145,12 +145,12 @@ for (const width of [1440, 390]) {
       ).toBeVisible()
 
       // The bar names the reply; the box holds its guidance, as guidance, toggle on meanwhile.
-      await expect(bar(page)).toContainText("Guidance for a new version of Aria's reply")
+      await expect(bar(page)).toContainText("Guidance for a new swipe of Aria's reply")
       await expect(box(page)).toHaveValue("Aria looks out to sea.")
       await expect(toggle(page)).toBeChecked()
       await expect(toggle(page)).toBeDisabled()
-      await expect(page.getByRole("button", { name: "New version", exact: true })).toBeVisible()
-      await expect(page.getByRole("button", { name: "New version", exact: true })).toBeEnabled()
+      await expect(page.getByRole("button", { name: "New swipe", exact: true })).toBeVisible()
+      await expect(page.getByRole("button", { name: "New swipe", exact: true })).toBeEnabled()
       if (process.env.RP_SCREENS) {
         mkdirSync(process.env.RP_SCREENS, { recursive: true })
         await page.screenshot({ path: `${process.env.RP_SCREENS}/guidance-edit-bar-${width}-${theme}.png` })
@@ -166,7 +166,7 @@ for (const width of [1440, 390]) {
 
       // Edit again, and the visible button: another new version, never a new turn.
       await box(page).fill("Aria hums an old sailors' song.")
-      await page.getByRole("button", { name: "New version", exact: true }).click()
+      await page.getByRole("button", { name: "New swipe", exact: true }).click()
       await settled(slotId, 3)
       expect((await versions(slotId)).map((v) => v.direction)).toEqual([
         "Aria looks out to sea.",
@@ -192,7 +192,7 @@ for (const width of [1440, 390]) {
       // Reload while editing: the text and the bar come back.
       await box(page).fill("Aria counts the gulls.")
       await page.reload()
-      await expect(bar(page)).toContainText("Guidance for a new version of Aria's reply")
+      await expect(bar(page)).toContainText("Guidance for a new swipe of Aria's reply")
       await expect(box(page)).toHaveValue("Aria counts the gulls.")
       await expect(toggle(page)).toBeChecked()
 
@@ -239,12 +239,12 @@ for (const width of [1440, 390]) {
     await page.reload()
     dropSaves = false
     await expect(box(page)).toHaveValue("Aria sees a storm coming.")
-    await expect(bar(page)).toContainText("Guidance for a new version of Aria's reply")
+    await expect(bar(page)).toContainText("Guidance for a new swipe of Aria's reply")
     // It reaches the server once saves go through, and New version uses it.
     await expect
       .poll(async () => (await rpc((api) => api.OpenComposer({ chatId, forkId: null }))).content)
       .toBe("Aria sees a storm coming.")
-    await page.getByRole("button", { name: "New version", exact: true }).click()
+    await page.getByRole("button", { name: "New swipe", exact: true }).click()
     await settled(slotId, 2)
     expect((await versions(slotId)).at(-1)!.direction).toBe("Aria sees a storm coming.")
   })
@@ -267,8 +267,8 @@ for (const width of [1440, 390]) {
     await expect.poll(() => held.length).toBeGreaterThan(0)
     await page.getByRole("button", { name: "Edit this guidance" }).click()
     await box(page).fill("Aria listens to the waves.")
-    await expect(page.getByRole("button", { name: "New version", exact: true })).toBeEnabled()
-    await page.getByRole("button", { name: "New version", exact: true }).click()
+    await expect(page.getByRole("button", { name: "New swipe", exact: true })).toBeEnabled()
+    await page.getByRole("button", { name: "New swipe", exact: true }).click()
     await settled(slotId, 2)
     expect((await versions(slotId)).at(-1)!.direction).toBe("Aria listens to the waves.")
     for (const release of held) release()
@@ -295,19 +295,19 @@ for (const width of [1440, 390]) {
     await reply.getByRole("button", { name: "Edit this guidance" }).click()
     await box(page).fill("Live unsaved guidance.")
     await showActions(reply)
-    await reply.getByRole("button", { name: "Generate another version", exact: true }).click()
+    await reply.getByRole("button", { name: "Generate another swipe", exact: true }).click()
     await settled(slotId, 2)
     expect((await versions(slotId)).at(-1)!.direction).toBe("Live unsaved guidance.")
     // Regenerating the other reply doesn't take the text currently in the box.
     const other = page.getByRole("article").filter({ hasText: "Guidance: A different reply's guidance." })
     await showActions(other)
-    await other.getByRole("button", { name: "Generate another version", exact: true }).click()
+    await other.getByRole("button", { name: "Generate another swipe", exact: true }).click()
     await settled(secondId, 2)
     expect((await versions(secondId)).at(-1)!.direction).toBe("A different reply's guidance.")
     await expect(box(page)).toHaveValue("Live unsaved guidance.")
     // An explicit empty box removes guidance; New version with guidance… offers the same editor again.
     await box(page).fill("")
-    await page.getByRole("button", { name: "New version", exact: true }).click()
+    await page.getByRole("button", { name: "New swipe", exact: true }).click()
     await settled(slotId, 3)
     expect((await versions(slotId)).at(-1)!.direction).toBeNull()
     await bar(page).getByRole("button", { name: "Close: back to new messages" }).click()
@@ -316,10 +316,10 @@ for (const width of [1440, 390]) {
     // A reply without guidance leaves the box's text as it is, for its guidance.
     await box(page).fill("Fog over the water.")
     const unguided = page.getByRole("article").nth(1)
-    await messageMenu(unguided, "New version with guidance…")
+    await messageMenu(unguided, "New swipe with guidance…")
     await expect(box(page)).toHaveValue("Fog over the water.")
     await expect(bar(page)).toBeVisible()
-    await messageMenu(unguided, "Delete all versions")
+    await messageMenu(unguided, "Delete all swipes")
     await expect(bar(page)).toHaveCount(0)
     await expect(box(page)).toHaveValue("Fog over the water.")
     await page.getByRole("button", { name: "Edit this guidance" }).click()

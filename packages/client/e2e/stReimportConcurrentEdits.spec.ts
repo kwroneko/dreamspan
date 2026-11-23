@@ -57,7 +57,7 @@ for (const mode of ["selected", "unselected", "racing"] as const) {
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chat.id}`)
     const row = page.locator(`article[data-slot="${entry.slotId}"]`)
-    await expect(row.getByRole("group", { name: "Versions", exact: true })).toContainText("2/2")
+    await expect(row.getByRole("group", { name: "Swipes", exact: true })).toContainText("2/2")
     await showActions(row)
     await row.getByRole("button", { name: "Edit", exact: true }).click()
     const box = row.getByLabel("Message text", { exact: true })
@@ -69,7 +69,7 @@ for (const mode of ["selected", "unselected", "racing"] as const) {
       await admin((api) =>
         api.SelectVersion({ slotId: entry.slotId, versionId: versions[0]!.id, expectedVersionId: entry.version.id })
       )
-      await expect(row.getByRole("note")).toContainText("Another version is selected")
+      await expect(row.getByRole("note")).toContainText("Another swipe is selected")
     }
     await admin((api) =>
       api.AmendVersion({

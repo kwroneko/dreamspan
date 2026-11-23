@@ -933,7 +933,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         kind: "version",
         targetId: versionId,
         chatId: slot.chat_id,
-        title: `Version of a message in ${chatName(slot.title)}`,
+        title: `Swipe of a message in ${chatName(slot.title)}`,
         excerpt: version.content,
         origin: {
           chatId: slot.chat_id,

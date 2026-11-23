@@ -107,25 +107,25 @@ for (const width of [1440, 390]) {
     await expect(reasoning).toHaveAttribute("aria-expanded", "false")
     await shoot(page, "04-complete-collapsed")
     await showActions(reply)
-    await reply.getByRole("button", { name: /choose a version/ }).click()
-    await expect(page.getByRole("dialog", { name: "Versions of message #2", exact: true })).toContainText("stopped")
-    await expect(page.getByRole("dialog", { name: "Versions of message #2", exact: true })).not.toContainText(
+    await reply.getByRole("button", { name: /choose a swipe/ }).click()
+    await expect(page.getByRole("dialog", { name: "Swipes of message #2", exact: true })).toContainText("stopped")
+    await expect(page.getByRole("dialog", { name: "Swipes of message #2", exact: true })).not.toContainText(
       "generating"
     )
-    await expect(page.getByRole("dialog", { name: "Versions of message #2", exact: true })).toContainText(
+    await expect(page.getByRole("dialog", { name: "Swipes of message #2", exact: true })).toContainText(
       "The ledger says"
     )
     await shoot(page, "05-picker-complete")
     await page.keyboard.press("Escape")
     // Cached completion must remain correct after selecting the original too.
-    await reply.getByRole("button", { name: "Previous version", exact: true }).click()
-    await reply.getByRole("button", { name: /choose a version/ }).click()
-    await expect(page.getByRole("dialog", { name: "Versions of message #2", exact: true })).not.toContainText(
+    await reply.getByRole("button", { name: "Previous swipe", exact: true }).click()
+    await reply.getByRole("button", { name: /choose a swipe/ }).click()
+    await expect(page.getByRole("dialog", { name: "Swipes of message #2", exact: true })).not.toContainText(
       "generating"
     )
     await page.keyboard.press("Escape")
-    await reply.getByRole("button", { name: "Next version", exact: true }).click()
-    await expect(reply.getByRole("button", { name: /Version 2 of 2/ })).toBeVisible()
+    await reply.getByRole("button", { name: "Next swipe", exact: true }).click()
+    await expect(reply.getByRole("button", { name: /Swipe 2 of 2/ })).toBeVisible()
     const versions = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       api.ListVersions({ slotId: originalVersion.slotId })
     )
@@ -180,7 +180,7 @@ for (const width of [1440, 390]) {
       .toMatchObject({ reasoning: "collapsed" })
     await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20000 })
     await showActions(reply)
-    await reply.getByRole("button", { name: "Generate another version" }).click()
+    await reply.getByRole("button", { name: "Generate another swipe" }).click()
     await expect(reply.getByText("generating", { exact: true })).toBeVisible()
     await expect(reasoning).toHaveAttribute("aria-expanded", "false")
     await page.reload()

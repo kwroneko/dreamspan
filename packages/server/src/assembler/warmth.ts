@@ -47,7 +47,7 @@ const messageReason = (
   const sent = next.pieces.find((p) => p.source.kind === "message" && p.source.slot === source.slot)
   if (sent?.source.kind === "message" && sent.messages.length === 0) return budgetReason(next)
   if (sent?.source.kind === "message") {
-    if (sent.source.version !== source.version) return `${label} was edited, or another of its versions chosen.`
+    if (sent.source.version !== source.version) return `${label} was edited, or another of its swipes chosen.`
     const previous = last.pieces.find((p) => p.source.kind === "message" && p.source.slot === source.slot)
     if (sent.text !== previous?.text) return `${label} was amended.`
     // Message offsets can move because notes were inserted or a breakpoint shortened,
@@ -86,7 +86,7 @@ const messageReason = (
       ? budgetReason(next)
       : `The path changed: another branch is shown, or ${label} was deleted.`
   }
-  if (entry.versionId !== source.version) return `${label} was edited, or another of its versions chosen.`
+  if (entry.versionId !== source.version) return `${label} was edited, or another of its swipes chosen.`
   return entry.inContext ? budgetReason(next) : `${label} was hidden.`
 }
 

@@ -20,7 +20,7 @@ export const binTitle = (item: BinItem) => {
     case "message":
       return number === null ? `Message in “${chat}”` : `Message ${number} in “${chat}”`
     case "version":
-      return number === null ? `Version of a message in “${chat}”` : `Version of message ${number} in “${chat}”`
+      return number === null ? `Swipe of a message in “${chat}”` : `Swipe of message ${number} in “${chat}”`
     case "branch": {
       // A fork deleted on its own (owner, 2026-10-27): named by its name, else by what only it had.
       if (typeof item.origin.forkId === "string") {
@@ -66,8 +66,8 @@ export const purgeTitle = (item: BinItem) => {
       // Numbered among the message's versions, from 1.
       const ordinal = typeof item.origin.ordinal === "number" ? item.origin.ordinal + 1 : null
       return ordinal === null
-        ? `Delete a version of ${message} for good?`
-        : `Delete version ${ordinal} of ${message} for good?`
+        ? `Delete a swipe of ${message} for good?`
+        : `Delete swipe ${ordinal} of ${message} for good?`
     }
     case "branch": {
       const name = typeof item.origin.forkName === "string" && item.origin.forkName !== "" ? item.origin.forkName : null

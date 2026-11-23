@@ -604,11 +604,11 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(message.getByRole("button", { name: "View image 1" })).toBeVisible()
       await showActions(message)
       await message.getByRole("button", { name: "Edit", exact: true }).click()
-      const images = message.getByRole("list", { name: "Images of this version" })
+      const images = message.getByRole("list", { name: "Images of this swipe" })
       await expect(images.getByRole("img")).toHaveCount(1)
       // The editor's own controls stand in for the message's images while it's open.
       await expect(message.getByRole("button", { name: "View image 1" })).toHaveCount(0)
-      await message.getByLabel("Choose images for this version").setInputFiles({
+      await message.getByLabel("Choose images for this swipe").setInputFiles({
         name: "revision.png",
         mimeType: "image/png",
         buffer: Buffer.concat([buffer, Buffer.from("revision")])
@@ -640,10 +640,10 @@ for (const colorScheme of ["light", "dark"] as const) {
       await remote.goto(page.url())
       const remoteMessage = remote.getByRole("article", { name: "Your message" })
       await expect(
-        remoteMessage.getByRole("list", { name: "Images of this version" }).getByRole("img", { name: "revision.png" })
+        remoteMessage.getByRole("list", { name: "Images of this swipe" }).getByRole("img", { name: "revision.png" })
       ).toBeVisible()
       await remoteMessage.getByRole("button", { name: "Save", exact: true }).click()
-      await expect(remoteMessage.getByRole("list", { name: "Images of this version" })).toHaveCount(0)
+      await expect(remoteMessage.getByRole("list", { name: "Images of this swipe" })).toHaveCount(0)
       await page.reload()
       await elsewhere.close()
       await expect(images).toHaveCount(0)
@@ -703,7 +703,7 @@ test("a generated version's editor adds pasted/dropped images to a new version a
   await transfer("paste", "pasted-edit.png")
   await expect(reply.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
   release()
-  const images = reply.getByRole("list", { name: "Images of this version" })
+  const images = reply.getByRole("list", { name: "Images of this swipe" })
   await expect(images.getByRole("img", { name: "pasted-edit.png" })).toBeVisible()
   await page.unroute("**/chat/image")
   await transfer("drop", "dropped-edit.png")
@@ -712,8 +712,8 @@ test("a generated version's editor adds pasted/dropped images to a new version a
   // The edit stays in the same speaker's reply slot, alongside the original version.
   const edited = reply
   await expect(edited.getByRole("button", { name: /^View image/ })).toHaveCount(2)
-  await expect(edited.getByRole("group", { name: "Versions" })).toContainText("2/2")
-  await edited.getByRole("button", { name: "Previous version" }).click()
+  await expect(edited.getByRole("group", { name: "Swipes" })).toContainText("2/2")
+  await edited.getByRole("button", { name: "Previous swipe" }).click()
   await expect(reply.getByRole("button", { name: /^View image/ })).toHaveCount(0)
   await expect(page.getByRole("list", { name: "Attached images" })).toHaveCount(0)
 })

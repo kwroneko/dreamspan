@@ -69,7 +69,7 @@ describe("the cache chip", () => {
   })
 
   it("takes the total from the estimate itself, and shows none rather than one below the uncached part", () => {
-    const changed = { reason: "Message 2 was edited, or another of its versions chosen.", tokens: 2_926 }
+    const changed = { reason: "Message 2 was edited, or another of its swipes chosen.", tokens: 2_926 }
     // The normal case: the estimate's own total, counted as its uncached part is.
     expect(uncachedTotal(2_926, warmth({ changed, requestTokens: 96_906 }))).toBe(96_906)
     expect(uncachedText(2_926, uncachedTotal(2_926, warmth({ changed, requestTokens: 2_926 })))).toBe(

@@ -81,7 +81,7 @@ export const awayExplanation = (row: AwayRow, name: (id: EntityId) => string) =>
       ? `A decision model judged that ${who} ${row.away ? "left" : "was back"} at the end of this message.`
       : row.by === "user"
         ? `You marked ${who} ${row.away ? "away" : "back"} here, in the Cast tab.`
-        : `${row.setBy === undefined || row.setBy === row.entityId ? `${who}'s own reply` : `${name(row.setBy)}'s reply`} marked ${who} ${row.away ? "away" : "back"}; a new version of that reply takes it back.`
+        : `${row.setBy === undefined || row.setBy === row.entityId ? `${who}'s own reply` : `${name(row.setBy)}'s reply`} marked ${who} ${row.away ? "away" : "back"}; a new swipe of that reply takes it back.`
   return `${said} ${since}`
 }
 

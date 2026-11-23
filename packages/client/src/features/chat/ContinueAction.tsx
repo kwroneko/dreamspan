@@ -78,7 +78,7 @@ export function ContinueView({ show, ...context }: MessageActionDescribeProps) {
     icon: "continue",
     hint:
       blocked ??
-      "Write on from the end of this message, as a new version that starts with its text (Alt+Enter; keeps the composer's text).",
+      "Write on from the end of this message, as a new swipe that starts with its text (Alt+Enter; keeps the composer's text).",
     ...(blocked === null ? {} : { disabled: blocked }),
     onSelect: () => invokeMessageAction("message.continue", context, "button")
   })

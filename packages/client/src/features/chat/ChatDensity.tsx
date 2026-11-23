@@ -25,13 +25,13 @@ export function ChatDensitySetting() {
           {
             value: "comfortable",
             label: "Comfortable",
-            description: "Roomy spacing, with version arrows always shown."
+            description: "Roomy spacing, with swipe arrows always shown."
           },
           {
             value: "compact",
             label: "Compact",
             description:
-              "Fits more of the story on screen. Version arrows show on hover, focus or a tap; the newest message always shows them."
+              "Fits more of the story on screen. Swipe arrows show on hover, focus or a tap; the newest message always shows them."
           }
         ]}
       />

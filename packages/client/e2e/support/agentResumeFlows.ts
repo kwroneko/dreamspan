@@ -128,14 +128,14 @@ export function agentResumeTests() {
 
         // The stopped version, shown again while its resume runs, can't be resumed twice.
         if (width >= 640) await showActions(reply)
-        await reply.getByRole("button", { name: "Previous version" }).click()
+        await reply.getByRole("button", { name: "Previous swipe" }).click()
         await expect(reply.getByText("stopped", { exact: true })).toBeVisible()
         await resume(reply)
         await expect(reply.getByText("This reply can't be carried on: it's already being resumed.")).toBeVisible()
         await shot("resume-refused")
         await expectLayout(page, info, `resume-refused-${width}-${theme}`, { scope: "article:last-of-type" })
         if (width >= 640) await showActions(reply)
-        await reply.getByRole("button", { name: /^Next version/ }).click()
+        await reply.getByRole("button", { name: /^Next swipe/ }).click()
         // Stop a resumed reply, then resume that version: neither changes its frozen prefix.
         await reply.getByRole("button", { name: "Stop", exact: true }).click()
         await expect(reply.getByText("stopped", { exact: true })).toBeVisible()

@@ -107,7 +107,7 @@ describe("pinned message actions", () => {
   })
 
   it("shows Edit, Continue, Branch from here and Delete by default, in the menu's order", () => {
-    expect(buttons(contextOf(entryOf("model", 3)))).toEqual(["Edit", "Continue", "Branch from here", "Delete version"])
+    expect(buttons(contextOf(entryOf("model", 3)))).toEqual(["Edit", "Continue", "Branch from here", "Delete swipe"])
     expect(buttons(contextOf(entryOf("human", 1)))).toEqual(["Edit", "Continue", "Branch from here", "Delete message"])
   })
 
@@ -125,22 +125,16 @@ describe("pinned message actions", () => {
     messageActionPins.choose("message.copy-text", true)
     messageActionPins.choose("message.edit", false)
     messageActionPins.choose("plugin.not-installed", true)
-    expect(buttons(reply)).toEqual(["Continue", "Branch from here", "Copy text", "Delete version"])
+    expect(buttons(reply)).toEqual(["Continue", "Branch from here", "Copy text", "Delete swipe"])
     // Delete all versions retains its pin and becomes disabled with only one version.
     messageActionPins.choose("message.delete-all", true)
-    expect(buttons(reply)).toEqual([
-      "Continue",
-      "Branch from here",
-      "Copy text",
-      "Delete version",
-      "Delete all versions"
-    ])
+    expect(buttons(reply)).toEqual(["Continue", "Branch from here", "Copy text", "Delete swipe", "Delete all swipes"])
     expect(buttons(contextOf(entryOf("model", 1)))).toEqual([
       "Continue",
       "Branch from here",
       "Copy text",
       "Delete message",
-      "Delete all versions"
+      "Delete all swipes"
     ])
     messageActionPins.choose("message.edit", true)
     expect(buttons(reply)[0]).toBe("Edit")
@@ -155,9 +149,9 @@ describe("pinned message actions", () => {
     const reply = contextOf(entryOf("model", 2))
     expect(buttons(reply)).not.toContain("Synthetic action")
     messageActionPins.choose("synthetic.pinnable", true)
-    expect(buttons(reply)).toEqual(["Edit", "Continue", "Branch from here", "Synthetic action", "Delete version"])
+    expect(buttons(reply)).toEqual(["Edit", "Continue", "Branch from here", "Synthetic action", "Delete swipe"])
     close()
-    expect(buttons(reply)).toEqual(["Edit", "Continue", "Branch from here", "Delete version"])
+    expect(buttons(reply)).toEqual(["Edit", "Continue", "Branch from here", "Delete swipe"])
   })
 
   it("gives every action its own icon, a short label and an explanation", () => {
@@ -182,12 +176,12 @@ describe("pinned message actions", () => {
       }
     }
     const reply = views(contextOf(entryOf("model", 12)))
-    expect(reply.get("message.add-guidance")).toMatchObject({ label: "New version with guidance…", icon: "guidance" })
-    expect(reply.get("message.delete-all")).toMatchObject({ label: "Delete all versions", icon: "trash-all" })
+    expect(reply.get("message.add-guidance")).toMatchObject({ label: "New swipe with guidance…", icon: "guidance" })
+    expect(reply.get("message.delete-all")).toMatchObject({ label: "Delete all swipes", icon: "trash-all" })
     expect(reply.get("message.delete-all")!.hint).toBe(
-      "Moves this message and all its versions to the bin, from which it can be restored later."
+      "Moves this message and all its swipes to the bin, from which it can be restored later."
     )
-    expect(reply.get("message.delete")).toMatchObject({ label: "Delete version", icon: "trash" })
+    expect(reply.get("message.delete")).toMatchObject({ label: "Delete swipe", icon: "trash" })
     // Every action the old menu and toolbar had is listed, the toolbar's included.
     expect([...reply.keys()]).toEqual([
       "message.edit",
