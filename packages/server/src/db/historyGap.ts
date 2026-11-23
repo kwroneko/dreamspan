@@ -10,7 +10,7 @@ import type { ContextSnapshot, SourcePins } from "../assembler/types.ts"
 import { shownIn, slotDeletedIn } from "./forkState.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 
-export interface HistoryGap {
+interface HistoryGap {
   /** The position of the last message the budget left out; null: the budget left none out. */
   readonly cutThrough: number | null
   /**
