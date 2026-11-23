@@ -9,6 +9,7 @@
 // older text is moved through the edits made since, and the latest text is asked for next.
 import { ChangeSet, type Extension, StateEffect, StateField } from "@codemirror/state"
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view"
+import { messageBlockLines } from "./messageBlockLines.ts"
 import { messageStyleRanges, STYLE_KINDS, styleCache, type StyleRanges } from "./messageStyles.ts"
 
 export interface StyleRequest {
@@ -147,7 +148,13 @@ export function messageStyling(html: boolean): Extension {
       }
     }
   )
-  return [field, plugin, messageTextTheme, EditorView.editorAttributes.of({ class: "rp-message-text" })]
+  return [
+    field,
+    plugin,
+    messageBlockLines,
+    messageTextTheme,
+    EditorView.editorAttributes.of({ class: "rp-message-text" })
+  ]
 }
 
 /**
