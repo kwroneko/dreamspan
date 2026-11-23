@@ -234,7 +234,11 @@ export const SourcePage = Schema.Struct({
   /** A lower bound: the archive stopped counting at its cap or deadline. */
   totalCapped: Schema.optionalKey(Schema.Boolean),
   /** The total is the source's estimate, not an exact count. */
-  totalEstimated: Schema.optionalKey(Schema.Boolean)
+  totalEstimated: Schema.optionalKey(Schema.Boolean),
+  /** How many more cards the source's defaults left out (no cover, under its token floor). */
+  hidden: Schema.optionalKey(Schema.Number),
+  /** `hidden` is a lower bound. */
+  hiddenCapped: Schema.optionalKey(Schema.Boolean)
 })
 export type SourcePage = typeof SourcePage.Type
 

@@ -63,6 +63,9 @@ interface AdapterPage {
   readonly totalCapped?: boolean
   readonly total?: number
   readonly totalEstimated?: boolean
+  /** How many more cards the source's defaults left out, and whether that's a lower bound. */
+  readonly hidden?: number
+  readonly hiddenCapped?: boolean
 }
 
 export interface SourceVersion {

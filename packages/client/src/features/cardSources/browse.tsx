@@ -115,6 +115,8 @@ interface Results {
   readonly total?: number | undefined
   readonly notice?: string | undefined
   readonly estimated?: boolean | undefined
+  readonly hidden?: number | undefined
+  readonly hiddenCapped?: boolean | undefined
   readonly status: Status
   readonly problem?: SourceProblem | undefined
 }
@@ -159,6 +161,8 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
                 total: out.value.total,
                 capped: out.value.totalCapped,
                 estimated: out.value.totalEstimated,
+                hidden: out.value.hidden,
+                hiddenCapped: out.value.hiddenCapped,
                 notice: out.value.notice,
                 status: "ready"
               }
@@ -362,6 +366,22 @@ export function SourceSortControl({ browse, compact = false }: { browse: SourceB
     </div>
   )
 }
+
+/** "N results · page X of Y": the pages loaded so far, of the archive's 48-card pages. */
+export function SourceResultLine({ browse }: { browse: SourceBrowse }) {
+  const { results } = browse
+  const total = totalLabel(results)
+  if (!results || total === null || results.total === 0) return null
+  const loaded = Math.max(1, Math.ceil(results.items.length / SOURCE_PAGE))
+  const pages = results.total === undefined ? null : Math.max(1, Math.ceil(results.total / SOURCE_PAGE))
+  return (
+    <p data-source-result-line className="min-h-5 text-sm leading-5 text-muted">
+      {total} {total === "1" ? "result" : "results"}
+      {pages !== null && pages > 1 && ` · page ${numberFormat.format(loaded)} of ${numberFormat.format(pages)}${results.capped ? "+" : ""}`}
+    </p>
+  )
+}
+const SOURCE_PAGE = 48
 
 /**
  * Filters: the last control of the sort row, only while a source is shown and only on a narrow

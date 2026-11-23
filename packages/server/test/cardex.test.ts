@@ -18,7 +18,8 @@ import {
   downloadModeOf,
   detailMetadata,
   searchParams,
-  summaryOf
+  summaryOf,
+  unmappedParameters
 } from "../src/sources/cardex.ts"
 import { makeSourceHttp } from "../src/sources/guard.ts"
 import { makeLimiter } from "../src/sources/limiter.ts"
@@ -420,6 +421,21 @@ describe("v1 as card sources", () => {
     assert.deepStrictEqual(caps.tags, { include: false, exclude: false, suggest: true })
     assert.throws(() => capabilitiesOf({ sorts: [] }))
   })
+
+  it.effect("every parameter the archive describes has a control or is left out on purpose", () =>
+    Effect.gen(function* () {
+      const raw = yield* Effect.promise(async () => (await fetch(`${archive.origin}/api/v1/capabilities`)).json())
+      // A parameter added here means the bar has no control for it: map it in cardex.ts's PLACEMENT.
+      assert.deepStrictEqual(unmappedParameters(raw), [])
+      // One the archive adds later is left out of the bar, never a button of its own.
+      const later = { ...raw, filters: [...raw.filters, { name: "mood", type: "string", label: "Mood" }] }
+      assert.deepStrictEqual(unmappedParameters(later), ["mood"])
+      assert.notInclude(
+        capabilitiesOf(later).filters.map((f) => f.id),
+        "mood"
+      )
+    })
+  )
 
   it("search parameters: only what was chosen, v1's names, the sort by direction", () => {
     const query = {

@@ -269,6 +269,8 @@ export interface CardSourcesOptions {
 }
 
 const sha = (text: string | Uint8Array) => createHash("sha256").update(text).digest("hex")
+/** This server run, which the cached capabilities are keyed by. */
+const CAPS_RUN = `run-${Date.now().toString(36)}`
 
 /** A card's link back to its page on the source (§4.5): the page it named, else `<source>:<remoteId>`. */
 const linkOf = (sourceId: string, remoteId: string, summary: { readonly url?: string | undefined }) =>
@@ -924,7 +926,9 @@ const make = (options: CardSourcesOptions = {}) =>
         }),
       capabilities: (user, sourceId) =>
         Effect.flatMap(known(sourceId), (adapter) =>
-          cached(user, sourceId, "caps", "", (http) => adapter.capabilities(http))
+          // Kept per server run: capabilities are the adapter's reading of the source's answer,
+          // so one cached by an earlier build would lay out the bar the way that build did.
+          cached(user, sourceId, "caps", CAPS_RUN, (http) => adapter.capabilities(http))
         ),
       search: (user, sourceId, query, page) =>
         Effect.gen(function* () {
