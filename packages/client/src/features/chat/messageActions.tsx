@@ -25,6 +25,7 @@ import { showToast } from "../../ui/Toast.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Menu, MenuItemWithCheckbox, MenuSeparator } from "../../ui/Menu.tsx"
+import { linkMenuProps } from "../../ui/linkMenuState.ts"
 import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
@@ -59,7 +60,11 @@ export interface MessageActionView {
   readonly dimmed?: boolean
   /** What choosing it does. */
   readonly onSelect?: () => unknown
-  /** Or where it goes: a link element (a router `Link`, without children) the row and button render as. */
+  /**
+   * Or where it goes: a link element (a router `Link`, without children) the row and button
+   * render as. Its href gives both the link's open menu (Open, Open beside, Open in a new browser
+   * tab; ui/LinkMenu.tsx) on a right-click.
+   */
   readonly link?: ReactElement
 }
 
@@ -201,6 +206,7 @@ function PinnedButton({ view }: { view: MessageActionView }) {
     return (
       <Tooltip label={view.hint}>
         {cloneElement(view.link as ReactElement<Record<string, unknown>>, {
+          ...linkMenuProps,
           "aria-label": view.label,
           className: `${iconButtonClass(view.tone === "danger" ? "danger" : "muted")} ${faded}`,
           children: <Icon name={view.icon} />

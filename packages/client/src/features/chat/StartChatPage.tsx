@@ -1,5 +1,5 @@
 import type { Draft } from "@dreamspan/shared/drafts.ts"
-import { useSidePanelPlace } from "../workbench/tab.tsx"
+import { useSidePanelPlace, useWorkbenchTab } from "../workbench/tab.tsx"
 import { greetingPick } from "@dreamspan/shared/greetings.ts"
 import { useUserDraft, UserDraftNotices, UserDraftStatus, UserDraftUndo } from "../editor/userDraft.tsx"
 import { Input } from "../../ui/Field.tsx"
@@ -31,7 +31,7 @@ import type { CardForChat, ChatGroup } from "@dreamspan/shared/chatSetupApi.ts"
 import { remoteOf } from "@dreamspan/shared/cardSources.ts"
 import { showAdopted } from "../cardSources/remote.ts"
 import type { FrozenValues } from "@dreamspan/shared/macros/expand.ts"
-import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
+import { useLocation, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { Effect, Option } from "effect"
 import {
   type CSSProperties,
@@ -72,7 +72,8 @@ import { chatColumns } from "./presentation.tsx"
 import { seedChat } from "./session.ts"
 import { seedSplitChats } from "./splitChats.ts"
 import { preloadChatPage } from "./chatPageLoader.ts"
-import { DraftRequestDialog, type PreviewInput, useDraftPreview } from "./draftRequest.tsx"
+import { type PreviewInput, useDraftPreview } from "./draftRequest.tsx"
+import { FIRST_REQUEST_PATH, firstRequests } from "./firstRequest.ts"
 
 /**
  * One greeting of the chat not made yet, as the saved chat shows a message: the portrait, the
@@ -185,7 +186,6 @@ function Pending({
     panel?: string
     character?: string
     guidance?: string
-    request?: string
   }
   const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
   const view = pending.view(state)
@@ -348,17 +348,21 @@ function Pending({
               }
             : { first: { _tag: "Generate" as const, speakerEntityId: speakerId, direction: guidance ? text : "" } })
         }
-  const requestOpen = navigationSearch.request === "first"
-  const setRequestOpen = (open: boolean) =>
-    void navigate({
-      to: ".",
-      search: (prev: Record<string, unknown>) => ({ ...prev, request: open ? "first" : undefined }),
-      resetScroll: false
-    })
+  // The request opens as an inspector tab (owner, 2026-11-23), reading what this view publishes.
+  // This view's tab is kept open first: its choices (greetings drawn, persona, who replies) live
+  // here, so the request must not take its place.
+  const workbenchTab = useWorkbenchTab()
+  const here = useLocation({ select: (location) => location.href })
+  const requestSearch = { pending: here, ...(workbenchTab ? { pendingTab: workbenchTab.tabId } : {}) }
+  const requestHref = `${FIRST_REQUEST_PATH}?${new URLSearchParams(requestSearch).toString()}`
   const draft = useDraftPreview(
     previewInput,
     JSON.stringify([view.cast?.model ?? null, view.cast?.preset ?? null]),
-    () => setRequestOpen(true)
+    () => {
+      if (workbenchTab) workbenchTab.store.pin(workbenchTab.tabId)
+      void navigate({ to: FIRST_REQUEST_PATH, search: requestSearch })
+    },
+    requestHref
   )
   // The model the first request goes to, for what attached images say of it: the last one
   // read, so the note doesn't flicker while the request is built again.
@@ -366,6 +370,12 @@ function Pending({
   const [lastModel, setLastModel] = useState(readModel)
   if (readModel !== undefined && readModel !== lastModel) setLastModel(readModel)
   const hasMessage = text.trim() !== "" || (attachments?.count ?? 0) > 0
+  const [publishToken] = useState(() => Symbol("first request"))
+  const pendingPath = useLocation({ select: (location) => location.pathname })
+  useEffect(() => {
+    firstRequests.publish(publishToken, pendingPath, workbenchTab?.tabId ?? null, draft)
+  })
+  useEffect(() => () => firstRequests.withdraw(publishToken), [publishToken])
 
   const start = async (first: "send" | "generate") => {
     if (!viewPrefs.ready || action.pending || attachments?.busy || (first === "send" && !hasMessage)) return
@@ -638,7 +648,6 @@ function Pending({
             <StripRow scroll={phone}>
               <PendingComposerControls placement="strip" context={controls} />
             </StripRow>
-            <DraftRequestDialog open={requestOpen} onClose={() => setRequestOpen(false)} draft={draft} />
           </div>
         </div>
         {panel !== null && place.show && (

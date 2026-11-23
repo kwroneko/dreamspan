@@ -10,7 +10,9 @@ import {
   type ReactNode,
   createContext,
   useContext,
+  useEffect,
   useId,
+  useRef,
   useState
 } from "react"
 import { Button, buttonClass, LinkButton } from "./Button.tsx"
@@ -18,6 +20,7 @@ import { openOnPlainClick } from "./links.ts"
 import { HighlightExplanation, useItemExplanation } from "./Explanation.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
 import { Tooltip } from "./Tooltip.tsx"
+import { linkMenu, linkMenuProps } from "./linkMenuState.ts"
 
 export function Menu({
   trigger,
@@ -56,14 +59,42 @@ export function Menu({
   marker?: string | undefined
 }) {
   const [popup, setPopup] = useState<HTMLElement | null>(null)
+  const [own, setOwn] = useState(defaultOpen)
+  const shown = open ?? own
+  const change = (next: boolean, reason: string) => {
+    if (open === undefined) setOwn(next)
+    onOpenChange?.(next, reason)
+  }
+  // A link item's own open menu (LinkMenu.tsx) keeps this menu open under it, and closes it with
+  // itself: what it opened is chosen.
+  const holding = useRef(false)
+  const closedByLink = useRef(false)
+  useEffect(
+    () =>
+      linkMenu.subscribe(() => {
+        const at = linkMenu.get()
+        if (at !== null && popup?.contains(at.link) === true) holding.current = true
+        else if (holding.current) {
+          holding.current = false
+          closedByLink.current = true
+          if (open === undefined) setOwn(false)
+          onOpenChange?.(false, "link-menu")
+        }
+      }),
+    [popup, open, onOpenChange]
+  )
   return (
     <BaseMenu.Root
       modal={false}
-      defaultOpen={defaultOpen}
-      {...(open === undefined ? {} : { open })}
-      {...(onOpenChange
-        ? { onOpenChange: (next: boolean, details: { reason: string }) => onOpenChange(next, details.reason) }
-        : {})}
+      open={shown}
+      onOpenChange={(next: boolean, details: { reason: string; event?: Event }) => {
+        if (!next && holding.current) return
+        // A link item chosen opens something, maybe in another frame: focus goes with it.
+        const target = details.event?.target
+        closedByLink.current =
+          !next && target instanceof Element && target.closest("a[href]") !== null && popup?.contains(target) === true
+        change(next, details.reason)
+      }}
     >
       {hint ? (
         <Tooltip label={hint}>
@@ -87,7 +118,8 @@ export function Menu({
             ref={setPopup}
             aria-label={label}
             data-menu={marker}
-            {...(finalFocus ? { finalFocus } : {})}
+            // Closed by its link's open menu: focus goes with what was opened, not back here.
+            finalFocus={() => (closedByLink.current ? false : finalFocus ? finalFocus() : true)}
             className="max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none [&:not(:has(.menu-mark))_.menu-slot]:hidden transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
           >
             <MenuActionsContext value>{children}</MenuActionsContext>
@@ -264,12 +296,15 @@ export function PointMenu({
   at,
   onClose,
   label,
-  children
+  children,
+  finalFocus
 }: {
   at: { readonly x: number; readonly y: number } | null
   onClose: () => void
   label: string
   children: ReactNode
+  /** Where focus goes when it closes; false leaves it (with what an item opened). */
+  finalFocus?: (() => boolean) | undefined
 }) {
   const [popup, setPopup] = useState<HTMLElement | null>(null)
   const x = at?.x ?? 0
@@ -291,6 +326,7 @@ export function PointMenu({
           <BaseMenu.Popup
             ref={setPopup}
             aria-label={label}
+            {...(finalFocus ? { finalFocus } : {})}
             className="max-h-[var(--available-height)] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none [&:not(:has(.menu-mark))_.menu-slot]:hidden"
           >
             <MenuActionsContext value>{children}</MenuActionsContext>
@@ -377,7 +413,10 @@ export function MenuItem({
   )
 }
 
-/** An item that navigates: `render` is the link (a router `Link`, say). */
+/**
+ * An item that navigates: `render` is the link (a router `Link`, say). A right-click on it shows
+ * the link's open menu (LinkMenu.tsx).
+ */
 export function MenuLinkItem({
   icon,
   description,
@@ -391,7 +430,13 @@ export function MenuLinkItem({
 }) {
   const explanation = useItemExplanation(description)
   return (
-    <BaseMenu.LinkItem className={itemClass("default")} render={render} closeOnClick {...explanation.describedBy}>
+    <BaseMenu.LinkItem
+      className={itemClass("default")}
+      render={render}
+      closeOnClick
+      {...explanation.describedBy}
+      {...linkMenuProps}
+    >
       {icon ? <Icon name={icon} className="menu-mark text-muted" /> : <span className="menu-slot w-4 shrink-0" />}
       <ItemText parts={explanation.parts}>{children}</ItemText>
     </BaseMenu.LinkItem>
@@ -502,6 +547,7 @@ export function MenuItemWithCheckbox({
           <BaseMenu.LinkItem
             render={link}
             closeOnClick
+            {...linkMenuProps}
             label={label}
             aria-describedby={`${id}-description`}
             className={itemClassName}

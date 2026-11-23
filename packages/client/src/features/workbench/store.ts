@@ -10,8 +10,9 @@
 import type { RouterHistory } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import type { DropZone } from "./dropOpen.ts"
-import { itemKey, persistHref, shellKeys } from "./kinds.ts"
+import { affinityOf, itemKey, persistHref, shellKeys } from "./kinds.ts"
 import {
+  affinityFrame,
   allTabs,
   closeFrame,
   closeTab,
@@ -121,11 +122,20 @@ export class WorkbenchStore {
   readonly userId: string
   private readonly browser: RouterHistory
   private readonly save: (json: string) => void
+  /** Frames side by side (not a phone): only then do kinds open where their kind shows. */
+  private readonly wide: () => boolean
 
-  constructor(userId: string, browser: RouterHistory, saved: unknown, save: (json: string) => void) {
+  constructor(
+    userId: string,
+    browser: RouterHistory,
+    saved: unknown,
+    save: (json: string) => void,
+    wide: () => boolean = () => typeof matchMedia === "function" && matchMedia("(min-width: 1024px)").matches
+  ) {
     this.userId = userId
     this.browser = browser
     this.save = save
+    this.wide = wide
     // The browser tab's layout params stay on the browser's URL (tabLayoutParams.ts).
     const href = withoutLayoutParams(browser.location.href)
     const restored = restoreLayout(saved)
@@ -238,7 +248,9 @@ export class WorkbenchStore {
     // A preview tab goes there itself, as navigating did before tabs (fromTab), unless another
     // tab of its frame has that item open.
     const twin = frame.tabs.some((t) => itemKey(t.href) === itemKey(href))
-    if (tab.preview && !twin) return false
+    // An item whose kind is showing in another frame opens there; this tab stays as it is.
+    const affine = this.wide() ? affinityFrame(this.layout, href, itemKey, affinityOf) : undefined
+    if (tab.preview && !twin && (!affine || affine.id === frame.id)) return false
     // The view navigated to that URL whole: its sidebar keys are what the sidebar shows next.
     this.shellChange = shellDiff(null, href)
     this.open(href, { state: clean(state), frame: frame.id })
@@ -348,11 +360,22 @@ export class WorkbenchStore {
 
   // --- What the user does.
 
-  /** Opens an item (model.ts `openTab`), at its URL's history state. */
-  open(link: string, options: OpenOptions & { state?: HistoryState; mirror?: Action } = {}) {
+  /**
+   * Opens an item (model.ts `openTab`), at its URL's history state. A plain open: an item whose
+   * kind opens where it's shown goes there (`TabKind.opensWhereShown`), where frames sit side by
+   * side, unless `affinity` is false (Open beside, a drop, a tab reopened in its frame).
+   */
+  open(
+    link: string,
+    options: Omit<OpenOptions, "affinity"> & { state?: HistoryState; mirror?: Action; affinity?: boolean } = {}
+  ) {
     const href = withoutLayoutParams(link)
-    const { state, mirror = "PUSH", ...rest } = options
-    const { layout: next, tabId } = openTabAt(this.layout, href, itemKey, { ...rest, id: rest.id ?? newId("t") })
+    const { state, mirror = "PUSH", affinity = true, ...rest } = options
+    const { layout: next, tabId } = openTabAt(this.layout, href, itemKey, {
+      ...rest,
+      ...(affinity && this.wide() ? { affinity: affinityOf } : {}),
+      id: rest.id ?? newId("t")
+    })
     // A tab already mounted (the item's own, or the preview taking it) navigates in place.
     if (findTab(this.layout, tabId)) this.apply(tabId, href, state ?? {}, "PUSH")
     else {
@@ -415,7 +438,7 @@ export class WorkbenchStore {
     if (!last) return
     this.closed = rest
     const frame = this.frames().some((f) => f.id === last.frameId) ? last.frameId : undefined
-    this.open(last.href, { preview: false, ...(frame ? { frame } : {}) })
+    this.open(last.href, { preview: false, affinity: false, ...(frame ? { frame } : {}) })
   }
   stick(tabId: string, sticky: boolean) {
     this.set(stickTab(this.layout, tabId, sticky))
@@ -453,7 +476,7 @@ export class WorkbenchStore {
    * Opens an item from inside a frame (a link in one of its tabs): in that frame, never another,
    * so a frame showing the same item elsewhere keeps its place. Unknown frames open as `open`.
    */
-  openIn(frameId: string | undefined, href: string, options: OpenOptions & { whole?: boolean } = {}) {
+  openIn(frameId: string | undefined, href: string, options: Omit<OpenOptions, "affinity"> & { whole?: boolean } = {}) {
     const { whole = false, ...rest } = options
     const frame = frames(this.layout.root).find((f) => f.id === frameId)?.id
     // `whole`: a link followed as a whole URL, its sidebar place included.
@@ -483,7 +506,7 @@ export class WorkbenchStore {
     // tile scopes the sidebar to the character's chats).
     this.shellChange = shellCarried(href)
     try {
-      return this.open(href, { frame, preview: false })
+      return this.open(href, { frame, preview: false, affinity: false })
     } finally {
       this.shellChange = null
     }
@@ -512,7 +535,7 @@ export class WorkbenchStore {
       .find((f) => f.id === frame)
       ?.tabs.find((t) => t.preview)
     if (preview) this.layout = pinTab(this.layout, preview.id)
-    return this.open(href, { frame, preview: false })
+    return this.open(href, { frame, preview: false, affinity: false })
   }
   /**
    * Moves a tab into a new frame beside a frame (its own by default): `before` puts it on the
@@ -534,7 +557,7 @@ export class WorkbenchStore {
       // Put beside what the frame shows, never in place of its preview tab.
       const preview = frame.tabs.find((t) => t.preview)
       if (preview) this.layout = pinTab(this.layout, preview.id)
-      const tabId = this.open(href, { frame: frameId, preview: false })
+      const tabId = this.open(href, { frame: frameId, preview: false, affinity: false })
       if (index !== undefined) {
         // The drop names a boundary before opening added the tab. Follow the tab on its
         // right, whose index may have shifted, so moving uses the current strip's boundary.
@@ -550,7 +573,7 @@ export class WorkbenchStore {
       before: zone === "left" || zone === "top",
       empty: true
     })
-    this.open(href, { frame: id, preview: false })
+    this.open(href, { frame: id, preview: false, affinity: false })
   }
   resize(splitId: string, sizes: ReadonlyArray<number>) {
     this.set(resizeSplit(this.layout, splitId, sizes), "REPLACE", 400)

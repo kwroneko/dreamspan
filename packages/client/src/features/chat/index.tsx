@@ -24,6 +24,7 @@ import { registerHistoryCommands } from "./historyContributions.ts"
 import { registerPanels } from "./registerPanels.tsx"
 import { createElement, lazy, Suspense, useState } from "react"
 import { loadChatPage, loadedChatPage } from "./chatPageLoader.ts"
+import { FIRST_REQUEST_PATH, firstRequestKey } from "./firstRequest.ts"
 import { routes } from "../../routes.tsx"
 import { Loading, reloadPage } from "../../ui/Spinner.tsx"
 import { ChatDefaultsPage } from "./ChatDefaults.tsx"
@@ -53,6 +54,18 @@ function LazyChatPage() {
   // Loaded ahead (a pending chat does, chatPageLoader.ts): no fallback to show.
   const [Page] = useState(() => loadedChatPage() ?? ChatPage)
   return <Suspense fallback={<ChatSkeleton onRetry={reloadPage} />}>{createElement(Page)}</Suspense>
+}
+
+const FirstRequestPage = lazy(() =>
+  import("./FirstRequestPage.tsx").then((module) => ({ default: module.FirstRequestPage }))
+)
+
+function LazyFirstRequestPage() {
+  return (
+    <Suspense fallback={<Loading label="Loading the request…" onRetry={reloadPage} />}>
+      <FirstRequestPage />
+    </Suspense>
+  )
 }
 
 function LazyContextPage() {
@@ -134,12 +147,18 @@ export const register = () => {
     icon: "chat",
     document: true
   })
+  // The request inspector: a reply's, or the first of a chat not sent yet (`/request/first`, one
+  // per pending chat's tab). It opens where an inspector is showing (owner, 2026-11-23), so the
+  // chat keeps its frame while the requests take turns beside it.
   tabKinds.register({
     id: "chat.context",
     order: 100,
-    match: (url) => /^\/chats\/([^/]+\/context\/[^/]+)$/.exec(url.pathname)?.[1] ?? null,
+    match: (url) =>
+      /^\/chats\/([^/]+\/context\/[^/]+)$/.exec(url.pathname)?.[1] ??
+      (url.pathname === FIRST_REQUEST_PATH ? firstRequestKey(url) : null),
     title: () => "Request",
-    icon: "search"
+    icon: "search",
+    opensWhereShown: true
   })
   tabKinds.register({
     id: "chat.start",
@@ -186,6 +205,14 @@ export const register = () => {
     parent: "app",
     path: "/chats/$chatId/context/$versionId",
     component: LazyContextPage,
+    retainSearch: sidebarSearch
+  })
+  // The first request of a chat not sent yet (DESIGN §2.1), as its pending chat's view builds it.
+  routes.register({
+    id: "chat.first-request",
+    parent: "app",
+    path: FIRST_REQUEST_PATH,
+    component: LazyFirstRequestPage,
     retainSearch: sidebarSearch
   })
   // What applies to all of the user's chats.

@@ -1,6 +1,7 @@
 import { createMemoryHistory } from "@tanstack/react-router"
 import { afterEach, expect, it, vi } from "vitest"
-import { allTabs, focusedTab, saveLayout } from "../src/features/workbench/model.ts"
+import { tabKinds } from "../src/features/workbench/kinds.ts"
+import { allTabs, findTab, focusedTab, saveLayout } from "../src/features/workbench/model.ts"
 import { WorkbenchStore } from "../src/features/workbench/store.ts"
 
 afterEach(() => {
@@ -145,5 +146,92 @@ it("an editor's panel follows its source view when the same chat is open twice",
   removeSecond()
   expect(store.panelOwner(true)).toBe(first)
   removeFirst()
+  vi.runAllTimers()
+})
+
+// Kind affinity in the store's open path (owner, 2026-11-23): a link followed in the chat's tab
+// opens the request inspector where one is showing, and the chat stays; phones are unchanged.
+const inspectorKind = () =>
+  tabKinds.register({
+    id: "test.request",
+    order: 0,
+    match: (url) => /^\/chats\/([^/]+\/context\/[^/]+)$/.exec(url.pathname)?.[1] ?? null,
+    opensWhereShown: true
+  })
+
+const chatBesideInspector = (wide: boolean) => {
+  vi.stubGlobal("window", new EventTarget())
+  const store = new WorkbenchStore(
+    "user",
+    createMemoryHistory({ initialEntries: ["/chats/a"] }),
+    null,
+    () => {},
+    () => wide
+  )
+  const chat = focusedTab(store.layout)!.id
+  const chatFrame = store.frames()[0]!.id
+  store.openBeside("/chats/a/context/1")
+  const inspectorFrame = store.frames().find((frame) => frame.id !== chatFrame)!.id
+  store.focusTab(chat)
+  return { store, chat, chatFrame, inspectorFrame }
+}
+
+it("a link in a preview chat tab opens the request beside a kept inspector, the chat staying", () => {
+  vi.useFakeTimers()
+  const dispose = inspectorKind()
+  try {
+    const { store, chat, chatFrame, inspectorFrame } = chatBesideInspector(true)
+    expect(findTab(store.layout, chat)?.preview).toBe(true)
+    expect(store.leaves(chat, "/chats/a/context/2", {}, "PUSH")).toBe(true)
+    const [left, right] = store.frames()
+    expect(left!.id).toBe(chatFrame)
+    expect(left!.tabs.map((tab) => tab.href)).toEqual(["/chats/a"])
+    expect(right!.tabs.map((tab) => [tab.href, tab.preview])).toEqual([
+      ["/chats/a/context/1", false],
+      ["/chats/a/context/2", true]
+    ])
+    expect(store.layout.focused).toBe(inspectorFrame)
+    // Inspecting another replaces the italic one.
+    store.focusTab(chat)
+    expect(store.leaves(chat, "/chats/a/context/3", {}, "PUSH")).toBe(true)
+    expect(store.frames()[1]!.tabs.map((tab) => tab.href)).toEqual(["/chats/a/context/1", "/chats/a/context/3"])
+    // Open beside goes right of the focused frame, kept (in the preview's place, as any open).
+    store.focusTab(chat)
+    store.openBeside("/chats/a/context/4")
+    expect(store.frames()[1]!.tabs.map((tab) => [tab.href, tab.preview])).toEqual([
+      ["/chats/a/context/1", false],
+      ["/chats/a/context/4", false]
+    ])
+    // From the inspector's own frame, Open beside adds a frame rather than following its kind.
+    store.openBeside("/chats/a/context/5")
+    expect(store.frames().map((frame) => frame.tabs.map((tab) => tab.href))).toEqual([
+      ["/chats/a"],
+      ["/chats/a/context/1", "/chats/a/context/4"],
+      ["/chats/a/context/5"]
+    ])
+  } finally {
+    dispose()
+  }
+  vi.runAllTimers()
+})
+
+it("phones open the request in the chat's own frame, as before", () => {
+  vi.useFakeTimers()
+  const dispose = inspectorKind()
+  try {
+    const { store, chat, chatFrame } = chatBesideInspector(false)
+    // The preview chat tab navigates in place, as before tabs.
+    expect(store.leaves(chat, "/chats/a/context/2", {}, "PUSH")).toBe(false)
+    store.pin(chat)
+    expect(store.leaves(chat, "/chats/a/context/2", {}, "PUSH")).toBe(true)
+    expect(
+      store
+        .frames()
+        .find((frame) => frame.id === chatFrame)!
+        .tabs.map((tab) => tab.href)
+    ).toEqual(["/chats/a", "/chats/a/context/2"])
+  } finally {
+    dispose()
+  }
   vi.runAllTimers()
 })

@@ -21,6 +21,12 @@ export interface TabKind {
   readonly document?: boolean
   /** The URL as saved in the layout, or null to leave the tab out of it. By default, as is. */
   readonly persist?: (url: URL) => string | null
+  /**
+   * Opens where a tab of its kind is showing (owner, 2026-11-23: the request inspector): a plain
+   * open goes to the frame focused most recently whose shown tab is of this kind, not the
+   * opener's, with the usual preview rules there. Open beside and new browser tabs don't.
+   */
+  readonly opensWhereShown?: boolean
 }
 
 export const tabKinds = makeRegistry<TabKind>()
@@ -43,6 +49,12 @@ export const itemKey = (href: string) => {
 }
 
 export const tabKind = (href: string) => kindOf(parse(href))?.kind
+
+/** The kind an item's tab opens with, for `opensWhereShown` kinds (model.ts `affinity`); else null. */
+export const affinityOf = (href: string) => {
+  const kind = tabKind(href)
+  return kind?.opensWhereShown ? kind.id : null
+}
 
 export const defaultTitle = (href: string) => {
   const url = parse(href)

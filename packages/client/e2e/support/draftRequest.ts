@@ -1,6 +1,6 @@
 // A chat not sent yet shows its context size and its first request (DESIGN §2.1): the strip's
-// Context chip, its popover, and View request's dialog (`request=first` in the URL), built as
-// the box changes. The model's provider gets nothing until the send. Synthetic data only.
+// Context chip, its popover, and View request's inspector tab (`/request/first`), built as the
+// box changes. The model's provider gets nothing until the send. Synthetic data only.
 import type { GenerationDefaults } from "@dreamspan/shared/generation.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -78,26 +78,33 @@ export function draftRequestTests() {
         const popover = page.getByRole("dialog", { name: "Context" })
         await expect(popover).toContainText("what your first send would send")
         await expect(popover).toContainText("nothing is sent until you send")
-        await popover.getByRole("button", { name: "View request" }).click()
-        await expect(page).toHaveURL(/request=first/)
-        const dialog = page.getByRole("dialog", { name: "Your first request" })
-        await expect(dialog).toContainText("Nothing has been sent.")
-        await expect(dialog).toContainText(
+        // A request inspector tab, as every other inspector (owner, 2026-11-23): switched to, with
+        // the new chat kept in its own tab, and Back returns to it.
+        await popover.getByRole("link", { name: "View request" }).click()
+        await expect(page).toHaveURL(/\/request\/first\?/)
+        const heading = page.getByRole("heading", { name: "Your first request" })
+        await expect(heading).toBeVisible()
+        await expect(page.getByRole("dialog")).toHaveCount(0)
+        const shown = page.locator("[data-workbench-tab]")
+        await expect(shown).toHaveCount(1)
+        await expect(shown).toContainText("Nothing has been sent.")
+        await expect(shown).toContainText(
           "Random choices, the current time and automatic decisions can change it when you send."
         )
-        await expect(dialog.getByRole("list")).toContainText(content)
-        await expect(dialog.getByRole("list")).toContainText("Mira keeps the ledger at the river crossing.")
+        const messages = page.getByRole("region", { name: "Messages", exact: true })
+        await expect(messages).toContainText(content)
+        await expect(messages).toContainText("Mira keeps the ledger at the river crossing.")
         await expectLayout(page, info, `draft-request-${width}-${theme}`)
         await page.screenshot({ path: info.outputPath(`draft-request-${width}-${theme}.png`) })
 
-        // The URL is the dialog's state: back closes it, forward opens it again.
+        // Back returns to the new chat as it was; forward shows the request again.
         await page.goBack()
-        await expect(dialog).toBeHidden()
+        await expect(heading).toBeHidden()
+        await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue(content)
         await page.goForward()
-        await expect(page.getByRole("dialog", { name: "Your first request" })).toBeVisible()
-        await page.keyboard.press("Escape")
-        await expect(page.getByRole("dialog", { name: "Your first request" })).toBeHidden()
-        expect(new URL(page.url()).searchParams.get("request")).toBeNull()
+        await expect(page.getByRole("region", { name: "Messages", exact: true })).toContainText(content)
+        await page.getByRole("link", { name: "← Back to the new chat" }).click()
+        await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue(content)
 
         // None of it reached the model's provider.
         // Picking a model changes what Send would use without changing the composer text.
@@ -107,8 +114,9 @@ export function draftRequestTests() {
           .click()
         await expect(modelChip(page)).toContainText("other-synthetic")
         await chip.click()
-        await page.getByRole("button", { name: "View request", exact: true }).click()
-        await expect(page.getByRole("dialog", { name: "Your first request" })).toContainText("other-synthetic")
+        await page.getByRole("link", { name: "View request", exact: true }).click()
+        await expect(page.getByRole("heading", { name: "Your first request" })).toBeVisible()
+        await expect(page.locator("[data-workbench-tab]")).toContainText("other-synthetic")
         expect(provider.keys.length).toBe(before)
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
       })
