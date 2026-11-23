@@ -6,9 +6,9 @@
 // next one; that reply's swipes use the box as it is. ✕ gives the box back to new turns. The box's
 // text is always the composer draft's (one box, one draft: owner 2026-11-21), so a reload keeps it.
 import type { EntityId, ForkId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
-import { useSyncExternalStore } from "react"
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Icon } from "../../ui/Icon.tsx"
-import { IconButton } from "../../ui/Tooltip.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { focusComposer } from "./composerFocus.ts"
 import { nameOf, useCast } from "./cast.ts"
 import { composerControls, type ComposerControlContext } from "./composerControls.tsx"
@@ -146,16 +146,52 @@ const editGuidance = (session: ChatSession, entry: PathEntry) => {
 export function MessageDirection({ entry, session }: { entry: PathEntry; session: ChatSession }) {
   const { version } = entry
   if (version.writer !== "model" || !version.direction) return null
+  return <GuidanceLine text={version.direction} onEdit={() => editGuidance(session, entry)} />
+}
+
+/**
+ * Long guidance folds to three lines, with Show more/Show less only when it doesn't fit; the
+ * edit button stays beside it either way. Measured again when its width changes; open or not
+ * lasts while the message is shown.
+ */
+function GuidanceLine({ text, onEdit }: { text: string; onEdit: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [long, setLong] = useState(false)
+  const body = useRef<HTMLParagraphElement>(null)
+  useLayoutEffect(() => {
+    const element = body.current
+    if (!element || open) return
+    const measure = () => setLong(element.scrollHeight > element.clientHeight + 1)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [text, open])
   return (
     <div data-testid="message-direction" className="flex items-start gap-1 text-xs text-muted">
-      <p className="min-w-0 flex-1 pt-2 wrap-break-word">
-        <span className="font-medium">Guidance:</span> {version.direction}
-      </p>
+      <div className="flex min-w-0 flex-1 flex-col items-start pt-2">
+        <p ref={body} className={`w-full wrap-break-word ${open ? "" : "line-clamp-3"}`}>
+          <span className="font-medium">Guidance:</span> {text}
+        </p>
+        {(long || open) && (
+          <Tooltip label={open ? "Fold this guidance back to three lines." : "Show all of this guidance."}>
+            <button
+              type="button"
+              aria-expanded={open}
+              onClick={() => setOpen(!open)}
+              className="mt-1 rounded text-xs text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              {open ? "Show less" : "Show more"}
+              <span className="sr-only"> of this guidance</span>
+            </button>
+          </Tooltip>
+        )}
+      </div>
       <IconButton
         label="Edit this guidance"
         hint="Edit this guidance and generate a new swipe with it. This swipe will not be affected."
         icon="edit"
-        onClick={() => editGuidance(session, entry)}
+        onClick={onEdit}
       />
     </div>
   )
