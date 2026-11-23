@@ -1,5 +1,5 @@
 // Choices are shared across tabs and scoped to a draft, including writes crossing a branch switch.
-import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { EntityId, SlotId } from "@dreamspan/shared/chat.ts"
 import { ComposerChoice } from "@dreamspan/shared/composerApi.ts"
 import { expect, it, vi } from "vitest"
 import { composerChoice } from "../src/features/chat/speaker.ts"
@@ -21,6 +21,7 @@ const fixture = () => {
     ["two", choice("two", "Bo")]
   ])
   const pending: Array<() => void> = []
+  const writes: Array<Record<string, unknown>> = []
   let receive: (next: ComposerChoice | null) => void = () => {}
   const session = {
     id: "chat",
@@ -29,11 +30,15 @@ const fixture = () => {
     },
     call: (
       run: (
-        client: (tag: string, payload: { draftId: string; speakerEntityId?: EntityId; guidance?: boolean }) => unknown
+        client: (
+          tag: string,
+          payload: { draftId: string; speakerEntityId?: EntityId; guidance?: boolean; guidanceSlotId?: SlotId | null }
+        ) => unknown
       ) => unknown
     ) =>
       run((tag, payload) => {
         if (tag === "GetComposerChoice") return Promise.resolve({ ok: true, value: rows.get(payload.draftId)! })
+        writes.push(payload)
         return new Promise((resolve) =>
           pending.push(() => {
             const before = rows.get(payload.draftId)!
@@ -50,7 +55,7 @@ const fixture = () => {
       })
   } as unknown as ChatSession
   const store = composerChoice(session)
-  return { store, rows, pending, receive: (next: ComposerChoice | null) => receive(next) }
+  return { store, rows, pending, writes, receive: (next: ComposerChoice | null) => receive(next) }
 }
 
 it("finishes loading a new branch when an old branch's choice was still saving", async () => {
@@ -116,4 +121,15 @@ it("shows the mode delivered with the draft while the separate speaker read is s
   expect(store.snapshot()).toMatchObject({ draftId: "one", guidance: true, loaded: false })
   await vi.waitFor(() => expect(store.snapshot().loaded).toBe(true))
   expect(store.snapshot().guidance).toBe(true)
+})
+
+it("keeps the reply a guidance edit was opened for before the draft was known, and saves it once it is", async () => {
+  const { store, pending, writes } = fixture()
+  await store.change({ guidanceSlot: "s1" as SlotId })
+  expect(writes).toHaveLength(0)
+  store.bind("one")
+  await vi.waitFor(() => expect(store.snapshot().loaded).toBe(true))
+  expect(store.snapshot().guidanceSlot).toBe("s1")
+  await vi.waitFor(() => expect(pending).toHaveLength(1))
+  expect(writes[0]).toMatchObject({ draftId: "one", guidanceSlotId: "s1" })
 })
