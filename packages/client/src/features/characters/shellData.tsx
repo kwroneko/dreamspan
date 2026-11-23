@@ -426,6 +426,7 @@ const TILE_BASE =
 /** A tile that is the whole link (home, the sidebar, a card source's results). */
 export const TILE_CLASS = `${TILE_BASE} rounded-lg border border-border`
 const TILE_OPEN_CLASS = `${TILE_BASE} rounded-t-lg focus-visible:ring-inset`
+const OPEN_AREA = "inset: The open area fills the tile above its badges and footer"
 /** What holds a tile and the toggles over its picture's corners. */
 export const TILE_SURFACE_CLASS = "tile-toggle-surface relative flex min-w-0 flex-col"
 
@@ -514,7 +515,10 @@ function CharacterTile({
   const editor = pick?.href?.(card) ?? `/library/${encodeURIComponent(c.refId)}`
   const onDragStart = (event: DragEvent) => carryOnDrag(event.dataTransfer, CARD_DRAG.id, editor)
   // An open family's tiles share the accent border, so its members read as one group in the grid.
-  const tileClass = `${pick?.onOpen ? TILE_OPEN_CLASS : TILE_CLASS} ${!pick?.onOpen && (state.done || state.pending) ? "cursor-default" : "hover:border-focus"} ${family?.expanded ? "border-accent!" : ""}`
+  // The border is the surface's, so its badges and footer sit inside the tile, never on a row of
+  // their own between grid rows; the open area fills the tile above them.
+  const idle = !pick?.onOpen && (state.done || state.pending)
+  const tileClass = `${TILE_OPEN_CLASS} ${idle ? "cursor-default" : ""}`
   const button = !pick ? (
     // A link to the chat it opens, so it opens in a new browser tab too.
     <Link
@@ -522,6 +526,7 @@ function CharacterTile({
       onClick={openOnPlainClick(() => open(c.entityId))}
       onDragStart={onDragStart}
       aria-label={`Open ${c.label}${marked ? " (persona)" : ""}`}
+      data-layout-audit-ignore={OPEN_AREA}
       className={tileClass}
     >
       {inner}
@@ -532,7 +537,7 @@ function CharacterTile({
       onClick={openOnPlainClick(() => pick.onOpen?.(card))}
       onDragStart={onDragStart}
       aria-label={`Open ${c.label}${marked ? " (persona)" : ""}`}
-      data-layout-audit-ignore="inset: The open area fills the tile above its joined footer"
+      data-layout-audit-ignore={OPEN_AREA}
       className={tileClass}
     >
       {inner}
@@ -548,7 +553,7 @@ function CharacterTile({
         if (!state.done && !state.pending) pick.onPick(card)
       }}
       aria-label={!pick.onOpen ? pick.label(card, status) : `Open ${c.label}${marked ? " (persona)" : ""}`}
-      data-layout-audit-ignore={pick.onOpen ? "inset: The open area fills the tile above its joined footer" : undefined}
+      data-layout-audit-ignore={OPEN_AREA}
       {...(!pick.onOpen && (state.done || state.pending) ? { "aria-disabled": true } : {})}
       {...(!pick.onOpen && state.pending ? { "aria-busy": true } : {})}
       className={tileClass}
@@ -559,7 +564,7 @@ function CharacterTile({
   return (
     <div
       {...(family ? { "data-family": family.id, "data-family-head": family.head } : {})}
-      className={`${TILE_SURFACE_CLASS} ${pick?.onOpen ? "overflow-hidden rounded-lg border border-border bg-surface" : ""}`}
+      className={`${TILE_SURFACE_CLASS} overflow-hidden rounded-lg border border-border bg-surface ${idle ? "" : "hover:border-focus"} ${family?.expanded ? "border-accent!" : ""}`}
     >
       {pick ? (
         <Tooltip label={pick.onOpen ? `Open ${c.label} in the full editor` : pick.hint(card, status)}>{button}</Tooltip>
@@ -593,6 +598,11 @@ function CharacterTile({
           <CardSurface placement="tile-menu" entityId={c.entityId} />
         </ContextMenu>
       )}
+      {/* Its badges (forks, the default persona) and family toggle: a line inside the tile, gone when empty. */}
+      <span data-tile-badges className="flex min-w-0 flex-wrap items-center gap-1 px-2 pb-2 empty:hidden">
+        {family?.head && onFamily && <FamilyToggle label={c.label} family={family} onToggle={onFamily} />}
+        <CardSurface placement="badge" entityId={c.entityId} label={c.label} />
+      </span>
       {pick?.onOpen && (
         <Button
           data-layout-audit-ignore="inset: The footer joins the tile border edge to edge"
@@ -624,17 +634,6 @@ function CharacterTile({
         >
           {state.mark}
         </span>
-      )}
-      {family?.head && onFamily && <FamilyToggle label={c.label} family={family} onToggle={onFamily} />}
-      {card.persona ? (
-        <div className="flex items-start gap-2 p-2">
-          <div className="flex min-w-0 flex-1 flex-wrap gap-1">
-            <CardSurface placement="badge" entityId={c.entityId} label={c.label} />
-          </div>
-          <CardSurface placement="persona-menu" entityId={c.entityId} label={c.label} />
-        </div>
-      ) : (
-        <CardSurface placement="badge" entityId={c.entityId} label={c.label} />
       )}
     </div>
   )

@@ -118,6 +118,13 @@ export const registerDefaultPersona = () => {
     order: 5,
     component: DefaultPersonaMenu
   })
+  // A persona's tile has no button of its own for it: it's in the tile's right-click menu.
+  cardContributions.register({
+    id: "characters.default-persona.tile-menu",
+    placement: "tile-menu",
+    order: 5,
+    component: DefaultPersonaAction
+  })
   cardContributions.register({
     id: "characters.default-persona",
     placement: "actions",
