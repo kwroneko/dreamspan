@@ -48,7 +48,6 @@ export function Versions({
         label="Previous version"
         hint={before ? "Shows the previous version." : "No previous version."}
         icon="left"
-        className="max-sm:size-7"
         disabled={!before}
         focusableWhenDisabled
         onClick={() => onStep(-1)}
@@ -71,7 +70,6 @@ export function Versions({
               : "Next version (ArrowRight outside inputs, on the last reply; generates past last)"
         }
         icon="right"
-        className="max-sm:size-7"
         disabled={!generated && !after}
         focusableWhenDisabled
         onClick={() => onStep(1)}

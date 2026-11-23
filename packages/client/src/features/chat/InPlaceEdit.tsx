@@ -10,7 +10,7 @@
 // The text box is the registered `messageTextEditor` (editorHistory.tsx): a surface replacing it
 // gets `bare`, keeps the metrics contract (ARCHITECTURE §12, "Editing"), and grows with its text.
 import type { PathEntry, Version } from "@dreamspan/shared/chat.ts"
-import { type KeyboardEvent, useEffect, useState, useSyncExternalStore } from "react"
+import { type KeyboardEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { SlotOutlet } from "../../slots.tsx"
 import { EditorTextActions } from "../../textActions.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -19,6 +19,7 @@ import { Icon } from "../../ui/Icon.tsx"
 import { popupOpen } from "../../ui/openPopups.ts"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
+import { tokenizerText, tokensText, useTokenCounts } from "../editor/tokenCounts.ts"
 import {
   availableCommands,
   type ChatCommandContext,
@@ -308,41 +309,74 @@ export function EditControls({
         footer
           ? // As tall as the footer's own buttons: opening the edit leaves the row as it was. A
             // version's images go on a line of their own above them (images.tsx).
-            "flex min-w-0 flex-1 flex-wrap items-center gap-1 [&_button:not(li_*)]:h-8"
-          : "flex flex-wrap items-center gap-2"
+            // The tools after Save and Cancel are icon buttons side by side with no gap, as the
+            // message's actions and versions beside them are: one square each, one spacing.
+            "flex min-w-0 flex-1 flex-wrap items-center gap-y-1 [&_button:not(li_*)]:h-8"
+          : "flex flex-wrap items-center gap-y-2"
       }
     >
-      <Tooltip label={`${shownSave} (Ctrl+Enter)`}>
+      <div className={`flex flex-wrap items-center ${footer ? "gap-1" : "gap-2"}`}>
+        <Tooltip label={`${shownSave} (Ctrl+Enter)`}>
+          <Button
+            type={footer ? "button" : "submit"}
+            variant="primary"
+            disabled={disabled}
+            className={footer ? "max-sm:w-8 max-sm:px-0" : ""}
+            {...(footer ? { onClick: () => saveEdit(session, onSave) } : {})}
+          >
+            <Icon name="check" />
+            <span className={label}>{shownSave}</span>
+          </Button>
+        </Tooltip>
+        {saves.map(({ option }) => (
+          <option.component key={option.id} entry={entry} session={session} disabled={disabled} save={onSaveWith} />
+        ))}
         <Button
-          type={footer ? "button" : "submit"}
-          variant="primary"
-          disabled={disabled}
-          className={footer ? "max-sm:px-2" : ""}
-          {...(footer ? { onClick: () => saveEdit(session, onSave) } : {})}
+          onClick={onCancel}
+          className={footer ? "max-sm:w-8 max-sm:px-0" : ""}
+          hint={
+            draft.target._tag === "Write"
+              ? "Closes the editor without adding a message version."
+              : "Closes the message editor without saving."
+          }
         >
-          <Icon name="check" />
-          <span className={label}>{shownSave}</span>
+          <Icon name="close" />
+          <span className={label}>Cancel</span>
         </Button>
-      </Tooltip>
-      {saves.map(({ option }) => (
-        <option.component key={option.id} entry={entry} session={session} disabled={disabled} save={onSaveWith} />
-      ))}
-      <Button
-        onClick={onCancel}
-        className={footer ? "max-sm:px-2" : ""}
-        hint={
-          draft.target._tag === "Write"
-            ? "Closes the editor without adding a message version."
-            : "Closes the message editor without saving."
-        }
-      >
-        <Icon name="close" />
-        <span className={label}>Cancel</span>
-      </Button>
+      </div>
       <span className="flex-1" />
-      {selection && <EditorTextActions text={text} selection={selected} shown />}
+      <EditTokens text={text} session={session} />
+      {selection && <EditorTextActions text={text} selection={selected} shown size="row" />}
       {tools}
     </div>
+  )
+}
+
+/**
+ * The edited text's tokens with the tokenizer of this chat's model (the one its next reply uses,
+ * as the composer's model chip shows: its own, else the account's), counted once typing rests,
+ * as a card field's are (editor/tokenCounts.ts). Beside the editor's icon buttons, away from Save
+ * and Cancel. Its width is reserved and its digits are tabular, so the row stays put as the
+ * number changes; on a phone the number alone, its word in its name and explanation.
+ */
+function EditTokens({ text, session }: { text: string; session: ChatSession }) {
+  const texts = useMemo(() => [text], [text])
+  const chatModel = useSyncExternalStore(session.subscribe, () => session.snapshot().cast?.model ?? undefined)
+  const { counts, tokenizer, pending } = useTokenCounts(texts, chatModel)
+  const shown = tokensText(counts[0] ?? null, tokenizer, pending)
+  return (
+    <Tooltip label={`The tokens in this message's text. ${tokenizerText(tokenizer)}`}>
+      <span
+        tabIndex={0}
+        data-edit-tokens
+        aria-label={shown}
+        aria-busy={pending || undefined}
+        className="min-w-[7ch] px-1 shrink-0 rounded text-right text-xs whitespace-nowrap text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus sm:min-w-[14ch]"
+      >
+        {shown.replace(/ tokens$/, "")}
+        <span className="max-sm:hidden"> tokens</span>
+      </span>
+    </Tooltip>
   )
 }
 

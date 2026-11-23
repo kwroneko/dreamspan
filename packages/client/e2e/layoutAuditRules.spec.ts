@@ -42,3 +42,22 @@ test("a control's short label cut by an ellipsis is reported; a long name cut is
   expect(cut.map((v) => v.selector)).toEqual(["#short"])
   expect(cut[0]!.measurement).toContain("“Auto replies”")
 })
+
+test("icon buttons in one row share one square and one gap; a text button or a chip is left out", async ({ page }) => {
+  const icon = `<svg width="16" height="16"><path d="M0 0h16"/></svg>`
+  const button = (id: string, width: number, style = "") =>
+    `<button id="${id}" aria-label="${id}" style="width:${width}px;height:32px;padding:0;border:0;display:inline-flex;align-items:center;justify-content:center;${style}">${icon}</button>`
+  await page.setContent(`
+    <main style="padding:16px">
+      <div style="display:flex;align-items:center;gap:4px;padding:8px">
+        ${button("a", 32)}${button("b", 32)}<button style="height:32px">1/1</button>${button("c", 32)}
+        <button aria-label="Speaker" style="height:32px;width:50px">${icon}${icon}</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;padding:8px">
+        ${button("d", 24)}${button("e", 32)}${button("f", 36)}${button("g", 32)}${button("h", 32, "margin-left:-4px")}
+      </div>
+    </main>`)
+  const found = (await layoutAudit(page)).filter((v) => v.kind === "iconrow")
+  expect(found.map((v) => v.selector).sort()).toEqual(["#d", "#d", "#f"])
+  expect(found.find((v) => v.measurement.startsWith("gaps"))!.measurement).toContain("spread 4.00px")
+})

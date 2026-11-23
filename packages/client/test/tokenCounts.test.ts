@@ -3,7 +3,13 @@
 import { TokenizerInfo } from "@dreamspan/shared/generation.ts"
 import { describe, expect, it, vi } from "vitest"
 import type { Caller } from "../src/features/editor/caller.ts"
-import { refreshTokenCounts, requestCounts, tokenizerText, tokensText } from "../src/features/editor/tokenCounts.ts"
+import {
+  type CountModel,
+  refreshTokenCounts,
+  requestCounts,
+  tokenizerText,
+  tokensText
+} from "../src/features/editor/tokenCounts.ts"
 
 // The hook's connections to the app, which a test without a page has none of.
 vi.mock("../src/features/pickers/defaults.ts", () => ({ defaultsAtom: null }))
@@ -41,6 +47,30 @@ describe("token counts", () => {
     requestCounts(call, "m2", ["one two"])
     await vi.advanceTimersByTimeAsync(50)
     expect(sent).toEqual([["one two", "three"], ["one two"]])
+    vi.useRealTimers()
+  })
+
+  it("asks for a chat's own model apart, naming it; the account's model goes without one", async () => {
+    vi.useFakeTimers()
+    const payloads: Array<{ texts: ReadonlyArray<string>; model?: unknown }> = []
+    const call = (async (run: (client: unknown) => unknown) => {
+      let texts: ReadonlyArray<string> = []
+      run((_tag: string, payload: { texts: ReadonlyArray<string>; model?: unknown }) => {
+        texts = payload.texts
+        payloads.push(payload)
+        return null
+      })
+      return { ok: true, value: { counts: texts.map(() => 1), tokenizer: exact } }
+    }) as unknown as Caller
+    const chatModel = { connection: "connection-1", model: "model-1" } as unknown as CountModel
+    requestCounts(call, "account", ["grouped one"])
+    requestCounts(call, "chat", ["grouped two"], chatModel)
+    requestCounts(call, "account", ["grouped three"])
+    await vi.advanceTimersByTimeAsync(50)
+    expect(payloads).toEqual([
+      { texts: ["grouped one", "grouped three"] },
+      { texts: ["grouped two"], model: chatModel }
+    ])
     vi.useRealTimers()
   })
 
