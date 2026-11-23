@@ -34,7 +34,9 @@ const sheetRow = (page: Page, title: string) =>
 
 /** What a panel's button or row says (its accessible name). */
 export async function panelSummary(page: Page, scope: Locator, title: string) {
-  return (await wideBar(scope)) ? panelTrigger(scope, title) : sheetRow(page, title)
+  if (await wideBar(scope)) return panelTrigger(scope, title)
+  await openSheet(page, scope)
+  return sheetRow(page, title)
 }
 
 /** Opens a panel and returns where its controls are: its popover, or the sheet. */

@@ -209,11 +209,18 @@ export function cardexCriteriaTests() {
             await chips.getByRole("button", { name: "Not fantasy", exact: true }).click()
             await expect(chips.getByRole("button", { name: "+fantasy", exact: true })).toBeVisible()
             await clear()
-            // Audit the bar, and with a panel open, also in the narrow sidebar.
+            // Audit the bar, and with a panel open: its popover, or the sheet that covers the page.
             for (const title of ["", "Sites", "Creators", "Tokens", "Created"]) {
               if (title) await openPanel(page, scope, title)
+              const inSheet = await page.locator("[data-filter-sheet]").isVisible()
               await expectLayout(page, info, `cardex-panel-${place}-${title || "folded"}-${width}-${theme}`, {
-                scope: title ? "body" : place === "home" ? "main" : "[data-shell-list]"
+                scope: inSheet
+                  ? "[data-filter-sheet]"
+                  : title
+                    ? "body"
+                    : place === "home"
+                      ? "main"
+                      : "[data-shell-list]"
               })
               if (title) await closePanel(page, title)
             }

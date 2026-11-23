@@ -1039,26 +1039,26 @@ function CreatorsPanel({ browse, set }: { browse: SourceBrowse; set: SetFilters 
         {suggestions.items.map((item) => {
           const on = chosen.includes(item.value)
           return (
-            <li key={item.value} className="min-w-0 rounded-md px-1 py-2 hover:bg-hover">
-              <Checkbox
-                checked={on}
-                disabled={!on && full}
-                onCheckedChange={(next) => {
-                  setNames((m) => new Map(m).set(item.value, item.label))
-                  write(mode, next ? [...chosen, item.value] : chosen.filter((v) => v !== item.value))
-                }}
-              >
-                {/* Name, site and count in columns, as a table of the source's creators. */}
-                <span className="grid w-[min(22rem,calc(100vw-6rem))] min-w-0 grid-cols-[minmax(0,1fr)_auto_4rem] items-center gap-3">
-                  <span className="min-w-0 truncate">{item.label}</span>
-                  <span className="rounded border border-border px-1.5 text-xs text-muted">
-                    {siteName(item.value.slice(0, item.value.indexOf("/")))}
-                  </span>
-                  <span className="text-right text-xs text-muted tabular-nums">
-                    {item.count !== undefined ? count(item.count) : ""}
-                  </span>
-                </span>
-              </Checkbox>
+            // Name, site and count in columns, as a table of the source's creators.
+            <li key={item.value} className="flex min-w-0 items-center gap-3 rounded-md px-2 py-2 hover:bg-hover">
+              <div className="min-w-0 flex-1">
+                <Checkbox
+                  checked={on}
+                  disabled={!on && full}
+                  onCheckedChange={(next) => {
+                    setNames((m) => new Map(m).set(item.value, item.label))
+                    write(mode, next ? [...chosen, item.value] : chosen.filter((v) => v !== item.value))
+                  }}
+                >
+                  <span className="block truncate">{item.label}</span>
+                </Checkbox>
+              </div>
+              <span className="shrink-0 rounded border border-border px-1.5 text-xs leading-5 text-muted">
+                {siteName(item.value.slice(0, item.value.indexOf("/")))}
+              </span>
+              <span className="w-14 shrink-0 text-right text-xs leading-5 text-muted tabular-nums">
+                {item.count !== undefined ? count(item.count) : ""}
+              </span>
             </li>
           )
         })}
@@ -1298,7 +1298,7 @@ function FiltersSheet({ browse, set }: { browse: SourceBrowse; set: SetFilters }
   const { panels, switches } = layoutOf(caps)
   const total = totalLabel(browse.results)
   return (
-    <Sheet open={browse.filtersOpen} onOpenChange={browse.setFiltersOpen} title="Filters">
+    <Sheet open={browse.filtersOpen} onOpenChange={browse.setFiltersOpen} title="Filters" imageControls={false}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div data-filter-sheet className="flex min-h-0 flex-1 flex-col divide-y divide-border overflow-y-auto px-4">
           {(caps.tags.include || caps.tags.exclude) && (
