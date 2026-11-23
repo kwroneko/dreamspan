@@ -350,25 +350,52 @@ export const carriesSigned = (binding: ThinkingBinding, payload: Record<string, 
   (binding.messages(payload) ?? []).some((message) => binding.signed(message).length > 0)
 
 /** Why signed blocks were left out of a request, for its notes (ARCHITECTURE §6). */
-export type DropReason = "changed" | "model" | "refused"
+export type DropReason = "changed" | "model" | "refused" | "chain"
 
 export const DROP_NOTES: Record<DropReason, string> = {
   changed:
     "Thinking from earlier in this reply was left out, because something before it changed after it was written. The provider refuses it then.",
   model: "Thinking was left out because the model or connection changed.",
-  refused: "The provider refused earlier thinking, so this request was sent again without it."
+  refused: "The provider refused earlier thinking, so this request was sent again without it.",
+  chain:
+    "Older thinking from this reply was left out: a newer block didn't follow it, and the provider takes only an unbroken run."
 }
 
 /** The same for earlier replies' reasoning a plain chat sends back (assembler/reasoningReplay.ts). */
 export const HISTORY_DROP_NOTES: Record<DropReason, string> = {
   changed: "Reasoning from an earlier reply wasn't sent back: the request before it changed since it was written.",
   model: "Reasoning from an earlier reply wasn't sent back: another model or connection wrote it.",
-  refused: "The provider refused earlier replies' reasoning, so this request was sent again without it."
+  refused: "The provider refused earlier replies' reasoning, so this request was sent again without it.",
+  chain:
+    "Reasoning from an earlier reply wasn't sent back: a newer reply's didn't follow it, and the provider takes only an unbroken run."
 }
 
 /** The note for earlier replies' reasoning the provider itself left out (`providerDroppedThinking`). */
 export const providerDropNote = (n: number) =>
   `${n === 1 ? "A block of earlier replies' reasoning was" : `${n} blocks of earlier replies' reasoning were`} left out by the provider: what came before changed, or another model or account wrote it.`
+
+/**
+ * The same within a tool run: its own earlier thinking the provider dropped. One wording for any
+ * count, so a run's requests note it once.
+ */
+export const PROVIDER_RUN_DROP_NOTE =
+  "Thinking from earlier in this reply was left out by the provider: what came before it changed, or another model or account wrote it."
+
+/**
+ * Anthropic Messages content always as blocks. pi-ai sends a message's string content as a
+ * string, except on the request's last message, which it turns into a block to carry the cache
+ * marker (as an explicit breakpoint does): an app message sent last as a block went back as a
+ * string on the next request, and a bound block written after it no longer fit (the shape is
+ * part of the prefix). Blocks every time keep each request's earlier messages as they were sent.
+ */
+export const anthropicBlockContent = (payload: Record<string, unknown>): Record<string, unknown> => {
+  if (!Array.isArray(payload.messages)) return payload
+  for (const message of payload.messages as Array<unknown>) {
+    const record = object(message)
+    if (record && typeof record.content === "string") record.content = [{ type: "text", text: record.content }]
+  }
+  return payload
+}
 
 /**
  * How many sent thinking blocks the provider says it dropped, from a raw Anthropic stream event:
@@ -435,6 +462,13 @@ export const bindThinking = (
      * settings stay, and each is checked only as the provider checks it (`replayTerms`).
      */
     readonly history?: ReplayTerms
+    /**
+     * The provider also checks that the blocks sent are an unbroken run (a bound-thinking Claude
+     * model, `replayTerms` `prefix`): each block but the first must follow the block sent before
+     * it, as it did when it was written (its record's `prev`). Leaving out a leading run is
+     * allowed, so the newest unbroken run is kept and the older blocks are left out ("chain").
+     */
+    readonly run?: boolean
   }
 ): BindResult => {
   const messages = binding.messages(payload)
@@ -456,6 +490,9 @@ export const bindThinking = (
   let dropping = input.mode === "strip"
   let reason: DropReason | null = input.mode === "strip" ? "refused" : null
   let dropped = 0
+  /** Each message with the blocks it leaves out, and the blocks kept so far, in order. */
+  const entries: Array<{ readonly message: unknown; readonly leaving: Set<string> }> = []
+  const kept: Array<{ readonly key: string; readonly prev: string | null; readonly leaving: Set<string> }> = []
   for (const message of messages) {
     const keys = binding.signed(message)
     if (input.mode === "strip") {
@@ -489,9 +526,19 @@ export const bindThinking = (
         reason = record !== undefined && !written ? "model" : "changed"
       }
       if (dropping) leaving.add(key)
+      else kept.push({ key, prev: record!.prev, leaving })
     }
     const comparable = binding.comparable(message)
     if (comparable !== null) hash.update(stable(comparable))
+    entries.push({ message, leaving })
+  }
+  // The newest unbroken run of the blocks kept: older ones the next didn't follow are left out.
+  if (input.run && input.mode === "check") {
+    const start = kept.findLastIndex((block, at) => at > 0 && block.prev !== kept[at - 1]!.key)
+    for (const block of kept.slice(0, Math.max(0, start))) block.leaving.add(block.key)
+    if (start > 0) reason ??= "chain"
+  }
+  for (const { message, leaving } of entries) {
     if (leaving.size > 0) {
       dropped += leaving.size
       const stripped = binding.strip(message, leaving)

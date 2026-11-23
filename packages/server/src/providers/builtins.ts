@@ -27,7 +27,7 @@ import { bedrockOpenAIChatKind, bedrockOpenAIResponsesKind } from "./bedrockOpen
 import { vertexKind } from "./vertex.ts"
 import { builtinProviders } from "@dreamspan/shared/providerDefinitions.ts"
 import { builtinShims } from "./shims.ts"
-import { builtinThinkingBindings } from "./thinkingBinding.ts"
+import { anthropicBlockContent, builtinThinkingBindings } from "./thinkingBinding.ts"
 import { applyAnthropicToolLoading, applyResponsesToolLoading, applyRouterToolLoading } from "./toolLoading.ts"
 
 const completions = openAICompletionsApi()
@@ -132,7 +132,14 @@ export const layer = Layer.effectDiscard(
     for (const shim of builtinShims) yield* registry.shims.register(shim)
     // Signed reasoning goes back only into the conversation that wrote it (thinkingBinding.ts).
     for (const binding of builtinThinkingBindings) yield* registry.thinkingBindings.register(binding)
-    // Deferred tools (spec/TOOL-LOADING.md §4), first: the breakpoint transforms see the final tools.
+    // Message content always as blocks, first: a message keeps one shape in every later request
+    // whether or not it carried a cache marker (thinkingBinding.ts `anthropicBlockContent`).
+    yield* registry.transforms.register({
+      id: "anthropic-block-content",
+      appliesTo: (target) => target.api === "anthropic-messages",
+      transform: (payload) => anthropicBlockContent(payload)
+    })
+    // Deferred tools (spec/TOOL-LOADING.md §4): the breakpoint transforms see the final tools.
     yield* registry.transforms.register({
       id: "anthropic-tool-loading",
       appliesTo: (target) => target.api === "anthropic-messages",
