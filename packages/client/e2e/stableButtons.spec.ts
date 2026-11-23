@@ -143,16 +143,19 @@ for (const width of [1440, 390]) {
     const composer = page.getByTestId("composer-controls")
     const guidance = composer.getByRole("switch", { name: "Guidance", exact: true })
     const send = composer.getByRole("button", { name: "Send", exact: true })
-    const before = await boxes(composer)
+    // Empty, Send would pass the turn (no one here can reply).
+    await expect(send).toBeDisabled()
+    await hint(page, send, "Type a message to send.")
+    // With guidance on, Generate is the one action, in Generate's and Send's room: nothing else moves
+    // (owner, 2026-11-23; guidanceButtons.spec.ts checks the widths).
+    const before = (await boxes(composer)).slice(0, -3)
+    const toggleBox = await guidance.boundingBox()
     await guidance.click()
-    await expect(send).toBeDisabled()
-    expect(await boxes(composer)).toEqual(before)
-    // Empty, Send would ask for a reply (none here: no one can reply); typed, guidance goes with Generate.
-    await hint(page, send, "Type a message to send")
+    await expect(send).toHaveCount(0)
+    expect(await guidance.boundingBox()).toEqual(toggleBox)
     await page.getByTestId("composer").fill("Synthetic guidance.")
-    await expect(send).toBeDisabled()
-    expect(await boxes(composer)).toEqual(before)
-    await hint(page, send, "Guidance is sent with Generate")
+    expect((await boxes(composer)).slice(0, -2)).toEqual(before)
+    expect(await guidance.boundingBox()).toEqual(toggleBox)
     await audit(page, `composer-${width}`)
     await guidance.click()
     await page.getByLabel("Message", { exact: true }).fill("Synthetic first message.")
@@ -242,13 +245,14 @@ for (const width of [1440, 390]) {
     const controls = page.getByTestId("composer-controls")
     const emptySend = controls.getByRole("button", { name: / repl(?:y|ies)$/ })
     await expect(emptySend).toBeVisible()
-    // With nothing typed there's no guidance to lose: Send still asks for the reply alone.
+    // With guidance on, Generate is the one action (owner, 2026-11-23): no empty Send beside it.
     await controls.getByRole("switch", { name: "Guidance", exact: true }).click()
-    await expect(emptySend).toBeEnabled()
+    await expect(emptySend).toHaveCount(0)
+    await expect(controls.getByRole("button", { name: /^Generate/ })).toBeEnabled()
     await audit(page, `next-reply-${width}`)
   })
 
-  test(`pending composer keeps Send beside Generate in guidance mode at ${width}`, async ({ page }) => {
+  test(`pending composer's guidance toggle stays put as Generate takes Send's room at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     const card = await admin((api) => api.CreateCard({ label: `Pending ${width}`, name: `Pending ${width}` }))
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -257,11 +261,10 @@ for (const width of [1440, 390]) {
     const controls = page.getByTestId("composer-controls")
     const send = controls.getByRole("button", { name: /^Send/ })
     await expect(send).toBeEnabled()
-    const before = await boxes(controls)
+    const before = (await boxes(controls)).slice(0, -2)
     await controls.getByRole("switch", { name: "Guidance", exact: true }).click()
-    await expect(send).toBeDisabled()
-    expect(await boxes(controls)).toEqual(before)
-    await hint(page, send, "Guidance is sent with Generate")
+    await expect(send).toHaveCount(0)
+    expect((await boxes(controls)).slice(0, -1)).toEqual(before)
     await audit(page, `pending-composer-${width}`)
   })
 

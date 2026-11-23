@@ -123,8 +123,13 @@ for (const width of [1440, 1024, 390])
           }
         }
         for (const control of groups[0]!.controls.slice(1)) expect(Math.abs(control.width - 36)).toBeLessThanOrEqual(1)
-        for (const control of groups[1]!.controls.filter((control) => control.label !== primaryLabel || width === 390))
+        // With guidance on, the phone's Generate icon is the one action, two squares and their gap wide.
+        for (const control of groups[1]!.controls.filter(
+          (control) => control.label !== primaryLabel || (width === 390 && !on)
+        ))
           expect(Math.abs(control.width - 36)).toBeLessThanOrEqual(1)
+        if (on && width === 390)
+          expect(Math.abs(groups[1]!.controls.at(-1)!.width - (36 * 2 + 6))).toBeLessThanOrEqual(1)
         // Both groups in the box share their centre; the pickers have the same outer inset: the audit's 8 px
         // inside the 1 px border.
         expect(Math.abs(groups[0]!.controls[0]!.centre - groups[1]!.controls[0]!.centre)).toBeLessThanOrEqual(1)
@@ -146,7 +151,7 @@ for (const width of [1440, 1024, 390])
           await page.getByTestId("composer").fill(text)
           await capture(`${on ? "guidance" : "message"}-${text ? "text" : "empty"}`)
         }
-        await expect(generate).toHaveText(width === 390 ? "" : "Generate")
+        await expect(generate).toHaveText(width === 390 && !on ? "" : "Generate")
         // Clicking dismisses the explanation until the pointer leaves the toggle.
         await page.mouse.move(0, 0)
         await guidance.hover()
@@ -161,7 +166,7 @@ for (const width of [1440, 1024, 390])
         await guidance.focus()
         await page.keyboard.press("Tab")
         await expect(generate).toBeFocused()
-        await expect(page.getByText(new RegExp(`^Generate ${longName}'s next turn`))).toBeVisible()
+        await expect(page.getByText(new RegExp(`^Let the model write ${longName}'s next turn`))).toBeVisible()
         await page.getByTestId("composer").focus()
       }
       await generate.click()
@@ -192,6 +197,9 @@ for (const width of [1440, 1024, 390])
             yield* api.ChangeCast({ chatId, slotId: null, change: { _tag: "Join", entityId } })
           })
         )
+        // The empty Send shows with guidance off (with it on, Generate is the one action).
+        await guidance.click()
+        await expect(guidance).toHaveAttribute("aria-checked", "false")
         await page.getByTestId("composer").fill("")
         const next = strip.getByRole("button", { name: /^Next: / })
         await expect(next).toBeEnabled()

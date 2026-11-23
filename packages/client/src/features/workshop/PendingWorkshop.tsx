@@ -29,7 +29,7 @@ import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDra
 import { CastContext, castView } from "../chat/cast.ts"
 import { ComposerBox, useCompactComposer } from "../chat/Composer.tsx"
 import { composerCarryCopy } from "../chat/composerCarry.ts"
-import { composerSubmitHint } from "../chat/composerKeys.ts"
+import { composerSubmitKey } from "../chat/composerKeys.ts"
 import { composerKeyDown } from "../chat/composerKeys.ts"
 import type { DraftPreviewState } from "../chat/draftRequest.tsx"
 import { ModelChip } from "../chat/GenerationControls.tsx"
@@ -371,7 +371,8 @@ export function PendingWorkshop({
       }
     },
     speakerName,
-    submitHint: composerSubmitHint(viewPrefs.prefs.enterSends),
+    submitKey: composerSubmitKey(viewPrefs.prefs.enterSends),
+    speakerPlayed: speakerId === null || speakerId === playing?.entityId,
     guidance,
     prefsReady: ready,
     changeGuidance: setGuidance,

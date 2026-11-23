@@ -1,6 +1,6 @@
 import type { KeyboardEvent } from "react"
 import { expect, it, vi } from "vitest"
-import { composerKeyDown } from "../src/features/chat/composerKeys.ts"
+import { composerKeyDown, composerSubmitKey } from "../src/features/chat/composerKeys.ts"
 
 const event = (patch: object = {}) =>
   ({
@@ -51,6 +51,16 @@ it("applies all account modes on desktop and touch, with a send chord and newlin
       composerKeyDown(send, mode)(event({ nativeEvent: { isComposing: true } }))
       expect(send).toHaveBeenCalledTimes(before + 2)
     }
+  }
+  vi.unstubAllGlobals()
+})
+
+it("names the key that submits, for the end of its button's hover, never Shift+Enter", () => {
+  for (const coarse of [false, true]) {
+    vi.stubGlobal("matchMedia", () => ({ matches: coarse }))
+    expect(composerSubmitKey("always")).toBe("Enter")
+    expect(composerSubmitKey("never")).toBe("Ctrl/Cmd+Enter")
+    expect(composerSubmitKey("automatic")).toBe(coarse ? "Ctrl/Cmd+Enter" : "Enter")
   }
   vi.unstubAllGlobals()
 })

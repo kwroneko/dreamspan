@@ -63,7 +63,7 @@ import { PendingChatHeader } from "./ChatHeader.tsx"
 import { carryPanelFocus, ChatSidePanel, usePanel } from "./ChatPanels.tsx"
 import { composerCarryCopy } from "./composerCarry.ts"
 import { ComposerBox, useCompactComposer } from "./Composer.tsx"
-import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
+import { composerKeyDown, composerSubmitKey } from "./composerKeys.ts"
 import { expandForDisplay } from "./macros.ts"
 import { useIsPanelTab } from "./panels.tsx"
 import { firstId, PendingChat, pendingOptions, pendingTitle } from "./pendingChat.ts"
@@ -516,7 +516,8 @@ function Pending({
       footer: <SlotOutlet slot={pendingPersonaPickerRows} props={{ pending }} />
     },
     speakerName,
-    submitHint: composerSubmitHint(viewPrefs.prefs.enterSends),
+    submitKey: composerSubmitKey(viewPrefs.prefs.enterSends),
+    speakerPlayed: speakerId === null || speakerId === playing?.entityId,
     guidance,
     prefsReady: viewPrefs.ready,
     changeGuidance: setGuidance,

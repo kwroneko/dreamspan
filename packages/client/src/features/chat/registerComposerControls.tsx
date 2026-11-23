@@ -52,11 +52,27 @@ function GuidanceToggle({
   )
 }
 
-/** Generate's hover in a chat not made yet; with a card from a card source, what it adds (spec/CARD-SOURCES.md §4.4). */
+/**
+ * With guidance on, the box has one action (owner, 2026-11-23): Send renders nothing and Generate
+ * takes its place too, its own width plus the actions' gap (`--composer-actions-gap`, ComposerBox)
+ * and Send's square (a button's height, `h-9`), added to `Button`'s own padding (`px-3`) on both
+ * sides so its content stays centred; the guidance toggle and the group's left edge don't move.
+ */
+const WIDE_GENERATE = "px-[calc(--spacing(3)+(--spacing(9)+var(--composer-actions-gap))/2)]!"
+/** On a phone, two of Send's squares and the gap: its word, not an icon, as it's not a square any more. */
+const WIDE_PHONE_GENERATE = "w-[calc(--spacing(9)*2+var(--composer-actions-gap))]! px-0!"
+
+/**
+ * Generate's hover in a chat not made yet, as at the saved composer: "for you" only for the user's
+ * own card; with a card from a card source, what it adds (spec/CARD-SOURCES.md §4.4); the key last
+ * with guidance on, where Enter triggers it.
+ */
 const generateHint = (context: PendingComposerContext) =>
-  context.adds !== ""
-    ? `Has ${context.speakerName} write the first message and adds ${context.adds} to your cards.`
-    : `Generate ${context.speakerName}'s first turn with the model${context.guidance ? ", following your guidance" : ""}.`
+  `Let the model write ${context.speakerName === "You" ? "your" : `${context.speakerName}'s`} next turn${
+    context.speakerPlayed && context.speakerName !== "You" ? " for you" : ""
+  }${context.guidance && context.hasText ? ", following your guidance" : ""}${
+    context.adds !== "" ? `, and add ${context.adds} to your cards` : ""
+  }.${context.guidance ? ` (${context.submitKey})` : ""}`
 
 export const registerComposerControls = () => [
   composerControls.register({
@@ -95,7 +111,7 @@ export const registerComposerControls = () => [
     placement: "actions",
     run: ({ start }) => start("generate"),
     component: (context) =>
-      context.compact ? (
+      context.compact && !context.guidance ? (
         <SquareIconButton
           label={`Generate ${context.speakerName}`}
           hint={generateHint(context)}
@@ -113,10 +129,11 @@ export const registerComposerControls = () => [
           hint={generateHint(context)}
           pending={context.busy}
           disabled={context.busy || context.attaching || !context.prefsReady}
+          className={context.guidance ? (context.compact ? WIDE_PHONE_GENERATE : WIDE_GENERATE) : ""}
           onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
         >
           {/* Its word only: the speaker's name is on the chip at the row's start, and in its name. */}
-          {!context.busy && <GenerateIcon />}
+          {!context.busy && !context.compact && <GenerateIcon />}
           Generate
         </Button>
       )
@@ -128,26 +145,28 @@ export const registerComposerControls = () => [
     run: async ({ guidance, start }) => {
       if (!guidance) await start("send")
     },
-    component: (context) => (
-      <SquareIconButton
-        label={context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`}
-        hint={
-          context.guidance
-            ? "Guidance is sent with Generate, as instructions for the reply."
-            : context.adds !== ""
-              ? `Sends your message and adds ${context.adds} to your cards (${context.submitHint})`
-              : `${context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`} (${context.submitHint})`
-        }
-        variant="primary"
-        pending={context.busy}
-        disabled={context.guidance || context.busy || context.attaching || !context.prefsReady || !context.hasText}
-        className="data-disabled:bg-surface-raised! data-disabled:text-muted!"
-        focusableWhenDisabled
-        onClick={() => void pendingComposerControls.get("pending.send")?.run?.(context)}
-      >
-        <SendIcon />
-      </SquareIconButton>
-    )
+    // With guidance on, nothing: Generate takes its place (WIDE_GENERATE).
+    component: (context) =>
+      !context.guidance && (
+        <SquareIconButton
+          label={context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`}
+          hint={
+            !context.hasText
+              ? "Type a message to send."
+              : context.adds !== ""
+                ? `Send your message and add ${context.adds} to your cards. (${context.submitKey})`
+                : `${context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`}. (${context.submitKey})`
+          }
+          variant="primary"
+          pending={context.busy}
+          disabled={context.busy || context.attaching || !context.prefsReady || !context.hasText}
+          className="data-disabled:bg-surface-raised! data-disabled:text-muted!"
+          focusableWhenDisabled
+          onClick={() => void pendingComposerControls.get("pending.send")?.run?.(context)}
+        >
+          <SendIcon />
+        </SquareIconButton>
+      )
   }),
   // The next-reply strip of a chat not made yet: the account's model and preset, as at the saved composer.
   pendingComposerControls.register({
@@ -253,10 +272,10 @@ export const registerComposerControls = () => [
     order: 30,
     placement: "actions",
     run: ({ generate }) => generate(),
-    // Its word only ("Generate", or "New version" while a reply's guidance is edited; an icon on a
-    // phone): the speaker's name is on the chip at the row's start, and in this one's name and tooltip.
+    // Its word only ("Generate", or "New swipe" while a reply's guidance is edited; an icon on a
+    // phone with guidance off): the speaker's name is on the chip at the row's start, and in this one's name and tooltip.
     component: ({ guidance, busy, ready, generateHint, generateText, generateWord, invoke, compact }) =>
-      compact ? (
+      compact && !guidance ? (
         <SquareIconButton
           label={generateText}
           hint={generateHint}
@@ -275,9 +294,9 @@ export const registerComposerControls = () => [
             aria-label={generateText}
             disabled={busy || !ready}
             onClick={invoke}
-            className="px-2.5"
+            className={guidance ? (compact ? WIDE_PHONE_GENERATE : WIDE_GENERATE) : ""}
           >
-            {!(guidance && busy) && <GenerateIcon />}
+            {!(guidance && busy) && !compact && <GenerateIcon />}
             {generateWord}
           </Button>
         </Tooltip>
@@ -287,24 +306,18 @@ export const registerComposerControls = () => [
     id: "composer.send",
     order: 40,
     placement: "actions",
-    // With nothing typed it asks for the reply alone, guidance on or off (there's no guidance to
-    // lose); with text and guidance on, Generate sends it, never Send.
-    run: ({ guidance, editingGuidance, hasText, send, replyNow }) => {
-      if (editingGuidance) return
-      if (!hasText) return replyNow()
-      if (!guidance) return send()
-    },
-    component: ({ guidance, editingGuidance, sendLabel, sendHint, busy, ready, hasText, replier, invoke }) => (
+    // Only with guidance off: with it on, and while a reply's guidance is edited, Generate is the one
+    // action and takes this one's place too (WIDE_GENERATE). With nothing typed it passes the turn:
+    // the next reply, with nothing from the user.
+    available: ({ guidance }) => !guidance,
+    run: ({ hasText, send, replyNow }) => (hasText ? send() : replyNow()),
+    component: ({ sendLabel, sendHint, busy, ready, hasText, replier, invoke }) => (
       <SquareIconButton
         label={sendLabel}
-        hint={
-          editingGuidance || (guidance && hasText)
-            ? "Guidance is sent with Generate, as instructions for the reply."
-            : sendHint
-        }
+        hint={sendHint}
         variant="primary"
         pending={busy}
-        disabled={editingGuidance || (guidance && hasText) || !ready || (!hasText && replier === null)}
+        disabled={!ready || (!hasText && replier === null)}
         className="data-disabled:bg-surface-raised! data-disabled:text-muted!"
         focusableWhenDisabled
         onClick={invoke}

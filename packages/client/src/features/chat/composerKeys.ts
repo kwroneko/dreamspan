@@ -7,6 +7,8 @@ const plainEnterSends = (mode: EnterSends) =>
   (mode === "automatic" && !(typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches))
 export const composerSubmitHint = (mode: EnterSends) =>
   plainEnterSends(mode) ? "Enter; Shift+Enter for a new line" : "Ctrl/Cmd+Enter; Enter for a new line"
+/** The key that submits, for the end of the hover of the button it triggers: "(Enter)" (owner, 2026-11-23). */
+export const composerSubmitKey = (mode: EnterSends) => (plainEnterSends(mode) ? "Enter" : "Ctrl/Cmd+Enter")
 
 /** Account preference applies to saved and pending chats. Never send Alt or IME Enter. */
 export const composerKeyDown =
