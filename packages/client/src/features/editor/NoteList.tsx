@@ -363,10 +363,7 @@ export function NoteBlock({
               gaps (DESIGN §10.1); the settings button stays put when opening the note adds Save. */}
               <span data-note-controls className="ml-auto flex shrink-0 items-center gap-1">
                 {open && loaded && (
-                  <span
-                    data-note-save
-                    className="inline-flex h-8 items-center"
-                  >
+                  <span data-note-save className="inline-flex h-8 items-center">
                     <SaveRevision store={store} />
                   </span>
                 )}
