@@ -963,6 +963,59 @@ test.describe("synthetic library and every app surface", () => {
           await audit("message-toolbar-menu", '[role="menu"]')
           return
         }
+        if (process.env.LAYOUT_AUDIT_ICONROW_ONLY === "1") {
+          // Icon rows under a text box and on a message: one square per button, one gap (iconrow).
+          // LAYOUT_AUDIT_ICONROW_SHOTS=<dir> also saves each row and its buttons' boxes there.
+          const out = process.env.LAYOUT_AUDIT_ICONROW_SHOTS
+          const row = async (surface: string, locator: Locator, scope: string) => {
+            await page.mouse.move(0, 0)
+            if (surface === "message-actions") await showActions(page.locator("article[data-slot]").last())
+            await expect(locator).toBeVisible()
+            if (out) {
+              mkdirSync(out, { recursive: true })
+              const name = `${width}-${theme}-${surface}`
+              const box = (await locator.boundingBox())!
+              await page.screenshot({
+                path: join(out, `${name}.png`),
+                clip: {
+                  x: Math.max(0, box.x - 8),
+                  y: Math.max(0, box.y - 8),
+                  width: box.width + 16,
+                  height: box.height + 16
+                }
+              })
+              const buttons = await locator.locator("button, [role=button], [role=switch]").evaluateAll((els) =>
+                els
+                  .filter((el) => (el as HTMLElement).checkVisibility({ checkOpacity: true }))
+                  .map((el) => {
+                    const r = el.getBoundingClientRect()
+                    return {
+                      name: el.getAttribute("aria-label") ?? el.textContent?.trim() ?? "",
+                      width: Math.round(r.width * 100) / 100,
+                      height: Math.round(r.height * 100) / 100,
+                      left: Math.round(r.left * 100) / 100
+                    }
+                  })
+                  .filter((b) => b.width > 0)
+              )
+              writeFileSync(join(out, `${name}.json`), JSON.stringify(buttons, null, 2))
+            }
+            await audit(`iconrow-${surface}`, scope)
+          }
+          await page.goto(`${server.url}/chats/${chatId}`)
+          await row("composer", page.getByTestId("composer-controls"), '[data-testid="composer-controls"]')
+          const message = page.locator("article[data-slot]").last()
+          await expect(message).toBeVisible()
+          await row(
+            "message-actions",
+            message.getByRole("toolbar", { name: "Message actions" }).locator("visible=true").first(),
+            "article[data-slot]"
+          )
+          await messageMenu(message, "Edit")
+          const footer = message.locator("footer").filter({ has: page.getByRole("group", { name: "Edit" }) })
+          await row("message-editor", footer, "article[data-slot] footer")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_SUITEFIX2_ONLY === "1") {
           await go("suitefix2-pending", `/cards/${cardId}/chat`)
           const cast = await openPanel(page, "Cast")

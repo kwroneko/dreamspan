@@ -308,39 +308,43 @@ export function EditControls({
         footer
           ? // As tall as the footer's own buttons: opening the edit leaves the row as it was. A
             // version's images go on a line of their own above them (images.tsx).
-            "flex min-w-0 flex-1 flex-wrap items-center gap-1 [&_button:not(li_*)]:h-8"
-          : "flex flex-wrap items-center gap-2"
+            // The tools after Save and Cancel are icon buttons side by side with no gap, as the
+            // message's actions and versions beside them are: one square each, one spacing.
+            "flex min-w-0 flex-1 flex-wrap items-center gap-y-1 [&_button:not(li_*)]:h-8"
+          : "flex flex-wrap items-center gap-y-2"
       }
     >
-      <Tooltip label={`${shownSave} (Ctrl+Enter)`}>
+      <div className={`flex flex-wrap items-center ${footer ? "gap-1" : "gap-2"}`}>
+        <Tooltip label={`${shownSave} (Ctrl+Enter)`}>
+          <Button
+            type={footer ? "button" : "submit"}
+            variant="primary"
+            disabled={disabled}
+            className={footer ? "max-sm:w-8 max-sm:px-0" : ""}
+            {...(footer ? { onClick: () => saveEdit(session, onSave) } : {})}
+          >
+            <Icon name="check" />
+            <span className={label}>{shownSave}</span>
+          </Button>
+        </Tooltip>
+        {saves.map(({ option }) => (
+          <option.component key={option.id} entry={entry} session={session} disabled={disabled} save={onSaveWith} />
+        ))}
         <Button
-          type={footer ? "button" : "submit"}
-          variant="primary"
-          disabled={disabled}
-          className={footer ? "max-sm:px-2" : ""}
-          {...(footer ? { onClick: () => saveEdit(session, onSave) } : {})}
+          onClick={onCancel}
+          className={footer ? "max-sm:w-8 max-sm:px-0" : ""}
+          hint={
+            draft.target._tag === "Write"
+              ? "Closes the editor without adding a message version."
+              : "Closes the message editor without saving."
+          }
         >
-          <Icon name="check" />
-          <span className={label}>{shownSave}</span>
+          <Icon name="close" />
+          <span className={label}>Cancel</span>
         </Button>
-      </Tooltip>
-      {saves.map(({ option }) => (
-        <option.component key={option.id} entry={entry} session={session} disabled={disabled} save={onSaveWith} />
-      ))}
-      <Button
-        onClick={onCancel}
-        className={footer ? "max-sm:px-2" : ""}
-        hint={
-          draft.target._tag === "Write"
-            ? "Closes the editor without adding a message version."
-            : "Closes the message editor without saving."
-        }
-      >
-        <Icon name="close" />
-        <span className={label}>Cancel</span>
-      </Button>
+      </div>
       <span className="flex-1" />
-      {selection && <EditorTextActions text={text} selection={selected} shown />}
+      {selection && <EditorTextActions text={text} selection={selected} shown size="row" />}
       {tools}
     </div>
   )

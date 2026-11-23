@@ -36,7 +36,7 @@ function GuidanceToggle({
         onClick={() => changeGuidance(!guidance)}
         className={`w-9 px-0! ${guidance ? "bg-guidance-surface text-guidance! ring-1 ring-guidance/60" : ""}`}
       >
-        <Icon name="guidance" size={18} />
+        <Icon name="guidance" />
       </Button>
     </Tooltip>
   )

@@ -113,7 +113,7 @@ export function Composition({
         >
           {versions}
           <span className="flex-1" />
-          <EditorTextActions text={text} selection={selection} shown scope={{ ownVersion: target }} />
+          <EditorTextActions text={text} selection={selection} shown scope={{ ownVersion: target }} size="row" />
         </div>
         <div ref={body} className="min-w-0 px-3 py-2">
           {source}

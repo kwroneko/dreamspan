@@ -12,7 +12,7 @@ import {
 import { makeRegistry } from "./registry.ts"
 import { Icon, type IconName } from "./ui/Icon.tsx"
 import { Menu } from "./ui/Menu.tsx"
-import { Tooltip } from "./ui/Tooltip.tsx"
+import { iconButtonClass, Tooltip } from "./ui/Tooltip.tsx"
 
 export interface TextActionContext {
   readonly text: string
@@ -106,6 +106,7 @@ export function EditorTextActions({
   shown,
   source,
   scope,
+  size = "strip",
   className = ""
 }: {
   text: string
@@ -114,6 +115,12 @@ export function EditorTextActions({
   source?: "snippet" | undefined
   /** What the text belongs to, for actions on it: rendered message text being composed from. */
   scope?: Partial<Pick<TextActionContext, "ownVersion">> | undefined
+  /**
+   * "strip": the small buttons of the strip inside a field's frame (ui/FieldFrame.tsx). "row": in a
+   * row of icon buttons outside the box (a message edit's footer), each the shared icon button's
+   * square (ui/Tooltip.tsx `iconButtonClass`), with no gap of their own, as its neighbours have.
+   */
+  size?: "strip" | "row"
   className?: string
 }) {
   const snapshot = useSyncExternalStore(textActions.subscribe, textActions.snapshot, textActions.snapshot)
@@ -125,10 +132,10 @@ export function EditorTextActions({
       data-editor-active={shown || undefined}
       role="toolbar"
       aria-label="Text actions"
-      className={`flex min-w-0 items-center justify-end gap-0.5 ${className}`}
+      className={`flex min-w-0 items-center justify-end ${size === "strip" ? "gap-0.5" : ""} ${className}`}
     >
       {offered.map(({ action, context }) => (
-        <ActionButton key={action.id} action={action} context={context} />
+        <ActionButton key={action.id} action={action} context={context} size={size} />
       ))}
     </div>
   )
@@ -159,7 +166,15 @@ const focusedElement = () => {
   return active instanceof HTMLElement ? active : null
 }
 
-function ActionButton({ action, context }: { action: TextAction; context: TextActionContext }) {
+function ActionButton({
+  action,
+  context,
+  size
+}: {
+  action: TextAction
+  context: TextActionContext
+  size: "strip" | "row"
+}) {
   // Open with the text as it was when it opened; the editor to give focus back to.
   const [chosen, setChosen] = useState<TextActionContext | null>(null)
   const editor = useRef<HTMLElement | null>(null)
@@ -211,12 +226,16 @@ function ActionButton({ action, context }: { action: TextAction; context: TextAc
               }
             : undefined
         }
-        className={`aria-disabled:opacity-40 inline-flex h-6 shrink-0 items-center justify-center gap-1.5 rounded-md text-xs text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus max-sm:h-8 ${
-          action.icon ? "w-6 max-sm:w-8" : "px-2"
-        }`}
+        className={
+          size === "row" && action.icon
+            ? `${iconButtonClass()} aria-disabled:opacity-40`
+            : `aria-disabled:opacity-40 inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md text-xs text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus ${
+                size === "row" ? "h-8 px-2" : `h-6 max-sm:h-8 ${action.icon ? "w-6 max-sm:w-8" : "px-2"}`
+              }`
+        }
       >
         {action.icon ? (
-          <Icon name={action.icon} size={14} />
+          <Icon name={action.icon} size={size === "row" ? 16 : 14} />
         ) : (
           <>
             <span className={action.shortLabel ? "max-sm:hidden" : ""}>{action.label}</span>

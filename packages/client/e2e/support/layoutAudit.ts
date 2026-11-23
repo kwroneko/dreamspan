@@ -12,7 +12,7 @@ interface Box {
   height: number
 }
 interface Violation {
-  kind: "inset" | "text" | "gap" | "alignment" | "overlap" | "overlay" | "fill" | "exception"
+  kind: "inset" | "text" | "gap" | "alignment" | "overlap" | "overlay" | "fill" | "iconrow" | "exception"
   selector: string
   related?: string
   name: string
@@ -197,7 +197,7 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
       for (const el of shown) {
         if (el.hasAttribute("data-layout-audit-ignore")) {
           for (const entry of el.dataset.layoutAuditIgnore!.split(";"))
-            if (!/^(inset|text|gap|alignment|overlap|overlay|fill):\s*\S.+/.test(entry.trim()))
+            if (!/^(inset|text|gap|alignment|overlap|overlay|fill|iconrow):\s*\S.+/.test(entry.trim()))
               add("exception", el, `Invalid exception (rule and reason required): ${entry}`)
         }
         // An icon's paths are drawing primitives, not independent layout boxes.
@@ -637,6 +637,88 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
               t.el,
               `first shown control at ${t.x.toFixed(2)}, ${t.y.toFixed(2)}px from its tile's corner; ${ux}, ${uy}px on the grid's other tiles`
             )
+      }
+      // Icon buttons side by side in one row (an editor's tools, a message's actions, a panel's
+      // header) share one square: the same width and height, and one gap between neighbours.
+      // A row is the widest single-line band around a button: its ancestors while they stay
+      // under twice its height. An icon button shows one icon and no text: a button with visible
+      // text (Save, the "1/1" counter), a picture, or an icon beside a chevron (a picker chip)
+      // isn't one.
+      const iconControls = "button, [role=button], [role=switch], a[href]"
+      const iconOnly = (el: HTMLElement) => {
+        const icons = [...el.querySelectorAll<SVGElement>("svg")].filter(
+          (svg) => !svg.parentElement?.closest("svg") && svg.getBoundingClientRect().width > 0
+        )
+        if (icons.length !== 1 || el.querySelector("img, canvas, video")) return false
+        const texts = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+        for (let t = texts.nextNode(); t; t = texts.nextNode()) {
+          const host = t.parentElement
+          if (t.textContent?.trim() && host && !host.closest("svg") && visible(host)) return false
+        }
+        return true
+      }
+      const iconRows = new Map<HTMLElement, HTMLElement[]>()
+      for (const el of shown) {
+        if (el instanceof SVGElement || !el.matches(iconControls) || !iconOnly(el)) continue
+        if ([...ancestors(parent(el))].some((p) => p.matches(iconControls))) continue
+        const r = rect(el)
+        let row: HTMLElement | null = null
+        for (const p of ancestors(parent(el))) {
+          if (p === document.body || rect(p).height >= r.height * 2) break
+          row = p
+        }
+        if (row) iconRows.set(row, [...(iconRows.get(row) ?? []), el])
+      }
+      for (const [row, buttons] of iconRows) {
+        // One line of them: the buttons centred on one line of the row.
+        const lines: HTMLElement[][] = []
+        const middle = (b: HTMLElement) => rect(b).top + rect(b).height / 2
+        for (const b of buttons) {
+          const line = lines.find((l) => Math.abs(middle(l[0]!) - middle(b)) <= 2)
+          if (line) line.push(b)
+          else lines.push([b])
+        }
+        for (const line of lines) {
+          if (line.length < 2) continue
+          line.sort((a, b) => rect(a).left - rect(b).left)
+          // The size most of them have is the row's; the others are reported.
+          const counts = new Map<string, number>()
+          for (const b of line) {
+            const key = `${Math.round(rect(b).width)}x${Math.round(rect(b).height)}`
+            counts.set(key, (counts.get(key) ?? 0) + 1)
+          }
+          const [usual] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]!
+          const [uw, uh] = usual.split("x").map(Number) as [number, number]
+          const sizes = line.map((b) => `${rect(b).width.toFixed(0)}×${rect(b).height.toFixed(0)}`).join(", ")
+          for (const b of line)
+            if (Math.abs(rect(b).width - uw) > tolerance || Math.abs(rect(b).height - uh) > tolerance)
+              add(
+                "iconrow",
+                b,
+                `icon button ${rect(b).width.toFixed(2)} × ${rect(b).height.toFixed(2)}px; the row's others are ${uw} × ${uh}px [${sizes}]`,
+                row
+              )
+          // Neighbours a short way apart are one cluster, with one gap between them. A wider
+          // space (a spacer, groups pushed apart) starts another cluster.
+          const gaps = line.slice(1).map((b, i) => rect(b).left - rect(line[i]!).right)
+          // Reported on the cluster's first and last buttons, so a scope around them includes it.
+          const clusters: Array<{ first: HTMLElement; last: HTMLElement; gaps: number[] }> = [
+            { first: line[0]!, last: line[0]!, gaps: [] }
+          ]
+          for (const [i, g] of gaps.entries()) {
+            const next = line[i + 1]!
+            if (g > 12) clusters.push({ first: next, last: next, gaps: [] })
+            else Object.assign(clusters.at(-1)!, { last: next }).gaps.push(g)
+          }
+          for (const { first, last, gaps: cluster } of clusters)
+            if (cluster.length > 1 && Math.max(...cluster) - Math.min(...cluster) > tolerance)
+              add(
+                "iconrow",
+                first,
+                `gaps between icon buttons [${cluster.map((g) => g.toFixed(2)).join(", ")}]px; spread ${(Math.max(...cluster) - Math.min(...cluster)).toFixed(2)}px; sizes [${sizes}]`,
+                last
+              )
+        }
       }
       return results
     },

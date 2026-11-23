@@ -25,7 +25,7 @@ import type { ComposerImage } from "@dreamspan/shared/composerApi.ts"
 import { ContentImage } from "../../ui/ContentImage.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
-import { PICTURE_TOGGLE, SquareIconButton, ToggleIconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { IconButton, PICTURE_TOGGLE, SquareIconButton, ToggleIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
 import { carryOnDrag, isAppDrag, PICTURE_DRAG } from "../../ui/appDrags.ts"
 import { EnsurePortraitViewer, PicturePeek, type Portrait, usePortraitViewer } from "../../ui/Portrait.tsx"
@@ -93,7 +93,8 @@ function AttachButton({
   onFiles,
   anyType = false,
   pickerLabel = anyType ? "Choose files" : "Choose images",
-  hint = "Attach images. You can also paste an image or drop it anywhere in the chat."
+  hint = "Attach images. You can also paste an image or drop it anywhere in the chat.",
+  size = "md"
 }: {
   disabled: boolean
   onFiles: (files: File[]) => void
@@ -101,6 +102,8 @@ function AttachButton({
   anyType?: boolean
   pickerLabel?: string
   hint?: string
+  /** "sm" among the message editor's icon buttons, "md" beside the composer's (ui/Tooltip.tsx). */
+  size?: "md" | "sm"
 }) {
   const picker = useRef<HTMLInputElement>(null)
   return (
@@ -118,15 +121,25 @@ function AttachButton({
           event.currentTarget.value = ""
         }}
       />
-      <SquareIconButton
-        label={anyType ? "Attach files" : "Attach images"}
-        hint={hint}
-        variant="ghost"
-        disabled={disabled}
-        onClick={() => picker.current?.click()}
-      >
-        <Icon name="paperclip" />
-      </SquareIconButton>
+      {size === "sm" ? (
+        <IconButton
+          icon="paperclip"
+          label={anyType ? "Attach files" : "Attach images"}
+          hint={hint}
+          disabled={disabled}
+          onClick={() => picker.current?.click()}
+        />
+      ) : (
+        <SquareIconButton
+          label={anyType ? "Attach files" : "Attach images"}
+          hint={hint}
+          variant="ghost"
+          disabled={disabled}
+          onClick={() => picker.current?.click()}
+        >
+          <Icon name="paperclip" />
+        </SquareIconButton>
+      )}
     </>
   )
 }
@@ -508,6 +521,7 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
         disabled={busy}
         onFiles={(files) => void add(files)}
         pickerLabel="Choose images for this version"
+        size="sm"
         hint="Attach images to this version. You can also paste an image or drop it on the editor."
       />
       {busy && (
