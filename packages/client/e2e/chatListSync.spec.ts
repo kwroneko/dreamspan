@@ -9,6 +9,7 @@ import { Effect } from "effect"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -85,5 +86,5 @@ test("an unsent first message doesn't hold up logout, and is there after the nex
   await expect(page).toHaveURL(/\/login/)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/cards/${made.entityId}/chat`)
-  await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue(text)
+  await expectTextBox(page.getByRole("textbox", { name: "Message", exact: true }), text)
 })

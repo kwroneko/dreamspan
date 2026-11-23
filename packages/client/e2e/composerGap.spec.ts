@@ -10,6 +10,7 @@ import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { setGuidance } from "./support/composer.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -162,7 +163,7 @@ for (const latency of [0, 150]) {
           .toBe(LONG)
         await page.reload()
         await expect(bar(page)).toBeVisible()
-        await expect(box(page)).toHaveValue(LONG)
+        await expectTextBox(box(page), LONG)
       } else await box(page).fill(mode === "a line wrap" ? NEAR_WRAP : LONG)
       const gaps = await gapsWhileTyping(page)
       const seen = [...new Set(gaps)]

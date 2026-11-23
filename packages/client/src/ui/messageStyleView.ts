@@ -7,7 +7,7 @@
 // at once (CodeMirror maps them), and the text goes to a worker, which reparses only the block
 // that changed and answers with the new ranges. One request is out at a time; an answer for an
 // older text is moved through the edits made since, and the latest text is asked for next.
-import { ChangeSet, type Extension, StateEffect, StateField } from "@codemirror/state"
+import { ChangeSet, type Extension, StateEffect, StateField, Transaction } from "@codemirror/state"
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view"
 import { messageStyleRanges, STYLE_KINDS, styleCache, type StyleRanges } from "./messageStyles.ts"
 
@@ -68,6 +68,14 @@ export function messageStyling(html: boolean): Extension {
   const field = StateField.define<DecorationSet>({
     create: (state) => decorations(messageStyleRanges(state.doc.toString(), { html }, local), state.doc.length),
     update(set, transaction) {
+      // Text put in from outside rather than typed (the composer's draft arriving as the page
+      // opens, a restore, another tab's text) is styled at once, as an opening editor's is, so it
+      // never shows plain first; typing and pasting only map the marks and leave the rest to the worker.
+      if (transaction.docChanged && transaction.annotation(Transaction.userEvent) === undefined)
+        return decorations(
+          messageStyleRanges(transaction.newDoc.toString(), { html }, local),
+          transaction.newDoc.length
+        )
       set = set.map(transaction.changes)
       for (const effect of transaction.effects) if (effect.is(setStyles)) set = effect.value
       return set
@@ -93,6 +101,12 @@ export function messageStyling(html: boolean): Extension {
       }
       update(update: ViewUpdate) {
         if (update.docChanged) {
+          // Text put in from outside was styled whole (the field): an answer for the text before
+          // it, or one held through a composition, would only cover it with stale marks.
+          if (update.transactions.some((tr) => tr.docChanged && tr.annotation(Transaction.userEvent) === undefined)) {
+            this.out = null
+            this.held = null
+          }
           if (this.out) this.out = { ...this.out, since: this.out.since.compose(update.changes) }
           if (this.held) this.held = this.held.map(update.changes)
           this.dirty = true
@@ -163,7 +177,7 @@ const messageTextTheme = EditorView.theme({
     backgroundColor: "transparent"
   },
   "&.rp-message-text .cm-scroller": { fontFamily: "inherit", lineHeight: "inherit" },
-  "&.rp-message-text .cm-content": { padding: "0", caretColor: "var(--color-message-main)" },
+  "&.rp-message-text .cm-content": { padding: "var(--bare-padding, 0)", caretColor: "var(--color-message-main)" },
   "&.rp-message-text .cm-line": { padding: "0" },
   "&.rp-message-text .cm-cursor, &.rp-message-text .cm-dropCursor": {
     borderLeftColor: "var(--color-message-main)"

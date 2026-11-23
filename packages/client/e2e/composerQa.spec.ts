@@ -10,6 +10,7 @@ import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { cacheChip, choices, modelChip, nextChip, nextReply, presetChip, presetName } from "./support/strip.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -102,7 +103,7 @@ for (const width of [1440, 390]) {
       )
     ).toHaveLength(0)
     // Submitted guidance leaves the box (DESIGN §2.2, guidance on swipes).
-    await expect(box(page)).toHaveValue("")
+    await expectTextBox(box(page), "")
     await expect(toggle(page)).toBeChecked()
     // The server still has the old preference; the first write remains held.
     expect((await rpc((api) => composerChoice(api, chatId))).guidance).toBe(false)

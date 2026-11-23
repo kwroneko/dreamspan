@@ -2,13 +2,16 @@
 // most of the bundle). A pending chat loads it ahead, so the chat its first send saves opens
 // at once: the route's skeleton never shows between them (owner, 2026-11-02: nothing flashes).
 import type { ComponentType } from "react"
+import { loadMessageTextEditor } from "../../ui/messageTextLoader.ts"
 
 let loaded: ComponentType | null = null
 let pending: Promise<{ default: ComponentType }> | null = null
 
 export const loadChatPage = () =>
-  (pending ??= import("./ChatPage.tsx").then(
-    (module) => {
+  // The composer's text box comes with it (ui/MessageTextEditor.tsx): fetched side by side, so
+  // the page's first frame already has the box, never its loading line.
+  (pending ??= Promise.all([import("./ChatPage.tsx"), loadMessageTextEditor()]).then(
+    ([module]) => {
       loaded = module.ChatPage
       return { default: module.ChatPage }
     },

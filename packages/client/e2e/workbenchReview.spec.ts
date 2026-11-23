@@ -6,6 +6,7 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel, panelTab } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "20", FAKE_GENERATOR_TOKENS: "200" })
 
@@ -44,19 +45,22 @@ test("two views keep their composer labels, drafts and panels independent while 
   const a = left.getByRole("textbox", { name: "Message", exact: true })
   const b = right.getByRole("textbox", { name: "Message", exact: true })
   await expect(b).toBeEditable()
-  // Each screen-reader description belongs to its own composer, including guidance mode.
-  const ids = await page
+  // Each composer carries its own screen-reader description, with no id another view could share.
+  const hints = await page
     .locator('[data-testid="composer"]')
-    .evaluateAll((boxes) => boxes.map((box) => ({ id: box.id, hint: box.getAttribute("aria-describedby") })))
-  expect(new Set(ids.map((box) => box.id)).size).toBe(2)
-  expect(new Set(ids.map((box) => box.hint)).size).toBe(2)
+    .evaluateAll((boxes) => boxes.map((box) => ({ id: box.id, hint: box.getAttribute("aria-description") })))
+  expect(hints).toHaveLength(2)
+  for (const box of hints) {
+    expect(box.id).toBe("")
+    expect(box.hint).toBeTruthy()
+  }
   await panelTab(page, "Notes")
   await a.fill("Left view draft")
   await expect(page.getByRole("tabpanel", { name: "This chat", exact: true })).toBeVisible()
   await b.fill("Right view draft")
   await expect(page.getByRole("tabpanel", { name: "Notes", exact: true })).toBeVisible()
-  await expect(a).toHaveValue("Left view draft")
-  await expect(b).toHaveValue("Right view draft")
+  await expectTextBox(a, "Left view draft")
+  await expectTextBox(b, "Right view draft")
   await expect(page.locator("[data-tab] [data-unsaved-dot]")).toHaveCount(0)
   const rightTop = await right.getByTestId("messages").evaluate((element) => element.scrollTop)
   const leftTop = await left.getByTestId("messages").evaluate((element) => element.scrollTop)

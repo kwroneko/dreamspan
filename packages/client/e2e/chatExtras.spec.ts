@@ -10,6 +10,7 @@ import { typeInto } from "./support/composer.ts"
 import { asUser } from "./support/rpc.ts"
 import { showActions } from "./support/message.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 // About two seconds a reply.
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "80", FAKE_GENERATOR_TOKENS: "160" })
@@ -58,22 +59,22 @@ test("switching between branches opens the fork through each, with its own compo
   const left = message(page, "Take the left road.")
   await expect(left.getByRole("group", { name: "Branches: 1 of 2" })).toBeVisible()
   await expect(message(page, "The left road floods.")).toBeVisible()
-  await expect(box(page)).toHaveValue("")
+  await expectTextBox(box(page), "")
   // The URL names the fork shown, so a reload stays on it...
   await expect(page).toHaveURL(/fork=/)
   await page.reload()
   await expect(message(page, "The left road floods.")).toBeVisible()
   await expect(box(page)).toBeEditable()
-  await expect(box(page)).toHaveValue("")
+  await expectTextBox(box(page), "")
 
   await left.getByRole("button", { name: "Next branch" }).click()
   await expect(message(page, "Take the right road.")).toBeVisible()
-  await expect(box(page)).toHaveValue("On the right, a toll.")
+  await expectTextBox(box(page), "On the right, a toll.")
   // ...while switching never moved where the chat opens: the fork last chatted in.
   await expect(page).toHaveURL(/fork=/)
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(message(page, "Take the right road.")).toBeVisible()
-  await expect(box(page)).toHaveValue("On the right, a toll.")
+  await expectTextBox(box(page), "On the right, a toll.")
 })
 
 test("a deleted message comes back with Undo, and the bin restores and deletes for good", async ({ page }) => {

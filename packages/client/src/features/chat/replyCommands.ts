@@ -92,8 +92,7 @@ export const registerReplyCommands = () => [
     order: 30,
     icon: "continue",
     shortcut: { key: "Enter", mod: false, alt: true },
-    acceptsKey: (event) =>
-      !typingTarget(event) || keyTarget(event)?.matches('textarea[data-testid="composer"]') === true,
+    acceptsKey: (event) => !typingTarget(event) || keyTarget(event)?.matches('[data-testid="composer"]') === true,
     available: (context) => availableAction(context, "message.continue"),
     run: (context) => {
       const target = latestContext(context)

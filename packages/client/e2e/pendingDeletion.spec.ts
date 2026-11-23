@@ -5,6 +5,7 @@ import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { asUser } from "./support/rpc.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -41,7 +42,7 @@ test("deletion on another device defeats old browser text; a new keystroke after
     await apiLogin(first.request, server(), ADMIN.handle, ADMIN.password)
     const url = `${server().url}/cards/${card.entityId}/chat`
     await first.goto(url)
-    await expect(first.getByLabel("Message", { exact: true })).toHaveValue("Text to delete")
+    await expectTextBox(first.getByLabel("Message", { exact: true }), "Text to delete")
     await first.getByLabel("Message", { exact: true }).fill("Old text left on device A")
     // An arbitrarily fast device clock must not beat a server deletion.
     const kept = await first.evaluate(() => {
@@ -61,9 +62,7 @@ test("deletion on another device defeats old browser text; a new keystroke after
     const second = await deviceB.newPage()
     await apiLogin(second.request, server(), ADMIN.handle, ADMIN.password)
     await second.goto(url)
-    await expect(second.getByLabel("Message", { exact: true })).toHaveValue(
-      /^(Text to delete|Old text left on device A)$/
-    )
+    await expectTextBox(second.getByLabel("Message", { exact: true }), /^(Text to delete|Old text left on device A)$/)
     await second.getByLabel("Message", { exact: true }).fill("")
     await expect
       .poll(() => admin((api) => api.GetUserDraft(address)).then((draft) => draft?.clearedVersion ?? 0))
@@ -72,13 +71,13 @@ test("deletion on another device defeats old browser text; a new keystroke after
 
     const reopened = await deviceA.newPage()
     await reopened.goto(url)
-    await expect(reopened.getByLabel("Message", { exact: true })).toHaveValue("")
+    await expectTextBox(reopened.getByLabel("Message", { exact: true }), "")
     // This copy observes the deletion's version. No server save or async backup is
     // required to finish before reloading immediately after its final keystroke.
     await reopened.getByLabel("Message", { exact: true }).fill("A new thought after deleting")
     hold = false
     await reopened.reload()
-    await expect(reopened.getByLabel("Message", { exact: true })).toHaveValue("A new thought after deleting")
+    await expectTextBox(reopened.getByLabel("Message", { exact: true }), "A new thought after deleting")
     await expect
       .poll(() => admin((api) => api.GetUserDraft(address)).then((draft) => draft?.content))
       .toBe("A new thought after deleting")
@@ -304,7 +303,7 @@ test("a whole pending-message clear survives a blocked history queue, new text a
     await apiLogin(second.request, server(), ADMIN.handle, ADMIN.password)
     const url = `${server().url}/cards/${card.entityId}/chat`
     await first.goto(url)
-    await expect(first.getByLabel("Message", { exact: true })).toHaveValue(old)
+    await expectTextBox(first.getByLabel("Message", { exact: true }), old)
     // A retained pre-clear copy can be an earlier save whose acknowledgement was lost.
     // Keep that exact starting text without an additional live edit racing B's opening.
     await first.evaluate(
@@ -333,7 +332,7 @@ test("a whole pending-message clear survives a blocked history queue, new text a
     await first.close()
     await second.goto(url)
     const input = second.getByLabel("Message", { exact: true })
-    await expect(input).toHaveValue(old)
+    await expectTextBox(input, old)
     await second.getByRole("button", { name: "Undo / history", exact: true }).click()
     await expect.poll(() => historyHeld).toBe(true)
     await input.fill("")
@@ -349,14 +348,14 @@ test("a whole pending-message clear survives a blocked history queue, new text a
     await second.close()
     const restored = await deviceB.newPage()
     await restored.goto(url)
-    await expect(restored.getByLabel("Message", { exact: true })).toHaveValue(fresh)
+    await expectTextBox(restored.getByLabel("Message", { exact: true }), fresh)
     await expect
       .poll(() => admin((api) => api.GetUserDraft(address)).then((draft) => draft?.clearedVersion ?? 0))
       .toBeGreaterThan(0)
     holdA = false
     const stale = await deviceA.newPage()
     await stale.goto(url)
-    await expect(stale.getByLabel("Message", { exact: true })).toHaveValue(fresh)
+    await expectTextBox(stale.getByLabel("Message", { exact: true }), fresh)
     await expect.poll(() => admin((api) => api.GetUserDraft(address)).then((draft) => draft?.content)).toBe(fresh)
   } finally {
     await deviceA.close()

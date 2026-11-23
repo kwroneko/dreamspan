@@ -75,6 +75,16 @@ export interface CodeEditorProps {
   extensions?: Extension | undefined
   /** A class on the element holding the text, for what the text inherits there (its font, line height). */
   surfaceClass?: string | undefined
+  /** Shown in the empty box, and its `aria-placeholder`. */
+  placeholder?: string | undefined
+  /** More attributes on the element that takes the text (a test id, `aria-busy`); compared by value. */
+  contentAttributes?: Readonly<Record<string, string>> | undefined
+  /** A key pressed in the text, before the editor's own keys: true when the host took it (the composer's Enter). */
+  onKeyDown?: ((event: KeyboardEvent) => boolean) | undefined
+  /** True for a paste or drop the host takes as files (attachments): the editor inserts nothing for it. */
+  hostFiles?: ((data: DataTransfer) => boolean) | undefined
+  /** Message text without the message's styling (`message.text-editor`): the composer's guidance. */
+  plain?: boolean | undefined
   ref?: Ref<TextSurfaceHandle> | undefined
 }
 

@@ -4,6 +4,7 @@ import { Effect } from "effect"
 import { startContinueProvider } from "./support/continueProvider.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: Awaited<ReturnType<typeof startContinueProvider>>
@@ -99,7 +100,7 @@ test("Alt+Enter continues without sending or consuming composer text, including 
     await expect.poll(() => provider.requests.length).toBe(requests + 1)
     expect(JSON.stringify(provider.requests.at(-1))).not.toContain("UNSENT SYNTHETIC DRAFT")
     expect(provider.requests.at(-1)!.messages.at(-1)!.role).toBe("assistant")
-    await expect(box).toHaveValue("UNSENT SYNTHETIC DRAFT")
+    await expectTextBox(box, "UNSENT SYNTHETIC DRAFT")
     await expect(page.getByRole("article")).toHaveCount(1)
     await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 30_000 })
   }
@@ -170,12 +171,12 @@ test("Enter sends is visible, persists and controls saved and pending composers"
     await expect(box).toBeEditable()
     await box.fill("first line")
     await box.press("Enter")
-    await expect(box).toHaveValue("first line\n")
+    await expectTextBox(box, "first line\n")
     await box.press("Alt+Enter") // Pending chats have nothing to continue; never send the draft.
-    await expect(box).toHaveValue("first line\n")
+    await expectTextBox(box, "first line\n")
     await box.press("Control+Enter")
     await expect(page.getByRole("article").filter({ hasText: "first line" })).toBeVisible()
-    await expect(page.getByTestId("composer")).toHaveValue("")
+    await expectTextBox(page.getByTestId("composer"), "")
   }
   await page.goto(`${server().url}/settings/interface`)
   await page.getByRole("radio", { name: /^Automatic/ }).click()

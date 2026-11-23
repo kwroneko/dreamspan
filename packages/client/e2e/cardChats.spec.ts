@@ -10,6 +10,7 @@ import { Effect } from "effect"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -151,10 +152,10 @@ test("a first message typed before the chat exists survives leaving it, and goes
   await page.locator(".fixed.inset-0").getByRole("link", { name: "Home", exact: true }).last().click()
   await page.getByRole("main").getByRole("link", { name: "Open Fen", exact: true }).click()
   await page.getByRole("button", { name: "Close", exact: true }).click()
-  await expect(box).toHaveValue(text)
+  await expectTextBox(box, text)
   // A reload, too: it's kept in the browser, not the page.
   await page.reload()
-  await expect(box).toHaveValue(text)
+  await expectTextBox(box, text)
 
   // Sent, the chat has it, and a new chat with Fen starts empty.
   await page.getByRole("button", { name: /^Send/ }).click()
@@ -163,7 +164,7 @@ test("a first message typed before the chat exists survives leaving it, and goes
   await page.goto(`${server().url}/cards/${fen}/chat`)
   await expect(page.getByRole("heading", { name: "Fen" })).toBeVisible()
   await page.waitForTimeout(500)
-  await expect(box).toHaveValue("")
+  await expectTextBox(box, "")
   await context.close()
 })
 

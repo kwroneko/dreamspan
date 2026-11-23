@@ -6,6 +6,7 @@ import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { loginCookie, withCookie, type Client } from "./support/rpc.ts"
 import { openPanel, closePanel, openSummarySettings } from "./support/panel.ts"
 import { chooseCustomServer, chooseDefaultModelIfNone } from "./support/provider.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 test.describe.configure({ mode: "serial" })
@@ -158,21 +159,22 @@ for (const width of [1440, 390])
         .poll(() => draftText(`pending-chat:${ref.entityId}`, "First message"))
         .toBe(`Unsent opening ${width} ${theme}`)
       await page.reload()
-      await expect(message).toHaveValue(`Unsent opening ${width} ${theme}`)
+      await expectTextBox(message, `Unsent opening ${width} ${theme}`)
       await message.fill("x")
       await expect.poll(() => draftText(`pending-chat:${ref.entityId}`, "First message")).toBe("x")
       await page.getByRole("button", { name: "Undo / history", exact: true }).click()
       await page.getByRole("button", { name: "Undo field change", exact: true }).click()
-      await expect(message).toHaveValue(`Unsent opening ${width} ${theme}`)
+      await expectTextBox(message, `Unsent opening ${width} ${theme}`)
       await page.keyboard.press("Escape")
       await page.reload()
-      await expect(message).toHaveValue(`Unsent opening ${width} ${theme}`)
+      await expectTextBox(message, `Unsent opening ${width} ${theme}`)
       await shot(page, `pending-${width}-${theme}`)
       const fresh = await browser.newContext({ viewport: { width, height: 1000 }, colorScheme: theme })
       const device = await fresh.newPage()
       await authenticate(device)
       await device.goto(`${server().url}/cards/${ref.entityId}/chat`)
-      await expect(device.getByRole("textbox", { name: "Message", exact: true })).toHaveValue(
+      await expectTextBox(
+        device.getByRole("textbox", { name: "Message", exact: true }),
         `Unsent opening ${width} ${theme}`
       )
       await device.goto(`${server().url}/chats/${started.chat.id}`)

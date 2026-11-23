@@ -31,7 +31,7 @@ const startSampling = (page: Page) =>
     w.frames_ = []
     w.stop_ = false
     const tick = () => {
-      const composer = document.querySelector('[data-testid="composer"]')!.getBoundingClientRect()
+      const composer = document.querySelector("[data-composer-text]")!.getBoundingClientRect()
       const list = document.querySelector('[data-testid="messages"]')!
       const rows = [...document.querySelectorAll("article[data-slot]")]
       const last = rows.reduce<Element | null>(

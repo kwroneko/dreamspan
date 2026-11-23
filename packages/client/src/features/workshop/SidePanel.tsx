@@ -33,6 +33,7 @@ import { IconLink } from "../../ui/Tooltip.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { castView, CastContext } from "../chat/cast.ts"
 import { ChatPlaceScope, chatPlaceKey } from "../chat/chatPlace.ts"
+import { composerTextbox } from "../chat/composerFocus.ts"
 import { type Flashes, MessageList } from "../chat/ChatPage.tsx"
 import { KindBadge } from "../chat/KindBadge.tsx"
 import { kindRootProps, useChatKindLook } from "../chat/kindLooks.ts"
@@ -437,8 +438,7 @@ function SideChatSurface({
   const problem = view.error ?? branchError
   const root = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (focusComposer)
-      root.current?.querySelector<HTMLElement>('[data-testid="composer"]')?.focus({ preventScroll: true })
+    if (focusComposer) (root.current ? composerTextbox(root.current) : null)?.focus({ preventScroll: true })
   }, [focusComposer])
   return (
     <ChatPlaceScope value={SIDE_CHAT_SCOPE}>

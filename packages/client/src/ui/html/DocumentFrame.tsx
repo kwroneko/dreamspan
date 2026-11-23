@@ -86,8 +86,11 @@ const focusGuard = {
   users: 0
 }
 const onGuardFocusIn = (event: FocusEvent) => {
-  if (event.target instanceof HTMLIFrameElement || !(event.target instanceof HTMLElement)) return
-  focusGuard.previous = event.target
+  // Inside a shadow root (the composer's and other editors) the event's target is the root's
+  // host, which can't take focus back: keep what actually had it.
+  const target = event.composedPath()[0] ?? event.target
+  if (target instanceof HTMLIFrameElement || !(target instanceof HTMLElement)) return
+  focusGuard.previous = target
   focusGuard.granted = null
 }
 const onGuardKeyDown = (event: KeyboardEvent) => {

@@ -4,6 +4,7 @@ import { Effect } from "effect"
 import { composerChoice } from "./support/composer.ts"
 import { loginCookie, withCookie, type Client } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import {} from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 let cookie: Promise<string> | undefined

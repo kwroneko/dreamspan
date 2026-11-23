@@ -334,7 +334,7 @@ test("the cache indicator is warm after a reply, and cold once an earlier messag
       await page.setViewportSize({ width, height: 900 })
       await expect(chip).toHaveText(/^↻ [\d.]+k? of [\d.]+k? uncached$/)
       await expectLayout(page, info, `cache-cold-composer-${width}`, {
-        scope: '.chat-column:has([data-testid="composer"])'
+        scope: ".chat-column:has([data-composer-text])"
       })
     }
   }

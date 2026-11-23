@@ -1074,7 +1074,7 @@ test.describe("synthetic library and every app surface", () => {
           return
         }
         if (process.env.LAYOUT_AUDIT_GUIDANCE_ONLY === "1") {
-          const scope = '.chat-column:has([data-testid="composer"])'
+          const scope = ".chat-column:has([data-composer-text])"
           await page.goto(`${server.url}/chats/${chatId}`)
           if (process.env.LAYOUT_AUDIT_PLUGIN === "1") {
             await expect(page.getByRole("button", { name: "Roll layout-fixture" })).toBeVisible()
@@ -1397,7 +1397,7 @@ test.describe("synthetic library and every app surface", () => {
             })
           )
           await go("splitconfirm-chat", `/chats/${chatId}?fork=${branch.id}`)
-          await audit("splitconfirm-composer", '.chat-column:has([data-testid="composer"])')
+          await audit("splitconfirm-composer", ".chat-column:has([data-composer-text])")
           await showAppNavigation(page)
           const foot = page
             .getByRole("region", { name: "Branches of the open chat", exact: true })

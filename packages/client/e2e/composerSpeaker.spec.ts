@@ -11,6 +11,7 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { choices, nextChip, nextName, nextReply, pickReply } from "./support/strip.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 // Seed 1's prose mentions none of this file's cast. Random synthetic names can
 // legitimately override talkativeness, changing Auto's next pick after a reply.
@@ -503,7 +504,7 @@ test("typing stays available while the saved speaker is loading; sending waits f
   await expect(send).toBeDisabled()
   release!()
   await expect(send).toBeEnabled()
-  await expect(composer(page)).toHaveValue("Kept while the speaker loads.")
+  await expectTextBox(composer(page), "Kept while the speaker loads.")
   await send.click()
   await expect(page.getByRole("article", { name: "Your message", exact: true }).last()).toContainText(
     "Kept while the speaker loads."
@@ -518,7 +519,7 @@ test("empty Enter requests the visible empty-box reply without adding human text
   await expect(page.getByRole("article")).toHaveCount(1)
   await expect(lastHeader(page)).toContainText("Mira")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
-  await expect(composer(page)).toHaveValue("")
+  await expectTextBox(composer(page), "")
 })
 
 for (const [width, height] of [

@@ -11,6 +11,7 @@ import type { RefId } from "@dreamspan/shared/library.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox, textBoxValue } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 
@@ -360,7 +361,7 @@ test("the bridge cannot borrow a click from outside its frame", async ({ page })
     )
   })
   await page.waitForTimeout(6000) // the setup's own activation has expired
-  await page.locator("textarea").last().click()
+  await page.getByTestId("composer").click()
   await page.keyboard.press("a")
   await expect(page.locator("html")).toHaveAttribute("data-review-bridge-done", "yes")
   // The key press in the app gave the frame no activation of its own.
@@ -629,12 +630,12 @@ test("a panel that takes focus gets neither the typing nor the bridge, and a cli
   const inside = page.frameLocator('iframe[title="Panel"]')
   await expect(inside.locator("body")).toHaveAttribute("data-focus-ready", "yes")
   await page.evaluate(() => navigator.clipboard.writeText("Unchanged"))
-  const composer = page.locator("textarea").last()
+  const composer = page.getByTestId("composer")
   await composer.click()
   await page.keyboard.type("Good evening to you", { delay: 60 })
   // Focus went back: most of the typing is the composer's (without the guard, none of it is).
   // A few keys typed while focus was away may reach the panel, more on a loaded host.
-  expect((await composer.inputValue()).length).toBeGreaterThan(9)
+  expect((await textBoxValue(composer)).length).toBeGreaterThan(9)
   // Whatever key reached the panel gave it nothing to act on.
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("Unchanged")
   // A press in the panel gives it focus, and its copy then works. (Its field may already hold
@@ -692,7 +693,7 @@ test("a press the app sees before the pointer's arrival keeps its field's focus"
   await page.goto(`${server().url}/chats/${started.chat.id}`)
   const inside = page.frameLocator('iframe[title="Panel"]')
   await expect(inside.locator("body")).toHaveAttribute("data-ready", "yes")
-  const composer = page.locator("textarea").last()
+  const composer = page.getByTestId("composer")
   await composer.click()
   await page.keyboard.type("Hello", { delay: 30 })
   await page.waitForTimeout(700)
@@ -704,7 +705,7 @@ test("a press the app sees before the pointer's arrival keeps its field's focus"
   await page.mouse.up()
   await page.keyboard.type("Room 4", { delay: 60 })
   await expect(inside.locator("#field")).toHaveValue("Room 4")
-  await expect(composer).toHaveValue("Hello")
+  await expectTextBox(composer, "Hello")
 })
 
 // A message's own HTML can paint over the strip (a decoy with pointer-events: none passes the

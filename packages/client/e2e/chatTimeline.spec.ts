@@ -6,6 +6,7 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { condensed, level1 } from "./support/summaries.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 let cookie = ""
@@ -85,7 +86,7 @@ for (const width of [1440, 390]) {
       .first()
       .click()
     await expect(originals(page, chat.entries[0]!)).toHaveCount(0)
-    await expect(composer).toHaveValue("A draft kept while switching the viewer.")
+    await expectTextBox(composer, "A draft kept while switching the viewer.")
     const panel = await openPanel(page, "Summaries")
     // The panel keeps the rail; what the chat shows is its own tabs.
     await expect(panel.getByRole("switch", { name: "Summaries in chat" })).toHaveCount(0)
@@ -95,7 +96,7 @@ for (const width of [1440, 390]) {
     await page.reload()
     await expect(viewTab(page, "Summaries")).toHaveAttribute("aria-selected", "true")
     await expect(page.getByTestId("coverage-rail")).toBeVisible()
-    await expect(composer).toHaveValue("A draft kept while switching the viewer.")
+    await expectTextBox(composer, "A draft kept while switching the viewer.")
     const other = await fixture(`Other chat ${width}`)
     await page.goto(`${server().url}/chats/${other.id}`)
     await expect(page.locator("[data-timeline-summary]")).toHaveCount(2)

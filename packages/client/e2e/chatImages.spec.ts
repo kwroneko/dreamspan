@@ -6,6 +6,7 @@ import { apiLogin, ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { messageMenu, showActions } from "./support/message.ts"
 import { composerPlaces, expectGrewUpward, expectImageTile, removeAttachment } from "./support/attachments.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "20" })
 const tooltip = (page: Page) => page.locator('[data-layout-overlay="Tooltip floats above the page"]')
@@ -101,7 +102,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled()
       await page.reload()
       await expect(attached.getByRole("img")).toHaveCount(1)
-      await expect(page.getByLabel("Message", { exact: true })).toHaveValue("A costume study for the harbor keeper.")
+      await expectTextBox(page.getByLabel("Message", { exact: true }), "A costume study for the harbor keeper.")
       await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled()
       const screenshots = process.env.SCREENSHOT_DIR
       if (screenshots) await page.screenshot({ path: join(screenshots, `draft-${width}-${colorScheme}.png`) })
@@ -231,11 +232,14 @@ test("paste, chat drop, removal, upload retry, and image-only send", async ({ pa
         data.items.add(new File([bytes], name, { type: "image/png" }))
         const target =
           kind === "paste"
-            ? document.querySelector('[data-testid="composer"]')!
+            ? // The composer's editor content, in its editor's shadow root: the editor sees the paste first.
+              [...document.querySelector("[data-composer-text]")!.querySelectorAll("*")]
+                .map((element) => element.shadowRoot?.querySelector('[data-testid="composer"]'))
+                .find((element) => element)!
             : document.querySelector('[data-testid="messages"]')!
         target.dispatchEvent(
           kind === "paste"
-            ? new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true })
+            ? new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true, composed: true })
             : new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true })
         )
       },
@@ -726,7 +730,7 @@ test("a generated version's editor adds pasted/dropped images to a new version a
         data.items.add(new File([Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))], name, { type: "image/png" }))
         form.dispatchEvent(
           kind === "paste"
-            ? new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true })
+            ? new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true, composed: true })
             : new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true })
         )
       },

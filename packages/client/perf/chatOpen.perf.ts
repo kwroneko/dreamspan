@@ -118,8 +118,15 @@ test("interleaved reference/current chat opening", async ({ browser }) => {
         }).observe({ type: "longtask", buffered: true })
         const check = () => {
           if (!state.start) return
-          const composer = document.querySelector<HTMLTextAreaElement>("#composer")
-          if (composer && !composer.readOnly && composer.offsetHeight > 0 && state.editable === null) {
+          // The composer's editor content, in its editor's shadow root (Composer.tsx).
+          const host = document.querySelector("[data-composer-text]")
+          const composer = host
+            ? ([...host.querySelectorAll("*")]
+                .map((element) => element.shadowRoot?.querySelector<HTMLElement>('[data-testid="composer"]'))
+                .find((element) => element) ?? null)
+            : null
+          const editable = composer !== null && composer.getAttribute("aria-readonly") !== "true"
+          if (composer && editable && composer.offsetHeight > 0 && state.editable === null) {
             state.editable = performance.now() - state.start
             requestAnimationFrame(() =>
               requestAnimationFrame(() => {
@@ -128,7 +135,7 @@ test("interleaved reference/current chat opening", async ({ browser }) => {
             )
           }
           const attach = document.querySelector<HTMLButtonElement>('button[aria-label="Attach images"]')
-          if (composer && !composer.readOnly && attach && !attach.disabled && state.attachments === null)
+          if (composer && editable && attach && !attach.disabled && state.attachments === null)
             state.attachments = performance.now() - state.start
         }
         document.addEventListener(

@@ -79,7 +79,8 @@ const measure = (scope: Locator) =>
       const style = getComputedStyle(child)
       return box.height > 0 && style.position !== "absolute" && style.position !== "fixed"
     })
-    const text = column.querySelector('[data-testid="composer"]')!
+    // The chat composer's editor, or a pending chat's textarea.
+    const text = (column.querySelector("[data-composer-text]") ?? column.querySelector('[data-testid="composer"]'))!
     const box = text.getBoundingClientRect()
     return {
       inLast: blocks.at(-1)!.contains(text),

@@ -12,6 +12,7 @@ import { layoutAudit } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const built = new URL("../dist/", import.meta.url).pathname
 const dist = join(mkdtempSync(join(tmpdir(), "rp-stale-build-")), "dist")
@@ -89,7 +90,7 @@ for (const width of [390, 1440]) {
       "The app was updated while this tab was open."
     )
     expect(reloads).toBe(before)
-    await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Half a sentence I am still writing")
+    await expectTextBox(page.getByLabel("Message", { exact: true }), "Half a sentence I am still writing")
     await page.mouse.move(0, 0)
     await page.screenshot({ path: info.outputPath(`stale-${width}.png`) })
     const findings = (await layoutAudit(page)).filter(
@@ -104,7 +105,7 @@ for (const width of [390, 1440]) {
     // Reload: the typed text is still there in the new build.
     restoreBuild()
     await panel.getByRole("button", { name: "Reload", exact: true }).click()
-    await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Half a sentence I am still writing", {
+    await expectTextBox(page.getByLabel("Message", { exact: true }), "Half a sentence I am still writing", {
       timeout: 20_000
     })
     await expect(page.getByRole("status", { name: "App updated" })).toHaveCount(0)

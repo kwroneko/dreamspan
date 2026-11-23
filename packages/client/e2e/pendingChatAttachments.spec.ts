@@ -8,6 +8,7 @@ import { composerPlaces, expectGrewUpward, expectImageTile } from "./support/att
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "20" })
 const chats = () => asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListChats({ limit: 500, before: null }))
@@ -107,7 +108,7 @@ for (const width of [1440, 390]) {
     await page.waitForTimeout(800)
     await page.reload()
     await expect(attached(page).getByRole("img")).toHaveCount(3, { timeout: 30_000 })
-    await expect(box).toHaveValue("Here's the harbor.")
+    await expectTextBox(box, "Here's the harbor.")
     expect((await chats()).length).toBe(before)
     await expectLayout(page, info, `pending-attachments-reloaded-${width}`)
 

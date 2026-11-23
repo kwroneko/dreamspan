@@ -158,8 +158,9 @@ export const typingTarget = (event: CommandKeyEvent) =>
 export const emptyComposerTarget = (event: CommandKeyEvent) => {
   const target = keyTarget(event)
   return (
-    target?.matches('textarea[data-testid="composer"]') === true &&
-    (target as HTMLTextAreaElement).value === "" &&
+    target?.matches('[data-testid="composer"]') === true &&
+    // The chat composer's editor says it's empty (Composer.tsx); a plain composer has a value.
+    (target instanceof HTMLTextAreaElement ? target.value === "" : target.hasAttribute("data-empty")) &&
     !target.hasAttribute("data-has-attachments")
   )
 }
@@ -171,7 +172,11 @@ export const invokeChatCommand = (id: string, context: ChatCommandContext) => {
 
 /** Keyboard invocation resolves the same effective, available command as the menu. */
 export const runCommandShortcut = (event: CommandKeyEvent, context: ChatCommandContext) => {
-  if (event.defaultPrevented || event.isComposing || event.repeat || event.shiftKey) return false
+  // The chat composer's editor takes an arrow in its empty text as a caret move (to where it already
+  // is) and prevents its default; there the key is still the empty composer's shortcut, as it was
+  // in the composer's textarea.
+  const caretMove = event.key.startsWith("Arrow") && emptyComposerTarget(event)
+  if ((event.defaultPrevented && !caretMove) || event.isComposing || event.repeat || event.shiftKey) return false
   if (popupOpen()) return false
   const command = availableCommands(context).find(
     (entry) =>

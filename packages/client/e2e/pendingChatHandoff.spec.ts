@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60", FAKE_GENERATOR_TOKENS: "1200" })
 const copies = (page: Page) =>
@@ -123,7 +124,7 @@ for (const target of ["group", "card"] as const) {
       .toBe(true)
     holdSave = false
     await page.reload()
-    await expect(composer).toHaveValue("Irreplaceable text typed while the first send was pending.")
+    await expectTextBox(composer, "Irreplaceable text typed while the first send was pending.")
     await expect.poll(() => copies(page)).toEqual([])
     await expect(page.getByRole("article", { name: "Your message", exact: true })).toContainText(
       "The first message that will be saved."
@@ -192,11 +193,11 @@ for (const target of ["card", "group"] as const) {
       await composer.press("Shift+Enter")
       await composer.press("Shift+Enter")
       await composer.pressSequentially("Second line")
-      await expect(composer).toHaveValue("First line\n\n\n\nSecond line")
+      await expectTextBox(composer, "First line\n\n\n\nSecond line")
       expect((await composer.boundingBox())!.height).toBeGreaterThan(empty.height)
       expect(page.url()).toBe(pendingUrl)
       await page.reload()
-      await expect(composer).toHaveValue("First line\n\n\n\nSecond line")
+      await expectTextBox(composer, "First line\n\n\n\nSecond line")
       await send.hover()
       // The tooltip ends with the key that sends, and only that (Base UI gives its popup no tooltip role).
       await expect(page.getByText("Send. (Enter)", { exact: true })).toBeVisible()
@@ -219,7 +220,7 @@ test("a touch keyboard keeps Enter for a newline; Ctrl+Enter creates the chat", 
     const pendingUrl = page.url()
     await composer.fill("Touch keyboard")
     await composer.press("Enter")
-    await expect(composer).toHaveValue("Touch keyboard\n")
+    await expectTextBox(composer, "Touch keyboard\n")
     expect(page.url()).toBe(pendingUrl)
     await composer.press("Control+Enter")
     await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)

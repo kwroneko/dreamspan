@@ -34,9 +34,9 @@ type Site =
   | { readonly exempt: string }
   | { readonly gap: string }
 
-/** The boxes: raw and wrapped textareas, the code editor, contenteditable. */
+/** The boxes: raw and wrapped textareas, the code editor, the message text box's slot, contenteditable. */
 const SITE =
-  /<(?:textarea|Textarea|AutoGrowTextarea|CodeEditor|MessageTextEditor|CardTextEditor)\b|component: (?:CodeEditor|MessageTextEditor|AutoGrowTextarea)\b|contentEditable/g
+  /<(?:textarea|Textarea|AutoGrowTextarea|CodeEditor|MessageTextEditor|CardTextEditor)\b|component: (?:CodeEditor|MessageTextEditor|AutoGrowTextarea)\b|slot=\{messageTextEditor\}|contentEditable/g
 
 const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
   // The primitives themselves: whoever renders them is listed.
@@ -51,7 +51,7 @@ const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
   "features/chat/editorHistory.tsx": [
     {
       durable: "MessageDraft",
-      what: "message edit, own version and thinking (message.text-editor slot, Message.tsx, editThinking.tsx)"
+      what: "the message text box (message.text-editor slot), kept by each place that shows it (below)"
     },
     {
       durable: "SummaryDraft",
@@ -61,8 +61,13 @@ const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
 
   // Chat.
   "features/chat/Composer.tsx": [
-    { durable: "ComposerDraft", what: "the composer, guidance for a new version included" }
+    { durable: "ComposerDraft", what: "the composer (the message text box), guidance for a new swipe included" }
   ],
+  "features/chat/InPlaceEdit.tsx": [{ durable: "MessageDraft", what: "a message's edit, in the text's place" }],
+  "features/chat/Message.tsx": [
+    { durable: "MessageDraft", what: "a version the user writes (Write your own version)" }
+  ],
+  "features/chat/editThinking.tsx": [{ durable: "MessageDraft", what: "a message's thinking, edited" }],
   "features/chat/QueuedMessages.tsx": [{ durable: "MessageDraft", what: "queued message edit (queue_edit draft)" }],
   "features/chat/insertMessage/InsertEditor.tsx": [
     { durable: "MessageDraft", what: "inserted message (insert draft)" }

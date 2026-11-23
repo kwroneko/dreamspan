@@ -9,7 +9,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"
-import { expectTextBox, replaceEditorText } from "./support/textbox.ts"
+import { expectTextBox, replaceEditorText, textBoxValue } from "./support/textbox.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { gotoWithLayout, storedLayout } from "./support/workbench.ts"
@@ -110,9 +110,11 @@ test("one chat looks as a single view; opens are previews until kept", async ({ 
   // Each tab keeps its own draft.
   await page.getByRole("tab", { name: "Lighthouse night" }).click()
   await expect(said(page, "The lamp turns")).toBeVisible()
-  await expect(page.getByRole("textbox", { name: "Message" })).not.toHaveValue("Draft for the harbour")
+  await expect
+    .poll(() => textBoxValue(page.getByRole("textbox", { name: "Message" })))
+    .not.toBe("Draft for the harbour")
   await page.getByRole("tab", { name: "Harbour walk" }).click()
-  await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue("Draft for the harbour")
+  await expectTextBox(page.getByRole("textbox", { name: "Message" }), "Draft for the harbour")
 
   // Closing a tab shows the one focused before.
   await page.getByRole("button", { name: "Close Harbour walk" }).click()

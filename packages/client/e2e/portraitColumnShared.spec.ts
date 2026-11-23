@@ -15,6 +15,7 @@ import { openPanel, panelTab } from "./support/panel.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { removeAttachment } from "./support/attachments.ts"
 import { SHAPES, shapeCard } from "./support/shapes.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "20" })
 test.setTimeout(240_000)
@@ -502,7 +503,7 @@ test("a message's attached image dragged onto a frame opens there as a tab; onto
   await expect(attachmentTab(page)).toHaveCount(1)
   await expect(page.getByRole("list", { name: "Attached images" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: `Remove ${ATTACHMENT}` })).toHaveCount(0)
-  await expect(page.getByLabel("Message", { exact: true }).first()).toHaveValue("")
+  await expectTextBox(page.getByLabel("Message", { exact: true }).first(), "")
   await expect(page.getByText("reload to retry")).toHaveCount(0)
   await page
     .getByRole("button", { name: `Close ${ATTACHMENT}`, exact: true })

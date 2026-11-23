@@ -4,6 +4,7 @@ import { Effect } from "effect"
 import { startContinueProvider } from "./support/continueProvider.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 
@@ -72,11 +73,11 @@ test("guidance editing waits for Enter sends, then obeys Never", async ({ page }
     await expect(submit).toBeEnabled()
     await box.fill("A revised direction")
     await box.press("Enter")
-    await expect(box).toHaveValue("A revised direction\n")
+    await expectTextBox(box, "A revised direction\n")
     expect(provider.requests).toHaveLength(requests)
     await box.press("Control+Enter")
     await expect.poll(() => provider.requests.length).toBe(requests + 1)
-    await expect(box).toHaveValue("A revised direction\n")
+    await expectTextBox(box, "A revised direction\n")
   } finally {
     await provider.stop()
   }

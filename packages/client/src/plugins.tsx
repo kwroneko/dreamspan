@@ -21,6 +21,7 @@ import { timelineTransforms, timelineInput, timelineRows } from "./features/chat
 import { displayScriptLists } from "./features/chat/displayScripts.ts"
 import type { DisplayTransformV1, DisplayScriptListV1, TimelineTransformV1 } from "../../plugin-api/src/display.ts"
 import { composerControls } from "./features/chat/composerControls.tsx"
+import { composerTextbox } from "./features/chat/composerFocus.ts"
 import { chatPanels } from "./features/chat/panels.tsx"
 import { appBanners } from "./features/shell.tsx"
 import { shellSearchKeys } from "./features/workbench/kinds.ts"
@@ -119,7 +120,7 @@ export const clientPluginHost = (p: ClientPlugin, display?: DisplayBridge) => {
     if (typeof requestAnimationFrame === "function")
       requestAnimationFrame(() => {
         if (focused && !focused.isConnected && document.activeElement === document.body)
-          document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.focus({ preventScroll: true })
+          composerTextbox()?.focus({ preventScroll: true })
       })
   }
   // A worker stopped while idle (it posted without being asked) has no call to fail: the

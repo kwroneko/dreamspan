@@ -63,9 +63,19 @@ export const checkBuild = async () => {
   return build
 }
 
+/** The page's text fields, and the chat composer's, whose editor is in a shadow root. */
+const textFields = () => [
+  ...document.querySelectorAll<HTMLElement>("textarea, [contenteditable='true'], input"),
+  ...[...document.querySelectorAll("[data-composer-text]")].flatMap((box) =>
+    [...box.querySelectorAll("*")].flatMap((host) =>
+      host.shadowRoot ? [...host.shadowRoot.querySelectorAll<HTMLElement>("[contenteditable='true']")] : []
+    )
+  )
+]
+
 const hasUnsavedText = () => {
   if (unsavedEditorRefs().length > 0) return true
-  for (const element of document.querySelectorAll<HTMLElement>("textarea, [contenteditable='true'], input")) {
+  for (const element of textFields()) {
     if (element instanceof HTMLTextAreaElement && element.value.trim() !== "") return true
     if (
       element instanceof HTMLInputElement &&
@@ -73,7 +83,13 @@ const hasUnsavedText = () => {
       element.value !== element.defaultValue
     )
       return true
-    if (element.isContentEditable && (element.textContent ?? "").trim() !== "") return true
+    // An empty editor's placeholder is in its text, not typed.
+    if (
+      element.isContentEditable &&
+      !element.querySelector(".cm-placeholder") &&
+      (element.textContent ?? "").trim() !== ""
+    )
+      return true
   }
   return false
 }

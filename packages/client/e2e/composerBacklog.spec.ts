@@ -5,6 +5,7 @@ import { Effect } from "effect"
 import { pickPendingPersona } from "./support/cast.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "10", FAKE_GENERATOR_TOKENS: "2000" })
 let cookie: Promise<string> | null = null
@@ -153,7 +154,7 @@ for (const [width, theme, model, asCard] of [
     await queued.getByRole("button", { name: "Copy to composer" }).click()
     await expect(edit).toHaveCount(0)
     const composer = page.getByRole("textbox", { name: model ? "Guidance" : "Message", exact: true })
-    await expect(composer).toHaveValue(new RegExp(retained.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+    await expectTextBox(composer, new RegExp(retained.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
     // The selected speaker also survives a saved-chat generation.
     await toggle(page, true)
     await page.getByRole("textbox", { name: "Guidance", exact: true }).fill("Now look toward the lighthouse.")

@@ -9,6 +9,7 @@ import { asUser } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { modelChip, choices } from "./strip.ts"
 import { expectLayout } from "./layoutAudit.ts"
+import { expectTextBox } from "./textbox.ts"
 
 export function draftRequestTests() {
   const server = serverPerFile(withAdmin)
@@ -100,11 +101,11 @@ export function draftRequestTests() {
         // Back returns to the new chat as it was; forward shows the request again.
         await page.goBack()
         await expect(heading).toBeHidden()
-        await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue(content)
+        await expectTextBox(page.getByRole("textbox", { name: "Message", exact: true }), content)
         await page.goForward()
         await expect(page.getByRole("region", { name: "Messages", exact: true })).toContainText(content)
         await page.getByRole("link", { name: "← Back to the new chat" }).click()
-        await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue(content)
+        await expectTextBox(page.getByRole("textbox", { name: "Message", exact: true }), content)
 
         // None of it reached the model's provider.
         // Picking a model changes what Send would use without changing the composer text.

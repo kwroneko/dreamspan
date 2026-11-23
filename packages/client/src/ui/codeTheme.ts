@@ -31,6 +31,7 @@ export const proseTheme = EditorView.theme({
   },
   ".cm-line": { padding: "0 10px" },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--text)" },
+  ".cm-placeholder": { color: "var(--text-muted)" },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
     backgroundColor: "color-mix(in oklch, var(--accent) 22%, transparent)"
   },
@@ -93,11 +94,20 @@ export const proseTheme = EditorView.theme({
   "@media (min-width: 640px)": { "&": { fontSize: "14px" } },
   // In place of the text it edits (`bare`): the metrics of what's around it, nothing of its own.
   "&.rp-bare": { backgroundColor: "transparent", color: "inherit", fontSize: "inherit", borderRadius: "0" },
-  "&.rp-bare .cm-scroller": { fontFamily: "inherit", lineHeight: "inherit", maxHeight: "none", overflow: "visible" },
-  "&.rp-bare .cm-content": { padding: "0", minHeight: "0" },
+  // A host with a box of its own (the composer) gives it its padding, least and most height
+  // through these properties (`--bare-*`), set on the element the editor is in.
+  "&.rp-bare .cm-scroller": {
+    fontFamily: "inherit",
+    lineHeight: "inherit",
+    maxHeight: "var(--bare-max-height, none)",
+    overflow: "var(--bare-overflow, visible)"
+  },
+  "&.rp-bare .cm-content": { padding: "var(--bare-padding, 0)", minHeight: "var(--bare-min-height, 0)" },
   "&.rp-bare .cm-line": { padding: "0" },
   // A blank line between paragraphs is as tall as the rendered text's gap there (styles.css).
-  "&.rp-bare .cm-line.rp-paragraph-gap": { lineHeight: "var(--message-paragraph-gap, 0.75em)" },
+  "&.rp-bare .cm-line.rp-paragraph-gap": {
+    lineHeight: "var(--bare-paragraph-gap, var(--message-paragraph-gap, 0.75em))"
+  },
   // A list item's line has the rendered item's padding (styles.css).
   "&.rp-bare .cm-line.rp-list-item": { paddingBlock: "var(--message-list-item-padding, 0.25rem)" },
   // Message text styled as the message (messageStyleView.ts) has no padding of its own; in a
