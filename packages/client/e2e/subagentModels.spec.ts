@@ -34,7 +34,12 @@ test.beforeAll(async () => {
         }
       })
       const model = yield* api.AddUserModel({ connectionId: connection.id, key: "workshop-small", overrides: {} })
-      const other = yield* api.AddUserModel({ connectionId: connection.id, key: "lookup-tiny", overrides: {} })
+      // Marked non-reasoning: a model whose reasoning nobody reports is assumed to reason.
+      const other = yield* api.AddUserModel({
+        connectionId: connection.id,
+        key: "lookup-tiny",
+        overrides: { reasoning: false }
+      })
       const thinking = yield* api.AddUserModel({
         connectionId: connection.id,
         key: "think-mini",

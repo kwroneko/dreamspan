@@ -41,6 +41,11 @@ export const proseTheme = EditorView.theme({
     color: "var(--text-muted)",
     borderRight: "1px solid var(--border)"
   },
+  // A marker is about a line tall even before the editor first measures its lines (one that
+  // mounts as a dialog opens): each then has an estimated 14px, and the gutter cut the marker.
+  // A pixel under a line, so a measured line (a hair under 1lh) keeps its own height; the
+  // first child is the gutter's zero-height width spacer.
+  ".rp-change-gutter .cm-gutterElement:not(:first-child)": { minHeight: "calc(1lh - 1px)" },
   ".rp-line-marker": {
     display: "block",
     width: "14px",
