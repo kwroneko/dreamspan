@@ -232,7 +232,58 @@ describe("message search at scale", () => {
             .map(([text, times]) => `${text}: ${times.map((t) => t.toFixed(0)).join(", ")} ms`)
             .join("; ")}\n`
         )
+        // The other sorts, a filter's or a character's chats, and the count (msgsearch1): the first
+        // two pages of a rare and a common word, each within the budget too.
+        const chatIds = (yield* fixtureSql(
+          config.dataDir,
+          [{ sql: "SELECT id FROM chats WHERE owner_user_id=? ORDER BY title", params: [userId] }],
+          { readOnly: true }
+        ))[0] as unknown as ReadonlyArray<{ id: string }>
+        const order = chatIds.map((row) => row.id)
+        const sortTimes: Array<[string, ReadonlyArray<number>]> = []
+        for (const text of ["lighthouse", "tide"])
+          for (const [label, sort, chats] of [
+            ["newest", "newest", null],
+            ["oldest", "oldest", null],
+            ["chat", "chat", order],
+            ["newest in one chat", "newest", [c]],
+            ["newest in the other chats", "newest", order.filter((id) => id !== c)],
+            ["chat, the big chat last", "chat", [...order.filter((id) => id !== c), c]]
+          ] as const) {
+            const times: Array<number> = []
+            let at: MessageCursor | null = null
+            for (let i = 0; i < 2; i++) {
+              const from: MessageCursor | null = at
+              const read = (cursor: MessageCursor | null) =>
+                reader.SearchMessages({ userId: userId as UserId, text, cursor, limit: 20, sort, chats })
+              times.push(yield* median(read(from)))
+              const found: MessageSearchPage = yield* read(from)
+              at = found.next
+              if (at === null) break
+            }
+            sortTimes.push([`${text} ${label}`, times])
+          }
+        for (const text of ["lighthouse", "tide"]) {
+          sortTimes.push([
+            `${text} count`,
+            [yield* median(reader.CountMessages({ userId: userId as UserId, text, chats: null }))]
+          ])
+          sortTimes.push([
+            `${text} count in the other chats`,
+            [
+              yield* median(
+                reader.CountMessages({ userId: userId as UserId, text, chats: order.filter((id) => id !== c) })
+              )
+            ]
+          ])
+        }
+        process.stderr.write(
+          `SearchMessages sorts and counts: ${sortTimes
+            .map(([text, times]) => `${text}: ${times.map((t) => t.toFixed(0)).join(", ")} ms`)
+            .join("; ")}\n`
+        )
         // Every measurement is printed before any is checked.
+        for (const [text, times] of sortTimes) for (const t of times) assert.isBelow(t, BUDGET_MS, text)
         for (const t of pages) assert.isBelow(t, BUDGET_MS)
         assert.isBelow(common, BUDGET_MS)
         for (const [text, times] of phraseTimes) for (const t of times) assert.isBelow(t, BUDGET_MS, text)

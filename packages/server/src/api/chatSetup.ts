@@ -39,7 +39,7 @@ import { NotFound, ServerError } from "@dreamspan/shared/errors.ts"
 import { CardSources } from "../sources/CardSources.ts"
 
 /** How long a branch list waits for the shared shell snapshot before it lists the rows stored so far. */
-const PARTIAL_AFTER = "300 millis"
+export const PARTIAL_AFTER = "300 millis"
 /** How often a branch list that is filling in is read again while the first pass goes on. */
 const PROGRESS_EVERY = "1 second"
 

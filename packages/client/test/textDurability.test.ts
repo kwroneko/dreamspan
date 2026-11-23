@@ -220,7 +220,7 @@ const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
   "features/characters/ShellBrowser.tsx": [
     search("find a branch"),
     search("a card source's query"),
-    search("find in the list")
+    search("find by name or in messages, its text kept in the URL (sideQ) with the sort, filter and scope")
   ],
   "features/chat/BranchControl.tsx": [search("find a branch")],
   "features/chat/CardForkDialogs.tsx": times(3, kept("useUserDraft", "fork for this chat: name, version, nickname")),

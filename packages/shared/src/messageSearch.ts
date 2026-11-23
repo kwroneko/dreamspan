@@ -229,11 +229,41 @@ export const MessageHit = Schema.Struct({
 export type MessageHit = typeof MessageHit.Type
 
 /**
- * Where the next page starts: below this version (newest first). `phase` "words": among the
- * messages that have the words apart, after every one that has them side by side.
+ * Where the next page starts: past this version in the sort's order (below it newest first,
+ * above it oldest first). `phase` "words": among the messages that have the words apart, after
+ * every one that has them side by side (Best match). `chat`: the Chat sort's place in its list
+ * of chats, `before` within that chat.
  */
-export const MessageCursor = Schema.Struct({ before: Schema.Int, phase: Schema.optionalKey(Schema.Literal("words")) })
+export const MessageCursor = Schema.Struct({
+  before: Schema.Int,
+  phase: Schema.optionalKey(Schema.Literal("words")),
+  chat: Schema.optionalKey(Schema.Int)
+})
 export type MessageCursor = typeof MessageCursor.Type
+
+/**
+ * How found messages are listed: Best match (words side by side first, then apart, each newest
+ * first), Newest, Oldest, or Chat (by chat name, A to Z unless reversed, newest first in each).
+ */
+export const MESSAGE_SORTS = ["best", "newest", "oldest", "chat"] as const
+export const MessageSort = Schema.Literals(MESSAGE_SORTS)
+export type MessageSort = typeof MessageSort.Type
+
+/** Found messages counted at most; past it the count says "1,000+". */
+export const MESSAGE_COUNT_CAP = 1000
+
+/**
+ * How many messages have the words, and in how many chats. `more`: the count stopped early, at
+ * MESSAGE_COUNT_CAP or after the matches a count reads at most, so there are more than `messages`.
+ */
+export const MessageCount = Schema.Struct({ messages: Schema.Int, chats: Schema.Int, more: Schema.Boolean })
+export type MessageCount = typeof MessageCount.Type
+
+/** "128 messages in 14 chats", or "1,000+ messages" when the count stopped early. */
+export const messageCountText = ({ messages, chats, more }: MessageCount) => {
+  const n = `${messages.toLocaleString("en-US")}${more ? "+" : ""} message${messages === 1 && !more ? "" : "s"}`
+  return more ? n : `${n} in ${chats.toLocaleString("en-US")} chat${chats === 1 ? "" : "s"}`
+}
 
 export const MessageSearchPage = Schema.Struct({
   hits: Schema.Array(MessageHit),

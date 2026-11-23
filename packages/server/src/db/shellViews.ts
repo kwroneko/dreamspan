@@ -103,6 +103,30 @@ const inChatFilter = (f: Fork, filter: ChatBrowse["filter"], pinned: ReadonlySet
               ? f.cast.length === 1
               : f.branches > 1)
 
+/**
+ * The chats a message search looks through, as the Chats tab lists them: those `filter` shows,
+ * of card `entity`'s chats when given, by name (A to Z, as its Name sort). Each a stored chat
+ * id: a row standing for split chats gives each of them, together.
+ */
+export const searchedChats = (
+  state: ShellState,
+  filter: ChatBrowse["filter"],
+  entity: EntityId | null
+): ReadonlyArray<string> => {
+  const rows = perChat(state.forks.filter((f) => entity === null || f.joined.includes(entity)))
+    .map((f) => state.chatIndex.get(f.chat.id)!)
+    .filter((f) => inChatFilter(f, filter, state.pinnedChats))
+    .sort((a, b) => a.chatName.localeCompare(b.chatName) || a.chat.id.localeCompare(b.chat.id))
+  const rank = new Map(rows.map((f, i) => [f.chat.id, i]))
+  const ids = new Map<string, number>()
+  for (const f of state.forks) {
+    const at = rank.get(f.chat.id)
+    const id = f.sourceChatId ?? f.chat.id
+    if (at !== undefined && !ids.has(id)) ids.set(id, at)
+  }
+  return [...ids].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0])).map(([id]) => id)
+}
+
 const browseChats = (rows: ReadonlyArray<Fork>, browse: ChatBrowse, state: ShellState) => {
   const metric = (f: Fork) => {
     const current = state.chatIndex.get(f.chat.id)!
