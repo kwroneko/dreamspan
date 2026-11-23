@@ -10,6 +10,7 @@ import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { asUser } from "./support/rpc.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { textBoxValue } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -162,7 +163,7 @@ test("Enter sends with guidance off and generates with guidance on", async ({ pa
   await composer.fill("Synthetic guidance with Enter.")
   await composer.press("Enter")
   // Sam's turn, written by the model with the guidance; nothing sent as a message.
-  await expect(composer).toHaveValue("")
+  await expect.poll(() => textBoxValue(composer)).toBe("")
   await expect(articles.last()).toContainText("Guidance: Synthetic guidance with Enter.", { timeout: 30_000 })
   await expect(articles.filter({ hasText: "Synthetic guidance with Enter." })).toHaveCount(1)
   await expect(articles.last().locator("header")).toContainText("Sam")
