@@ -380,6 +380,82 @@ export function ChatSidePanel({
   // Shown beside the frames even while this chat's tab is behind another (its editor's, say).
   return host ? createPortal(<Away value={false}>{aside}</Away>, host) : aside
 }
+type CastMembers = Pick<NonNullable<ChatView["cast"]>, "participants" | "playedByMe">
+
+/**
+ * The cards one cast change put in another's place, old to new: the persona switched (any
+ * picker: the composer's Speak as, the Cast tab's, This chat's), or a card swapped in place
+ * (Use another version). A card that only left, or only joined, replaces nothing.
+ */
+export const castReplacements = (before: CastMembers, after: CastMembers): ReadonlyArray<readonly [string, string]> => {
+  const pairs = new Map<string, string>()
+  const [was] = before.playedByMe
+  const [now] = after.playedByMe
+  if (before.playedByMe.length === 1 && after.playedByMe.length === 1 && was !== now) pairs.set(was!, now!)
+  if (before.participants.length === after.participants.length) {
+    const changed = before.participants.flatMap((id, at) => (after.participants[at] === id ? [] : [at]))
+    const at = changed[0]
+    if (changed.length === 1 && at !== undefined) {
+      const out = before.participants[at]!
+      const into = after.participants[at]!
+      if (!after.participants.includes(out) && !before.participants.includes(into)) pairs.set(out, into)
+    }
+  }
+  return [...pairs]
+}
+
+/**
+ * A character tab whose card was replaced in place gives way to its replacement's: the persona's
+ * tab, open as the persona changes, opens the new persona's. Returns the tab to show instead of
+ * `asked`, or null; the URL then follows with replace (usePanel), so Back never lands on the
+ * gone card's tab. Later, a tab of a card replaced on this branch and no longer in the cast (a
+ * Back to it) follows too. A card that only left keeps its tab as before (characters/panels.tsx).
+ */
+function useCastFollow(asked: PanelTab | null, view: ChatView) {
+  const cast = view.cast
+  const [seen, setSeen] = useState(() => ({
+    cast,
+    chat: view.chat?.id ?? null,
+    forkId: view.forkId,
+    follows: new Map<string, string>() as ReadonlyMap<string, string>,
+    /** The tab open when its card was replaced, and its replacement's, until the URL moves on. */
+    open: null as { readonly from: PanelTab; readonly to: PanelTab } | null
+  }))
+  let { follows, open } = seen
+  if (open !== null && asked !== open.from) open = null
+  if (seen.cast !== cast) {
+    // Only a change in place: another branch or chat isn't a replacement.
+    const inPlace =
+      seen.cast !== null && cast !== null && seen.chat === (view.chat?.id ?? null) && seen.forkId === view.forkId
+    const pairs = inPlace ? castReplacements(seen.cast!, cast!) : []
+    if (pairs.length > 0) {
+      const next = new Map(follows)
+      for (const [from, to] of pairs) next.set(from, to)
+      follows = next
+      const hit = pairs.find(([from]) => asked === `card:${from}`)
+      if (hit) open = { from: asked!, to: `card:${hit[1]}` }
+    } else if (!inPlace) follows = new Map()
+  }
+  if (seen.cast !== cast || seen.follows !== follows || seen.open !== open)
+    setSeen({ cast, chat: view.chat?.id ?? null, forkId: view.forkId, follows, open })
+  return { tab: open?.to ?? followed(asked, cast, follows), follows, cast }
+}
+
+/** Where a tab of a card replaced on this branch, and no longer in the cast, goes: its replacement's. */
+const followed = (tab: PanelTab | null, cast: ChatView["cast"], follows: ReadonlyMap<string, string>) => {
+  if (cast === null || !tab?.startsWith("card:")) return null
+  const members: ReadonlyArray<string> = [...cast.participants, ...cast.playedByMe]
+  const member = (id: string) => members.includes(id)
+  let id = tab.slice(5)
+  if (member(id)) return null
+  for (let step = 0; step < 8 && !member(id); step++) {
+    const to = follows.get(id)
+    if (to === undefined) return null
+    id = to
+  }
+  return member(id) ? `card:${id}` : null
+}
+
 /**
  * The side panel's tab: the URL's, else on a wide screen the one this browser last had open
  * (a link to a message drops the URL's). A phone opens it only when asked: it covers the chat.
@@ -394,10 +470,12 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   const [remembered, setRemembered] = useState(() => ({ userId, tab: rememberedPanel(userId) }))
   const rememberedTab = remembered.userId === userId ? remembered.tab : rememberedPanel(userId)
   const explicit = useLocation({ select: (l) => l.state.chatPanel === true })
-  const candidate = urlPanel ?? (!explicit && wide ? rememberedTab : null)
+  const asked = urlPanel ?? (!explicit && wide ? rememberedTab : null)
+  const follow = useCastFollow(asked, view)
+  const candidate = follow.tab ?? asked
   const panel = usePanelHere(candidate === "display" ? "interface" : candidate, view)
   usePlaceNotice(
-    urlPanel !== null && urlPanel !== "display" && view.cast !== null && panel !== urlPanel
+    follow.tab === null && urlPanel !== null && urlPanel !== "display" && view.cast !== null && panel !== urlPanel
       ? "This panel is no longer available in this chat."
       : null
   )
@@ -405,6 +483,12 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   useEffect(() => {
     if (panel !== null) rememberPanel(userId, panel)
   }, [userId, panel])
+  // A closed panel's tab, its card replaced meanwhile, reopens at the replacement's.
+  useEffect(() => {
+    const tab = lastTab.get(userId) ?? null
+    const next = followed(tab, follow.cast, follow.follows)
+    if (next !== null) lastTab.set(userId, next)
+  }, [userId, follow.cast, follow.follows])
   // The URL names the tab shown, so a refresh or a copied link keeps it.
   useEffect(() => {
     // Location state can update before the route's search props, and this component can
