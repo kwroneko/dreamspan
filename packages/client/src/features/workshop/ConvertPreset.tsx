@@ -25,7 +25,13 @@ export function ConvertPresetButton({ store, compact }: { store: EditorStore; co
   const target = `${compact ? "panel" : "editor"}:${snapshot.ref.id}`
   return (
     <>
-      <Button className="h-8! px-2!" aria-label="Convert to workshop" hint={HINT} onClick={() => setPlace(target)}>
+      <Button
+        // With only its icon showing, the 32 px square of the toolbar's icon buttons.
+        className="h-8! px-2! @max-[60rem]:w-8 @max-[60rem]:px-0!"
+        aria-label="Convert to workshop"
+        hint={HINT}
+        onClick={() => setPlace(target)}
+      >
         <Icon name="tool" />
         {/* The toolbar's longest label goes first: with it, the row needs 59rem (presetMarkers.spec.ts). */}
         <span className="@max-[60rem]:hidden">Convert to workshop</span>

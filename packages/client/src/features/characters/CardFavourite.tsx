@@ -24,5 +24,6 @@ export function CardFavourite({ entityId, gap = "gap-1" }: { entityId: string; g
 
 export function PanelFavourite({ store }: { store: EditorStore }) {
   const ref = useEditorState(store).snapshot?.ref
-  return ref?.kind === "card" ? <CardFavourite entityId={ref.entityId} gap="gap-2" /> : null
+  // Among an editor's panel actions, whose rows differ in gap: the row's own.
+  return ref?.kind === "card" ? <CardFavourite entityId={ref.entityId} gap="gap-[inherit]" /> : null
 }

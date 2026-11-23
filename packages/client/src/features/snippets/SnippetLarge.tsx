@@ -88,9 +88,7 @@ export function SnippetLarge({
         </Tooltip>
       )}
       <CenterHeaderContent>
-        <header
-          className={`flex min-w-0 items-center gap-2 sm:[&_[data-rename-pencil]]:size-8! ${compactHeaderControls}`}
-        >
+        <header className={`flex min-w-0 items-center gap-2 ${compactHeaderControls}`}>
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <InlineRename
               place={`snippet-title:large:${refId}`}

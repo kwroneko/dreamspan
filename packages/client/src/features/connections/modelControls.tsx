@@ -64,10 +64,7 @@ function LimitEnd({ limit }: { limit: Limit }) {
   }, [open])
   return (
     <div className="flex min-w-0 flex-col items-end gap-2" data-limit={limit.field}>
-      <span
-        className="flex items-center gap-1 text-xs text-muted"
-        data-layout-audit-ignore="iconrow: the limit's “?” is its label's help mark, as beside any field label, and the pencil after it is the control"
-      >
+      <span className="flex items-center gap-1 text-xs text-muted">
         <LabelWithHelp help={<AboutHint heading={capitalized(limit.name)}>{limit.source}</AboutHint>}>
           <span className={`tabular-nums ${limit.assumed ? "text-warning" : ""}`}>
             Max {numberText(limit.value)}
@@ -76,6 +73,8 @@ function LimitEnd({ limit }: { limit: Limit }) {
         </LabelWithHelp>
         <IconButton
           icon="edit"
+          // The help mark's small square beside it, as a compact rename pencil is: one even pair.
+          className="size-5! [&_svg]:size-3!"
           label={`Set the ${limit.name} yourself`}
           hint={
             open

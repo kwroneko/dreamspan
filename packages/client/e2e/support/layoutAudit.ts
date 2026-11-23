@@ -653,9 +653,19 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
         const texts = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
         for (let t = texts.nextNode(); t; t = texts.nextNode()) {
           const host = t.parentElement
-          if (t.textContent?.trim() && host && !host.closest("svg") && visible(host)) return false
+          if (t.textContent?.trim() && host && !host.closest("svg") && shownText(host)) return false
         }
         return true
+      }
+      // Text the button shows, scrolled out of view or not: a label scrolled under a sticky
+      // strip is still the button's text. Hidden text (a screen-reader label, a collapsed
+      // label) isn't.
+      const shownText = (host: HTMLElement) => {
+        if (!host.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false
+        const r = host.getBoundingClientRect(),
+          s = css(host)
+        if (r.width <= 1 && r.height <= 1) return false
+        return s.clip !== "rect(0px, 0px, 0px, 0px)" && s.clipPath !== "inset(50%)"
       }
       // A text box's own buttons (its Clear, a framed box's strip) sit inside its border: they're
       // the box's, not siblings of the buttons beside it, so their row ends at the box. The box
@@ -713,9 +723,38 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
           if (line) line.push(b)
           else lines.push([b])
         }
-        for (const line of lines) {
-          if (line.length < 2) continue
+        // Text between two buttons (a name, a count, a text button's label) parts them: the
+        // buttons either side of it aren't one row of buttons (a list row's icon tile and its ⋯,
+        // a name's pencil and the version's after the version's text).
+        const texts: DOMRect[] = []
+        const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT)
+        for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+          const host = t.parentElement
+          if (!t.textContent?.trim() || !host || host.closest("svg") || !visible(host)) continue
+          const range = document.createRange()
+          range.selectNodeContents(t)
+          const r = range.getBoundingClientRect()
+          if (r.width > 0) texts.push(r)
+        }
+        const segments = lines.flatMap((line) => {
           line.sort((a, b) => rect(a).left - rect(b).left)
+          const parts: HTMLElement[][] = [[line[0]!]]
+          for (const [i, b] of line.slice(1).entries()) {
+            const a = line[i]!
+            const between = texts.some(
+              (t) =>
+                t.left >= rect(a).right - 1 &&
+                t.right <= rect(b).left + 1 &&
+                t.bottom > rect(a).top &&
+                t.top < rect(a).bottom
+            )
+            if (between) parts.push([b])
+            else parts.at(-1)!.push(b)
+          }
+          return parts
+        })
+        for (const line of segments) {
+          if (line.length < 2) continue
           // The size most of them have is the row's; the others are reported.
           const counts = new Map<string, number>()
           for (const b of line) {

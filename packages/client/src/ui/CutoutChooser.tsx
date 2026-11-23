@@ -447,7 +447,7 @@ export function CutoutChooser({
             />
             <Button
               variant="ghost"
-              className="size-8 px-0!"
+              className="size-8! px-0!"
               aria-label={tab === "picture" ? "Reset to the original" : "Reset the cutout"}
               hint={
                 image

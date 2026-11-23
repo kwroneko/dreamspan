@@ -91,6 +91,23 @@ test("a text box's own buttons aren't in the row of the buttons beside the box",
   expect(found.map((v) => v.selector)).toEqual(["#odd"])
 })
 
+test("text between icon buttons parts them; buttons with none between are still compared", async ({ page }) => {
+  const icon = `<svg width="16" height="16"><path d="M0 0h16"/></svg>`
+  const button = (id: string, size: number) =>
+    `<button id="${id}" aria-label="${id}" style="width:${size}px;height:${size}px;padding:0;border:0;display:inline-flex;align-items:center;justify-content:center">${icon}</button>`
+  await page.setContent(`
+    <main style="padding:16px">
+      <div style="display:flex;align-items:center;gap:8px;width:500px">
+        ${button("tile", 40)}<span style="flex:1">Layout world</span><button style="height:32px">Edit</button>${button("more", 32)}
+      </div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <span>Name</span>${button("pencil1", 24)}<span>1.0</span>${button("pencil2", 24)}${button("save", 24)}${button("odd", 32)}
+      </div>
+    </main>`)
+  const found = (await layoutAudit(page)).filter((v) => v.kind === "iconrow")
+  expect(found.map((v) => v.selector)).toEqual(["#odd"])
+})
+
 test("a growing box's free room and a 12px group gap aren't gaps between icon buttons", async ({ page }) => {
   const icon = `<svg width="16" height="16"><path d="M0 0h16"/></svg>`
   const button = (id: string) =>
