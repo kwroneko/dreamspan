@@ -28,7 +28,9 @@ import {
   frames,
   initialLayout,
   type Layout,
+  type LayoutAction,
   moveTab,
+  moveToNewFrame,
   neighbours,
   newId,
   type OpenOptions,
@@ -437,6 +439,13 @@ export class WorkbenchStore {
     if (shown) this.initialState.set(copyId, clean(shown.location.state))
     this.set(splitFrame(this.layout, frameId, direction, { copyId }))
   }
+  /** Does what a tab's menu item names (`canApply` says whether it changes anything). */
+  act(action: LayoutAction) {
+    if (action.type === "split") this.split(action.frameId, action.direction)
+    else if (action.type === "move") {
+      if (action.frameId) this.move(action.tabId, action.frameId)
+    } else this.moveToSplit(action.tabId, action.direction, undefined, action.before ?? false)
+  }
   move(tabId: string, frameId: string, index?: number) {
     this.set(moveTab(this.layout, tabId, frameId, index, itemKey))
   }
@@ -507,14 +516,11 @@ export class WorkbenchStore {
   }
   /**
    * Moves a tab into a new frame beside a frame (its own by default): `before` puts it on the
-   * left or above, as a tab dropped on that edge does.
+   * left or above, as a tab dropped on that edge does. A frame's only tab leaves its frame
+   * first (`moveToNewFrame`).
    */
   moveToSplit(tabId: string, direction: Direction, frameId?: string, before = false) {
-    const frame = frameId ? this.frames().find((f) => f.id === frameId) : frameOfTab(this.layout, tabId)
-    if (!frame) return
-    const id = newId("f")
-    const next = splitFrame(focusTab(this.layout, tabId), frame.id, direction, { newFrameId: id, before, empty: true })
-    this.set(moveTab(next, tabId, id, undefined, itemKey))
+    this.set(moveToNewFrame(this.layout, tabId, direction, { ...(frameId ? { frameId } : {}), before }))
   }
   /**
    * Opens an item dropped on a frame (a picture dragged from the portrait column), kept: into

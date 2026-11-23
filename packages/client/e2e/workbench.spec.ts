@@ -398,7 +398,7 @@ test("open beside, one chat in two frames, and a tab dropped on an edge", async 
       .last()
   await expect(arrow("Move to the frame above")).toHaveAttribute("d", "M12 16V8")
   await expect(arrow("Move to the frame on the right")).toHaveAttribute("d", "m12 16 4-4-4-4")
-  await expect(menu.getByRole("menuitem", { name: /^Move to the frame on the left/ })).toHaveCount(0)
+  await expect(menu.getByRole("menuitem", { name: /^Move to the frame on the left/ })).toBeDisabled()
   await shot(page, "tab-menu-moves-1440-light")
   if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "tab-menu-moves")
   await page.keyboard.press("Escape")
