@@ -2119,7 +2119,7 @@ test.describe("synthetic library and every app surface", () => {
           const notes = await openPanel(page, "Notes")
           await audit("panel-Notes")
           // An open note's header adds its save cluster beside its settings and ⋯.
-          const expand = notes.getByRole("button", { name: /^Expand / })
+          const expand = notes.getByRole("button", { name: /^Expand (?!all$)/ })
           if ((await expand.count()) > 0) await expand.first().click()
           await expect(notes.locator("[data-note-save]").first()).toBeVisible()
           await audit("panel-Notes-open")
