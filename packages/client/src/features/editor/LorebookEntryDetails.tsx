@@ -496,12 +496,15 @@ function Grouped({
  * The settings form's layout, for one entry or many (LorebookMassEdit): accordions, closed until
  * opened, each with its one-line summary and a dot when it differs from the defaults (the side
  * panel, owner 2026-11-02: "expanding settings blows up the sidebar entry"), or every section
- * open in two columns (the large editor and a wide dialog).
+ * open in two columns (the large editor), or `flow`ing (the "Edit N entries" dialog, owner
+ * 2026-11-23: "far too narrow on a large screen"): the plain section's fields side by side, then
+ * the boxed sections in as many columns as fit, up to four, one on a phone.
  */
 export function SettingsLayout({
   sections,
   accordion,
   wide,
+  flow = false,
   label,
   render,
   lead,
@@ -511,6 +514,8 @@ export function SettingsLayout({
   sections: ReadonlyArray<FormSection>
   accordion: boolean
   wide: boolean
+  /** Fill the width: fields side by side and the boxed sections in up to four columns. */
+  flow?: boolean
   /** Whose settings, for the sections' accessible names: "Matching of <label>". */
   label: string
   render: (setting: LorebookEntrySetting) => ReactNode
@@ -562,24 +567,43 @@ export function SettingsLayout({
         </div>
       </div>
     )
+  const boxed = (item: FormSection, className = "") => (
+    <section
+      key={item.section.id}
+      aria-label={item.section.title}
+      className={`flex min-w-0 flex-col gap-4 rounded-lg border border-border p-3 ${className}`}
+    >
+      <h4 className="flex items-center gap-1.5 text-sm font-medium">
+        {item.section.title}
+        {item.section.headerStatus !== false && differs?.(item) && (
+          <span data-changed aria-label="changed from the defaults" className="size-1.5 rounded-full bg-accent" />
+        )}
+      </h4>
+      {body(item)}
+    </section>
+  )
+  if (flow)
+    return (
+      <div className="flex min-w-0 flex-col gap-4" data-settings-flow>
+        {sections
+          .filter((item) => item.section.plain)
+          .map((item) => (
+            <section
+              key={item.section.id}
+              aria-label={item.section.title}
+              className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,14rem),1fr))] items-start gap-x-6 gap-y-4"
+            >
+              {lead?.(item.section)}
+              <Grouped settings={item.settings} render={render} />
+            </section>
+          ))}
+        <div className="-mb-4 min-w-0 gap-x-4 [columns:20rem_4]">
+          {grouped.map((item) => boxed(item, "mb-4 break-inside-avoid"))}
+        </div>
+      </div>
+    )
   const column = (index: 0 | 1) =>
-    grouped
-      .filter((item) => !wide || item.section.column === index)
-      .map((item) => (
-        <section
-          key={item.section.id}
-          aria-label={item.section.title}
-          className="flex min-w-0 flex-col gap-4 rounded-lg border border-border p-3"
-        >
-          <h4 className="flex items-center gap-1.5 text-sm font-medium">
-            {item.section.title}
-            {item.section.headerStatus !== false && differs?.(item) && (
-              <span data-changed aria-label="changed from the defaults" className="size-1.5 rounded-full bg-accent" />
-            )}
-          </h4>
-          {body(item)}
-        </section>
-      ))
+    grouped.filter((item) => !wide || item.section.column === index).map((item) => boxed(item))
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {plain}
