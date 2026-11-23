@@ -5,7 +5,7 @@
 import type { ModelOverrides } from "@dreamspan/shared/providers.ts"
 
 export type Tri = "auto" | "yes" | "no"
-const triOf = (value: boolean | undefined): Tri => (value === undefined ? "auto" : value ? "yes" : "no")
+export const triOf = (value: boolean | undefined): Tri => (value === undefined ? "auto" : value ? "yes" : "no")
 export const flagOf = (tri: Tri) => (tri === "auto" ? undefined : tri === "yes")
 
 export type PrefillChoice = "auto" | NonNullable<ModelOverrides["prefill"]>
