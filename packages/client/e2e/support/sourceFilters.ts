@@ -6,17 +6,17 @@ import { expect, type Locator, type Page } from "@playwright/test"
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 /** The panel's button on a wide bar (its name is "<title>: <what's chosen>", or the summary when it starts with the title). */
-export const panelTrigger = (scope: Locator, title: string) =>
+const panelTrigger = (scope: Locator, title: string) =>
   scope.locator("[data-filter-panels]").getByRole("button", { name: new RegExp(`^${escaped(title)}\\b`) })
 
 /** The filters' sheet, on a narrow bar. */
-export const filterSheet = (page: Page) => page.locator("[data-filter-sheet]")
+const filterSheet = (page: Page) => page.locator("[data-filter-sheet]")
 
 /** Whether the bar shows its panels in place (a wide bar) rather than in the sheet. */
-export const wideBar = async (scope: Locator) => scope.locator("[data-filter-panels]").isVisible()
+const wideBar = async (scope: Locator) => scope.locator("[data-filter-panels]").isVisible()
 
 /** Opens the sheet (narrow bars only). */
-export async function openSheet(page: Page, scope: Locator) {
+async function openSheet(page: Page, scope: Locator) {
   if (await filterSheet(page).isVisible()) return filterSheet(page)
   await scope.getByRole("button", { name: /^Filters/ }).click()
   await expect(filterSheet(page)).toBeVisible()

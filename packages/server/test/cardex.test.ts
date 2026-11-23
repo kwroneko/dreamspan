@@ -124,7 +124,7 @@ describe("v1 as card sources", () => {
           ["created_before", "Created before", "Created"],
           ["fields", "Search in", "search"],
           ["mode", "Match", "search"],
-          ["exclude_forks", "Leave out forks", "switches"],
+          ["exclude_forks", "Hide forks", "switches"],
           ["has_cover", "Cover", "switches"],
           ["deleted_from_source", "Deleted from all sites", "switches"],
           ["deleted_from_any_source", "Deleted from a site", "switches"],
@@ -186,7 +186,12 @@ describe("v1 as card sources", () => {
     Effect.gen(function* () {
       const adapter = fakeCardexAdapter(archive)
       const caps = yield* adapter.capabilities(direct())
-      assert.deepStrictEqual(caps.creators, { filterId: "author", excludeFilterId: "not_author", profiles: true })
+      assert.deepStrictEqual(caps.creators, {
+        filterId: "author",
+        excludeFilterId: "not_author",
+        anyFilterId: "any_author",
+        profiles: true
+      })
       const card = archive.cards.find((c) => c.creator !== "lumen")!
       const query = `${card.site}/${card.creator}`
       const profile = yield* adapter.creator!(direct(), query)

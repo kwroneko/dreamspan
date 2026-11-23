@@ -11,7 +11,7 @@ import { asUser, type Client } from "./rpc.ts"
 import { ADMIN, apiLogin, startServer, withAdmin } from "./server.ts"
 import { openPanel } from "./panel.ts"
 import { expectLayout } from "./layoutAudit.ts"
-import { closePanel, openPanel } from "./sourceFilters.ts"
+import { closePanel, openPanel as openFilterPanel } from "./sourceFilters.ts"
 
 const freePort = () =>
   new Promise<number>((resolve, reject) => {
@@ -58,7 +58,7 @@ export function cardexLorebookTests() {
           await expectLayout(page, info, `lorebook-results-${width}-${theme}`, { scope: "main", hovered: true })
 
           // The Kind choice offers all four.
-          const kind = await openPanel(page, main, "Kind")
+          const kind = await openFilterPanel(page, main, "Kind")
           for (const option of ["Characters and lorebooks", "Characters", "Characters with a lorebook", "Lorebooks"])
             await expect(kind.getByRole("radio", { name: option, exact: true })).toBeVisible()
           await expectLayout(page, info, `lorebook-kind-${width}-${theme}`)

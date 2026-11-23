@@ -413,6 +413,7 @@ function TagInput({ browse, inline = false }: { browse: SourceBrowse; inline?: b
       <Field
         label="Tags"
         labelHidden={!inline}
+        aboutInfo
         about={[
           "Type to find a tag. Enter or + requires it; − or a leading - leaves it out.",
           anyId ? "or makes it an alternative to a tag you required: cards with either count." : ""
@@ -634,11 +635,22 @@ function DatePanel({ panel, filters, set }: { panel: Panel; filters: Filters; se
   return (
     <div className="flex items-end gap-2" data-date-range={panel.key}>
       {[from, until].map((filter, i) => (
-        <Field key={filter.id} label={i === 0 ? "From" : "To"} about={filter.about} className="min-w-0 flex-1">
+        <Field
+          key={filter.id}
+          // Shown as From and To; named in full ("Added after"), since a sheet holds two pairs.
+          label={
+            <>
+              <span aria-hidden="true">{i === 0 ? "From" : "To"}</span>
+              <span className="sr-only">{filter.label}</span>
+            </>
+          }
+          about={filter.about}
+          aboutLabel={filter.label}
+          className="min-w-0 flex-1"
+        >
           <Input
             type="date"
             data-date-filter={filter.id}
-            aria-label={filter.label}
             value={value(filter)}
             onChange={(event) => set({ [filter.id]: event.currentTarget.value || undefined })}
           />
@@ -945,7 +957,15 @@ function ToggleBox({ filter, filters, set }: { filter: SourceFilter; filters: Fi
     <Checkbox
       checked={filters[filter.id] === true}
       disabled={!met}
-      {...(filter.about && met ? { about: filter.about } : {})}
+      {...(filter.about && met
+        ? {
+            labelHelp: (
+              <AboutHint heading={filter.label} info>
+                {filter.about}
+              </AboutHint>
+            )
+          }
+        : {})}
       onCheckedChange={(on) => set({ [filter.id]: on ? true : undefined })}
     >
       {filter.label}
@@ -982,6 +1002,10 @@ function CreatorsPanel({ browse, set }: { browse: SourceBrowse; set: SetFilters 
     set(patch)
   }
   const nameOf = (identity: string) => names.get(identity) ?? handle(identity)
+  // A creator's site, named as the site picker names it.
+  const siteName = (site: string) =>
+    caps.filters.flatMap((f) => (f.kind === "choice" && f.excludeId ? f.options : [])).find((o) => o.value === site)
+      ?.label ?? site
   return (
     <div className="flex w-96 max-w-full min-h-0 flex-col gap-2" data-creator-picker>
       {c.excludeFilterId && (
@@ -1011,11 +1035,11 @@ function CreatorsPanel({ browse, set }: { browse: SourceBrowse; set: SetFilters 
           onChange={(event) => setText(event.currentTarget.value)}
         />
       </Field>
-      <ul aria-label="Creators" className="-mx-2 flex max-h-72 min-w-0 flex-col overflow-y-auto p-2">
+      <ul aria-label="Creators" className="-mx-2 flex max-h-80 min-w-0 flex-col overflow-y-auto px-2">
         {suggestions.items.map((item) => {
           const on = chosen.includes(item.value)
           return (
-            <li key={item.value} className="min-w-0">
+            <li key={item.value} className="min-w-0 rounded-md px-1 py-2 hover:bg-hover">
               <Checkbox
                 checked={on}
                 disabled={!on && full}
@@ -1024,12 +1048,15 @@ function CreatorsPanel({ browse, set }: { browse: SourceBrowse; set: SetFilters 
                   write(mode, next ? [...chosen, item.value] : chosen.filter((v) => v !== item.value))
                 }}
               >
-                <span className="flex min-w-0 items-baseline gap-2">
+                {/* Name, site and count in columns, as a table of the source's creators. */}
+                <span className="grid w-[min(22rem,calc(100vw-6rem))] min-w-0 grid-cols-[minmax(0,1fr)_auto_4rem] items-center gap-3">
                   <span className="min-w-0 truncate">{item.label}</span>
-                  <span className="text-xs text-muted">{item.value.slice(0, item.value.indexOf("/"))}</span>
-                  {item.count !== undefined && (
-                    <span className="ml-auto text-xs text-muted tabular-nums">{count(item.count)}</span>
-                  )}
+                  <span className="rounded border border-border px-1.5 text-xs text-muted">
+                    {siteName(item.value.slice(0, item.value.indexOf("/")))}
+                  </span>
+                  <span className="text-right text-xs text-muted tabular-nums">
+                    {item.count !== undefined ? count(item.count) : ""}
+                  </span>
                 </span>
               </Checkbox>
             </li>
@@ -1123,6 +1150,7 @@ function PanelButton({ panel, browse, set }: { panel: Panel; browse: SourceBrows
       triggerLabel={panelName(panel, summary)}
       hint={panelAbout(panel) ?? `Click to choose the ${panel.title.toLowerCase()}.`}
       side="bottom"
+      tall
       wide={creatorIds(browse.caps!).includes(panel.filters[0]!.id)}
       triggerClassName={`${buttonClass("secondary")} max-w-full`}
       trigger={
@@ -1160,7 +1188,11 @@ function Switches({
             <Checkbox
               key={filter.id}
               checked={active.includes(hidden)}
-              about={hidden.about}
+              labelHelp={
+                <AboutHint heading={hidden.toggle!} info>
+                  {hidden.about}
+                </AboutHint>
+              }
               onCheckedChange={(on) => set({ [filter.id]: on ? undefined : (hidden.off as SourceFilterValue) })}
             >
               {hidden.toggle}
@@ -1247,7 +1279,11 @@ function SearchOptions({
               onValueChange={(next) => set({ [filter.id]: next === filter.options[0]?.value ? undefined : next })}
               options={filter.options.map((o) => ({ value: o.value, label: o.label }))}
             />
-            {filter.about && <AboutHint heading={filter.label}>{filter.about}</AboutHint>}
+            {filter.about && (
+              <AboutHint heading={filter.label} info>
+                {filter.about}
+              </AboutHint>
+            )}
           </span>
         )
       })}
@@ -1289,7 +1325,11 @@ function FiltersSheet({ browse, set }: { browse: SourceBrowse; set: SetFilters }
                     </span>
                     <Icon name="down" className={open ? "rotate-180" : ""} />
                   </button>
-                  {panelAbout(panel) && <AboutHint heading={panel.title}>{panelAbout(panel)}</AboutHint>}
+                  {panelAbout(panel) && (
+                    <AboutHint heading={panel.title} info>
+                      {panelAbout(panel)}
+                    </AboutHint>
+                  )}
                 </div>
                 {open && (
                   <div id={bodyId} className="flex flex-col gap-2 pb-3">

@@ -79,15 +79,15 @@ for (const width of [1440, 390])
       await panel.getByRole("radio", { name: "Characters", exact: true }).click()
       await closePanel(page, "Kind")
       panel = await openPanel(page, main, "Added")
-      await panel.getByLabel("Added after", { exact: true }).fill("2026-01-01")
-      await panel.getByLabel("Added before", { exact: true }).fill("2026-03-01")
+      await panel.getByRole("textbox", { name: "Added after", exact: true }).fill("2026-01-01")
+      await panel.getByRole("textbox", { name: "Added before", exact: true }).fill("2026-03-01")
       await expectLayout(page, info, `cardex-filters-panel-${width}`, { scope: "body" })
       await closePanel(page, "Added")
       panel = await openPanel(page, main, "Tokens")
       await panel.getByRole("spinbutton", { name: "Min tokens", exact: true }).fill("100")
       await closePanel(page, "Tokens")
       controls = await filterControls(page, main)
-      await controls.getByRole("checkbox", { name: "Leave out forks", exact: true }).click()
+      await controls.getByRole("checkbox", { name: "Hide forks", exact: true }).click()
       await closeSheet(page)
 
       const applied = [
@@ -96,7 +96,7 @@ for (const width of [1440, 390])
         "Kind: Characters",
         "Added 2026-01-01 – 2026-03-01",
         "At least 100 tokens",
-        "Leave out forks"
+        "Hide forks"
       ]
       for (const text of applied) await expect(chips).toContainText(text)
       // A minimum of its own lifts the archive's; characters only still leave out those without a cover.

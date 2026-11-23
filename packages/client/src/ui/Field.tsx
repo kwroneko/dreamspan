@@ -30,6 +30,7 @@ export function Field({
   description,
   about,
   aboutLabel,
+  aboutInfo = false,
   error,
   children,
   className = "",
@@ -46,6 +47,8 @@ export function Field({
   /** Help for choosing a value, beside the label. */
   about?: ReactNode
   aboutLabel?: string
+  /** The help as a circled (i) at icon size, beside a bar's control, rather than the small "?". */
+  aboutInfo?: boolean
   /** Shown under the control, and marks it invalid. */
   error?: string | null | undefined
   children: ReactNode
@@ -55,7 +58,9 @@ export function Field({
     <div className={labelHidden ? "sr-only" : "text-sm leading-5"}>
       <BaseField.Label className="inline text-sm font-medium text-text">{label}</BaseField.Label>
       {"\u00a0"}
-      <AboutHint heading={aboutLabel ?? (typeof label === "string" ? label : "this field")}>{about}</AboutHint>
+      <AboutHint heading={aboutLabel ?? (typeof label === "string" ? label : "this field")} info={aboutInfo}>
+        {about}
+      </AboutHint>
     </div>
   ) : (
     <BaseField.Label className={labelHidden ? "sr-only" : "text-sm font-medium text-text"}>{label}</BaseField.Label>

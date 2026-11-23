@@ -398,7 +398,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       about: `cardex leaves out characters under ${typeof named.get("min_tokens")?.default === "number" ? named.get("min_tokens")!.default : 300} tokens unless you set a minimum.`
     })
   }
-  if (named.has("exclude_forks")) filters.push({ id: "exclude_forks", label: "Leave out forks", kind: "toggle" })
+  if (named.has("exclude_forks")) filters.push({ id: "exclude_forks", label: "Hide forks", kind: "toggle" })
   const sites = allowed("source")
   if (sites.length) {
     filters.push({
