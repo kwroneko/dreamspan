@@ -224,11 +224,13 @@ describe("guidance on swipes, as registered parts", () => {
       generateText: "New version",
       generateHint: "A new version of Aria's reply"
     } as never
-    expect(markup(createElement(ComposerControls, { placement: "actions", context }))).toContain(
-      'aria-label="New version"'
-    )
-    // Send keeps its place, disabled: no submit can post guidance as a message.
-    expect(availableComposerControls("actions", context).map((c) => c.id)).toContain("composer.send")
+    const html = markup(createElement(ComposerControls, { placement: "actions", context }))
+    expect(html).toContain('aria-label="New version"')
+    // Generate is the one action, primary: no Send beside it, so no submit can post guidance as a
+    // message (owner, 2026-11-23).
+    expect(html).toMatch(/<button[^>]*bg-accent[^>]*aria-label="New version"|aria-label="New version"[^>]*bg-accent/)
+    expect(availableComposerControls("actions", context).map((c) => c.id)).not.toContain("composer.send")
+    expect(html).not.toContain('aria-label="Send')
     void composerControls.get("composer.generate")!.run!(context, "keyboard")
     void composerControls.get("composer.generate")!.run!(context, "button")
     expect(generate).toHaveBeenCalledTimes(2)
