@@ -1,13 +1,33 @@
 import type { BudgetOrigins } from "@dreamspan/shared/inspectorApi.ts"
 import { need, type Assembly } from "./pipeline.ts"
 import type { ModelInput } from "./types.ts"
+import { ASSUMED_CONTEXT } from "@dreamspan/shared/modelSettings.ts"
 
-/** What the preset's budget allows: its context size, within the model's, less its response length. */
+/**
+ * The input budget: the context size within the model's window, less the reply length. Both are
+ * the model's settings (`withModelSettings` puts them in the preset view, replacing whatever an
+ * imported preset carried): its "Context to send", else its window.
+ */
 export const contextBudget = (assembly: Assembly) => {
   const { samplers } = need(assembly, "preset").doc
   const model = assembly.model
   const context = Math.min(samplers.openai_max_context, model?.context ?? Number.POSITIVE_INFINITY)
   return context - samplers.openai_max_tokens
+}
+
+/**
+ * What limits the context, with its size in tokens, for the notes on what was left out: the
+ * model's own "Context to send", its window, or the window assumed when nothing reports one.
+ */
+export const contextLimit = (assembly: Assembly) => {
+  const size = contextBudget(assembly) + need(assembly, "preset").doc.samplers.openai_max_tokens
+  const model = assembly.model
+  const tokens = `(${size.toLocaleString("en-US")} tokens)`
+  if (model?.settings?.samplers?.openai_max_context === size) return `the context size set for this model ${tokens}`
+  if (model?.context === size) return `this model's context window ${tokens}`
+  if (model && model.context == null && size === ASSUMED_CONTEXT)
+    return `the context window assumed for this model ${tokens}`
+  return `the context size ${tokens}`
 }
 
 /** The target includes the same response reserve as the maximum. */

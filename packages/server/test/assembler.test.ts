@@ -1000,8 +1000,81 @@ describe("the context assembler", () => {
       })
     )
     expect(snapshot.issues.find((issue) => issue.kind === "examples_truncated")?.message).toBe(
-      "1 example dialogue didn't fit the preset's context size."
+      "1 example dialogue didn't fit the context size set for this model (1,000 tokens)."
     )
+  })
+
+  describe("the budget is the model's, never an imported preset's (owner 2026-11-23)", () => {
+    // An ST preset file as imported, with ST's small context size and a reply length the size of it.
+    const stPreset = preset({ openai_max_context: 4095, openai_max_tokens: 4096 })
+    const withExamples = chat({
+      cards: [
+        ...chat().cards.filter((c) => c.entity !== "mira"),
+        {
+          entity: "mira",
+          doc: { ...mira, mes_example: "<START>\n{{user}}: Hi\n{{char}}: " + "long ".repeat(1500) }
+        }
+      ],
+      messages: Array.from({ length: 30 }, (_, i) => ({
+        side: i % 2 === 0 ? ("assistant" as const) : ("user" as const),
+        content: `message ${i} ${"word ".repeat(150)}`
+      })),
+      preset: stPreset
+    })
+    const cuts = (snapshot: ContextSnapshot) =>
+      snapshot.issues.filter((issue) => issue.kind === "examples_truncated" || issue.kind === "history_truncated")
+
+    it("sends everything to a model with a big window, whatever the preset's own context size", async () => {
+      for (const context of [1_000_000, null]) {
+        const snapshot = await assembled({ ...withExamples, model: model({ context, settings: {} }) })
+        expect(cuts(snapshot)).toEqual([])
+        expect(snapshot.contextBudget?.maximum).toBe(context ?? 128_000)
+        expect(snapshot.contextBudget?.responseReserve).toBe(4096)
+      }
+    })
+
+    it("cuts to the model's Context to send, and the notes give its size", async () => {
+      const snapshot = await assembled({
+        ...withExamples,
+        model: model({
+          context: 1_000_000,
+          settings: { samplers: { openai_max_context: 4000, openai_max_tokens: 500 } }
+        })
+      })
+      expect(snapshot.contextBudget?.maximum).toBe(4000)
+      const messages = cuts(snapshot).map((issue) => issue.message)
+      expect(messages).toContain("1 example dialogue didn't fit the context size set for this model (4,000 tokens).")
+      expect(
+        messages.some((m) =>
+          /^The context holds the last \d+ messages: older ones don't fit the context size set for this model \(4,000 tokens\)\.$/.test(
+            m
+          )
+        )
+      ).toBe(true)
+    })
+
+    it("names the model's window when that is what limits", async () => {
+      const snapshot = await assembled({ ...withExamples, model: model({ context: 4000, settings: {} }) })
+      expect(cuts(snapshot).map((issue) => issue.message)).toContain(
+        "1 example dialogue didn't fit this model's context window (4,000 tokens)."
+      )
+    })
+
+    it("doesn't call examples cut when the preset's order turns them off", async () => {
+      const off = {
+        ...stPreset,
+        order: stPreset.order.map((e) => (e.identifier === "dialogueExamples" ? { ...e, enabled: false } : e))
+      }
+      const absent = { ...stPreset, order: stPreset.order.filter((e) => e.identifier !== "dialogueExamples") }
+      for (const doc of [off, absent]) {
+        const snapshot = await assembled({
+          ...withExamples,
+          preset: doc,
+          model: model({ context: 1_000_000, settings: {} })
+        })
+        expect(cuts(snapshot)).toEqual([])
+      }
+    })
   })
 
   it("keeps the newest messages the preset's budget allows, and says so", async () => {
