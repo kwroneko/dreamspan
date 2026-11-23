@@ -13,14 +13,15 @@ import { CardForChat } from "./chatSetupApi.ts"
 const SourceId = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,39}$/))
 
 /**
- * Where a criterion sits in the filter bar: criteria sharing a `group` are one section (one
- * button on a wide bar, one folding row on a narrow one), named by the group; `more` puts it
- * under More filters. Without either, a switch sits in the bar's row of switches and any other
- * criterion is a section of its own.
+ * Where a criterion sits in the filter bar: criteria sharing a `group` are one panel (a button
+ * that says what's chosen, on a wide bar; a folding row in the phone's Filters sheet), named by
+ * the group. `place` puts it beside the search box ("search"), among the bar's checkboxes
+ * ("switches", where ungrouped switches go anyway), or nowhere ("none": set only through the
+ * URL or another control, shown as a chip).
  */
 const placement = {
   group: Schema.optionalKey(Schema.String),
-  more: Schema.optionalKey(Schema.Boolean)
+  place: Schema.optionalKey(Schema.Literals(["search", "switches", "none"]))
 }
 
 /** One criterion the source can filter by (§2.3). The filter bar is generated from these. */
@@ -31,6 +32,11 @@ const SourceFilter = Schema.Union([
     kind: Schema.Literal("choice"),
     options: Schema.Array(Schema.Struct({ value: Schema.String, label: Schema.String })),
     multi: Schema.Boolean,
+    /**
+     * A several-choice filter whose options another filter (this id, with the same options)
+     * leaves out: the bar shows both as one list of checkboxes with Include or Exclude above.
+     */
+    excludeId: Schema.optionalKey(Schema.String),
     about: Schema.optionalKey(Schema.String),
     ...placement
   }),
@@ -41,6 +47,8 @@ const SourceFilter = Schema.Union([
     unit: Schema.optionalKey(Schema.String),
     min: Schema.optionalKey(Schema.Number),
     max: Schema.optionalKey(Schema.Number),
+    /** The slider's top step before "no maximum" (its scale is logarithmic). */
+    scaleMax: Schema.optionalKey(Schema.Number),
     about: Schema.optionalKey(Schema.String),
     ...placement
   }),
@@ -70,7 +78,16 @@ export type SourceFilter = typeof SourceFilter.Type
 
 export const SourceCapabilities = Schema.Struct({
   text: Schema.Boolean,
-  tags: Schema.Struct({ include: Schema.Boolean, exclude: Schema.Boolean, suggest: Schema.Boolean }),
+  tags: Schema.Struct({
+    include: Schema.Boolean,
+    exclude: Schema.Boolean,
+    suggest: Schema.Boolean,
+    /**
+     * The text filter that holds groups of alternative tags (`a|b,c|d`: a card needs one tag of
+     * each group); the tag field offers "or" for it.
+     */
+    anyFilterId: Schema.optionalKey(Schema.String)
+  }),
   filters: Schema.Array(SourceFilter),
   sorts: Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String, reversible: Schema.Boolean })),
   /** Which filter is the content rating, and the source's own anonymous default for it (§5.3). */
@@ -94,8 +111,36 @@ export const SourceCapabilities = Schema.Struct({
     Schema.Struct({
       filterId: Schema.String,
       excludeFilterId: Schema.optionalKey(Schema.String),
+      /** The text filter for "by any of these creators" (several, comma-separated). */
+      anyFilterId: Schema.optionalKey(Schema.String),
       profiles: Schema.Boolean
     })
+  ),
+  /**
+   * What the source leaves out while a filter isn't set (characters with few tokens, say): a
+   * chip shows each while it applies, that is unless one of `unless` is set (to one of its
+   * `values`, when given), and removing it sets `filterId` to `off`. `min` is the minimum it
+   * applies to a range filter.
+   */
+  hiddenByDefault: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        label: Schema.String,
+        about: Schema.String,
+        filterId: Schema.String,
+        off: Schema.Union([
+          Schema.String,
+          Schema.Struct({ min: Schema.optionalKey(Schema.Number), max: Schema.optionalKey(Schema.Number) })
+        ]),
+        unless: Schema.Array(
+          Schema.Struct({ filterId: Schema.String, values: Schema.optionalKey(Schema.Array(Schema.String)) })
+        ),
+        min: Schema.optionalKey(Schema.Number),
+        /** A checkbox among the bar's switches that is this default: ticked while it applies. */
+        toggle: Schema.optionalKey(Schema.String)
+      })
+    )
   ),
   /** The source lists a card's earlier listings, versions and forks (`SourceFamily`). */
   families: Schema.optionalKey(Schema.Boolean)

@@ -11,6 +11,7 @@ import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, startServer, withAdmin } from "./support/server.ts"
 import { hideAppNavigation, showAppNavigation } from "./support/appMenu.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
+import { closeSheet, filterControls } from "./support/sourceFilters.ts"
 import { UNSAVED, expectSaveState, saveRevision } from "./support/saveRevision.ts"
 import { Effect } from "effect"
 
@@ -100,26 +101,21 @@ for (const width of [1440, 390])
         await expect(page).toHaveURL(/ssort=name/)
         await search.fill("")
 
-        // Filters: the panel below the controls, chips for what's set, Clear filters.
-        const filters = main.getByRole("button", { name: /^Filters/ })
-        await filters.click()
-        await expect(filters).toHaveAttribute("aria-pressed", "true")
-        const panel = main.getByRole("region", { name: "cardex filters", exact: true })
-        await expect(panel).toBeVisible()
-        await panel.getByRole("switch", { name: "Leave out forks" }).click()
-        const chips = main.getByLabel("Filters set", { exact: true })
-        await expect(chips.getByText("Leave out forks", { exact: true })).toBeVisible()
-        await panel.getByRole("textbox", { name: "Tags", exact: true }).fill("mystery")
-        await panel.getByRole("textbox", { name: "Tags", exact: true }).press("Enter")
-        await expect(chips.getByText("+mystery", { exact: true })).toBeVisible()
-        await expect(page).toHaveURL(/stags=/)
+        // Filters: the bar (or the Filters sheet on a narrow one), chips for what's in effect, Clear all.
+        const controls = await filterControls(page, main)
+        await controls.getByRole("checkbox", { name: "Hide forks" }).click()
+        const tags = controls.getByRole("textbox", { name: "Tags", exact: true })
+        await tags.fill("mystery")
+        await tags.press("Enter")
         await expectLayout(page, info, `home-cardex-filters-${width}-${theme}`, { scope: "main" })
+        await closeSheet(page)
+        const chips = main.getByRole("group", { name: "Active filters", exact: true })
+        await expect(chips).toContainText("Hide forks")
+        await expect(chips).toContainText("+mystery")
+        await expect(page).toHaveURL(/stags=/)
         await main.screenshot({ path: info.outputPath("home-filters.png") })
-        await chips.getByRole("button", { name: "Clear filters", exact: true }).click()
-        await expect(chips).toHaveCount(0)
-        await panel.getByRole("button", { name: "Close", exact: true }).click()
-        await expect(panel).toHaveCount(0)
-        await expect(filters).toHaveAttribute("aria-pressed", "false")
+        await chips.getByRole("button", { name: "Clear all", exact: true }).click()
+        await expect(chips.locator("[data-source-chip]:not([data-default])")).toHaveCount(0)
 
         // An error says what the user can do, and Retry asks again.
         // Pictures are in by now, so the failure meets the search.

@@ -26,7 +26,20 @@ export function LabelWithHelp({ children, help }: { children: ReactNode; help: R
   )
 }
 
-export function AboutHint({ heading, children }: { heading: string; children: ReactNode }) {
+/** The info variant: a circled (i) at icon size beside a control, for bars of controls rather than headings. */
+const infoHintClass =
+  "-my-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md align-middle text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+
+export function AboutHint({
+  heading,
+  children,
+  info = false
+}: {
+  heading: string
+  children: ReactNode
+  /** A circled (i) at icon size instead of the small "?". */
+  info?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const id = useId()
   return (
@@ -39,9 +52,9 @@ export function AboutHint({ heading, children }: { heading: string; children: Re
             aria-describedby={id}
             // A tap opens it too, where nothing hovers; a tap elsewhere closes it.
             onClick={() => setOpen(true)}
-            className={aboutHintClass}
+            className={info ? infoHintClass : aboutHintClass}
           >
-            <Icon name="help" size={14} />
+            {info ? <Icon name="info" /> : <Icon name="help" size={14} />}
           </BaseButton>
         }
       />

@@ -68,7 +68,7 @@ export function CardBrowseBar({
     // Wraps where the sidebar is narrowest: the filter keeps room for its choice, and the
     // sort and toggles move to a second line rather than squeezing it.
     <div className="flex max-w-controls min-w-0 shrink-0 flex-wrap items-center gap-1">
-      <div className="min-w-24 flex-1">
+      <div className="min-w-24 flex-auto">
         {groups ? (
           <GroupsFilter data={data} browse={browse} onChange={onChange} sources={sources} onSource={onSource} />
         ) : (

@@ -179,3 +179,60 @@ export function FieldSlider({
     </BaseSlider.Root>
   )
 }
+
+/**
+ * A slider with two thumbs, a range's low and high ends, over positions `0..steps`: the caller
+ * maps positions to values (a log scale, say). `valueText` says what a thumb's position stands
+ * for; the label row is the caller's. `onValueChange` follows the drag, `onValueCommitted` fires
+ * once the pointer lets go or after a key.
+ */
+export function RangeSlider({
+  label,
+  thumbLabels,
+  value,
+  steps,
+  valueText,
+  onValueChange,
+  onValueCommitted
+}: {
+  label: string
+  thumbLabels: readonly [string, string]
+  value: readonly [number, number]
+  steps: number
+  valueText: (position: number, thumb: 0 | 1) => string
+  onValueChange: (value: [number, number]) => void
+  onValueCommitted: (value: [number, number]) => void
+}) {
+  const pair = (next: number | readonly number[]): [number, number] =>
+    Array.isArray(next) ? [next[0] ?? 0, next[1] ?? steps] : [next as number, next as number]
+  return (
+    <BaseSlider.Root
+      aria-label={label}
+      value={[...value]}
+      min={0}
+      max={steps}
+      step={1}
+      largeStep={Math.max(1, Math.round(steps / 10))}
+      thumbAlignment="edge"
+      onValueChange={(next) => onValueChange(pair(next))}
+      onValueCommitted={(next) => onValueCommitted(pair(next))}
+      className="flex w-full flex-col"
+    >
+      <BaseSlider.Control className="flex h-8 w-full touch-none items-center select-none">
+        <BaseSlider.Track className="h-1.5 w-full rounded-full bg-surface-raised ring-1 ring-border">
+          <BaseSlider.Indicator className="rounded-full bg-accent" />
+          {([0, 1] as const).map((thumb) => (
+            <BaseSlider.Thumb
+              key={thumb}
+              index={thumb}
+              data-layout-overlay="Slider thumb rides over its track and fill"
+              getAriaLabel={() => thumbLabels[thumb]}
+              getAriaValueText={(_formatted, current) => valueText(current, thumb)}
+              className="size-5 rounded-full border border-border bg-surface shadow-sm outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus"
+            />
+          ))}
+        </BaseSlider.Track>
+      </BaseSlider.Control>
+    </BaseSlider.Root>
+  )
+}

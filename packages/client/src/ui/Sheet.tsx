@@ -12,7 +12,8 @@ export function Sheet({
   title,
   container,
   children,
-  initialFocus
+  initialFocus,
+  imageControls = true
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -20,6 +21,8 @@ export function Sheet({
   title: ReactNode
   /** Keep a sheet within the landmark it belongs to. */
   container?: HTMLElement | null | undefined
+  /** False: no image controls in its header, for a sheet that shows no pictures. */
+  imageControls?: boolean
   /** Fills the rest of the height; it scrolls itself. */
   children: ReactNode
   /** Restore a focused control when this sheet replaces a pending chat's sheet. */
@@ -37,9 +40,11 @@ export function Sheet({
         >
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
             <BaseDialog.Title className="min-w-0 flex-1 truncate text-base font-semibold">{title}</BaseDialog.Title>
-            <div className="max-sm:order-3 max-sm:flex max-sm:w-full max-sm:justify-end">
-              <ImageControls />
-            </div>
+            {imageControls && (
+              <div className="max-sm:order-3 max-sm:flex max-sm:w-full max-sm:justify-end">
+                <ImageControls />
+              </div>
+            )}
             <WindowClose ref={closeRef} onClick={() => onOpenChange(false)} />
           </div>
           {children}
