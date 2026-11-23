@@ -12,7 +12,10 @@ export interface PendingComposerContext {
   /** A phone: the speaker chip is its portrait, Generate an icon, as at the chat's composer. */
   readonly compact: boolean
   readonly speaker: ComponentProps<typeof SpeakerSwitcher>
-  readonly submitHint: string
+  /** The key that submits ("Enter"), for the end of the hover of the button it triggers. */
+  readonly submitKey: string
+  /** The speaker is the user's own card (or no one, "You"): Generate writes their turn "for you". */
+  readonly speakerPlayed: boolean
   readonly speakerName: string
   readonly guidance: boolean
   readonly prefsReady: boolean

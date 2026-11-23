@@ -23,7 +23,7 @@ import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore,
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
-import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
+import { composerKeyDown, composerSubmitHint, composerSubmitKey } from "./composerKeys.ts"
 import { buttonClass } from "../../ui/Button.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
@@ -120,7 +120,10 @@ export function ComposerBox({
       <div className="grid min-w-0 p-2">{children}</div>
       <div data-testid="composer-controls" className="flex min-w-0 flex-wrap items-center gap-1.5 p-2">
         <div className="flex min-w-0 items-center gap-1.5">{start}</div>
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">{end}</div>
+        {/* Its gap is a variable: Generate in guidance mode takes Send's width and this gap too (WIDE_GENERATE). */}
+        <div className="ml-auto flex shrink-0 items-center gap-(--composer-actions-gap) [--composer-actions-gap:--spacing(1.5)]">
+          {end}
+        </div>
       </div>
     </div>
   )
@@ -287,6 +290,8 @@ export function Composer({
   // as they're asked for: a new version reuses its reply's own, except the reply edited here.
   const viewPrefs = useViewPrefs()
   const submitHint = composerSubmitHint(viewPrefs.prefs.enterSends)
+  // At the end of the hover of the one button Enter triggers: Generate with guidance on, else Send.
+  const submitKey = ` (${composerSubmitKey(viewPrefs.prefs.enterSends)})`
   const mode = choice.draftId === draftId ? choice.guidance : draftGuidance
   const guidance = mode || editing !== null
   const choicesReady =
@@ -594,6 +599,7 @@ export function Composer({
       : replierName
         ? `${roundNames ?? replierName} ${replies}`
         : "Send"
+  // Send shows only with guidance off, so Enter is always its key.
   const sendHint = hasText
     ? `${sendLabel}${routeHint}${
         decides
@@ -603,27 +609,24 @@ export function Composer({
             : choice.noReplies
               ? ", with no reply"
               : ""
-      } (${submitHint})`
+      }.${submitKey}`
     : decides
-      ? "A reply now, with nothing sent from you; the decision model chooses who"
+      ? `Pass the turn: the decision model chooses who replies next.${submitKey}`
       : roundNames
-        ? `${roundNames} ${replies} now, with nothing sent from you`
-        : "Type a message to send"
+        ? `Pass the turn: ${roundNames} ${replies} next.${submitKey}`
+        : "Type a message to send."
   // Generate writes the speaker's turn: for a card the user plays, the model writes it for them.
   const editedName = editing === null ? null : nameOf(castView, editing.speakerEntityId)
   // Keep the action named while the cast is loading; the full name includes its speaker.
   const generateText =
     editing !== null ? "New swipe" : name ? `Generate ${name}` : cast === null ? "Generate …" : "Generate"
+  // "For you" only for the user's own card: another character's turn is theirs (owner, 2026-11-23).
   const generateHint =
     editing !== null
-      ? `Generate a new swipe of ${editedName ? `${editedName}'s` : "this"} reply, following this guidance (${submitHint}). The guidance stays here.`
-      : `${
-          name === null
-            ? "Generate the next turn with the model"
-            : speakerPlayed
-              ? `Generate ${name}'s next turn with the model for you`
-              : `Generate ${name}'s next turn with the model`
-        }${guidance && hasText ? ", following the guidance" : ""}${guidance ? ` (${submitHint})` : ""}`
+      ? `Generate a new swipe of ${editedName ? `${editedName}'s` : "this"} reply following this guidance. This swipe isn't affected.${submitKey}`
+      : `Let the model write ${name === null ? "the" : `${name}'s`} next turn${speakerPlayed ? " for you" : ""}${
+          guidance && hasText ? ", following your guidance" : ""
+        }.${guidance ? submitKey : ""}`
   const shownError = error ?? saveError ?? viewPrefs.error
 
   const controls: ComposerControlContext = {

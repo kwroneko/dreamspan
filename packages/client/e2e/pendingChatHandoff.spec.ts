@@ -198,8 +198,8 @@ for (const target of ["card", "group"] as const) {
       await page.reload()
       await expect(composer).toHaveValue("First line\n\n\n\nSecond line")
       await send.hover()
-      // The tooltip shows how to add a line (Base UI gives its popup no tooltip role).
-      await expect(page.getByText(/Shift\+Enter for a new line/)).toBeVisible()
+      // The tooltip ends with the key that sends, and only that (Base UI gives its popup no tooltip role).
+      await expect(page.getByText("Send. (Enter)", { exact: true })).toBeVisible()
       await composer.press("Enter")
       await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
       await expect(page.getByRole("article", { name: "Your message", exact: true })).toContainText("First line")

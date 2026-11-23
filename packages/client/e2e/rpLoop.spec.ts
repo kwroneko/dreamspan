@@ -151,9 +151,8 @@ for (const width of [1440, 390])
       await shot("02-composer-off-with-text")
       await box.fill("")
 
-      // Guidance on: its own look, label and placeholder; Send stays beside Generate. With nothing
-      // typed it asks for the reply alone (owner, 2026-11-17: no Reply now), so whether it's
-      // enabled depends on who can reply, not on the guidance mode.
+      // Guidance on: its own look, label and placeholder; Generate is the one action, no Send
+      // beside it (owner, 2026-11-23).
       await guidanceSwitch(page).click()
       await expect(guidanceSwitch(page)).toBeChecked()
       const guidance = page.getByRole("textbox", { name: "Guidance", exact: true })
@@ -161,7 +160,7 @@ for (const width of [1440, 390])
       await expect(page.locator("[data-guidance]").first()).toBeVisible()
       await expect(
         page.getByTestId("composer-controls").getByRole("button", { name: /^(?:Send|.* repl(?:y|ies)$)/ })
-      ).toBeVisible()
+      ).toHaveCount(0)
       await shot("03-composer-guidance-empty")
       const direction = `Have the stranger by the fire speak up (${width} ${theme}).`
       await guidance.fill(direction)
