@@ -12,6 +12,17 @@ import { CardForChat } from "./chatSetupApi.ts"
 /** A source's id: lowercase, safe in URLs and keys (`show=src.<id>`). */
 const SourceId = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,39}$/))
 
+/**
+ * Where a criterion sits in the filter bar: criteria sharing a `group` are one section (one
+ * button on a wide bar, one folding row on a narrow one), named by the group; `more` puts it
+ * under More filters. Without either, a switch sits in the bar's row of switches and any other
+ * criterion is a section of its own.
+ */
+const placement = {
+  group: Schema.optionalKey(Schema.String),
+  more: Schema.optionalKey(Schema.Boolean)
+}
+
 /** One criterion the source can filter by (§2.3). The filter bar is generated from these. */
 const SourceFilter = Schema.Union([
   Schema.Struct({
@@ -20,7 +31,8 @@ const SourceFilter = Schema.Union([
     kind: Schema.Literal("choice"),
     options: Schema.Array(Schema.Struct({ value: Schema.String, label: Schema.String })),
     multi: Schema.Boolean,
-    about: Schema.optionalKey(Schema.String)
+    about: Schema.optionalKey(Schema.String),
+    ...placement
   }),
   Schema.Struct({
     id: Schema.String,
@@ -29,7 +41,8 @@ const SourceFilter = Schema.Union([
     unit: Schema.optionalKey(Schema.String),
     min: Schema.optionalKey(Schema.Number),
     max: Schema.optionalKey(Schema.Number),
-    about: Schema.optionalKey(Schema.String)
+    about: Schema.optionalKey(Schema.String),
+    ...placement
   }),
   Schema.Struct({
     id: Schema.String,
@@ -39,7 +52,8 @@ const SourceFilter = Schema.Union([
     requires: Schema.optionalKey(
       Schema.Struct({ filterId: Schema.String, values: Schema.Array(Schema.String), about: Schema.String })
     ),
-    about: Schema.optionalKey(Schema.String)
+    about: Schema.optionalKey(Schema.String),
+    ...placement
   }),
   Schema.Struct({
     id: Schema.String,
@@ -48,7 +62,8 @@ const SourceFilter = Schema.Union([
     suggestions: Schema.optionalKey(Schema.Struct({ kind: Schema.Literal("creators"), multiple: Schema.Boolean })),
     /** The value is a calendar date (`YYYY-MM-DD`): the panel offers a date field. */
     format: Schema.optionalKey(Schema.Literal("date")),
-    about: Schema.optionalKey(Schema.String)
+    about: Schema.optionalKey(Schema.String),
+    ...placement
   })
 ])
 export type SourceFilter = typeof SourceFilter.Type

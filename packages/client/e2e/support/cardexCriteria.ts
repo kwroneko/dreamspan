@@ -1,9 +1,11 @@
-// All public v1 card criteria use the existing generic panel. Synthetic archive only.
+// All public v1 card criteria in the generated filter bar: its sections, switches and More
+// filters. Synthetic archive only.
 import { createServer } from "node:net"
 import { expect, test } from "@playwright/test"
 import { ADMIN, apiLogin, startServer, withAdmin } from "./server.ts"
 import { showAppNavigation } from "./appMenu.ts"
 import { expectLayout } from "./layoutAudit.ts"
+import { closeSection, openMore, openSection } from "./sourceFilters.ts"
 
 const freePort = () =>
   new Promise<number>((resolve) => {
@@ -71,54 +73,70 @@ export function cardexCriteriaTests() {
               )
               await clear()
             }
-            // Both existing picker fields can reach values beyond their first keyset page.
+            // Both existing picker fields can reach values beyond their first keyset page. Tag
+            // suggestions show while the tag field is in use.
             const suggestedTags = panel.getByLabel("Suggested tags", { exact: true })
+            await expect(suggestedTags).toHaveCount(0)
+            await panel.getByRole("textbox", { name: "Tags", exact: true }).focus()
             await expect(suggestedTags.getByRole("button", { name: "More tags", exact: true })).toBeVisible()
             await suggestedTags.getByRole("button", { name: "More tags", exact: true }).click()
             await expect(suggestedTags.getByRole("button")).toHaveCount(21)
-            const creator = panel.getByRole("textbox", { name: "Creator", exact: true })
+            // Escape closes the list (and only the list).
+            await panel.getByRole("textbox", { name: "Tags", exact: true }).press("Escape")
+            await expect(suggestedTags).toHaveCount(0)
+            await expect(panel).toBeVisible()
+            const creators = await openSection(page, panel, "Creators")
+            const creator = creators.getByRole("textbox", { name: "Creator", exact: true })
             await creator.fill("/")
-            const suggestedCreators = panel.getByLabel("Suggested creators", { exact: true }).first()
+            const suggestedCreators = creators.getByLabel("Suggested creators", { exact: true }).first()
             await suggestedCreators.getByRole("button", { name: "More creators", exact: true }).click()
             await expect(suggestedCreators.getByRole("button")).toHaveCount(21)
             await suggestedCreators.getByRole("button").first().click()
             await expect(creator).toHaveValue(/^[a-z_]+\//)
+            await closeSection(page, "Creators")
             await clear()
             // A long list of choices (every site) is the existing picker, with its search.
             const pick = async (label: string, option: string) => {
-              await panel.getByRole("combobox", { name: label, exact: true }).click()
+              const sites = await openSection(page, panel, "Sites")
+              await sites.getByRole("combobox", { name: label, exact: true }).click()
               const list = page.getByRole("dialog", { name: `Choose: ${label.toLowerCase()}`, exact: true })
               await list.getByPlaceholder("Search").fill(option)
               await list.getByRole("option", { name: option, exact: true }).click()
               await page.keyboard.press("Escape")
               await expect(list).toBeHidden()
+              await closeSection(page, "Sites")
             }
             for (const label of ["Site", "Exclude sites"]) {
               await pick(label, "Chub")
               await check(`${label}: Chub`)
             }
-            // Each choice kind, including lists, has a chip and can be cleared again.
-            for (const [group, option, chip] of [
-              ["Rating", "Safe", "Rating: Safe"],
-              ["Match", "Meaning", "Match: Meaning"],
-              ["Search in", "Name", "Search in: Name"],
-              ["Kind", "Characters with a lorebook", "Kind: Characters with a lorebook"],
-              ["Cover", "Any", "Cover: Any"]
+            // Each choice kind, including lists, has a chip and can be cleared again: in its
+            // section, or under More filters.
+            for (const [group, option, chip, section] of [
+              ["Rating", "Safe", "Rating: Safe", "Rating"],
+              ["Match", "Meaning", "Match: Meaning", null],
+              ["Search in", "Name", "Search in: Name", null],
+              ["Kind", "Characters with a lorebook", "Kind: Characters with a lorebook", "Kind"],
+              ["Cover", "Any", "Cover: Any", null]
             ]) {
-              await panel
+              const where = section ? await openSection(page, panel, section) : await openMore(panel)
+              await where
                 .getByRole("group", { name: group!, exact: true })
                 .getByRole("button", { name: option!, exact: true })
                 .click()
+              if (section) await closeSection(page, section)
               await check(chip!)
             }
-            for (const [label, value] of [
-              ["Creator", "chub/fable_forge"],
-              ["Any of these creators", "chub/fable_forge,risuai/lumen"],
-              ["Exclude creators", "chub/fable_forge"],
-              ["Any of these tags", "fantasy|magic,adventure|mystery"],
-              ["Picture", "a".repeat(64)]
+            for (const [label, value, section] of [
+              ["Creator", "chub/fable_forge", "Creators"],
+              ["Any of these creators", "chub/fable_forge,risuai/lumen", "Creators"],
+              ["Exclude creators", "chub/fable_forge", "Creators"],
+              ["Any of these tags", "fantasy|magic,adventure|mystery", null],
+              ["Picture", "a".repeat(64), null]
             ]) {
-              await panel.getByRole("textbox", { name: label!, exact: true }).fill(value!)
+              const where = section ? await openSection(page, panel, section) : await openMore(panel)
+              await where.getByRole("textbox", { name: label!, exact: true }).fill(value!)
+              if (section) await closeSection(page, section)
               await expect(chips).toContainText(label!)
               if (label === "Picture") {
                 await chips.scrollIntoViewIfNeeded()
@@ -128,48 +146,64 @@ export function cardexCriteriaTests() {
               }
               await clear()
             }
-            // Dates are date fields.
-            for (const [label, value] of [
-              ["Added after", "2026-01-01"],
-              ["Added before", "2026-02-01"],
-              ["Created after", "2025-01-01"],
-              ["Created before", "2026-01-01"]
+            // Dates are date fields; a range's two dates are one chip.
+            for (const [section, label, value, chip] of [
+              ["Added", "Added after", "2026-01-01", "Added: from 2026-01-01"],
+              ["Added", "Added before", "2026-02-01", "Added: until 2026-02-01"],
+              ["Created", "Created after", "2025-01-01", "Created: from 2025-01-01"],
+              ["Created", "Created before", "2026-01-01", "Created: until 2026-01-01"]
             ]) {
-              const date = panel.getByLabel(label!, { exact: true })
+              const where = await openSection(page, panel, section!)
+              const date = where.getByLabel(label!, { exact: true })
               await expect(date).toHaveAttribute("type", "date")
               await date.fill(value!)
-              await check(`${label}: ${value}`)
+              await closeSection(page, section!)
+              await check(chip!)
             }
-            await panel.getByRole("spinbutton", { name: "Tokens: at least (tokens)", exact: true }).fill("100")
-            await panel.getByRole("spinbutton", { name: "Tokens: at most (tokens)", exact: true }).fill("2000")
+            const tokens = await openSection(page, panel, "Tokens")
+            await tokens.getByRole("spinbutton", { name: "Tokens: at least (tokens)", exact: true }).fill("100")
+            await tokens.getByRole("spinbutton", { name: "Tokens: at most (tokens)", exact: true }).fill("2000")
+            await closeSection(page, "Tokens")
             await check("Tokens 100–2,000")
             for (const label of ["Leave out forks", "Deleted from all sites", "Deleted from a site"]) {
               await panel.getByRole("switch", { name: label, exact: true }).click()
               await check(label)
             }
-            await expect(panel.getByRole("switch", { name: "Chub verified", exact: true })).toBeDisabled()
+            let sites = await openSection(page, panel, "Sites")
+            await expect(sites.getByRole("switch", { name: "Chub verified", exact: true })).toBeDisabled()
+            await closeSection(page, "Sites")
             await pick("Site", "Chub")
-            await panel.getByRole("switch", { name: "Chub verified", exact: true }).click()
-            await panel.getByRole("switch", { name: "Chub recommended", exact: true }).click()
+            sites = await openSection(page, panel, "Sites")
+            await sites.getByRole("switch", { name: "Chub verified", exact: true }).click()
+            await sites.getByRole("switch", { name: "Chub recommended", exact: true }).click()
+            await closeSection(page, "Sites")
             await expect(chips).toContainText("Chub verified")
             await expect(chips).toContainText("Chub recommended")
             // Changing to another site removes incompatible marks, rather than asking a refused query.
             await pick("Site", "RisuRealm")
             await expect(chips).not.toContainText("Chub verified")
             await clear()
+            // Enter requires a tag, a leading "-" leaves it out; a chip's click switches between the two.
             const tags = panel.getByRole("textbox", { name: "Tags", exact: true })
             await tags.fill("fantasy")
             await tags.press("Enter")
+            await tags.fill("-horror")
+            await tags.press("Enter")
+            await expect(chips.getByRole("button", { name: "Not horror", exact: true })).toBeVisible()
             await chips.getByRole("button", { name: "+fantasy", exact: true }).click()
-            await expect(chips).toContainText("Not fantasy")
+            await expect(chips.getByRole("button", { name: "Not fantasy", exact: true })).toBeVisible()
             await chips.getByRole("button", { name: "Not fantasy", exact: true }).click()
-            await expect(chips).toHaveCount(0)
-            // Audit the expanded panel through its full height, also in the narrow sidebar.
-            for (const label of ["Tags", "Site", "Picture", "Created before"]) {
-              await panel.getByLabel(label, { exact: true }).first().scrollIntoViewIfNeeded()
-              await expectLayout(page, info, `cardex-panel-${place}-${label}-${width}-${theme}`, {
+            await expect(chips.getByRole("button", { name: "+fantasy", exact: true })).toBeVisible()
+            await clear()
+            // Audit the bar folded, with a section open and with More filters, also in the narrow sidebar.
+            for (const section of ["", "Sites", "Created", "More"]) {
+              if (section === "More") await openMore(panel)
+              else if (section) await openSection(page, panel, section)
+              await panel.scrollIntoViewIfNeeded()
+              await expectLayout(page, info, `cardex-panel-${place}-${section || "folded"}-${width}-${theme}`, {
                 scope: place === "home" ? "main" : "[data-shell-list]"
               })
+              if (section && section !== "More") await closeSection(page, section)
             }
             await panel.getByRole("button", { name: "Close", exact: true }).click()
             // Every sort and every available direction remains reachable in both toolbars.
@@ -191,10 +225,13 @@ export function cardexCriteriaTests() {
             }
             // URL state restores filters, text, sorting and direction in either surface.
             await filters.click()
-            await panel
+            await (
+              await openSection(page, panel, "Kind")
+            )
               .getByRole("group", { name: "Kind", exact: true })
               .getByRole("button", { name: "Characters with a lorebook", exact: true })
               .click()
+            await closeSection(page, "Kind")
             await panel.getByRole("button", { name: "Close", exact: true }).click()
             if (place === "home")
               await scope
@@ -311,7 +348,7 @@ export function cardexCriteriaTests() {
             await revealSidebar(page)
             const expectFilters = async (target: typeof page) => {
               await expect(target.locator('[aria-label="Filters set"]').filter({ visible: true })).toContainText(
-                "Created before: 2027-01-01"
+                "Created: 2024-01-01 – 2027-01-01"
               )
               const restored = new URL(target.url())
               expect(JSON.parse(restored.searchParams.get(key("sf"))!)).toEqual(allFilters)
