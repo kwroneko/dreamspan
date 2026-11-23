@@ -548,6 +548,9 @@ const onControl = (target: EventTarget | null) =>
 /** A double-click this close to its first press is on the spot pressed. */
 const SAME_SPOT_PX = 8
 
+/** Where an edit of `source` opens for a double-click on `spot` (ui/editCaret.ts); null where unknown. */
+const locateSpot = (spot: CaretSpot | null, source: string): EditCaret | null => spot && locateEditCaret(spot, source)
+
 /** A third click within this long of a double-click selects a paragraph instead of editing. */
 const TRIPLE_CLICK_MS = 450
 
@@ -691,13 +694,17 @@ export const Message = memo(function Message({
     now.current = { editing, generating, versionId: version.id }
   })
   // Where a press landed, read before its click can move the text (ui/editCaret.ts): a
-  // double-click's caret is the spot its first click pressed.
-  const pressed = useRef<{ x: number; y: number; spot: CaretSpot | null } | null>(null)
+  // double-click's caret is the spot its first click pressed. It's placed in the stored text
+  // at once: the text pressed can be gone by the second click (the plain text shown while the
+  // renderer loads, replaced by the rendered one), and the same point then is another word.
+  const pressed = useRef<{ x: number; y: number; versionId: string; caret: EditCaret | null } | null>(null)
   // Any press after the double-click (a triple-click's third, or another action begun within
   // the wait) is the user doing something else.
   const onMouseDown = (event: MouseEvent) => {
-    if (event.detail <= 1 && !editing)
-      pressed.current = { x: event.clientX, y: event.clientY, spot: caretSpotAt(event.clientX, event.clientY) }
+    if (event.detail <= 1 && !editing) {
+      const caret = locateSpot(caretSpotAt(event.clientX, event.clientY), version.content)
+      pressed.current = { x: event.clientX, y: event.clientY, versionId: version.id, caret }
+    }
     if (pendingEdit.current === null) return
     clearTimeout(pendingEdit.current)
     pendingEdit.current = null
@@ -708,12 +715,12 @@ export const Message = memo(function Message({
     if (messageActions.get("message.edit")?.available?.(context) === false) return
     // The caret where it landed in the stored text (ui/editCaret.ts), else at the end.
     const first = pressed.current
-    const spot =
-      first?.spot?.point.node.isConnected &&
+    const caret =
+      (first?.caret &&
+      first.versionId === version.id &&
       Math.hypot(first.x - event.clientX, first.y - event.clientY) <= SAME_SPOT_PX
-        ? first.spot
-        : caretSpotAt(event.clientX, event.clientY)
-    const caret = (spot && locateEditCaret(spot, version.content)) ?? undefined
+        ? first.caret
+        : locateSpot(caretSpotAt(event.clientX, event.clientY), version.content)) ?? undefined
     clearTimeout(pendingEdit.current ?? undefined)
     const versionId = version.id
     pendingEdit.current = setTimeout(() => {
