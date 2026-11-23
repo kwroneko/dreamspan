@@ -1,8 +1,10 @@
 // A chat not made yet attaches as a saved chat does: the same paperclip in the same row, paste
-// and drop, the thumbnails under the text; a reload keeps them, and the first send makes the
+// and drop, the thumbnails above the text, which stays put; a reload keeps them, and the first send makes the
 // chat with them on its first message. Generate leaves them, and they move to the saved chat's
 // composer. At 1440 and 390 with the layout audit. Synthetic cards and a drawn image only.
+import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
+import { composerPlaces, expectGrewUpward, expectImageTile } from "./support/attachments.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -70,12 +72,26 @@ for (const width of [1440, 390]) {
     const attach = page.getByRole("button", { name: "Attach images", exact: true })
     await expect(attach).toBeEnabled()
     const buffer = await drawing(page)
+    await box.focus()
+    const unattached = await composerPlaces(page)
     await page.getByLabel("Choose images").setInputFiles({ name: "picked.png", mimeType: "image/png", buffer })
     await expect(attached(page).getByRole("img")).toHaveCount(1)
     await expect(page.getByRole("button", { name: "Remove picked.png" })).toBeVisible()
+    await expect(page.getByText(/vision model|images in context/)).toBeVisible()
+    // Above the text, as in a saved chat: the box grows upward and the caret stays.
+    expectGrewUpward(unattached, await composerPlaces(page))
+    await expectImageTile(attached(page), "picked.png")
     // Image-only: Send is ready once it's uploaded.
     await expect(page.getByRole("button", { name: /^Send/ })).toBeEnabled()
     await expectLayout(page, info, `pending-attachments-${width}`)
+    const screenshots = process.env.SCREENSHOT_DIR
+    if (screenshots) {
+      await page.mouse.move(0, 0)
+      await page.screenshot({ path: join(screenshots, `new-chat-rest-${width}.png`) })
+      await attached(page).getByRole("button", { name: "View picked.png", exact: true }).hover()
+      await page.screenshot({ path: join(screenshots, `new-chat-hover-${width}.png`) })
+      await page.mouse.move(0, 0)
+    }
 
     // Paste into the box and drop on the chat attach too.
     const base64 = buffer.toString("base64")

@@ -25,7 +25,14 @@ import type { ComposerImage } from "@dreamspan/shared/composerApi.ts"
 import { ContentImage } from "../../ui/ContentImage.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
-import { IconButton, PICTURE_TOGGLE, SquareIconButton, ToggleIconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import {
+  CornerIconButton,
+  IconButton,
+  PICTURE_TOGGLE,
+  SquareIconButton,
+  ToggleIconButton,
+  Tooltip
+} from "../../ui/Tooltip.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
 import { carryOnDrag, isAppDrag, PICTURE_DRAG } from "../../ui/appDrags.ts"
 import { EnsurePortraitViewer, PicturePeek, type Portrait, usePortraitViewer } from "../../ui/Portrait.tsx"
@@ -212,11 +219,14 @@ function ImageMenu({
   )
 }
 
-/** The thumbnail's corner button: opens it in the image column (on hover and focus; always on touch). */
+/**
+ * The thumbnail's button at its bottom right, inside it (the remove X takes the top right): opens
+ * it in the image column (on hover and focus; always on touch).
+ */
 function ColumnButton({ picture }: { picture: Portrait | null }) {
   const { column } = useImageActions(picture)
   return (
-    <span data-layout-overlay="Open in image column sits over the thumbnail" className="absolute top-1 right-1 flex">
+    <span data-layout-overlay="Open in image column sits over the thumbnail" className="absolute right-1 bottom-1 flex">
       <ToggleIconButton
         label="Open in image column"
         icon="sidebar"
@@ -236,13 +246,21 @@ function ColumnButton({ picture }: { picture: Portrait | null }) {
  */
 function AttachedThumbnail({
   item,
-  onPeek
+  onPeek,
+  corner
 }: {
   item: AttachmentItem
   onPeek: (picture: Portrait, file: Blob | undefined) => void
+  /** The remove X straddling the top-right corner. */
+  corner: ReactNode
 }) {
   if (item.kind === "file")
-    return <FileTile name={item.name} href={item.fileHref ?? null} view={item.fileView ?? null} />
+    return (
+      <div className="tile-toggle-surface relative">
+        <FileTile name={item.name} href={item.fileHref ?? null} view={item.fileView ?? null} />
+        {corner}
+      </div>
+    )
   const picture = item.mediaId ? attachmentPicture(item.mediaId, item.name) : null
   const peekable = picture !== null || item.file !== undefined
   return (
@@ -264,7 +282,7 @@ function AttachedThumbnail({
               onClick={() => {
                 if (peekable) onPeek(picture ?? { id: `draft:${item.id}`, name: item.name, mediaId: null }, item.file)
               }}
-              className="block rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              className="block overflow-hidden rounded-md border border-border bg-surface-raised outline-none focus-visible:ring-2 focus-visible:ring-focus"
             >
               {item.thumbnail}
             </button>
@@ -272,6 +290,7 @@ function AttachedThumbnail({
         }
       />
       <ColumnButton picture={picture} />
+      {corner}
     </div>
   )
 }
@@ -390,14 +409,20 @@ interface AttachmentItem {
   readonly file?: Blob | undefined
 }
 
-/** Removable thumbnails of attached images; the composer and the message editor use it. */
+/**
+ * Removable thumbnails of attached images; the composer and the message editor use it. Each has
+ * a round X straddling its top-right corner that removes it (owner, 2026-11-23: no Remove text
+ * button under the picture); `removeHint` says what removing an image does there.
+ */
 function AttachmentList({
   label,
   items,
+  removeHint,
   onRemove
 }: {
   label: string
   items: ReadonlyArray<AttachmentItem>
+  removeHint: string
   onRemove: (id: string) => void
 }) {
   const [peek, setPeek] = useState<{ picture: Portrait; src: string | undefined } | null>(null)
@@ -409,31 +434,35 @@ function AttachmentList({
   }, [peek?.src])
   return (
     <>
-      <ul className="flex flex-wrap gap-2" aria-label={label}>
+      {/* Room above and to the right for the X, which sits half outside its tile, and clear of the edge. */}
+      <ul className="flex flex-wrap gap-3 pt-5 pr-3" aria-label={label}>
         {items.map((item) => (
-          <li key={item.id} className="flex flex-col items-center rounded-md border border-border p-2">
+          <li key={item.id} className="flex flex-col items-center gap-1">
             <AttachedThumbnail
               item={item}
               onPeek={(picture, file) =>
                 setPeek({ picture, src: picture.mediaId === null && file ? URL.createObjectURL(file) : undefined })
               }
+              corner={
+                item.sending ? null : (
+                  <span
+                    data-layout-overlay="The remove X straddles the thumbnail's corner"
+                    className="absolute -top-3 -right-3 flex"
+                  >
+                    <CornerIconButton
+                      label={`Remove ${item.name}`}
+                      icon="close"
+                      hint={
+                        item.kind === "file" ? "Removes this file from the message. It stays in Files." : removeHint
+                      }
+                      onClick={() => onRemove(item.id)}
+                      className="tile-action relative"
+                    />
+                  </span>
+                )
+              }
             />
-            {item.sending ? (
-              <span className="text-xs text-muted">Sending…</span>
-            ) : (
-              <Button
-                hint={
-                  item.kind === "file"
-                    ? "Removes this file from the message. It stays in Files."
-                    : "Removes this attached image."
-                }
-                variant="ghost"
-                aria-label={`Remove ${item.name}`}
-                onClick={() => onRemove(item.id)}
-              >
-                Remove
-              </Button>
-            )}
+            {item.sending && <span className="text-xs text-muted">Sending…</span>}
           </li>
         ))}
       </ul>
@@ -444,7 +473,7 @@ function AttachmentList({
 
 /**
  * The message editor's images (DESIGN §10.2a): the version saved keeps, adds or removes them.
- * Starts from the source's set; the paperclip, paste and drop on the editor add, Remove takes
+ * Starts from the source's set; the paperclip, paste and drop on the editor add, an image's X takes
  * one off. The set is the draft's (`MessageDraft.setImages`), which Save sends.
  */
 function EditorImages({ draft, images }: { draft: MessageDraft; base: string; images: MessageImages }) {
@@ -533,6 +562,7 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
         <div className="order-first basis-full">
           <AttachmentList
             label="Images of this swipe"
+            removeHint="Removes this image from this swipe. Cancel keeps it."
             items={current.map((image, index) => ({
               id: `${index}:${image.mediaId}`,
               name: image.name ?? attachmentName(image.altText, null, index, current.length),
@@ -547,9 +577,9 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
                 : {}),
               thumbnail: (
                 <ContentImage
-                  src={mediaUrl(image.mediaId, 160)}
+                  src={mediaUrl(image.mediaId, 208)}
                   alt={image.altText || `Image ${index + 1}`}
-                  className="h-20 w-20 rounded-md object-contain"
+                  className="h-26 w-26 object-contain"
                 />
               )
             }))}
@@ -921,9 +951,9 @@ function DraftThumbnail({ entry }: { entry: ImageDraftEntry }) {
   return (
     <ContentImage
       ref={ref}
-      src={entry.mediaId ? mediaUrl(entry.mediaId, 160) : undefined}
+      src={entry.mediaId ? mediaUrl(entry.mediaId, 208) : undefined}
       alt={entry.name}
-      className="h-20 w-20 rounded-md object-contain"
+      className="h-26 w-26 object-contain"
     />
   )
 }
@@ -958,6 +988,7 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
                 <>
                   <AttachmentList
                     label={state.attacher ? "Attached files" : "Attached images"}
+                    removeHint="Removes this image from the message. It isn't sent."
                     items={state.entries.map((entry) => ({
                       id: entry.id,
                       name: entry.name,
@@ -1160,6 +1191,7 @@ function PendingImageScope({ scope: key, children }: { scope: string; children: 
                   thumbnail: <DraftThumbnail entry={entry} />,
                   ...(sending.has(entry.id) ? { sending: true } : {})
                 }))}
+                removeHint="Removes this image from the message. It isn't sent."
                 onRemove={remove}
               />
               <VisionNote vision={model?.vision} maxImages={model?.maxImages ?? 4} />

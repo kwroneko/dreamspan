@@ -77,7 +77,8 @@ export const useCompactComposer = () => {
  * The composers' box (owner 2026-11-01: the input is the composer's main part): the text on a
  * row of its own, the whole box's width, with everything about it inside the same border. On
  * top, `header`, what says how the box stands (editing a reply's guidance, replayed or restored
- * text), shown only while it has something; under the text what's attached; then one row of
+ * text), shown only while it has something; then what's attached (owner, 2026-11-23: above
+ * the text, as other chat apps, so the caret never moves), the text; then one row of
  * controls, `start` (who speaks, tools) at its left and `end` (guidance, generate, send) at its
  * right, wrapping rather than ever narrowing the text.
  */
@@ -114,8 +115,9 @@ export function ComposerBox({
           {header}
         </div>
       )}
-      <div className="grid min-w-0 p-2">{children}</div>
+      {/* Above the text: attaching grows the box upward, and the text and controls stay put. */}
       {attachments && <div className="px-2 pt-1">{attachments}</div>}
+      <div className="grid min-w-0 p-2">{children}</div>
       <div data-testid="composer-controls" className="flex min-w-0 flex-wrap items-center gap-1.5 p-2">
         <div className="flex min-w-0 items-center gap-1.5">{start}</div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">{end}</div>

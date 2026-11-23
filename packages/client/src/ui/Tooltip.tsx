@@ -157,6 +157,37 @@ export function SquareIconButton({
 }
 
 /**
+ * A small round icon button straddling a tile's corner, half outside it (an attachment's remove
+ * X; owner, 2026-11-23). Its hit area reaches past the circle, for a finger. `className` places
+ * it and sets when it shows (`tile-action`: on hover and focus, always on touch).
+ */
+export function CornerIconButton({
+  label,
+  hint,
+  icon,
+  className = "",
+  onClick
+}: {
+  label: string
+  hint?: ReactNode
+  icon: IconName
+  className?: string
+  onClick: () => void
+}) {
+  return (
+    <Tooltip label={hint ?? label}>
+      <BaseButton
+        aria-label={label}
+        onClick={onClick}
+        className={`inline-flex size-6 items-center justify-center rounded-full border border-border bg-surface text-muted shadow-sm outline-none transition-opacity select-none after:absolute after:-inset-1.5 after:content-[''] hover:text-text focus-visible:ring-2 focus-visible:ring-focus ${className}`}
+      >
+        <Icon name={icon} size={14} />
+      </BaseButton>
+    </Tooltip>
+  )
+}
+
+/**
  * A pressed toggle (owner, 2026-11-20: a pinned pin "looks identical to the unpinned one"): accent
  * icon, filled, on an accent wash and edge. The wash is a gradient over the opaque surface, so a
  * toggle over a picture keeps its backing.

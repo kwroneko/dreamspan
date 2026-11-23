@@ -5,6 +5,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import { apiLogin, ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { messageMenu, showActions } from "./support/message.ts"
+import { composerPlaces, expectGrewUpward, expectImageTile, removeAttachment } from "./support/attachments.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "20" })
 const tooltip = (page: Page) => page.locator('[data-layout-overlay="Tooltip floats above the page"]')
@@ -85,11 +86,18 @@ for (const colorScheme of ["light", "dark"] as const) {
       const page = await context.newPage()
       await openChat(page, `Costume study ${width} ${colorScheme}`)
       await page.getByLabel("Message", { exact: true }).fill("A costume study for the harbor keeper.")
-      await page
-        .getByLabel("Choose images")
-        .setInputFiles({ name: "costume.png", mimeType: "image/png", buffer: await drawing(page) })
+      const buffer = await drawing(page)
+      // The thumbnails go above the text (owner, 2026-11-23): the box grows upward, and the
+      // text, the caret and the control row stay where they were.
+      await page.getByLabel("Message", { exact: true }).focus()
+      const unattached = await composerPlaces(page)
+      await page.getByLabel("Choose images").setInputFiles({ name: "costume.png", mimeType: "image/png", buffer })
       const attached = page.getByRole("list", { name: "Attached images" })
       await expect(attached.getByRole("img")).toHaveCount(1)
+      await expect(page.getByText(/vision model|images in context/)).toBeVisible()
+      expectGrewUpward(unattached, await composerPlaces(page))
+      // Two icon buttons over a 104 px thumbnail, the X on its corner; no text button.
+      await expectImageTile(attached, "costume.png")
       await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled()
       await page.reload()
       await expect(attached.getByRole("img")).toHaveCount(1)
@@ -118,11 +126,20 @@ for (const colorScheme of ["light", "dark"] as const) {
       const toColumn = attached.getByRole("button", { name: "Open in image column", exact: true })
       // Closing the peek returns focus to the thumbnail, which shows the button too.
       await expect(thumb).toBeFocused()
+      await page.mouse.move(0, 0)
+      await expect(toColumn).toHaveCSS("opacity", "1")
+      await expect(attached.getByRole("button", { name: "Remove costume.png", exact: true })).toHaveCSS("opacity", "1")
       await thumb.blur()
       await page.mouse.move(0, 0)
       await expect(toColumn).toHaveCSS("opacity", "0")
+      if (screenshots) await page.screenshot({ path: join(screenshots, `draft-rest-${width}-${colorScheme}.png`) })
       await thumb.hover()
       await expect(toColumn).toHaveCSS("opacity", "1")
+      if (screenshots) await page.screenshot({ path: join(screenshots, `draft-hover-${width}-${colorScheme}.png`) })
+      const remove = attached.getByRole("button", { name: "Remove costume.png", exact: true })
+      await expect(remove).toHaveCSS("opacity", "1")
+      await remove.hover()
+      await expect(tooltip(page)).toHaveText("Removes this image from the message. It isn't sent.")
       await toColumn.hover()
       await expect(tooltip(page)).toHaveText("Opens this image in the image column, beside the chat.")
       await expectLayout(page, test.info(), `attachment-thumbnail-${width}-${colorScheme}`, {
@@ -186,6 +203,22 @@ for (const colorScheme of ["light", "dark"] as const) {
   }
 }
 
+test("on a touch screen an attachment's two buttons show without a hover", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const page = await context.newPage()
+  expect(await page.evaluate(() => matchMedia("(hover: none) and (pointer: coarse)").matches)).toBe(true)
+  await openChat(page, "Touch attachments")
+  await page
+    .getByLabel("Choose images")
+    .setInputFiles({ name: "touch.png", mimeType: "image/png", buffer: await drawing(page) })
+  const attached = page.getByRole("list", { name: "Attached images" })
+  const { column, x } = await expectImageTile(attached, "touch.png")
+  for (const button of [column, x]) await expect(button).toHaveCSS("opacity", "1")
+  await x.tap()
+  await expect(attached).toHaveCount(0)
+  await context.close()
+})
+
 test("paste, chat drop, removal, upload retry, and image-only send", async ({ page }) => {
   await openChat(page, "Direct image input")
   const buffer = await drawing(page)
@@ -213,7 +246,7 @@ test("paste, chat drop, removal, upload retry, and image-only send", async ({ pa
   await expect(page.getByRole("button", { name: "Remove pasted.png" })).toBeVisible()
   await transfer("drop", "dropped.png")
   await expect(page.getByRole("list", { name: "Attached images" }).getByRole("img")).toHaveCount(2)
-  await page.getByRole("button", { name: "Remove pasted.png" }).click()
+  await removeAttachment(page.getByRole("button", { name: "Remove pasted.png" }))
   await expect(page.getByRole("list", { name: "Attached images" }).getByRole("img")).toHaveCount(1)
   // A failed upload retains the blob and can replay it after refresh.
   await page.route("**/chat/image", (route) => route.abort())
@@ -325,7 +358,7 @@ test("uploaded attachment drafts follow the account across browsers, including r
   const elsewhere = await second.newPage()
   await elsewhere.goto(page.url())
   await expect(elsewhere.getByRole("button", { name: "Remove shared.png" })).toBeVisible()
-  await elsewhere.getByRole("button", { name: "Remove shared.png" }).click()
+  await removeAttachment(elsewhere.getByRole("button", { name: "Remove shared.png" }))
   await expect(elsewhere.getByRole("list", { name: "Attached images" })).toHaveCount(0)
   await page.reload()
   await expect(page.getByRole("button", { name: "Attach images", exact: true })).toBeEnabled()
@@ -614,7 +647,15 @@ for (const colorScheme of ["light", "dark"] as const) {
         buffer: Buffer.concat([buffer, Buffer.from("revision")])
       })
       await expect(images.getByRole("img")).toHaveCount(2)
-      await images.getByRole("button", { name: "Remove study.png" }).click()
+      const study = await expectImageTile(images, "study.png")
+      await study.view.hover()
+      await study.x.hover()
+      await expect(tooltip(page)).toHaveText("Removes this image from this swipe. Cancel keeps it.")
+      if (process.env.SCREENSHOT_DIR)
+        await page.screenshot({
+          path: join(process.env.SCREENSHOT_DIR, `edit-images-hover-${width}-${colorScheme}.png`)
+        })
+      await removeAttachment(study.x)
       await expect(images.getByRole("img")).toHaveCount(1)
       // An image-only edit is a server draft, even though its text never changed.
       await expect(message.getByText("Uploading…", { exact: true })).toHaveCount(0)

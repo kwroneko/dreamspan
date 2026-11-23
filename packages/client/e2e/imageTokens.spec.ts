@@ -6,6 +6,7 @@ import { png } from "../../server/test/formats/support.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
 import { startProvider, type FakeProvider, REPLY } from "./support/provider.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { removeAttachment } from "./support/attachments.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -83,7 +84,7 @@ for (const width of [1440, 390])
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
       if (process.env.SCREENSHOT_DIR)
         await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `composer-${width}-${theme}.png`) })
-      await page.getByRole("button", { name: "Remove draft-drawing.png", exact: true }).click()
+      await removeAttachment(page.getByRole("button", { name: "Remove draft-drawing.png", exact: true }))
       await expect(page.getByText(/1 image in the next request: ~255 tokens/)).toBeVisible()
       await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
       const badge = page.getByText("Image 1: ~255 tokens", { exact: true })
