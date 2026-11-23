@@ -87,7 +87,7 @@ export const replayTerms = (target: { readonly api: string; readonly key: string
 })
 
 /** The beta that `thinking.block_binding` needs on Anthropic Messages. */
-export const THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01"
+const THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01"
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
