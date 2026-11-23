@@ -228,7 +228,12 @@ export const registerComposerControls = () => [
     order: 5,
     placement: "actions",
     component: ({ guidance, prefsReady, changeGuidance, speakerName }) => (
-      <GuidanceToggle guidance={guidance} prefsReady={prefsReady} changeGuidance={changeGuidance} speaker={speakerName} />
+      <GuidanceToggle
+        guidance={guidance}
+        prefsReady={prefsReady}
+        changeGuidance={changeGuidance}
+        speaker={speakerName}
+      />
     )
   }),
   composerControls.register({

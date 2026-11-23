@@ -72,7 +72,9 @@ for (const width of [1440, 390])
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const path = saved ? `/chats/${await savedChat()}` : `/cards/${ids.Halden}/chat`
       await page.goto(`${server().url}${path}`)
-      await expect(page.getByRole("button", { name: /^(Playing|Speaking) as Ilse\b/ }).first()).toBeVisible({ timeout: 30_000 })
+      await expect(page.getByRole("button", { name: /^(Playing|Speaking) as Ilse\b/ }).first()).toBeVisible({
+        timeout: 30_000
+      })
       // This chat first, then the persona's tab: a step in the history.
       await openPanel(page, "This chat")
       await panelTab(page, "Ilse")
