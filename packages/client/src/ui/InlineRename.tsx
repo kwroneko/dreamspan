@@ -121,7 +121,7 @@ export function InlineRename({
         data-layout-audit-ignore={
           lastLine ? "inset: Borderless name and pencil share the header's content inset" : undefined
         }
-        className={`${lastLine ? "relative block w-fit max-w-full pr-[30px]" : "flex min-w-0 items-center gap-0.5"} ${className}`}
+        className={`${lastLine ? "relative block w-fit max-w-full pr-[34px]" : "flex min-w-0 items-center gap-0.5"} ${className}`}
       >
         {children ?? <span className="min-w-0 [overflow-wrap:anywhere]">{value}</span>}
         {editText ? (
@@ -144,7 +144,7 @@ export function InlineRename({
             data-layout-overlay={
               lastLine ? "Pencil follows the text inside the blank part of a multiline heading's box" : undefined
             }
-            className={`${compact ? "size-5! [&_svg]:size-3!" : "size-7!"} shrink-0 ${lastLine ? "absolute" : ""}`}
+            className={`${compact ? "size-5! [&_svg]:size-3!" : ""} shrink-0 ${lastLine ? "absolute" : ""}`}
             onClick={() => setEditing(true)}
           />
         )}

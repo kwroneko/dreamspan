@@ -381,7 +381,7 @@ function SummaryRow({
               trigger={
                 <Button
                   variant="ghost"
-                  className="size-8 shrink-0 px-0!"
+                  className="size-8! shrink-0 px-0!"
                   aria-label={`Actions for the summary of ${range.toLowerCase()}`}
                   disabled={mode === "edit"}
                   focusableWhenDisabled

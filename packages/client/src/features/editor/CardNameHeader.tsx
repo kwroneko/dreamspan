@@ -260,9 +260,7 @@ export function CardNameHeader({
       <Identity>
         <div
           data-card-header-row="identity"
-          // In the column header the pencils take the header's icon square, as the star, archive and
-          // save buttons on the same row do (28 px pencils beside 32 px toggles read as uneven).
-          className={`relative flex w-full min-w-0 items-center gap-1 ${centerTitle ? `[--card-name-min:1rem] sm:[&_[data-rename-pencil]]:size-8! ${compactHeaderControls}` : ""}`}
+          className={`relative flex w-full min-w-0 items-center gap-1 ${centerTitle ? `[--card-name-min:1rem] ${compactHeaderControls}` : ""}`}
         >
           <div className="flex min-w-[min(100%,calc(2*var(--card-name-min)+0.25rem))] flex-1 items-center gap-1 has-[[data-renaming]]:min-w-[min(100%,calc(4*var(--card-name-min)+0.75rem))]">
             <InlineRename
@@ -338,7 +336,12 @@ export function CardNameHeader({
           )}
         </div>
       </Identity>
-      <div data-card-header-row="nickname" className="flex min-h-7 min-w-0 max-w-full items-center">
+      {/* The nickname row keeps the header's 28 px rhythm beside the portrait: its pencil, alone on
+        the row, is 28 px. */}
+      <div
+        data-card-header-row="nickname"
+        className="flex min-h-7 min-w-0 max-w-full items-center [&_[data-rename-pencil]]:size-7!"
+      >
         <InlineRename
           place={`card-nickname:${store.refId}`}
           value={nickname}
@@ -373,9 +376,11 @@ export function CardHeader({ portrait, children }: { portrait: ReactNode; childr
   return (
     <div data-card-header data-editor-header className="@container/card-header flex items-start gap-3">
       {portrait}
+      {/* --card-name-min: a name or version box's least width, its pencil and a character of text, so
+        neither is ever squeezed to its pencil alone. */}
       <div
         data-card-header-rows
-        className="flex min-w-0 flex-1 flex-col gap-1 has-[[data-persona-align-start]]:self-stretch [--card-name-min:2rem] @max-[25rem]/card-header:[--card-name-min:1.625rem] @max-[18rem]/card-header:[--card-name-min:1.375rem] @max-[25rem]/card-header:[&_[data-card-header-row=identity]_:is(button,a.size-8)]:size-6! @max-[18rem]/card-header:[&_[data-card-header-row=identity]_:is(button,a.size-8)]:size-5!"
+        className="flex min-w-0 flex-1 flex-col gap-1 has-[[data-persona-align-start]]:self-stretch [--card-name-min:2.25rem] @max-[25rem]/card-header:[--card-name-min:2.125rem] @max-[18rem]/card-header:[--card-name-min:1.875rem] @max-[25rem]/card-header:[&_[data-card-header-row=identity]_:is(button,a.size-8)]:size-6! @max-[18rem]/card-header:[&_[data-card-header-row=identity]_:is(button,a.size-8)]:size-5!"
       >
         {children}
       </div>

@@ -522,8 +522,7 @@ function PromptBlock({
       goTo={nameMatch}
       highlights={nameHighlights}
       allowEmpty
-      // The pencil takes the row's icon square, as the prompt's settings and ⋯ beside it do.
-      className="min-w-14 max-w-md [&_[data-rename-pencil]]:size-8!"
+      className="min-w-14 max-w-md"
       onRename={(next) => {
         store.setText(namePath, next)
         void store.save(textField(namePath))

@@ -15,8 +15,9 @@ export function FamilyButton({ store, compact }: { store: EditorStore; compact: 
   return (
     <>
       <Button
-        // The size of the buttons beside it: the panels' and the preset toolbar's are small.
-        className={compact || ref.kind === "preset" ? "h-8! px-2!" : ""}
+        // The size of the buttons beside it: the panels' and the preset toolbar's are small, and
+        // with only its icon showing it is their 32 px square.
+        className={`${compact || ref.kind === "preset" ? "h-8! px-2!" : ""} ${compact ? "@max-[30rem]:w-8 @max-[30rem]:px-0!" : ""}`}
         aria-label="Family"
         aria-pressed={open}
         hint={`Shows where this ${ref.kind} was forked from and the forks made from it.`}
