@@ -264,7 +264,7 @@ for (const width of [1440, 390])
           const box = (await button.boundingBox())!
           expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(24)
         }
-      await versioned.getByRole("button", { name: /Version .*50|50 versions|Choose.*version/ }).click()
+      await versioned.getByRole("button", { name: /Swipe .*50|50 swipes|choose a swipe/ }).click()
       await page.keyboard.press("Escape")
       await level1(server().dataDir, chatId, data.path.entries.slice(0, 2), "Synthetic summary of the harbor opening.")
       await admin((api) => api.SetDisplayPrefs({ prefs: { timeline: "summaries" } }))
