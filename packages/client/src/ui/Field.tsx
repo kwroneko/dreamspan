@@ -11,7 +11,7 @@ import {
   type SyntheticEvent
 } from "react"
 import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textActions.tsx"
-import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
+import { AboutHint, LabelWithHelp, useLabelTrail } from "./AboutHint.tsx"
 import { FieldFrame, framedControl } from "./FieldFrame.tsx"
 import { textareaResize } from "./HeightGrip.tsx"
 import { Icon } from "./Icon.tsx"
@@ -51,11 +51,17 @@ export function Field({
   children: ReactNode
   className?: string
 }) {
+  const trail = useLabelTrail(!labelHidden)
   const labelRow = about ? (
     <div className={labelHidden ? "sr-only" : "text-sm leading-5"}>
       <BaseField.Label className="inline text-sm font-medium text-text">{label}</BaseField.Label>
       {"\u00a0"}
       <AboutHint heading={aboutLabel ?? (typeof label === "string" ? label : "this field")}>{about}</AboutHint>
+      {trail && <> {trail}</>}
+    </div>
+  ) : trail ? (
+    <div className={labelHidden ? "sr-only" : "text-sm leading-5"}>
+      <BaseField.Label className="inline text-sm font-medium text-text">{label}</BaseField.Label> {trail}
     </div>
   ) : (
     <BaseField.Label className={labelHidden ? "sr-only" : "text-sm font-medium text-text"}>{label}</BaseField.Label>

@@ -15,7 +15,7 @@ import { Alert } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useDurableForm } from "../editor/durable.tsx"
-import { MixedMarker } from "../editor/LorebookMassEdit.tsx"
+import { MassRow, MixedMarker } from "../editor/LorebookMassEdit.tsx"
 import { CopySettingsButton } from "./CopySettings.tsx"
 import {
   biasRowProblem,
@@ -69,27 +69,28 @@ function Ticked({
   children: ReactNode
 }) {
   return (
-    <div className="flex min-w-0 items-start gap-2" data-mass-field={field} data-ticked={ticked ? "" : undefined}>
-      <Tooltip
-        label={
-          ticked
-            ? "Saved on every selected model. Untick to leave it as each model has it."
-            : "Left as each model has it. Tick it, or change it, to save it on every selected model."
-        }
-      >
-        <span className="inline-flex shrink-0 mt-0.5">
-          <Checkbox labelHidden checked={ticked} onCheckedChange={onTick}>
-            {`Change ${MODEL_FIELDS[field].label}`}
-          </Checkbox>
-        </span>
-      </Tooltip>
-      <div className="min-w-0 flex-1">{children}</div>
-      {mixed && (
-        <span className="mt-1 shrink-0">
-          <MixedMarker breakdown={mixed} />
-        </span>
-      )}
-    </div>
+    <MassRow
+      data-mass-field={field}
+      data-ticked={ticked ? "" : undefined}
+      marker={mixed && <MixedMarker items="models" breakdown={mixed} />}
+      tick={
+        <Tooltip
+          label={
+            ticked
+              ? "Saved on every selected model. Untick to leave it as each model has it."
+              : "Left as each model has it. Tick it, or change it, to save it on every selected model."
+          }
+        >
+          <span className="inline-flex">
+            <Checkbox labelHidden checked={ticked} onCheckedChange={onTick}>
+              {`Change ${MODEL_FIELDS[field].label}`}
+            </Checkbox>
+          </span>
+        </Tooltip>
+      }
+    >
+      {children}
+    </MassRow>
   )
 }
 

@@ -3,6 +3,7 @@
 // greyed with the value the entries share or "Mixed"; ticked, its value goes on every selected
 // entry, and an empty text or number clears it. Several settings apply at once, as unsaved
 // changes like any edit (lorebookMass.ts).
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { useDurableForm } from "./durable.tsx"
 import type { LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
 import type { FieldPath } from "@dreamspan/shared/editing.ts"
@@ -11,6 +12,7 @@ import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
+import { LabelTrail } from "../../ui/AboutHint.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { SettingsLayout, useFormSections } from "./LorebookEntryDetails.tsx"
 import { applyMassChange, patchEdits, touched } from "./lorebookMass.ts"
@@ -20,19 +22,72 @@ import type { EditorStore } from "./store.ts"
 
 const entriesLabel = (count: number) => `${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}`
 
-/** The quiet marker beside a setting whose entries differ; its hover says how. */
-export function MixedMarker({ breakdown }: { breakdown: string }) {
+/**
+ * The mark after a setting's label when the selected items differ in it; its hover says so in
+ * words, and how (`breakdown`: "0.2 on 10, not set on 90").
+ */
+export function MixedMarker({ items, breakdown }: { items: string; breakdown: string }) {
   return (
-    <Tooltip label={breakdown}>
+    <Tooltip label={`The selected ${items} don't all have the same value: ${breakdown}.`}>
       <span
         data-mixed
         tabIndex={0}
-        aria-label={`Mixed: ${breakdown}`}
-        className="inline-flex h-4 shrink-0 items-center rounded-sm border border-dashed border-border px-1 text-[10px] leading-none text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        aria-label={`Differs: ${breakdown}`}
+        className="inline-flex items-center rounded-full bg-surface-raised px-1.5 align-[1px] text-xs leading-4 font-normal text-muted ring-1 ring-border outline-none ring-inset focus-visible:ring-2 focus-visible:ring-focus"
       >
-        ≠
+        Differs
       </span>
     </Tooltip>
+  )
+}
+
+/**
+ * A setting in a mass edit: its tick on the line of the setting's label (wherever the setting
+ * puts it: above its control, or beside a number at the end of its row), the setting, and
+ * `marker` after the label.
+ */
+export function MassRow({
+  tick,
+  marker,
+  dimmed = false,
+  children,
+  ...data
+}: {
+  tick: ReactNode
+  marker: ReactNode
+  dimmed?: boolean
+  children: ReactNode
+} & { readonly [key: `data-${string}`]: string | undefined }) {
+  const row = useRef<HTMLDivElement>(null)
+  const [top, setTop] = useState(0)
+  useLayoutEffect(() => {
+    const element = row.current
+    if (!element) return
+    const measure = () => {
+      const label = [...element.querySelectorAll<HTMLElement>("[data-mass-body] label")].find(
+        (candidate) => candidate.closest(".sr-only") === null && candidate.getClientRects().length > 0
+      )
+      const line = label?.getClientRects()[0]
+      // The tick's box is 18px high, its 16px square 2px down: its middle on the line's.
+      const offset = line ? line.top + line.height / 2 - element.getBoundingClientRect().top - 10 : 0
+      setTop(Math.max(0, Math.round(offset)))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <div ref={row} className="flex min-w-0 items-start gap-2" {...data}>
+      <span className="inline-flex shrink-0" style={{ marginTop: top }}>
+        {tick}
+      </span>
+      <LabelTrail node={marker}>
+        <div data-mass-body className={`min-w-0 flex-1 ${dimmed ? "opacity-60" : ""}`}>
+          {children}
+        </div>
+      </LabelTrail>
+    </div>
   )
 }
 
@@ -56,7 +111,7 @@ function ManySetting({
   const mixed = !ticked && common.mixed
   // Unticked it shows what the entries have; ticked, what will be set (nothing chosen yet: empty).
   const shown = ticked ? value : common.mixed ? undefined : common.value
-  const marker = common.mixed && <MixedMarker breakdown={common.breakdown} />
+  const marker = common.mixed && <MixedMarker items="entries" breakdown={common.breakdown} />
   const label = setting.label
   const control = (() => {
     switch (input.kind) {
@@ -127,19 +182,24 @@ function ManySetting({
     }
   })()
   return (
-    <div className="flex min-w-0 items-start gap-2" data-setting={setting.id}>
-      <Tooltip
-        label={ticked ? "Leaves this setting as each entry has it." : "Changes this setting on every selected entry."}
-      >
-        <span className="inline-flex shrink-0 pt-0.5">
-          <Checkbox labelHidden checked={ticked} onCheckedChange={onTick}>
-            {`Change ${setting.label}`}
-          </Checkbox>
-        </span>
-      </Tooltip>
-      <div className={`min-w-0 flex-1 ${ticked ? "" : "opacity-60"}`}>{control}</div>
-      {marker && <span className="shrink-0 pt-1">{marker}</span>}
-    </div>
+    <MassRow
+      data-setting={setting.id}
+      dimmed={!ticked}
+      marker={marker}
+      tick={
+        <Tooltip
+          label={ticked ? "Leaves this setting as each entry has it." : "Changes this setting on every selected entry."}
+        >
+          <span className="inline-flex">
+            <Checkbox labelHidden checked={ticked} onCheckedChange={onTick}>
+              {`Change ${setting.label}`}
+            </Checkbox>
+          </span>
+        </Tooltip>
+      }
+    >
+      {control}
+    </MassRow>
   )
 }
 

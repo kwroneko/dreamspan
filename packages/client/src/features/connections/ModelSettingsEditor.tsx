@@ -627,8 +627,8 @@ export function ModelFields({
     : undefined
 
   return (
-    <>
-      {/* One column; two, then three (main | samplers | what it can do and Advanced) when wide. */}
+    <div className="@container/model-columns">
+      {/* One column; two, then three (main | samplers | what it can do and Advanced) when wide. A column's first group starts level with the first, without its divider: the named container, as each column is a container of its own. */}
       <div className="grid items-start gap-x-10 gap-y-5 @5xl:grid-cols-2 @min-[88rem]:grid-cols-3" data-model-columns>
         <div className={`${COLUMN} @5xl:row-span-2 @min-[88rem]:row-span-1`}>
           {top}
@@ -825,7 +825,9 @@ export function ModelFields({
             )}
           </Group>
         </div>
-        <div className={`${COLUMN} @5xl:col-start-2`}>
+        <div
+          className={`${COLUMN} @5xl:col-start-2 @5xl/model-columns:[&>:first-child]:border-t-0 @5xl/model-columns:[&>:first-child]:pt-0`}
+        >
           {shownSamplers.length > 0 && (
             <Group
               title="Samplers"
@@ -902,7 +904,9 @@ export function ModelFields({
             </Group>
           )}
         </div>
-        <div className={`${COLUMN} @5xl:col-start-2 @min-[88rem]:col-start-3 @min-[88rem]:row-start-1`}>
+        <div
+          className={`${COLUMN} @5xl:col-start-2 @min-[88rem]:col-start-3 @min-[88rem]:row-start-1 @min-[88rem]/model-columns:[&>:first-child]:border-t-0 @min-[88rem]/model-columns:[&>:first-child]:pt-0`}
+        >
           <Group title="What it can do">
             <div className="grid max-w-3xl gap-4 @md:grid-cols-2 @3xl:grid-cols-3">
               {wrap(
@@ -1381,7 +1385,7 @@ export function ModelFields({
           </div>
         </div>
       </div>
-    </>
+    </div>
   )
 }
 

@@ -316,7 +316,7 @@ export const commonOf = (
       const values = value as ReadonlyArray<unknown>
       return `${values.length === 1 ? shown(values[0]) : values.map(shown).join(" / ")} on ${count.toLocaleString()}`
     })
-    mixed[id] = `Differs: ${parts.join(", ")}${groups.length > 4 ? ", …" : ""}.`
+    mixed[id] = `${parts.join(", ")}${groups.length > 4 ? ", …" : ""}`
   }
   return { draft: draftOf(common as ModelOverrides, 0), mixed }
 }

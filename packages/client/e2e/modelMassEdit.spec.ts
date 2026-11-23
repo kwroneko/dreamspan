@@ -126,8 +126,13 @@ test("edits only the ticked fields on exactly the selected models shown, with Un
   const dialog = page.getByRole("dialog", { name: "Edit 100 models", exact: true })
   await expect(dialog).toBeVisible()
   await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
-  // The models differ in Temperature: the mark says how.
-  await expect(dialog.locator('[data-mass-field="temperature"] [data-mixed]')).toBeVisible()
+  // The models differ in Temperature: the mark after its label says so, and how.
+  const marker = dialog.locator('[data-mass-field="temperature"] [data-mixed]')
+  await expect(marker).toHaveText("Differs")
+  await marker.hover()
+  await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(
+    "The selected models don't all have the same value: not set on 90, 0.2 on 10."
+  )
   // Editing two fields ticks both; unticking one leaves it as each model has it.
   await dialog.getByRole("textbox", { name: "Temperature", exact: true }).fill("0.55")
   await expect(tick(page, "Temperature")).toBeChecked()
@@ -224,6 +229,27 @@ for (const [width, height] of [
       const dialog = page.getByRole("dialog", { name: "Edit 100 models", exact: true })
       await dialog.getByRole("textbox", { name: "Temperature", exact: true }).fill("0.7")
       await expect(tick(page, "Temperature")).toBeChecked()
+      // Each tick is on its label's line, slider rows included; the mark sits right after the label.
+      for (const field of ["openai_max_context", "temperature", "top_p", "reasoning", "vision"]) {
+        const row = dialog.locator(`[data-mass-field="${field}"]`)
+        const box = (await row.getByRole("checkbox").first().boundingBox())!
+        const label = (await row.locator("[data-mass-body] label").first().boundingBox())!
+        expect(Math.abs(box.y + box.height / 2 - (label.y + label.height / 2))).toBeLessThanOrEqual(2)
+      }
+      const label = (await dialog.locator('[data-mass-field="top_p"] [data-mass-body] label').first().boundingBox())!
+      const mark = (await dialog.locator('[data-mass-field="top_p"] [data-mixed]').boundingBox())!
+      expect(mark.x).toBeGreaterThan(label.x + label.width)
+      expect(mark.x).toBeLessThan(label.x + label.width + 40)
+      expect(Math.abs(mark.y + mark.height / 2 - (label.y + label.height / 2))).toBeLessThanOrEqual(2)
+      if (width === 1440) {
+        // Two columns, level at the top: the right one's first heading has no divider and gap over it.
+        const columns = dialog.locator("[data-model-columns] > *")
+        const left = (await columns.nth(0).boundingBox())!
+        const right = (await columns.nth(1).boundingBox())!
+        expect(right.x).toBeGreaterThan(left.x + left.width)
+        const heading = (await dialog.getByText("Samplers", { exact: true }).boundingBox())!
+        expect(Math.abs(heading.y - left.y)).toBeLessThanOrEqual(4)
+      }
       await expectLayout(page, info, `model-mass-edit-${width}-${theme}`, { scope: "[role=dialog]" })
       await page.screenshot({ path: `${SHOTS}/dialog-${width}-${theme}.png` })
       await dialog.getByText("Advanced", { exact: true }).click()

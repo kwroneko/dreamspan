@@ -28,7 +28,7 @@ it("what many models share, and how they differ", () => {
   ])
   expect(draft.vision).toBe("yes")
   expect(draft.settings).toEqual({})
-  expect(mixed.temperature).toBe("Differs: not set on 2, 0.2 on 1.")
+  expect(mixed.temperature).toBe("not set on 2, 0.2 on 1")
   expect(mixed.vision).toBeUndefined()
 })
 
