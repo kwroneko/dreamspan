@@ -636,8 +636,29 @@ export const ImagesLeftOut = Schema.Struct({
 })
 export type ImagesLeftOut = typeof ImagesLeftOut.Type
 
+/**
+ * The next request's size, as its request view counts it (`GetNextRequest`), by part: what the
+ * next-reply strip's context chip shows. Counted locally; nothing is sent.
+ */
+export const RequestSize = Schema.Struct({
+  /** The request's messages' tokens, summed as the request view sums them. */
+  tokens: Schema.Int,
+  /**
+   * Its tokens by where they came from (the assembler's own sources: preset prompts, cards,
+   * examples, lorebook, notes, summaries, history, guidance, end of request, a plugin's), largest
+   * first; joins, wrappers and each message's framing are `formatting`. They add up to `tokens`.
+   */
+  parts: Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String, tokens: Schema.Int })),
+  /** The chat's messages it sends, of those before the reply on its path. */
+  messages: Schema.Struct({ sent: Schema.Int, total: Schema.Int }),
+  tokenizer: Schema.optionalKey(TokenizerInfo)
+})
+export type RequestSize = typeof RequestSize.Type
+
 /** The next request boundary, also available before a first send or without a cache TTL. */
 export const NextContext = Schema.Struct({
+  /** The next request's size by part; absent when it can't be assembled. */
+  size: Schema.optionalKey(RequestSize),
   /** Why the next request cannot be assembled; cleared after a successful estimate. */
   assemblyError: Schema.optionalKey(Schema.NullOr(Schema.String)),
   /** The kind of that failure (`budget`: the fixed part and the reply don't fit), for its actions. */
@@ -734,6 +755,17 @@ export class DraftPreviewApi extends RpcGroup.make(
   Rpc.make("PreviewChat", {
     payload: { ...StartChatInput, replier: Schema.optionalKey(Schema.NullOr(EntityId)) },
     success: DraftChatPreview,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /**
+   * A chat's next reply's request at the leaf, as the inspector shows a sent one: built and
+   * counted here, as the context chip's size is. Nothing is sent. Null without a model or when
+   * it can't be built (`GetNextContext` says why). In this group, not the chat API's, to bound
+   * TypeScript inference of the core group.
+   */
+  Rpc.make("GetNextRequest", {
+    payload: { chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), leafSlotId: Schema.NullOr(SlotId) },
+    success: Schema.NullOr(DraftRequest),
     error: Schema.Union([NotFound, ServerError])
   })
 ) {}

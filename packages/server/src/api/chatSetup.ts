@@ -271,7 +271,16 @@ export const makeDraftPreviewHandlers = Effect.gen(function* () {
           })),
           now: Date.now()
         })
-      }).pipe(internal("PreviewChat"))
+      }).pipe(internal("PreviewChat")),
+
+    // The request a chat's next reply would send, assembled and counted in a reader: nothing is
+    // sent. The chat, leaf and fork are checked as the caller's first.
+    GetNextRequest: ({ chatId, leafSlotId, forkId }) =>
+      Effect.gen(function* () {
+        const { id } = yield* CurrentUser
+        yield* reader.NextContextAccess({ userId: id, chatId, leafSlotId, forkId: forkId ?? null })
+        return yield* reader.NextRequest({ userId: id, chatId, leafSlotId, forkId: forkId ?? null })
+      }).pipe(internal("GetNextRequest"))
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
 })
 

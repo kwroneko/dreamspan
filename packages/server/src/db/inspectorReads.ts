@@ -49,6 +49,17 @@ export const sourceDepthsQuery = `SELECT s.id, s.depth FROM json_each(?) j
   CROSS JOIN slots s ON s.id = j.value CROSS JOIN chats c ON c.id = s.chat_id
   WHERE c.id = ? AND c.owner_user_id = ?`
 
+/** A source's `ContextSource.id`: its identity from references and revisions, not its display text. */
+export const sourceId = (source: Source) => {
+  const identity =
+    source.kind === "lorebook"
+      ? [source.kind, source.book, source.revision, source.uid]
+      : source.kind === "note"
+        ? [source.kind, source.entity, source.revision]
+        : source
+  return createHash("sha256").update(JSON.stringify(identity)).digest("hex")
+}
+
 /**
  * Names for the sources of these snapshots' pieces: cards and notes by the revision they
  * were read at, preset prompts by the preset revision's names, messages by their place.
@@ -132,14 +143,8 @@ export const describer = (
     }
 
     return (source: Source): ContextSource => {
-      const identity =
-        source.kind === "lorebook"
-          ? [source.kind, source.book, source.revision, source.uid]
-          : source.kind === "note"
-            ? [source.kind, source.entity, source.revision]
-            : source
       const common = {
-        id: createHash("sha256").update(JSON.stringify(identity)).digest("hex"),
+        id: sourceId(source),
         activation:
           source.kind === "lorebook"
             ? { kind: "lorebook" as const, ...source.activation }

@@ -15,6 +15,8 @@ import {
   type ComposerControlContext
 } from "../src/features/chat/composerControls.tsx"
 import { registerComposerControls } from "../src/features/chat/registerComposerControls.tsx"
+import { contextText } from "../src/features/chat/ContextChip.tsx"
+import { REST_MS, restedText } from "../src/features/chat/restedText.ts"
 import type { ChatSession } from "../src/features/chat/session.ts"
 
 vi.hoisted(() => {
@@ -131,19 +133,12 @@ describe("strip and box placements", () => {
   const ids = (placement: Parameters<typeof availableComposerControls>[0], c: ComposerControlContext) =>
     availableComposerControls(placement, c).map((entry) => entry.id)
 
-  it("puts the next-reply chips in the strip, Next retaining its place without a choice", () => {
-    expect(ids("strip", context(false, 1))).toEqual([
-      "composer.model",
-      "composer.preset",
-      "composer.cache",
-      "composer.next"
-    ])
-    expect(ids("strip", context(false, 3))).toEqual([
-      "composer.model",
-      "composer.preset",
-      "composer.cache",
-      "composer.next"
-    ])
+  // What's chosen first (who replies, the model, the preset), then what the next request is: its
+  // size, then its cache.
+  const order = ["composer.next", "composer.model", "composer.preset", "composer.context", "composer.cache"]
+  it("puts the choices first and the next request's size and cache last, Next keeping its place without a choice", () => {
+    expect(ids("strip", context(false, 1))).toEqual(order)
+    expect(ids("strip", context(false, 3))).toEqual(order)
   })
 
   it("keeps earlier text and the guidance switch in the box at every width: the text has a row of its own", () => {
@@ -162,14 +157,96 @@ describe("strip and box placements", () => {
       component: () => null
     })
     expect(ids("strip", context(false, 1))).toEqual([
+      "composer.next",
       "composer.model",
       "composer.preset",
-      "composer.cache",
       "synthetic.chip",
-      "composer.next"
+      "composer.context",
+      "composer.cache"
     ])
     expect(ids("tools", context(true, 1))).toEqual(["synthetic.chip", "composer.history"])
     close()
     expect(ids("strip", context(false, 1))).not.toContain("synthetic.chip")
+  })
+})
+
+describe("the context chip", () => {
+  it("shows the next request's size against the context the model allows", () => {
+    expect(contextText(24_112, 128_000)).toBe("24k / 128k")
+    expect(contextText(2_926, 8_192)).toBe("2.9k / 8.2k")
+    expect(contextText(2_926, null)).toBe("~2.9k")
+  })
+})
+
+describe("the composer's rested text", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+  // A store like the composer draft's: every keystroke notifies.
+  const store = () => {
+    let text = ""
+    const listeners = new Set<() => void>()
+    return {
+      type: (next: string) => {
+        text = next
+        for (const listener of listeners) listener()
+      },
+      watch: (listener: () => void) => {
+        listeners.add(listener)
+        return () => void listeners.delete(listener)
+      },
+      read: () => text
+    }
+  }
+
+  it("hears nothing while 40 characters are typed at human speed, then exactly once at the pause", () => {
+    const draft = store()
+    const rested = restedText(draft.watch, draft.read)
+    const heard = vi.fn()
+    const unsubscribe = rested.subscribe(heard)
+    const typed = "Synthetic forty characters typed slowly."
+    expect(typed).toHaveLength(40)
+    for (let i = 1; i <= typed.length; i++) {
+      draft.type(typed.slice(0, i))
+      // About 180 ms between keys: well under the pause.
+      vi.advanceTimersByTime(180)
+    }
+    expect(heard).not.toHaveBeenCalled()
+    expect(rested.snapshot()).toBe("")
+    vi.advanceTimersByTime(REST_MS - 180 - 1)
+    expect(heard).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(heard).toHaveBeenCalledTimes(1)
+    expect(rested.snapshot()).toBe(typed)
+    // Nothing more without typing.
+    vi.advanceTimersByTime(10 * REST_MS)
+    expect(heard).toHaveBeenCalledTimes(1)
+    unsubscribe()
+  })
+
+  it("rests at once when the box loses focus or is emptied (a send), and not for text back as it was", () => {
+    const draft = store()
+    const rested = restedText(draft.watch, draft.read)
+    const heard = vi.fn()
+    const unsubscribe = rested.subscribe(heard)
+    draft.type("Synthetic")
+    rested.flush()
+    expect(heard).toHaveBeenCalledTimes(1)
+    expect(rested.snapshot()).toBe("Synthetic")
+    draft.type("Synthetic!")
+    draft.type("Synthetic")
+    vi.advanceTimersByTime(REST_MS)
+    expect(heard).toHaveBeenCalledTimes(1)
+    draft.type("")
+    expect(heard).toHaveBeenCalledTimes(2)
+    expect(rested.snapshot()).toBe("")
+    unsubscribe()
+    // Not watched while nothing listens.
+    draft.type("Synthetic")
+    vi.advanceTimersByTime(REST_MS)
+    expect(heard).toHaveBeenCalledTimes(2)
   })
 })

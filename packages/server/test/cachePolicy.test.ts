@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest"
+import { builtinProviders } from "@dreamspan/shared/providerDefinitions.ts"
 import { documentedCacheMinimum, documentedCachePolicy } from "../src/providers/cachePolicy.ts"
 
 const hour = { system: [{ cache_control: { type: "ephemeral", ttl: "1h" } }] }
@@ -160,4 +161,54 @@ for (const [model, minimum] of [
     const target = { provider: "google", api: "google-generative-ai", model }
     assert.equal(documentedCacheMinimum(target), minimum)
     assert.isNull(documentedCachePolicy(target))
+  })
+
+// A model the user adds by hand (not from a list or catalog) gets its lifetime from the
+// connection's provider: what the provider kind documents, by its API and the model's family.
+// Each built-in provider's own cache contract and API, as a connection made from it has them.
+const claudeMarker = { system: [{ cache_control: { type: "ephemeral" } }] }
+for (const [providerId, api, model, payload, ttl] of [
+  // Anthropic: explicit breakpoints, 5 minutes, or 1 hour when every marker asks for it.
+  ["anthropic", "anthropic-messages", "my-claude-finetune", claudeMarker, 300],
+  ["anthropic", "anthropic-messages", "my-claude-finetune", hour, 3600],
+  // Bedrock and Vertex serve only Claude on Anthropic Messages, whatever the id names.
+  [
+    "anthropic-bedrock",
+    "anthropic-messages",
+    "arn:aws:bedrock:eu-west-1:000000000000:application-inference-profile/synthetic",
+    claudeMarker,
+    300
+  ],
+  [
+    "anthropic-bedrock",
+    "anthropic-messages",
+    "arn:aws:bedrock:eu-west-1:000000000000:application-inference-profile/synthetic",
+    hour,
+    3600
+  ],
+  ["anthropic-vertex", "anthropic-messages", "custom-deployment@001", claudeMarker, 300],
+  ["anthropic-vertex", "anthropic-messages", "custom-deployment@001", hour, 3600],
+  // OpenAI: automatic prefix caching, by the model's family (a fine-tune is its base model's).
+  ["openai", "openai-completions", "ft:gpt-4.1-mini:synthetic-org::abc123", {}, 300],
+  ["openai", "openai-responses", "ft:gpt-5.6-mini:synthetic-org::abc123", {}, 1800],
+  ["openai", "openai-responses", "o7-mini", {}, 300],
+  // OpenAI-compatible: only OpenAI's own models, as a router in front of OpenAI serves them.
+  ["openai-compatible", "openai-completions", "openai/gpt-4o-mini", {}, 300],
+  ["openai-compatible", "openai-completions", "synthetic-local-model", {}, null],
+  ["openai-compatible", "openai-completions", "claude-sonnet-5", {}, null],
+  // OpenRouter: by the upstream the id names.
+  ["openrouter", "openai-completions", "anthropic/claude-custom", explicit, 300],
+  ["openrouter", "openai-completions", "anthropic/claude-custom", {}, null],
+  ["openrouter", "openai-completions", "google/gemini-custom", {}, 180],
+  ["openrouter", "openai-completions", "openai/gpt-4.1-custom", {}, 300],
+  ["openrouter", "openai-completions", "openai/gpt-5.6-custom", {}, 1800],
+  ["openrouter", "openai-completions", "deepseek/deepseek-custom", {}, null],
+  ["openrouter", "openai-completions", "x-ai/grok-custom", {}, null],
+  // No documented lifetime: unknown, so the chip shows only a changed prefix.
+  ["deepseek", "openai-completions", "deepseek-custom", {}, null],
+  ["google", "google-generative-ai", "gemini-custom", {}, null]
+] as const)
+  it(`a custom ${model} on ${providerId} gets ${ttl ?? "no"} TTL from its provider`, () => {
+    const provider = builtinProviders.find((p) => p.id === providerId)!
+    assert.equal(documentedCachePolicy({ provider: provider.cacheContract!, api, model }, payload)?.ttlS ?? null, ttl)
   })

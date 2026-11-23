@@ -25,6 +25,7 @@ import { registerPanels } from "./registerPanels.tsx"
 import { createElement, lazy, Suspense, useState } from "react"
 import { loadChatPage, loadedChatPage } from "./chatPageLoader.ts"
 import { FIRST_REQUEST_PATH, firstRequestKey } from "./firstRequest.ts"
+import { NEXT_REQUEST_PATH, nextRequestKey } from "./nextRequest.ts"
 import { routes } from "../../routes.tsx"
 import { Loading, reloadPage } from "../../ui/Spinner.tsx"
 import { ChatDefaultsPage } from "./ChatDefaults.tsx"
@@ -64,6 +65,18 @@ function LazyFirstRequestPage() {
   return (
     <Suspense fallback={<Loading label="Loading the request…" onRetry={reloadPage} />}>
       <FirstRequestPage />
+    </Suspense>
+  )
+}
+
+const NextRequestPage = lazy(() =>
+  import("./NextRequestPage.tsx").then((module) => ({ default: module.NextRequestPage }))
+)
+
+function LazyNextRequestPage() {
+  return (
+    <Suspense fallback={<Loading label="Loading the request…" onRetry={reloadPage} />}>
+      <NextRequestPage />
     </Suspense>
   )
 }
@@ -147,15 +160,19 @@ export const register = () => {
     icon: "chat",
     document: true
   })
-  // The request inspector: a reply's, or the first of a chat not sent yet (`/request/first`, one
-  // per pending chat's tab). It opens where an inspector is showing (owner, 2026-11-23), so the
+  // The request inspector: a reply's, the first of a chat not sent yet (`/request/first`, one per
+  // pending chat's tab), or a chat's next (`/request/next`, one per chat). It opens where an inspector is showing (owner, 2026-11-23), so the
   // chat keeps its frame while the requests take turns beside it.
   tabKinds.register({
     id: "chat.context",
     order: 100,
     match: (url) =>
       /^\/chats\/([^/]+\/context\/[^/]+)$/.exec(url.pathname)?.[1] ??
-      (url.pathname === FIRST_REQUEST_PATH ? firstRequestKey(url) : null),
+      (url.pathname === FIRST_REQUEST_PATH
+        ? firstRequestKey(url)
+        : url.pathname === NEXT_REQUEST_PATH
+          ? nextRequestKey(url)
+          : null),
     title: () => "Request",
     icon: "search",
     opensWhereShown: true
@@ -213,6 +230,14 @@ export const register = () => {
     parent: "app",
     path: FIRST_REQUEST_PATH,
     component: LazyFirstRequestPage,
+    retainSearch: sidebarSearch
+  })
+  // A chat's next request, as its open view's estimate stands (nextRequest.ts).
+  routes.register({
+    id: "chat.next-request",
+    parent: "app",
+    path: NEXT_REQUEST_PATH,
+    component: LazyNextRequestPage,
     retainSearch: sidebarSearch
   })
   // What applies to all of the user's chats.

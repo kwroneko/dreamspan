@@ -48,9 +48,24 @@ const newerGPT = (model: string) => {
   const family = /(?:^|[/.])gpt-(\d+)(?:\.(\d+))?/i.exec(model)
   return family !== null && (+family[1]! > 5 || (+family[1]! === 5 && +(family[2] ?? 0) >= 6))
 }
+/**
+ * An OpenAI model's id as its family names it: a fine-tune (`ft:gpt-4.1-mini:org::id`) is its base
+ * model's, and a router's or gateway's vendor prefix (`openai/gpt-4o`) is left out.
+ */
+const openaiFamily = (model: string) => model.replace(/^ft:/, "").replace(/^openai\//, "")
 // API-compatible local models and legacy GPT-3/4 do not inherit a cache contract.
-const knownOpenAI = (model: string) =>
-  newerGPT(model) || /^(gpt-(?:4o|4\.[15]|5)(?:[.-]|$)|o[134](?:-|$)|chatgpt-4o(?:-|$))/i.test(model)
+const knownOpenAI = (model: string) => {
+  const family = openaiFamily(model)
+  return newerGPT(family) || /^(gpt-(?:4o|4\.[15]|5)(?:[.-]|$)|o[1-9]\d*(?:-|$)|chatgpt-4o(?:-|$))/i.test(family)
+}
+/** OpenAI's policy for one of its models, wherever it's served: 30 minutes for GPT-5.5 and later. */
+const openaiPolicy = (model: string, payload: Record<string, unknown>, source: string) => {
+  const family = openaiFamily(model)
+  return policy(
+    newerGPT(family) || /^gpt-5\.5(?:-|$)/.test(family) || payload.prompt_cache_retention === "24h" ? 1800 : 300,
+    source
+  )
+}
 
 /** OpenAI's models on Bedrock's OpenAI-compatible APIs (`us.openai.gpt-5.6-sol`, `openai.gpt-oss-120b`). */
 const bedrockOpenAI = (model: string, api: string) =>
@@ -65,14 +80,11 @@ export const documentedCachePolicy = (target: Target, payload: Record<string, un
   // Mixed Anthropic marker lifetimes expire at the shortest marked prefix.
   const hour = explicit && cacheMarkers.every((m) => m.ttl === "1h")
   if (provider === "anthropic") return policy(hour ? 3600 : 300, claudeSource)
-  if (provider === "openai" && knownOpenAI(model))
-    return policy(
-      newerGPT(model) || /^gpt-5\.5(?:-|$)/.test(model) || payload.prompt_cache_retention === "24h" ? 1800 : 300,
-      openaiSource
-    )
+  if (provider === "openai" && knownOpenAI(model)) return openaiPolicy(model, payload, openaiSource)
   if (provider === "azure" && knownOpenAI(model)) {
-    if (newerGPT(model)) return policy(1800, azureSource)
-    return payload.prompt_cache_retention === "24h" || /^gpt-5\.5(?:-|$)/.test(model) ? null : policy(300, azureSource)
+    const family = openaiFamily(model)
+    if (newerGPT(family)) return policy(1800, azureSource)
+    return payload.prompt_cache_retention === "24h" || /^gpt-5\.5(?:-|$)/.test(family) ? null : policy(300, azureSource)
   }
   if (provider === "openrouter") {
     const pinned = object(payload.provider).only
@@ -82,6 +94,9 @@ export const documentedCachePolicy = (target: Target, payload: Record<string, un
         ? policy(hour ? (Array.isArray(pinned) && pinned.length === 1 ? 3600 : 600) : 300, routerSource)
         : null
     if (model.startsWith("google/gemini")) return policy(explicit ? 300 : 180, routerSource, explicit)
+    // OpenAI's models through OpenRouter cache automatically, with OpenAI's lifetimes (routerSource).
+    if (model.startsWith("openai/") && knownOpenAI(model)) return openaiPolicy(model, payload, routerSource)
+    // Other upstreams (DeepSeek, xAI, Moonshot...) state no lifetime through OpenRouter.
     return null
   }
   if (["moonshotai", "moonshotai-cn"].includes(provider) && /(?:kimi[-/]?)?k3(?:[-.]|$)/.test(model)) {
@@ -101,12 +116,15 @@ export const documentedCachePolicy = (target: Target, payload: Record<string, un
     return policy(300, "https://www.alibabacloud.com/help/en/model-studio/context-cache")
   if (provider === "groq" && /(?:^|\/)gpt-oss-(?:20b|120b|safeguard-20b)(?:-|$)/.test(model))
     return policy(7200, "https://console.groq.com/docs/prompt-caching")
+  // Anthropic Messages on Bedrock or Vertex AI serves only Claude, whatever the id names (an
+  // inference profile's ARN, a custom deployment): the connection's API decides, not the id.
+  const claudeOnly = target.api === "anthropic-messages"
   if (provider === "amazon-bedrock") {
-    if (model.includes("claude")) return policy(hour ? 3600 : 300, bedrockSource)
+    if (model.includes("claude") || claudeOnly) return policy(hour ? 3600 : 300, bedrockSource)
     if (["openai-completions", "openai-responses"].includes(target.api) && newerGPT(model))
       return policy(1800, bedrockSource)
   }
-  if (provider === "google-vertex" && model.includes("claude"))
+  if (provider === "google-vertex" && (model.includes("claude") || claudeOnly))
     return policy(
       hour ? 3600 : 300,
       "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/partner-models/claude/prompt-caching"

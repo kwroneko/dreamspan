@@ -25,6 +25,8 @@ type Invocation = "button" | "keyboard"
 
 export interface ComposerControlContext {
   readonly draft: import("../../../../plugin-api/src/client.ts").DraftControl
+  /** The box's text once typing pauses (`restedText.ts`): what reads it this way doesn't render per keystroke. */
+  readonly typed: import("./restedText.ts").RestedText
   readonly compact?: boolean
   readonly recoverQueued: (text: string, images?: MessageImages) => void
   readonly session: ChatSession

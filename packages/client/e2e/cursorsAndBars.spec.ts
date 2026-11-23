@@ -13,7 +13,7 @@ import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { saveButton } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { nextReply } from "./support/strip.ts"
+import { modelChip } from "./support/strip.ts"
 
 test.use({ launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] } })
 
@@ -154,7 +154,7 @@ for (const theme of ["light", "dark"] as const)
     expect(await cursor(tab)).toBe("pointer")
     await expect(page.getByText("Loading the chat settings…")).toHaveCount(0)
     await shoot(page, `side-panel-${theme}`)
-    expect(await cursor(nextReply(page).getByRole("button").first())).toBe("pointer")
+    expect(await cursor(modelChip(page))).toBe("pointer")
     const box = page.getByRole("textbox", { name: "Message", exact: true })
     expect(["text", "auto"]).toContain(await cursor(box))
 

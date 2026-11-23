@@ -6,7 +6,7 @@ import { makeSavedMediaReadHandlers } from "./savedMedia.ts"
 import type { ContinuousSnapshot } from "../agent/continuity.ts"
 import { prepareTextTokens } from "../assembler/textTokens.ts"
 import { tokensOf } from "../assembler/st.ts"
-import { textDisplay } from "./textDisplay.ts"
+import { calibratedCount, textDisplay } from "./textDisplay.ts"
 import { fitSummaryOutput } from "../lcm/requestBudget.ts"
 import { presetContext } from "./presetContext.ts"
 import { cacheExpiry } from "./cacheExpiry.ts"
@@ -25,10 +25,10 @@ import { lastBreakpoint, prefixChange, speakerPrefixChange, tokensBetween } from
 import { bestEffortCache, documentedCacheMinimum } from "../providers/cachePolicy.ts"
 import { nextImages, estimateImage } from "../assembler/imageTokens.ts"
 import { budgetOrigins } from "../assembler/budget.ts"
-import { contextMessages, describer, inspectionInputs } from "./inspectorReads.ts"
+import { describer, inspectionInputs } from "./inspectorReads.ts"
+import { requestViewCounted } from "./requestView.ts"
+import { requestSize, requestTotal, requestView } from "./requestView.ts"
 import { draftSources } from "./draftSources.ts"
-import { inspectWire } from "../assembler/inspection.ts"
-import { wireImages } from "../assembler/imageTokens.ts"
 import type { Assembler } from "../assembler/assembler.ts"
 import type { ContextSource } from "@dreamspan/shared/inspectorApi.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
@@ -74,11 +74,19 @@ const estimateOf = (
   userId: UserId,
   assembler: Assembler,
   next: ContextSnapshot | AssemblyFailed,
-  sources: Pick<ReturnType<typeof sqlSources>, "chosenModel" | "resolvedModel">
+  sources: Pick<ReturnType<typeof sqlSources>, "chosenModel" | "resolvedModel">,
+  now: number,
+  link?: (source: ContextSource) => ContextSource
 ) =>
   Effect.gen(function* () {
+    // The next request's one count (the request view's: the messages as the API is sent them,
+    // calibrated), which the boundary line, the context chip, the cache chip and the preview read.
+    const view =
+      next instanceof AssemblyFailed || !next.inputs.model
+        ? null
+        : yield* requestViewCounted(sql, userId, assembler, next, next.inputs.model, now, link)
     const displayTokens =
-      next instanceof AssemblyFailed
+      next instanceof AssemblyFailed || view !== null
         ? null
         : yield* textDisplay(
             sql,
@@ -104,7 +112,7 @@ const estimateOf = (
           WHERE c.id = ${chosen.connection} AND c.owner_user_id = ${userId}
             AND c.deleted_at IS NULL AND c.purged_at IS NULL`
       : []
-    return {
+    const estimate = {
       assemblyError: next instanceof AssemblyFailed ? next.message : null,
       assemblyErrorReason: next instanceof AssemblyFailed ? next.reason : null,
       presetContext: next instanceof AssemblyFailed ? null : yield* presetContext(sql, userId, next),
@@ -134,22 +142,25 @@ const estimateOf = (
         budget && preset
           ? {
               ...budget,
-              ...(displayTokens && !(next instanceof AssemblyFailed)
-                ? {
-                    countedInput:
-                      displayTokens.counts.reduce(
-                        (n, c) => n + c,
-                        next.request.messages.filter((m) => m.content).length * 3
-                      ) + next.request.messages.reduce((n, m) => n + tokensOf({ content: "", images: m.images }), 0),
-                    tokenizer: displayTokens.tokenizer
-                  }
-                : {}),
+              ...(view !== null
+                ? { countedInput: requestTotal(view.request), tokenizer: view.request.tokenizer }
+                : displayTokens && !(next instanceof AssemblyFailed)
+                  ? {
+                      countedInput:
+                        displayTokens.counts.reduce(
+                          (n, c) => n + c,
+                          next.request.messages.filter((m) => m.content).length * 3
+                        ) + next.request.messages.reduce((n, m) => n + tokensOf({ content: "", images: m.images }), 0),
+                      tokenizer: displayTokens.tokenizer
+                    }
+                  : {}),
               presetName,
               builtinPreset: preset.scope === "builtin",
               origins: budgetOrigins(resolved ?? null)
             }
           : null
     }
+    return { estimate, view }
   })
 
 export const makeAssemblyReadHandlers = Effect.gen(function* () {
@@ -387,7 +398,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           : (sources.pins().historyStart ?? null)
         const start = next instanceof AssemblyFailed ? fallback : (next.historyStart ?? fallback)
         const resolved = sources.resolvedModel()
-        const estimate = yield* estimateOf(sql, userId, assembler, next, sources)
+        const { estimate, view } = yield* estimateOf(sql, userId, assembler, next, sources, Date.now())
         const nextFork = (yield* viewAt(sql, chatId, sources.pins().target.parentSlotId)) as ForkId | null
         // Composer uploads already belong to a server-backed, owner/fork-scoped draft.
         // Estimate them before Send with the same registered rules and stored facts as history.
@@ -444,8 +455,14 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             ? null
             : yield* historyGap(sql, chatId, nextFork, sources.pins(), start.depth, summarizedThrough ?? -1)
         const summaryNotes = next instanceof AssemblyFailed ? [] : yield* sentSummaryNotes(sql, userId, chatId, next)
+        // The next request's size by part, counted as its request view counts it (`NextRequest`).
+        const size =
+          next instanceof AssemblyFailed || view === null
+            ? {}
+            : { size: requestSize(next, view.request, sources.pins().target.depth) }
         const boundary = {
           ...estimate,
+          ...size,
           forkId: nextFork,
           leafSlotId: sources.pins().target.parentSlotId,
           historyStart: start ? { slotId: start.slotId, depth: start.depth, ...(gap ?? {}) } : null,
@@ -473,8 +490,23 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
               ? previous.wire.cache.ttlS
               : next.inputs.model.cacheTtlS
             : next.inputs.model.cacheTtlS) ?? null
-        const previousCount = yield* prepareTextTokens(assembler.textCounters.list(), previous.inputs.model)
-        const nextCount = yield* prepareTextTokens(assembler.textCounters.list(), next.inputs.model)
+        // Counted as the request view counts (calibrated), and for the next request's own messages
+        // to the view's very numbers, so the chip's parts and total agree with every other place.
+        const previousCount = yield* calibratedCount(
+          sql,
+          userId,
+          previous.inputs.model,
+          assembler,
+          yield* prepareTextTokens(assembler.textCounters.list(), previous.inputs.model)
+        )
+        const nextRaw = yield* calibratedCount(
+          sql,
+          userId,
+          next.inputs.model,
+          assembler,
+          yield* prepareTextTokens(assembler.textCounters.list(), next.inputs.model)
+        )
+        const nextCount = (text: string) => view?.counted.get(text) ?? nextRaw(text)
         const prefixTokens = tokensBetween(previous, 0, end, previousCount)
         const speakerCost = sameModel ? speakerPrefixChange(previous, next, nextCount) : null
         let speakerChange: string | undefined
@@ -511,7 +543,10 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         const nextEnd = lastBreakpoint(next)
         const nextTokens = nextEnd < 0 ? 0 : tokensBetween(next, 0, nextEnd, nextCount)
         // The total the chip shows the uncached part out of, counted the same way and sent with it.
-        const requestTokens = tokensBetween(next, 0, next.request.messages.length - 1, nextCount)
+        const requestTokens =
+          view === null
+            ? tokensBetween(next, 0, next.request.messages.length - 1, nextCount)
+            : requestTotal(view.request)
         if (minimum !== null && end >= 0 && prefixTokens < minimum) {
           return {
             ...boundary,
@@ -538,7 +573,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                     ...speakerWarning,
                     changed: {
                       reason: `The last request was below the model's minimum cacheable size (${minimum.toLocaleString("en-US")} tokens), so nothing was cached.`,
-                      tokens: nextTokens
+                      tokens: Math.min(nextTokens, requestTokens)
                     }
                   }
           }
@@ -554,8 +589,13 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           yield* describer(sql, userId, chatId, [previous, next], assembler),
           nextCount
         )
+        // Never more uncached than the request holds: "50k of 50k" is the whole request.
         const changed =
-          compared && bestEffort ? { ...compared, tokens: Math.max(compared.tokens, nextTokens) } : compared
+          compared &&
+          ({
+            ...compared,
+            tokens: Math.min(requestTokens, bestEffort ? Math.max(compared.tokens, nextTokens) : compared.tokens)
+          } as const)
         const lastRead = last.cache_read ?? 0
         const reusable = bestEffort ? Math.min(prefixTokens, lastRead) : prefixTokens
         const expiresAt = yield* cacheExpiry(sql, userId, chatId, last, previous)
@@ -596,6 +636,29 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         }
       }).pipe(query("NextContextAccess")),
 
+    // The next reply's request at the leaf, as the inspector shows a sent one (the context chip's
+    // View request): assembled as `CacheWarmth` assembles it and counted as its `size` is, so the
+    // two agree. Nothing is written and nothing leaves the worker. Null without a model, or when
+    // it can't be assembled (`GetNextContext` says why).
+    NextRequest: ({ userId, chatId, leafSlotId, forkId }) =>
+      Effect.gen(function* () {
+        const [chat] = yield* sql<{ id: string }>`
+          SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        const sources = sqlSources(sql, { userId, chatId, next: true, leafSlotId: leafSlotId ?? null })
+        const next = yield* assembler
+          .assemble({ now: Date.now(), timeZone: "UTC", frozen: {}, random: Math.random })
+          .pipe(
+            Effect.provide(sources.layer),
+            Effect.map((built): ContextSnapshot => ({ ...built, sources: sources.pins() })),
+            Effect.catchTag("AssemblyFailed", (error) => Effect.succeed(error))
+          )
+        if (next instanceof AssemblyFailed || !next.inputs.model) return null
+        return yield* requestView(sql, userId, assembler, next, next.inputs.model, Date.now())
+      }).pipe(inFork(sql, chatId, forkId, leafSlotId ?? null), query("NextRequest"), (effect) =>
+        withAssemblyModules(assembler, effect)
+      ),
+
     // A chat not made yet: the request its first send would make (DESIGN §2.1), from the same
     // pipeline over sources standing in for what StartChat would write. Nothing is written, and
     // this worker has no network: counts are the local tokenizers' (`textDisplay` refuses any).
@@ -616,7 +679,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         const chosen = yield* sources.model().pipe(Effect.catchTag("AssemblyFailed", (error) => Effect.succeed(error)))
         if (chosen instanceof AssemblyFailed)
           return {
-            ...(yield* estimateOf(sql, userId, assembler, chosen, sources)),
+            ...(yield* estimateOf(sql, userId, assembler, chosen, sources, now)).estimate,
             warmth: null,
             leafSlotId: null,
             historyStart: null,
@@ -637,7 +700,9 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           Effect.map((snapshot): ContextSnapshot => snapshot),
           Effect.catchTag("AssemblyFailed", (error) => Effect.succeed(error))
         )
-        const estimate = yield* estimateOf(sql, userId, assembler, built, sources)
+        // Message sources lead nowhere in the preview, since the chat's messages don't exist yet.
+        const unlinked = (source: ContextSource): ContextSource => ({ ...source, slotId: null })
+        const { estimate, view } = yield* estimateOf(sql, userId, assembler, built, sources, now, unlinked)
         const base = {
           ...estimate,
           warmth: null,
@@ -648,33 +713,10 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           ...(built instanceof AssemblyFailed || !built.imagesLeftOut ? {} : { images: built.imagesLeftOut })
         }
         const model = built instanceof AssemblyFailed ? null : built.inputs.model
-        if (built instanceof AssemblyFailed || model === null) return { ...base, request: null }
-        // The request mapped for the model's API, as the inspector shows a sent one; message
-        // sources lead nowhere, since the chat's messages don't exist yet.
-        const inspection = yield* inspectionInputs(sql, userId, built, assembler)
-        const wire = inspectWire(wireContext(built.request, model), built.request, inspection, (text) => text)
-        const counts = yield* textDisplay(
-          sql,
-          userId,
-          model,
-          assembler,
-          wire.messages.map((m) => m.content + (m.name ?? "")),
-          now
-        )
-        const unlinked = (source: ContextSource): ContextSource => ({ ...source, slotId: null })
-        return {
-          ...base,
-          request: {
-            builtAt: now,
-            type: built.inputs.type,
-            mode: built.inputs.mode,
-            tokenizer: counts.tokenizer,
-            messages: contextMessages(wire, wireImages(wire.messages, built.request), counts.counts, unlinked),
-            samplers: { ...wire.samplers },
-            ...wire.display!,
-            ...(wire.display?.notSent ? { notSent: wire.display.notSent.map(unlinked) } : {})
-          }
-        }
+        if (built instanceof AssemblyFailed || model === null || view === null) return { ...base, request: null }
+        // The request mapped for the model's API, as the inspector shows a sent one, and its size
+        // by part: the estimate's own count.
+        return { ...base, size: requestSize(built, view.request, 0), request: view.request }
       }).pipe(query("AssembleDraftChat"), (effect) => withAssemblyModules(assembler, effect)),
 
     GetGenerationDefaults: ({ userId }) => readDefaults(sql, userId).pipe(query("GetGenerationDefaults")),

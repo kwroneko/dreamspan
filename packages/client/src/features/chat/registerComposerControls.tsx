@@ -6,6 +6,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { CacheChip } from "./CacheIndicator.tsx"
+import { ContextChip } from "./ContextChip.tsx"
 import { DraftContextChip } from "./draftRequest.tsx"
 import { ModelChip, PresetChip } from "./GenerationControls.tsx"
 import { GenerateIcon, SendIcon } from "./icons.tsx"
@@ -168,29 +169,40 @@ export const registerComposerControls = () => [
     placement: "strip",
     component: DraftContextChip
   }),
+  // The strip reads as a sentence: who replies, with which model and preset (and the other
+  // choices, 11 to 79), then what that next request is (its size, then its cache), at the end.
+  composerControls.register({
+    id: "composer.next",
+    order: 10,
+    placement: "strip",
+    component: ({ reply }) => <NextReplyChip {...reply} />
+  }),
   composerControls.register({
     id: "composer.model",
-    order: 10,
+    order: 20,
     placement: "strip",
     component: ({ session, view, onSettings }) => <ModelChip session={session} view={view} onSettings={onSettings} />
   }),
   composerControls.register({
     id: "composer.preset",
-    order: 20,
+    order: 30,
     placement: "strip",
     component: ({ session, view, onSettings }) => <PresetChip session={session} view={view} onSettings={onSettings} />
   }),
   composerControls.register({
-    id: "composer.cache",
-    order: 30,
+    id: "composer.context",
+    order: 80,
     placement: "strip",
-    component: ({ session, view }) => <CacheChip session={session} view={view} />
+    // Only the view, the typed text's store and the guidance switch: typing doesn't render it again.
+    component: ({ view, typed, guidance, editingGuidance }) => (
+      <ContextChip view={view} typed={typed} guidance={guidance} editingGuidance={editingGuidance} />
+    )
   }),
   composerControls.register({
-    id: "composer.next",
-    order: 40,
+    id: "composer.cache",
+    order: 90,
     placement: "strip",
-    component: ({ reply }) => <NextReplyChip {...reply} />
+    component: ({ session, view }) => <CacheChip session={session} view={view} />
   }),
   composerControls.register({
     id: "composer.history",

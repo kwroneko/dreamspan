@@ -12,6 +12,38 @@ import { calibrateText } from "../providers/textCalibration.ts"
 import { TokenCountError } from "../providers/textCounters.ts"
 import { readTextCalibration } from "./textCalibration.ts"
 
+/**
+ * `count` corrected as `textDisplay` corrects its counts (the same calibration for the same
+ * model and tokenizer), for counting texts one at a time: the cache estimate's.
+ */
+export const calibratedCount = (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  model: ModelInput | null,
+  assembler: Assembler,
+  count: (text: string) => number
+) =>
+  Effect.gen(function* () {
+    if (!model) return count
+    const target = { kind: model.kind, api: model.api, model: model.key, baseUrl: "" }
+    const counter = assembler.textCounters
+      .list()
+      .toReversed()
+      .find((c) => !c.remote && c.appliesTo(target))
+    const calibration = yield* readTextCalibration(
+      sql,
+      userId,
+      model.connectionId,
+      model.key,
+      counter?.id ?? "approximate"
+    )
+    if (calibration === null) return count
+    return (text: string) => {
+      const n = count(text)
+      return n === 0 ? 0 : Math.ceil(n * calibration.ratio)
+    }
+  })
+
 export const textDisplay = (
   sql: SqlClient.SqlClient,
   userId: UserId,
