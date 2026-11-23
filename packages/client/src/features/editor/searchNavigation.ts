@@ -6,6 +6,8 @@ export interface SearchMatch {
   readonly path: FieldPath
   readonly at: number
   readonly length: number
+  /** A link from elsewhere landed on the field (`?at=` on the editor page): its box flashes too. */
+  readonly landed?: boolean
 }
 
 export const SearchNavigation = createContext<SearchMatch | null>(null)

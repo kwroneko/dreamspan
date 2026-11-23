@@ -53,7 +53,7 @@ import {
 } from "../../ui/Block.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { ResizeHandle, useInnerPanelWidth } from "../../ui/ResizeHandle.tsx"
-import { revealAdded, revealIfHidden } from "../../ui/reveal.ts"
+import { flashItem, revealAdded, revealIfHidden } from "../../ui/reveal.ts"
 import { SortableList } from "../../ui/SortableList.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
@@ -826,8 +826,11 @@ export function PromptDocument({
     [...prompts, newestMessage].map((p) => [p.identifier, p.marker ? p.name : promptLabel(p.name, p.content).text])
   )
   if (!names.has(charDefinitions.identifier)) names.set(charDefinitions.identifier, charDefinitions.name)
-  /** Opens and scrolls to a prompt; a new block also flashes after the toolbar has measured. */
-  const jump = (identifier: string, added = false) => {
+  /**
+   * Opens and scrolls to a prompt; a new block also flashes after the toolbar has measured, and
+   * so does one a link from elsewhere `landed` on (the URL's focus).
+   */
+  const jump = (identifier: string, added = false, landed = false) => {
     reveal(identifier)
     requestAnimationFrame(() => {
       const target = root.current?.querySelector<HTMLElement>(
@@ -849,11 +852,12 @@ export function PromptDocument({
         const margin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
         scroll.scrollTop += target.getBoundingClientRect().top - scroll.getBoundingClientRect().top - margin
       } else target.scrollIntoView({ block: column ? "nearest" : "start" })
+      if (landed) flashItem(target)
     })
   }
   useEffect(() => {
     if (!focusedPrompt || focusedHere.current === focusedPrompt) return
-    const frame = requestAnimationFrame(() => jump(focusedPrompt))
+    const frame = requestAnimationFrame(() => jump(focusedPrompt, false, true))
     return () => cancelAnimationFrame(frame)
     // Only a new target scrolls; editing that prompt must not keep scrolling it back.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -35,7 +35,7 @@ import { AboutHint } from "../../ui/AboutHint.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
-import { revealAdded, revealIfHidden } from "../../ui/reveal.ts"
+import { flashItem, revealAdded, revealIfHidden } from "../../ui/reveal.ts"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
@@ -60,16 +60,21 @@ import {
   lorebookSorts,
   POSITIONS,
   positionValue,
+  entriesScope,
   uidOf
 } from "./lorebookTable.ts"
 import { SearchNavigation, useSearchMatch } from "./searchNavigation.ts"
 import { type EditorStore, useEditorKind, useText, useValue } from "./store.ts"
 
-/** Where an entry revealed gets the cursor; `added`: it was just added (or duplicated), so it's flashed. */
+/**
+ * Where an entry revealed gets the cursor; `added`: it was just added (or duplicated), so it's
+ * flashed; `landed`: a link from elsewhere opened the book on it, so it's flashed where it is.
+ */
 interface Focus {
   readonly uid: number
   readonly at: "title" | "keys"
   readonly added?: boolean
+  readonly landed?: boolean
 }
 
 /** What an opened entry shows with its settings closed. */
@@ -559,7 +564,11 @@ function Rows({
       const item = header?.closest<HTMLElement>("[role=listitem]")
       if (focus.added && item)
         revealAdded(item.firstElementChild instanceof HTMLElement ? item.firstElementChild : item)
-      else if (header) revealIfHidden(header, [field])
+      else if (header) {
+        revealIfHidden(header, [field])
+        if (focus.landed && item)
+          flashItem(item.firstElementChild instanceof HTMLElement ? item.firstElementChild : item)
+      }
       if (!searching) field?.focus({ preventScroll: true })
       onFocused()
     }
@@ -665,7 +674,7 @@ export function LorebookTable(props: {
   const sorts = useRegistry(lorebookSorts)
   const actions = useRegistry(lorebookEntryActions)
   const card = useEditorKind(store) === "card"
-  const scope = `entries:${store.refId}:${root.join("/")}`
+  const scope = entriesScope(store.refId, root)
   const [query, changeQuery] = usePlaceParam(`${scope}:q`, "")
   const setQuery = (next: string) => changeQuery(next, true)
   const [enabled, changeEnabled] = usePlaceParam<EnabledFilter>(`${scope}:show`, "all", ["all", "on", "off"])
@@ -770,7 +779,8 @@ export function LorebookTable(props: {
     if (entry === local || entry === null || !book.entries.some((e) => e.uid === entry)) return
     const frame = requestAnimationFrame(() => {
       setOpened((set) => new Set(set).add(entry))
-      setFocus({ uid: entry, at: "title" })
+      // The URL's entry, from a link or a reload: shown where it is, flashed.
+      setFocus({ uid: entry, at: "title", landed: true })
     })
     return () => cancelAnimationFrame(frame)
   })

@@ -21,6 +21,8 @@ import type {
 } from "@dreamspan/shared/inspectorApi.ts"
 import { Link, Navigate, useParams, useSearch } from "@tanstack/react-router"
 import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
+import { entryParam } from "../editor/lorebookTable.ts"
+import { endOfRequestText } from "@dreamspan/shared/endOfRequest.ts"
 import { type Reuse, ReuseLine, reuseByMessage } from "../editor/promptLines.tsx"
 import {
   createContext,
@@ -101,6 +103,79 @@ const unsent = (source: ContextSource) =>
  */
 const ViewedFork = createContext<{ readonly fork?: ForkId }>({})
 
+/** Where a source's link goes, landing on the item it is, and what its hover says. */
+type SourceTarget =
+  | { readonly to: "chat"; readonly search: Record<string, unknown>; readonly hint: string }
+  | { readonly to: "library"; readonly ref: string; readonly search: Record<string, unknown>; readonly hint: string }
+
+/**
+ * A preset's text by its piece identifier: a prompt of its order by `?focus=` (its block opens,
+ * scrolled to and flashed); an end-of-request text, a utility text or a prefill by its field
+ * (`?at=`, the editor's landing).
+ */
+const presetTarget = (ref: string, identifier: string): SourceTarget => {
+  const [group, rest] = identifier.split(/\.(.*)/s)
+  const field =
+    endOfRequestText(identifier) !== undefined
+      ? ["prompts", `identifier=${identifier}`, "content"]
+      : group === "utility" && rest
+        ? ["utility_prompts", rest]
+        : group === "prefill" && rest
+          ? ["prefill", rest]
+          : null
+  return field
+    ? { to: "library", ref, search: { at: field }, hint: "Opens this text in the preset editor." }
+    : { to: "library", ref, search: { focus: identifier }, hint: "Opens this prompt in the preset editor." }
+}
+
+/** Whose page a source's link opens, at its item: every kind lands on the exact thing it names. */
+const sourceTarget = (
+  source: ContextSource,
+  chatId: ChatId,
+  viewed: { readonly fork?: ForkId }
+): SourceTarget | null => {
+  if (source.slotId)
+    return { to: "chat", search: { ...viewed, slot: source.slotId }, hint: "Opens this message in the chat." }
+  if (source.kind === "summary" && source.summary)
+    return {
+      to: "chat",
+      search: { ...viewed, panel: "summaries", summary: source.summary.id },
+      hint: "Opens this summary in the chat's Summaries tab."
+    }
+  if (!source.ref) return null
+  const ref = source.ref
+  // A note is the chat's or a card's, edited where the chat lists them.
+  if (source.kind === "note")
+    return {
+      to: "chat",
+      search: { ...viewed, panel: "notes", note: ref },
+      hint: "Opens this note in the chat's Notes tab."
+    }
+  // A plugin's kind keeps its plain library link, whatever item it carries.
+  const item =
+    source.kind === "preset" || source.kind === "lorebook" || source.kind === "card" ? source.item : undefined
+  if (item?.kind === "prompt") return presetTarget(ref, item.identifier)
+  if (item?.kind === "entry")
+    // A card's own book opens on the card, the book alone (`focus`); a standalone one is its page.
+    return item.embedded
+      ? {
+          to: "library",
+          ref,
+          search: { focus: CARD_LOREBOOK_FOCUS, [entryParam(ref, ["character_book"])]: String(item.uid) },
+          hint: "Opens this entry in the card's lorebook."
+        }
+      : {
+          to: "library",
+          ref,
+          search: { [entryParam(ref, [])]: String(item.uid) },
+          hint: "Opens this entry in the lorebook editor."
+        }
+  if (item?.kind === "field")
+    return { to: "library", ref, search: { at: [item.field] }, hint: "Opens this field in the card editor." }
+  if (source.kind === "card") return { to: "library", ref, search: {}, hint: "Opens this card in the card editor." }
+  return { to: "library", ref, search: {}, hint: "Opens this context source." }
+}
+
 /** What the source is, where it's from: the inspector's own words, never prompt text. */
 function SourceTitle({
   source,
@@ -119,35 +194,34 @@ function SourceTitle({
       {rewritten && " (rewritten)"}
     </>
   )
+  const target = sourceTarget(source, chatId, viewed)
   return (
     <span className="flex min-w-0 flex-col gap-0.5">
       <span className="font-medium break-words text-text">
-        {source.slotId ? (
-          <Tooltip label="Opens this context source.">
-            <Link
-              to="/chats/$chatId"
-              params={{ chatId }}
-              search={{ ...viewed, slot: source.slotId }}
-              className="text-accent underline-offset-2 hover:underline"
-            >
-              {label}
-            </Link>
-          </Tooltip>
-        ) : source.ref ? (
-          <Tooltip label="Opens this context source.">
-            <Link
-              to="/library/$refId"
-              params={{ refId: source.ref }}
-              // An entry's link opens its book: a card's own opens the card on it (a standalone
-              // lorebook ignores the focus).
-              search={source.kind === "lorebook" ? { focus: CARD_LOREBOOK_FOCUS } : {}}
-              className="text-accent underline-offset-2 hover:underline"
-            >
-              {label}
-            </Link>
-          </Tooltip>
-        ) : (
+        {target === null ? (
           label
+        ) : (
+          <Tooltip label={target.hint}>
+            {target.to === "chat" ? (
+              <Link
+                to="/chats/$chatId"
+                params={{ chatId }}
+                search={target.search}
+                className="text-accent underline-offset-2 hover:underline"
+              >
+                {label}
+              </Link>
+            ) : (
+              <Link
+                to="/library/$refId"
+                params={{ refId: target.ref }}
+                search={target.search}
+                className="text-accent underline-offset-2 hover:underline"
+              >
+                {label}
+              </Link>
+            )}
+          </Tooltip>
         )}
       </span>
       {source.summary?.stale && <span className="text-warning">Stale when this reply was generated.</span>}

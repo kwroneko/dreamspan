@@ -78,6 +78,17 @@ export const ContextSource = Schema.Struct({
   version: Schema.optionalKey(Schema.Int),
   /** The library item it came from (a card, lorebook or preset), to link to; absent in older captures. */
   ref: Schema.optionalKey(Schema.String),
+  /**
+   * What in that item it is, so its link lands there: a preset's prompt, a lorebook's entry
+   * (`embedded`: a card's own book, opened on the card), a card's field. Absent: the item as a whole.
+   */
+  item: Schema.optionalKey(
+    Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("prompt"), identifier: Schema.String }),
+      Schema.Struct({ kind: Schema.Literal("entry"), uid: Schema.Int, embedded: Schema.Boolean }),
+      Schema.Struct({ kind: Schema.Literal("field"), field: Schema.String })
+    ])
+  ),
   /** The prompt regex scripts that changed its text in this request, in the order they ran; absent: none. */
   scripts: Schema.optionalKey(Schema.Array(ScriptRef))
 })

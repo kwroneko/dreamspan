@@ -27,6 +27,7 @@ import { Alert } from "../../ui/Surface.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { type NoteCard, NoteSectionHeader, SharedNotePicker, noteTitle } from "../editor/notes.tsx"
 import { SlotOutlet } from "../../slots.tsx"
+import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useCast } from "./cast.ts"
 import { chatNoteActions } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
@@ -221,6 +222,22 @@ export function NotesTab({
   useEffect(() => {
     if (focusCard !== null) sections.current.get(focusCard)?.scrollIntoView({ block: "start", behavior: "smooth" })
   }, [focusCard])
+  // A link from elsewhere at one note (the request inspector's, `?note=<ref>`): it opens, comes
+  // into view and flashes as a note just added does, once the list has it; again on a reload.
+  const [landing] = usePlaceParam("note", "")
+  const listedNotes = AsyncResult.isSuccess(listed) ? listed.value : null
+  const landingListed = landing !== "" && listedNotes !== null && listedNotes.some((n) => n.ref.id === landing)
+  // Only a new target lands; opening or folding notes must not replay it.
+  const landingTarget = landingListed ? landing : null
+  const [landed, setLanded] = useState<string | null>(null)
+  if (landingTarget !== landed) {
+    setLanded(landingTarget)
+    if (landingTarget !== null) setAdded(landingTarget)
+  }
+  useEffect(() => {
+    if (landingTarget !== null) blocks.setOpen(landingTarget, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [landingTarget])
 
   // A note added here is open, its settings too unless it's a shared note's.
   const add = async (group: Group, shared?: SharedNote) => {

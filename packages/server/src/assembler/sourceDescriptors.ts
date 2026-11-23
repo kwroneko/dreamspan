@@ -35,7 +35,7 @@ const builtinDescription = (source: Source, labels: SourceLabels): SourceDescrip
         return {
           label: `End of request: ${end.label.charAt(0).toLowerCase()}${end.label.slice(1)}`,
           slotId: null,
-          ...(source.ref ? { ref: source.ref } : {})
+          ...(source.ref ? { ref: source.ref, item: { kind: "prompt", identifier: source.identifier } } : {})
         }
       const name = promptNames.get(`${source.revision}:${source.identifier}`)
       // Its other text (`utility.new_chat_prompt`, `prefill.assistant`) by what it is.
@@ -48,7 +48,7 @@ const builtinDescription = (source: Source, labels: SourceLabels): SourceDescrip
       return {
         label: (name ? `Preset prompt “${name}”` : `Preset: ${other}`) + when,
         slotId: null,
-        ...(source.ref ? { ref: source.ref } : {})
+        ...(source.ref ? { ref: source.ref, item: { kind: "prompt", identifier: source.identifier } } : {})
       }
     }
     case "card":
@@ -57,20 +57,26 @@ const builtinDescription = (source: Source, labels: SourceLabels): SourceDescrip
           source.swapped ? " (card swap: sent only on its character's turn)" : ""
         }`,
         slotId: null,
-        ...linkOf(source.revision)
+        ...linkOf(source.revision),
+        // The block of a card's fields is the card as a whole.
+        ...(source.field === "definitions" ? {} : { item: { kind: "field", field: source.field } })
       }
     case "lorebook": {
       const title = titles.get(`${source.revision}:${source.uid}`)
       return {
         label: `Lorebook “${names.get(source.revision) ?? "unnamed"}”: entry ${source.uid}${title ? ` “${title}”` : ""}`,
         slotId: null,
-        ...linkOf(source.revision)
+        ...linkOf(source.revision),
+        // A card's own book (`card:<entity>`, loreStages.ts) is read at the card's revision.
+        item: { kind: "entry", uid: source.uid, embedded: source.book.startsWith("card:") }
       }
     }
     case "note":
       return {
         label: `${source.ownTurn ? "Own-turn note" : "Note"} “${names.get(source.revision) ?? "unnamed"}”`,
-        slotId: null
+        slotId: null,
+        // The note's library entry: its link opens it in the chat's Notes tab.
+        ...linkOf(source.revision)
       }
     case "summary":
       return {
