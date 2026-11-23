@@ -1,5 +1,5 @@
 // Guidance on swipes (DESIGN §2.2, owner 2026-10-29). The guidance under a reply has a
-// "New version…" button (a reply without any has "New version with guidance…" in its menu):
+// pencil (Edit this guidance) button (a reply without any has "New version with guidance…" in its menu):
 // it puts that guidance in the composer's box, with a bar above the composer naming the reply.
 // Neither changes the version shown: only a new version uses the text (owner, 2026-11-01). While the bar is up, any
 // submit makes a new version of that reply with the box's text, and the text stays for the
@@ -7,9 +7,8 @@
 // text is always the composer draft's (one box, one draft: owner 2026-11-21), so a reload keeps it.
 import type { EntityId, ForkId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
 import { useSyncExternalStore } from "react"
-import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
-import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
 import { focusComposer } from "./composerFocus.ts"
 import { nameOf, useCast } from "./cast.ts"
 import { composerControls, type ComposerControlContext } from "./composerControls.tsx"
@@ -143,25 +142,21 @@ const editGuidance = (session: ChatSession, entry: PathEntry) => {
   focusComposer()
 }
 
-/** The guidance a reply was written with, under it, with New version… to write another with it changed. */
+/** The guidance a reply was written with, under it, with an edit button to write another version with it changed. */
 export function MessageDirection({ entry, session }: { entry: PathEntry; session: ChatSession }) {
   const { version } = entry
   if (version.writer !== "model" || !version.direction) return null
   return (
-    <div className="flex items-start gap-1 text-xs text-muted">
-      <p className="min-w-0 flex-1 pt-1.5 wrap-break-word">
+    <div data-testid="message-direction" className="flex items-start gap-1 text-xs text-muted">
+      <p className="min-w-0 flex-1 pt-2 wrap-break-word">
         <span className="font-medium">Guidance:</span> {version.direction}
       </p>
-      <Tooltip label="Change this guidance in the composer and write a new version with it. This version stays.">
-        <Button
-          variant="ghost"
-          className="h-7! shrink-0 px-2! text-xs"
-          aria-label="New version with this guidance"
-          onClick={() => editGuidance(session, entry)}
-        >
-          New version…
-        </Button>
-      </Tooltip>
+      <IconButton
+        label="Edit this guidance"
+        hint="Edit this guidance and generate a new swipe with it. This swipe will not be affected."
+        icon="edit"
+        onClick={() => editGuidance(session, entry)}
+      />
     </div>
   )
 }

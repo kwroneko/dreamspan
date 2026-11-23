@@ -163,7 +163,7 @@ for (const [width, height] of [
 
       // Editing a reply's guidance: the bar is the box's first line, the text directly under it.
       const reply = page.getByRole("article").filter({ hasText: "Guidance: Ethan answers without looking up." })
-      await reply.getByRole("button", { name: "New version with this guidance" }).click()
+      await reply.getByRole("button", { name: "Edit this guidance" }).click()
       const bar = page.getByTestId("guidance-edit-bar")
       await expect(bar).toContainText("Guidance for a new version of Ethan's reply")
       const frame = await bounds(composerBox(page))

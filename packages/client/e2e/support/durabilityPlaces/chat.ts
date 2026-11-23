@@ -144,7 +144,7 @@ export const chatPlaces = [
     open: async (page, { chatId, slotId }, ctx) => {
       await goChat(page, ctx, chatId)
       const reply = page.locator(`article[data-slot="${slotId}"]`)
-      await reply.getByRole("button", { name: "New version with this guidance" }).click()
+      await reply.getByRole("button", { name: "Edit this guidance" }).click()
       await page.getByTestId("guidance-edit-bar").waitFor()
       return composer(page)
     },

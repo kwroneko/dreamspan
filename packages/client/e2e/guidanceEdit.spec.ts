@@ -12,6 +12,7 @@ import { messageMenu, showActions } from "./support/message.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { showAppNavigation } from "./support/appMenu.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -96,7 +97,7 @@ for (const width of [1440, 390]) {
   for (const theme of ["light", "dark"] as const) {
     test(`edit → submit → edit → submit → ✕, the text and the bar surviving reloads (${width}px, ${theme})`, async ({
       page
-    }) => {
+    }, info) => {
       const { chatId, slotId } = await harbor()
       await settled(slotId, 1)
       await page.setViewportSize({ width, height: 844 })
@@ -121,7 +122,18 @@ for (const width of [1440, 390]) {
         })
       await expect(controls).toBeVisible()
       const historyBefore = await historyBox()
-      await reply.getByRole("button", { name: "New version with this guidance" }).click()
+      const edit = reply.getByRole("button", { name: "Edit this guidance", exact: true })
+      await expect(edit).toBeVisible()
+      await expectLayout(page, info, `guidance row ${width} ${theme}`, { scope: '[data-testid="message-direction"]' })
+      await edit.hover()
+      await expect(
+        page
+          .getByText("Edit this guidance and generate a new swipe with it. This swipe will not be affected.", {
+            exact: true
+          })
+          .filter({ visible: true })
+      ).toBeVisible()
+      await edit.click()
 
       await expect(history).toBeDisabled()
       expect(await historyBox()).toEqual(historyBefore)
@@ -219,7 +231,7 @@ for (const width of [1440, 390]) {
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chatId}`)
     await expect(toggle(page)).toBeEnabled()
-    await page.getByRole("button", { name: "New version with this guidance" }).click()
+    await page.getByRole("button", { name: "Edit this guidance" }).click()
     await expect(box(page)).toHaveValue("Aria looks out to sea.")
     await box(page).fill("Aria sees a storm coming.")
     await page.waitForTimeout(100)
@@ -253,7 +265,7 @@ for (const width of [1440, 390]) {
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chatId}`)
     await expect.poll(() => held.length).toBeGreaterThan(0)
-    await page.getByRole("button", { name: "New version with this guidance" }).click()
+    await page.getByRole("button", { name: "Edit this guidance" }).click()
     await box(page).fill("Aria listens to the waves.")
     await expect(page.getByRole("button", { name: "New version", exact: true })).toBeEnabled()
     await page.getByRole("button", { name: "New version", exact: true }).click()
@@ -280,7 +292,7 @@ for (const width of [1440, 390]) {
     await expect(toggle(page)).toBeEnabled()
     await box(page).fill("The next turn's original guidance.")
     const reply = page.getByRole("article").filter({ hasText: "Guidance: Aria looks out to sea." })
-    await reply.getByRole("button", { name: "New version with this guidance" }).click()
+    await reply.getByRole("button", { name: "Edit this guidance" }).click()
     await box(page).fill("Live unsaved guidance.")
     await showActions(reply)
     await reply.getByRole("button", { name: "Generate another version", exact: true }).click()
@@ -310,7 +322,7 @@ for (const width of [1440, 390]) {
     await messageMenu(unguided, "Delete all versions")
     await expect(bar(page)).toHaveCount(0)
     await expect(box(page)).toHaveValue("Fog over the water.")
-    await page.getByRole("button", { name: "New version with this guidance" }).click()
+    await page.getByRole("button", { name: "Edit this guidance" }).click()
     await expect(bar(page)).toBeVisible()
     const guidance = await box(page).inputValue()
     await showAppNavigation(page)
@@ -352,7 +364,7 @@ for (const width of [1440, 390]) {
       await page.goto(`${server().url}/chats/${chatId}`)
       await expect(toggle(page)).toBeEnabled()
       const reply = page.getByRole("article").filter({ hasText: "Guidance: Tide." })
-      await reply.getByRole("button", { name: "New version with this guidance" }).click()
+      await reply.getByRole("button", { name: "Edit this guidance" }).click()
       await expect(bar(page)).toBeVisible()
       await expect(box(page)).toHaveValue("Tide.")
       await box(page).press("End")
