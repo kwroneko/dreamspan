@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { extname, join } from "node:path"
-import { fileURLToPath } from "node:url"
 import babel from "@rolldown/plugin-babel"
 import tailwindcss from "@tailwindcss/vite"
 import react, { reactCompilerPreset } from "@vitejs/plugin-react"
@@ -52,13 +52,17 @@ const FRAME_LIBRARIES: Record<string, string> = {
   "vue.global.prod.js": "vue/dist/vue.global.prod.js",
   "vue-router.global.prod.js": "vue-router/dist/vue-router.global.prod.js"
 }
-const MODULES = [
-  fileURLToPath(new URL("./node_modules/", import.meta.url)),
-  fileURLToPath(new URL("../../node_modules/", import.meta.url))
-]
+/**
+ * A file inside an installed package, found as Node finds the package from this config's
+ * folder (each `node_modules` up the tree), wherever the checkout and its install are. Only the
+ * package's folder is looked up, so files its `exports` don't list (and folders) resolve too.
+ */
+const lookupPaths = createRequire(import.meta.url).resolve.paths("package") ?? []
 const moduleFile = (path: string) => {
-  const found = MODULES.map((root) => join(root, path)).find((file) => existsSync(file))
-  if (found === undefined) throw new Error(`frame library ${path} isn't installed`)
+  const name = path.split("/").slice(0, path.startsWith("@") ? 2 : 1).join("/")
+  const root = lookupPaths.find((dir) => existsSync(join(dir, name, "package.json")))
+  const found = root === undefined ? undefined : join(root, path)
+  if (found === undefined || !existsSync(found)) throw new Error(`${path} isn't installed`)
   return found
 }
 /** Every served file under `frame/lib/` and its source. */
