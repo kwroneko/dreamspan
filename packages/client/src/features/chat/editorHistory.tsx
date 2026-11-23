@@ -68,7 +68,7 @@ export const messageTextEditor = defineSlot<CodeEditorProps>("message.text-edito
 export const summaryTextEditor = defineSlot<CodeEditorProps>("summary.text-editor")
 
 const EARLIER_DRAFTS =
-  "Every earlier state of this edit as you typed it, from before its saves too, to restore one. Restoring makes it the newest state."
+  "Every earlier state of this text as you typed it, from before its saves too, to restore one. Restoring makes it the newest state."
 /** How many states a page of the history lists. */
 const HISTORY_PAGE = 100
 
@@ -87,13 +87,22 @@ function DraftHistory({ draft }: { draft: MessageDraft | SummaryDraft }) {
       <Button hint={EARLIER_DRAFTS} onClick={() => setOpen(true)}>
         Earlier draft text
       </Button>
-      {open && <DraftHistoryDialog draft={draft} onClose={() => setOpen(false)} />}
+      {open && <DraftHistoryDialog draft={draft} subject="summary" onClose={() => setOpen(false)} />}
     </>
   )
 }
 
 /** The draft's earlier states, read as it opens (it's mounted only while open); any can be restored. */
-function DraftHistoryDialog({ draft, onClose }: { draft: MessageDraft | SummaryDraft; onClose: () => void }) {
+function DraftHistoryDialog({
+  draft,
+  subject,
+  onClose
+}: {
+  draft: MessageDraft | SummaryDraft
+  /** What the user is editing, as the dialog names it. */
+  subject: "message" | "summary"
+  onClose: () => void
+}) {
   const [states, setStates] = useState<ReadonlyArray<DraftState> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -126,7 +135,11 @@ function DraftHistoryDialog({ draft, onClose }: { draft: MessageDraft | SummaryD
       open
       onOpenChange={(next) => !next && onClose()}
       title="Earlier draft text"
-      description="Restore any earlier text and images of this edit. Restoring keeps the current draft in this history."
+      description={
+        subject === "message"
+          ? "Restore any earlier text and images you typed for this message. Restoring keeps the current text in this list."
+          : "Restore any earlier text you typed for this summary. Restoring keeps the current text in this list."
+      }
     >
       {error && (
         <p role="alert" className="text-sm text-danger">
@@ -149,7 +162,7 @@ function DraftHistoryDialog({ draft, onClose }: { draft: MessageDraft | SummaryD
               </p>
               <Button
                 disabled={busy}
-                hint="Loads this text into the message editor."
+                hint={`Loads this text into the ${subject} editor.`}
                 onClick={async () => {
                   setBusy(true)
                   const restored = await draft.restoreState(state.seq)
@@ -191,7 +204,7 @@ function EditHistoryMenu({ draft, base }: { draft: MessageDraft; base: string })
         side="top"
         label="History of this edit"
         trigger={
-          <Tooltip label="History of this edit">
+          <Tooltip label="Shows earlier text of this message, or compares it with the saved text.">
             <button type="button" aria-label="History of this edit" className={iconButtonClass()}>
               <HistoryIcon />
             </button>
@@ -213,7 +226,7 @@ function EditHistoryMenu({ draft, base }: { draft: MessageDraft; base: string })
           Compare with saved text…
         </MenuItem>
       </Menu>
-      {open === "drafts" && <DraftHistoryDialog draft={draft} onClose={() => setOpen(null)} />}
+      {open === "drafts" && <DraftHistoryDialog draft={draft} subject="message" onClose={() => setOpen(null)} />}
       <Dialog
         open={open === "changes"}
         onOpenChange={(next) => setOpen(next ? "changes" : null)}

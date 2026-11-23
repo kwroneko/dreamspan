@@ -117,7 +117,7 @@ function QueueEditor({
           Cancel
         </Button>
         <Button
-          hint="Opens earlier text of this queued edit."
+          hint="Shows earlier text you typed for this queued message."
           variant="ghost"
           onClick={async () => {
             const result = await editor.history()

@@ -112,7 +112,7 @@ test("an earlier text comes back from the server's history", async ({ page }) =>
   // Select-all and a stray key.
   await box(page).fill("x")
   await expect.poll(() => onServer(chatId, null)).toBe("x")
-  await page.getByRole("button", { name: "Earlier text of this message" }).click()
+  await page.getByRole("button", { name: "Earlier text in this box" }).click()
   await page
     .getByRole("dialog", { name: "Earlier text" })
     .getByRole("button")
@@ -352,7 +352,7 @@ test("text typed while an earlier text is being restored stays, on top of it", a
   await box(page).fill("x")
   await expect.poll(() => onServer(chatId, null)).toBe("x")
   restore.arm()
-  await page.getByRole("button", { name: "Earlier text of this message" }).click()
+  await page.getByRole("button", { name: "Earlier text in this box" }).click()
   await page
     .getByRole("dialog", { name: "Earlier text" })
     .getByRole("button")

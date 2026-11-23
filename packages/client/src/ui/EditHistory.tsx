@@ -57,7 +57,7 @@ export function EditHistory({
     <>
       <IconButton
         label={`Edit history of ${label}`}
-        hint={disabled ? "No edit history yet." : "Shows earlier states of this text from any device."}
+        hint={disabled ? "No edit history yet." : "Shows earlier text of this field, from any device."}
         icon="history"
         disabled={disabled}
         focusableWhenDisabled

@@ -152,7 +152,7 @@ for (const kind of ["composer", "editor"] as const) {
             await expect(notice).toHaveCount(0)
             await expect.poll(async () => (await saved())?.content).toBe(elsewhere)
             if (kind === "composer") {
-              await back.getByRole("button", { name: "Earlier text of this message" }).click()
+              await back.getByRole("button", { name: "Earlier text in this box" }).click()
               await back
                 .getByRole("dialog", { name: "Earlier text" })
                 .getByRole("button")

@@ -330,7 +330,7 @@ for (const scale of [1, 2])
       const page = await context.newPage()
       await open(page, 1440, 900, "light", chatId)
       const chips = [
-        page.getByRole("button", { name: "Earlier text of this message", exact: true }),
+        page.getByRole("button", { name: "Earlier text in this box", exact: true }),
         page.getByRole("button", { name: "Attach images", exact: true }),
         page.getByRole("switch", { name: "Guidance", exact: true }),
         page.getByRole("button", { name: /^(Send|.+ replies)$/ })
