@@ -657,16 +657,51 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
         }
         return true
       }
+      // A text box's own buttons (its Clear, a framed box's strip) sit inside its border: they're
+      // the box's, not siblings of the buttons beside it, so their row ends at the box. The box
+      // is a field frame, or else the text entry whose border holds the button.
+      const textEntry =
+        "textarea, [contenteditable=''], [contenteditable=true], input:not([type=checkbox], [type=radio], [type=button], [type=submit], [type=reset], [type=range], [type=color], [type=file], [type=image], [type=hidden])"
+      const within = (a: DOMRect, b: DOMRect) =>
+        a.left >= b.left - 1 && a.right <= b.right + 1 && a.top >= b.top - 1 && a.bottom <= b.bottom + 1
+      const fieldOf = (el: HTMLElement): HTMLElement | null => {
+        const frame = el.closest<HTMLElement>("[data-field-frame]")
+        if (frame) return frame
+        // The nearest ancestor holding a text entry is the only place its box can be.
+        for (const p of ancestors(parent(el))) {
+          if (p === document.body) return null
+          const entries = [...p.querySelectorAll<HTMLElement>(textEntry)]
+          if (entries.length === 0) continue
+          return entries.find((t) => visible(t) && within(rect(el), rect(t))) ?? null
+        }
+        return null
+      }
+      const boxed = (el: HTMLElement) => {
+        const s = getComputedStyle(el)
+        return (
+          s.borderLeftStyle !== "none" &&
+          s.borderRightStyle !== "none" &&
+          parseFloat(s.borderLeftWidth) > 0 &&
+          parseFloat(s.borderRightWidth) > 0
+        )
+      }
       const iconRows = new Map<HTMLElement, HTMLElement[]>()
       for (const el of shown) {
         if (el instanceof SVGElement || !el.matches(iconControls) || !iconOnly(el)) continue
         if ([...ancestors(parent(el))].some((p) => p.matches(iconControls))) continue
         const r = rect(el)
+        const field = fieldOf(el)
         let row: HTMLElement | null = null
         for (const p of ancestors(parent(el))) {
           if (p === document.body || rect(p).height >= r.height * 2) break
+          if (field && !field.contains(p)) break
           row = p
+          // A box drawn around buttons (a pane, a card, joined controls) is their row: the
+          // buttons outside it aren't their neighbours.
+          if (boxed(p)) break
         }
+        // A button laid over its text entry (not inside it in the DOM) is the entry's.
+        if (field && !(row && field.contains(row))) row = field
         if (row) iconRows.set(row, [...(iconRows.get(row) ?? []), el])
       }
       for (const [row, buttons] of iconRows) {
@@ -699,15 +734,29 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
                 row
               )
           // Neighbours a short way apart are one cluster, with one gap between them. A wider
-          // space (a spacer, groups pushed apart) starts another cluster.
+          // space (12px and up: a group's own gap, groups pushed apart) starts another cluster,
+          // and so does space a growing box leaves (a name's box taking the row's free room
+          // before the buttons after it): it varies with the width, it isn't a gap.
           const gaps = line.slice(1).map((b, i) => rect(b).left - rect(line[i]!).right)
+          const grows = (el: HTMLElement) => Number(getComputedStyle(el).flexGrow) > 0
+          const spacer = (a: HTMLElement, b: HTMLElement) => {
+            for (const p of ancestors(parent(a))) {
+              if (p.contains(b)) break
+              if (grows(p) && rect(p).right > rect(a).right + 1) return true
+            }
+            for (const p of ancestors(parent(b))) {
+              if (p.contains(a)) break
+              if (grows(p) && rect(p).left < rect(b).left - 1) return true
+            }
+            return false
+          }
           // Reported on the cluster's first and last buttons, so a scope around them includes it.
           const clusters: Array<{ first: HTMLElement; last: HTMLElement; gaps: number[] }> = [
             { first: line[0]!, last: line[0]!, gaps: [] }
           ]
           for (const [i, g] of gaps.entries()) {
             const next = line[i + 1]!
-            if (g > 12) clusters.push({ first: next, last: next, gaps: [] })
+            if (g >= 12 || spacer(line[i]!, next)) clusters.push({ first: next, last: next, gaps: [] })
             else Object.assign(clusters.at(-1)!, { last: next }).gaps.push(g)
           }
           for (const { first, last, gaps: cluster } of clusters)

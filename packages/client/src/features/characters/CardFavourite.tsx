@@ -7,15 +7,15 @@ import { shellAtom } from "./shellData.tsx"
 import { FavouriteStar } from "./cardBrowse.tsx"
 
 /** A card's favourite star and archive toggle, side by side, beside its name. */
-export function CardFavourite({ entityId }: { entityId: string }) {
+export function CardFavourite({ entityId, gap = "gap-1" }: { entityId: string; gap?: string }) {
   const shell = useAtomValue(shellAtom)
   const card = AsyncResult.isSuccess(shell)
     ? [...shell.value.cards, ...shell.value.personas, ...shell.value.archived].find((c) => c.card.entityId === entityId)
     : undefined
   // One group, so a wrapping row (the side panel's) never parts the star from the archive. Its
-  // gap is the header row's, so the star, archive and save buttons sit evenly apart.
+  // gap is its row's (`gap`), so the star, archive and the row's other buttons sit evenly apart.
   return card ? (
-    <span className="inline-flex shrink-0 items-center gap-1">
+    <span className={`inline-flex shrink-0 items-center ${gap}`}>
       <FavouriteStar card={card} />
       <CardSurface placement="archive-toggle" entityId={entityId as EntityId} />
     </span>
@@ -24,5 +24,5 @@ export function CardFavourite({ entityId }: { entityId: string }) {
 
 export function PanelFavourite({ store }: { store: EditorStore }) {
   const ref = useEditorState(store).snapshot?.ref
-  return ref?.kind === "card" ? <CardFavourite entityId={ref.entityId} /> : null
+  return ref?.kind === "card" ? <CardFavourite entityId={ref.entityId} gap="gap-2" /> : null
 }

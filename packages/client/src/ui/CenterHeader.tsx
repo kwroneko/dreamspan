@@ -23,7 +23,7 @@ export function CenterHeaderEnd() {
  * so the document's name beside them shows whole (a short one never cut, layout audit).
  */
 export const compactHeaderControls =
-  "max-sm:gap-1 max-sm:[&_button.size-8]:size-6! max-sm:[&_[data-save-state]_button]:size-6!"
+  "max-sm:gap-1 max-sm:[&_button.size-8]:size-6! max-sm:[&_a.size-8]:size-6! max-sm:[&_[data-block-menu]]:size-6! max-sm:[&_[data-save-state]_button]:size-6!"
 
 /** The registered column boundary shared by chats, pages and full editors. */
 export function CenterHeader(props: HeaderProps) {

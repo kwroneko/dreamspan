@@ -28,7 +28,7 @@ import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { ContextMenu, Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
 import { UnsavedScope, UnsavedTracker } from "../../ui/UnsavedChanges.tsx"
-import { Tooltip, IconButton } from "../../ui/Tooltip.tsx"
+import { Tooltip, IconButton, iconButtonClass } from "../../ui/Tooltip.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { CenterPage, sidebarToggle } from "../shell.tsx"
 import { PanelPlaceholder } from "../chat/PanelPlaceholder.tsx"
@@ -772,7 +772,6 @@ function TabStrip({
               }
               icon="expand"
               aria-pressed={layout.maximized === frame.id}
-              className="size-7"
               data-strip-maximize
               onClick={() => store.maximize(layout.maximized === frame.id ? null : frame.id)}
             />
@@ -950,11 +949,7 @@ function FrameMenu({ frame, layout, store }: { frame: Frame; layout: Layout; sto
       label="Tab and frame actions"
       hint="Tab and frame actions: pin, keep open, split, move, close"
       trigger={
-        <button
-          type="button"
-          aria-label="Tab and frame actions"
-          className="inline-flex size-7 items-center justify-center rounded-md text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
-        >
+        <button type="button" aria-label="Tab and frame actions" className={iconButtonClass()}>
           <Icon name="more" />
         </button>
       }

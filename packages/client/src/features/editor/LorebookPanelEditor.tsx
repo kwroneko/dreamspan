@@ -132,7 +132,7 @@ function LorebookPanelBody({
         aria-label={`Lorebook ${root.length === 0 ? state.snapshot.ref.label : fallbackName}`}
         className="flex min-w-0 flex-col gap-3"
       >
-        <div data-editor-header className="flex items-start gap-0.5">
+        <div data-editor-header className="flex items-start gap-1">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="font-medium">
               <BookName store={store} root={root} fallback={fallbackName} />
@@ -192,7 +192,7 @@ function LorebookPanelBody({
               <div className="flex items-center gap-1">
                 <SearchReplaceButton
                   ref={findButton}
-                  className="@max-[30rem]:[&>span]:hidden"
+                  className="@max-[30rem]:w-8 @max-[30rem]:px-0! @max-[30rem]:[&>span]:hidden"
                   open={searching}
                   controls="panel-lore-search"
                   onClick={() => setSearching(!searching)}

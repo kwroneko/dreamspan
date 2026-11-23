@@ -606,7 +606,7 @@ function Pending({
                 <>
                   <PendingComposerControls placement="speaker" context={controls} />
                   {/* Where the saved composer has its earlier text. */}
-                  <UserDraftUndo draft={durable} />
+                  <UserDraftUndo draft={durable} place="composer" />
                   {attachments?.action}
                 </>
               }

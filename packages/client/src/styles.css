@@ -819,6 +819,52 @@ main:has(> [data-fill]) {
     display: none;
   }
 }
+/* A button showing its icon alone takes the square of the toolbar's icon buttons (2rem): no
+   padding. In the utilities layer, so it outranks the buttons' own important padding. */
+@layer utilities {
+  @container (width < 52rem) {
+    [data-preset-layout="document"] .preset-search {
+      width: 2rem;
+      padding-inline: 0 !important;
+    }
+  }
+  @container (width < 44rem) {
+    [data-preset-layout="document"] .preset-add-definitions {
+      width: 2rem;
+      padding-inline: 0 !important;
+    }
+  }
+  @container (width < 25rem) {
+    [data-preset-layout="document"] .preset-add-prompt {
+      width: 2rem;
+      padding-inline: 0 !important;
+    }
+  }
+  @container (width < 38rem) {
+    [data-preset-layout="column"] .preset-search {
+      width: 2rem;
+      padding-inline: 0 !important;
+    }
+  }
+  @container (width < 30rem) {
+    [data-preset-layout="column"] .preset-add-definitions {
+      width: 2rem;
+      padding-inline: 0 !important;
+    }
+  }
+  @container (width < 20rem) {
+    [data-preset-layout="column"] .preset-add-prompt {
+      width: 2rem;
+      padding-inline: 0 !important;
+    }
+  }
+  @container (width < 35rem) {
+    .preset-toolbar-end button:has(> span) {
+      width: 2rem;
+      padding-inline: 0 !important;
+    }
+  }
+}
 @container (width < 36rem) {
   .prompt-document-header > [data-prompt-info] {
     flex-basis: 100%;

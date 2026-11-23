@@ -318,11 +318,15 @@ export function Editor({
                 <CenterHeaderContent>
                   <div
                     data-editor-header
-                    className={`flex w-full min-w-0 items-center justify-between gap-2 ${compactHeaderControls}`}
+                    // The rename pencil takes the header's icon square, as the save buttons beside it do.
+                    className={`flex w-full min-w-0 items-center justify-between gap-2 sm:[&_[data-rename-pencil]]:size-8! ${compactHeaderControls}`}
                   >
                     <div className="min-w-0 flex-1">{title("text-base")}</div>
-                    <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
-                    {onClose && <WindowClose onClick={onClose} />}
+                    {/* One row of buttons, one gap between them. */}
+                    <div className="flex shrink-0 items-center gap-1">
+                      <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
+                      {onClose && <WindowClose onClick={onClose} />}
+                    </div>
                   </div>
                 </CenterHeaderContent>
               )}

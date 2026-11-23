@@ -48,7 +48,7 @@ function PresetColumn({ store }: { store: EditorStore }) {
   return (
     <SearchNavigation value={searchMatch}>
       <div className="flex min-h-full flex-col gap-3">
-        <div data-editor-header className="flex items-start justify-between gap-2">
+        <div data-editor-header className="flex items-start justify-between gap-2 [&_[data-rename-pencil]]:size-8!">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <span className="min-w-0 font-medium">
               <RefName store={store}>
@@ -59,16 +59,19 @@ function PresetColumn({ store }: { store: EditorStore }) {
             </span>
             <Badge>preset</Badge>
           </div>
-          <SaveRevision store={store} />
-          {workspace && (
-            <IconLink
-              label="Open the preset in the large editor"
-              hint="Opens this preset in the large editor"
-              icon="expand"
-              href={workspace.href(store.refId)}
-              onOpen={() => workspace.open(store.refId)}
-            />
-          )}
+          {/* One row of buttons, one gap between them. */}
+          <div className="flex shrink-0 items-center gap-1">
+            <SaveRevision store={store} />
+            {workspace && (
+              <IconLink
+                label="Open the preset in the large editor"
+                hint="Opens this preset in the large editor"
+                icon="expand"
+                href={workspace.href(store.refId)}
+                onOpen={() => workspace.open(store.refId)}
+              />
+            )}
+          </div>
         </div>
         {state.saveError && (
           <ErrorAlert

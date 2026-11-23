@@ -79,7 +79,7 @@ function Instruction({
         base={base}
         rows={5}
         onChange={setText}
-        tools={<UserDraftUndo draft={draft} />}
+        tools={<UserDraftUndo draft={draft} place="strip" />}
       />
       <div className="flex flex-wrap items-center gap-2">
         <Button

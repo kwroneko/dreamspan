@@ -25,6 +25,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { iconButtonClass } from "../../ui/Tooltip.tsx"
+import { chromeButton } from "../../ui/FieldFrame.tsx"
 import { copiesOf, dropCopy, keepCopy, makeCopy, pendingOf, type Copy } from "./backup.ts"
 
 import { readTypedBackup, keepTypedBackup, dropTypedBackup } from "./typedBackup.ts"
@@ -626,9 +627,10 @@ type UserDraft = ReturnType<typeof useUserDraft>
 
 /**
  * A form's undo: one small button for its header, opening the field's server-kept history. The
- * history is read when it opens; picking a version restores it.
+ * history is read when it opens; picking a version restores it. `place` sizes it like its
+ * neighbours: a composer's buttons, or the small ones in a text box's strip.
  */
-export function UserDraftUndo({ draft }: { draft: UserDraft }) {
+export function UserDraftUndo({ draft, place }: { draft: UserDraft; place?: "composer" | "strip" }) {
   const [open, setOpen] = useState(false)
   return (
     <Popover
@@ -640,7 +642,7 @@ export function UserDraftUndo({ draft }: { draft: UserDraft }) {
       trigger={<Icon name="undo" />}
       triggerLabel="Undo / history"
       hint="Undo / history"
-      triggerClassName={iconButtonClass()}
+      triggerClassName={`${iconButtonClass()} ${place === "composer" ? "size-9!" : place === "strip" ? chromeButton : ""}`}
       title="Undo / history"
       side="bottom"
       align="end"
