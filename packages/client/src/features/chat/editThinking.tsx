@@ -1,6 +1,7 @@
 // A message's thinking in its edit (SillyTavern's reasoning block edit, "Add reasoning block"
 // and its removal): a second field of the message's editor, above its text, as the thinking
-// panel sits above the reply. Its text is a server draft of its own (`EditThinking`, the edit's
+// panel sits above the reply, opened by Edit thinking so the edit opens with the panels as
+// they were (InPlaceEdit.tsx: nothing moves). Its text is a server draft of its own (`EditThinking`, the edit's
 // `version_edit` draft with field `reasoning`), so it outlives the row and a reload as the text
 // does, and Save commits both together: a new version, or the user's own version changed in
 // place with the earlier thinking in its history. Saved thinking is plain text: the edited
@@ -81,6 +82,28 @@ const ABOUT =
 const ABOUT_IN_REPLY =
   "The thinking in the reply, shown folded above it. The model sees it again only if the preset sends thinking back for the last replies."
 
+/**
+ * Whether the field stands in for the version's thinking panels: opened (Add or Edit thinking),
+ * or its text changed or removed (a reload reopens it so). Until then the edit opens with the
+ * panels as they were, so nothing above the text moves (InPlaceEdit.tsx).
+ */
+const fieldOpen = (state: Shown, text: string, source: Version) => state.added || text !== editableThinking(source)
+
+/** Whether the edit's thinking field stands in for the thinking panels now (Message.tsx hides them). */
+export function useThinkingOpen(
+  session: ChatSession,
+  draft: MessageDraft | undefined,
+  source: Version | undefined
+): boolean {
+  const versionId = draft?.target._tag === "Edit" ? draft.target.versionId : null
+  const key = versionId === null ? null : thinkingKey(versionId)
+  const editor = useSyncExternalStore(session.subscribeEditors, () => (key === null ? undefined : session.editor(key)))
+  const view = useText(editor)
+  const state = useShown(key ?? "think:")
+  if (view === undefined || view.loading || source === undefined || source.id !== versionId) return false
+  return fieldOpen(state, view.text, source)
+}
+
 function ThinkingField(props: EditThinkingProps) {
   const { source, draft } = props
   const { key, editor } = useThinkingEditor(props)
@@ -88,7 +111,7 @@ function ThinkingField(props: EditThinkingProps) {
   const state = useShown(key ?? "think:")
   if (key === null || editor === undefined || view === undefined || source === undefined) return null
   if (view.loading) return null
-  if (view.text === "" && !state.added) return null
+  if (view.text === "" ? !state.added : !fieldOpen(state, view.text, source)) return null
   return (
     <div className="flex flex-col gap-1" data-edit-thinking>
       <div className="flex items-center gap-1 text-sm text-muted">
@@ -148,8 +171,18 @@ function AddThinking({
   const { key, editor } = useThinkingEditor({ session, entry, draft, source })
   const view = useText(editor)
   const state = useShown(key ?? "think:")
-  if (key === null || editor === undefined || view === undefined || view.loading) return null
-  if (view.text !== "" || state.added) return null
+  if (key === null || editor === undefined || view === undefined || view.loading || source === undefined) return null
+  if (state.added) return null
+  // The thinking it has, shown folded above the text until this opens it for editing.
+  if (view.text !== "")
+    return fieldOpen(state, view.text, source) ? null : (
+      <IconButton
+        icon="reasoning"
+        label="Edit thinking"
+        hint="Opens this message's thinking for editing, in place of its folded thinking. Saved as plain text."
+        onClick={() => setShown(key, { added: true, focus: true, removed: null })}
+      />
+    )
   return (
     <IconButton
       icon="reasoning"

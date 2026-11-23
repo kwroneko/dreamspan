@@ -1,6 +1,16 @@
 import { useMediaPermit } from "./externalMedia.tsx"
-import { messageEditorTools, messageTextEditor, useMessageSaveOptions } from "./editorHistory.tsx"
-import { forgetThinking, messageEditorThinking, thinkingKey } from "./editThinking.tsx"
+import { messageTextEditor } from "./editorHistory.tsx"
+import { forgetThinking, messageEditorThinking, thinkingKey, useThinkingOpen } from "./editThinking.tsx"
+import {
+  EditControls,
+  editKeys,
+  editSelection,
+  EditStatus,
+  InPlaceText,
+  saveEdit as runSave,
+  useDraftLoaded,
+  useEditSource
+} from "./InPlaceEdit.tsx"
 // One message: who wrote it (avatar and name, with the registered message details: time and
 // model in the header, number, generation time and tokens under the portrait;
 // messageDetails.tsx), its versions (swipe through them, pick one in the version picker, or
@@ -21,6 +31,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -39,7 +50,6 @@ import { Composition } from "./Composition.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
-import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { messageSide, useCast } from "./cast.ts"
 import { deleteOffersFor, invokeMessageAction, messageActions, MessageActions } from "./messageActions.tsx"
 import { ReasoningPanels } from "./Reasoning.tsx"
@@ -52,13 +62,6 @@ import { useMountedTracking, useRenderCount } from "./perf.ts"
 import { type ChatSession, liveText, type Outcome, resumeKind, waitingCache } from "./session.ts"
 import { stepVersion } from "./versionNavigation.ts"
 import {
-  availableCommands,
-  chatCommands,
-  invokeChatCommand,
-  runCommandShortcut,
-  type ChatCommandContext
-} from "./commands.tsx"
-import {
   messageDirections,
   messageHeaderDetails,
   messageVersions,
@@ -68,7 +71,6 @@ import {
   versionFailureActions
 } from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
-import { popupOpen } from "../../ui/openPopups.ts"
 import { ChatDensityContext } from "./ChatDensity.tsx"
 
 /** A horizontal drag this long on a message swipes to the next or previous version. */
@@ -183,6 +185,16 @@ function StatusRow({ text, action }: { text: string; action: ReactNode }) {
   )
 }
 
+/** An edit open in a version's body. */
+interface BodyEdit {
+  /** Its text box once its saved text is read (null until then: the text stays), given the text's height as it opened. */
+  readonly text: ((height: number | null) => ReactNode) | null
+  /** Its thinking field (editThinking.tsx), above the text. */
+  readonly thinking: ReactNode
+  /** Whether that field stands in for the thinking panels now (opened, changed or removed). */
+  readonly thinkingOpen: boolean
+}
+
 function VersionBody({
   version,
   session,
@@ -191,10 +203,13 @@ function VersionBody({
   depth,
   placement,
   speakerName,
-  onResume
+  onResume,
+  edit
 }: {
   version: Version
   session: ChatSession
+  /** An edit open in its text's place (InPlaceEdit.tsx). */
+  edit?: BodyEdit | undefined
   /** Who wrote it, for a pass's line ("Mira stays silent"). */
   speakerName: string
   /** Its thinking the user hid from the model here (SetThinkingHidden). */
@@ -211,35 +226,56 @@ function VersionBody({
   useMountedTracking(version.id)
   const generating = version.status === "generating"
   const text = live ?? version.content
+  // An edit in the text's place (InPlaceEdit.tsx) is as tall as the text was when it opened: its
+  // height is read in the layout of the render that opens it, before the edit is drawn, and
+  // the text stays mounted under it, hidden, to show again as it was when the edit closes.
+  // Opened with the row (a reload, a row scrolled back), there was no text on screen to match.
+  const textBox = useRef<HTMLDivElement>(null)
+  const [held, setHeld] = useState<{ readonly height: number | null } | null>(() =>
+    edit === undefined ? null : { height: null }
+  )
+  if (edit === undefined && held !== null) setHeld(null)
+  useLayoutEffect(() => {
+    if (edit !== undefined && held === null)
+      setHeld({ height: textBox.current?.getBoundingClientRect().height ?? null })
+  }, [edit, held])
+  const editText = edit?.text && held !== null ? edit.text(held.height) : null
   return (
     <div className="flex flex-col gap-2 compact:gap-1">
-      <ReasoningPanels
-        version={version}
-        session={session}
-        hiddenThinking={hiddenThinking}
-        parentSlotId={parentSlotId}
-        depth={depth}
-      />
-      {text === "" && generating ? (
-        <p className="text-sm text-muted" aria-live="polite">
-          {waiting ? "Waiting for the cache…" : "Writing…"}
-        </p>
-      ) : version.mark === "silent" && text === "" ? (
-        // A pass (spec/REPLY-CONTRACT.md §3.1): never invisible, and another version is a reply.
-        <p data-silent className="text-sm text-muted italic">
-          {speakerName} stays silent
-        </p>
-      ) : (
-        <BodyText
+      {/* Its thinking panels stay as they are in an edit, until its thinking field stands in for them. */}
+      <div className="contents" hidden={edit?.thinkingOpen}>
+        <ReasoningPanels
           version={version}
           session={session}
+          hiddenThinking={hiddenThinking}
           parentSlotId={parentSlotId}
           depth={depth}
-          placement={placement}
-          text={text}
-          streaming={generating}
         />
-      )}
+      </div>
+      {edit?.thinking}
+      {editText}
+      <div ref={textBox} className="flex flex-col gap-2 compact:gap-1" hidden={editText !== null}>
+        {text === "" && generating ? (
+          <p className="text-sm text-muted" aria-live="polite">
+            {waiting ? "Waiting for the cache…" : "Writing…"}
+          </p>
+        ) : version.mark === "silent" && text === "" ? (
+          // A pass (spec/REPLY-CONTRACT.md §3.1): never invisible, and another version is a reply.
+          <p data-silent className="text-sm text-muted italic">
+            {speakerName} stays silent
+          </p>
+        ) : (
+          <BodyText
+            version={version}
+            session={session}
+            parentSlotId={parentSlotId}
+            depth={depth}
+            placement={placement}
+            text={text}
+            streaming={generating}
+          />
+        )}
+      </div>
       {version.mark === "refused" && (
         <p role="note" className="text-sm text-muted">
           {version.status === "failed"
@@ -279,82 +315,33 @@ function VersionBody({
 }
 
 /**
- * A message's editor: an edit of its original source, or a version of the user's own. Its
- * text is a server draft kept by the session (messageDraft.ts), so scrolling the message
- * away or reloading the page doesn't lose it, and the editor opens again where it was.
+ * The editor of a version of the user's own, under the version shown (Composition.tsx). Its
+ * text is a server draft kept by the session (messageDraft.ts), so scrolling the message away
+ * or reloading the page doesn't lose it, and the editor opens again where it was. An edit of a
+ * version opens in its text's place instead (InPlaceEdit.tsx).
  */
-function Editor({
+function WriteEditor({
   draft,
-  label,
-  saveLabel,
-  source,
   session,
   entry,
-  caret,
-  onCaretTaken,
   onScrollIntoView,
   onSave,
   onSaveWith,
-  offerSaves,
   onCancel
 }: {
   draft: MessageDraft
-  label: string
-  saveLabel: string
-  /** Saves, then runs `after` with the text saved: a registered save option's (messageSaveOptions). */
-  onSaveWith: (after: (text: string) => Promise<void>) => void
-  /** An edit of the message's text, where the registered save options are offered. */
-  offerSaves: boolean
-  source: Version | undefined
   session: ChatSession
   entry: PathEntry
-  /** Where the caret opens (a double-click's place in the text, and its line's place on screen), else at the end. */
-  caret?: EditCaret | undefined
-  onCaretTaken: () => void
   onScrollIntoView: () => void
   onSave: () => void
+  onSaveWith: (after: (text: string) => Promise<void>) => void
   onCancel: () => void
 }) {
-  const { text, loading, error, conflict, imagesBusy, added } = useSyncExternalStore(draft.subscribe, draft.snapshot)
-  // The editor may mount after the saved text loads: it still opens at the first caret.
-  const [initialCaret] = useState(caret)
-  useEffect(() => {
-    if (initialCaret !== undefined) onCaretTaken()
-  }, [initialCaret, onCaretTaken])
-  const [original, setOriginal] = useState<Version | undefined>(source)
-  useEffect(() => {
-    if (draft.target._tag !== "Edit" || source) return
-    let live = true
-    const id = draft.target.versionId
-    void session.listVersions(entry.slotId).then((result) => {
-      if (live && result.ok) setOriginal(result.value.find((version) => version.id === id))
-    })
-    return () => {
-      live = false
-    }
-  }, [session, entry.slotId, draft, source])
-  const base =
-    draft.target._tag === "Edit"
-      ? (source ?? (original?.id === draft.target.versionId ? original : undefined))?.content
-      : ""
-
-  const commandSnapshot = useSyncExternalStore(chatCommands.subscribe, chatCommands.snapshot, chatCommands.snapshot)
-  const offered = useMessageSaveOptions(entry)
-  const saves = offerSaves ? offered : []
-  // Beside another way to save ("Save in both"), Save says where it saves ("Save here").
-  const shownSave = saves[0]?.here ?? saveLabel
+  const { text, loading, error, added } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   // The editor opens where the message is: when its text takes focus the first time, Save
-  // and Cancel under it come into view too, with the caret at the end just above them. Opened
-  // at a double-click, the caret's line stays where the click was instead (CodeEditorView).
+  // and Cancel under it come into view too, with the caret at the end just above them.
   const actions = useRef<HTMLDivElement>(null)
-  const revealed = useRef(initialCaret !== undefined)
-  const commands: ChatCommandContext = {
-    session,
-    view: session.snapshot(),
-    onHistory: () => {},
-    onJump: () => {},
-    saveMessageEdit: onSave
-  }
+  const revealed = useRef(false)
   return (
     <form
       className="flex flex-col gap-2"
@@ -368,144 +355,52 @@ function Editor({
       }}
       onSubmit={(event) => {
         event.preventDefault()
-        invokeChatCommand("message.save", commands)
+        runSave(session, onSave)
       }}
-      onKeyDownCapture={(event) => {
-        // Handle Save before CodeMirror's Mod+Enter binding inserts a blank line.
-        if (
-          event.key === "Enter" &&
-          (event.ctrlKey || event.metaKey) &&
-          runCommandShortcut(event.nativeEvent, commands)
-        ) {
-          event.preventDefault()
-          event.stopPropagation()
-        }
-      }}
-      onKeyDown={(event) => {
-        // A modal can open before its focus effect moves focus off this form's
-        // trigger. Escape belongs to that modal, even when its target is here.
-        if (
-          event.key === "Escape" &&
-          event.currentTarget.contains(event.target as Node) &&
-          !event.defaultPrevented &&
-          !popupOpen()
-        )
-          onCancel()
-      }}
+      {...editKeys(session, onSave, onCancel)}
     >
-      {loading || base === undefined ? (
+      {loading ? (
         <p role="status">
           Loading saved text…{" "}
-          {loading && error && (
+          {error && (
             <Button type="button" onClick={() => void draft.open()} hint="Loads the saved edit before you type.">
               Retry
             </Button>
           )}
         </p>
       ) : (
-        <>
-          {/* An edit's thinking, above its text as the thinking panel is above the reply (editThinking.tsx). */}
-          {draft.target._tag === "Edit" && (
-            <SlotOutlet
-              slot={messageEditorThinking}
-              props={{
-                session,
-                entry,
-                draft,
-                source: source ?? (original?.id === draft.target.versionId ? original : undefined)
-              }}
-            />
-          )}
-          <SlotOutlet
-            slot={messageTextEditor}
-            props={{
-              label,
-              value: text,
-              base,
-              // Opened from the chat's other view, it leaves focus there (Composition.tsx).
-              autoFocus: !draft.mirror,
-              caret: initialCaret?.offset,
-              caretTop: initialCaret?.top,
-              onCaretPlaced: onScrollIntoView,
-              quietMarkers: true,
-              // Text just added to your version: marked and scrolled to, focus left where it is.
-              flash: added,
-              // In place in the chat, already as wide as the message: no Open large.
-              expand: false,
-              onChange: (value) => draft.setText(value)
-            }}
-          />
-        </>
-      )}
-      {error && (
-        <p role="alert" className="text-sm text-danger">
-          The text isn’t saved as a draft yet: {error.message}
-        </p>
-      )}
-      {conflict && (
-        <ReplayNotice
-          conflict={conflict}
-          acknowledge={() => draft.acknowledgeConflict()}
-          switchText={() => draft.switchConflict()}
+        <SlotOutlet
+          slot={messageTextEditor}
+          props={{
+            label: "Your version",
+            value: text,
+            base: "",
+            // Opened from the chat's other view, it leaves focus there (Composition.tsx).
+            autoFocus: !draft.mirror,
+            quietMarkers: true,
+            // Text just added to your version: marked and scrolled to, focus left where it is.
+            flash: added,
+            // In place in the chat, already as wide as the message: no Open large.
+            expand: false,
+            onChange: (value) => draft.setText(value)
+          }}
         />
       )}
-      <div ref={actions} className="flex flex-wrap items-center gap-2">
-        <Tooltip label={`${shownSave} (Ctrl+Enter)`}>
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={
-              imagesBusy ||
-              !availableCommands(commands, commandSnapshot).some((command) => command.id === "message.save")
-            }
-          >
-            <Icon name="check" />
-            {shownSave}
-          </Button>
-        </Tooltip>
-        {saves.map(({ option }) => (
-          <option.component
-            key={option.id}
-            entry={entry}
-            session={session}
-            disabled={
-              imagesBusy ||
-              !availableCommands(commands, commandSnapshot).some((command) => command.id === "message.save")
-            }
-            save={onSaveWith}
-          />
-        ))}
-        <Button
-          onClick={onCancel}
-          hint={
-            draft.target._tag === "Write"
-              ? "Closes the editor without adding a message version."
-              : "Closes the message editor without saving."
-          }
-        >
-          <Icon name="close" />
-          Cancel
-        </Button>
-        <span className="flex-1" />
-        {base !== undefined && (
-          <SlotOutlet
-            slot={messageEditorTools}
-            props={{
-              draft,
-              base,
-              session,
-              entry,
-              source:
-                draft.target._tag === "Edit"
-                  ? (source ?? (original?.id === draft.target.versionId ? original : undefined))
-                  : undefined,
-              images:
-                (draft.target._tag === "Edit"
-                  ? (source ?? (original?.id === draft.target.versionId ? original : undefined))?.images
-                  : entry.version.images) ?? []
-            }}
-          />
-        )}
+      {!loading && <EditStatus draft={draft} base="" />}
+      <div ref={actions}>
+        <EditControls
+          draft={draft}
+          base={loading ? undefined : ""}
+          source={undefined}
+          session={session}
+          entry={entry}
+          saveLabel="Add as a new version"
+          offerSaves={false}
+          onSave={onSave}
+          onSaveWith={onSaveWith}
+          onCancel={onCancel}
+          layout="row"
+        />
       </div>
     </form>
   )
@@ -701,13 +596,6 @@ export const Message = memo(function Message({
   /** The last touch was a swipe, so the click it ends in isn't a tap. */
   const swiped = useRef(false)
   const footer = useRef<HTMLDivElement>(null)
-  // A tap shows the actions at the end of the message, which may be past the screen's edge.
-  useEffect(() => {
-    if (revealed && footer.current) {
-      footer.current.scrollIntoView({ block: "nearest" })
-      onScrollIntoView()
-    }
-  }, [revealed, onScrollIntoView])
   const generating = version.status === "generating"
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
   const { versions, position, load, replace } = useVersions(session, entry, report)
@@ -727,6 +615,14 @@ export const Message = memo(function Message({
   const editor = writeEditor ?? editEditor
   const editing = writeEditor ? "write" : editEditor ? "edit" : null
   const editingAnotherVersion = editEditor?.target._tag === "Edit" && editEditor.target.versionId !== version.id
+  /** The edit open in the text's place, if any (InPlaceEdit.tsx). */
+  const inPlace = editing === "edit" ? editEditor : undefined
+  const { source: editSource, base: editBase } = useEditSource(session, entry, inPlace, [version, ...(versions ?? [])])
+  const editLoaded = useDraftLoaded(inPlace)
+  const thinkingOpen = useThinkingOpen(session, inPlace, editSource)
+  // A fresh one per edit, so an edit never starts with the last one's selection.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const selection = useMemo(() => editSelection(), [inPlace])
   // Edits and versions the user writes keep the message's speaker; older ones may have none,
   // and then another version's names it, or the first version's, deleted or not, so deleting
   // the original never makes a character's message the model's.
@@ -844,6 +740,18 @@ export const Message = memo(function Message({
     if (window.getSelection()?.toString()) return
     onReveal(revealed ? null : entry.slotId)
   }
+  // A tap shows the actions at the end of the message, which may be past the screen's edge. A
+  // double-click's first click is a tap too: the view waits for a second, and stays where it
+  // is for the edit it opens.
+  useEffect(() => {
+    if (!revealed) return
+    const timer = setTimeout(() => {
+      if (!footer.current || pendingEdit.current !== null || now.current.editing) return
+      footer.current.scrollIntoView({ block: "nearest" })
+      onScrollIntoView()
+    }, TRIPLE_CLICK_MS)
+    return () => clearTimeout(timer)
+  }, [revealed, onScrollIntoView])
 
   const latest = useSyncExternalStore(
     session.subscribe,
@@ -905,10 +813,37 @@ export const Message = memo(function Message({
   else if (empty)
     marks = <Mark icon="dropped" name="Not in the context" label="Not sent" reason={reason!} className="text-muted" />
 
+  const bodyEdit: BodyEdit | undefined = inPlace && {
+    text:
+      editLoaded && editBase !== undefined
+        ? (height) => (
+            <InPlaceText
+              draft={inPlace}
+              base={editBase}
+              height={height}
+              caret={caretAt}
+              onCaretTaken={caretTaken}
+              onCaretPlaced={onScrollIntoView}
+              onFirstFocus={() => {
+                // Opened by Edit: its controls under the text come into view with its end.
+                footer.current?.scrollIntoView({ block: "nearest" })
+                onScrollIntoView()
+              }}
+              selection={selection}
+            />
+          )
+        : null,
+    // An edit's thinking, above its text as the thinking panel is above the reply (editThinking.tsx).
+    thinking: (
+      <SlotOutlet slot={messageEditorThinking} props={{ session, entry, draft: inPlace, source: editSource }} />
+    ),
+    thinkingOpen
+  }
   const versionBody = (
     <VersionBody
       version={version}
       session={session}
+      edit={bodyEdit || undefined}
       hiddenThinking={entry.hiddenThinking}
       parentSlotId={entry.parentSlotId}
       depth={positionOf(entry)}
@@ -984,48 +919,55 @@ export const Message = memo(function Message({
     session.closeEditor(editor)
   }
 
-  const editorView = editor !== undefined && (
-    <Editor
-      key={editing}
-      draft={editor}
+  const cancelEdit = async () => {
+    if (editor === undefined) return
+    // Its text goes to the bin's recovered texts, never nowhere (DESIGN §6.2).
+    const target = editor.target
+    const thinkingEditor = target._tag === "Edit" ? session.editor(thinkingKey(target.versionId)) : undefined
+    const thought = thinkingEditor === undefined ? undefined : await thinkingEditor.discard()
+    if (thought !== undefined && !thought.ok) return report(thought)
+    const outcome = await editor.discard()
+    report(outcome)
+    if (!outcome.ok) return
+    if (thinkingEditor !== undefined) session.closeEditor(thinkingEditor)
+    if (target._tag === "Edit") forgetThinking(target.versionId)
+    session.closeEditor(editor)
+  }
+  const onSave = () => void saveEdit()
+  const onCancel = () => void cancelEdit()
+  const onSaveWith = (after: (text: string) => Promise<void>) => void saveEdit(after)
+
+  // An edit in its text's place (InPlaceEdit.tsx): its text box in the body, its controls in the footer row.
+  const editControls = inPlace && (
+    <EditControls
+      draft={inPlace}
+      base={editBase}
+      source={editSource}
       session={session}
       entry={entry}
-      caret={editing === "edit" ? caretAt : undefined}
-      onCaretTaken={caretTaken}
+      saveLabel="Save"
+      offerSaves
+      onSave={onSave}
+      onSaveWith={onSaveWith}
+      onCancel={onCancel}
+      selection={selection}
+      layout="footer"
+    />
+  )
+  const writeView = editing === "write" && writeEditor !== undefined && (
+    <WriteEditor
+      draft={writeEditor}
+      session={session}
+      entry={entry}
       onScrollIntoView={onScrollIntoView}
-      source={
-        editor.target._tag === "Edit"
-          ? [version, ...(versions ?? [])].find(
-              (item) => item.id === (editor.target._tag === "Edit" ? editor.target.versionId : null)
-            )
-          : undefined
-      }
-      {...(editing === "edit"
-        ? { label: "Message text", saveLabel: "Save" }
-        : {
-            label: "Your version",
-            saveLabel: "Add as a new version"
-          })}
-      onCancel={async () => {
-        // Its text goes to the bin's recovered texts, never nowhere (DESIGN §6.2).
-        const target = editor.target
-        const thinkingEditor = target._tag === "Edit" ? session.editor(thinkingKey(target.versionId)) : undefined
-        const thought = thinkingEditor === undefined ? undefined : await thinkingEditor.discard()
-        if (thought !== undefined && !thought.ok) return report(thought)
-        const outcome = await editor.discard()
-        report(outcome)
-        if (!outcome.ok) return
-        if (thinkingEditor !== undefined) session.closeEditor(thinkingEditor)
-        if (target._tag === "Edit") forgetThinking(target.versionId)
-        session.closeEditor(editor)
-      }}
-      offerSaves={editing === "edit"}
-      onSaveWith={(after) => void saveEdit(after)}
-      onSave={() => void saveEdit()}
+      onSave={onSave}
+      onSaveWith={onSaveWith}
+      onCancel={onCancel}
     />
   )
 
-  const keepFooter = latest || generating || revealed || editing !== null || savedAs !== null
+  // In a compact list an edit's footer stays where the footer lies (over the message's corner), taking no room.
+  const keepFooter = latest || generating || revealed || editing === "write" || savedAs !== null
 
   return (
     <article
@@ -1087,6 +1029,9 @@ export const Message = memo(function Message({
       </div>
       <div
         className={`message-content flex min-w-0 flex-1 flex-col gap-1 compact:gap-0.5 ${hidden ? "opacity-60" : ""}`}
+        // An edit in place: its keys, and an image pasted or dropped on it is the edit's (images.tsx).
+        data-message-edit={inPlace ? "" : undefined}
+        {...(inPlace ? editKeys(session, onSave, onCancel) : {})}
       >
         {/* A chat in a narrow column (the workshop in a story's panel, `@container/chat`) wraps as a phone's does. */}
         <header className="flex min-h-8 min-w-0 items-center compact:min-h-6 gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1 @max-[30rem]/chat:flex-wrap @max-[30rem]/chat:gap-y-1">
@@ -1125,18 +1070,21 @@ export const Message = memo(function Message({
           {generating && <Badge tone="accent">generating</Badge>}
           {version.mark === "refused" && <Badge tone="warning">refused</Badge>}
           {marks}
-          {editing ? (
+          {editing === "write" ? (
             <span className="flex-1" />
           ) : (
-            // The rest of the header's width: the pinned buttons that fit, then More actions.
+            // The rest of the header's width: the pinned buttons that fit, then More actions. While
+            // the message is edited they keep their room, unseen, so the header stays as it was.
             <MessageActions
               context={actionContext}
               // In a narrow column it keeps room for More actions, on a line of its own if need be.
               // Compact, with a mouse: the buttons are as tall as the slimmer name row (24 px).
               className={`hidden justify-end transition-opacity duration-100 sm:flex @max-[30rem]/chat:min-w-8 compact:sm:pointer-fine:[&_a]:size-6 compact:sm:pointer-fine:[&_button]:size-6 ${
-                revealed
-                  ? "opacity-100"
-                  : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 has-[[data-popup-open]]:opacity-100 [@media(hover:none)]:opacity-100"
+                inPlace
+                  ? "invisible"
+                  : revealed
+                    ? "opacity-100"
+                    : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 has-[[data-popup-open]]:opacity-100 [@media(hover:none)]:opacity-100"
               }`}
             />
           )}
@@ -1148,22 +1096,21 @@ export const Message = memo(function Message({
           </p>
         )}
         <SlotOutlet slot={messagePreviews} props={{ entry, session }} />
-        {editor === undefined ? (
-          versionBody
-        ) : editing === "write" ? (
+        {writeView ? (
           // Writing your own version: the version shown stays above it (DESIGN §3.1).
           <Composition
             entry={entry}
-            draft={editor}
+            draft={writeEditor!}
             text={version.content}
             versions={versionControls}
             source={versionBody}
           >
-            {editorView}
+            {writeView}
           </Composition>
         ) : (
-          editorView
+          versionBody
         )}
+        {inPlace && <EditStatus draft={inPlace} base={editBase} />}
         {version.context !== null && version.context.issues.length > 0 && (
           // What the user should know about the context it was generated from (ARCHITECTURE §15).
           <details className="text-xs text-warning">
@@ -1211,6 +1158,7 @@ export const Message = memo(function Message({
           ref={footer}
           className="message-footer flex flex-col gap-1"
           data-keep={keepFooter || undefined}
+          data-editing={inPlace ? "" : undefined}
           data-layout-overlay={
             density === "compact" && !keepFooter
               ? "Compact version controls occupy the message's reserved lower corner"
@@ -1222,20 +1170,28 @@ export const Message = memo(function Message({
               : undefined
           }
         >
-          {revealed && !editing && reason !== null && <p className="text-xs text-muted sm:hidden">{reason}</p>}
+          {revealed && editing !== "write" && reason !== null && (
+            <p className="text-xs text-muted sm:hidden">{reason}</p>
+          )}
           <footer className="flex min-h-8 items-center">
-            {revealed && !editing ? (
+            {editControls ? (
+              // An edit's Save, Cancel and tools, where the message's actions are on a phone (InPlaceEdit.tsx).
+              editControls
+            ) : revealed && !editing ? (
               // The footer's width before the versions: the pinned buttons that fit, then More actions.
               <MessageActions context={actionContext} className="-ml-1.5 flex sm:hidden" />
             ) : (
               <span className="flex-1" />
             )}
             {savedAs !== null && (
-              <span role="status" className="mr-1 text-xs text-muted">
+              <span role="status" className="mx-1 text-xs text-muted">
                 Saved as version {savedAs}
               </span>
             )}
-            {editing !== "write" && versionControls}
+            {editing !== "write" && (
+              // On a phone an edit's controls take the row: its version can't change while it's edited there.
+              <div className={`contents ${inPlace ? "max-sm:hidden" : ""}`}>{versionControls}</div>
+            )}
           </footer>
         </div>
         {error && (

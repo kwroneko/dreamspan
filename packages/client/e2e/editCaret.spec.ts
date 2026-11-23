@@ -66,6 +66,25 @@ const caretOf = (editor: Locator) =>
     return { head, line: { top: line.top, bottom: line.bottom }, box: { top: box.top, bottom: box.bottom } }
   })
 
+/** The message's top and height in the viewport. */
+const placeOf = (message: Locator) =>
+  message.evaluate((article) => {
+    const { top, height } = article.getBoundingClientRect()
+    return { top, height }
+  })
+
+/** `placeOf` once the list has stopped adjusting (it measures rows that came into view). */
+const settledPlace = async (message: Locator) => {
+  let last = await placeOf(message)
+  for (let still = 0; still < 6;) {
+    await message.page().evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
+    const next = await placeOf(message)
+    still = JSON.stringify(next) === JSON.stringify(last) ? still + 1 : 0
+    last = next
+  }
+  return last
+}
+
 const settled = (page: Page) =>
   expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
 
@@ -94,6 +113,7 @@ for (const width of [1440, 390])
     ]
     for (const { word, nth, into, source } of cases) {
       const point = await wordPoint(body, word, nth, into)
+      const before = await settledPlace(mine)
       await page.mouse.dblclick(point.x, point.y)
       await expect(editor).toBeFocused()
       expect(await textBoxValue(editor)).toBe(MESSAGE)
@@ -111,10 +131,11 @@ for (const width of [1440, 390])
       const { line, box } = await caretOf(editor)
       expect(line.top).toBeGreaterThanOrEqual(box.top - 1)
       expect(line.bottom).toBeLessThanOrEqual(box.bottom + 1)
-      // The editor's box (shorter than the screen) entirely on screen around it.
-      const viewport = page.viewportSize()!
-      expect(box.top).toBeGreaterThanOrEqual(0)
-      expect(box.bottom).toBeLessThanOrEqual(viewport.height)
+      // The edit opened in the text's place, as tall as the text: the message stayed where it was
+      // on screen (seamlessEdit.spec.ts measures the list's scroll and the messages around it).
+      const after = await settledPlace(mine)
+      expect(Math.abs(after.top - before.top)).toBeLessThan(0.5)
+      expect(Math.abs(after.height - before.height)).toBeLessThan(0.5)
       // Typing goes in at the caret.
       await page.keyboard.type("Q")
       await expect.poll(() => textBoxValue(editor)).toContain("Q")

@@ -679,7 +679,7 @@ test("a generated version's editor adds pasted/dropped images to a new version a
   await reply.getByRole("button", { name: "Edit", exact: true }).click()
   const buffer = await drawing(page)
   const transfer = async (kind: "paste" | "drop", name: string) => {
-    await reply.locator("form").evaluate(
+    await reply.locator("[data-message-edit]").evaluate(
       (form, { kind, name, base64 }) => {
         const data = new DataTransfer()
         data.items.add(new File([Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))], name, { type: "image/png" }))

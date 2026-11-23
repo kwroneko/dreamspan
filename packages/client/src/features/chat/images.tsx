@@ -467,7 +467,8 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
   // Paste and drop on the editor add here, not to the composer below.
   const ref = useCallback(
     (node: HTMLDivElement | null) => {
-      const form = node?.closest("form")
+      // The editor's form, or the message an edit is open in (InPlaceEdit.tsx).
+      const form = node?.closest<HTMLElement>("form, [data-message-edit]")
       if (!form) return
       const paste = (event: ClipboardEvent) => {
         const files = imageFiles(event.clipboardData?.files ?? [])

@@ -80,8 +80,10 @@ for (const width of [1440, 390])
         await expect(reply.getByRole("textbox", { name: "Message text", exact: true })).toHaveCount(0)
       }
 
-      // The tagged thinking opens as the edit's thinking, not as Add thinking.
+      // The tagged thinking is the edit's thinking, opened by Edit thinking, not Add thinking.
+      const editThinking = reply.getByRole("button", { name: "Edit thinking", exact: true })
       await edit()
+      await editThinking.click()
       await expectTextBox(thinking, tagged)
       await expect(reply.getByRole("button", { name: "Add thinking", exact: true })).toHaveCount(0)
       await reply.getByRole("button", { name: "About Thinking", exact: true }).hover()
@@ -103,6 +105,7 @@ for (const width of [1440, 390])
 
       // Removed like any other thinking.
       await edit()
+      await editThinking.click()
       await reply.getByRole("button", { name: "Remove thinking", exact: true }).click()
       await expect(thinking).toHaveCount(0)
       await save()

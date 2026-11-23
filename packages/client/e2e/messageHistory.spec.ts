@@ -183,7 +183,8 @@ for (const width of [1440, 390])
       await page.goto(`${server().url}/chats/${fixture.chat.id}`)
       const mine = page.getByRole("article", { name: "Your message" }).first()
       await expectTextBox(mine.getByLabel("Message text"), "Accidental overwrite.")
-      await expect(mine.locator(".rp-line-modified")).toHaveCount(1)
+      // The edit in the text's place has no change markers (they'd move the text); the comparison shows the change.
+      await expect(mine.locator(".rp-line-modified")).toHaveCount(0)
       await editHistory(mine, "Compare with saved text…")
       const messageDiff = page.getByRole("dialog", { name: "Compare with saved text", exact: true })
       await expectTextBox(

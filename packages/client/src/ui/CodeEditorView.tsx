@@ -6,7 +6,7 @@ import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } fro
 import type { CodeEditorProps } from "./CodeEditor.tsx"
 import { changeGutter, comparisonBase, lineChanges, quietMarkers } from "./codeChanges.ts"
 import { editorExtensions } from "./editorExtensions.ts"
-import { proseTheme } from "./codeTheme.ts"
+import { bareText, proseTheme } from "./codeTheme.ts"
 import { loadLanguage } from "./codeLanguages.ts"
 import { FieldRevertButton } from "./FieldRevertButton.tsx"
 import { holdCaretAt } from "./holdCaret.ts"
@@ -58,55 +58,64 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
         runEditorShortcut(event, props.value, controller.current?.selection() ?? selection, props.source)
       }
     >
-      {/* The text actions and the field's own controls in the strip inside its bottom border. */}
-      <FieldFrame
-        side="bottom"
-        strip={
-          props.textActions !== false ||
-          props.tools !== undefined ||
-          props.status !== undefined ||
-          props.lastRevision !== undefined
-        }
-        status={props.status}
-        tools={
-          <>
-            {props.textActions !== false && (
-              <EditorTextActions text={props.value} selection={selection} shown={focused} source={props.source} />
-            )}
-            {props.tools}
-            {props.lastRevision !== undefined && !props.readOnly && (
-              <FieldRevertButton
-                changed={props.value !== props.lastRevision}
-                pending={reverting}
-                onRevert={() => {
-                  const before = props.value
-                  const saved = props.lastRevision!
-                  setReverting(true)
-                  void (props.onRevert?.() ?? Promise.resolve(true)).then((restored) => {
-                    setReverting(false)
-                    if (restored) controller.current?.edit(saved, before)
-                  })
-                }}
-              />
-            )}
-            {expand && (
-              <IconButton
-                label={`Open ${props.label} large`}
-                hint={`Opens ${props.label} large over the page, to write in a bigger box; it's the same text.`}
-                icon="expand"
-                className={chromeButton}
-                onClick={() => setLarge(true)}
-              />
-            )}
-          </>
-        }
-      >
+      {props.bare ? (
+        // In place of the text it edits: the host frames it and places its actions (`bare`).
         <div
-          data-layout-audit-ignore="inset: Editor surface fills its own bordered field"
+          data-layout-audit-ignore="inset: Editor text in place of the text it edits"
           ref={host}
-          className={`min-w-0 overflow-hidden rounded-md${props.surfaceClass ? ` ${props.surfaceClass}` : ""}`}
+          className={`min-w-0${props.surfaceClass ? ` ${props.surfaceClass}` : ""}`}
         />
-      </FieldFrame>
+      ) : (
+        // The text actions and the field's own controls in the strip inside its bottom border.
+        <FieldFrame
+          side="bottom"
+          strip={
+            props.textActions !== false ||
+            props.tools !== undefined ||
+            props.status !== undefined ||
+            props.lastRevision !== undefined
+          }
+          status={props.status}
+          tools={
+            <>
+              {props.textActions !== false && (
+                <EditorTextActions text={props.value} selection={selection} shown={focused} source={props.source} />
+              )}
+              {props.tools}
+              {props.lastRevision !== undefined && !props.readOnly && (
+                <FieldRevertButton
+                  changed={props.value !== props.lastRevision}
+                  pending={reverting}
+                  onRevert={() => {
+                    const before = props.value
+                    const saved = props.lastRevision!
+                    setReverting(true)
+                    void (props.onRevert?.() ?? Promise.resolve(true)).then((restored) => {
+                      setReverting(false)
+                      if (restored) controller.current?.edit(saved, before)
+                    })
+                  }}
+                />
+              )}
+              {expand && (
+                <IconButton
+                  label={`Open ${props.label} large`}
+                  hint={`Opens ${props.label} large over the page, to write in a bigger box; it's the same text.`}
+                  icon="expand"
+                  className={chromeButton}
+                  onClick={() => setLarge(true)}
+                />
+              )}
+            </>
+          }
+        >
+          <div
+            data-layout-audit-ignore="inset: Editor surface fills its own bordered field"
+            ref={host}
+            className="min-w-0 overflow-hidden rounded-md"
+          />
+        </FieldFrame>
+      )}
       {large && (
         <Dialog
           open
@@ -202,10 +211,10 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
         history(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         lineChanges,
-        changeGutter,
+        // In place of rendered text, a gutter would move the text off its place.
+        initial.bare ? bareText : [changeGutter, initial.quietMarkers ? quietMarkers : []],
         flashField,
         searchHighlights,
-        initial.quietMarkers ? quietMarkers : [],
         options.of(attributes()),
         EditorView.updateListener.of((update) => {
           if (update.selectionSet || update.docChanged) {
