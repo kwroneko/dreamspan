@@ -2,7 +2,14 @@
 // every scrolling ancestor (the chat's list, the page) scroll so the caret's line sits at the
 // line's old place, kept in view, and again as the layout settles over the next frames (the
 // list measures the row the editor grew or shrank), until the user scrolls, types or presses.
+// An editor that opens in place of its text, as tall as the text was (a message's edit), marks
+// the box around it `data-hold-caret-within`: only that box and the editor's own scroll, so the
+// list and the page stay where they were even where the stored text's lines fall a little apart
+// from the rendered text's (markdown marks).
 import type { EditorView } from "@codemirror/view"
+
+/** The outermost box a hold scrolls, when an ancestor of the editor is marked so. */
+const HOLD_WITHIN = "[data-hold-caret-within]"
 
 /** How long the layout may take to settle, and how many still frames say it has. */
 const SETTLE_MS = 1000
@@ -54,7 +61,8 @@ function place(view: EditorView, top: number): boolean {
   let line = view.coordsAtPos(head)
   if (!line) return false
   let moved = false
-  for (let element: Element | null = view.scrollDOM; element && line; element = parentOf(element)) {
+  for (const element of scrollers(view)) {
+    if (!line) break
     if (!scrolls(element)) continue
     const room = element === view.scrollDOM ? element.getBoundingClientRect() : shown(element)
     const height = line.bottom - line.top
@@ -70,6 +78,16 @@ function place(view: EditorView, top: number): boolean {
     }
   }
   return moved
+}
+
+/** The scrollers a pass may move: the editor's own box out to its `HOLD_WITHIN` ancestor, else every one. */
+function scrollers(view: EditorView): Element[] {
+  const all: Element[] = []
+  for (let element: Element | null = view.scrollDOM; element; element = parentOf(element)) {
+    all.push(element)
+    if (element.matches(HOLD_WITHIN)) break
+  }
+  return all
 }
 
 /**

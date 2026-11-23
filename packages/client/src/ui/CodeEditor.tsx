@@ -41,6 +41,15 @@ export interface CodeEditorProps {
   status?: ReactNode
   /** False: no Open large in the strip. Prose that can be edited has it (owner, 2026-11-02). */
   expand?: boolean | undefined
+  /**
+   * In place of the text it edits (a message's edit): no border, strip, gutter or padding of its
+   * own, the font, size, line height and colour of what's around it, a blank line between
+   * paragraphs as tall as the gap the rendered text has there (`--message-paragraph-gap`) and a
+   * list item's line padded as the rendered item (`--message-list-item-padding`), so its lines
+   * fall where the text's did. All its lines are drawn, so its height is exact; it grows with its
+   * text, without a height limit; its text actions and tools are the host's to place.
+   */
+  bare?: boolean | undefined
   /** The change markers in the gutter only once the text differs from `base`: a plain text box until then. */
   quietMarkers?: boolean | undefined
   rows?: number | undefined

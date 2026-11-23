@@ -114,7 +114,7 @@ export const chatPlaces = [
   }),
   place({
     name: "Message edit",
-    source: "features/chat/Message.tsx:414",
+    source: "features/chat/InPlaceEdit.tsx:185",
     setup: oneMessage,
     open: async (page, { chatId }, ctx) => {
       await goChat(page, ctx, chatId)
@@ -127,7 +127,7 @@ export const chatPlaces = [
   }),
   place({
     name: "Your own version",
-    source: "features/chat/Message.tsx:414",
+    source: "features/chat/Message.tsx:372",
     setup: oneMessage,
     open: async (page, { chatId }, ctx) => {
       await goChat(page, ctx, chatId)
@@ -221,7 +221,7 @@ export const chatPlaces = [
   }),
   place({
     name: "Edit thinking",
-    source: "features/chat/editThinking.tsx:99",
+    source: "features/chat/editThinking.tsx:121",
     setup: oneMessage,
     open: async (page, { chatId }, ctx) => {
       await goChat(page, ctx, chatId)

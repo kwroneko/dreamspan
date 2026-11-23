@@ -80,9 +80,15 @@ for (const width of [1440, 390])
         await expect(reply.getByRole("textbox", { name: "Message text", exact: true })).toHaveCount(0)
       }
 
-      // The reply's thinking opens in its edit, above the text, explained on hover.
+      // The edit opens with the reply's thinking folded as it was, so nothing moves; Edit thinking
+      // opens it above the text, in the panel's place, explained on hover.
+      const editThinking = reply.getByRole("button", { name: "Edit thinking", exact: true })
       await edit()
-      await expect(thinking).toBeVisible()
+      await expect(thinking).toHaveCount(0)
+      await expect(reply.locator('[data-reasoning-panel="reasoning"]')).toBeVisible()
+      await editThinking.click()
+      await expect(thinking).toBeFocused()
+      await expect(reply.locator('[data-reasoning-panel="reasoning"]')).toBeHidden()
       await expectTextBox(thinking, generated.reasoning!)
       const about = reply.getByRole("button", { name: "About Thinking", exact: true })
       await about.hover()
@@ -101,6 +107,7 @@ for (const width of [1440, 390])
 
       // Removed: the field goes, Add thinking stands in for it; saved, the reply has none.
       await edit()
+      await editThinking.click()
       await reply.getByRole("button", { name: "Remove thinking", exact: true }).click()
       await expect(thinking).toHaveCount(0)
       const add = reply.getByRole("button", { name: "Add thinking", exact: true })

@@ -231,12 +231,9 @@ main:has(> [data-fill]) {
  */
 @custom-variant compact (&:where([data-chat-density="compact"] *));
 
-[data-chat-density="compact"] .chat-row :is(.markdown, .message-edit-text) {
-  line-height: 1.45;
-}
-[data-chat-density="compact"] .chat-row .markdown > * + *,
-[data-chat-density="compact"] .chat-row .markdown li > * + * {
-  margin-top: 0.5em;
+[data-chat-density="compact"] .chat-row {
+  --message-line-height: 1.45;
+  --message-paragraph-gap: 0.5em;
 }
 /*
  * A message's footer (its version controls) takes no room of its own in a compact list. On a
@@ -255,6 +252,18 @@ main:has(> [data-fill]) {
     position: static;
     opacity: 1;
     pointer-events: auto;
+  }
+  /* A message being edited in place (features/chat/InPlaceEdit.tsx): its controls lie over its
+     lower corner, as with a pointer, so opening the edit moves nothing. */
+  [data-chat-density="compact"] article:focus-within > * > .message-footer[data-editing]:not([data-keep]) {
+    position: absolute;
+    right: 0.5rem;
+    bottom: 0.25rem;
+    z-index: 1;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    background: var(--surface);
+    box-shadow: 0 1px 2px var(--overlay);
   }
 }
 @media (pointer: coarse) {
@@ -294,17 +303,30 @@ main:has(> [data-fill]) {
   }
 }
 
-/* Message text (ui/Markdown.tsx), and the box its edit is typed in (ui/MessageTextEditor.tsx),
-   which the editor's text inherits these from. */
+/*
+ * Message text (ui/Markdown.tsx), and the box its edit is typed in (`.message-edit-text`,
+ * ui/MessageTextEditor.tsx, in the text's place: features/chat/InPlaceEdit.tsx), which the
+ * editor's text inherits these from and which shares its metrics so the edit's lines fall where the
+ * text's were: the line height, the gap between paragraphs that the edit's blank line takes, and
+ * the padding of a list item's line.
+ */
+:root {
+  --message-line-height: 1.6;
+  --message-paragraph-gap: 0.75em;
+  --message-list-item-padding: 0.25rem;
+}
 .markdown,
 .message-edit-text {
   color: var(--color-message-main);
   overflow-wrap: anywhere;
-  line-height: 1.6;
+  line-height: var(--message-line-height);
 }
 .markdown > * + *,
 .markdown li > * + * {
-  margin-top: 0.75em;
+  margin-top: var(--message-paragraph-gap);
+}
+.markdown li {
+  padding-block: var(--message-list-item-padding);
 }
 .markdown h1,
 .markdown h2,
@@ -391,7 +413,7 @@ main:has(> [data-fill]) {
 }
 .markdown > [data-streamdown="code-block"] + *,
 .markdown > * + [data-streamdown="code-block"] {
-  margin-top: 0.75em;
+  margin-top: var(--message-paragraph-gap);
 }
 .markdown [data-streamdown="code-block-header"] {
   height: auto;
