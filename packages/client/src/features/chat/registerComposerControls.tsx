@@ -13,20 +13,29 @@ import { NextReplyChip } from "./ReplyFrom.tsx"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import { composerControls } from "./composerControls.tsx"
 
+/**
+ * What the guidance toggle does, in the owner's words (2026-11-23), for the selected speaker:
+ * a persona's name when you speak as yourself, "your character" when there's no name.
+ */
+const guidanceToggleHint = (guidance: boolean, speaker: string | null) =>
+  guidance
+    ? `Click to switch back to writing the message yourself. What you type is then sent as ${speaker ?? "your character"}'s message.`
+    : `Click to switch to Guidance mode. In Guidance mode, you describe what ${speaker ?? "your character"} does next, and the model writes the actual turn for you.`
+
 /** Guidance as an icon toggle in the box (DESIGN §2.2: a visible control), its name and use in the tooltip. */
 function GuidanceToggle({
   guidance,
   prefsReady,
   changeGuidance,
-  hint
+  speaker
 }: {
   guidance: boolean
   prefsReady: boolean
   changeGuidance: (next: boolean) => void
-  hint: string
+  speaker: string | null
 }) {
   return (
-    <Tooltip label={`Click to turn guidance ${guidance ? "off" : "on"}. ${hint}`}>
+    <Tooltip label={guidanceToggleHint(guidance, speaker)}>
       <Button
         role="switch"
         aria-checked={guidance}
@@ -75,7 +84,7 @@ export const registerComposerControls = () => [
         guidance={guidance}
         prefsReady={prefsReady}
         changeGuidance={changeGuidance}
-        hint={`One-turn guidance for ${speakerName}'s first reply`}
+        speaker={speakerName === "You" ? null : speakerName}
       />
     )
   }),
@@ -218,8 +227,8 @@ export const registerComposerControls = () => [
     id: "composer.guidance",
     order: 5,
     placement: "actions",
-    component: ({ guidance, prefsReady, changeGuidance, hint }) => (
-      <GuidanceToggle guidance={guidance} prefsReady={prefsReady} changeGuidance={changeGuidance} hint={hint} />
+    component: ({ guidance, prefsReady, changeGuidance, speakerName }) => (
+      <GuidanceToggle guidance={guidance} prefsReady={prefsReady} changeGuidance={changeGuidance} speaker={speakerName} />
     )
   }),
   composerControls.register({

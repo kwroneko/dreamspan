@@ -656,6 +656,7 @@ export function Composer({
     })),
     onRecent: setPicked,
     guidance,
+    speakerName: name,
     editingGuidance: editing !== null,
     // While a reply's guidance is edited, the box is guidance whatever the toggle says.
     prefsReady: viewPrefs.ready && textReady && editing === null,
@@ -771,7 +772,7 @@ export function Composer({
           onKeyDown={onKeyDown}
         />
       </ComposerBox>
-      {/* What the text is for, read with the box; its tooltip on the guidance switch shows it. */}
+      {/* What the text is for, read with the box. */}
       <p id={`${composerId}-hint`} className="sr-only">
         {controls.hint}
       </p>

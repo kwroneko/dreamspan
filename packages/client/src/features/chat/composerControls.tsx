@@ -40,6 +40,8 @@ export interface ComposerControlContext {
   readonly prefsReady: boolean
   readonly changeGuidance: (next: boolean) => void
   readonly hint: string
+  /** The selected speaker's name, for the guidance toggle's explanation; null without one. */
+  readonly speakerName: string | null
   /** Who replies next, in a group. */
   readonly reply: ReplyChoice
   readonly leaf: PathEntry | undefined
