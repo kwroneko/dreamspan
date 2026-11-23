@@ -23,6 +23,10 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
   const [selected, setSelected] = useState("")
   const { focused, onFocus, onBlur } = useEditorFocus()
   const selection = focused ? selected : ""
+  // A host placing the selection's actions itself (`bare`) hears the same: the selection while
+  // the box has focus, none once it's left for another box, which keeps it unseen.
+  const reportSelection = props.onSelectionChange
+  useEffect(() => reportSelection?.(selection), [reportSelection, selection])
   // Open large (owner, 2026-11-02): every prose editor's text in a box filling the middle of the
   // screen, bound to the same value and changes, so it's the same draft with the same history.
   const [large, setLarge] = useState(false)
@@ -239,7 +243,6 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
             const range = update.state.selection.main
             const text = update.state.sliceDoc(range.from, range.to)
             onSelected(text)
-            props.onSelectionChange?.(text)
             props.onSelectionRangeChange?.({ at: range.from, length: range.to - range.from })
           }
           if (update.docChanged && !applying) {

@@ -63,6 +63,7 @@ export interface CodeEditorProps {
   readOnly?: boolean | undefined
   onChange: (value: string) => void
   onSelectionRangeChange?: ((range: { readonly at: number; readonly length: number }) => void) | undefined
+  /** The selected text while the box has focus (its bar's or menu's included), else "". */
   onSelectionChange?: ((text: string) => void) | undefined
   onBlur?: (() => void) | undefined
   /** More CodeMirror extensions for this box (the message editor's styling); a new value reconfigures them. */
