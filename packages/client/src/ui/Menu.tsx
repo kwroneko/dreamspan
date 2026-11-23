@@ -96,12 +96,12 @@ export function Menu({
       }),
     [popup, open, onOpenChange]
   )
-  // Its open state is always `shown` (its own, or the caller's), so scrolling reads that.
-  const { anchor, actions } = useScrollClose(shown)
+  // A list or page around the trigger scrolling it out of view closes the menu (anchorScroll.ts).
+  const anchor = useRef<HTMLButtonElement>(null)
+  useCloseOnAnchorScroll(shown, anchor, () => change(false, "scroll"))
   return (
     <BaseMenu.Root
       modal={false}
-      actionsRef={actions}
       open={shown}
       onOpenChange={(next: boolean, details: { reason: string; event?: Event }) => {
         if (!next && holding.current) return
