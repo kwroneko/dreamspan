@@ -209,7 +209,10 @@ const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
     secret,
     kept("useDurableForm", "Card sources: cache size limit and unit")
   ],
-  "features/cardSources/filters.tsx": times(4, search("a card source's filters (range, value, tag)")),
+  "features/cardSources/filters.tsx": times(
+    6,
+    search("a card source's filters (tag, creator lookup, dates, range ends, value)")
+  ),
   "features/characters/ArchiveUnused.tsx": [kept("useDurableForm", "Archive unused: each rule's amount, as typed")],
   "features/characters/CardGridControls.tsx": [search("a card source's query"), search("filter the cards")],
   "features/characters/CardPage.tsx": [search("find a chat")],

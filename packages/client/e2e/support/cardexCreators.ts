@@ -124,7 +124,7 @@ export function cardexCreatorTests() {
             )
             await header.getByRole("button", { name: "Not by this creator", exact: true }).click()
             await expect(header).toHaveCount(0)
-            await expect(scope.getByLabel("Filters set", { exact: true })).toContainText("Exclude creators")
+            await expect(scope.getByRole("group", { name: "Active filters", exact: true })).toContainText("Not by ")
             await expect(tiles.first()).toBeVisible()
             await expect
               .poll(async () =>

@@ -1,13 +1,14 @@
 // The archive's filter bar on home (spec/CARD-SOURCES.md §3.2) against the fake archive, which
-// holds synthetic cards only: the tag field first, a section per group of criteria (a popover on
-// a wide bar, a folding row on a narrow one) that says what's chosen, the switches, More filters
-// folded. Applying filters reaches the archive and shows as chips; a reload restores them from
-// the URL; a section's Clear, a chip's Remove and Clear filters take them off again.
+// holds synthetic cards only, laid out as the archive's public search page: Search in and Match
+// under the search; on a wide bar a button per panel that says what's chosen and the tag field,
+// then the checkboxes; on a narrow one the Filters button's sheet. Applying filters reaches the
+// archive and shows as chips beside the archive's own defaults; a reload restores them from the
+// URL; a panel's Clear, a chip's Remove and Clear all take them off again.
 import { createServer } from "node:net"
 import { expect, test } from "@playwright/test"
 import { ADMIN, apiLogin, startServer, withAdmin } from "./support/server.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
-import { closeSection, openSection, sectionTrigger } from "./support/sourceFilters.ts"
+import { closePanel, closeSheet, filterControls, openPanel, panelSummary } from "./support/sourceFilters.ts"
 
 const freePort = () =>
   new Promise<number>((resolve, reject) => {
@@ -36,67 +37,74 @@ for (const width of [1440, 390])
       const main = page.getByRole("main")
       await main.getByRole("button", { name: "cardex", exact: true }).click()
       await expect(main.locator("[data-remote-card]").first()).toBeVisible()
-      const filters = main.getByRole("button", { name: /^Filters/ })
-      await filters.click()
-      const panel = main.getByRole("region", { name: "cardex filters", exact: true })
-      const chips = main.getByLabel("Filters set", { exact: true })
+      const chips = main.getByRole("group", { name: "Active filters", exact: true })
+      const chosen = chips.locator("[data-source-chip]:not([data-default])")
 
-      // Folded: the tag field, the sections saying what's chosen, the switches; the rest under More filters.
-      await expect(panel.getByRole("textbox", { name: "Tags", exact: true })).toBeVisible()
-      for (const [label, summary] of [
-        ["Sites", "Any"],
-        ["Kind", "Any"],
-        ["Rating", "Everything"],
-        ["Tokens", "Any"],
-        ["Creators", "Any"],
-        ["Added", "Any"],
-        ["Created", "Any"]
-      ])
-        await expect(sectionTrigger(panel, label!)).toHaveAccessibleName(`${label}: ${summary}`)
-      await expect(panel.getByRole("switch", { name: "Leave out forks", exact: true })).toBeVisible()
-      await expect(panel.getByRole("textbox", { name: "Picture", exact: true })).toHaveCount(0)
-      await expect(panel.getByRole("button", { name: "More filters", exact: true })).toHaveAttribute(
-        "aria-expanded",
-        "false"
-      )
-      await expect(chips).toHaveCount(0)
+      // Under the search: which parts it looks in and how it matches. The archive's defaults are chips.
+      await expect(main.getByRole("button", { name: "Search in: All text", exact: true })).toBeVisible()
+      await expect(main.getByRole("group", { name: "Match", exact: true })).toBeVisible()
+      await expect(chips).toContainText("Characters under 300 tokens hidden (default)")
+      await expect(chips).toContainText("Cards without a cover hidden (default)")
+      await expect(chosen).toHaveCount(0)
+      const filters = main.getByRole("button", { name: /^Filters/ })
+      if (width === 1440) {
+        // Wide: every panel says what's chosen, always shown; no Filters button.
+        await expect(filters).toBeHidden()
+        for (const name of [
+          "Creators: Any creator",
+          "Sites: All sites",
+          "Kind: Characters and lorebooks",
+          "Tokens: ≥ 300 tokens",
+          "Added: any date",
+          "Created: any date"
+        ])
+          await expect(main.locator("[data-filter-panels]").getByRole("button", { name, exact: true })).toBeVisible()
+        await expect(
+          main.locator("[data-filter-panels]").getByRole("button", { name: /^Rating: (Safe|Everything|Mature only)$/ })
+        ).toBeVisible()
+        await expect(main.getByRole("checkbox", { name: "Only cards with a cover", exact: true })).toBeChecked()
+      } else await expect(filters).toBeVisible()
       await expectLayout(page, info, `cardex-filters-folded-${width}`, { scope: "main" })
 
-      // Apply: a required tag, a left-out one, a kind, a date range, a token minimum, a switch.
-      const tags = panel.getByRole("textbox", { name: "Tags", exact: true })
+      // Apply: a required tag, a left-out one, a kind, a date range, a token minimum, a checkbox.
+      let controls = await filterControls(page, main)
+      const tags = controls.getByRole("textbox", { name: "Tags", exact: true })
       await tags.fill("fantasy")
       await tags.press("Enter")
       await tags.fill("-horror")
       await tags.press("Enter")
       await expect(tags).toHaveValue("")
-      const kind = await openSection(page, panel, "Kind")
-      await kind
-        .getByRole("group", { name: "Kind", exact: true })
-        .getByRole("button", { name: "Characters", exact: true })
-        .click()
-      await closeSection(page, "Kind")
-      const added = await openSection(page, panel, "Added")
-      await added.getByLabel("Added after", { exact: true }).fill("2026-01-01")
-      await added.getByLabel("Added before", { exact: true }).fill("2026-03-01")
-      await expectLayout(page, info, `cardex-filters-section-${width}`, { scope: width === 1440 ? "body" : "main" })
-      await closeSection(page, "Added")
-      const tokens = await openSection(page, panel, "Tokens")
-      await tokens.getByRole("spinbutton", { name: "Tokens: at least (tokens)", exact: true }).fill("100")
-      await closeSection(page, "Tokens")
-      await panel.getByRole("switch", { name: "Leave out forks", exact: true }).click()
+      await tags.press("Escape")
+      let panel = await openPanel(page, main, "Kind")
+      await panel.getByRole("radio", { name: "Characters", exact: true }).click()
+      await closePanel(page, "Kind")
+      panel = await openPanel(page, main, "Added")
+      await panel.getByLabel("Added after", { exact: true }).fill("2026-01-01")
+      await panel.getByLabel("Added before", { exact: true }).fill("2026-03-01")
+      await expectLayout(page, info, `cardex-filters-panel-${width}`, { scope: "body" })
+      await closePanel(page, "Added")
+      panel = await openPanel(page, main, "Tokens")
+      await panel.getByRole("spinbutton", { name: "Min tokens", exact: true }).fill("100")
+      await closePanel(page, "Tokens")
+      controls = await filterControls(page, main)
+      await controls.getByRole("checkbox", { name: "Leave out forks", exact: true }).click()
+      await closeSheet(page)
 
       const applied = [
         "+fantasy",
         "−horror",
         "Kind: Characters",
-        "Added: 2026-01-01 – 2026-03-01",
-        "Tokens ≥ 100",
+        "Added 2026-01-01 – 2026-03-01",
+        "At least 100 tokens",
         "Leave out forks"
       ]
       for (const text of applied) await expect(chips).toContainText(text)
-      await expect(sectionTrigger(panel, "Kind")).toHaveAccessibleName("Kind: Characters")
-      await expect(sectionTrigger(panel, "Added")).toHaveAccessibleName("Added: 2026-01-01 – 2026-03-01")
-      await expect(sectionTrigger(panel, "Tokens")).toHaveAccessibleName("Tokens: ≥ 100")
+      // A minimum of its own lifts the archive's; characters only still leave out those without a cover.
+      await expect(chips).not.toContainText("tokens hidden")
+      await expect(chips).toContainText("Cards without a cover hidden (default)")
+      await expect(await panelSummary(page, main, "Kind")).toHaveAccessibleName("Kind: Characters")
+      await expect(await panelSummary(page, main, "Tokens")).toHaveAccessibleName("Tokens: ≥ 100 tokens")
+      await closeSheet(page)
       await expect
         .poll(async () =>
           (await searches()).some((path) =>
@@ -118,25 +126,20 @@ for (const width of [1440, 390])
       await chips.scrollIntoViewIfNeeded()
       await expectLayout(page, info, `cardex-filters-applied-${width}`, { scope: "main" })
 
-      // The URL is the state: a reload shows the same chips, sections and typed values.
+      // The URL is the state: a reload shows the same chips and typed values.
       const url = page.url()
       await page.reload()
       await expect(page).toHaveURL(url)
       for (const text of applied) await expect(chips).toContainText(text)
-      await filters.click()
-      await expect(sectionTrigger(panel, "Added")).toHaveAccessibleName("Added: 2026-01-01 – 2026-03-01")
-      const reopened = await openSection(page, panel, "Tokens")
-      await expect(reopened.getByRole("spinbutton", { name: "Tokens: at least (tokens)", exact: true })).toHaveValue(
-        "100"
-      )
-      await closeSection(page, "Tokens")
+      panel = await openPanel(page, main, "Tokens")
+      await expect(panel.getByRole("spinbutton", { name: "Min tokens", exact: true })).toHaveValue("100")
+      await closePanel(page, "Tokens")
 
-      // Clearing: a section's Clear, a chip's Remove, then Clear filters.
-      const again = await openSection(page, panel, "Added")
-      await again.getByRole("button", { name: "Clear added", exact: true }).click()
-      await closeSection(page, "Added")
-      await expect(chips).not.toContainText("Added:")
-      await expect(sectionTrigger(panel, "Added")).toHaveAccessibleName("Added: Any")
+      // Clearing: a panel's Clear, a chip's Remove, then Clear all; the defaults come back.
+      panel = await openPanel(page, main, "Added")
+      await panel.getByRole("button", { name: "Clear the dates", exact: true }).click()
+      await closePanel(page, "Added")
+      await expect(chips).not.toContainText("Added")
       await chips
         .locator("[data-source-chip]")
         .filter({ hasText: "Kind: Characters" })
@@ -144,17 +147,29 @@ for (const width of [1440, 390])
         .click()
       await expect(chips).not.toContainText("Kind: Characters")
       await expect(chips).toContainText("+fantasy")
-      await chips.getByRole("button", { name: "Clear filters", exact: true }).click()
-      await expect(chips).toHaveCount(0)
+      await chips.getByRole("button", { name: "Clear all", exact: true }).click()
+      await expect(chosen).toHaveCount(0)
+      await expect(chips).toContainText("Characters under 300 tokens hidden (default)")
       await expect(page).not.toHaveURL(/stags=|sxtags=/)
-      await expect(sectionTrigger(panel, "Tokens")).toHaveAccessibleName("Tokens: Any")
-      await expect(filters).toHaveAccessibleName("Filters")
+      await expect(await panelSummary(page, main, "Tokens")).toHaveAccessibleName("Tokens: ≥ 300 tokens")
 
-      // On a narrow bar, Show results closes the filters to the cards.
+      // A default's chip removed includes those cards: the cover checkbox follows.
+      await closeSheet(page)
+      await chips
+        .locator("[data-source-chip][data-default]")
+        .filter({ hasText: "without a cover" })
+        .getByRole("button")
+        .last()
+        .click()
+      await expect(chips).not.toContainText("without a cover")
+      controls = await filterControls(page, main)
+      await expect(controls.getByRole("checkbox", { name: "Only cards with a cover", exact: true })).not.toBeChecked()
+
+      // On a narrow bar, Show results closes the sheet to the cards.
       if (width === 390) {
-        await panel.getByRole("button", { name: /^Show .*results$/ }).click()
-        await expect(panel).toHaveCount(0)
-      } else await expect(panel.getByRole("button", { name: /^Show .*results$/ })).toBeHidden()
+        await page.getByRole("button", { name: /^Show results/ }).click()
+        await expect(page.locator("[data-filter-sheet]")).toHaveCount(0)
+      }
     } finally {
       await server.stop()
     }

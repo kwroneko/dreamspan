@@ -4,7 +4,7 @@ import { CardGroupingControl } from "./cardGrouping.tsx"
 // A card source shown takes over the search, the sort and a Filters button at the row's end.
 import { useId, useLayoutEffect, useRef } from "react"
 import { Input } from "../../ui/Field.tsx"
-import { type SourceBrowse, SourceFiltersButton, SourceSortControl } from "../cardSources/browse.tsx"
+import { type SourceBrowse, SourceSortControl } from "../cardSources/browse.tsx"
 import { type CardBrowse, CardFilterControl, CardSortControl, IncludePersonas } from "./cardBrowse.tsx"
 import { browsable, type ShellLibrary, useGroupCount } from "./shellData.tsx"
 
@@ -16,8 +16,7 @@ export function CardGridControls({
   onSearch,
   searchLabel,
   sources,
-  onSource,
-  filtersId = ""
+  onSource
 }: {
   data: ShellLibrary
   browse: CardBrowse
@@ -26,13 +25,11 @@ export function CardGridControls({
   onSearch: (search: string) => void
   searchLabel: string
   /**
-   * The card sources Show offers; while one is shown, the search, sort and Filters work on it
+   * The card sources Show offers; while one is shown, the search and sort work on it
    * (spec/CARD-SOURCES.md §3.2), and Include personas stays, disabled.
    */
   sources?: SourceBrowse | undefined
   onSource?: (id: string) => void
-  /** The Filters panel's id, for its button. */
-  filtersId?: string
 }) {
   const shown = sources?.info ?? null
   const name = `card-grid-${useId().replace(/[^a-zA-Z0-9-]/g, "")}`
@@ -103,7 +100,6 @@ export function CardGridControls({
                   onChange={onChange}
                   disabledReason={`Personas are your own cards; ${shown.name} lists characters.`}
                 />
-                <SourceFiltersButton browse={sources} panelId={filtersId} />
               </>
             ) : (
               <>

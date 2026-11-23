@@ -361,7 +361,10 @@ export function SourceSortControl({ browse, compact = false }: { browse: SourceB
   )
 }
 
-/** Filters: the last control of the sort row, only while a source is shown (§3.2). */
+/**
+ * Filters: the last control of the sort row, only while a source is shown and only on a narrow
+ * bar, where it opens the filters' sheet; a wide bar shows the filters themselves (§3.2).
+ */
 export function SourceFiltersButton({
   browse,
   panelId,
@@ -374,16 +377,10 @@ export function SourceFiltersButton({
 }) {
   const count = browse.filterCount
   return (
-    <Tooltip
-      label={
-        browse.filtersOpen
-          ? "Click to hide the filters"
-          : `Click to show every filter ${browse.info?.name ?? ""} offers`
-      }
-    >
+    <Tooltip label={`Click to show every filter ${browse.info?.name ?? ""} offers`}>
       <Button
         variant="ghost"
-        className={`h-8 gap-1 px-2 ${pressedButtonClass}`}
+        className={`h-8 gap-1 px-2 @xl:hidden ${pressedButtonClass}`}
         aria-pressed={browse.filtersOpen}
         aria-expanded={browse.filtersOpen}
         aria-controls={panelId}

@@ -311,12 +311,15 @@ const FILTER_HELP: Record<string, string> = {
   created_before: "Cards their creator made before this day, as far as cardex knows."
 }
 /**
- * Where each criterion sits in the filter bar, modeled on the archive's public search page:
- * sites, kind, rating, tokens, creators and the two date ranges up front; how the words are
- * matched, the cover, any-of tags and the picture under More filters; the remaining switches
- * in the bar's row of switches.
+ * Where each criterion sits in the filter bar, modeled on the archive's public search page: one
+ * panel each for creators, sites, kind, rating, tokens and the two date ranges, in that order;
+ * which parts the words are looked for in and how they're matched beside the search box; the
+ * checkboxes after the panels; the picture only through a card's own link.
  */
-const PLACEMENT: Record<string, { readonly group?: string; readonly more?: true }> = {
+const PLACEMENT: Record<string, { readonly group?: string; readonly place?: "search" | "switches" | "none" }> = {
+  author: { group: "Creators" },
+  any_author: { group: "Creators" },
+  not_author: { group: "Creators" },
   source: { group: "Sites" },
   not_source: { group: "Sites" },
   chub_verified: { group: "Sites" },
@@ -324,18 +327,18 @@ const PLACEMENT: Record<string, { readonly group?: string; readonly more?: true 
   kind: { group: "Kind" },
   nsfw: { group: "Rating" },
   tokens: { group: "Tokens" },
-  author: { group: "Creators" },
-  any_author: { group: "Creators" },
-  not_author: { group: "Creators" },
   added_after: { group: "Added" },
   added_before: { group: "Added" },
   created_after: { group: "Created" },
   created_before: { group: "Created" },
-  mode: { group: "Search", more: true },
-  fields: { group: "Search", more: true },
-  any_tags: { more: true },
-  has_cover: { more: true },
-  picture: { more: true }
+  fields: { place: "search" },
+  mode: { place: "search" },
+  exclude_forks: { place: "switches" },
+  has_cover: { place: "switches" },
+  deleted_from_source: { place: "switches" },
+  deleted_from_any_source: { place: "switches" },
+  any_tags: { place: "none" },
+  picture: { place: "none" }
 }
 const PLACED = Object.keys(PLACEMENT)
 const placedAt = (id: string) => (PLACED.includes(id) ? PLACED.indexOf(id) : PLACED.length)
@@ -391,6 +394,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       unit: "tokens",
       min: 0,
       ...(typeof max === "number" ? { max } : {}),
+      scaleMax: 100_000,
       about: `cardex leaves out characters under ${typeof named.get("min_tokens")?.default === "number" ? named.get("min_tokens")!.default : 300} tokens unless you set a minimum.`
     })
   }
@@ -501,13 +505,50 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
     }
   }
   const nsfwDefault = named.get("nsfw")?.default
+  const has = (id: string) => filters.some((f) => f.id === id)
+  // What cardex leaves out unless asked: characters under its token minimum, and characters
+  // without a cover. Lorebooks are never left out for either.
+  const floor = named.get("min_tokens")?.default
+  const hidden: Array<NonNullable<SourceCapabilities["hiddenByDefault"]>[number]> = []
+  if (typeof floor === "number" && floor > 0 && has("tokens"))
+    hidden.push({
+      id: "token-floor",
+      label: `Characters under ${floor} tokens`,
+      about:
+        "The archive leaves these out unless you set a minimum, since most are stubs. Remove this to include them.",
+      filterId: "tokens",
+      off: { min: 0 },
+      unless: [{ filterId: "tokens" }, ...(has("kind") ? [{ filterId: "kind", values: ["lorebook"] }] : [])],
+      min: floor
+    })
+  if (named.get("has_cover")?.default === true && has("has_cover"))
+    hidden.push({
+      id: "cover",
+      label: "Cards without a cover",
+      about: "The archive leaves these out unless you ask for them. Remove this to include them.",
+      filterId: "has_cover",
+      off: "false",
+      unless: [{ filterId: "has_cover" }, ...(has("kind") ? [{ filterId: "kind", values: ["lorebook"] }] : [])],
+      toggle: "Only cards with a cover"
+    })
   return {
     text: true,
-    tags: { include: named.has("tags"), exclude: named.has("not_tags"), suggest: true },
-    // In the bar's order: the placed criteria as listed above, then the switches.
+    tags: {
+      include: named.has("tags"),
+      exclude: named.has("not_tags"),
+      suggest: true,
+      ...(has("any_tags") ? { anyFilterId: "any_tags" } : {})
+    },
+    // In the bar's order: the placed criteria as listed above, then the switches. Sites left
+    // out are the same list as the sites included, each site either.
     filters: filters
-      .map((filter) => ({ ...filter, ...PLACEMENT[filter.id] }))
+      .map((filter) => ({
+        ...filter,
+        ...PLACEMENT[filter.id],
+        ...(filter.id === "source" && has("not_source") ? { excludeId: "not_source" } : {})
+      }))
       .sort((a, b) => placedAt(a.id) - placedAt(b.id)),
+    ...(hidden.length ? { hiddenByDefault: hidden } : {}),
     sorts: SORTS.filter((s) => s.needs.every((n) => body.sorts.includes(n))).map((s) => ({
       id: s.id,
       label: s.label,
@@ -530,6 +571,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
           creators: {
             filterId: "author",
             ...(named.has("not_author") ? { excludeFilterId: "not_author" } : {}),
+            ...(named.has("any_author") ? { anyFilterId: "any_author" } : {}),
             profiles: true
           }
         }

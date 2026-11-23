@@ -103,10 +103,14 @@ describe("v1 as card sources", () => {
   it.effect("capabilities: the filters a character browser offers, labelled, with v1's defaults", () =>
     Effect.gen(function* () {
       const caps = yield* fakeCardexAdapter(archive).capabilities(direct())
-      // In the filter bar's order, each with its place: a group's section, More filters, or the switches.
+      // In the filter bar's order, each with its place: a group's panel, beside the search, the
+      // checkboxes, or no control of its own.
       assert.deepStrictEqual(
-        caps.filters.map((f) => [f.id, f.label, f.more ? "more" : (f.group ?? "")]),
+        caps.filters.map((f) => [f.id, f.label, f.group ?? f.place ?? ""]),
         [
+          ["author", "Creator", "Creators"],
+          ["any_author", "Any of these creators", "Creators"],
+          ["not_author", "Exclude creators", "Creators"],
           ["source", "Site", "Sites"],
           ["not_source", "Exclude sites", "Sites"],
           ["chub_verified", "Chub verified", "Sites"],
@@ -114,21 +118,39 @@ describe("v1 as card sources", () => {
           ["kind", "Kind", "Kind"],
           ["nsfw", "Rating", "Rating"],
           ["tokens", "Tokens", "Tokens"],
-          ["author", "Creator", "Creators"],
-          ["any_author", "Any of these creators", "Creators"],
-          ["not_author", "Exclude creators", "Creators"],
           ["added_after", "Added after", "Added"],
           ["added_before", "Added before", "Added"],
           ["created_after", "Created after", "Created"],
           ["created_before", "Created before", "Created"],
-          ["mode", "Match", "more"],
-          ["fields", "Search in", "more"],
-          ["any_tags", "Any of these tags", "more"],
-          ["has_cover", "Cover", "more"],
-          ["picture", "Picture", "more"],
-          ["exclude_forks", "Leave out forks", ""],
-          ["deleted_from_source", "Deleted from all sites", ""],
-          ["deleted_from_any_source", "Deleted from a site", ""]
+          ["fields", "Search in", "search"],
+          ["mode", "Match", "search"],
+          ["exclude_forks", "Leave out forks", "switches"],
+          ["has_cover", "Cover", "switches"],
+          ["deleted_from_source", "Deleted from all sites", "switches"],
+          ["deleted_from_any_source", "Deleted from a site", "switches"],
+          ["any_tags", "Any of these tags", "none"],
+          ["picture", "Picture", "none"]
+        ]
+      )
+      // Sites left out are the same list, either mode; alternative tags are the tag field's; the
+      // creator lists are one picker; the slider's scale tops out at 100,000 tokens.
+      const site = caps.filters.find((f) => f.id === "source")!
+      assert.strictEqual(site.kind === "choice" ? site.excludeId : undefined, "not_source")
+      const tokens = caps.filters.find((f) => f.id === "tokens")!
+      assert.strictEqual(tokens.kind === "range" ? tokens.scaleMax : undefined, 100_000)
+      assert.strictEqual(caps.tags.anyFilterId, "any_tags")
+      assert.deepStrictEqual(caps.creators, {
+        filterId: "author",
+        excludeFilterId: "not_author",
+        anyFilterId: "any_author",
+        profiles: true
+      })
+      // What v1 leaves out by default, from its own defaults; neither for lorebooks.
+      assert.deepStrictEqual(
+        caps.hiddenByDefault?.map((d) => [d.label, d.filterId, d.off, d.unless.map((u) => u.filterId), d.toggle]),
+        [
+          ["Characters under 300 tokens", "tokens", { min: 0 }, ["tokens", "kind"], undefined],
+          ["Cards without a cover", "has_cover", "false", ["has_cover", "kind"], "Only cards with a cover"]
         ]
       )
       const rating = caps.filters.find((f) => f.id === "nsfw")!

@@ -11,7 +11,7 @@ import { asUser, type Client } from "./rpc.ts"
 import { ADMIN, apiLogin, startServer, withAdmin } from "./server.ts"
 import { openPanel } from "./panel.ts"
 import { expectLayout } from "./layoutAudit.ts"
-import { closeSection, openSection } from "./sourceFilters.ts"
+import { closePanel, openPanel } from "./sourceFilters.ts"
 
 const freePort = () =>
   new Promise<number>((resolve, reject) => {
@@ -58,16 +58,16 @@ export function cardexLorebookTests() {
           await expectLayout(page, info, `lorebook-results-${width}-${theme}`, { scope: "main", hovered: true })
 
           // The Kind choice offers all four.
-          await main.getByRole("button", { name: /^Filters/ }).click()
-          const filterBar = main.getByRole("region", { name: "cardex filters", exact: true })
-          const kind = (await openSection(page, filterBar, "Kind")).getByRole("group", { name: "Kind", exact: true })
+          const kind = await openPanel(page, main, "Kind")
           for (const option of ["Characters and lorebooks", "Characters", "Characters with a lorebook", "Lorebooks"])
-            await expect(kind.getByRole("button", { name: option, exact: true })).toBeVisible()
+            await expect(kind.getByRole("radio", { name: option, exact: true })).toBeVisible()
           await expectLayout(page, info, `lorebook-kind-${width}-${theme}`)
-          await kind.getByRole("button", { name: "Lorebooks", exact: true }).click()
-          await closeSection(page, "Kind")
-          await filterBar.getByRole("button", { name: "Close", exact: true }).click()
-          await expect(main.getByLabel("Filters set", { exact: true })).toContainText("Kind: Lorebooks")
+          await kind.getByRole("radio", { name: "Lorebooks", exact: true }).click()
+          await closePanel(page, "Kind")
+          const active = main.getByRole("group", { name: "Active filters", exact: true })
+          await expect(active).toContainText("Kind: Lorebooks")
+          // Neither default applies to lorebooks.
+          await expect(active).not.toContainText("(default)")
           await expect(tile(first!.slug)).toBeVisible({ timeout: 30_000 })
 
           // The menu: no Inspect, no chat, no card; Add to my lorebooks adds it without opening it.

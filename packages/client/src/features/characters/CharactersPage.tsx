@@ -72,12 +72,11 @@ function Home({ data }: { data: ShellLibrary }) {
         searchLabel="Search characters and groups"
         sources={sources}
         onSource={(id) => setBrowse({ source: id })}
-        filtersId="home-source-filters"
       />
       {source !== null ? (
         // The source's cards only: never mixed with the user's (spec/CARD-SOURCES.md §3.2).
         <>
-          <SourceFiltersPanel browse={sources} id="home-source-filters" />
+          <SourceFiltersPanel browse={sources} id="home-source-filters" filtersButton />
           <SourceChips browse={sources} />
           <SourceResults browse={sources} className={COLUMNS} />
         </>
