@@ -68,8 +68,18 @@ export const initialLayout = (href: string): Layout => {
   return { root: frame, focused: frame.id, recent: [tab.id] }
 }
 
-export const frames = (node: Node): ReadonlyArray<Frame> =>
-  node.type === "frame" ? [node] : node.children.flatMap(frames)
+// A plain walk: the menus run the layout's functions for every item each time they open
+// (`canApply`), and `flatMap` over the tree was most of that time.
+export const frames = (node: Node): ReadonlyArray<Frame> => {
+  if (node.type === "frame") return [node]
+  const found: Array<Frame> = []
+  const walk = (n: Node) => {
+    if (n.type === "frame") found.push(n)
+    else for (const child of n.children) walk(child)
+  }
+  walk(node)
+  return found
+}
 
 export const allTabs = (layout: Layout): ReadonlyArray<Tab> => frames(layout.root).flatMap((f) => f.tabs)
 
@@ -121,7 +131,8 @@ const updateFrames = (layout: Layout, f: (frame: Frame) => Node | null): Layout 
   const root = mapNode(layout.root, f) ?? frameNode([])
   const live = frames(root)
   const focused = live.some((fr) => fr.id === layout.focused) ? layout.focused : (live[0]?.id ?? "")
-  const ids = new Set(live.flatMap((fr) => fr.tabs.map((t) => t.id)))
+  const ids = new Set<string>()
+  for (const fr of live) for (const t of fr.tabs) ids.add(t.id)
   const maximized = live.length > 1 && live.some((fr) => fr.id === layout.maximized) ? layout.maximized : undefined
   return {
     root,
@@ -400,6 +411,117 @@ export const splitFrame = (
   const { maximized: _, ...rest } = layout
   const next = { ...rest, root, focused: added.id }
   return copy ? focusTab(next, copy.id) : next
+}
+
+/** The node beside a frame in its split: the one before it, else the one after. */
+const siblingOf = (node: Node, frameId: string): Node | undefined => {
+  if (node.type === "frame") return undefined
+  const at = node.children.findIndex((c) => c.type === "frame" && c.id === frameId)
+  if (at >= 0) return node.children[at - 1] ?? node.children[at + 1]
+  for (const child of node.children) {
+    const found = siblingOf(child, frameId)
+    if (found) return found
+  }
+  return undefined
+}
+
+const hasNode = (node: Node, id: string): boolean =>
+  node.id === id || (node.type === "split" && node.children.some((c) => hasNode(c, id)))
+
+/** Puts a new frame beside a node (a frame or a whole split), as `splitFrame` does for a frame. */
+const splitNode = (layout: Layout, nodeId: string, direction: Direction, added: Frame, before: boolean): Layout => {
+  const replace = (node: Node): Node => {
+    if (node.id === nodeId) {
+      const children = before ? [added, node] : [node, added]
+      return { type: "split", id: newId("s"), direction, children, sizes: [0.5, 0.5] }
+    }
+    return node.type === "frame" ? node : { ...node, children: node.children.map(replace) }
+  }
+  // Rebuilt through `updateFrames`, so a split inside one split the same way joins it.
+  return updateFrames({ ...layout, root: replace(layout.root) }, (f) => f)
+}
+
+/**
+ * Moves a tab into a new frame beside a frame (its own by default), on the right or below, or
+ * on the left or above with `before`. A frame's only tab leaves first, as closing it would: its
+ * frame closes and the node that took its place (the one before it, else after) is split, so
+ * the only tab of the right frame of two, moved below, ends up below the left one. The only tab
+ * of the only frame stays: closing it leaves nothing to split.
+ */
+export const moveToNewFrame = (
+  layout: Layout,
+  tabId: string,
+  direction: Direction,
+  options: { readonly frameId?: string; readonly before?: boolean; readonly newFrameId?: string } = {}
+): Layout => {
+  const tab = findTab(layout, tabId)
+  const from = frameOfTab(layout, tabId)
+  const target = options.frameId ?? from?.id
+  if (!tab || !from || !target || !findFrame(layout, target)) return layout
+  const added = frameNode([], options.newFrameId ?? newId("f"))
+  const before = options.before ?? false
+  const { maximized: _, ...whole } = layout
+  const place = (next: Layout) =>
+    focusTab(
+      updateFrames(next, (f) => (f.id === added.id ? insertTab(f, tab) : f)),
+      tabId
+    )
+  if (target !== from.id || from.tabs.length > 1)
+    return moveTab(splitNode(focusTab(whole, tabId), target, direction, added, before), tabId, added.id)
+  const sibling = siblingOf(layout.root, from.id)
+  // The only tab of the only frame: closing it leaves nothing to split.
+  if (!sibling) return layout
+  const removed = updateFrames(whole, (f) => (f.id === from.id ? null : f))
+  const at = hasNode(removed.root, sibling.id) ? sibling.id : frames(sibling)[0]!.id
+  return place(splitNode(removed, at, direction, added, before))
+}
+
+/** What a tab's menu does to the layout: Split, Move to the frame beside, Move to a new frame. */
+export type LayoutAction =
+  | { readonly type: "split"; readonly frameId: string; readonly direction: Direction }
+  | { readonly type: "move"; readonly tabId: string; readonly frameId: string | undefined }
+  | {
+      readonly type: "moveToNewFrame"
+      readonly tabId: string
+      readonly direction: Direction
+      readonly before?: boolean
+    }
+
+/** The action done to a layout, as the store does it (its ids aside). */
+export const applyAction = (layout: Layout, action: LayoutAction, keyOf?: KeyOf): Layout => {
+  switch (action.type) {
+    case "split":
+      return findFrame(layout, action.frameId)?.active ? splitFrame(layout, action.frameId, action.direction) : layout
+    case "move":
+      return action.frameId ? moveTab(layout, action.tabId, action.frameId, undefined, keyOf) : layout
+    case "moveToNewFrame":
+      return moveToNewFrame(layout, action.tabId, action.direction, { before: action.before ?? false })
+  }
+}
+
+/** Whether two layouts look alike: the same tabs in each frame, the splits the same way. */
+const sameShape = (a: Node, b: Node): boolean => {
+  if (a === b) return true
+  if (a.type === "frame")
+    return b.type === "frame" && a.tabs.length === b.tabs.length && a.tabs.every((t, i) => t.id === b.tabs[i]!.id)
+  return (
+    b.type === "split" &&
+    a.direction === b.direction &&
+    a.children.length === b.children.length &&
+    a.children.every((c, i) => sameShape(c, b.children[i]!))
+  )
+}
+
+/**
+ * Whether an action changes the layout, for the menus to disable it when not: "none" when it
+ * can't act (the only tab of the only frame, no frame on that side), "same" when the result
+ * looks as now (the left frame's only tab moved to a new frame on the left). Frame and split
+ * ids and shares don't count.
+ */
+export const canApply = (layout: Layout, action: LayoutAction, keyOf?: KeyOf): "yes" | "none" | "same" => {
+  const next = applyAction(layout, action, keyOf)
+  if (next === layout) return "none"
+  return sameShape(next.root, layout.root) ? "same" : "yes"
 }
 
 /** Sets a split's shares, each at least `min`. */

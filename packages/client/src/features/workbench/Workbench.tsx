@@ -32,15 +32,17 @@ import { Tooltip, IconButton } from "../../ui/Tooltip.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { CenterPage, sidebarToggle } from "../shell.tsx"
 import { PanelPlaceholder } from "../chat/PanelPlaceholder.tsx"
-import { defaultTitle, tabKind } from "./kinds.ts"
+import { defaultTitle, itemKey, tabKind } from "./kinds.ts"
 import {
   allTabs,
   type Frame,
   focusedFrame,
   frameOfTab,
   frames,
+  canApply,
   isSplit,
   type Layout,
+  type LayoutAction,
   stripCorners,
   neighbours,
   restoreLayout,
@@ -985,32 +987,47 @@ function TabActions({
   const right = frame.tabs.slice(index + 1).filter(closable).length
   const saved = frame.tabs.filter((t) => closable(t) && !store.isUnsaved(t.id)).length
   const all = frame.tabs.filter(closable).length
-  const moves: Array<{ to: string | undefined; icon: IconName; label: string; description: string }> = [
-    {
-      to: near.left,
-      icon: "move-left",
-      label: "Move to the frame on the left",
-      description: "Moves this tab into the frame on the left."
-    },
-    {
-      to: near.right,
-      icon: "move-right",
-      label: "Move to the frame on the right",
-      description: "Moves this tab into the frame on the right."
-    },
-    {
-      to: near.up,
-      icon: "move-up",
-      label: "Move to the frame above",
-      description: "Moves this tab into the frame above."
-    },
-    {
-      to: near.down,
-      icon: "move-down",
-      label: "Move to the frame below",
-      description: "Moves this tab into the frame below."
-    }
-  ]
+  type Item = { action: LayoutAction; icon: IconName; label: string; description: string }
+  const moves: Array<Item> = tab
+    ? [
+        ...(
+          [
+            ["left", near.left, "the frame on the left"],
+            ["right", near.right, "the frame on the right"],
+            ["up", near.up, "the frame above"],
+            ["down", near.down, "the frame below"]
+          ] as const
+        ).map(([side, to, where]) => ({
+          action: { type: "move" as const, tabId: tab.id, frameId: to },
+          icon: `move-${side}` as IconName,
+          label: `Move to ${where}`,
+          description: `Moves this tab into ${where}.`
+        })),
+        ...(
+          [
+            ["row", true, "on the left"],
+            ["row", false, "on the right"],
+            ["column", true, "above"],
+            ["column", false, "below"]
+          ] as const
+        ).map(([direction, before, where]) => ({
+          action: { type: "moveToNewFrame" as const, tabId: tab.id, direction, before },
+          icon: (direction === "row" ? "split-right" : "split-down") as IconName,
+          label: `Move to a new frame ${where}`,
+          description: `Moves this tab into a new frame ${where}.`
+        }))
+      ]
+    : []
+  // An item that wouldn't change the layout is disabled, saying why.
+  const why = (action: LayoutAction) => {
+    const can = canApply(layout, action, itemKey)
+    if (can === "yes") return undefined
+    if (can === "same") return "It's already there."
+    const alone = frames(layout.root).length === 1 && frame.tabs.length === 1
+    return action.type === "move" && !alone ? "No frame there." : "Needs another tab or pane."
+  }
+  const splittable = (direction: Direction) =>
+    tab !== undefined && canApply(layout, { type: "split", frameId: frame.id, direction }) === "yes"
   const splitWith = (direction: Direction) => {
     if (!tab) return
     store.focusTab(tab.id)
@@ -1041,50 +1058,36 @@ function TabActions({
       <MenuSeparator />
       <MenuItem
         icon="split-right"
-        disabled={!tab}
-        description="Shows this tab in a second frame on the right too."
+        disabled={!splittable("row")}
+        description={
+          splittable("row") ? "Shows this tab in a second frame on the right too." : "Nothing shown to split."
+        }
         onClick={() => splitWith("row")}
       >
         Split right
       </MenuItem>
       <MenuItem
         icon="split-down"
-        disabled={!tab}
-        description="Shows this tab in a second frame below too."
+        disabled={!splittable("column")}
+        description={splittable("column") ? "Shows this tab in a second frame below too." : "Nothing shown to split."}
         onClick={() => splitWith("column")}
       >
         Split down
       </MenuItem>
-      {moves.flatMap((move) =>
-        move.to && tab
-          ? [
-              <MenuItem
-                key={move.label}
-                icon={move.icon}
-                description={move.description}
-                onClick={() => store.move(tab.id, move.to!)}
-              >
-                {move.label}
-              </MenuItem>
-            ]
-          : []
-      )}
-      <MenuItem
-        icon="split-right"
-        disabled={!tab}
-        description="Moves this tab into a new frame on the right."
-        onClick={() => tab && store.moveToSplit(tab.id, "row")}
-      >
-        Move to a new frame on the right
-      </MenuItem>
-      <MenuItem
-        icon="split-down"
-        disabled={!tab}
-        description="Moves this tab into a new frame below."
-        onClick={() => tab && store.moveToSplit(tab.id, "column")}
-      >
-        Move to a new frame below
-      </MenuItem>
+      {moves.map((move) => {
+        const reason = why(move.action)
+        return (
+          <MenuItem
+            key={move.label}
+            icon={move.icon}
+            disabled={reason !== undefined}
+            description={reason ?? move.description}
+            onClick={() => reason === undefined && store.act(move.action)}
+          >
+            {move.label}
+          </MenuItem>
+        )
+      })}
       {split && (
         <MenuItem
           icon="expand"
