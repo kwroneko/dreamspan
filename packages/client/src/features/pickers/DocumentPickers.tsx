@@ -213,8 +213,6 @@ export interface CardPickerProps extends PickerBodyProps {
   /** "New card…" at the end of the list. */
   readonly create?: NewDocument | undefined
   readonly createPersona?: NewDocument | undefined
-  /** Lists personas alone, with no filter to change it: for choosing who the user is. */
-  readonly personasOnly?: boolean | undefined
   /** A row's first tooltip line where choosing does something else than opening it in an editor. */
   readonly rowHint?: ((card: { readonly persona: boolean; readonly current: boolean }) => string) | undefined
 }
@@ -280,12 +278,11 @@ export function CardPicker({
   onChosen,
   focus,
   focusRef,
-  personasOnly = false,
   rowHint
 }: CardPickerProps) {
   const shell = useAtomValue(shellAtom)
   const [remembered, update] = useCardSwitcherView()
-  const [filter, setFilter] = useState<CardBrowse["filter"]>(persona || personasOnly ? "personas" : "all")
+  const [filter, setFilter] = useState<CardBrowse["filter"]>(persona ? "personas" : "all")
   const browse: CardBrowse = { ...remembered, filter, grouped: false }
   const [query, setQuery] = useState("")
   const search = useRef<HTMLInputElement>(null)
@@ -326,7 +323,7 @@ export function CardPicker({
         inputRef={focus === "search" ? focusRef : search}
         controls={listId}
       />
-      {data && !personasOnly && (
+      {data && (
         <CardBrowseBar
           data={data}
           browse={browse}

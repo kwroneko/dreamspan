@@ -1,7 +1,7 @@
 // The persona locked to a character (DESIGN §2.2, owner 2026-11-18: "an explicit lock
 // per-character"): new single chats with them start as it instead of the account default.
-// Set from a new single chat's persona picker (Always play as this with <Name>, the same
-// switch row as the pickers' Lock for this chat); shown, and cleared, in the character's own
+// Set from a new single chat's persona pickers, the composer's and the Cast tab's (Always play
+// as <Persona> with <Name>, a row under the list); shown, and cleared, in the character's own
 // tab in the chat panel. A lock never changes a chat that has started. Both parts are
 // registered slot entries, so a plugin can replace or drop either. A lock is account data, so
 // another browser tab follows a change at once (the `dreamspan.personaLock` channel) and on focus, as
@@ -14,7 +14,7 @@ import { useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
 import { showToast } from "../../ui/Toast.tsx"
-import { PickerLockRow } from "../pickers/PickerParts.tsx"
+import { Checkbox } from "../../ui/Choice.tsx"
 import type { PendingChat } from "../chat/pendingChat.ts"
 import { chatCharacterRows, pendingPersonaPickerRows } from "../chat/presentation.tsx"
 
@@ -65,30 +65,39 @@ const writeLock = (action: ReturnType<typeof useAction>, entityId: EntityId, per
 
 const lockHint = (name: string) => `New chats with ${name} start with this persona. Chats already started keep theirs.`
 
-/** At the top of a new single chat's persona picker: lock the persona picked to its character. */
+/**
+ * Under the list of a new single chat's persona pickers (the composer's and the Cast tab's): lock
+ * the persona picked to its character. A row of the list's own size and inset, not a settings
+ * switch; none while no persona is picked.
+ */
 function PendingPersonaLock({ pending }: { pending: PendingChat }) {
   const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
   // The chat's one character now: none once another joins in the Cast tab.
   const card = pending.lockCard(state)
   const lock = usePersonaLock(card?.entityId ?? null)
   const action = useAction()
-  if (card === null) return null
-  const persona = state.persona === card.entityId ? null : state.persona
-  const locked = persona !== null && lock.persona?.entityId === persona
+  const persona = card === null || state.persona === card.entityId ? null : pending.playing(state)
+  if (card === null || persona === null) return null
+  const locked = lock.persona?.entityId === persona.entityId
   return (
-    <PickerLockRow
-      checked={locked}
-      disabled={persona === null || !lock.ready || action.pending}
-      onCheckedChange={(on) =>
-        void writeLock(action, card.entityId, on ? persona : null).then((result) => {
-          if (!result.ok)
-            showToast({ title: "Couldn’t change who you play with them", description: result.error.message })
-        })
-      }
-      hint={persona === null ? `Choose a persona before locking it to ${card.name}.` : lockHint(card.name)}
-    >
-      Always play as this with {card.name}
-    </PickerLockRow>
+    <div className="mx-2 flex min-h-9 shrink-0 items-center rounded-md px-2 py-2 hover:bg-surface-raised">
+      <Checkbox
+        checked={locked}
+        disabled={!lock.ready || action.pending}
+        hintInline={false}
+        onCheckedChange={(on) =>
+          void writeLock(action, card.entityId, on ? persona.entityId : null).then((result) => {
+            if (!result.ok)
+              showToast({ title: "Couldn’t change who you play with them", description: result.error.message })
+          })
+        }
+        hint={lockHint(card.name)}
+      >
+        <span className="[overflow-wrap:anywhere]">
+          Always play as {persona.name} with {card.name}
+        </span>
+      </Checkbox>
+    </div>
   )
 }
 

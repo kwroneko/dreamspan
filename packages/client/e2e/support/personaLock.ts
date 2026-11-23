@@ -5,13 +5,16 @@
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./layoutAudit.ts"
-import { openPanel, panelTab } from "./panel.ts"
+import { closePanel, openPanel, panelTab } from "./panel.ts"
 import { addToCast } from "./cast.ts"
 import { loginCookie, withCookie } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 
 const playing = (page: Page, name: string) =>
   page.getByRole("button", { name: `Playing as ${name}. Change your persona`, exact: true })
+/** The composer's speaker chip on a new chat's page: Speak as, and Your persona under it. */
+const speaking = (page: Page, name: string) =>
+  page.getByRole("button", { name: `Speaking as ${name}. Change the speaker`, exact: true })
 
 export function personaLockTests() {
   test.describe("persona lock", () => {
@@ -61,23 +64,37 @@ export function personaLockTests() {
           const lock = () => admin((api) => api.GetPersonaLock({ entityId: harbor.entityId }))
           const name = (card: { label: string }) => card.label
 
-          // The new chat starts with the account default; the picker offers the lock, off.
+          // The new chat starts with the account default. The composer's speaker chip, where a
+          // user picks their persona on a new chat's page, offers the lock, off.
           await page.goto(`${server().url}/cards/${harbor.entityId}/chat`)
-          await openPanel(page, "Cast")
-          await expect(playing(page, `${name(mapmaker)} (default)`)).toBeVisible()
-          await playing(page, `${name(mapmaker)} (default)`).click()
-          const picker = page.getByRole("dialog", { name: "Your persona" })
-          const toggle = picker.getByRole("switch", { name: `Always play as this with ${name(harbor)}`, exact: true })
-          await expect(toggle).toBeVisible()
-          await expect(toggle).not.toBeChecked()
-          await expect(toggle).toHaveAccessibleDescription(
+          await expect(speaking(page, name(mapmaker))).toBeVisible()
+          await speaking(page, name(mapmaker)).click()
+          const picker = page.getByRole("dialog", { name: "Speak as" })
+          // The row names the persona picked; it follows the pick.
+          const lockRow = (persona: string) =>
+            picker.getByRole("checkbox", { name: `Always play as ${persona} with ${name(harbor)}`, exact: true })
+          await expect(lockRow(name(mapmaker))).toBeVisible()
+          await expect(lockRow(name(mapmaker))).not.toBeChecked()
+          await expect(lockRow(name(mapmaker))).toHaveAccessibleDescription(
             `New chats with ${name(harbor)} start with this persona. Chats already started keep theirs.`
           )
-          await picker.getByRole("option", { name: name(pilot), exact: true }).click()
-          await expect(playing(page, name(pilot))).toBeVisible()
+          // A compact row of the list's own inset, under the list, not a settings switch above it.
+          const listBox = (await picker.getByRole("listbox").boundingBox())!
+          const rowBox = (await lockRow(name(mapmaker)).boundingBox())!
+          expect(rowBox.y).toBeGreaterThanOrEqual(listBox.y + listBox.height - 1)
+          expect(rowBox.height).toBeLessThanOrEqual(20)
+          // The row is under the list on every tab; picking a persona is on Personas.
+          await picker.getByRole("tab", { name: "Personas", exact: true }).click()
+          await expect(lockRow(name(mapmaker))).toBeVisible()
+          await picker
+            .getByRole("tabpanel", { name: "Personas" })
+            .getByRole("option", { name: name(pilot), exact: true })
+            .click()
+          await expect(speaking(page, name(pilot))).toBeVisible()
           // Picking a persona alone locks nothing (DESIGN §2.2: it affects only this chat).
           expect(await lock()).toBeNull()
-          await playing(page, name(pilot)).click()
+          await speaking(page, name(pilot)).click()
+          const toggle = lockRow(name(pilot))
           await expect(toggle).not.toBeChecked()
           await picker.screenshot({ path: info.outputPath(`picker-unlocked.png`), animations: "disabled" })
           await expectLayout(page, info, `persona-lock-picker-unlocked-${suffix}`, { scope: '[role="dialog"]' })
@@ -90,6 +107,7 @@ export function personaLockTests() {
 
           // The pending chat's character tab shows it.
           const row = page.locator("[data-persona-lock]")
+          await openPanel(page, "Cast")
           await panelTab(page, name(harbor))
           await expect(row).toContainText(`You play ${name(pilot)} with ${name(harbor)}`)
 
@@ -166,17 +184,32 @@ export function personaLockTests() {
         )
         await page.setViewportSize({ width, height: 900 })
         await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-        const toggle = page.getByRole("switch", { name: `Always play as this with ${harbor.label}`, exact: true })
+        const toggle = page.getByRole("checkbox", {
+          name: `Always play as ${pilot.label} with ${harbor.label}`,
+          exact: true
+        })
 
-        // A character joining the new chat makes it a group: the picker no longer offers the lock.
+        // Both pickers show the lock, the same row: the composer's and the Cast tab's.
         await page.goto(`${server().url}/cards/${harbor.entityId}/chat`)
-        await openPanel(page, "Cast")
-        await playing(page, pilot.label).click()
+        await speaking(page, pilot.label).click()
+        await expect(page.getByRole("dialog", { name: "Speak as" })).toBeVisible()
         await expect(toggle).toBeChecked()
         await page.keyboard.press("Escape")
+        await openPanel(page, "Cast")
+        await playing(page, pilot.label).click()
+        await expect(page.getByRole("dialog", { name: "Your persona" })).toBeVisible()
+        await expect(toggle).toBeChecked()
+        await page.keyboard.press("Escape")
+        // A character joining the new chat makes it a group: neither picker offers the lock.
         await addToCast(page, partner.label)
         await playing(page, pilot.label).click()
         await expect(page.getByRole("dialog", { name: "Your persona" })).toBeVisible()
+        await expect(toggle).toHaveCount(0)
+        await page.keyboard.press("Escape")
+        // On a phone the panel is a sheet over the composer.
+        if (width < 700) await closePanel(page)
+        await speaking(page, pilot.label).click()
+        await expect(page.getByRole("dialog", { name: "Speak as" })).toBeVisible()
         await expect(toggle).toHaveCount(0)
         await page.keyboard.press("Escape")
 

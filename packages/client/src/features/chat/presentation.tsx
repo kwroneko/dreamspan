@@ -43,7 +43,13 @@ export const castSections = defineSlot<{ session: ChatSession }>("chat.cast-sect
 export const pendingCastSections = defineSlot<{ pending: import("./pendingChat.ts").PendingChat }>(
   "chat.pending-cast-sections"
 )
-/** Rows at the top of a chat not made yet's persona picker: the persona lock (DESIGN §2.2). */
+/**
+ * The picker of who speaks and who the user plays (SpeakerSwitcher.tsx), one registered entry
+ * (`chat.card-switcher`) that every place picking a speaker or a persona renders through
+ * `CardSwitcher`: a plugin replaces it by registering its own in place of that id.
+ */
+export const cardSwitchers = defineSlot<import("./SpeakerSwitcher.tsx").SpeakerSwitcherProps>("chat.card-switcher")
+/** Rows under the list of a chat not made yet's persona pickers: the persona lock (DESIGN §2.2). */
 export const pendingPersonaPickerRows = defineSlot<{ pending: import("./pendingChat.ts").PendingChat }>(
   "chat.pending-persona-picker-rows"
 )
