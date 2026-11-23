@@ -798,7 +798,6 @@ export function Composer({
               base: "",
               bare: true,
               plain: guidance,
-              expand: false,
               textActions: false,
               readOnly: !textReady,
               placeholder,
