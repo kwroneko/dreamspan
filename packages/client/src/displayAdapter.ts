@@ -103,7 +103,7 @@ export const displayListResult = (value: unknown): ReadonlyArray<RegexScript> =>
   return scripts
 }
 
-const BODY_KINDS = ["merge", "history", "lcm-boundary", "lcm-tabs", "summary", "threads", "text"]
+const BODY_KINDS = ["merge", "history", "hidden-history", "lcm-boundary", "lcm-tabs", "summary", "threads", "text"]
 /** Validate data rows before any render closures are reattached, and rebuild each from the
  * contract's own fields: nothing else an answer carries (extra properties, a forged prototype
  * key) reaches the page's objects. Infinity is the existing empty-range sentinel; NaN,

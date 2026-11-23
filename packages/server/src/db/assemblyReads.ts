@@ -44,6 +44,7 @@ import {
 import type { RequestImage } from "../assembler/types.ts"
 import { sqlSources, readImageTokenFacts } from "./assemblySources.ts"
 import { previousStartIn } from "./historyStart.ts"
+import { historyGap, sentSummaryNotes } from "./historyGap.ts"
 import { displayThrough } from "./displayPath.ts"
 import { readDefaults, readGlobalRegex } from "./generationSettings.ts"
 import { readCardPromptUse, readLorebookPresets } from "./lorebookSettings.ts"
@@ -436,12 +437,20 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           // The regular snapshot stays unchanged: these images are still drafts.
           imagePreview = nextImages({ request: { messages }, inputs: { model: resolved } })
         }
+        const summarizedThrough = (sources.pins().lcm?.cursorDepth ?? -1) < 0 ? null : sources.pins().lcm!.cursorDepth
+        // Why the messages above the start aren't sent, for the timeline's boundary lines.
+        const gap =
+          next instanceof AssemblyFailed || !start
+            ? null
+            : yield* historyGap(sql, chatId, nextFork, sources.pins(), start.depth, summarizedThrough ?? -1)
+        const summaryNotes = next instanceof AssemblyFailed ? [] : yield* sentSummaryNotes(sql, userId, chatId, next)
         const boundary = {
           ...estimate,
           forkId: nextFork,
           leafSlotId: sources.pins().target.parentSlotId,
-          historyStart: start ? { slotId: start.slotId, depth: start.depth } : null,
-          summarizedThrough: (sources.pins().lcm?.cursorDepth ?? -1) < 0 ? null : sources.pins().lcm!.cursorDepth,
+          historyStart: start ? { slotId: start.slotId, depth: start.depth, ...(gap ?? {}) } : null,
+          ...(summaryNotes.length > 0 ? { summaryNotes } : {}),
+          summarizedThrough,
           // The next request's images, and those whose model hasn't counted them (for ImageTokenCounts).
           ...imagePreview,
           ...(next instanceof AssemblyFailed || !next.imagesLeftOut ? {} : { images: next.imagesLeftOut })

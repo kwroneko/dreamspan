@@ -146,6 +146,8 @@ export interface TimelineInputV1 {
   readonly hasBudget: boolean
   readonly assemblyError: boolean
   readonly historyDivider: number
+  /** Where the line saying the messages above are hidden goes (an entry index); absent or -1: none. */
+  readonly hiddenDivider?: number
   readonly divider: number
   readonly summaries: boolean
   readonly lcm: {
