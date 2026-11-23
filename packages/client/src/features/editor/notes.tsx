@@ -294,14 +294,14 @@ const WHEN: ReadonlyArray<{ readonly value: When; readonly label: string; readon
   {
     value: "own_turn",
     label: "On its card's turn",
-    description: "Sent only when this note’s own card speaks, including a new version or continuation."
+    description: "Sent only when this note’s own card speaks, including a new swipe or continuation."
   },
   { value: "always", label: "Always", description: "Sent on every turn while it's on." },
   {
     value: "turn",
     label: "On a chosen character's turn",
     description:
-      "Sent only when one of the chosen characters writes the message, a new version or continuation of theirs included."
+      "Sent only when one of the chosen characters writes the message, a new swipe or continuation of theirs included."
   },
   {
     value: "not_muted",

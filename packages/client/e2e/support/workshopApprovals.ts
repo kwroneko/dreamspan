@@ -190,8 +190,8 @@ export function workshopApprovalTests() {
           const regenerate = async () => {
             await showActions(opening)
             await opening
-              .getByRole("group", { name: "Versions", exact: true })
-              .getByRole("button", { name: "Generate another version", exact: true })
+              .getByRole("group", { name: "Swipes", exact: true })
+              .getByRole("button", { name: "Generate another swipe", exact: true })
               .click()
           }
           const before = provider.bodies.length
@@ -199,7 +199,7 @@ export function workshopApprovalTests() {
           const warning = page.getByRole("dialog", { name: "This reply changed things outside the chat" })
           await expect(warning).toContainText(CREATED)
           await expect(warning).toContainText(
-            "A new version keeps this reply’s own steps and changes and undoes none of these, but the assistant may make them again."
+            "A new swipe keeps this reply’s own steps and changes and undoes none of these, but the assistant may make them again."
           )
           await shot("warning")
           await expectLayout(page, info, `workshop-approvals-warning-${width}-${theme}`, { scope: '[role="dialog"]' })
@@ -210,7 +210,7 @@ export function workshopApprovalTests() {
           // Undo them, then make a new version: the card is undone, and the run carries on from
           // the new first message without asking (allowed in this workshop now).
           await regenerate()
-          await warning.getByRole("button", { name: "Undo them, then make a new version", exact: true }).click()
+          await warning.getByRole("button", { name: "Undo them, then make a new swipe", exact: true }).click()
           await expect.poll(async () => (await effects()).filter((e) => e.undoneAt !== null).length).toBe(1)
           await expect.poll(async () => (await effects()).length, { timeout: 30_000 }).toBe(3)
           await expect(page.getByRole("article").last().getByText(WORKSHOP_ANSWER)).toBeVisible({ timeout: 30_000 })

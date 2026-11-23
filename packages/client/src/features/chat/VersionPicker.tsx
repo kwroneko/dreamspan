@@ -78,11 +78,11 @@ function Found({ text, query }: { text: string; query: string }) {
 const VERSION_SORTS = ["written", "newest", "longest", "shortest", "starred"] as const
 type VersionSort = (typeof VERSION_SORTS)[number]
 const SORTS: Record<VersionSort, { label: string; hint: string }> = {
-  written: { label: "Order written", hint: "Lists versions in the order they were written" },
-  newest: { label: "Newest first", hint: "Lists the latest versions first" },
-  longest: { label: "Longest first", hint: "Lists the longest versions first" },
-  shortest: { label: "Shortest first", hint: "Lists the shortest versions first" },
-  starred: { label: "Starred first", hint: "Lists starred versions first, then the rest in the order written" }
+  written: { label: "Order written", hint: "Lists swipes in the order they were written" },
+  newest: { label: "Newest first", hint: "Lists the latest swipes first" },
+  longest: { label: "Longest first", hint: "Lists the longest swipes first" },
+  shortest: { label: "Shortest first", hint: "Lists the shortest swipes first" },
+  starred: { label: "Starred first", hint: "Lists starred swipes first, then the rest in the order written" }
 }
 
 /** What the list shows of a message's versions: those with the text (any case), in the sort's order. */
@@ -213,16 +213,16 @@ function Row({
             className="mt-0.5 size-4 shrink-0 accent-accent"
             checked={ticked}
             onChange={onTick}
-            aria-label={`Compare version ${number}`}
+            aria-label={`Compare swipe ${number}`}
           />
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">{body}</span>
         </label>
       ) : (
-        <Tooltip label="Shows this message version.">
+        <Tooltip label="Shows this swipe.">
           <button
             type="button"
             aria-current={current || undefined}
-            aria-label={`Version ${number}, ${writer}${current ? ", shown" : ""}: ${preview(text).slice(0, 80)}`}
+            aria-label={`Swipe ${number}, ${writer}${current ? ", shown" : ""}: ${preview(text).slice(0, 80)}`}
             className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
             onClick={onPick}
           >
@@ -233,8 +233,8 @@ function Row({
       {!comparing && (
         <div className={`flex shrink-0 items-center py-0.5 ${rowActionInsetClass}`}>
           <IconButton
-            label={version.starred ? `Unstar version ${number}` : `Star version ${number}`}
-            hint={`Click to ${version.starred ? "unstar" : "star"} version ${number}`}
+            label={version.starred ? `Unstar swipe ${number}` : `Star swipe ${number}`}
+            hint={`Click to ${version.starred ? "unstar" : "star"} swipe ${number}`}
             icon="star"
             filled={version.starred}
             aria-pressed={version.starred}
@@ -242,10 +242,8 @@ function Row({
             onClick={() => onFlag({ starred: !version.starred })}
           />
           <IconButton
-            label={
-              version.hidden ? `Show version ${number} in the arrows again` : `Hide version ${number} from the arrows`
-            }
-            hint={`Click to ${version.hidden ? "show" : "hide"} version ${number} ${version.hidden ? "in" : "from"} the arrows`}
+            label={version.hidden ? `Show swipe ${number} in the arrows again` : `Hide swipe ${number} from the arrows`}
+            hint={`Click to ${version.hidden ? "show" : "hide"} swipe ${number} ${version.hidden ? "in" : "from"} the arrows`}
             icon={version.hidden ? "eye" : "ghost"}
             onClick={() => onFlag({ hidden: !version.hidden })}
           />
@@ -304,7 +302,7 @@ function PickerBody({
     return () => cancelAnimationFrame(frame)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once the list is there
   }, [open, versions === null])
-  if (versions === null) return <p className="px-1 py-2 text-sm text-muted">Loading the versions…</p>
+  if (versions === null) return <p className="px-1 py-2 text-sm text-muted">Loading the swipes…</p>
   const numbers = new Map(versions.map((v, i) => [v.id, i + 1]))
   const numberOf = (id: Version["id"]) => numbers.get(id)
   const starred = versions.filter((v) => v.starred).length
@@ -369,7 +367,7 @@ function PickerBody({
           </Button>
         ) : (
           <Button
-            hint="Compares the selected message versions."
+            hint="Compares the selected swipes."
             className="h-8"
             disabled={versions.length < 2}
             onClick={() => setTicked([])}
@@ -382,22 +380,22 @@ function PickerBody({
       <div className="flex min-w-0 items-center gap-2">
         <Input
           type="search"
-          aria-label="Find in versions"
-          placeholder="Find in versions"
+          aria-label="Find in swipes"
+          placeholder="Find in swipes"
           className="h-8 min-w-0 flex-1"
           value={view.query}
           onChange={(e) => onView({ ...view, query: e.currentTarget.value })}
         />
         <Menu
-          label="Sort versions"
-          hint="Chooses how versions are ordered"
+          label="Sort swipes"
+          hint="Chooses how swipes are ordered"
           align="end"
           trigger={
             <Button
-              hint="Chooses how versions are ordered."
+              hint="Chooses how swipes are ordered."
               variant="ghost"
               className="h-8 shrink-0 gap-1 px-2"
-              aria-label={`Sort versions: ${SORTS[view.sort].label}`}
+              aria-label={`Sort swipes: ${SORTS[view.sort].label}`}
             >
               {SORTS[view.sort].label}
               <Icon name="down" />
@@ -418,29 +416,29 @@ function PickerBody({
       </div>
       {comparing && (
         <p className="text-sm text-muted" role="status">
-          Tick two versions to compare them side by side{ticked.length === 1 ? ": one more" : "."}
+          Tick two swipes to compare them side by side{ticked.length === 1 ? ": one more" : "."}
         </p>
       )}
       <div ref={list} className="relative -mx-1 min-h-0 flex-1 overflow-y-auto px-1">
         {shown.length === 0 && hidden.length === 0 && needle !== "" ? (
           <p className="py-2 text-sm text-muted">
-            No {filter === "starred" ? "starred " : ""}version has “{query.trim()}”.
+            No {filter === "starred" ? "starred " : ""}swipe has “{query.trim()}”.
           </p>
         ) : shown.length === 0 && filter === "starred" && hidden.length === 0 ? (
-          <p className="py-2 text-sm text-muted">No starred versions yet. Star one with its ☆ button.</p>
+          <p className="py-2 text-sm text-muted">No starred swipes yet. Star one with its ☆ button.</p>
         ) : (
-          <ol className="flex flex-col gap-0.5" aria-label="Versions">
+          <ol className="flex flex-col gap-0.5" aria-label="Swipes">
             {shown.map(row)}
           </ol>
         )}
         {hidden.length > 0 && (
           <details className="mt-2" open={comparing || undefined}>
-            <Tooltip label="Shows message versions hidden from the arrows.">
+            <Tooltip label="Shows swipes hidden from the arrows.">
               <summary className="cursor-pointer rounded-md px-2 py-1 text-sm text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus">
                 Hidden {hidden.length}: left out of the arrows
               </summary>
             </Tooltip>
-            <ol className="mt-1 flex flex-col gap-0.5" aria-label="Hidden versions">
+            <ol className="mt-1 flex flex-col gap-0.5" aria-label="Hidden swipes">
               {hidden.map(row)}
             </ol>
           </details>
@@ -468,7 +466,7 @@ function Compare({
   const column = (version: Version, index: number) => {
     const number = numberOf(version.id) ?? 0
     return (
-      <section key={version.id} aria-label={`Version ${number}`} className="flex min-w-0 flex-col gap-2">
+      <section key={version.id} aria-label={`Swipe ${number}`} className="flex min-w-0 flex-col gap-2">
         <header className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <span className="font-semibold tabular-nums">#{number}</span>
           <span className="min-w-0 text-xs text-muted [overflow-wrap:anywhere]">{writerOf(version, numberOf)}</span>
@@ -480,7 +478,7 @@ function Compare({
           )}
           <StatusBadges version={version} />
           <span className="flex-1" />
-          <Button hint="Shows this message version." className="h-8" onClick={() => onPick(version)}>
+          <Button hint="Shows this swipe." className="h-8" onClick={() => onPick(version)}>
             Show #{number}
           </Button>
         </header>
@@ -495,7 +493,7 @@ function Compare({
       open
       onOpenChange={(open) => !open && onClose()}
       wide
-      title={`Version ${numberOf(pair[0].id)} and version ${numberOf(pair[1].id)}`}
+      title={`Swipe ${numberOf(pair[0].id)} and swipe ${numberOf(pair[1].id)}`}
     >
       <>
         <div>
@@ -548,10 +546,10 @@ export function VersionPicker({
   const hiddenCount = versions?.filter((v) => v.hidden).length ?? 0
   const counter = count === 1 ? "1/1" : position >= 0 ? `${position + 1}/${count}` : `${count}`
   const label =
-    (count === 1 ? "Version 1 of 1" : position >= 0 ? `Version ${position + 1} of ${count}` : `${count} versions`) +
+    (count === 1 ? "Swipe 1 of 1" : position >= 0 ? `Swipe ${position + 1} of ${count}` : `${count} swipes`) +
     (hiddenCount > 0 ? `, ${hiddenCount} hidden` : "") +
-    ": choose a version"
-  const title = `Versions of message #${positionOf(entry) + 1}`
+    ": choose a swipe"
+  const title = `Swipes of message #${positionOf(entry) + 1}`
   const openChange = (next: boolean) => {
     setOpen(next)
     if (next) onOpen()
@@ -581,7 +579,7 @@ export function VersionPicker({
   if (narrow)
     picker = (
       <>
-        <Tooltip label={count < 2 ? "No other versions yet." : "Choose a version"}>
+        <Tooltip label={count < 2 ? "No other swipes yet." : "Choose a swipe"}>
           <Button
             variant="ghost"
             disabled={count < 2}
@@ -607,7 +605,7 @@ export function VersionPicker({
         triggerLabel={label}
         triggerClassName={`${buttonClass("ghost")} ${counterClass}`}
         triggerDisabled={count < 2}
-        hint={count < 2 ? "No other versions yet." : "Choose a version"}
+        hint={count < 2 ? "No other swipes yet." : "Choose a swipe"}
         title={title}
         side="top"
         align="end"

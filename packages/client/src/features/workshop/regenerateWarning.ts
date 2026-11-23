@@ -31,7 +31,7 @@ const notify = () => {
  */
 export const warningText = (action: "regenerate" | "resume-step") =>
   action === "regenerate"
-    ? "Made by the replies its run wrote after this one. A new version keeps this reply’s own steps and changes and undoes none of these, but the assistant may make them again."
+    ? "Made by the replies its run wrote after this one. A new swipe keeps this reply’s own steps and changes and undoes none of these, but the assistant may make them again."
     : "Made from this step on, or by the replies its run wrote after this one. Carrying on keeps the steps before it and their changes and undoes none of these, but the assistant may make them again."
 
 /**

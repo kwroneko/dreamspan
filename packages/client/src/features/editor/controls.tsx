@@ -581,7 +581,7 @@ export function TriggersField({
     <Fieldset
       legend={<FieldLabel store={store} field={field} label={label} />}
       aboutLabel={label}
-      about="Choose which kinds of reply include this text. None selected means all kinds. New version includes swipes and regenerations; Summary is a summary request."
+      about="Choose which kinds of reply include this text. None selected means all kinds. A new swipe of a reply counts as both Swipe and Regenerate; a summary counts as Quiet."
       className="gap-1.5"
     >
       <div className="flex flex-wrap gap-x-4 gap-y-1.5">

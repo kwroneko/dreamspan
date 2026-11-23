@@ -61,7 +61,7 @@ test("guidance editing waits for Enter sends, then obeys Never", async ({ page }
     await page.goto(`${server().url}/chats/${chat.id}`)
     await page.getByRole("button", { name: "Edit this guidance", exact: true }).click()
     const box = page.getByTestId("composer")
-    const submit = page.getByRole("button", { name: "New version", exact: true })
+    const submit = page.getByRole("button", { name: "New swipe", exact: true })
     await expect.poll(() => held.length).toBeGreaterThan(0)
     await expect(submit).toBeDisabled()
     const requests = provider.requests.length

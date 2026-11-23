@@ -16,7 +16,7 @@ export function LearnContextLimit({ version }: { version: Version }) {
       {saved ? (
         <p role="status">
           Saved: the model&rsquo;s context size is {limit.tokens.toLocaleString()} tokens. › on the reply generates
-          another version to try again.
+          another swipe to try again.
         </p>
       ) : (
         <div className="flex flex-wrap items-center gap-2">

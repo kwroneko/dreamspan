@@ -42,20 +42,20 @@ test("the text of a version being written, and of an edit, survives a reload and
   )
   await open(page, chat.id)
   const row = page.locator("article[data-slot]").first()
-  await messageMenu(row, "Write your own version")
-  await row.getByLabel("Your version", { exact: true }).fill("An irreplaceable draft assembled from several swipes.")
+  await messageMenu(row, "Write your own swipe")
+  await row.getByLabel("Your swipe", { exact: true }).fill("An irreplaceable draft assembled from several swipes.")
   await page.waitForTimeout(1000)
   await page.reload()
   // The editor is open again where it was, with its text.
   await expectTextBox(
-    row.getByLabel("Your version", { exact: true }),
+    row.getByLabel("Your swipe", { exact: true }),
     "An irreplaceable draft assembled from several swipes."
   )
-  await row.getByRole("button", { name: "Add as a new version" }).click()
+  await row.getByRole("button", { name: "Add as a new swipe" }).click()
   await expect(row.locator(".markdown")).toHaveText("An irreplaceable draft assembled from several swipes.")
   await page.reload()
   await expect(row.locator(".markdown")).toHaveText("An irreplaceable draft assembled from several swipes.")
-  await expect(row.getByLabel("Your version", { exact: true })).toHaveCount(0)
+  await expect(row.getByLabel("Your swipe", { exact: true })).toHaveCount(0)
 
   await showActions(row)
   await row.getByRole("button", { name: "Edit", exact: true }).click()
@@ -81,13 +81,13 @@ test("text typed into a message editor while the server is down survives closing
   )
   await open(page, chat.id)
   const row = page.locator("article[data-slot]").first()
-  await messageMenu(row, "Write your own version")
-  await row.getByLabel("Your version", { exact: true }).fill("Server-saved prefix.")
+  await messageMenu(row, "Write your own swipe")
+  await row.getByLabel("Your swipe", { exact: true }).fill("Server-saved prefix.")
   await page.waitForTimeout(1000)
   // The server goes away with the tab still open; what's typed now never reaches it.
   await server().pause()
   const text = "Server-saved prefix. An irreplaceable paragraph written while the connection is down."
-  await row.getByLabel("Your version", { exact: true }).fill(text)
+  await row.getByLabel("Your swipe", { exact: true }).fill(text)
   await page.waitForTimeout(1000)
   await page.close()
   await server().restart()
@@ -96,13 +96,13 @@ test("text typed into a message editor while the server is down survives closing
   const reopened = await context.newPage()
   await reopened.goto(`${server().url}/chats/${chat.id}`)
   const again = reopened.locator("article[data-slot]").first()
-  await expectTextBox(again.getByLabel("Your version", { exact: true }), text)
+  await expectTextBox(again.getByLabel("Your swipe", { exact: true }), text)
   // On the server now: once the version is saved, a reload doesn't bring the editor back.
-  await again.getByRole("button", { name: "Add as a new version" }).click()
+  await again.getByRole("button", { name: "Add as a new swipe" }).click()
   await expect(again.locator(".markdown")).toHaveText(text)
   await reopened.reload()
   await expect(again.locator(".markdown")).toHaveText(text)
-  await expect(again.getByLabel("Your version", { exact: true })).toHaveCount(0)
+  await expect(again.getByLabel("Your swipe", { exact: true })).toHaveCount(0)
 })
 
 const admin = <A>(use: (api: Client) => Effect.Effect<A, unknown>) =>
@@ -157,19 +157,19 @@ for (const kind of ["Write", "Edit"] as const) {
     })
     await open(page, chat.id)
     const row = page.locator(`article[data-slot="${entry.slotId}"]`)
-    if (kind === "Write") await messageMenu(row, "Write your own version")
+    if (kind === "Write") await messageMenu(row, "Write your own swipe")
     else {
       await showActions(row)
       await row.getByRole("button", { name: "Edit", exact: true }).click()
     }
-    const box = row.getByLabel(kind === "Write" ? "Your version" : "Message text", { exact: true })
+    const box = row.getByLabel(kind === "Write" ? "Your swipe" : "Message text", { exact: true })
     const submitted = "The text saved as the version."
     const later = "The text saved as the version. More typed while it was being saved."
     await box.fill(submitted)
     await expect
       .poll(async () => (await admin((api) => api.MessageDrafts({ chatId: chat.id })))[0]?.content)
       .toBe(submitted)
-    await row.getByRole("button", { name: kind === "Write" ? "Add as a new version" : "Save", exact: true }).click()
+    await row.getByRole("button", { name: kind === "Write" ? "Add as a new swipe" : "Save", exact: true }).click()
     await expect.poll(() => release !== null).toBe(true)
     await box.fill(later)
     await expect.poll(() => contents(page)).toContain(later)
@@ -214,7 +214,7 @@ test("text replayed from this browser that the server refused is retried on the 
   })
   await open(page, chat.id)
   const offline = `${first.content} offline A`
-  await page.getByLabel("Your version", { exact: true }).fill(offline)
+  await page.getByLabel("Your swipe", { exact: true }).fill(offline)
   await expect.poll(() => contents(page)).toContain(offline)
   await page.close()
   // Another device saves a small change to the same draft.
@@ -251,7 +251,7 @@ test("text replayed from this browser that the server refused is retried on the 
     })
   })
   await back.goto(`${server().url}/chats/${chat.id}`)
-  const box = back.getByLabel("Your version", { exact: true })
+  const box = back.getByLabel("Your swipe", { exact: true })
   await expectTextBox(box, offline)
   await expect(back.getByRole("alert")).toContainText("The text isn’t saved as a draft yet")
   await box.fill(`${offline}!`)
@@ -262,7 +262,7 @@ test("text replayed from this browser that the server refused is retried on the 
   expect(sent.map((payload) => payload.expectedRowVersion)).toEqual([first.rowVersion, first.rowVersion])
   // So the other device's text went one step back, and the editor says so.
   await expect(back.getByText("This browser's text replaced text saved elsewhere")).toBeVisible()
-  await back.getByRole("button", { name: "Add as a new version" }).click()
+  await back.getByRole("button", { name: "Add as a new swipe" }).click()
   await expect(box).toHaveCount(0)
   // Saved as a version, the other device's text is in the recovered texts.
   const recovered = await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))
@@ -293,7 +293,7 @@ test("a replay from this browser that goes over text saved elsewhere says so unt
   )
   // This browser kept text typed on the first save, which never reached the server.
   await open(page, chat.id)
-  await expectTextBox(page.getByLabel("Your version", { exact: true }), elsewhere)
+  await expectTextBox(page.getByLabel("Your swipe", { exact: true }), elsewhere)
   const offline = "Shared prefix. Typed offline here."
   const copy = makeCopy(
     me.id,
@@ -329,7 +329,7 @@ test("a replay from this browser that goes over text saved elsewhere says so unt
     copy
   )
   await page.reload()
-  const box = page.getByLabel("Your version", { exact: true })
+  const box = page.getByLabel("Your swipe", { exact: true })
   await expectTextBox(box, offline)
   await expect.poll(() => copies(page)).toEqual([])
   const notice = page.getByRole("status").filter({ hasText: "This browser's text replaced text saved elsewhere" })
@@ -348,7 +348,7 @@ test("a replay from this browser that goes over text saved elsewhere says so unt
   await history.getByRole("button", { name: "Restore draft text" }).first().click()
   await expectTextBox(box, `${offline} More.`)
   // Saved as a version, the other text is in the recovered texts.
-  await page.getByRole("button", { name: "Add as a new version" }).click()
+  await page.getByRole("button", { name: "Add as a new swipe" }).click()
   await expect(box).toHaveCount(0)
   const recovered = await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))
   expect(recovered.map((text) => text.content)).toContain(elsewhere)
@@ -361,9 +361,9 @@ test("an older reply keeps its version arrows with one version", async ({ page }
   await page.getByLabel("Message", { exact: true }).fill("Next turn.")
   await page.getByRole("button", { name: "Send", exact: true }).click()
   await expect(page.getByRole("article", { name: "Reply", exact: true })).toHaveCount(2)
-  const versions = first.getByRole("group", { name: "Versions", exact: true })
+  const versions = first.getByRole("group", { name: "Swipes", exact: true })
   await expect(versions).toBeVisible()
-  await expect(versions.getByRole("button", { name: "Generate another version" })).toBeVisible()
+  await expect(versions.getByRole("button", { name: "Generate another swipe" })).toBeVisible()
 })
 
 test("copy text copies the text already shown while a version is streaming", async ({ page, context }) => {
@@ -389,15 +389,15 @@ test("a reply written by hand keeps its speaker and its generating › after the
   const chat = await create()
   await open(page, chat.id)
   const row = await stoppedReply(page, "First turn.")
-  await messageMenu(row, "Write your own version")
-  await row.getByLabel("Your version", { exact: true }).fill("My assembled reply.")
-  await row.getByRole("button", { name: "Add as a new version" }).click()
-  await row.getByRole("button", { name: "Previous version", exact: true }).click()
+  await messageMenu(row, "Write your own swipe")
+  await row.getByLabel("Your swipe", { exact: true }).fill("My assembled reply.")
+  await row.getByRole("button", { name: "Add as a new swipe" }).click()
+  await row.getByRole("button", { name: "Previous swipe", exact: true }).click()
   await showActions(row)
-  await row.getByRole("button", { name: "Delete version", exact: true }).click()
+  await row.getByRole("button", { name: "Delete swipe", exact: true }).click()
   await expect(row.locator(".markdown")).toHaveText("My assembled reply.")
   await expect(row).toHaveAttribute("aria-label", "Reply")
-  await expect(row.getByRole("button", { name: "Generate another version", exact: true })).toBeVisible()
+  await expect(row.getByRole("button", { name: "Generate another swipe", exact: true })).toBeVisible()
 })
 
 test("on a phone, a tap on a long message out of the context shows the start of why", async ({ page }) => {

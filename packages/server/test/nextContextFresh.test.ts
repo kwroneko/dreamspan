@@ -40,7 +40,7 @@ it.live(
         expectedRowVersion: sent.rowVersion
       })
       const edited = yield* next(leaf)
-      assert.strictEqual(edited.warmth?.changed?.reason, "Message 2 was edited, or another of its versions chosen.")
+      assert.strictEqual(edited.warmth?.changed?.reason, "Message 2 was edited, or another of its swipes chosen.")
 
       const me = yield* api.Whoami()
       const other = yield* (yield* Writer).CreateEntity({

@@ -129,11 +129,11 @@ export const registerReplyCommands = () => [
   ...([-1, 1] as const).map((direction) =>
     chatCommands.register({
       id: direction === -1 ? "reply.previous-version" : "reply.next-version",
-      label: direction === -1 ? "Previous version of last reply" : "Next version of last reply",
+      label: direction === -1 ? "Previous swipe of last reply" : "Next swipe of last reply",
       description:
         direction === -1
-          ? "Shows the latest reply's version before the one shown."
-          : "Shows the latest reply's next version; past its last, writes a new one.",
+          ? "Shows the latest reply's swipe before the one shown."
+          : "Shows the latest reply's next swipe; past its last, writes a new one.",
       order: direction === -1 ? 33 : 34,
       icon: direction === -1 ? ("left" as const) : ("right" as const),
       shortcut: { key: direction === -1 ? "ArrowLeft" : "ArrowRight", mod: false },

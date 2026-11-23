@@ -2154,9 +2154,9 @@ test.describe("synthetic library and every app surface", () => {
         }
         if (process.env.LAYOUT_AUDIT_ICON_TOGGLES_ONLY === "1") {
           await go("group-chat", `/chats/${chatId}`)
-          const versions = page.getByRole("button", { name: /choose a version$/ }).last()
+          const versions = page.getByRole("button", { name: /choose a swipe$/ }).last()
           await versions.click()
-          await expect(page.getByRole("dialog", { name: /^Versions of message/ })).toBeVisible()
+          await expect(page.getByRole("dialog", { name: /^Swipes of message/ })).toBeVisible()
           await audit("version-picker")
           await page.keyboard.press("Escape")
           for (const name of ["Cast", "Prompt preset", "Lorebooks", "Notes"]) {

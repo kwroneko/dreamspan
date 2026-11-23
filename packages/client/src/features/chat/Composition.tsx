@@ -97,7 +97,7 @@ export function Composition({
       onFocus={() => used.current()}
     >
       <section
-        aria-label="Version shown"
+        aria-label="Swipe shown"
         data-composition-source
         className="flex min-w-0 flex-col rounded-md border border-border"
       >

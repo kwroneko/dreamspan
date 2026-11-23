@@ -165,7 +165,7 @@ for (const [width, height] of [
       const reply = page.getByRole("article").filter({ hasText: "Guidance: Ethan answers without looking up." })
       await reply.getByRole("button", { name: "Edit this guidance" }).click()
       const bar = page.getByTestId("guidance-edit-bar")
-      await expect(bar).toContainText("Guidance for a new version of Ethan's reply")
+      await expect(bar).toContainText("Guidance for a new swipe of Ethan's reply")
       const frame = await bounds(composerBox(page))
       const barAt = await bounds(bar)
       const textAt = await bounds(box(page))

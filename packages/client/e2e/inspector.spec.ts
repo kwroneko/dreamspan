@@ -283,8 +283,8 @@ test("an earlier reply and a swipe each open their own request from the message'
   await expect(page.getByText(/^swipe, /)).toBeVisible()
   const messages = page.getByRole("region", { name: "Messages" })
   // The earlier reply is in its history, by message and version.
-  await scrollUntil(messages, messages.getByRole("link", { name: "Message 3, version 1" }))
-  await expect(messages.getByRole("link", { name: "Message 3, version 1" })).toBeVisible()
+  await scrollUntil(messages, messages.getByRole("link", { name: "Message 3, swipe 1" }))
+  await expect(messages.getByRole("link", { name: "Message 3, swipe 1" })).toBeVisible()
   await page.getByRole("link", { name: "← Back to the reply" }).click()
   // The earlier reply opens its own request.
   await messageMenu(replies.first(), "Open request inspector")

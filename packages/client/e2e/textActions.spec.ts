@@ -16,7 +16,7 @@ const shots = process.env.SCREENSHOT_DIR
 
 const settled = (page: Page) =>
   expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
-const versions = (message: Locator) => message.getByRole("group", { name: "Versions", exact: true })
+const versions = (message: Locator) => message.getByRole("group", { name: "Swipes", exact: true })
 
 /** Whether a contextmenu event over `target` was cancelled: the browser's menu would not open. */
 const menuPrevented = (target: Locator) =>
@@ -81,7 +81,7 @@ for (const width of [1440, 390])
       )
       // A double-click on a control isn't one on the message.
       await showActions(reply)
-      await versions(reply).getByRole("button", { name: "Generate another version" }).dispatchEvent("dblclick")
+      await versions(reply).getByRole("button", { name: "Generate another swipe" }).dispatchEvent("dblclick")
       await page.waitForTimeout(600)
       await expect(reply.getByRole("textbox", { name: "Message text" })).toHaveCount(0)
 
@@ -91,7 +91,7 @@ for (const width of [1440, 390])
       await expect(toolbar.getByRole("button", { name: "Edit" })).toBeVisible()
       await expect(toolbar.getByRole("button", { name: /Regenerate/ })).toHaveCount(0)
       await expect(reply.getByRole("button", { name: /Regenerate/ })).toHaveCount(0)
-      await versions(reply).getByRole("button", { name: "Generate another version" }).click()
+      await versions(reply).getByRole("button", { name: "Generate another swipe" }).click()
       await expect(versions(reply)).toContainText("2/2")
       await settled(page)
       // ArrowRight outside inputs still generates past the last reply's last version.

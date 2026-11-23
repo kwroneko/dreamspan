@@ -115,7 +115,7 @@ function SourceTitle({
   const label = (
     <>
       {source.label}
-      {source.version !== undefined && `, version ${source.version}`}
+      {source.version !== undefined && `, swipe ${source.version}`}
       {rewritten && " (rewritten)"}
     </>
   )
@@ -410,7 +410,7 @@ function Message({
                     <span key={source.id} className="flex flex-col gap-0.5">
                       <span className="break-words text-muted">
                         {source.label}
-                        {source.version !== undefined && `, version ${source.version}`}
+                        {source.version !== undefined && `, swipe ${source.version}`}
                       </span>
                       {source.activation && (
                         <span className="break-words text-muted">{activationText(source.activation)}</span>

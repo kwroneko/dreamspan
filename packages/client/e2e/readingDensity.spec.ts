@@ -148,7 +148,7 @@ const footer = (message: Locator) =>
     const style = getComputedStyle(el)
     return { display: style.display, position: style.position, opacity: style.opacity }
   })
-const versions = (message: Locator) => message.getByRole("group", { name: "Versions" })
+const versions = (message: Locator) => message.getByRole("group", { name: "Swipes" })
 
 const open = async (page: Page, width: number, theme: "light" | "dark", url: string) => {
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })

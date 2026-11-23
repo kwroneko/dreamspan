@@ -419,8 +419,8 @@ const rewrite = <A extends Base>(
             {
               label: "Scope",
               value: p.chat.storyTarget
-                ? `Branch “${p.chat.branchLabel}”; ${p.range ? `messages ${p.range.first}–${p.range.last}` : `from message ${p.chat.upTo}`}. ${p.includeSwipes ? "Includes unshown swipes." : "Only shown versions; other swipes are unchanged."}`
-                : `Only this chat's current branch (${p.chat.currentForkId}). ${p.includeSwipes ? "Includes unshown swipes." : "Only shown versions; other swipes are unchanged."}`
+                ? `Branch “${p.chat.branchLabel}”; ${p.range ? `messages ${p.range.first}–${p.range.last}` : `from message ${p.chat.upTo}`}. ${p.includeSwipes ? "Includes unshown swipes." : "Only the swipes shown; the others are unchanged."}`
+                : `Only this chat's current branch (${p.chat.currentForkId}). ${p.includeSwipes ? "Includes unshown swipes." : "Only the swipes shown; the others are unchanged."}`
             },
             {
               label: "Limit",

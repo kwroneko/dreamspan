@@ -130,8 +130,8 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
               return yield* new InsertRefused({
                 message:
                   source.status === "generating"
-                    ? "This version is still being written. Duplicate it once it's finished."
-                    : "A failed version has nothing to duplicate."
+                    ? "This swipe is still being written. Duplicate it once it's finished."
+                    : "A failed swipe has nothing to duplicate."
               })
             slotId = uuidv7()
             versionId = uuidv7()

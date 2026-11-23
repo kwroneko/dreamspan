@@ -208,7 +208,7 @@ describe("guidance on swipes, as registered parts", () => {
     expect(availableComposerControls("banner", context).map((c) => c.id)).toEqual(["composer.guidance-edit"])
     expect(bar()).toBe("")
     guidanceEditor(s).open(entry("s2", "Rain."), null)
-    expect(bar()).toContain("Guidance for a new version of Aria&#x27;s reply")
+    expect(bar()).toContain("Guidance for a new swipe of Aria&#x27;s reply")
     expect(bar()).toContain('aria-label="Close: back to new messages"')
     guidanceEditor(s).close()
     expect(bar()).toBe("")

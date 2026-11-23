@@ -611,10 +611,10 @@ export function Composer({
   const editedName = editing === null ? null : nameOf(castView, editing.speakerEntityId)
   // Keep the action named while the cast is loading; the full name includes its speaker.
   const generateText =
-    editing !== null ? "New version" : name ? `Generate ${name}` : cast === null ? "Generate …" : "Generate"
+    editing !== null ? "New swipe" : name ? `Generate ${name}` : cast === null ? "Generate …" : "Generate"
   const generateHint =
     editing !== null
-      ? `Generate a new version of ${editedName ? `${editedName}'s` : "this"} reply, following this guidance (${submitHint}). The guidance stays here.`
+      ? `Generate a new swipe of ${editedName ? `${editedName}'s` : "this"} reply, following this guidance (${submitHint}). The guidance stays here.`
       : `${
           name === null
             ? "Generate the next turn with the model"
@@ -664,9 +664,9 @@ export function Composer({
     },
     hint:
       editing !== null
-        ? `Guidance for ${editedName ? `${editedName}'s` : "this"} reply: each submit (${submitHint}) makes a new version of it with this text, and so does its › past the last version; the versions it has keep their own. ✕ above goes back to your draft.`
+        ? `Guidance for ${editedName ? `${editedName}'s` : "this"} reply: each submit (${submitHint}) makes a new swipe of it with this text, and so does its › past the last swipe; the swipes it has keep their own. ✕ above goes back to your draft.`
         : guidance
-          ? `One-turn guidance for ${name ? `${name}'s` : "the"} next message (${submitHint}) or Continue. It leaves the box when you submit it; a new version of a reply uses that reply's own guidance.`
+          ? `One-turn guidance for ${name ? `${name}'s` : "the"} next message (${submitHint}) or Continue. It leaves the box when you submit it; a new swipe of a reply uses that reply's own guidance.`
           : "What you type is sent as your message. Turn guidance on to have it guide the model's next message instead.",
     reply: {
       candidates: faces,
@@ -699,7 +699,7 @@ export function Composer({
     replier,
     round: replyPlan.round,
     generateText,
-    generateWord: editing !== null ? "New version" : "Generate",
+    generateWord: editing !== null ? "New swipe" : "Generate",
     generateHint,
     sendLabel,
     sendHint,

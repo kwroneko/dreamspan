@@ -193,7 +193,7 @@ for (const width of [1440, 390])
       // On a phone a tap on the line shows the message's actions, as on any message.
       if (width === 390) await reply.locator("[data-silent]").click()
       else await showActions(reply)
-      await reply.getByRole("button", { name: "Generate another version" }).click()
+      await reply.getByRole("button", { name: "Generate another swipe" }).click()
       const answered = page.getByRole("article").filter({ hasText: ANSWER })
       await expect(answered).toBeVisible()
       await expect(answered.locator("[data-silent]")).toHaveCount(0)

@@ -53,11 +53,23 @@ const make = (tag: string, message: string, reason: string | null = null, proble
   problems
 })
 
+/**
+ * The user's word for an entity the server names: a message's alternative texts are versions
+ * in the code and swipes to the user (DESIGN §3.1, owner 2026-11-23).
+ */
+const ENTITY_WORDS: Readonly<Record<string, string>> = {
+  version: "swipe",
+  "generating version": "generating swipe",
+  "human version": "swipe",
+  "version amendment": "edit of a swipe"
+}
+const entityWord = (entity: string) => ENTITY_WORDS[entity] ?? entity
+
 /** `useAction` reloads what the write would have changed, so the user sees the latest version. */
 const stale = (entity: string) =>
   make(
     "StaleWrite",
-    `This ${entity} changed since you opened it, maybe in another tab. The latest version is loaded: check it, then make your change again.`
+    `This ${entityWord(entity)} changed since you opened it, maybe in another tab. The latest version is loaded: check it, then make your change again.`
   )
 
 const describeError = (error: unknown): AppError => {
@@ -80,7 +92,7 @@ const describeError = (error: unknown): AppError => {
       // A library entry is an "item" to the user; a link to one may be stale or mistyped.
       error.entity === "ref"
         ? "This item was deleted or never existed."
-        : `This ${error.entity} doesn't exist any more.`
+        : `This ${entityWord(error.entity)} doesn't exist any more.`
     )
   if (error instanceof StaleWrite) return stale(error.entity)
   if (error instanceof ProviderError) return make("ProviderError", sentence(error.message), error.reason)

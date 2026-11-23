@@ -132,13 +132,13 @@ export const chatPlaces = [
     open: async (page, { chatId }, ctx) => {
       await goChat(page, ctx, chatId)
       const row = rows(page).first()
-      await messageMenu(row, "Write your own version")
-      return row.getByLabel("Your version", { exact: true })
+      await messageMenu(row, "Write your own swipe")
+      return row.getByLabel("Your swipe", { exact: true })
     },
-    shown: (page) => rows(page).first().getByLabel("Your version", { exact: true })
+    shown: (page) => rows(page).first().getByLabel("Your swipe", { exact: true })
   }),
   place({
-    name: "Guidance for a new version",
+    name: "Guidance for a new swipe",
     source: "features/chat/guidanceEdit.tsx:29",
     setup: guidedReply,
     open: async (page, { chatId, slotId }, ctx) => {

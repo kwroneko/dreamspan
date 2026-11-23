@@ -35,7 +35,7 @@ export const duplicateRefusal = ({ entry, generating }: MessageActionContext) =>
   generating || entry.version.status === "generating"
     ? "It's still being written. Duplicate it once it's finished."
     : entry.version.status === "failed"
-      ? "A failed version has nothing to duplicate."
+      ? "A failed swipe has nothing to duplicate."
       : null
 
 const duplicate = viewOf((context) => {
@@ -44,7 +44,7 @@ const duplicate = viewOf((context) => {
   return {
     label: "Duplicate",
     icon: "duplicate",
-    hint: "Insert a copy of the version shown right below this message.",
+    hint: "Insert a copy of the swipe shown right below this message.",
     ...(refusal !== null ? { disabled: refusal } : {}),
     onSelect: async () => {
       const forkId = session.snapshot().forkId

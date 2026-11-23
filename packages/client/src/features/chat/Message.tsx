@@ -147,15 +147,15 @@ function BodyText({
 const RESUME_COPY = {
   resume: {
     label: "Resume",
-    hint: "Carries this reply on from where it stopped, as a new version, with the model and settings the chat has now. Nothing new is written for you."
+    hint: "Carries this reply on from where it stopped, as a new swipe, with the model and settings the chat has now. Nothing new is written for you."
   },
   continue: {
     label: "Continue",
-    hint: "Continues the text it stopped in, as a new version, with the model and settings the chat has now."
+    hint: "Continues the text it stopped in, as a new swipe, with the model and settings the chat has now."
   },
   retry: {
     label: "Retry",
-    hint: "Asks the model for this reply again, as a new version, with the model and settings the chat has now."
+    hint: "Asks the model for this reply again, as a new swipe, with the model and settings the chat has now."
   }
 } as const
 
@@ -280,7 +280,7 @@ function VersionBody({
         <p role="note" className="text-sm text-muted">
           {version.status === "failed"
             ? "A judge model read what was written instead of a reply and found it a refusal."
-            : "A judge model found this reply a refusal. Its text is kept; › generates another version to try again."}
+            : "A judge model found this reply a refusal. Its text is kept; › generates another swipe to try again."}
         </p>
       )}
       {version.status === "failed" && version.error && (
@@ -372,7 +372,7 @@ function WriteEditor({
         <SlotOutlet
           slot={messageTextEditor}
           props={{
-            label: "Your version",
+            label: "Your swipe",
             value: text,
             base: "",
             // Opened from the chat's other view, it leaves focus there (Composition.tsx).
@@ -394,7 +394,7 @@ function WriteEditor({
           source={undefined}
           session={session}
           entry={entry}
-          saveLabel="Add as a new version"
+          saveLabel="Add as a new swipe"
           offerSaves={false}
           onSave={onSave}
           onSaveWith={onSaveWith}
@@ -539,7 +539,7 @@ const useEditor = (session: ChatSession, key: MessageEditorKey) =>
 /** Whether a double-click may open Edit here: not on a control, the version arrows or an image. */
 const canEditFrom = (target: EventTarget | null) =>
   !onControl(target) &&
-  !(target instanceof Element && target.closest("[role='group'][aria-label='Versions'], [data-text-tool], img, label"))
+  !(target instanceof Element && target.closest("[role='group'][aria-label='Swipes'], [data-text-tool], img, label"))
 
 /** Whether a click or tap landed on something that acts on its own. */
 const onControl = (target: EventTarget | null) =>
@@ -1092,7 +1092,7 @@ export const Message = memo(function Message({
         </header>
         {editingAnotherVersion && (
           <p role="note" className="text-sm text-muted">
-            Another version is selected. Your edit still belongs to the version you opened.
+            Another swipe is selected. Your edit still belongs to the swipe you opened.
           </p>
         )}
         <SlotOutlet slot={messagePreviews} props={{ entry, session }} />
@@ -1185,7 +1185,7 @@ export const Message = memo(function Message({
             )}
             {savedAs !== null && (
               <span role="status" className="mx-1 text-xs text-muted">
-                Saved as version {savedAs}
+                Saved as swipe {savedAs}
               </span>
             )}
             {editing !== "write" && (

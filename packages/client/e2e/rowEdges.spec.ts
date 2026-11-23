@@ -295,7 +295,7 @@ for (const width of [1440, 390])
       await shot("branch-picker")
       await page.keyboard.press("Escape")
       const message = page.getByRole("article").first()
-      await message.getByRole("button", { name: /choose a version/ }).click()
+      await message.getByRole("button", { name: /choose a swipe/ }).click()
       const versionRow = page.locator("[data-version]").first()
       await expect(versionRow).toBeVisible()
       results.versions = await measure(

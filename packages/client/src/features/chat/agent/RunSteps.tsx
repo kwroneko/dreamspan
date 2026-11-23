@@ -427,7 +427,7 @@ function StepBox({ target, editing, id }: { target: StepTarget; editing: StepEdi
         <Button
           variant="ghost"
           className="h-7 px-2 text-xs"
-          hint="Change this step, then carry on from it as a new version."
+          hint="Change this step, then carry on from it as a new swipe."
           disabled={editing.pending}
           onClick={() => editing.setOpen(id)}
         >
@@ -437,7 +437,7 @@ function StepBox({ target, editing, id }: { target: StepTarget; editing: StepEdi
       <Button
         variant="ghost"
         className="h-7 px-2 text-xs"
-        hint="Carry on from this step as a new version."
+        hint="Carry on from this step as a new swipe."
         disabled={editing.pending}
         onClick={() => void editing.resume(step, undefined)}
       >
@@ -507,8 +507,8 @@ function StepEditor({
           disabled={problem !== null || !draft.ready}
           hint={
             text === original
-              ? "Carry on from this step, unchanged, as a new version."
-              : "Carry on from this step, as you changed it, as a new version."
+              ? "Carry on from this step, unchanged, as a new swipe."
+              : "Carry on from this step, as you changed it, as a new swipe."
           }
           onClick={() => {
             if (!("edit" in checked) || committing) return

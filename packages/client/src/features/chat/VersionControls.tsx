@@ -43,10 +43,10 @@ export function Versions({
     : position >= 0 && position < entry.versionCount - 1
   const generates = generated && (position === -1 || !after)
   return (
-    <div className="flex shrink-0 items-center" role="group" aria-label="Versions">
+    <div className="flex shrink-0 items-center" role="group" aria-label="Swipes">
       <IconButton
-        label="Previous version"
-        hint={before ? "Shows the previous version." : "No previous version."}
+        label="Previous swipe"
+        hint={before ? "Shows the previous swipe." : "No previous swipe."}
         icon="left"
         className="max-sm:size-7"
         disabled={!before}
@@ -62,13 +62,13 @@ export function Versions({
         onFlag={onFlag}
       />
       <IconButton
-        label={generates ? "Generate another version" : "Next version"}
+        label={generates ? "Generate another swipe" : "Next swipe"}
         hint={
           !generated && !after
-            ? "No next version."
+            ? "No next swipe."
             : generates
-              ? "Generate another version (ArrowRight outside inputs, on the last reply)"
-              : "Next version (ArrowRight outside inputs, on the last reply; generates past last)"
+              ? "Generate another swipe (ArrowRight outside inputs, on the last reply)"
+              : "Next swipe (ArrowRight outside inputs, on the last reply; generates past last)"
         }
         icon="right"
         className="max-sm:size-7"

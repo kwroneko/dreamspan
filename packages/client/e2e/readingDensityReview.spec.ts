@@ -110,14 +110,14 @@ test("narrow keyboard: Tab reaches the concealed version controls", async ({ pag
     ;(el as HTMLElement).focus({ preventScroll: true })
   })
   await expect(row.locator(".markdown")).toBeFocused()
-  const previous = row.getByRole("button", { name: "Previous version", exact: true })
+  const previous = row.getByRole("button", { name: "Previous swipe", exact: true })
   for (let step = 0; step < 10; step++) {
     await page.keyboard.press("Tab")
     if (await previous.evaluate((el) => el === document.activeElement)) break
   }
   await expect(previous).toBeFocused()
   await expect(row.locator(".message-footer")).toHaveCSS("opacity", "1")
-  await expect(row.getByRole("button", { name: "Previous version", exact: true })).toBeInViewport()
+  await expect(row.getByRole("button", { name: "Previous swipe", exact: true })).toBeInViewport()
   await expect(row.getByRole("button", { name: "More actions", exact: true })).toBeVisible()
 })
 

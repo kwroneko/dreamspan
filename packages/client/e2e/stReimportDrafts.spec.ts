@@ -98,7 +98,7 @@ for (const width of [1440, 390]) {
         .toBe("ST overwrote the selected text")
       await expectTextBox(box, pending)
       await expect(
-        row.getByText("Another version is selected. Your edit still belongs to the version you opened.")
+        row.getByText("Another swipe is selected. Your edit still belongs to the swipe you opened.")
       ).toBeVisible()
       if (state === "in-flight") {
         hold = false
@@ -135,7 +135,7 @@ for (const width of [1440, 390]) {
       await expect.poll(() => releaseVersions.length).toBeGreaterThan(0)
       await expectTextBox(box, pending)
       await expect(
-        row.getByText("Another version is selected. Your edit still belongs to the version you opened.")
+        row.getByText("Another swipe is selected. Your edit still belongs to the swipe you opened.")
       ).toBeVisible()
       holdVersions = false
       for (const release of releaseVersions.splice(0)) release()

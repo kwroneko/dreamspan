@@ -55,7 +55,7 @@ export const registerMessageActions = () => [
       hint:
         context.entry.version.writer === "human" && context.entry.version.status === "complete"
           ? `Change this message's text in place. ${EDIT_KEYS}`
-          : `Edit this message’s text and save a new version. ${EDIT_KEYS}`,
+          : `Edit this message’s text and save a new swipe. ${EDIT_KEYS}`,
       onSelect: () => invokeMessageAction("message.edit", context, "button")
     }))
   }),
@@ -73,9 +73,9 @@ export const registerMessageActions = () => [
     order: 30,
     group: "change",
     describe: viewOf(({ session, entry }) => ({
-      label: "Write your own version",
+      label: "Write your own swipe",
       icon: "write",
-      hint: "Write a new version of this message, with its versions above the editor to take passages from.",
+      hint: "Write a new swipe of this message, with its swipes above the editor to take passages from.",
       onSelect: () => session.openEditor({ _tag: "Write", slotId: entry.slotId }, "", entry.slotId)
     }))
   }),
@@ -87,9 +87,9 @@ export const registerMessageActions = () => [
     group: "change",
     available: ({ generated }) => !generated,
     describe: viewOf(({ session, entry, report }) => ({
-      label: "Generate a version",
+      label: "Generate a swipe",
       icon: "regenerate",
-      hint: "Have the model write a new version of this turn as the same speaker.",
+      hint: "Have the model write a new swipe of this turn as the same speaker.",
       onSelect: async () => report(await session.regenerate(entry))
     }))
   }),
@@ -144,7 +144,7 @@ export const registerMessageActions = () => [
     describe: viewOf(({ session, entry }) => ({
       label: "Open request inspector",
       icon: "layers",
-      hint: "Shows everything the model was sent for this version, and where each part came from.",
+      hint: "Shows everything the model was sent for this swipe, and where each part came from.",
       link: (
         <Link
           to="/chats/$chatId/context/$versionId"
@@ -161,7 +161,7 @@ export const registerMessageActions = () => [
     describe: viewOf(({ session, entry }) => ({
       label: "Copy text",
       icon: "clipboard",
-      hint: "Copy the text of the message version shown.",
+      hint: "Copy the text of the swipe shown.",
       onSelect: () => void copy(session.textOf(entry.version), "Text")
     }))
   }),
@@ -191,10 +191,10 @@ export const registerMessageActions = () => [
     describe: viewOf(({ entry, session, toast }) =>
       entry.versionCount > 1
         ? {
-            label: "Delete version",
+            label: "Delete swipe",
             icon: "trash",
             tone: "danger",
-            hint: "Moves this message version to the bin, from which it can be restored later.",
+            hint: "Moves this swipe to the bin, from which it can be restored later.",
             onSelect: async () => toast(await session.deleteVersion(entry.version.id))
           }
         : {
@@ -210,12 +210,12 @@ export const registerMessageActions = () => [
     id: "message.delete-all",
     order: 111,
     group: "delete",
-    disabled: ({ entry }) => (entry.versionCount < 2 ? "This message has only one version; use Delete message." : null),
+    disabled: ({ entry }) => (entry.versionCount < 2 ? "This message has only one swipe; use Delete message." : null),
     describe: viewOf(({ session, entry, toast }) => ({
-      label: "Delete all versions",
+      label: "Delete all swipes",
       icon: "trash-all",
       tone: "danger",
-      hint: "Moves this message and all its versions to the bin, from which it can be restored later.",
+      hint: "Moves this message and all its swipes to the bin, from which it can be restored later.",
       onSelect: async () => toast(await session.deleteMessage(entry.slotId))
     }))
   })

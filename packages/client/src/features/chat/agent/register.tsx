@@ -43,7 +43,7 @@ export const registerAgent = () => [
     describe: viewOf((context) => ({
       label: "Resume",
       icon: "play",
-      hint: "Carries on this reply from where it stopped, as a new version.",
+      hint: "Carries on this reply from where it stopped, as a new swipe.",
       onSelect: () => invokeMessageAction("message.resume", context, "button")
     }))
   }),

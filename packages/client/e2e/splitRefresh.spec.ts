@@ -101,10 +101,10 @@ test("a workshop's first-message split has bounded reads, heap and DOM at 1440",
   const opening = page.getByRole("article").filter({ hasText: WORKSHOP_FIRST }).first()
   await showActions(opening)
   stats.armed = true
-  await opening.getByRole("button", { name: "Generate another version", exact: true }).click()
+  await opening.getByRole("button", { name: "Generate another swipe", exact: true }).click()
   const warning = page.getByRole("dialog", { name: "This reply changed things outside the chat" })
   await expect(warning).toBeVisible()
-  await warning.getByRole("button", { name: "Keep them and make a new version", exact: true }).click()
+  await warning.getByRole("button", { name: "Keep them and make a new swipe", exact: true }).click()
   await expect.poll(() => stats.slotFrames).toBeGreaterThan(0)
   await steady(page, stats)
   await page.getByRole("button", { name: "Chat panel", exact: true }).first().click()
@@ -154,7 +154,7 @@ test("story tabs on different branches can regenerate an earlier shared message 
   original.armed = changed.armed = true
   const opening = other.getByRole("article").filter({ hasText: "Synthetic opening." })
   // Human-written turns offer this in More actions; model replies use the version arrow.
-  await messageMenu(opening, "Generate a version")
+  await messageMenu(opening, "Generate a swipe")
   await expect(other.getByRole("article").filter({ hasText: STORY_REPLY })).toHaveCount(1)
   await expect.poll(() => original.reads).toBeGreaterThan(0)
   await expect(page.getByRole("article").filter({ hasText: "Synthetic opening." })).toHaveCount(1)

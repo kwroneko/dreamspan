@@ -173,7 +173,7 @@ test("the full editor opens the card used everywhere over the chat, and goes bac
 test("the latest reply's › makes a new version, shown without a hover even at one version", async ({ page }) => {
   await chatWithMira(page)
   const latest = replies(page).last()
-  const next = latest.getByRole("group", { name: "Versions" }).getByRole("button", { name: "Generate another version" })
+  const next = latest.getByRole("group", { name: "Swipes" }).getByRole("button", { name: "Generate another swipe" })
   // Not hovered: the pointer is on the composer.
   await page.getByTestId("composer").hover()
   await expect(next).toHaveCSS("opacity", "1")
@@ -184,5 +184,5 @@ test("the latest reply's › makes a new version, shown without a hover even at 
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   // A new version of that reply, not a new turn.
   await expect(replies(page)).toHaveCount(2)
-  await expect(latest.getByRole("group", { name: "Versions" })).toContainText("2")
+  await expect(latest.getByRole("group", { name: "Swipes" })).toContainText("2")
 })

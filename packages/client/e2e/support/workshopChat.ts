@@ -415,7 +415,7 @@ export function workshopChatTests() {
           // The card it created still stands: carrying on from an earlier step warns first.
           const warning = page.getByRole("dialog", { name: "This reply changed things outside the chat" })
           await expect(warning).toContainText("Created the card Mara Quill")
-          await warning.getByRole("button", { name: "Keep them and make a new version", exact: true }).click()
+          await warning.getByRole("button", { name: "Keep them and make a new swipe", exact: true }).click()
           await expect(page).toHaveURL(new RegExp(`/chats/${workshopId}\\?`))
           await expect.poll(() => provider.bodies.length).toBeGreaterThan(beforeEdit)
           await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER }).last()).toBeVisible()

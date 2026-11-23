@@ -12,25 +12,25 @@ const targetOf = (context: TextActionContext) =>
 const applies = (context: TextActionContext) => context.ownVersion !== undefined || context.source === "snippet"
 
 const unavailable = (context: TextActionContext) =>
-  context.text.trim() === "" ? "No text to add yet." : "Open “Write your own version” on a message to add text to it."
+  context.text.trim() === "" ? "No text to add yet." : "Open “Write your own swipe” on a message to add text to it."
 
 /** From a snippet the composition is elsewhere on screen: a notice says where the text went. */
 const add = (context: TextActionContext) => {
   const target = targetOf(context)
   if (target === null) return
   target.add(context.text)
-  if (context.ownVersion === undefined) showToast({ title: `Added to your version of ${target.name}` })
+  if (context.ownVersion === undefined) showToast({ title: `Added to your swipe of ${target.name}` })
 }
 
 export const registerCompositionActions = () => [
   textActions.register({
     id: "version.add-selection",
-    label: "Add selection to your version",
-    shortLabel: "Selection to version",
+    label: "Add selection to your swipe",
+    shortLabel: "Selection to swipe",
     description: (context) =>
       context.ownVersion
-        ? "Adds the selected text to the end of your version of this message."
-        : `Adds the selected text to the end of your version of ${compositionTarget()?.name ?? "a message"}.`,
+        ? "Adds the selected text to the end of your swipe of this message."
+        : `Adds the selected text to the end of your swipe of ${compositionTarget()?.name ?? "a message"}.`,
     icon: "versionAddSelection",
     editor: "selection",
     applies,
@@ -40,12 +40,12 @@ export const registerCompositionActions = () => [
   }),
   textActions.register({
     id: "version.add-text",
-    label: "Add to your version",
-    shortLabel: "To your version",
+    label: "Add to your swipe",
+    shortLabel: "To your swipe",
     description: (context) =>
       context.ownVersion
-        ? "Adds this version's whole text to the end of your version of this message."
-        : `Adds this snippet's text to the end of your version of ${compositionTarget()?.name ?? "a message"}.`,
+        ? "Adds this swipe's whole text to the end of your swipe of this message."
+        : `Adds this snippet's text to the end of your swipe of ${compositionTarget()?.name ?? "a message"}.`,
     icon: "versionAdd",
     editor: "text",
     applies,

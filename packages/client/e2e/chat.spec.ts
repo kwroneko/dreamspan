@@ -56,14 +56,14 @@ test("a message gets a streamed reply, with versions to swipe through", async ({
   expect(first.length).toBeGreaterThan(100)
 
   // Past the last version, a swipe generates another; swiping back shows the first again.
-  await reply.getByRole("button", { name: "Generate another version" }).click()
-  await expect(reply.getByRole("group", { name: "Versions" })).toContainText("2/2")
+  await reply.getByRole("button", { name: "Generate another swipe" }).click()
+  await expect(reply.getByRole("group", { name: "Swipes" })).toContainText("2/2")
   await expect(reply.getByText("generating", { exact: true })).toBeVisible()
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   const second = await textOf(reply)
   expect(second).not.toEqual(first)
-  await reply.getByRole("button", { name: "Previous version" }).click()
-  await expect(reply.getByRole("group", { name: "Versions" })).toContainText("1/2")
+  await reply.getByRole("button", { name: "Previous swipe" }).click()
+  await expect(reply.getByRole("group", { name: "Swipes" })).toContainText("1/2")
   await expect.poll(() => textOf(reply)).toBe(first)
 
   // The reload shows the same, from the server.
@@ -119,7 +119,7 @@ test("a stopped reply keeps its text, and a message can be edited, linked to, br
     await mine.getByRole("button", { name: "Save" }).click()
     await expect(mine.locator(".markdown")).toHaveText("Knock three times.")
     // Amended in place: still its only version.
-    await expect(mine.getByRole("group", { name: "Versions" })).toContainText("1/1")
+    await expect(mine.getByRole("group", { name: "Swipes" })).toContainText("1/1")
 
     // A copied link opens the chat at that message.
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"])
