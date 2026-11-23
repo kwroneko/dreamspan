@@ -157,11 +157,11 @@ function History({ draft, disabled = false }: { draft: ComposerDraft; disabled?:
       open={open}
       triggerDisabled={disabled}
       onOpenChange={openChange}
-      triggerLabel="Earlier text of this message"
+      triggerLabel="Earlier text in this box"
       hint={
         disabled
           ? "Finish editing this reply’s guidance to browse composer history."
-          : "Shows earlier text of this message."
+          : "Shows earlier text you typed in this box."
       }
       triggerClassName={`${buttonClass("ghost")} w-9 px-0!`}
       side="top"

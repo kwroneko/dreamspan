@@ -112,7 +112,7 @@ for (const width of [1440, 390]) {
       const draft = "Sam waves at the lighthouse keeper."
       await box(page).fill(draft)
       const reply = page.getByRole("article").filter({ hasText: "Guidance: Aria looks out to sea." })
-      const history = page.getByRole("button", { name: "Earlier text of this message", exact: true })
+      const history = page.getByRole("button", { name: "Earlier text in this box", exact: true })
       const controls = page.getByTestId("composer-controls")
       const historyBox = () =>
         history.evaluate((button) => {
