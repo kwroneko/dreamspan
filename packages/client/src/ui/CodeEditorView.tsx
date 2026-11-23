@@ -183,6 +183,8 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
   let props = initial
   let applying = false
   let deferred: string | null = null
+  /** When a pointer last pressed in the text: that focus places its own caret. */
+  let pressedAt = Number.NEGATIVE_INFINITY
   const attributes = () => [
     EditorState.readOnly.of(props.readOnly ?? false),
     EditorView.contentAttributes.of({
@@ -225,6 +227,17 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
           }
         }),
         EditorView.domEventHandlers({
+          pointerdown: () => {
+            pressedAt = performance.now()
+          },
+          // Focus that isn't a press in the text (Tab, a command, a closing dialog, the panel focus
+          // guard) keeps the editor's caret and selection, as a textarea's does. The browser keeps
+          // no caret in an unfocused editor whose lines were redrawn (a guidance toggle restyles
+          // them) and places one at a line's start, which typing would then go to: the editor's
+          // own focus writes its selection back. A press places the caret itself.
+          focus: (_event, editor) => {
+            if (performance.now() - pressedAt > 500) editor.focus()
+          },
           blur: () => {
             props.onBlur?.()
           }
@@ -240,21 +253,6 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       ]
     })
   })
-  // Focus given from code (a command, a closing dialog, the panel focus guard) keeps the editor's
-  // own caret and selection, as a textarea's does: the content's plain focus would let the browser
-  // place the caret, which the editor then takes as the user's. `view.focus()` focuses the content
-  // through this same method, so the inner call is the browser's own.
-  const nativeFocus = HTMLElement.prototype.focus
-  let focusing = false
-  view.contentDOM.focus = function (this: HTMLElement, focusOptions?: FocusOptions) {
-    if (focusing) return nativeFocus.call(this, focusOptions)
-    focusing = true
-    try {
-      view.focus()
-    } finally {
-      focusing = false
-    }
-  }
   let extensionVersion = 0
   const refreshExtensions = () => {
     const version = ++extensionVersion
