@@ -1232,7 +1232,8 @@ function Browser() {
                 placeholder={
                   messages ? "Find in messages" : kind === "chat" && !grid ? "Find a branch" : "Find by name"
                 }
-                className="min-w-0 flex-1"
+                clearable
+                frameClassName="min-w-0 flex-1"
                 value={fieldValue}
                 onChange={(e) => setField(e.currentTarget.value)}
               />
@@ -1241,6 +1242,37 @@ function Browser() {
           )}
         </div>
       </div>
+      {!grid && listNeedle !== "" && forks.progress && (
+        <p role="note" className="text-xs text-muted">
+          Until every {kind === "chat" ? "branch" : "chat"} has loaded, the ones still loading are found by name only.
+        </p>
+      )}
+      {!grid && kind !== "chat" && !messages && (
+        <SlotOutlet
+          slot={sidebarChatBrowse}
+          props={{ browse: chatBrowse, counts: forks.progress ? null : forks.filterCounts, onChange: setChatBrowse }}
+        />
+      )}
+      {grid && data && (
+        <CardBrowseBar
+          data={data}
+          browse={browse}
+          onChange={setBrowse}
+          groups
+          includePersonas
+          families
+          sources={sources}
+          onSource={(id) => setBrowse({ source: id })}
+          filtersId="side-source-filters"
+        />
+      )}
+      {grid && !source && browse.filter === "personas" && (
+        <div>
+          <NewCardButton persona />
+        </div>
+      )}
+      {grid && !source && browse.filter === "archived" && <SlotOutlet slot={archivedCardActions} props={{}} />}
+      {/* Below every filter row, directly above the list it navigates: coming or going, it moves only the list. */}
       {!grid && (scope.entity || scope.chat) && (
         <nav aria-label="Chat breadcrumbs" className="flex min-w-0 items-center gap-1 text-sm">
           <Tooltip label="Back to the list of all your chats.">
@@ -1301,36 +1333,6 @@ function Browser() {
           )}
         </nav>
       )}
-      {!grid && listNeedle !== "" && forks.progress && (
-        <p role="note" className="text-xs text-muted">
-          Until every {kind === "chat" ? "branch" : "chat"} has loaded, the ones still loading are found by name only.
-        </p>
-      )}
-      {!grid && kind !== "chat" && !messages && (
-        <SlotOutlet
-          slot={sidebarChatBrowse}
-          props={{ browse: chatBrowse, counts: forks.progress ? null : forks.filterCounts, onChange: setChatBrowse }}
-        />
-      )}
-      {grid && data && (
-        <CardBrowseBar
-          data={data}
-          browse={browse}
-          onChange={setBrowse}
-          groups
-          includePersonas
-          families
-          sources={sources}
-          onSource={(id) => setBrowse({ source: id })}
-          filtersId="side-source-filters"
-        />
-      )}
-      {grid && !source && browse.filter === "personas" && (
-        <div>
-          <NewCardButton persona />
-        </div>
-      )}
-      {grid && !source && browse.filter === "archived" && <SlotOutlet slot={archivedCardActions} props={{}} />}
       {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
       <div
         ref={listRef}
