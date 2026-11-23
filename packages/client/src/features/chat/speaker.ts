@@ -57,6 +57,12 @@ class ComposerChoices {
   private writes: Promise<unknown> = Promise.resolve()
   /** A speaker picked before the composer's draft was known ("Write as" as the chat opens). */
   private early: EntityId | null = null
+  /**
+   * The reply a guidance edit was opened for before the composer's draft was known (Edit
+   * clicked as the chat opens); undefined: none. Without it the draft's first read would
+   * answer "no reply" and close the bar the click opened.
+   */
+  private earlyGuidanceSlot: SlotId | null | undefined = undefined
 
   private readonly session: ChatSession
 
@@ -119,13 +125,17 @@ class ComposerChoices {
       replyFrom: choice?.replyFromEntityId ?? null,
       noReplies: choice?.noReplies ?? false,
       guidance: choice?.guidance ?? false,
-      guidanceSlot: choice?.guidanceSlotId ?? null
+      guidanceSlot: this.earlyGuidanceSlot !== undefined ? this.earlyGuidanceSlot : (choice?.guidanceSlotId ?? null)
     })
-    if (this.early !== null) {
-      const speaker = this.early
-      this.early = null
-      void this.change({ speaker })
-    }
+    const speaker = this.early
+    const guidanceSlot = this.earlyGuidanceSlot
+    this.early = null
+    this.earlyGuidanceSlot = undefined
+    if (speaker !== null || guidanceSlot !== undefined)
+      void this.change({
+        ...(speaker === null ? {} : { speaker }),
+        ...(guidanceSlot === undefined ? {} : { guidanceSlot })
+      })
   }
 
   private receive(choice: ComposerChoice) {
@@ -158,6 +168,7 @@ class ComposerChoices {
       (!this.state.loaded && change.guidance === undefined && change.guidanceSlot === undefined)
     ) {
       if (change.speaker !== undefined) this.early = change.speaker
+      if (draftId === null && change.guidanceSlot !== undefined) this.earlyGuidanceSlot = change.guidanceSlot
       return { ok: true, value: null }
     }
     this.reads++
