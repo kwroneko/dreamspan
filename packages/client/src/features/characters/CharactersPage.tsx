@@ -110,7 +110,7 @@ function LocalCards({
           <NewCardButton persona />
         </div>
       )}
-      {browse.filter === "archived" && <SlotOutlet slot={archivedCardActions} props={{}} />}
+      {browse.filter === "archived" && <SlotOutlet slot={archivedCardActions} props={{ place: "home" }} />}
       {browse.filter === "groups" ? (
         <GroupGrid needle={needle} sort={browse.sort} reversed={browse.reversed} className={COLUMNS} />
       ) : (

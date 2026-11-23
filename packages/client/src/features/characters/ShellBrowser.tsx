@@ -1276,7 +1276,9 @@ function Browser() {
           <NewCardButton persona />
         </div>
       )}
-      {grid && !source && browse.filter === "archived" && <SlotOutlet slot={archivedCardActions} props={{}} />}
+      {grid && !source && browse.filter === "archived" && (
+        <SlotOutlet slot={archivedCardActions} props={{ place: "sidebar" }} />
+      )}
       {/* Below every filter row, directly above the list it navigates: coming or going, it moves only the list. */}
       {!grid && (scope.entity || scope.chat) && (
         <nav aria-label="Chat breadcrumbs" className="flex min-w-0 items-center gap-1 text-sm">
