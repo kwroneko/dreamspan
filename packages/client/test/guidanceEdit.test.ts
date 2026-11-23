@@ -1,5 +1,5 @@
 // Guidance on swipes (DESIGN §2.2, owner 2026-10-29): what a new version and Continue are
-// asked with, the guidance editor, its "New version…" and "New version with guidance…" entry points, and the bar.
+// asked with, the guidance editor, its edit button and "New version with guidance…" entry points, and the bar.
 import type { ChatId, EntityId, ForkId, PathEntry, SlotId, Version, VersionId } from "@dreamspan/shared/chat.ts"
 import { AtomRegistry } from "effect/reactivity"
 import { createElement } from "react"
@@ -173,7 +173,7 @@ describe("guidance on swipes, as registered parts", () => {
     const { s } = session()
     const shown = markup(createElement(MessageDirection, { entry: entry("s2", "Make it rain."), session: s }))
     expect(shown).toContain("Make it rain.")
-    expect(shown).toContain('aria-label="New version with this guidance"')
+    expect(shown).toContain('aria-label="Edit this guidance"')
     expect(markup(createElement(MessageDirection, { entry: entry("s2", null), session: s }))).toBe("")
     expect(markup(createElement(MessageDirection, { entry: entry("s2", "Rain.", "human"), session: s }))).toBe("")
   })

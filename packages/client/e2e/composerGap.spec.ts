@@ -152,7 +152,7 @@ for (const latency of [0, 150]) {
       const resting = await gap(page)
       expect(resting).toBeGreaterThan(8)
       if (mode === "new version after a reload") {
-        await page.getByRole("button", { name: "New version with this guidance" }).click()
+        await page.getByRole("button", { name: "Edit this guidance" }).click()
         await expect(bar(page)).toBeVisible()
         await box(page).fill(LONG)
         await expect
