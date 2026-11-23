@@ -17,6 +17,7 @@ export function CardTextEditor({
   rows,
   minHeight,
   fullHeight,
+  resizable,
   mono,
   readOnly,
   source,
@@ -35,6 +36,8 @@ export function CardTextEditor({
   value: string
   label: string
   fullHeight?: boolean | undefined
+  /** False: no height grip, for a box that fills a dialog. */
+  resizable?: boolean | undefined
   rows?: number | undefined
   minHeight?: string | undefined
   mono?: boolean | undefined
@@ -94,6 +97,7 @@ export function CardTextEditor({
         rows={rows}
         minHeight={minHeight}
         fullHeight={fullHeight}
+        resizable={resizable}
         mono={mono}
         // Prose has text actions; a pattern or a template's markers (mono) doesn't.
         textActions={!mono}

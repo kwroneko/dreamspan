@@ -23,6 +23,8 @@ export interface CodeEditorProps {
   flash?: { readonly at: number; readonly length: number } | undefined
   label: string
   fullHeight?: boolean | undefined
+  /** False: no corner grip to drag the box's height, for a box filling a dialog (`bare` has none either). */
+  resizable?: boolean | undefined
   /** Focus it when it opens, with the caret at the end of the text, in view. */
   autoFocus?: boolean | undefined
   /** With `autoFocus`, the caret's offset in the text instead of its end. */

@@ -4,6 +4,7 @@ import { useSession } from "../../session.ts"
 import { useEffect, useState } from "react"
 import { Icon } from "../../ui/Icon.tsx"
 import { Button } from "../../ui/Button.tsx"
+import { textareaResize } from "../../ui/HeightGrip.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { copiesOfUser, type Copy, dropCopy, flushCopies, pendingOf, subscribeCopies } from "./backup.ts"
 
@@ -139,7 +140,8 @@ export function BrowserRecovery({
                   aria-label="Recovery text"
                   readOnly
                   value={copy.content}
-                  className="max-h-64 min-h-24 rounded-md border border-border bg-surface p-2"
+                  {...textareaResize}
+                  className="max-h-64 min-h-24 resize-y rounded-md border border-border bg-surface p-2"
                 />
                 <Button hint="Deletes this browser’s saved copy." variant="danger" onClick={() => setDeleting(copy)}>
                   Delete this copy

@@ -23,6 +23,7 @@ export function FieldFrame({
   strip = true,
   status,
   tools,
+  grip,
   children,
   className = ""
 }: {
@@ -34,6 +35,8 @@ export function FieldFrame({
   status?: ReactNode
   /** The controls, at the strip's end; the strip takes its room even when there are none now. */
   tools: ReactNode
+  /** A box's height grip (`HeightGrip`), always shown: at the strip's end, or over the box's corner without a strip. */
+  grip?: ReactNode
   children: ReactNode
   className?: string
 }) {
@@ -59,8 +62,10 @@ export function FieldFrame({
           <span data-field-reveal className="flex shrink-0 items-center gap-0.5">
             {tools}
           </span>
+          {grip}
         </div>
       )}
+      {!strip && grip}
     </div>
   )
 }

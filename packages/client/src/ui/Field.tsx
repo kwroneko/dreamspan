@@ -1,10 +1,19 @@
 import { Field as BaseField } from "@base-ui/react/field"
 import { Fieldset as BaseFieldset } from "@base-ui/react/fieldset"
 import { Input as BaseInput } from "@base-ui/react/input"
-import { useRef, useState, type ComponentProps, type ReactNode, type SyntheticEvent } from "react"
+import {
+  useRef,
+  useState,
+  type ComponentProps,
+  type MouseEvent,
+  type PointerEvent,
+  type ReactNode,
+  type SyntheticEvent
+} from "react"
 import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textActions.tsx"
 import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
 import { FieldFrame, framedControl } from "./FieldFrame.tsx"
+import { textareaResize } from "./HeightGrip.tsx"
 import { Icon } from "./Icon.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 
@@ -270,8 +279,23 @@ export function Textarea({
   const [text, setText] = useState({ value: "", selection: "" })
   const { focused, onFocus, onBlur } = useEditorFocus()
   const actions = textActions && !props.disabled
+  // Its corner resizes it past its max height too, and a double-click there undoes that.
+  const resize = {
+    onPointerDown: (event: PointerEvent<HTMLTextAreaElement>) => {
+      textareaResize.onPointerDown(event)
+      props.onPointerDown?.(event)
+    },
+    onDoubleClick: (event: MouseEvent<HTMLTextAreaElement>) => {
+      textareaResize.onDoubleClick(event)
+      props.onDoubleClick?.(event)
+    }
+  }
   if (!actions && tools === undefined && status === undefined)
-    return <BaseField.Control render={<textarea className={`min-h-24 py-2 ${control} ${className}`} {...props} />} />
+    return (
+      <BaseField.Control
+        render={<textarea className={`min-h-24 py-2 ${control} ${className}`} {...props} {...resize} />}
+      />
+    )
   const read = (event: SyntheticEvent<HTMLTextAreaElement>) => {
     const box = event.currentTarget
     const next = { value: box.value, selection: box.value.slice(box.selectionStart, box.selectionEnd) }
@@ -307,6 +331,7 @@ export function Textarea({
               data-layout-audit-ignore="inset: The text fills its own bordered field"
               className={`min-h-24 py-2 ${framedControl} ${className}`}
               {...props}
+              {...resize}
               onSelect={(event) => {
                 read(event)
                 props.onSelect?.(event)

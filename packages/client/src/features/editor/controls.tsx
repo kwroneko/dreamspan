@@ -379,6 +379,7 @@ function LargeField({
           label={label}
           minHeight="min(65dvh, 48rem)"
           fullHeight
+          resizable={false}
           expand={false}
           autoFocus
           tools={<FieldEditHistory store={store} field={field} label={label} />}

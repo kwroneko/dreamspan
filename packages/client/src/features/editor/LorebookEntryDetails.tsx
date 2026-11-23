@@ -166,7 +166,7 @@ export function KeysLine({
               placeholder="One key per line"
               rows={Math.max(1, keys.length)}
               spellCheck={false}
-              className="min-h-8! resize-none field-sizing-content"
+              className="min-h-8! resize-y field-sizing-content"
               textActions={false}
               value={keys.join("\n")}
               tools={

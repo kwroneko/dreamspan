@@ -4,17 +4,28 @@ import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate
 // A shadow root lets style-mod use a constructed stylesheet under our strict CSP.
 // All colors and fonts inherit the app's semantic tokens, including live theme changes.
 export const proseTheme = EditorView.theme({
-  "&": { backgroundColor: "var(--surface)", color: "var(--text)", fontSize: "16px", borderRadius: "6px" },
+  "&": {
+    backgroundColor: "var(--surface)",
+    color: "var(--text)",
+    fontSize: "16px",
+    borderRadius: "6px",
+    // Set while a height dragged with the box's grip holds (CodeEditorView.tsx).
+    height: "var(--editor-height, auto)"
+  },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": {
     fontFamily: "var(--editor-font, var(--font-sans))",
     lineHeight: "1.6",
     overflow: "auto",
-    maxHeight: "var(--editor-max-height, min(60vh, 32rem))"
+    // `--editor-grip-room`: a box without a strip keeps the bottom of its padding out of the
+    // scroller, for its corner grip (CodeEditorView.tsx); the box's height is the same.
+    marginBottom: "var(--editor-grip-room, 0px)",
+    height: "calc(100% - var(--editor-grip-room, 0px))",
+    maxHeight: "calc(var(--editor-max-height, min(60vh, 32rem)) - var(--editor-grip-room, 0px))"
   },
   ".cm-content": {
-    padding: "8px 0",
-    minHeight: "var(--editor-min-height, 6rem)",
+    padding: "8px 0 calc(8px - var(--editor-grip-room, 0px))",
+    minHeight: "calc(var(--editor-min-height, 6rem) - var(--editor-grip-room, 0px))",
     caretColor: "var(--text)",
     overflowWrap: "anywhere"
   },
@@ -91,7 +102,7 @@ export const proseTheme = EditorView.theme({
   "&.rp-bare .cm-line.rp-list-item": { paddingBlock: "var(--message-list-item-padding, 0.25rem)" },
   // Message text styled as the message (messageStyleView.ts) has no padding of its own; in a
   // framed box (a version the user writes, the edit's thinking) the frame keeps the prose padding.
-  "&.rp-message-text:not(.rp-bare) .cm-content": { padding: "8px 0" },
+  "&.rp-message-text:not(.rp-bare) .cm-content": { padding: "8px 0 calc(8px - var(--editor-grip-room, 0px))" },
   "&.rp-message-text:not(.rp-bare) .cm-line": { padding: "0 10px" }
 })
 
