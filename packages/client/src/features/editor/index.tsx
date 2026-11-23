@@ -1,5 +1,6 @@
 import { viewParams } from "../../tabLayoutParams.ts"
 import { tabKinds } from "../workbench/kinds.ts"
+import { fieldTabKind } from "./fieldTab.ts"
 import { panelEditorActions, PanelHistory, PanelVariant } from "./panelActions.tsx"
 import { replyHooks } from "../chat/replyHooks.ts"
 import { editorExtensions } from "../../ui/editorExtensions.ts"
@@ -44,6 +45,16 @@ function LazyCutoutChooser(props: CutoutChooserProps) {
   return (
     <Suspense fallback={null}>
       <CutoutChooser {...props} />
+    </Suspense>
+  )
+}
+
+const FieldPage = lazy(() => import("./FieldPage.tsx").then((module) => ({ default: module.FieldPage })))
+
+function LazyFieldPage() {
+  return (
+    <Suspense fallback={<Loading label="Opening the field…" />}>
+      <FieldPage />
     </Suspense>
   )
 }
@@ -126,4 +137,24 @@ export const register = () => {
     icon: "edit",
     document: true
   })
+  // A field in a tab of its own (fieldTab.ts, owner 2026-11-23): one tab per entry and field,
+  // titled "<entry> · <field>" once the entry has loaded.
+  routes.register({
+    id: "library.field",
+    parent: "app",
+    path: "/library/$refId/field",
+    component: LazyFieldPage,
+    fillBelowHeader: true
+  })
+  // A chat's own note's field, at the branch position the URL names.
+  routes.register({
+    id: "chat.note-field",
+    parent: "app",
+    path: "/chats/$chatId/notes/$refId/field",
+    component: LazyFieldPage,
+    fillBelowHeader: true
+  })
+  // The kind covers a chat's own texts' tabs too (a summary's, the instruction's): their pages
+  // are the chat feature's (chat/textTabs.tsx).
+  tabKinds.register(fieldTabKind)
 }

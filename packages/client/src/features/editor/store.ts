@@ -652,8 +652,15 @@ export class EditorStore {
     this.change(valueField(path), JSON.stringify(value) ?? "undefined")
   }
 
+  /**
+   * For reading only (editor/readOnly.ts: a card on a card source in the full editor): no change
+   * is kept, so nothing reaches a draft, this browser's copies or a save.
+   */
+  readOnly = false
+
   /** Typing re-renders the field; the page hears only when a field starts having unsaved changes. */
   private change(key: string, content: string) {
+    if (this.readOnly) return
     const field = this.field(key)
     this.keep(key, field, content)
     const quiet = field.local !== null
@@ -840,6 +847,7 @@ export class EditorStore {
    * as they are: an entry copied into another lorebook, without that book's own drafts.
    */
   async commit(message: string | null, only?: ReadonlyArray<string>) {
+    if (this.readOnly) return this.notSaved()
     // An explicit save takes the held moves and deletions too.
     if (only === undefined) await this.applyHeld()
     await this.flush()

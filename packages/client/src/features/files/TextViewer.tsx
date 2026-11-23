@@ -130,7 +130,6 @@ function Shown({
       quietMarkers
       language={languageOf(name)}
       textActions={false}
-      expand={false}
       rows={16}
       onChange={onChange ?? (() => undefined)}
     />

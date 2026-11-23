@@ -112,7 +112,7 @@ test("the persona's tab is a full card, with switching kept under the composer",
   await expect(tab.getByRole("textbox", { name: "Personality", exact: true })).toBeVisible()
   await expect(tab).not.toContainText(/used by|New chat/)
   await expect(tab.getByRole("button", { name: /^Fork for this chat/ })).toHaveCount(0)
-  await expect(tab.getByRole("button", { name: "Open Description large" })).toBeVisible()
+  await expect(tab.getByRole("link", { name: "Open Description in a tab" })).toBeAttached()
   // Edited in place, saved with the sticky Save.
   const box = tab.getByRole("textbox", { name: "Description", exact: true })
   await box.click()

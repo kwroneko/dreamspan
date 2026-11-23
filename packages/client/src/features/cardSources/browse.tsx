@@ -34,6 +34,8 @@ import {
   cardSourceViews,
   lorebookPath,
   recentAtom,
+  REMOTE_EDITOR_HINT,
+  remoteEditorHref,
   remoteImageUrl,
   SOURCES_KEY,
   sourcesAtom,
@@ -569,6 +571,15 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
             onClick={() => void navigate(link)}
           >
             Inspect
+          </MenuItem>
+        )}
+        {mine === null && (
+          <MenuItem
+            icon="edit"
+            description={REMOTE_EDITOR_HINT}
+            onClick={() => void navigate({ href: remoteEditorHref(info.id, card.remoteId) })}
+          >
+            Open in the editor
           </MenuItem>
         )}
         {mine === null && (

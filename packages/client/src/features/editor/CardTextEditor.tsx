@@ -6,6 +6,8 @@ import type { AppError } from "../../errors.ts"
 import { CodeEditor } from "../../ui/CodeEditor.tsx"
 import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { type EditorStore, useComparisonRevision, useRevisionDoc } from "./store.ts"
+import { useFieldTabHref } from "./useFieldTabHref.ts"
+import { useEditorReadOnly } from "./readOnly.ts"
 
 /** Comparison reads never alter a draft or the identity its next save will name. */
 export function CardTextEditor({
@@ -24,6 +26,7 @@ export function CardTextEditor({
   tools,
   status,
   expand,
+  fill,
   autoFocus,
   flash,
   onSelectionRangeChange,
@@ -47,8 +50,10 @@ export function CardTextEditor({
   /** The field's own controls and status, in the strip inside its box (`ui/FieldFrame`). */
   tools?: ReactNode
   status?: ReactNode
-  /** False: no Open large (the large box itself). */
+  /** False: no button opening it in its own tab (the field's tab itself). */
   expand?: boolean | undefined
+  /** Fills its container's height, its text scrolling inside (the field's tab). */
+  fill?: boolean | undefined
   /** Focused when it opens, the caret at the end. */
   autoFocus?: boolean | undefined
   /** Text just added, marked briefly and scrolled into view. */
@@ -58,6 +63,11 @@ export function CardTextEditor({
   onBlur?: (() => void) | undefined
 }) {
   const highlights = useSearchHighlights(store, path)
+  // A card shown for reading (readOnly.ts): nothing can be typed, but each field still opens in a tab.
+  const reading = useEditorReadOnly()
+  const locked = readOnly || reading
+  const tabLink = useFieldTabHref(store, path, label, field)
+  const expandTab = expand !== false && !mono && (!readOnly || reading) ? tabLink : undefined
   const saved = getAt(useRevisionDoc(store) ?? {}, path)
   const searchMatch = useSearchMatch(path)
   const revision = useComparisonRevision(store, field)
@@ -101,17 +111,18 @@ export function CardTextEditor({
         mono={mono}
         // Prose has text actions; a pattern or a template's markers (mono) doesn't.
         textActions={!mono}
-        readOnly={readOnly}
+        readOnly={locked}
         source={source}
         tools={tools}
-        lastRevision={typeof saved === "string" ? saved : ""}
+        {...(locked ? {} : { lastRevision: typeof saved === "string" ? saved : "" })}
         onRevert={async () => {
           const result = await store.revertField(field, path, typeof saved === "string" ? saved : "")
           setError(result.ok ? null : result.error)
           return result.ok && getAt(store.working().doc, path) === (typeof saved === "string" ? saved : "")
         }}
         status={status}
-        expand={expand}
+        expandTab={expandTab}
+        fill={fill}
         onSelectionRangeChange={onSelectionRangeChange}
         onChange={onChange}
         onBlur={onBlur}

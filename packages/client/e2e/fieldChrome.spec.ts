@@ -235,33 +235,27 @@ test("picking states in a box's edit history swaps the text in place: nothing is
 })
 
 /**
- * Opens the box large from its strip, types there, closes it: the box in place has the same text
- * and has focus again.
+ * Opens the box in its own tab from its strip (owner, 2026-11-23), types there, goes back: the box
+ * in place has the same text.
  */
 const expectOpensLarge = async (page: Page, box: Locator, name: string, label = name) => {
   const frame = frameOf(box)
-  await frame.getByRole("button", { name: `Open ${label} large`, exact: true }).click()
-  const dialog = page.getByRole("dialog", { name: label, exact: true })
-  const large = dialog.getByRole("textbox", { name, exact: true })
+  await box.click()
+  const link = frame.getByRole("link", { name: `Open ${label} in a tab`, exact: true })
+  const target = (await link.boundingBox())!
+  expect(target.width).toBeGreaterThanOrEqual(24)
+  await link.click()
+  const large = page.locator("[data-field-tab]").getByRole("textbox", { name, exact: true })
   await expect(large).toBeVisible()
+  await large.click()
   await page.keyboard.press("Control+End")
   await page.keyboard.type(" Written large.")
-  const close = dialog.getByRole("button", { name: "Close", exact: true })
-  await expect(close).toHaveCount(1)
-  const target = (await close.boundingBox())!
-  expect(target.width).toBeGreaterThanOrEqual(32)
-  expect(target.height).toBeGreaterThanOrEqual(32)
-  await close.hover()
-  await expect(page.getByText("Close", { exact: true })).toBeVisible()
-  await close.click()
-  await expect(dialog).toHaveCount(0)
+  await page.goBack()
+  await expect(page.locator("[data-field-tab]")).toBeHidden()
   await expect.poll(() => textBoxValue(box)).toMatch(/ Written large\.$/)
-  await expect
-    .poll(() => box.evaluate((e) => (e.getRootNode() as Document | ShadowRoot).activeElement === e))
-    .toBe(true)
 }
 
-test("every multi-line versioned field opens large from its strip, editing the same text: a card's, a note's, a preset prompt's, a lorebook entry's", async ({
+test("every multi-line versioned field opens in its own tab from its strip, editing the same text: a card's, a note's, a preset prompt's, a lorebook entry's", async ({
   page
 }) => {
   test.setTimeout(120_000)

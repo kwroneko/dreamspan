@@ -292,16 +292,29 @@ export const libraryPlaces: ReadonlyArray<Place> = [
     shown: (page) => field(page, "Lorebook description")
   }),
   place({
-    name: "Open large (Lorebook description)",
-    source: "features/editor/controls.tsx:337",
+    name: "Field in its own tab (Lorebook description)",
+    source: "features/editor/controls.tsx:358",
     setup: lazy,
     open: async (page, state, ctx) => {
       await goLibrary(page, ctx, await lorebook(page, ctx, state))
       await bookSettings(page)
-      await page.getByRole("button", { name: "Open Lorebook description large" }).click()
-      return page.getByRole("dialog", { name: "Lorebook description" }).getByRole("textbox")
+      await field(page, "Lorebook description").click()
+      await page.getByRole("link", { name: "Open Lorebook description in a tab", exact: true }).click()
+      return page.locator("[data-field-tab]").getByRole("textbox")
     },
-    shown: (page) => page.getByRole("dialog", { name: "Lorebook description" }).getByRole("textbox")
+    shown: (page) => page.locator("[data-field-tab]").getByRole("textbox")
+  }),
+  place({
+    name: "Field in its own tab (card Description)",
+    source: "features/editor/controls.tsx:358",
+    setup: card,
+    open: async (page, state, ctx) => {
+      await goLibrary(page, ctx, state.refId)
+      await field(page, "Description").first().click()
+      await page.getByRole("link", { name: "Open Description in a tab", exact: true }).click()
+      return page.locator("[data-field-tab]").getByRole("textbox", { name: "Description" })
+    },
+    shown: (page) => page.locator("[data-field-tab]").getByRole("textbox", { name: "Description" })
   }),
   place({
     name: "Lorebook entry content",

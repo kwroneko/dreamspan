@@ -50,6 +50,10 @@ export const flushOpenEditors = () => Promise.all([...open.keys()].map((editor) 
 export const openEditorStore = (refId: string): unknown =>
   [...open.keys()].find((editor) => editor.refId === refId && editor.store !== undefined)?.store
 
+/** The stores of every editor open on `refId` (a chat's own note's position among them). */
+export const openEditorStores = (refId: string): ReadonlyArray<unknown> =>
+  [...open.keys()].flatMap((editor) => (editor.refId === refId && editor.store !== undefined ? [editor.store] : []))
+
 /**
  * How many times a chat's state changed while editors were open: an editor kept while its tab
  * was closed (a workspace's store) reads its state again when it's shown, if it missed one.

@@ -2,7 +2,7 @@
 // contacts a source), and the calls that do, each cancellable, so a superseded search is
 // dropped on the server too (the server drops its upstream request when nobody waits on it).
 import { RegistryContext } from "@effect/atom-react"
-import type { SourceFailure } from "@dreamspan/shared/cardSources.ts"
+import { remoteEntityId, type SourceFailure } from "@dreamspan/shared/cardSources.ts"
 import { Cause, Context, Effect, Exit } from "effect"
 import { Atom, AtomRegistry } from "effect/reactivity"
 import { useNavigate } from "@tanstack/react-router"
@@ -16,6 +16,16 @@ import type { ReactNode } from "react"
 import type { RemoteSummary } from "@dreamspan/shared/cardSources.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { askMediaApproval } from "../savedMedia/approval.ts"
+
+/**
+ * A card on a source, not added, in the full editor (owner, 2026-11-23): for reading its every
+ * field there (editor/ReadOnlyCard.tsx), under the id it has until it's added.
+ */
+export const remoteEditorHref = (sourceId: string, remoteId: string) =>
+  `/library/${encodeURIComponent(remoteEntityId(sourceId, remoteId))}`
+
+/** What the full editor's opener says it does for a card not added yet. */
+export const REMOTE_EDITOR_HINT = "Shows every field in the editor, for reading. Add it to your cards to edit it."
 
 /** The reactivity key of everything card sources show from the server. */
 export const SOURCES_KEY = "cardSources"

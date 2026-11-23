@@ -114,7 +114,8 @@ export function IconLink({
   hint?: ReactNode
   icon: IconName
   href: string
-  onOpen: () => void
+  /** A plain click's own opening; without it the link opens as any app link does (in the workbench). */
+  onOpen?: (() => void) | undefined
   disabled?: boolean
   className?: string
 }) {
@@ -127,7 +128,7 @@ export function IconLink({
         className={`${iconButtonClass()} ${disabled ? "opacity-50" : ""} ${className}`}
         onClick={(event) => {
           if (disabled) return event.preventDefault()
-          openOnPlainClick(onOpen)(event)
+          if (onOpen) openOnPlainClick(onOpen)(event)
         }}
       >
         <Icon name={icon} />

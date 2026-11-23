@@ -16,6 +16,28 @@ const goChat = async (page: Page, { server }: PlaceContext, chatId: ChatId) => {
   await rows(page).first().or(composer(page)).first().waitFor()
 }
 
+/** A chat with one message and a summary of it. */
+const summarized = async (ctx: PlaceContext) => {
+  const fixture = await ctx.rpc((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: `Durable ${ctx.tag}` })
+      const sent = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        content: "A harbor."
+      })
+      if (sent._tag !== "Posted") throw new Error("Expected a posted message")
+      return { chatId: chat.id, entry: sent.entry }
+    })
+  )
+  await level1(ctx.server.dataDir, fixture.chatId, [fixture.entry], "Original summary.")
+  return { chatId: fixture.chatId }
+}
+
+/** A text's own tab (editor/fieldTab.ts): its box. */
+const tabBox = (page: Page) => page.locator("[data-field-tab]").getByRole("textbox").first()
+
 /** A chat with one message of the user's. */
 const oneMessage = ({ rpc, tag }: PlaceContext) =>
   rpc((api) =>
@@ -193,23 +215,7 @@ export const chatPlaces = [
   place({
     name: "Summary edit",
     source: "features/chat/SummaryPanel.tsx:116",
-    setup: async (ctx) => {
-      const fixture = await ctx.rpc((api) =>
-        Effect.gen(function* () {
-          const chat = yield* api.CreateChat({ title: `Durable ${ctx.tag}` })
-          const sent = yield* api.SendMessage({
-            chatId: chat.id,
-            parentSlotId: null,
-            branch: false,
-            content: "A harbor."
-          })
-          if (sent._tag !== "Posted") throw new Error("Expected a posted message")
-          return { chatId: chat.id, entry: sent.entry }
-        })
-      )
-      await level1(ctx.server.dataDir, fixture.chatId, [fixture.entry], "Original summary.")
-      return { chatId: fixture.chatId }
-    },
+    setup: summarized,
     open: async (page, { chatId }, ctx) => {
       await goChat(page, ctx, chatId)
       const panel = await openPanel(page, "Summaries")
@@ -218,6 +224,21 @@ export const chatPlaces = [
       return box
     },
     shown: (page) => page.getByRole("textbox", { name: /Text of the summary/ })
+  }),
+  place({
+    name: "Summary text in its own tab",
+    source: "features/chat/textTabs.tsx",
+    setup: summarized,
+    open: async (page, { chatId }, ctx) => {
+      await goChat(page, ctx, chatId)
+      const panel = await openPanel(page, "Summaries")
+      const box = panel.getByRole("textbox", { name: /Text of the summary/ })
+      if ((await box.count()) === 0) await panel.getByRole("button", { name: /Edit the summary/ }).click()
+      await box.click()
+      await panel.getByRole("link", { name: /^Open Text of the summary .* in a tab$/ }).click()
+      return tabBox(page)
+    },
+    shown: tabBox
   }),
   place({
     name: "Edit thinking",
@@ -250,6 +271,22 @@ export const chatPlaces = [
       return noteText(panel, "Note")
     },
     shown: (page) => page.getByRole("region", { name: "Note Note" }).getByRole("textbox", { name: "Text of Note" })
+  }),
+  place({
+    name: "Chat note in its own tab",
+    source: "features/editor/FieldPage.tsx",
+    setup: oneMessage,
+    open: async (page, { chatId }, ctx) => {
+      await goChat(page, ctx, chatId)
+      const panel = await openPanel(page, "Notes")
+      const own = panel.getByRole("region", { name: "This chat's notes" })
+      if ((await panel.getByRole("region", { name: "Note Note" }).count()) === 0)
+        await own.getByRole("button", { name: "Add note", exact: true }).click()
+      await (await noteText(panel, "Note")).click()
+      await panel.getByRole("link", { name: "Open Text of Note in a tab", exact: true }).click()
+      return tabBox(page)
+    },
+    shown: tabBox
   }),
   place({
     name: "Chat note title (rename in place)",
@@ -348,6 +385,19 @@ export const chatPlaces = [
       return page.getByRole("textbox", { name: "This chat's summarization instruction", exact: true })
     },
     shown: (page) => page.getByRole("textbox", { name: "This chat's summarization instruction", exact: true })
+  }),
+  place({
+    name: "This chat's summarization instruction in its own tab",
+    source: "features/chat/textTabs.tsx",
+    setup: oneMessage,
+    open: async (page, { chatId }, ctx) => {
+      await goChat(page, ctx, chatId)
+      await openSummarySettings(page)
+      await page.getByRole("textbox", { name: "This chat's summarization instruction", exact: true }).click()
+      await page.getByRole("link", { name: "Open This chat's summarization instruction in a tab", exact: true }).click()
+      return tabBox(page)
+    },
+    shown: tabBox
   }),
   place({
     name: "First message of a card's new chat",

@@ -46,6 +46,7 @@ import { SearchNavigation } from "./searchNavigation.ts"
 import { type EditorStore, useEditorState, useText, useValue, useWorkingDoc } from "./store.ts"
 import { MACROS_COUNTED, useCountMacros } from "./countMacros.ts"
 import { tokenizerText, tokensText, useTokenCounts } from "./tokenCounts.ts"
+import { useEditorReadOnly } from "./readOnly.ts"
 
 /** What each field is for, on hover over its label. */
 const HINTS = {
@@ -131,6 +132,8 @@ function Greetings({
   add: { label: string; hint: string }
 }) {
   const greetings = useValue<ReadonlyArray<string> | undefined>(store, path) ?? []
+  const reading = useEditorReadOnly()
+  if (reading && greetings.length === 0) return null
   return (
     <Fieldset legend={title} {...(about ? { about } : {})}>
       {greetings.map((greeting, index) => (
@@ -147,7 +150,7 @@ function Greetings({
               onBlur={() => void store.save(valueField(path))}
             />
           </Field>
-          <div>
+          <div className={reading ? "hidden" : ""}>
             <Button
               variant="ghost"
               onClick={() => store.setValue(path, greetings.toSpliced(index, 1))}
@@ -159,11 +162,13 @@ function Greetings({
           </div>
         </div>
       ))}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button hint={add.hint} onClick={() => store.setValue(path, [...greetings, ""])}>
-          {add.label}
-        </Button>
-      </div>
+      {!reading && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button hint={add.hint} onClick={() => store.setValue(path, [...greetings, ""])}>
+            {add.label}
+          </Button>
+        </div>
+      )}
       <FieldTools store={store} field={valueField(path)} label={title} />
     </Fieldset>
   )
@@ -172,6 +177,7 @@ function Greetings({
 function Tags({ store }: { store: EditorStore }) {
   const path = ["tags"]
   const tags = useValue<ReadonlyArray<string>>(store, path) ?? []
+  const reading = useEditorReadOnly()
   const typed = useDurableText(`new-tag:${store.refId}`, "New tag", "")
   const tag = typed.text
   const add = () => {
@@ -190,49 +196,53 @@ function Tags({ store }: { store: EditorStore }) {
             className="flex items-center gap-0.5 rounded-full border border-border py-0.5 pr-0.5 pl-3 text-sm"
           >
             {name}
-            <IconButton
-              data-layout-audit-ignore="inset: Remove action is part of its compact tag chip"
-              label={`Remove the tag ${name}`}
-              hint={`Removes the tag “${name}” from this card.`}
-              icon="close"
-              className="size-6! rounded-full"
-              onClick={() =>
-                store.setValue(
-                  path,
-                  tags.filter((other) => other !== name)
-                )
-              }
-            />
+            {!reading && (
+              <IconButton
+                data-layout-audit-ignore="inset: Remove action is part of its compact tag chip"
+                label={`Remove the tag ${name}`}
+                hint={`Removes the tag “${name}” from this card.`}
+                icon="close"
+                className="size-6! rounded-full"
+                onClick={() =>
+                  store.setValue(
+                    path,
+                    tags.filter((other) => other !== name)
+                  )
+                }
+              />
+            )}
           </li>
         ))}
-        <li
-          data-new-tag
-          data-layout-audit-ignore="inset: The new tag's field and + are part of their compact chip"
-          className="flex items-center gap-0.5 rounded-full border border-dashed border-border py-0.5 pr-0.5 pl-3 text-sm focus-within:border-focus"
-        >
-          <input
-            aria-label="New tag"
-            value={tag}
-            placeholder="New tag"
-            size={Math.max(7, [...tag].length + 1)}
-            className="max-w-48 min-w-0 bg-transparent outline-none placeholder:text-muted"
-            readOnly={!typed.ready}
-            onChange={(event) => typed.setText(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault()
-                add()
-              }
-            }}
-          />
-          <IconButton
-            label="Add the tag"
-            hint="Add what's typed as a tag of this card (or press Enter)."
-            icon="plus"
-            className="size-6! rounded-full"
-            onClick={add}
-          />
-        </li>
+        {!reading && (
+          <li
+            data-new-tag
+            data-layout-audit-ignore="inset: The new tag's field and + are part of their compact chip"
+            className="flex items-center gap-0.5 rounded-full border border-dashed border-border py-0.5 pr-0.5 pl-3 text-sm focus-within:border-focus"
+          >
+            <input
+              aria-label="New tag"
+              value={tag}
+              placeholder="New tag"
+              size={Math.max(7, [...tag].length + 1)}
+              className="max-w-48 min-w-0 bg-transparent outline-none placeholder:text-muted"
+              readOnly={!typed.ready}
+              onChange={(event) => typed.setText(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  add()
+                }
+              }}
+            />
+            <IconButton
+              label="Add the tag"
+              hint="Add what's typed as a tag of this card (or press Enter)."
+              icon="plus"
+              className="size-6! rounded-full"
+              onClick={add}
+            />
+          </li>
+        )}
       </ul>
       <FieldTools store={store} field={valueField(path)} label="Tags" />
     </Fieldset>
@@ -252,8 +262,10 @@ function Talkativeness({ store }: { store: EditorStore }) {
   const stored = useValue<unknown>(store, TALKATIVENESS)
   const value = typeof stored === "number" && Number.isFinite(stored) ? stored : TALKATIVENESS_DEFAULT
   const [dragged, setDragged] = useState<number | null>(null)
+  const reading = useEditorReadOnly()
   return (
     <Slider
+      disabled={reading}
       label="Talkativeness in group chats"
       about="Choose how often they reply in a group. A character named in the message answers first; otherwise this chance applies. Default: 50%."
       value={dragged ?? value}
@@ -427,6 +439,7 @@ function GreetingsTab({ store, layout }: CardTabProps) {
 }
 
 function MetadataTab({ store, call, layout }: CardTabProps) {
+  const reading = useEditorReadOnly()
   const doc = useWorkingDoc(store)
   const snapshot = useEditorState(store).snapshot
   const name = useText(store, ["name"]) ?? ""
@@ -441,7 +454,7 @@ function MetadataTab({ store, call, layout }: CardTabProps) {
   )
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      {layout === "page" ? (
+      {layout === "page" && !reading ? (
         // On a wide page the picture stands beside the notes, tags and creator, tops aligned.
         <div className="flex flex-col gap-6 md:flex-row md:items-start">
           <section aria-labelledby="card-picture" className="flex shrink-0 flex-col gap-2">
@@ -481,6 +494,8 @@ const BOOK: FieldPath = ["character_book"]
 function LorebookTab({ store, layout, onOpenBook }: CardTabProps) {
   const book = useValue<LorebookDoc | undefined>(store, BOOK)
   const name = useText(store, ["name"]) || "This card"
+  const reading = useEditorReadOnly()
+  if (reading) return <ReadOnlyLorebook store={store} book={book} name={name} />
   if (layout === "page")
     return (
       <div data-card-lorebook className="flex min-w-0 flex-col gap-4">
@@ -511,6 +526,39 @@ function LorebookTab({ store, layout, onOpenBook }: CardTabProps) {
         saveControls={false}
         {...(onOpenBook ? { onOpenLarge: onOpenBook } : {})}
       />
+    </div>
+  )
+}
+
+/**
+ * A card's own book shown for reading: each entry's name, keys and text, the text in its box
+ * (read-only, and opening in its own tab as any field's).
+ */
+function ReadOnlyLorebook({ store, book, name }: { store: EditorStore; book: LorebookDoc | undefined; name: string }) {
+  const entries = book?.entries ?? []
+  if (entries.length === 0) return <p className="text-sm text-muted">{name} has no lorebook of its own.</p>
+  return (
+    <div data-card-lorebook className="flex min-w-0 flex-col gap-4">
+      {entries.map((entry, index) => {
+        const title = entry.comment?.trim() || `Entry ${index + 1}`
+        const keys = (entry.keys ?? []).filter((key) => key.trim() !== "")
+        return (
+          <section key={index} aria-label={title} className="flex min-w-0 flex-col gap-1">
+            <h3 className="text-sm font-medium [overflow-wrap:anywhere]">
+              {title}
+              {entry.enabled === false && <span className="font-normal text-muted"> · off</span>}
+            </h3>
+            {keys.length > 0 && <p className="text-sm text-muted [overflow-wrap:anywhere]">Keys: {keys.join(", ")}</p>}
+            <TextField
+              store={store}
+              path={[...BOOK, "entries", index, "content"]}
+              label={`${title} text`}
+              labelHidden
+              rows={3}
+            />
+          </section>
+        )
+      })}
     </div>
   )
 }
@@ -559,7 +607,8 @@ export function CardEditor({
   header?: ReactNode
 }) {
   const snapshot = useSyncExternalStore(cardEditorTabs.subscribe, cardEditorTabs.snapshot, cardEditorTabs.snapshot)
-  const tabs = [...snapshot.entries].sort((a, b) => a.order - b.order)
+  const reading = useEditorReadOnly()
+  const tabs = [...snapshot.entries].filter((entry) => !reading || entry.readable).sort((a, b) => a.order - b.order)
   const [urlTab, setUrlTab] = usePlaceParam(`cardTab:${layout}:${store.refId}`, "")
   const tab = urlTab || initial
   const setTab = (next: string | undefined) => setUrlTab(next ?? "")

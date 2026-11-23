@@ -9,18 +9,18 @@ import { Link } from "@tanstack/react-router"
 import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
-import { Dialog } from "../../ui/Dialog.tsx"
 import { Field, Fieldset, Input, Textarea } from "../../ui/Field.tsx"
 import { Select, type SelectItem } from "../../ui/Select.tsx"
 import { chromeButton } from "../../ui/FieldFrame.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
-import { IconButton } from "../../ui/Tooltip.tsx"
 import { flashItem } from "../../ui/reveal.ts"
 import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { ReplayNotice } from "./ReplayNotice.tsx"
 import { FieldRevert, linesText } from "./FieldRevert.tsx"
 import { CardTextEditor } from "./CardTextEditor.tsx"
-import { useOpenPlace } from "./durable.tsx"
+import { useFieldTabHref } from "./useFieldTabHref.ts"
+import { useEditorReadOnly } from "./readOnly.ts"
+import { ExpandLink } from "../../ui/ExpandLink.tsx"
 import { type FieldViewExtra, fieldViews } from "./fieldViews.ts"
 import type { CallResult } from "./caller.ts"
 import { draftLabel } from "./fields.ts"
@@ -126,7 +126,7 @@ export function TextField({
   about,
   description,
   mono = false,
-  readOnly = false,
+  readOnly: readOnlyProp = false,
   labelHidden = false,
   fit = false,
   source,
@@ -168,8 +168,12 @@ export function TextField({
   /** Text just added (a snippet's sent text), marked briefly and scrolled into view; the code editor box only. */
   flash?: { readonly at: number; readonly length: number } | undefined
 }) {
-  // URL state, so a reload opens it large again: the text is the field's own draft.
-  const [large, setLarge] = useOpenPlace(`large:${store.refId}:${textField(path)}`)
+  // A card shown for reading (readOnly.ts): its boxes show their text, and nothing can be typed.
+  const reading = useEditorReadOnly()
+  const readOnly = readOnlyProp || reading
+  // Its own tab (owner, 2026-11-23): every multi-line prose field. The code editor's box (card,
+  // preset and note text) has the same, from `CardTextEditor`.
+  const tabLink = useFieldTabHref(store, path, label)
   const highlights = useSearchHighlights(store, path)
   const match = useSearchMatch(path)
   const target = useRef<HTMLDivElement>(null)
@@ -213,19 +217,7 @@ export function TextField({
         {fieldTools}
         {extra.tools}
         <FieldEditHistory store={store} field={field} label={label} />
-        {/* Open large (owner, 2026-11-02): every multi-line prose field. The code editor's box
-          (card, preset and note text) has its own, in `ui/CodeEditorView`. */}
-        {rows !== undefined && !card && !mono && !readOnly && (
-          <IconButton
-            data-layout-overlay="Expand action sits above the field in its label row"
-            data-layout-audit-ignore="inset: Expand action belongs to the field label, outside the editable box"
-            label={`Open ${label} large`}
-            hint={`Opens ${label} large over the page, to write in a bigger box; it's the same text.`}
-            icon="expand"
-            className={chromeButton}
-            onClick={() => setLarge(true)}
-          />
-        )}
+        {rows !== undefined && !card && !mono && (!readOnly || reading) && <ExpandLink label={label} {...tabLink} />}
       </>
     )
     return (
@@ -234,16 +226,6 @@ export function TextField({
         data-replaced-field={replaced || undefined}
         className="relative flex min-w-0 scroll-mt-[var(--preset-toolbar-height,1rem)] flex-col gap-1"
       >
-        {large && (
-          <LargeField
-            store={store}
-            path={path}
-            field={field}
-            label={label}
-            onClose={() => setLarge(false)}
-            returnFocus={() => target.current?.querySelector<HTMLElement>("textarea")?.focus()}
-          />
-        )}
         <Field
           label={labelHidden ? label : <FieldLabel label={label} />}
           description={description}
@@ -341,55 +323,53 @@ export function TextField({
   return render()
 }
 
-/** One text field at the size of the screen, over the page; the same draft as the field in place. */
-function LargeField({
+/**
+ * A field alone in its own tab (fieldTab.ts; owner, 2026-11-23): its box fills the tab, its text
+ * scrolling inside, with its history and "edited" in the strip as in place. The same store and
+ * draft as the field in its editor: a text field, or one item of a list (an alternate greeting)
+ * whose list is the draft.
+ */
+export function FieldTabEditor({
   store,
-  path,
   field,
-  label,
-  onClose,
-  returnFocus
+  path,
+  label
 }: {
   store: EditorStore
-  path: FieldPath
   field: string
+  path: FieldPath
   label: string
-  onClose: () => void
-  /** Back to the box in place, where the same text is. */
-  returnFocus: () => void
 }) {
-  const value = useText(store, path)
+  const value = useText(store, path) ?? ""
+  const readOnly = useEditorReadOnly()
+  const parsed = parseField(field)
+  const list = parsed?.kind === "value" ? parsed.path : null
+  const items = useValue<unknown>(store, list ?? path)
+  const index = path.at(-1)
+  const write = (next: string) => {
+    if (list === null) return store.setText(path, next)
+    if (!Array.isArray(items) || typeof index !== "number" || index >= items.length) return
+    store.setValue(list, items.with(index, next))
+  }
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => !open && onClose()}
-      title={label}
-      wide
-      finalFocus={() => {
-        requestAnimationFrame(returnFocus)
-        return false
-      }}
-    >
-      <div>
-        <CardTextEditor
-          store={store}
-          field={field}
-          path={path}
-          value={value}
-          label={label}
-          minHeight="min(65dvh, 48rem)"
-          fullHeight
-          resizable={false}
-          expand={false}
-          autoFocus
-          tools={<FieldEditHistory store={store} field={field} label={label} />}
-          status={<FieldStatus store={store} field={field} />}
-          onChange={(next) => store.setText(path, next)}
-          onBlur={() => void store.save(field)}
-        />
-      </div>
+    <div data-field-tab className="flex min-h-0 flex-1 flex-col gap-2">
+      <CardTextEditor
+        store={store}
+        field={field}
+        path={path}
+        value={value}
+        label={label}
+        fill
+        minHeight="100%"
+        expand={false}
+        readOnly={readOnly}
+        tools={<FieldEditHistory store={store} field={field} label={label} />}
+        status={<FieldStatus store={store} field={field} />}
+        onChange={write}
+        onBlur={() => void store.save(field)}
+      />
       <FieldTools store={store} field={field} label={label} history={false} />
-    </Dialog>
+    </div>
   )
 }
 

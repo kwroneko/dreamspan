@@ -289,13 +289,12 @@ function CardPanel({
                 saveControls={
                   <>
                     <SaveRevision store={store} adds={remote ? card.name : null} />
-                    {!remote && (
-                      <SlotOutlet
-                        slot={chatCardActions}
-                        only="card.edit"
-                        props={{ session, card, info, persona, presentation: "header" }}
-                      />
-                    )}
+                    {/* A source's card too: the full editor shows it for reading (editor/ReadOnlyCard.tsx). */}
+                    <SlotOutlet
+                      slot={chatCardActions}
+                      only="card.edit"
+                      props={{ session, card, info, persona, presentation: "header" }}
+                    />
                   </>
                 }
                 current={session === null ? undefined : { chatId: session.id, forkId: view.forkId }}

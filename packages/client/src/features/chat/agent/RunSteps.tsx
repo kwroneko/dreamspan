@@ -484,7 +484,6 @@ function StepEditor({
         mono={isArgs}
         rows={isArgs ? 6 : 4}
         textActions={!isArgs}
-        expand={false}
         autoFocus
         onChange={draft.setText}
         tools={<UserDraftUndo draft={draft} place="strip" />}

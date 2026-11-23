@@ -1,5 +1,5 @@
 // A text box's own controls inside its border (owner, 2026-11-02; DESIGN §10.1): the text actions,
-// its edit history, Open large, its token count, the "edited" marker. They sit in a strip along
+// its edit history, the link to its own tab, its token count, the "edited" marker. They sit in a strip along
 // one of the box's borders, inside it: under a multi-line box's text, at a one-line box's end.
 // The strip always takes its room, shown or not and full or empty, so focusing, typing, a change
 // or leaving the box never moves anything around the box, and the text never runs under a

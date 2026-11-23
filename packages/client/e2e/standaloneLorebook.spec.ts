@@ -353,17 +353,17 @@ test("a 400-entry book: rows virtualized, cells edited in place, new entries kep
   await page.getByRole("spinbutton", { name: "Order of Place 123" }).fill("900")
   await page.getByRole("spinbutton", { name: "Trigger % of Place 123" }).fill("40")
   await page.getByRole("spinbutton", { name: "Trigger % of Place 123" }).blur()
-  // The entry's text opens large, over the page, as a card's fields do.
+  // The entry's text opens in its own tab, as a card's fields do: the same text.
   await page.getByRole("button", { name: "Open Place 123", exact: true }).click()
   await page
     .getByRole("group", { name: "Lorebook entry 123", exact: true })
-    .getByRole("button", { name: "Open Entry content large", exact: true })
+    .getByRole("link", { name: "Open Entry content in a tab", exact: true })
     .click()
-  const large = page.getByRole("dialog", { name: "Entry content", exact: true })
+  const large = page.locator("[data-field-tab]")
   await large.getByRole("textbox").click()
   await page.keyboard.press("Control+End")
   await page.keyboard.type(" The bridge is out.")
-  await large.getByRole("button", { name: "Close", exact: true }).click()
+  await page.goBack()
   await expectTextBox(
     page
       .getByRole("group", { name: "Lorebook entry 123", exact: true })

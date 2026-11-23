@@ -588,23 +588,50 @@ export class UserDraftStore {
   acknowledge = () => this.update({ displaced: null })
 }
 
+/**
+ * One store per draft on the page (owner, 2026-11-23: a text opened in its own tab is the same
+ * draft as the box it came from, typing in one showing in the other): every box of the same
+ * target and field takes the same store, opened by the first, left by the last.
+ */
+const sharedDrafts = new Map<string, { readonly store: UserDraftStore; users: number; close?: () => void }>()
+
 export function useUserDraft(targetId: string, field: string, saved: string) {
   const { run } = useAction()
   const userId = useSession().user.id
+  const key = `${userId}\n${targetId}\n${field}`
   // The transport and queued writes outlive this editor; identity changes make a new store.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const store = useMemo(() => new UserDraftStore(userId, targetId, field, run), [userId, targetId, field])
+  const store = useMemo(() => {
+    const found = sharedDrafts.get(key)
+    if (found) return found.store
+    const made = new UserDraftStore(userId, targetId, field, run)
+    sharedDrafts.set(key, { store: made, users: 0 })
+    return made
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
   const state = useSyncExternalStore(store.subscribe, store.snapshot)
   useEffect(() => {
-    const disconnect = store.connect()
-    store.open()
-    window.addEventListener("pagehide", store.leave)
-    return () => {
-      disconnect()
-      window.removeEventListener("pagehide", store.leave)
-      store.leave()
+    let entry = sharedDrafts.get(key)
+    if (entry?.store !== store) {
+      entry = { store, users: 0 }
+      sharedDrafts.set(key, entry)
     }
-  }, [store])
+    const held = entry
+    if (held.users++ === 0) {
+      const disconnect = store.connect()
+      store.open()
+      window.addEventListener("pagehide", store.leave)
+      held.close = () => {
+        disconnect()
+        window.removeEventListener("pagehide", store.leave)
+        store.leave()
+      }
+    }
+    return () => {
+      if (--held.users > 0) return
+      held.close?.()
+      if (sharedDrafts.get(key) === held) sharedDrafts.delete(key)
+    }
+  }, [key, store])
   return {
     ...state,
     text: state.text ?? saved,

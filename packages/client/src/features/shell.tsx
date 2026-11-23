@@ -392,10 +392,11 @@ export function CenterPage() {
   // The screen shown says so itself (RouteEntry.fill). A path list here missed the chat with a
   // card source's card (composerbottom1): its composer sat under the greeting, mid-screen.
   const fill = useMatches({ select: (matches) => matches.at(-1)?.staticData.fill === true })
+  const fillBelowHeader = useMatches({ select: (matches) => matches.at(-1)?.staticData.fillBelowHeader === true })
   // An editor opened from a chat scrolls itself, as the chat's large editors did (BoundScroll).
   const bound = useSearch({ strict: false, select: (search) => typeof search.chat === "string" && search.chat !== "" })
   if (fill) return <Outlet />
-  const own = bound && pathname.startsWith("/library/")
+  const own = (bound && pathname.startsWith("/library/")) || fillBelowHeader
   return (
     <CenterHeaderHost
       leading={

@@ -55,10 +55,11 @@ export function RemoteCardLine({
   beforeAdd,
   onAdded
 }: {
-  card: CastCard
+  card: Pick<CastCard, "entityId" | "name">
   /** Run first, as keeping what's typed in the card's tab. */
   beforeAdd?: () => Promise<unknown>
-  onAdded?: (entityId: string) => void
+  /** The user's card, once it's theirs: its entity and its entry. */
+  onAdded?: (entityId: string, refId: string) => void
 }) {
   const from = remoteOf(card.entityId)
   const sourceName = useSourceName()
@@ -79,7 +80,7 @@ export function RemoteCardLine({
             .then(() => adopt(from.sourceId, name, from.remoteId))
             .then((added) => {
               setAdding(false)
-              if (added) onAdded?.(added.entityId)
+              if (added) onAdded?.(added.entityId, added.refId)
             })
         }}
       >

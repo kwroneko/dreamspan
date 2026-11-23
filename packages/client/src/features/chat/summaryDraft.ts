@@ -12,7 +12,15 @@ import { type Draft, DraftHistoryPolicy } from "@dreamspan/shared/drafts.ts"
 import type { LcmSummary } from "@dreamspan/shared/lcm.ts"
 import type { AppError } from "../../errors.ts"
 import { type Copy, copiesOf, dropCopy, keepCopy, makeCopy, pendingOf } from "../editor/backup.ts"
+import { useEffect, useState } from "react"
 import type { ChatSession, Outcome } from "./session.ts"
+
+/** What a draft needs of its chat: the server, and the branch it's read on. A chat's session is one. */
+export type SummaryDraftHost = Pick<ChatSession, "call"> & {
+  readonly snapshot: () => { readonly forkId: ReturnType<ChatSession["snapshot"]>["forkId"] }
+}
+/** What a draft needs of its summary. */
+export type SummaryDraftSubject = Pick<LcmSummary, "id" | "revisionId" | "content" | "rowVersion">
 
 /** How long typing pauses before the text is saved. */
 const SAVE_DELAY_MS = 600
@@ -84,14 +92,14 @@ export class SummaryDraft {
   private timer: ReturnType<typeof setTimeout> | null = null
   /** Replays and saves run one at a time, in order. */
   private queue: Promise<unknown> = Promise.resolve()
-  private summary: LcmSummary
+  private summary: SummaryDraftSubject
   private disposed = false
-  private readonly session: ChatSession
+  private readonly session: SummaryDraftHost
   private readonly forkId: ReturnType<ChatSession["snapshot"]>["forkId"]
   private readonly backupId: string
   private readonly userId: string
 
-  constructor(session: ChatSession, userId: string, summary: LcmSummary) {
+  constructor(session: SummaryDraftHost, userId: string, summary: SummaryDraftSubject) {
     this.forkId = session.snapshot().forkId
     this.backupId = `${summary.id}:${this.forkId ?? ""}`
     this.session = session
@@ -151,7 +159,7 @@ export class SummaryDraft {
   }
 
   /** The summary moved on (another revision selected, another tab): the box keeps what the user has. */
-  update(summary: LcmSummary) {
+  update(summary: SummaryDraftSubject) {
     this.summary = summary
     this.refresh()
   }
@@ -477,4 +485,50 @@ const deletedElsewhere: AppError = {
   message: "This text was deleted elsewhere. Find your copy in recovered texts.",
   problems: [],
   reason: null
+}
+
+/**
+ * One draft per summary and branch on the page (owner, 2026-11-23: a summary's text opened in its
+ * own tab is the same draft as its edit in the panel, typing in one showing in the other): the
+ * panel's edit and the tab take the same `SummaryDraft`, opened once, disposed (its typing sent)
+ * once neither shows it.
+ */
+const shared = new Map<string, { readonly draft: SummaryDraft; users: number; opened: boolean }>()
+const sweep = (key: string) =>
+  setTimeout(() => {
+    const entry = shared.get(key)
+    if (!entry || entry.users > 0) return
+    shared.delete(key)
+    entry.draft.dispose()
+  }, 1000)
+
+export function useSharedSummaryDraft(host: SummaryDraftHost, userId: string, summary: SummaryDraftSubject) {
+  const key = `${userId}\n${summary.id}\n${host.snapshot().forkId ?? ""}`
+  const [draft] = useState(() => {
+    const found = shared.get(key)
+    if (found) return found.draft
+    const made = new SummaryDraft(host, userId, summary)
+    shared.set(key, { draft: made, users: 0, opened: false })
+    sweep(key)
+    return made
+  })
+  useEffect(() => {
+    let entry = shared.get(key)
+    if (entry?.draft !== draft) {
+      // Swept before this effect ran (a render long unmounted): taken up again.
+      entry = { draft, users: 0, opened: false }
+      shared.set(key, entry)
+    }
+    const held = entry
+    held.users++
+    if (!held.opened) {
+      held.opened = true
+      void draft.open()
+    }
+    return () => {
+      held.users--
+      if (held.users === 0) sweep(key)
+    }
+  }, [key, draft])
+  return draft
 }
