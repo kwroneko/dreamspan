@@ -1,8 +1,8 @@
 // A card field or preset prompt a note replaces in the open chat (DESIGN §4.2; owner,
-// 2026-11-05; spec/NOTE-OVERRIDES.md §2.1): two tabs at the end of the field's label row, "As
-// replaced" first, its box glowing blue and its edits going to the note, which is named and
-// linked under it; "Original", the card's or preset's own text, edited as usual. A field no note
-// replaces has "Replace with a note in this chat" in its box's strip, shown on hover and focus.
+// 2026-11-05; spec/NOTE-OVERRIDES.md §2.1): two tabs at the end of the field's label row, "This
+// chat" first, its box glowing blue and its edits going to the note, which is named and linked
+// under it; "Original", the card's or preset's own text, edited as usual. A field no note
+// replaces has "Edit for this chat only" in its box's strip, shown on hover and focus.
 import type { NoteReplacementView, PresetContext } from "@dreamspan/shared/inspectorApi.ts"
 import { useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
@@ -81,17 +81,18 @@ function Replaced({
   if (noteStore.snapshot === null) void noteStore.load()
   const whose = target.kind === "preset_prompt" ? "the preset's" : `${names?.card(target.card) ?? "the card"}'s`
   const everywhere = target.kind === "preset_prompt" ? "every chat using the preset" : "every chat with the card"
+  const source = target.kind === "preset_prompt" ? "the preset" : "the card"
   const tabs = (
     <FieldTabs
-      label={`${label}: as replaced or original`}
+      label={`${label}: this chat or original`}
       ids={ids}
       value={tab}
       onValueChange={setTab}
       tabs={[
         {
           value: "replaced",
-          label: "As replaced",
-          description: `The note's text, sent in place of ${targetLabel(target, names)} in this chat. Edits change the note.`
+          label: "This chat",
+          description: `Your version, sent in this chat only. Edits change it here, not ${source}.`
         },
         {
           value: "original",
@@ -104,8 +105,8 @@ function Replaced({
   const line = (
     <>
       {replacement.status === "own_position"
-        ? "Left out in this chat: the note "
-        : "Replaced in this chat by the note "}
+        ? "Left out in this chat; the note "
+        : "This chat's version is kept in the note "}
       <Tooltip label="Opens the note.">
         <button
           type="button"
@@ -116,9 +117,9 @@ function Replaced({
         </button>
       </Tooltip>
       {replacement.status === "own_position"
-        ? " goes at its own position instead."
+        ? " is sent at its own position instead."
         : replacement.status === "not_due"
-          ? ", on the turns it applies to."
+          ? ", used on the turns it applies to."
           : "."}
     </>
   )
@@ -141,7 +142,7 @@ function Replaced({
   )
 }
 
-/** "Replace with a note in this chat": a note of the chat's own, with this text, on from here. */
+/** "Edit for this chat only": a note of the chat's own, with this text, on from here. */
 function ReplaceButton({
   chat,
   target,
@@ -164,7 +165,7 @@ function ReplaceButton({
   const what = targetLabel(target, names)
   const fail = (failure: AppError) => {
     setError(failure)
-    if (asking === null) showToast({ title: "Couldn't make the note", description: failure.message })
+    if (asking === null) showToast({ title: "Couldn't make this chat's version", description: failure.message })
   }
   const make = async () => {
     setPending(true)
@@ -198,8 +199,8 @@ function ReplaceButton({
   return (
     <>
       <IconButton
-        label="Replace with a note in this chat"
-        hint={`Makes a note of this chat with the current text of ${label}, sent in its place in this chat only.`}
+        label="Edit for this chat only"
+        hint={`Edit ${what} for this chat only. The ${target.kind === "preset_prompt" ? "preset" : "card"} stays as it is; this chat sends your version instead.`}
         icon="note"
         className={chromeButton}
         disabled={pending}
@@ -208,9 +209,9 @@ function ReplaceButton({
       <ConfirmDialog
         open={asking !== null}
         onOpenChange={(open) => !open && setAsking(null)}
-        title={`${what} has a note already`}
-        description={`Only one note can replace ${what}. The note ${anyTitles(asking)} replaces it in this chat now.`}
-        confirmLabel={`Unlink ${anyTitles(asking)} and make a new note`}
+        title={`${what} already has a version for this chat`}
+        description={`This chat already sends the note ${anyTitles(asking)} in its place, and only one can. Unlinked, it stays an ordinary note.`}
+        confirmLabel={`Unlink ${anyTitles(asking)} and start a new version`}
         pending={pending}
         onConfirm={() => {
           const others = asking ?? []

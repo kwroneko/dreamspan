@@ -1,6 +1,6 @@
 // Notes that replace prompts (DESIGN §4.2; spec/NOTE-OVERRIDES.md): a card field and a preset
-// prompt replaced from their own boxes ("Replace with a note in this chat"), shown with "As
-// replaced" first, glowing, its edits going to the note; "Original" the card's or preset's own
+// prompt replaced from their own boxes ("Edit for this chat only"), shown with "This chat"
+// first, glowing, its edits going to the note; "Original" the card's or preset's own
 // text; the note's Replaces control, its greyed position and Its own position; one note per
 // target. At 1440 and 390, light and dark, with the layout audit on each surface. A made-up
 // card and ST's default preset.
@@ -79,14 +79,14 @@ for (const width of [1440, 390])
       const tab = page.getByRole("tabpanel", { name })
       const description = tab.getByRole("textbox", { name: "Description", exact: true })
       await expect(description).toContainText("grey coat")
-      const replace = fieldOf(tab, "Description").getByRole("button", { name: "Replace with a note in this chat" })
+      const replace = fieldOf(tab, "Description").getByRole("button", { name: "Edit for this chat only" })
       await description.click()
       await replace.click()
-      const tabs = tab.getByRole("tablist", { name: "Description: as replaced or original" })
-      await expect(tabs.getByRole("tab", { name: "As replaced" })).toHaveAttribute("aria-selected", "true")
+      const tabs = tab.getByRole("tablist", { name: "Description: this chat or original" })
+      await expect(tabs.getByRole("tab", { name: "This chat", exact: true })).toHaveAttribute("aria-selected", "true")
       const replaced = tab.locator("[data-replaced-field]")
       await expect(replaced).toBeVisible()
-      await expect(replaced.getByText("Replaced in this chat by the note")).toBeVisible()
+      await expect(replaced.getByText("This chat's version is kept in the note")).toBeVisible()
       await expect(replaced.getByRole("button", { name: `${name}'s Description` })).toBeVisible()
       // Edits go to the note; the original keeps the card's text.
       const noteBox = replaced.getByRole("textbox", { name: "Description", exact: true })
@@ -129,11 +129,12 @@ for (const width of [1440, 390])
       if (await mainToggle.count()) await mainToggle.click()
       const main = presetTab.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
       await main.click()
-      await fieldOf(presetTab, "Prompt: Main Prompt")
-        .getByRole("button", { name: "Replace with a note in this chat" })
-        .click()
-      const mainTabs = presetTab.getByRole("tablist", { name: "Prompt: Main Prompt: as replaced or original" })
-      await expect(mainTabs.getByRole("tab", { name: "As replaced" })).toHaveAttribute("aria-selected", "true")
+      await fieldOf(presetTab, "Prompt: Main Prompt").getByRole("button", { name: "Edit for this chat only" }).click()
+      const mainTabs = presetTab.getByRole("tablist", { name: "Prompt: Main Prompt: this chat or original" })
+      await expect(mainTabs.getByRole("tab", { name: "This chat", exact: true })).toHaveAttribute(
+        "aria-selected",
+        "true"
+      )
       await expect(presetTab.locator('[data-prompt="main"] [data-prompt-replaced]')).toBeVisible({ timeout: 60_000 })
       await presetTab.locator('[data-prompt="main"]').scrollIntoViewIfNeeded()
       await shot("preset-prompt-as-replaced")
@@ -166,7 +167,7 @@ test("turning off a newly created replacement restores the original field while 
   const card = page.getByRole("tabpanel", { name })
   const field = fieldOf(card, "Description")
   await card.getByRole("textbox", { name: "Description", exact: true }).click()
-  await field.getByRole("button", { name: "Replace with a note in this chat" }).click()
+  await field.getByRole("button", { name: "Edit for this chat only" }).click()
   await expect(card.locator("[data-replaced-field]")).toBeVisible()
   const note = await admin((api) =>
     Effect.gen(function* () {

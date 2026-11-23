@@ -450,9 +450,9 @@ function PromptBlock({
       (r.status === "replaced" || r.status === "own_position" || r.status === "not_due")
   )
   const replacedBadge = !prompt.marker && noted && (
-    <Tooltip label={`The note “${noted.title}” replaces this prompt in this chat.`}>
+    <Tooltip label={`This chat sends its own version, kept in the note “${noted.title}”.`}>
       <span tabIndex={0} data-prompt-replaced>
-        <Badge tone="accent">replaced in this chat</Badge>
+        <Badge tone="accent">edited for this chat</Badge>
       </span>
     </Tooltip>
   )
