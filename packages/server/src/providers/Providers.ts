@@ -95,6 +95,7 @@ import {
   DROP_NOTES,
   HISTORY_DROP_NOTES,
   type RecordedAssistant,
+  PROVIDER_RUN_DROP_NOTE,
   providerDropNote,
   providerDroppedThinking,
   refusesSigned,
@@ -1584,8 +1585,10 @@ export const layer = (options: ProvidersOptions = {}) =>
         // A plain chat's earlier replies sending their reasoning back are this model's turns
         // (thinkingBinding.ts HISTORY_REPLAY); the binding below decides whether they may go.
         const history = carriesHistoryReplay(incoming.context.messages)
-        // What this provider checks of them (thinkingBinding.ts `replayTerms`).
-        const replay = history ? replayTerms({ api: prepared.api, key: model.key }) : undefined
+        // What this provider checks of signed blocks sent back (thinkingBinding.ts `replayTerms`):
+        // with `prefix`, everything before each and the unbroken run, in tool runs too.
+        const terms = replayTerms({ api: prepared.api, key: model.key })
+        const replay = history ? terms : undefined
         const request: StreamRequest = history
           ? {
               ...incoming,
@@ -2140,8 +2143,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                 // Registered observers read the raw events (usage capture, PROVIDERS §9.2).
                 onProviderStreamEvent: (data) => {
                   toolArguments.observe(data)
-                  // Earlier replies' reasoning the provider says it left out (the binding beta's report).
-                  if (replay) state.providerDropped = providerDroppedThinking(data) ?? state.providerDropped
+                  // Sent thinking the provider says it left out (the binding beta's report).
+                  if (terms.prefix) state.providerDropped = providerDroppedThinking(data) ?? state.providerDropped
                   for (const observer of observers) observer.observe(data, state.capture)
                   if ((prepared.kind.cacheRelease ?? defaultCacheRelease).after === "first-chunk") {
                     state.gate?.release("first-chunk")
@@ -2210,14 +2213,16 @@ export const layer = (options: ProvidersOptions = {}) =>
                         modelId: model.id,
                         connectionStamp,
                         mode: bindingMode,
-                        ...(replay ? { history: replay } : {})
+                        ...(replay ? { history: replay } : {}),
+                        ...(terms.prefix ? { run: true } : {})
                       })
                     : { payload: limited, dropped: 0, reason: null }
-                  // Sending earlier replies' reasoning to a bound-thinking model opts into the
-                  // provider's own check, whatever the account's age: a block the check above let
-                  // through wrongly is dropped (and reported), not refused or read stale.
+                  // Sending signed thinking to a bound-thinking model (earlier replies' reasoning,
+                  // or a tool run's own) opts into the provider's own check, whatever the account's
+                  // age: a block the check above let through wrongly is dropped (and reported), not
+                  // refused or read stale.
                   const netted =
-                    replay?.prefix && binding?.dropOnMismatch && carriesSigned(binding, bound.payload)
+                    terms.prefix && binding?.dropOnMismatch && carriesSigned(binding, bound.payload)
                       ? binding.dropOnMismatch(bound.payload)
                       : bound.payload
                   const budget = options.outputBudget
@@ -2369,7 +2374,12 @@ export const layer = (options: ProvidersOptions = {}) =>
                       writer.RecordSentContext({
                         userId: request.userId,
                         rolloutId,
-                        issues: [{ kind: "reasoning_left_out", message: providerDropNote(state.providerDropped) }]
+                        issues: [
+                          {
+                            kind: "reasoning_left_out",
+                            message: history ? providerDropNote(state.providerDropped) : PROVIDER_RUN_DROP_NOTE
+                          }
+                        ]
                       })
                     )
                   ).catch((error: unknown) =>

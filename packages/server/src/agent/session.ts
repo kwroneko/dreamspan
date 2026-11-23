@@ -17,6 +17,7 @@ import {
   createAssistantMessageEventStream,
   type Api,
   type AssistantMessage,
+  type Message,
   type Model,
   type Tool,
   Type
@@ -66,6 +67,8 @@ import { cutAnswersIn, liveSuffix, nudgesIn, sendOnlyTranscript } from "./messag
 import { contractAttempts, runOutcome } from "./contract.ts"
 import { loadedSet, loadPoints, type Skill, type ToolLoadingWire } from "./toolLoading.ts"
 import { executionRegistry } from "../execution.ts"
+import { DEFAULT_MAX_IMAGES } from "../assembler/images.ts"
+import { claudeBoundThinking } from "../providers/claudeThinking.ts"
 
 /** What an agent turn needs beyond a plain reply's. */
 export interface AgentRun {
@@ -156,6 +159,17 @@ export interface AgentStrategyInput {
 }
 
 export const WRITE_NOW = "Write the reply now."
+
+/** The image parts in these messages' content. */
+const imageParts = (messages: ReadonlyArray<Message>) =>
+  messages.reduce(
+    (sum, m) => sum + (Array.isArray(m.content) ? m.content.filter((p) => p.type === "image").length : 0),
+    0
+  )
+
+/** What a tool result says in place of the images the model's limit left out. */
+export const imagesLeftOut = (n: number) =>
+  `[${n === 1 ? "An image" : `${n} images`} left out: this request already has as many images as the model takes.]`
 
 /**
  * What a reply that never sent fails with (spec/REPLY-CONTRACT.md §3.4): `times` plain turns,
@@ -321,6 +335,24 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         : basePrefix
       /** The most requests this reply makes (`AgentPlan.turnCap`); a workshop has no cap. */
       const cap = plan.turnCap ?? Number.POSITIVE_INFINITY
+      /**
+       * Tool results' images on a model that binds its thinking to everything before it
+       * (claudeThinking.ts `claudeBoundThinking`): each image the run sends stays sent, and one
+       * past the model's image limit is left out where it arrives (`takeImages`), never later.
+       */
+      const appendOnlyImages = model.api === "anthropic-messages" && claudeBoundThinking(model.key)
+      /** Images the run's requests carry: the frozen request's and its transcript's, counted at the first. */
+      let imagesSent: number | undefined
+      /** How many of `n` new images fit under the model's limit; those are counted as sent. */
+      const takeImages = (n: number) => {
+        imagesSent ??=
+          imageParts(prefix.context.messages) +
+          imageParts(liveSuffix(agent.state.messages)) +
+          agent.state.messages.reduce((sum, m) => sum + (m.role === "rpUser" ? (m.message.images?.length ?? 0) : 0), 0)
+        const fits = Math.max(0, Math.min(n, (model.maxImages ?? DEFAULT_MAX_IMAGES) - imagesSent))
+        imagesSent += fits
+        return fits
+      }
       const sends = plan.contract !== "final_text"
       const several = plan.contract === "several"
       let working = { slotId: request.slotId, versionId: request.versionId }
@@ -1008,10 +1040,16 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             }
             resultTokens += await textTokens(sentText)
           }
+          // A server's images, for a model that takes them (spec/MCP.md §9). Past the model's
+          // image limit the provider layer sends the newest, leaving out the oldest: an edit to
+          // an earlier turn, which a model that binds its thinking to what came before refuses.
+          // There the run keeps the images it has sent and leaves out what no longer fits, here.
+          const images = result.images ?? []
+          const fits = appendOnlyImages && images.length > 0 ? takeImages(images.length) : images.length
           const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
             { type: "text" as const, text: fullText },
-            // A server's images, for a model that takes them (spec/MCP.md §9).
-            ...(result.images ?? []).map((image) => ({ type: "image" as const, ...image }))
+            ...images.slice(0, fits).map((image) => ({ type: "image" as const, ...image })),
+            ...(fits < images.length ? [{ type: "text" as const, text: imagesLeftOut(images.length - fits) }] : [])
           ]
           deliveredContent.add(content)
           return {
