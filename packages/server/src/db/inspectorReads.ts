@@ -471,6 +471,9 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           ended_at: number | null
           output: number | null
           reasoning: number | null
+          reasoning_estimated: number
+          first_reasoning_at: number | null
+          first_reply_at: number | null
           usage_source: RequestFigures["usageSource"]
           input_uncached: number | null
           cache_read: number | null
@@ -491,8 +494,8 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
             SELECT chain.root, v.source_version_id FROM chain JOIN versions v ON v.id = chain.id
             WHERE v.source_version_id IS NOT NULL
           )
-          SELECT chain.root, q.status, q.started_at, q.first_token_at, q.ended_at, q.output, q.reasoning, q.usage_source,
-            q.input_uncached, q.cache_read, q.cache_write, q.cache_write_long, q.cost, q.cost_currency, q.cost_formula,
+          SELECT chain.root, q.status, q.started_at, q.first_token_at, q.ended_at, q.output, q.reasoning, q.reasoning_estimated,
+            q.first_reasoning_at, q.first_reply_at, q.usage_source, q.input_uncached, q.cache_read, q.cache_write, q.cache_write_long, q.cost, q.cost_currency, q.cost_formula,
             json_extract(q.cost_rates_json, '$.reasoning') AS reasoning_rate, q.reported_cost
           FROM chain JOIN llm_requests q INDEXED BY llm_requests_version ON q.version_id = chain.id
           WHERE q.purpose IN ('generation', 'workshop') AND q.owner_user_id = ${userId}
@@ -507,6 +510,11 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
             endedAt: row.ended_at,
             output: row.output,
             reasoning: row.reasoning,
+            reasoningEstimated: row.reasoning_estimated === 1,
+            // A row from before these were kept streamed a token but has neither time.
+            ...(row.first_token_at !== null && row.first_reasoning_at === null && row.first_reply_at === null
+              ? {}
+              : { firstReasoningAt: row.first_reasoning_at, firstReplyAt: row.first_reply_at }),
             usageSource: row.usage_source,
             inputUncached: row.input_uncached,
             cacheRead: row.cache_read,

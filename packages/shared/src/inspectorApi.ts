@@ -203,6 +203,14 @@ export const RequestFigures = Schema.Struct({
   ...RequestTimes,
   output: Schema.NullOr(Schema.Int),
   reasoning: Schema.NullOr(Schema.Int),
+  /** The app counted the reasoning tokens: the provider gave no count of its own. */
+  reasoningEstimated: Schema.optionalKey(Schema.Boolean),
+  /**
+   * When the first streamed reasoning and the first reply token came (epoch ms; null: none came).
+   * Absent for requests recorded before these were kept: `firstTokenAt` is the earlier of the two.
+   */
+  firstReasoningAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  firstReplyAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   /** `estimated`: the app counted the tokens; `none`: nobody did (the counts are null). */
   usageSource: UsageSource,
   /** Input not read from the cache, read from it and written to it (`cacheWriteLong`: the long-lived part of the writes). */
@@ -246,7 +254,15 @@ export const VersionMetrics = Schema.Struct({
   streamingMs: Schema.NullOr(Schema.Number),
   /** Output tokens of the ended requests that have a count; reasoning tokens are part of them. */
   output: Schema.Int,
+  /** The part of `output` spent reasoning, summed; null when any ended request has no count. */
   reasoning: Schema.NullOr(Schema.Int),
+  /** Some reasoning count is the app's estimate (the provider gave none). */
+  reasoningEstimated: Schema.Boolean,
+  /**
+   * Whether the ended requests streamed reasoning text: true when any did, false when they were
+   * all recorded and none did, null when some were recorded before this was kept.
+   */
+  reasoningStreamed: Schema.NullOr(Schema.Boolean),
   /** Ended requests without an output count: `output` leaves them out. */
   outputUnknown: Schema.Int,
   /** Some count is the app's estimate, not the provider's. */
@@ -292,6 +308,12 @@ export const versionMetricsOf = (versionId: VersionId, requests: ReadonlyArray<R
       : sum(ended.map((r) => r.endedAt! - r.firstTokenAt!)),
     output: counted.reduce((total, r) => total + r.output!, 0),
     reasoning: ended.some((r) => r.reasoning === null) ? null : sum(ended.map((r) => r.reasoning!)),
+    reasoningEstimated: ended.some((r) => r.reasoning !== null && r.reasoningEstimated === true),
+    reasoningStreamed: ended.some((r) => r.firstReasoningAt != null)
+      ? true
+      : ended.some((r) => r.firstReasoningAt === undefined)
+        ? null
+        : false,
     outputUnknown: ended.length - counted.length,
     estimated: counted.some((r) => r.usageSource === "estimated"),
     ...costsOf(ended),

@@ -467,9 +467,14 @@ const CloseLlmRequest = Schema.Struct({
   status: RequestStatus,
   endedAt: Schema.Number,
   firstTokenAt: Schema.NullOr(Schema.Number),
+  /** When the first streamed reasoning and the first reply token (text or a tool call) came. */
+  firstReasoningAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  firstReplyAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   responseModel: Schema.NullOr(Schema.String),
   upstream: Schema.NullOr(Schema.String),
   counts: TokenCounts,
+  /** `counts.reasoning` is the app's count: the provider gave none. */
+  reasoningEstimated: Schema.optionalKey(Schema.Boolean),
   usageSource: UsageSource,
   rawUsage: Schema.NullOr(Schema.Unknown),
   reportedCost: Schema.NullOr(Schema.Number),

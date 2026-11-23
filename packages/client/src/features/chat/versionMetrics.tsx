@@ -145,33 +145,73 @@ export const costDetails = (m: VersionMetrics): ReadonlyArray<[string, string]> 
   return rows
 }
 
+/**
+ * What came of the reasoning: its tokens (the provider's count, "~" when the app counted them),
+ * and whether its text came with the reply (`hasReasoning`: the swipe has some) or the provider
+ * kept it back. Null when no request ended.
+ */
+const reasoningRow = (m: VersionMetrics, hasReasoning: boolean): string | null => {
+  const ended = m.requests - (m.running ? 1 : 0)
+  if (ended === 0) return null
+  const where = hasReasoning ? "shown above the reply" : "not returned by the provider"
+  if (m.reasoning === null) return hasReasoning ? `${where}, count unknown` : "none returned, count unknown"
+  if (m.reasoning === 0) return hasReasoning ? `${where}, counted as 0 tokens` : "none"
+  return `${m.reasoningEstimated ? "~" : ""}${count(m.reasoning)} tokens, ${where}`
+}
+
+/** The output count with its reasoning and reply apart: "778 (512 reasoning, 266 reply)". */
+const outputText = (m: VersionMetrics) => {
+  const ended = m.requests - (m.running ? 1 : 0)
+  if (ended === 0 || m.outputUnknown === ended) return "unknown (no request reported a count)"
+  if (m.outputUnknown > 0)
+    return `${count(m.output)} counted${m.estimated ? " (estimated)" : ""}; ${m.outputUnknown === 1 ? "1 request" : `${m.outputUnknown} requests`} reported none`
+  const total = `${count(m.output)}${m.estimated ? " (estimated)" : ""}`
+  if (m.reasoning === null) return `${total}, reasoning count unknown`
+  if (m.reasoning === 0) return total
+  const reasoning = Math.min(m.reasoning, m.output)
+  const mark = m.reasoningEstimated ? "~" : ""
+  return `${total} (${mark}${count(reasoning)} reasoning, ${mark}${count(m.output - reasoning)} reply)`
+}
+
 /** The full figures, one per line. */
 export const metricsDetails = (m: VersionMetrics, hasReasoning: boolean): ReadonlyArray<[string, string]> => {
   const last = m.last
+  const several = m.requests > 1 ? " (last request)" : ""
+  const since = (at: number | null | undefined) =>
+    at == null ? (m.running ? "waiting" : "none") : seconds(at - last.startedAt)
   const firstToken =
     last.firstTokenAt === null ? (m.running ? "waiting" : "unknown") : seconds(last.firstTokenAt - last.startedAt)
+  // Reasoning that streamed before the reply has its own first token; otherwise one first token.
+  const timing: Array<[string, string]> =
+    last.firstReasoningAt != null
+      ? [
+          ["Time to first reasoning token", `${since(last.firstReasoningAt)}${several}`],
+          ["Time to first reply token", `${since(last.firstReplyAt)}${several}`],
+          ...(last.firstReplyAt != null && last.firstReplyAt >= last.firstReasoningAt
+            ? [["Reasoning time", seconds(last.firstReplyAt - last.firstReasoningAt)] as [string, string]]
+            : [])
+        ]
+      : [["Time to first token", `${firstToken}${several}`]]
+  // Speed over the streaming phase only. Reasoning the provider didn't stream was written in the
+  // wait before the first token, so only the reply's tokens count against the streaming time.
+  const streamed = m.reasoningStreamed ?? hasReasoning
+  const hidden = !streamed && (m.reasoning ?? 0) > 0
+  const streamedTokens = hidden ? m.output - Math.min(m.reasoning!, m.output) : m.output
   const rate =
-    m.streamingMs !== null && m.streamingMs > 0 && m.output > 0 && m.outputUnknown === 0
-      ? `${(m.output / (m.streamingMs / 1000)).toFixed(1)} tokens/s${m.estimated ? " (estimated count)" : ""}`
+    m.streamingMs !== null && m.streamingMs > 0 && streamedTokens > 0 && m.outputUnknown === 0
+      ? `${(streamedTokens / (m.streamingMs / 1000)).toFixed(1)} tokens/s${hidden ? " (reply only)" : ""}${
+          m.estimated || (hidden && m.reasoningEstimated) ? " (estimated count)" : ""
+        }`
       : "unknown"
-  const ended = m.requests - (m.running ? 1 : 0)
-  const output =
-    ended === 0 || m.outputUnknown === ended
-      ? "unknown (no request reported a count)"
-      : m.outputUnknown > 0
-        ? `${count(m.output)} counted${m.estimated ? " (estimated)" : ""}; ${m.outputUnknown === 1 ? "1 request" : `${m.outputUnknown} requests`} reported none`
-        : `${count(m.output)}${m.estimated ? " (estimated)" : ""}`
+  const reasoning = reasoningRow(m, hasReasoning)
   const rows: Array<[string, string]> = [
     ["Generation time", m.elapsedMs === null ? "unknown" : seconds(m.elapsedMs)],
-    ["Time to first token", `${firstToken}${m.requests > 1 ? " (last request)" : ""}`],
-    ["Output tokens", ended > 0 && m.outputUnknown < ended ? `${output}, reasoning included` : output],
+    ...timing,
+    ["Output tokens", outputText(m)],
+    ...(reasoning === null ? [] : [["Reasoning", reasoning] as [string, string]]),
     ["Speed", rate],
     ...costDetails(m)
   ]
-  if (hasReasoning) {
-    rows.push(["Reasoning tokens", m.reasoning === null ? "unknown" : count(m.reasoning)])
-    rows.push(["Reasoning time", "not recorded"])
-  }
   if (m.requests > 1) {
     rows.push(["Requests", `${m.requests} (includes original generation, retries and continuations)`])
     rows.push([

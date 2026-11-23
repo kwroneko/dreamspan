@@ -327,7 +327,7 @@ for (const width of [1440, 390]) {
     await expect(metrics).toBeVisible()
     await metrics.click()
     const panel = page.getByRole("dialog", { name: "Generation" })
-    await expect(panel).toContainText("Time to first token")
+    await expect(panel).toContainText(/Time to first (reply )?token/)
     await expect(panel).toContainText("2 (includes original generation, retries and continuations)")
     expect(
       await panel.locator("dl").evaluate((element) => {
