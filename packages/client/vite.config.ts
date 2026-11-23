@@ -59,7 +59,10 @@ const FRAME_LIBRARIES: Record<string, string> = {
  */
 const lookupPaths = createRequire(import.meta.url).resolve.paths("package") ?? []
 const moduleFile = (path: string) => {
-  const name = path.split("/").slice(0, path.startsWith("@") ? 2 : 1).join("/")
+  const name = path
+    .split("/")
+    .slice(0, path.startsWith("@") ? 2 : 1)
+    .join("/")
   const root = lookupPaths.find((dir) => existsSync(join(dir, name, "package.json")))
   const found = root === undefined ? undefined : join(root, path)
   if (found === undefined || !existsSync(found)) throw new Error(`${path} isn't installed`)
