@@ -47,6 +47,7 @@ import {
   type ChatSurfaceProps
 } from "./presentation.tsx"
 import { dropImage, keepImage, readImages, type ImageDraftEntry } from "./imageDraft.ts"
+import { pendingAttachments, PendingAttachmentsContext, type PendingAttachments } from "./pendingComposerControls.tsx"
 import {
   FILE_PATH_MIME,
   onAttachRequest,
@@ -971,13 +972,7 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
                       }.`}
                     </p>
                   ) : (
-                    <p role="status" className={`text-sm ${vision === false ? "text-danger" : "text-muted"}`}>
-                      {vision === false
-                        ? "This model cannot see images. Choose a vision model before replying."
-                        : vision === undefined
-                          ? "Choose a vision model to reply to these images."
-                          : `The model sees up to the last ${maxImages} images in context.`}
-                    </p>
+                    <VisionNote vision={vision} maxImages={maxImages} />
                   )}
                 </>
               )}
@@ -992,6 +987,200 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
     />
   )
 }
+/** Under attached images: whether the model replying can see them, and how many it's shown. */
+function VisionNote({ vision, maxImages }: { vision: boolean | undefined; maxImages: number }) {
+  return (
+    <p role="status" className={`text-sm ${vision === false ? "text-danger" : "text-muted"}`}>
+      {vision === false
+        ? "This model cannot see images. Choose a vision model before replying."
+        : vision === undefined
+          ? "Choose a vision model to reply to these images."
+          : `The model sees up to the last ${maxImages} images in context.`}
+    </p>
+  )
+}
+
+/**
+ * The attachments of a chat not made yet (DESIGN §2.1), as the saved composer's: the same
+ * paperclip, list, paste and drop. There's no chat or composer draft to hold them on the server
+ * yet, so this browser keeps them (imageDraft.ts) under the pending chat's draft identity, the
+ * key its typed text is kept by: each is stored before its upload, the upload (`POST
+ * /chat/image`, which needs no chat) is replayed after a reload, and the first send carries
+ * them in `StartChat`, which writes them with the chat in one transaction. What the first send
+ * doesn't take (a Generate) moves to the saved chat's composer, whose replay attaches it there.
+ */
+function PendingImageScope({ scope: key, children }: { scope: string; children: ReactNode }) {
+  const user = useSession().user.id
+  const scope = `${user}:pending:${key}`
+  const [entries, setEntries] = useState<readonly ImageDraftEntry[]>([])
+  const [ready, setReady] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  // Taken by the first send that's out: shown as sending, not removable.
+  const [sending, setSending] = useState<ReadonlySet<string>>(new Set())
+  const queue = useRef(Promise.resolve())
+  const enqueue = (run: () => Promise<void>) => {
+    queue.current = queue.current.then(run).catch((error: unknown) => {
+      setError(error instanceof Error ? error.message : "The image could not be saved.")
+    })
+    return queue.current
+  }
+  const refresh = async () => setEntries(await readImages(scope))
+  const upload = async (entry: ImageDraftEntry) => {
+    if (entry.mediaId || !entry.file) return
+    try {
+      const mediaId = await uploadImage(entry.file)
+      const { file: _uploaded, ...rest } = entry
+      await keepImage({ ...rest, mediaId })
+    } catch (error) {
+      throw new Error(
+        `Upload failed. The attachment draft is kept in this browser. ${error instanceof Error ? error.message : "Reload to retry."}`
+      )
+    }
+  }
+  useEffect(() => {
+    let live = true
+    void enqueue(async () => {
+      try {
+        for (const entry of await readImages(scope)) await upload(entry)
+      } finally {
+        if (live) {
+          try {
+            await refresh()
+          } finally {
+            setReady(true)
+          }
+        }
+      }
+    })
+    return () => {
+      live = false
+    }
+    // The keyed part owns one scope; opening it replays its uploads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope])
+  const add = (picked: File[]) => {
+    if (!ready) {
+      setError("Wait for the chat to load before attaching.")
+      return
+    }
+    void enqueue(async () => {
+      setBusy(true)
+      setError(null)
+      try {
+        const kept = await readImages(scope)
+        const selected = imageFiles(picked)
+        const large = selected.find((file) => file.size > ATTACHMENT_MAX_BYTES)
+        if (large) throw new Error(`“${large.name}” is larger than ${formatByteSize(ATTACHMENT_MAX_BYTES)}.`)
+        if (kept.length + selected.length > 32) throw new Error("A message can hold at most 32 attachments.")
+        const firstPosition = Math.max(0, ...kept.map((entry) => entry.pendingPosition ?? 0)) + 1
+        const added = selected.map((file, index): ImageDraftEntry => ({
+          id: uuid(),
+          scope,
+          name: file.name || "Pasted image",
+          file,
+          pendingPosition: firstPosition + index
+        }))
+        // Keep the entire selection before any upload can fail or outlive this page.
+        for (const entry of added) await keepImage(entry)
+        await refresh()
+        for (const entry of await readImages(scope)) {
+          await upload(entry)
+          await refresh()
+        }
+      } finally {
+        setBusy(false)
+      }
+    })
+  }
+  const remove = (id: string) =>
+    void enqueue(async () => {
+      await dropImage(id)
+      await refresh()
+    })
+  const uploaded = entries.filter((entry) => entry.mediaId && !sending.has(entry.id))
+  const asSent = (list: readonly ImageDraftEntry[]): MessageImages =>
+    list.map((entry) => ({ mediaId: entry.mediaId!, altText: entry.name.slice(0, 2000) }))
+  const capture = () => {
+    const captured = uploaded
+    const ids = new Set(captured.map((entry) => entry.id))
+    setSending((current) => new Set([...current, ...ids]))
+    return {
+      images: asSent(captured),
+      finish: async (sent: boolean) => {
+        await enqueue(async () => {
+          if (sent) for (const entry of captured) await dropImage(entry.id)
+          await refresh()
+        })
+        setSending((current) => new Set([...current].filter((id) => !ids.has(id))))
+      }
+    }
+  }
+  // The saved chat's composer replays its scope's entries (ImageScope): those uploaded attach
+  // to its draft there.
+  const carry = (chatId: string, forkId: string) =>
+    enqueue(async () => {
+      for (const entry of await readImages(scope)) {
+        const { saved: _saved, sending: _sending, ...rest } = entry
+        await keepImage({ ...rest, scope: `${user}:${chatId}:${forkId}` })
+      }
+      await refresh()
+    })
+  const value: PendingAttachments = {
+    count: entries.length,
+    images: asSent(uploaded),
+    busy: !ready || busy || entries.some((entry) => !entry.mediaId),
+    action: <AttachButton disabled={!ready || busy} onFiles={add} />,
+    editor: (model) =>
+      entries.length > 0 || error ? (
+        <div className="flex flex-col gap-2" aria-label="Image attachments">
+          {entries.length > 0 && (
+            <>
+              <AttachmentList
+                label="Attached images"
+                items={entries.map((entry) => ({
+                  id: entry.id,
+                  name: entry.name,
+                  mediaId: entry.mediaId ?? null,
+                  file: entry.file,
+                  thumbnail: <DraftThumbnail entry={entry} />,
+                  ...(sending.has(entry.id) ? { sending: true } : {})
+                }))}
+                onRemove={remove}
+              />
+              <VisionNote vision={model?.vision} maxImages={model?.maxImages ?? 4} />
+            </>
+          )}
+          {error && (
+            <p role="alert" className="text-sm text-danger">
+              {error} Remove an image or reload to retry.
+            </p>
+          )}
+        </div>
+      ) : null,
+    surface: {
+      onDragOver: (event) => {
+        if (event.dataTransfer.types.includes("Files") && !isAppDrag(event.dataTransfer)) event.preventDefault()
+      },
+      onDrop: (event) => {
+        // Nothing dragged from inside the app is an attachment: a portrait goes to the frame as a tab.
+        if (!event.dataTransfer.files.length || isAppDrag(event.dataTransfer)) return
+        event.preventDefault()
+        add(Array.from(event.dataTransfer.files))
+      },
+      onPaste: (event) => {
+        const taken = imageFiles(event.clipboardData.files)
+        if (!taken.length) return
+        event.preventDefault()
+        add(taken)
+      }
+    },
+    capture,
+    carry
+  }
+  return <PendingAttachmentsContext value={value}>{children}</PendingAttachmentsContext>
+}
+
 /** Why the next request leaves image `index` of the message out, by the assembler's rules; null: it's sent. */
 const leftOutBy = (images: ImagesLeftOut | undefined, entry: PathEntry, index: number) => {
   const image = images?.images.find(
@@ -1199,6 +1388,7 @@ function QueuedThumbnails({ queued }: { queued: import("@dreamspan/shared/chat.t
 }
 export const registerImages = () => [
   chatComposer.register({ id: "chat.composer", order: 10, component: ImageComposer }),
+  pendingAttachments.register({ id: "pending.images", component: PendingImageScope }),
   chatSurfaceProviders.register({ id: "chat.images", order: 40, component: ImageProvider }),
   messagePreviews.register({
     id: "message.images",

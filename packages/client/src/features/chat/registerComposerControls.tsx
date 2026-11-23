@@ -91,7 +91,7 @@ export const registerComposerControls = () => [
           hint={generateHint(context)}
           variant={context.guidance ? "primary" : "ghost"}
           pending={context.guidance && context.busy}
-          disabled={context.busy || !context.prefsReady}
+          disabled={context.busy || context.attaching || !context.prefsReady}
           onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
         >
           {!(context.guidance && context.busy) && <GenerateIcon />}
@@ -102,7 +102,7 @@ export const registerComposerControls = () => [
           aria-label={`Generate ${context.speakerName}`}
           hint={generateHint(context)}
           pending={context.busy}
-          disabled={context.busy || !context.prefsReady}
+          disabled={context.busy || context.attaching || !context.prefsReady}
           onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
         >
           {/* Its word only: the speaker's name is on the chip at the row's start, and in its name. */}
@@ -130,7 +130,7 @@ export const registerComposerControls = () => [
         }
         variant="primary"
         pending={context.busy}
-        disabled={context.guidance || context.busy || !context.prefsReady || !context.hasText}
+        disabled={context.guidance || context.busy || context.attaching || !context.prefsReady || !context.hasText}
         className="data-disabled:bg-surface-raised! data-disabled:text-muted!"
         focusableWhenDisabled
         onClick={() => void pendingComposerControls.get("pending.send")?.run?.(context)}

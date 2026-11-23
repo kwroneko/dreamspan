@@ -5,8 +5,10 @@ import { useUserDraft, UserDraftNotices, UserDraftStatus, UserDraftUndo } from "
 import { Input } from "../../ui/Field.tsx"
 import { StripRow } from "./nextReplyStrip.tsx"
 import {
+  PendingAttachmentScope,
   PendingComposerControls,
   invokePendingComposer,
+  usePendingAttachments,
   type PendingComposerContext
 } from "./pendingComposerControls.tsx"
 // A chat that doesn't exist yet (DESIGN §2.1): a card's greeting, with its alternates to
@@ -322,6 +324,9 @@ function Pending({
   // The first request, as the first send would make it now (DESIGN §2.1): Send's with text in
   // the box, else Generate's (with guidance, the text directs it).
   const personaNow = playing?.entityId ?? null
+  // What's attached to the first message (images.tsx), as at the saved composer.
+  const attachments = usePendingAttachments()
+  const attachedImages = attachments?.images ?? []
   const previewInput: PreviewInput | null =
     !viewPrefs.ready || action.pending
       ? null
@@ -331,9 +336,14 @@ function Pending({
           persona: personaNow,
           greeting: null,
           greeters: greeterChoices(),
-          ...(!guidance && text.trim() !== ""
+          ...(!guidance && (text.trim() !== "" || attachedImages.length > 0)
             ? {
-                first: { _tag: "Send" as const, content: text, speakerEntityId: speakerId },
+                first: {
+                  _tag: "Send" as const,
+                  content: text,
+                  ...(attachedImages.length > 0 ? { images: attachedImages } : {}),
+                  speakerEntityId: speakerId
+                },
                 replier: replyId
               }
             : { first: { _tag: "Generate" as const, speakerEntityId: speakerId, direction: guidance ? text : "" } })
@@ -350,10 +360,19 @@ function Pending({
     JSON.stringify([view.cast?.model ?? null, view.cast?.preset ?? null]),
     () => setRequestOpen(true)
   )
+  // The model the first request goes to, for what attached images say of it: the last one
+  // read, so the note doesn't flicker while the request is built again.
+  const readModel = draft.preview === null ? undefined : (draft.preview.model ?? null)
+  const [lastModel, setLastModel] = useState(readModel)
+  if (readModel !== undefined && readModel !== lastModel) setLastModel(readModel)
+  const hasMessage = text.trim() !== "" || (attachments?.count ?? 0) > 0
 
   const start = async (first: "send" | "generate") => {
-    if (!viewPrefs.ready || action.pending || (first === "send" && text.trim() === "")) return
+    if (!viewPrefs.ready || action.pending || attachments?.busy || (first === "send" && !hasMessage)) return
     const personaId = playing?.entityId ?? null
+    // Attachments go with a sent message, in the transaction that makes the chat; with
+    // Generate they stay, and move to the saved chat's composer.
+    const captured = first === "send" ? attachments?.capture() : undefined
     // A sent message, or guidance for the first reply, leaves the box as it's sent; whatever
     // is typed while the chat is being made goes along to its composer, and a failure puts
     // the submitted text back. With guidance off, Generate doesn't use the text, which stays
@@ -375,7 +394,12 @@ function Pending({
             greeters: greeterChoices(),
             first:
               first === "send"
-                ? { _tag: "Send", content: submitted, speakerEntityId: speakerId }
+                ? {
+                    _tag: "Send",
+                    content: submitted,
+                    ...(captured?.images.length ? { images: captured.images } : {}),
+                    speakerEntityId: speakerId
+                  }
                 : { _tag: "Generate", speakerEntityId: speakerId, direction: guidance ? submitted : "" }
           })
           // A card from a card source is the user's card now, under its own id.
@@ -426,6 +450,8 @@ function Pending({
       adding.length > 0 ? ["chats", "library"] : ["chats"]
     )
     sending.current = null
+    // A failed send keeps its attachments in the box, as its text comes back.
+    await captured?.finish(result.ok)
     if (!result.ok) {
       if (sent && submitted !== "") {
         const restored = typed.current === "" ? submitted : `${submitted}\n\n${typed.current}`
@@ -443,6 +469,8 @@ function Pending({
     // the extra text addressed to the saved chat, before navigating or opening its draft.
     destination.current = { chatId: result.value.chat.id, composer: result.value.composer }
     await keep(typed.current)
+    // Whatever the first send didn't take goes along too: to the composer of the fork it made.
+    await attachments?.carry(result.value.chat.id, result.value.composer.key.field)
     await durable.commit(durable.text, async () => true)
     await empty?.sent()
     // Restore tab-strip focus only if it is still there as this route is replaced; typing
@@ -481,7 +509,8 @@ function Pending({
     prefsReady: viewPrefs.ready,
     changeGuidance: setGuidance,
     busy: action.pending,
-    hasText: text.trim() !== "",
+    attaching: attachments?.busy ?? false,
+    hasText: hasMessage,
     start,
     view,
     onSettings: show,
@@ -493,6 +522,8 @@ function Pending({
     <PendingSurface cast={cast} wide={wide} ready={view.cast !== null}>
       <div
         className="flex min-h-0 flex-1"
+        // Pasting an image or dropping it anywhere in the chat attaches it, as in a saved chat.
+        {...attachments?.surface}
         style={
           {
             "--chat-portrait-width": `${{ small: 48, default: 60, large: 72, largest: 84 }[prefs.portraitSize]}px`
@@ -558,11 +589,13 @@ function Pending({
             <ComposerBox
               guidance={guidance}
               header={<UserDraftNotices draft={durable} />}
+              attachments={attachments?.editor(lastModel ?? undefined)}
               start={
                 <>
                   <PendingComposerControls placement="speaker" context={controls} />
                   {/* Where the saved composer has its earlier text. */}
                   <UserDraftUndo draft={durable} />
+                  {attachments?.action}
                 </>
               }
               end={
@@ -582,6 +615,7 @@ function Pending({
                 aria-label={guidance ? "Guidance" : "Message"}
                 id={composerId}
                 data-testid="composer"
+                data-has-attachments={attachments?.count ? true : undefined}
                 value={text}
                 // Short, so it fits one line on a phone, as the chat's composer does.
                 placeholder={guidance ? "Guidance for the next message…" : "Message…"}
@@ -676,7 +710,16 @@ function PendingFor({
         lock
       )
   )
-  return <Pending pending={pending} card={card} groupMembers={group?.members ?? null} empty={empty} />
+  // Attachments are kept by the key the first message's text is (Pending's `copyKey`).
+  const copyKey =
+    group === null
+      ? pendingChatCopy(card?.card.entityId ?? EMPTY_CHAT)
+      : pendingGroupChatCopy(group.name, group.members)
+  return (
+    <PendingAttachmentScope scope={copyKey}>
+      <Pending pending={pending} card={card} groupMembers={group?.members ?? null} empty={empty} />
+    </PendingAttachmentScope>
+  )
 }
 
 /** /cards/$entityId/chat: a new chat with a card, made on its first send. */
