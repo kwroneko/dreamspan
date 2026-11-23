@@ -183,7 +183,7 @@ function CardOptions({
 }
 
 /** The persona part of the composer's picker: who `{{user}}` is, picked on its persona tabs. */
-export interface PersonaSection {
+interface PersonaSection {
   readonly current: EntityId | null
   readonly listCards: () => Promise<Outcome<ReadonlyArray<CastCard>>>
   readonly onPick: (card: CastCard) => void
