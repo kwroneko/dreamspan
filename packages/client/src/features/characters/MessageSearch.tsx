@@ -59,7 +59,7 @@ interface MessageSortChoice {
 }
 
 /** How found messages are listed, from the URL (Best match by default), and a way to change it. */
-export function useMessageSort() {
+function useMessageSort() {
   const sort = useSearch({
     strict: false,
     select: (s: Record<string, unknown>) => MESSAGE_SORTS.find((v) => v === s[SORT_KEY]) ?? "best"

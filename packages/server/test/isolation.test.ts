@@ -2762,7 +2762,13 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           for (const boundary of own.presetContext.cacheAfter)
             assert.deepStrictEqual(Object.keys(boundary).sort(), ["identifier", "reason"])
         }
-        if (own.historyStart) assert.deepStrictEqual(Object.keys(own.historyStart).sort(), ["depth", "slotId"])
+        if (own.historyStart)
+          assert.deepStrictEqual(Object.keys(own.historyStart).sort(), [
+            "cutThrough",
+            "depth",
+            "hiddenBefore",
+            "slotId"
+          ])
         if (own.preset) assert.deepStrictEqual(Object.keys(own.preset).sort(), ["name", "ref", "scope"])
         // The model is the owner's own, named from the owner's connection.
         if (own.model) assert.strictEqual(own.model.connection, owner.connectionId)
