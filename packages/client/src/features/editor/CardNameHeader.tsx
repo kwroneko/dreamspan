@@ -260,7 +260,9 @@ export function CardNameHeader({
       <Identity>
         <div
           data-card-header-row="identity"
-          className={`relative flex w-full min-w-0 items-center gap-1 ${centerTitle ? `[--card-name-min:1rem] ${compactHeaderControls}` : ""}`}
+          // In the column header the pencils take the header's icon square, as the star, archive and
+          // save buttons on the same row do (28 px pencils beside 32 px toggles read as uneven).
+          className={`relative flex w-full min-w-0 items-center gap-1 ${centerTitle ? `[--card-name-min:1rem] sm:[&_[data-rename-pencil]]:size-8! ${compactHeaderControls}` : ""}`}
         >
           <div className="flex min-w-[min(100%,calc(2*var(--card-name-min)+0.25rem))] flex-1 items-center gap-1 has-[[data-renaming]]:min-w-[min(100%,calc(4*var(--card-name-min)+0.75rem))]">
             <InlineRename
