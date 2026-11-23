@@ -11,13 +11,27 @@ import {
   createContext,
   useContext,
   useId,
+  useRef,
   useState
 } from "react"
+import { useCloseOnAnchorScroll } from "./anchorScroll.ts"
 import { Button, buttonClass, LinkButton } from "./Button.tsx"
 import { openOnPlainClick } from "./links.ts"
 import { HighlightExplanation, useItemExplanation } from "./Explanation.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
 import { Tooltip } from "./Tooltip.tsx"
+
+/**
+ * A menu on a trigger closes when a list or page around the trigger scrolls (anchorScroll.ts):
+ * its open state, the trigger's ref and the root's actions, for `useCloseOnAnchorScroll`.
+ */
+const useScrollClose = (controlled?: boolean, initial = false) => {
+  const [shown, setShown] = useState(initial)
+  const anchor = useRef<HTMLButtonElement>(null)
+  const actions = useRef<BaseMenu.Root.Actions>(null)
+  useCloseOnAnchorScroll(controlled ?? shown, anchor, () => actions.current?.close())
+  return { setShown, anchor, actions }
+}
 
 export function Menu({
   trigger,
@@ -56,21 +70,24 @@ export function Menu({
   marker?: string | undefined
 }) {
   const [popup, setPopup] = useState<HTMLElement | null>(null)
+  const { anchor, actions, setShown } = useScrollClose(open, defaultOpen)
   return (
     <BaseMenu.Root
       modal={false}
       defaultOpen={defaultOpen}
+      actionsRef={actions}
       {...(open === undefined ? {} : { open })}
-      {...(onOpenChange
-        ? { onOpenChange: (next: boolean, details: { reason: string }) => onOpenChange(next, details.reason) }
-        : {})}
+      onOpenChange={(next: boolean, details: { reason: string }) => {
+        setShown(next)
+        onOpenChange?.(next, details.reason)
+      }}
     >
       {hint ? (
         <Tooltip label={hint}>
-          <BaseMenu.Trigger render={trigger} />
+          <BaseMenu.Trigger ref={anchor} render={trigger} />
         </Tooltip>
       ) : (
-        <BaseMenu.Trigger render={trigger} />
+        <BaseMenu.Trigger ref={anchor} render={trigger} />
       )}
       <BaseMenu.Portal keepMounted={keepMounted}>
         <BaseMenu.Positioner
@@ -576,10 +593,11 @@ export function ActionMenu({
   items: ReadonlyArray<ActionMenuItem>
 }) {
   const [popup, setPopup] = useState<HTMLElement | null>(null)
+  const { anchor, actions, setShown } = useScrollClose()
   return (
-    <BaseMenu.Root>
+    <BaseMenu.Root actionsRef={actions} onOpenChange={(next) => setShown(next)}>
       <Tooltip label={label}>
-        <BaseMenu.Trigger aria-label={label} className={`${buttonClass("ghost")} h-8! w-8 px-0!`}>
+        <BaseMenu.Trigger ref={anchor} aria-label={label} className={`${buttonClass("ghost")} h-8! w-8 px-0!`}>
           {trigger}
         </BaseMenu.Trigger>
       </Tooltip>
