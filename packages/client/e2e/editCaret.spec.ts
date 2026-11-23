@@ -247,3 +247,93 @@ test("a double-click across the renderer's load opens the edit at the word first
   await expect.poll(async () => (await caretOf(editor)).head).toBeGreaterThanOrEqual(source)
   expect((await caretOf(editor)).head).toBeLessThanOrEqual(source + "cormorant".length)
 })
+
+// The blocks whose stored text wraps unlike its rendered text unless the editor indents it as the
+// message does: a quote's inset, a list item's hanging indent, and a line long with marks.
+const BLOCKS = [
+  {
+    name: "quote",
+    word: "quillwort",
+    text: "> The keeper's log says the light was lit at dusk and kept until the morning boat came round the point, that the wind backed to the north before midnight, that two gulls fought over the nets until the rain drove them under the eaves, and that nothing else of note happened at all, which the keeper underlines twice before he writes the last word of the night, quillwort."
+  },
+  {
+    name: "list item",
+    word: "marigold",
+    text: "- The lamp, trimmed and filled with oil before the light went down over the harbour wall.\n- The rope, coiled by the door and tarred twice since the spring, and the boat hook leaning beside it where the children can't reach it, and the old tin of nails nobody has opened since the winter the harbour froze and the boats stayed in for six weeks, and a lantern with a cracked glass that the keeper means to mend, and a pair of oilskins hung up to dry that have never quite dried, and under all of it a box of seed for a garden nobody planted, labelled in a careful hand: marigold.\n- The ledger, open at the last page."
+  },
+  {
+    name: "marked-up line",
+    word: "thistledown",
+    text: '*She sets the cup down* and **waits**, *listening to the wind* worry at the shutters, and *the kettle* begins to **sing** again. "You came *back*," she says **at last**, *not looking up*, and the *candle* gutters as the **door** swings, *the draught* carrying the smell of *salt* and **tar** and *something sweeter*, like **thistledown**.'
+  }
+]
+
+for (const width of [1440, 390])
+  test(`a double-click in a quote, a list item or a marked-up line keeps its line ${width}`, async ({ page }) => {
+    test.setTimeout(120_000)
+    await page.setViewportSize({ width, height: width < 640 ? 844 : 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/chats`)
+    await page.getByLabel("Title of the new chat").fill(`Blocks ${width}`)
+    await page.getByRole("button", { name: "New chat", exact: true }).click()
+    for (const [index, { name, word, text }] of BLOCKS.entries()) {
+      await replaceEditorText(page.getByLabel("Message", { exact: true }), `Before it, a short line.\n\n${text}`)
+      await page.getByRole("button", { name: "Send", exact: true }).click()
+      await expect(page.getByRole("article", { name: "Reply", exact: true })).toHaveCount(index + 1)
+      await settled(page)
+      // The message just sent, which the list keeps drawn near the end.
+      const mine = page.getByRole("article", { name: "Your message", exact: true }).filter({ hasText: word })
+      const point = await wordPoint(mine.locator(".markdown"), word, 0, 3)
+      // The rendered block the word is in (its quote's paragraph, its list item, its paragraph).
+      const renderedHeight = await mine.locator(".markdown").evaluate((node, word) => {
+        const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT)
+        for (let text = walker.nextNode(); text; text = walker.nextNode())
+          if (text.textContent!.includes(word))
+            return text.parentElement!.closest("li, p")!.getBoundingClientRect().height
+        throw new Error(`no ${word}`)
+      }, word)
+      await page.mouse.dblclick(point.x, point.y)
+      const editor = mine.getByRole("textbox", { name: "Message text" })
+      await expect(editor).toBeFocused()
+      // The caret in the word, its line where the word was once the edit has settled.
+      const { head } = await caretOf(editor)
+      expect((await textBoxValue(editor)).slice(head - 3, head - 3 + word.length)).toBe(word)
+      await settledPlace(mine)
+      const shift = (await caretOf(editor)).line.top - point.top
+      // How far the edit's box had to scroll its text to bring that line there: the text above the
+      // line moved by as much (none where the stored text wraps as the rendered text does).
+      const scrolled = await editor.evaluate((element) => {
+        let box: Element | null = element
+        while (box && !box.matches("[data-hold-caret-within]"))
+          box = box.parentElement ?? ((box.getRootNode() as ShadowRoot).host as Element | undefined) ?? null
+        return box?.scrollTop ?? 0
+      })
+      // The edit's line for that block, as tall as the block when it wraps where the block does.
+      const editedHeight = await editor.evaluate((element) => {
+        const content = element as HTMLElement & {
+          cmTile?: {
+            root: {
+              view: { state: { selection: { main: { head: number } } }; domAtPos: (pos: number) => { node: Node } }
+            }
+          }
+        }
+        const view = content.cmTile!.root.view
+        const { node } = view.domAtPos(view.state.selection.main.head)
+        return (node.nodeType === 1 ? (node as Element) : node.parentElement)!
+          .closest(".cm-line")!
+          .getBoundingClientRect().height
+      })
+      const rows = editedHeight - renderedHeight
+      const description = `${name} ${width}: line ${shift.toFixed(1)} px, text above ${scrolled.toFixed(1)} px, block ${rows.toFixed(1)} px taller`
+      test.info().annotations.push({ type: "shift", description })
+      console.log(`SHIFT ${description}`)
+      expect.soft(Math.abs(shift)).toBeLessThan(4)
+      // The marks of a marked-up line take room the rendered line doesn't have.
+      if (name !== "marked-up line") {
+        expect.soft(scrolled).toBeLessThan(4)
+        expect.soft(Math.abs(rows)).toBeLessThan(1)
+      }
+      await mine.getByRole("button", { name: "Cancel" }).click()
+      await expect(editor).toHaveCount(0)
+    }
+  })
