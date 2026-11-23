@@ -81,7 +81,8 @@ for (const width of [1440, 390])
           exact: true
         })
         await expect(input).toBeVisible()
-        const row = input.locator("..")
+        // The row holding the box (its clear button's wrapper is a span) and the toggle.
+        const row = input.locator("xpath=ancestor::div[1]")
         const left = (await switcher.boundingBox())!
         const find = (await input.boundingBox())!
         const searchRow = (await row.boundingBox())!

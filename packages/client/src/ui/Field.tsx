@@ -1,10 +1,12 @@
 import { Field as BaseField } from "@base-ui/react/field"
 import { Fieldset as BaseFieldset } from "@base-ui/react/fieldset"
 import { Input as BaseInput } from "@base-ui/react/input"
-import { useState, type ComponentProps, type ReactNode, type SyntheticEvent } from "react"
+import { useRef, useState, type ComponentProps, type ReactNode, type SyntheticEvent } from "react"
 import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textActions.tsx"
 import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
 import { FieldFrame, framedControl } from "./FieldFrame.tsx"
+import { Icon } from "./Icon.tsx"
+import { Tooltip } from "./Tooltip.tsx"
 
 // 16px text on touch screens, so iOS doesn't zoom into a focused field.
 const control =
@@ -84,6 +86,7 @@ export function Input({
   tools,
   status,
   frameClassName = "",
+  clearable = false,
   ...props
 }: ComponentProps<typeof BaseInput> & {
   /** Opt in only when a single-line field genuinely needs the editor's whole width. */
@@ -91,9 +94,23 @@ export function Input({
   tools?: ReactNode
   status?: ReactNode
   frameClassName?: string
+  /**
+   * An × at the box's end while it has text: it empties the box as typing would (through its
+   * `onChange`) and leaves the caret in it. The room for it is kept either way, so the box never
+   * resizes; `frameClassName` sizes the box then.
+   */
+  clearable?: boolean
 }) {
   const numeric = props.type === "number" || props.inputMode === "numeric" || props.inputMode === "decimal"
   const width = fullWidth ? "max-w-none" : numeric ? "max-w-32" : "max-w-controls"
+  if (clearable && tools === undefined && status === undefined)
+    return (
+      <ClearableInput
+        className={`h-9 ${control} ${className}`}
+        frameClassName={`${width} ${frameClassName}`}
+        {...props}
+      />
+    )
   if (tools === undefined && status === undefined)
     return <BaseInput className={`h-9 ${control} ${width} ${className}`} {...props} />
   return (
@@ -104,6 +121,55 @@ export function Input({
         {...props}
       />
     </FieldFrame>
+  )
+}
+
+/** Sets the box's text the way typing does, so its own `onChange` (and whatever keeps the text) runs. */
+const typeInto = (input: HTMLInputElement, text: string) => {
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, text)
+  input.dispatchEvent(new Event("input", { bubbles: true }))
+}
+
+function ClearableInput({
+  className,
+  frameClassName,
+  ref,
+  ...props
+}: ComponentProps<typeof BaseInput> & { frameClassName: string }) {
+  const own = useRef<HTMLInputElement | null>(null)
+  const setRef = (node: HTMLInputElement | null) => {
+    own.current = node
+    if (typeof ref === "function") ref(node)
+    else if (ref) ref.current = node
+  }
+  const empty = props.value !== undefined && String(props.value) === ""
+  return (
+    <span
+      data-layout-audit-ignore="overlap: The clear button sits in the box's end padding, kept free of text for it"
+      className={`relative flex w-full min-w-0 ${frameClassName}`}
+    >
+      <BaseInput ref={setRef} className={`pe-8 ${className}`} {...props} />
+      {!empty && !props.disabled && (
+        <Tooltip label="Clear">
+          <button
+            type="button"
+            aria-label="Clear"
+            data-input-clear
+            // Pressing it leaves the caret in the box.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              const input = own.current
+              if (!input) return
+              typeInto(input, "")
+              input.focus()
+            }}
+            className="absolute inset-y-0 end-0 flex w-8 items-center justify-center rounded-e-md text-muted outline-none transition-colors hover:text-text focus-visible:text-text focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            <Icon name="close" size={14} />
+          </button>
+        </Tooltip>
+      )}
+    </span>
   )
 }
 
