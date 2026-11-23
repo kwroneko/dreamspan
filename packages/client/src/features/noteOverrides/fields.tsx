@@ -148,7 +148,6 @@ function ReplaceButton({
   target,
   store,
   path,
-  label,
   onMade
 }: FieldViewProps & {
   chat: ReplaceChat

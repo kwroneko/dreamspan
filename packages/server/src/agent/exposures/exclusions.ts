@@ -80,6 +80,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   ComposerHistory: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   ContinueVersion: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   CopyNoteToBranch: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  CountMessages: "Not in W6's first exposures; use the bounded workshop read tools.",
   CountTokens: "Not in W6's first exposures; use the bounded workshop read tools.",
   CreateCard: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   CreateChat: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
