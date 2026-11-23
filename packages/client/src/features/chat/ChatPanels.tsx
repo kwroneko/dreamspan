@@ -387,7 +387,7 @@ type CastMembers = Pick<NonNullable<ChatView["cast"]>, "participants" | "playedB
  * picker: the composer's Speak as, the Cast tab's, This chat's), or a card swapped in place
  * (Use another version). A card that only left, or only joined, replaces nothing.
  */
-export const castReplacements = (before: CastMembers, after: CastMembers): ReadonlyArray<readonly [string, string]> => {
+const castReplacements = (before: CastMembers, after: CastMembers): ReadonlyArray<readonly [string, string]> => {
   const pairs = new Map<string, string>()
   const [was] = before.playedByMe
   const [now] = after.playedByMe
