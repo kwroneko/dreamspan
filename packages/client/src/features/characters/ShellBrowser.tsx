@@ -1,6 +1,6 @@
 import { useOpenPlace } from "../editor/durable.tsx"
 import { archivedCardActions, cardSearchExtras } from "./homeSlots.ts"
-import { sidebarMessageResults, sidebarSearchTools, useMessageSearch } from "./MessageSearch.tsx"
+import { MessageSortControl, sidebarMessageResults, sidebarSearchTools, useMessageSearch } from "./MessageSearch.tsx"
 import { useSplitChats } from "../chat/splitChats.ts"
 import { requestSplitReveal, useSplitReveal } from "../chat/splitReveal.ts"
 import type { ChatBrowse } from "@dreamspan/shared/chatBrowse.ts"
@@ -1113,9 +1113,9 @@ function Browser() {
   const cardLabel = card ? card.card.label : data ? "Character not found" : "…"
   const needle = search.trim().toLowerCase()
   const kind = scope.chat ? "chat" : scope.entity ? "character" : "all"
-  // The search looks through message text (MessageSearch.tsx): only in the list of all chats.
+  // The search looks through message text (MessageSearch.tsx): in the list of all chats or a character's.
   const [inMessages] = useMessageSearch()
-  const messages = inMessages && !grid && kind === "all"
+  const messages = inMessages && !grid && kind !== "chat"
   const sections = SECTIONS[kind]
   // A chat's branches have a filter of their own, kept for that chat: the words that found the
   // chat by its name would match none of its branches.
@@ -1237,7 +1237,7 @@ function Browser() {
                 value={fieldValue}
                 onChange={(e) => setField(e.currentTarget.value)}
               />
-              {kind === "all" && <SlotOutlet slot={sidebarSearchTools} props={{ grid }} />}
+              {kind !== "chat" && <SlotOutlet slot={sidebarSearchTools} props={{ grid }} />}
             </div>
           )}
         </div>
@@ -1247,10 +1247,15 @@ function Browser() {
           Until every {kind === "chat" ? "branch" : "chat"} has loaded, the ones still loading are found by name only.
         </p>
       )}
-      {!grid && kind !== "chat" && !messages && (
+      {!grid && kind !== "chat" && (
         <SlotOutlet
           slot={sidebarChatBrowse}
-          props={{ browse: chatBrowse, counts: forks.progress ? null : forks.filterCounts, onChange: setChatBrowse }}
+          props={{
+            browse: chatBrowse,
+            counts: forks.progress ? null : forks.filterCounts,
+            onChange: setChatBrowse,
+            ...(messages ? { sort: <MessageSortControl /> } : {})
+          }}
         />
       )}
       {grid && data && (
@@ -1377,7 +1382,10 @@ function Browser() {
           )
         ) : messages ? (
           <div className="max-w-controls pt-2 pb-2">
-            <SlotOutlet slot={sidebarMessageResults} props={{ text: search }} />
+            <SlotOutlet
+              slot={sidebarMessageResults}
+              props={{ text: search, filter: chatBrowse.filter, entity: scope.entity }}
+            />
           </div>
         ) : (
           // One column of rows; dragged wide, a row stays a row's width, its pin beside its text.

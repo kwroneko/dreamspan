@@ -13,17 +13,41 @@ import {
   LibrarySearch,
   LibraryUndoResult
 } from "./libraryReplace.ts"
-import { MessageCursor, MessageQuery, MessageSearchPage } from "./messageSearch.ts"
+import { EntityId } from "./chat.ts"
+import { CHAT_FILTERS } from "./chatBrowse.ts"
+import { MessageCount, MessageCursor, MessageQuery, MessageSearchPage, MessageSort } from "./messageSearch.ts"
+
+/**
+ * Which chats a message search looks through: those the Chats tab's filter shows (`filter`,
+ * default all), of one character's chats when `entity` is given, as the left panel lists them.
+ */
+const SearchScope = {
+  filter: Schema.optionalKey(Schema.Literals(CHAT_FILTERS)),
+  entity: Schema.optionalKey(Schema.NullOr(EntityId))
+}
 
 export class TextSearchApi extends RpcGroup.make(
   /**
-   * Messages in all of the user's chats whose text has each of `text`'s words (as the start of
-   * a word), newest first: each a message version with the branches that show it
-   * (messageSearch.ts). `cursor` is the previous page's `next`.
+   * Messages in the user's chats (`filter`, `entity`) whose text has each of `text`'s words (as
+   * the start of a word), in `sort`'s order (Best match by default; `reversed` turns the Chat
+   * sort Z to A): each a message version with the branches that show it (messageSearch.ts).
+   * `cursor` is the previous page's `next`.
    */
   Rpc.make("SearchMessages", {
-    payload: { text: MessageQuery, cursor: Schema.NullOr(MessageCursor) },
+    payload: {
+      text: MessageQuery,
+      cursor: Schema.NullOr(MessageCursor),
+      sort: Schema.optionalKey(MessageSort),
+      reversed: Schema.optionalKey(Schema.Boolean),
+      ...SearchScope
+    },
     success: MessageSearchPage,
+    error: ServerError
+  }),
+  /** How many messages SearchMessages finds in those chats, and in how many chats; capped. */
+  Rpc.make("CountMessages", {
+    payload: { text: MessageQuery, ...SearchScope },
+    success: MessageCount,
     error: ServerError
   }),
   /** Every entry of the chosen kinds with a match, by field, as its editor shows it now. */

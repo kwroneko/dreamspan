@@ -3759,6 +3759,23 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         const page = yield* actor.api.SearchMessages({ text: "hi", cursor: null })
         assert.isTrue(page.hits.some((h) => h.chatId === actor.quiet.chatId))
         assert.isFalse(page.hits.some((h) => h.chatId === owner.quiet.chatId || h.chatId === owner.chat.chatId))
+        // Scoped to the owner's card or sorted by chat: still nothing of the owner's.
+        for (const payload of [{ entity: owner.cardId }, { sort: "chat" as const }, { filter: "solo" as const }]) {
+          const scoped = yield* actor.api.SearchMessages({ text: "hi", cursor: null, ...payload })
+          assert.isFalse(scoped.hits.some((h) => h.chatId === owner.quiet.chatId || h.chatId === owner.chat.chatId))
+        }
+      })
+  },
+  CountMessages: {
+    // The owner's messages are never counted for another account, nor in the owner's card's scope.
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const own = yield* owner.api.CountMessages({ text: "hi" })
+        const theirs = yield* actor.api.CountMessages({ text: "hi" })
+        const page = yield* actor.api.SearchMessages({ text: "hi", cursor: null })
+        assert.isAtLeast(own.messages, 1)
+        assert.strictEqual(theirs.messages, page.hits.length)
+        assert.strictEqual((yield* actor.api.CountMessages({ text: "hi", entity: owner.cardId })).messages, 0)
       })
   },
   PreviewLibraryReplace: {

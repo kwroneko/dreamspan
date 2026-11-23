@@ -25,7 +25,13 @@ import {
   SavedMediaLookup,
   SavedMediaStatus
 } from "@dreamspan/shared/savedMedia.ts"
-import { MessageCursor, MessageQuery, MessageSearchPage } from "@dreamspan/shared/messageSearch.ts"
+import {
+  MessageCount,
+  MessageCursor,
+  MessageQuery,
+  MessageSearchPage,
+  MessageSort
+} from "@dreamspan/shared/messageSearch.ts"
 import {
   LibraryChoice,
   LibraryEdit,
@@ -5832,9 +5838,31 @@ const ReadOpsOwn = RpcGroup.make(
     success: Schema.Array(LibraryEdit),
     error: StorageError
   }),
+  /**
+   * Message text (messageSearch.ts, ARCHITECTURE §12 "Finding a message"), in `sort`'s order
+   * (Best match by default), in `chats` only when given: the chats a filter or a character
+   * leaves, in the Chat sort's order (by name), which that sort needs.
+   */
   Rpc.make("SearchMessages", {
-    payload: { userId: UserId, text: MessageQuery, cursor: Schema.NullOr(MessageCursor), limit: Schema.Int },
+    payload: {
+      userId: UserId,
+      text: MessageQuery,
+      cursor: Schema.NullOr(MessageCursor),
+      limit: Schema.Int,
+      sort: Schema.optionalKey(MessageSort),
+      chats: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
+    },
     success: MessageSearchPage,
+    error: StorageError
+  }),
+  /** How many messages SearchMessages finds (in `chats` when given), and in how many chats; capped. */
+  Rpc.make("CountMessages", {
+    payload: {
+      userId: UserId,
+      text: MessageQuery,
+      chats: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
+    },
+    success: MessageCount,
     error: StorageError
   }),
   /** Cheap preflight for the registered history tools: a join on this causal display path

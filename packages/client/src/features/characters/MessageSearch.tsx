@@ -6,8 +6,16 @@
 // at that message (`fork` and `slot` in the URL). Each page of results is its own query: a
 // changed text unmounts the old ones, which stops their reads on the server.
 import { useAtomValue } from "@effect/atom-react"
-import type { ChatId } from "@dreamspan/shared/chat.ts"
-import type { Excerpt, MessageCursor, MessageHit } from "@dreamspan/shared/messageSearch.ts"
+import type { ChatId, EntityId } from "@dreamspan/shared/chat.ts"
+import type { ChatBrowse } from "@dreamspan/shared/chatBrowse.ts"
+import {
+  type Excerpt,
+  MESSAGE_SORTS,
+  type MessageCursor,
+  type MessageHit,
+  type MessageSort,
+  messageCountText
+} from "@dreamspan/shared/messageSearch.ts"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
@@ -20,6 +28,8 @@ import { Spinner } from "../../ui/Spinner.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { defineSlot } from "../../slots.tsx"
 import { forkLabel, formatMoment } from "../chat/forks.ts"
+import { SortDirection } from "./cardBrowse.tsx"
+import { SortControl } from "./ChatBrowseBar.tsx"
 import { useShellNavigation } from "./shellData.tsx"
 
 /** The URL key that widens the left panel's chat search to message text. */
@@ -39,10 +49,83 @@ export function useMessageSearch() {
   return [on, set] as const
 }
 
+/** The URL keys of the message search's sort and its direction (the Chat sort's Z to A). */
+const SORT_KEY = "sideMsgSort"
+const REVERSE_KEY = "sideMsgReverse"
+
+interface MessageSortChoice {
+  readonly sort: MessageSort
+  readonly reversed: boolean
+}
+
+/** How found messages are listed, from the URL (Best match by default), and a way to change it. */
+export function useMessageSort() {
+  const sort = useSearch({
+    strict: false,
+    select: (s: Record<string, unknown>) => MESSAGE_SORTS.find((v) => v === s[SORT_KEY]) ?? "best"
+  })
+  const reversed = useSearch({ strict: false, select: (s: Record<string, unknown>) => s[REVERSE_KEY] === true })
+  const navigate = useNavigate()
+  const set = (next: MessageSortChoice) =>
+    void navigate({
+      to: ".",
+      search: (prev: Record<string, unknown>) => ({
+        ...prev,
+        [SORT_KEY]: next.sort === "best" ? undefined : next.sort,
+        [REVERSE_KEY]: next.sort === "chat" && next.reversed ? true : undefined
+      }),
+      replace: true,
+      resetScroll: false
+    })
+  return [{ sort, reversed: sort === "chat" && reversed }, set] as const
+}
+
+const SORTS = {
+  best: { label: "Best match", hint: "Messages with the words side by side first, then the rest, newest first" },
+  newest: { label: "Newest", hint: "Orders messages from the newest" },
+  oldest: { label: "Oldest", hint: "Orders messages from the oldest" },
+  chat: { label: "Chat", hint: "Groups messages by chat, chats by name, newest first in each" }
+} as const
+
+/** The message search's sort, in the chat list's browse row in place of the chats' sort. */
+export function MessageSortControl() {
+  const [{ sort, reversed }, set] = useMessageSort()
+  return (
+    <SortControl
+      noun="messages"
+      sorts={SORTS}
+      order={MESSAGE_SORTS}
+      value={sort}
+      onChange={(next) => set({ sort: next, reversed: false })}
+    >
+      <SortDirection
+        order={sort === "chat" ? "name" : "date"}
+        reversed={sort === "chat" ? reversed : sort === "oldest"}
+        onToggle={() =>
+          set(
+            sort === "chat"
+              ? { sort, reversed: !reversed }
+              : { sort: sort === "oldest" ? "newest" : "oldest", reversed: false }
+          )
+        }
+        disabledReason={sort === "best" ? "Best matches come first; pick Newest or Oldest to order by date" : undefined}
+      />
+    </SortControl>
+  )
+}
+
 /** Beside the left panel's chat search field: replaceable, registered by the characters feature. */
 export const sidebarSearchTools = defineSlot<{ grid: boolean }>("sidebar.search-tools")
-/** What the left panel lists while its search looks through message text. */
-export const sidebarMessageResults = defineSlot<{ text: string }>("sidebar.message-results")
+/**
+ * What the left panel lists while its search looks through message text: in the chats the
+ * chat list's filter shows (`filter`), of one character's when `entity` is given.
+ */
+interface MessageResultsProps {
+  readonly text: string
+  readonly filter: ChatBrowse["filter"]
+  readonly entity: EntityId | null
+}
+export const sidebarMessageResults = defineSlot<MessageResultsProps>("sidebar.message-results")
 
 export function MessageSearchToggle({ grid }: { grid: boolean }) {
   const [on, set] = useMessageSearch()
@@ -55,8 +138,8 @@ export function MessageSearchToggle({ grid }: { grid: boolean }) {
       className={`h-9! w-9! shrink-0 px-0! ${pressedButtonClass}`}
       hint={
         on
-          ? "Searching the text of messages in all your chats. Words in quotes are found as written, side by side. Click to search chat and character names again."
-          : "Click to search the text of messages in all your chats instead of names."
+          ? "Searching the text of messages in the chats the filter shows. Words in quotes are found as written, side by side. Click to search chat and character names again."
+          : "Click to search the text of messages in the chats the filter shows instead of names."
       }
       onClick={() => set(!on)}
     >
@@ -75,21 +158,56 @@ const useSettled = (value: string, ms: number) => {
   return settled
 }
 
-export function MessageResults({ text }: { text: string }) {
-  const settled = useSettled(text.trim().slice(0, 200), 300)
-  if (settled.length < 2)
-    return <p className="p-2 text-sm text-muted">Type at least two letters to find them in your messages.</p>
-  return <Pages key={settled} text={settled} />
+/** One search: its words and the chats and order it's in. */
+interface Search extends MessageSortChoice {
+  readonly text: string
+  readonly filter: ChatBrowse["filter"]
+  readonly entity: EntityId | null
 }
 
-function Pages({ text }: { text: string }) {
+export function MessageResults({ text, filter, entity }: MessageResultsProps) {
+  const settled = useSettled(text.trim().slice(0, 200), 300)
+  const [sort] = useMessageSort()
+  const search: Search = { text: settled, filter, entity, ...sort }
+  const key = JSON.stringify(search)
+  return (
+    <>
+      {/* Its line is kept while the search is on, so the list doesn't move as the count comes. */}
+      <p data-message-count aria-live="polite" className="h-4 truncate px-2 text-xs leading-4 text-muted">
+        {settled.length >= 2 && <Count key={key} search={search} />}
+      </p>
+      {settled.length < 2 ? (
+        <p className="p-2 text-sm text-muted">Type at least two letters to find them in your messages.</p>
+      ) : (
+        <Pages key={key} search={search} />
+      )}
+    </>
+  )
+}
+
+/** "128 messages in 14 chats", or "1,000+ messages" past what a count reads. */
+function Count({ search }: { search: Search }) {
+  const atom = useMemo(
+    () =>
+      AppClient.query("CountMessages", {
+        text: search.text,
+        filter: search.filter,
+        entity: search.entity
+      }),
+    [search.text, search.filter, search.entity]
+  )
+  const result = useAtomValue(atom)
+  return AsyncResult.isSuccess(result) ? messageCountText(result.value) : null
+}
+
+function Pages({ search }: { search: Search }) {
   const [cursors, setCursors] = useState<ReadonlyArray<MessageCursor | null>>([null])
   return (
     <ul aria-label="Messages found" className="flex flex-col gap-1">
       {cursors.map((cursor, i) => (
         <Page
-          key={cursor === null ? "first" : `${cursor.phase ?? "together"}/${cursor.before}`}
-          text={text}
+          key={cursor === null ? "first" : `${cursor.phase ?? "together"}/${cursor.chat ?? ""}/${cursor.before}`}
+          search={search}
           cursor={cursor}
           first={i === 0}
           last={i === cursors.length - 1}
@@ -101,21 +219,33 @@ function Pages({ text }: { text: string }) {
 }
 
 function Page({
-  text,
+  search,
   cursor,
   first,
   last,
   onMore
 }: {
-  text: string
+  search: Search
   cursor: MessageCursor | null
   first: boolean
   last: boolean
   onMore: (next: MessageCursor) => void
 }) {
+  const { text } = search
   // Keep loaded pages fixed. Refreshing the first page while retaining older cursors
-  // would drop its former last row whenever a new reply arrives.
-  const atom = useMemo(() => AppClient.query("SearchMessages", { text, cursor }), [text, cursor])
+  // would drop its former last row whenever a new reply arrives. `search` is fixed per list (its key).
+  const atom = useMemo(
+    () =>
+      AppClient.query("SearchMessages", {
+        text,
+        cursor,
+        sort: search.sort,
+        reversed: search.reversed,
+        filter: search.filter,
+        entity: search.entity
+      }),
+    [text, cursor, search.sort, search.reversed, search.filter, search.entity]
+  )
   const result = useAtomValue(atom)
   if (AsyncResult.isFailure(result))
     return <li className="p-2 text-sm text-danger">The search couldn't be finished. Try again in a moment.</li>
@@ -129,20 +259,23 @@ function Page({
   return (
     <>
       {first && page.hits.length === 0 && page.next === null && (
-        <li className="p-2 text-sm text-muted">No message in your chats has “{text}”.</li>
+        <li className="p-2 text-sm text-muted">
+          No message {search.filter === "all" && search.entity === null ? "in your chats" : "in these chats"} has “
+          {text}”.
+        </li>
       )}
       {page.hits.map((hit) => (
         <HitRow key={hit.versionId} hit={hit} />
       ))}
       {last && page.next !== null && (
         <li>
-          <Tooltip label="Searches older messages.">
+          <Tooltip label="Searches further through your messages.">
             <button
               type="button"
               onClick={() => onMore(page.next!)}
               className="mt-1 px-2 py-1 text-xs text-accent hover:underline"
             >
-              {page.hits.length === 0 ? "Search older messages" : "Show more"}
+              {page.hits.length === 0 ? "Search further" : "Show more"}
             </button>
           </Tooltip>
         </li>
