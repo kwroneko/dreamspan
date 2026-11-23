@@ -522,7 +522,8 @@ function PromptBlock({
       goTo={nameMatch}
       highlights={nameHighlights}
       allowEmpty
-      className="min-w-14 max-w-md"
+      // The pencil takes the row's icon square, as the prompt's settings and ⋯ beside it do.
+      className="min-w-14 max-w-md [&_[data-rename-pencil]]:size-8!"
       onRename={(next) => {
         store.setText(namePath, next)
         void store.save(textField(namePath))
@@ -1031,7 +1032,7 @@ export function PromptDocument({
   const anyOpen = order.some((e) => isOpen(opened, e.identifier))
   const controls = (
     <div data-preset-layout={layout} className="preset-toolbar @container flex min-w-0 flex-col gap-2">
-      <div data-preset-edit-row className="preset-edit-row flex items-center gap-2">
+      <div data-preset-edit-row className="preset-edit-row flex items-center gap-1">
         {addButtons}
         <SearchReplaceButton
           ref={searchButton}

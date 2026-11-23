@@ -20,7 +20,7 @@ export function PanelHistory({ store }: { store: EditorStore }) {
   return (
     <>
       <Button
-        className="h-8! px-2!"
+        className="h-8! px-2! @max-[30rem]:w-8 @max-[30rem]:px-0!"
         aria-label="History"
         aria-pressed={open}
         hint="Shows saved revisions to compare or restore."
@@ -44,7 +44,7 @@ export function PanelVariant({ store }: { store: EditorStore }) {
   return (
     <>
       <Button
-        className="h-8! px-2!"
+        className="h-8! px-2! @max-[30rem]:w-8 @max-[30rem]:px-0!"
         aria-label="Make a variant"
         hint="Makes a named copy of this lorebook with its own changes."
         onClick={() => setOpen(true)}

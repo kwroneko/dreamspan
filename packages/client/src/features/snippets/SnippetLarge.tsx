@@ -88,7 +88,9 @@ export function SnippetLarge({
         </Tooltip>
       )}
       <CenterHeaderContent>
-        <header className={`flex min-w-0 items-center gap-2 ${compactHeaderControls}`}>
+        <header
+          className={`flex min-w-0 items-center gap-2 sm:[&_[data-rename-pencil]]:size-8! ${compactHeaderControls}`}
+        >
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <InlineRename
               place={`snippet-title:large:${refId}`}
@@ -121,15 +123,18 @@ export function SnippetLarge({
               </h1>
             </InlineRename>
           </div>
-          <IconButton
-            label={`Copy ${title}`}
-            hint="Copies its text, to paste anywhere"
-            icon="copy"
-            disabled={content === ""}
-            onClick={() => void copy(content, "Snippet")}
-          />
-          <SaveRevision store={store} />
-          {onClose && <WindowClose onClick={onClose} />}
+          {/* One row of buttons, one gap between them. */}
+          <div className="flex shrink-0 items-center gap-1">
+            <IconButton
+              label={`Copy ${title}`}
+              hint="Copies its text, to paste anywhere"
+              icon="copy"
+              disabled={content === ""}
+              onClick={() => void copy(content, "Snippet")}
+            />
+            <SaveRevision store={store} />
+            {onClose && <WindowClose onClick={onClose} />}
+          </div>
         </header>
       </CenterHeaderContent>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">

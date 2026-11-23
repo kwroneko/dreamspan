@@ -302,7 +302,7 @@ export function SummaryDefaults({
         >
           <Textarea
             textActions
-            tools={<UserDraftUndo draft={instructionDraft} />}
+            tools={<UserDraftUndo draft={instructionDraft} place="strip" />}
             value={tail}
             onChange={(event) => type(event.target.value)}
             rows={5}

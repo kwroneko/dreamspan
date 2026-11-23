@@ -410,7 +410,7 @@ export function PendingWorkshop({
             start={
               <>
                 <PendingComposerControls placement="speaker" context={controls} />
-                <UserDraftUndo draft={durable} />
+                <UserDraftUndo draft={durable} place="composer" />
               </>
             }
             end={

@@ -487,7 +487,7 @@ function StepEditor({
         expand={false}
         autoFocus
         onChange={draft.setText}
-        tools={<UserDraftUndo draft={draft} />}
+        tools={<UserDraftUndo draft={draft} place="strip" />}
       />
       <UserDraftNotices draft={draft} />
       {problem !== null && (

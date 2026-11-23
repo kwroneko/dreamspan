@@ -17,6 +17,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react"
 import { defineSlot, SlotOutlet } from "../../slots.tsx"
 import { AboutHint } from "../../ui/AboutHint.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
+import { chromeButton } from "../../ui/FieldFrame.tsx"
 import { messageEditorTools, messageTextEditor } from "./editorHistory.tsx"
 import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import type { ChatSession } from "./session.ts"
@@ -132,6 +133,7 @@ function ThinkingField(props: EditThinkingProps) {
             <IconButton
               icon="trash"
               label="Remove thinking"
+              className={chromeButton}
               hint="Takes the thinking off this message when you save. Add thinking brings it back."
               onClick={() => {
                 setShown(key, { added: false, focus: false, removed: view.text })

@@ -375,7 +375,7 @@ export function CardHeader({ portrait, children }: { portrait: ReactNode; childr
       {portrait}
       <div
         data-card-header-rows
-        className="flex min-w-0 flex-1 flex-col gap-1 has-[[data-persona-align-start]]:self-stretch [--card-name-min:2rem] @max-[25rem]/card-header:[--card-name-min:1.625rem] @max-[18rem]/card-header:[--card-name-min:1.375rem] @max-[25rem]/card-header:[&_[data-card-header-row=identity]_button]:size-6! @max-[25rem]/card-header:[&_[data-card-header-row=identity]_[role=group]]:gap-0.5 @max-[18rem]/card-header:[&_[data-card-header-row=identity]_button]:size-5! @max-[18rem]/card-header:[&_[data-card-header-row=identity]_[role=group]]:gap-0.5"
+        className="flex min-w-0 flex-1 flex-col gap-1 has-[[data-persona-align-start]]:self-stretch [--card-name-min:2rem] @max-[25rem]/card-header:[--card-name-min:1.625rem] @max-[18rem]/card-header:[--card-name-min:1.375rem] @max-[25rem]/card-header:[&_[data-card-header-row=identity]_:is(button,a.size-8)]:size-6! @max-[18rem]/card-header:[&_[data-card-header-row=identity]_:is(button,a.size-8)]:size-5!"
       >
         {children}
       </div>

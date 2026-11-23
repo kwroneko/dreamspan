@@ -365,7 +365,7 @@ export function NoteBlock({
                 {open && loaded && (
                   <span
                     data-note-save
-                    className="inline-flex h-8 items-center @max-[22rem]/note-header:[&_[data-save-state]_button]:h-6! @max-[22rem]/note-header:[&_[data-save-state]_button]:w-6!"
+                    className="inline-flex h-8 items-center"
                   >
                     <SaveRevision store={store} />
                   </span>
