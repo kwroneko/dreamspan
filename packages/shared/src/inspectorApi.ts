@@ -629,7 +629,23 @@ export const NextContext = Schema.Struct({
   ),
   warmth: Schema.NullOr(CacheWarmth),
   leafSlotId: Schema.NullOr(Schema.String),
-  historyStart: Schema.NullOr(Schema.Struct({ slotId: Schema.NullOr(Schema.String), depth: Schema.Int })),
+  historyStart: Schema.NullOr(
+    Schema.Struct({
+      slotId: Schema.NullOr(Schema.String),
+      depth: Schema.Int,
+      /**
+       * Why the messages above the start aren't sent (the timeline's boundary lines): the
+       * position of the last message the context budget left out (null: the budget left none
+       * out), and the position of the first message on the path that would be sent when
+       * messages hidden from the model come before it (null: none do, or the read never
+       * reached them). Absent when the next request couldn't be assembled.
+       */
+      cutThrough: Schema.optionalKey(Schema.NullOr(Schema.Int)),
+      hiddenBefore: Schema.optionalKey(Schema.NullOr(Schema.Int))
+    })
+  ),
+  /** The titles of the imported ST summary notes the next request sends ("Summary (from ST)"). */
+  summaryNotes: Schema.optionalKey(Schema.Array(Schema.String)),
   summarizedThrough: Schema.NullOr(Schema.Int),
   /** The images the next request leaves out and why; absent when it can't be assembled. */
   images: Schema.optionalKey(ImagesLeftOut)

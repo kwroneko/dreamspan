@@ -27,15 +27,26 @@ export const historyTimeline = {
   order: 10,
   source: import.meta.url,
   transform: (input) => {
-    if (input.historyDivider < 0 || !input.hasBudget || input.assemblyError) return input.rows
+    const hidden = input.hiddenDivider ?? -1
+    if ((input.historyDivider < 0 && hidden < 0) || !input.hasBudget || input.assemblyError) return input.rows
     const rows = [...input.rows]
-    rows.splice(boundary(rows, input, input.historyDivider), 0, {
-      key: "history-boundary",
-      estimate: 64,
-      from: Infinity,
-      to: -1,
-      body: { kind: "history" }
-    })
+    // Each line at its own place: the hidden one first, so a size line below it keeps its index.
+    if (hidden >= 0)
+      rows.splice(boundary(rows, input, hidden), 0, {
+        key: "hidden-boundary",
+        estimate: 48,
+        from: Infinity,
+        to: -1,
+        body: { kind: "hidden-history" }
+      })
+    if (input.historyDivider >= 0)
+      rows.splice(boundary(rows, input, input.historyDivider), 0, {
+        key: "history-boundary",
+        estimate: 64,
+        from: Infinity,
+        to: -1,
+        body: { kind: "history" }
+      })
     return rows
   }
 } satisfies TimelineTransformV1
