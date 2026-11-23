@@ -36,7 +36,7 @@ type Site =
 
 /** The boxes: raw and wrapped textareas, the code editor, contenteditable. */
 const SITE =
-  /<(?:textarea|Textarea|AutoGrowTextarea|CodeEditor|CardTextEditor)\b|component: (?:CodeEditor|AutoGrowTextarea)\b|contentEditable/g
+  /<(?:textarea|Textarea|AutoGrowTextarea|CodeEditor|MessageTextEditor|CardTextEditor)\b|component: (?:CodeEditor|MessageTextEditor|AutoGrowTextarea)\b|contentEditable/g
 
 const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
   // The primitives themselves: whoever renders them is listed.

@@ -7,6 +7,7 @@ import type { MessageImages, PathEntry, Version } from "@dreamspan/shared/chat.t
 import type { DraftState } from "@dreamspan/shared/drafts.ts"
 import type { VersionAmendment } from "@dreamspan/shared/chatApi.ts"
 import { CodeEditor, type CodeEditorProps } from "../../ui/CodeEditor.tsx"
+import { MessageTextEditor } from "../../ui/MessageTextEditor.tsx"
 import { RevisionComparison, RevisionDiff } from "../../ui/RevisionDiff.tsx"
 import { defineSlot } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -302,7 +303,7 @@ function Amendments({ session, entry, closeDialog, report }: MessageActionProps)
 }
 
 export const registerEditorHistory = () => [
-  messageTextEditor.register({ id: "message.code-editor", order: 10, component: CodeEditor }),
+  messageTextEditor.register({ id: "message.code-editor", order: 10, component: MessageTextEditor }),
   summaryTextEditor.register({ id: "summary.code-editor", order: 10, component: CodeEditor }),
   summaryEditorTools.register({ id: "summary.current-changes", order: 20, component: CurrentChanges }),
   messageEditorTools.register({ id: "message.edit-history", order: 10, component: EditHistoryMenu }),

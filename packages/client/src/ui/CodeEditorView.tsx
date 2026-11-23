@@ -2,7 +2,7 @@ import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textAct
 import { defaultKeymap, history, historyKeymap, isolateHistory } from "@codemirror/commands"
 import { Compartment, EditorState, StateEffect, StateField, Transaction } from "@codemirror/state"
 import { Decoration, type DecorationSet, EditorView, keymap } from "@codemirror/view"
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react"
 import type { CodeEditorProps } from "./CodeEditor.tsx"
 import { changeGutter, comparisonBase, lineChanges, quietMarkers } from "./codeChanges.ts"
 import { editorExtensions } from "./editorExtensions.ts"
@@ -15,7 +15,7 @@ import { chromeButton, FieldFrame } from "./FieldFrame.tsx"
 import { IconButton } from "./Tooltip.tsx"
 
 /** One persistent view: controlled echoes never reset selection or undo history. */
-export default function CodeEditorView(props: CodeEditorProps) {
+export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
   const host = useRef<HTMLDivElement>(null)
   const controller = useRef<ReturnType<typeof mountEditor> | null>(null)
   // The selected text, for the bar's selection actions under the box.
@@ -40,6 +40,7 @@ export default function CodeEditorView(props: CodeEditorProps) {
   useLayoutEffect(() => {
     controller.current?.update(props)
   })
+  useImperativeHandle(ref, () => ({ focus: (at?: number) => controller.current?.focus(at) }), [])
   // Some engines finish composition after React's last render. Apply queued external text then.
   useEffect(() => {
     const node = host.current!
@@ -103,7 +104,7 @@ export default function CodeEditorView(props: CodeEditorProps) {
         <div
           data-layout-audit-ignore="inset: Editor surface fills its own bordered field"
           ref={host}
-          className="min-w-0 overflow-hidden rounded-md"
+          className={`min-w-0 overflow-hidden rounded-md${props.surfaceClass ? ` ${props.surfaceClass}` : ""}`}
         />
       </FieldFrame>
       {large && (
@@ -175,6 +176,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
   const options = new Compartment()
   const contributions = new Compartment()
   const syntax = new Compartment()
+  const own = new Compartment()
   let props = initial
   let applying = false
   let deferred: string | null = null
@@ -195,6 +197,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
         proseTheme,
         contributions.of([]),
         syntax.of([]),
+        own.of(initial.extensions ?? []),
         EditorView.lineWrapping,
         history(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
@@ -317,6 +320,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       base = next.base
       view.dispatch({ effects: comparisonBase.of(base) })
     }
+    if (next.extensions !== oldProps.extensions) view.dispatch({ effects: own.reconfigure(next.extensions ?? []) })
     if (oldProps.readOnly !== next.readOnly || oldProps.label !== next.label || oldProps.mono !== next.mono)
       view.dispatch({ effects: options.reconfigure(attributes()) })
   }
@@ -336,7 +340,13 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
     update,
     /** The selected text now, which a render may not have caught up with. */
     selection: () => view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to),
-    focus: () => view.focus(),
+    focus: (at?: number) => {
+      if (at !== undefined) {
+        const anchor = Math.min(Math.max(0, at), view.state.doc.length)
+        view.dispatch({ selection: { anchor }, scrollIntoView: true })
+      }
+      view.focus()
+    },
     edit: (value: string, before: string) => {
       const current = view.state.doc.toString()
       // A restore response may arrive after more typing. Keep that newer edit.

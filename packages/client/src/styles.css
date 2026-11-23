@@ -231,7 +231,7 @@ main:has(> [data-fill]) {
  */
 @custom-variant compact (&:where([data-chat-density="compact"] *));
 
-[data-chat-density="compact"] .chat-row .markdown {
+[data-chat-density="compact"] .chat-row :is(.markdown, .message-edit-text) {
   line-height: 1.45;
 }
 [data-chat-density="compact"] .chat-row .markdown > * + *,
@@ -294,8 +294,10 @@ main:has(> [data-fill]) {
   }
 }
 
-/* Message text (ui/Markdown.tsx). */
-.markdown {
+/* Message text (ui/Markdown.tsx), and the box its edit is typed in (ui/MessageTextEditor.tsx),
+   which the editor's text inherits these from. */
+.markdown,
+.message-edit-text {
   color: var(--color-message-main);
   overflow-wrap: anywhere;
   line-height: 1.6;
