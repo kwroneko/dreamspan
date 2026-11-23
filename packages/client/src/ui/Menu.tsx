@@ -245,7 +245,8 @@ export function ContextMenu({
             aria-label={label}
             className="max-h-[var(--available-height)] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none [&:not(:has(.menu-mark))_.menu-slot]:hidden"
           >
-            {children}
+            {/* An action a host shows here is an item, as in a Menu. */}
+            <MenuActionsContext value>{children}</MenuActionsContext>
           </BaseContextMenu.Popup>
           <HighlightExplanation popup={popup} />
         </BaseContextMenu.Positioner>
