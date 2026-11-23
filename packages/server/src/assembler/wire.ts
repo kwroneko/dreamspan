@@ -4,6 +4,8 @@ import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript"
 import { createHash } from "node:crypto"
 import { Predicate } from "effect"
 import { REPLY_TOOL, replyTool, schemaPrefillBudget } from "./prefill.ts"
+import { reasoningDetails, type ReplayedReasoning } from "./reasoningReplay.ts"
+import { HISTORY_REPLAY } from "../providers/thinkingBinding.ts"
 import type { Api, AssistantMessage, Context, Message, Model } from "@earendil-works/pi-ai"
 import type { AssembledRequest, ModelInput, RequestImage, RequestMessage, WireContext } from "./types.ts"
 import { claudeRules, modelRules } from "@dreamspan/shared/samplerRules.ts"
@@ -128,6 +130,8 @@ const baseProviderRequest = (request: AssembledRequest, model: ModelInput): Prov
     const ordinary = providerRequest(
       {
         ...request,
+        // The outer call sends the reasoning back, once.
+        replay: undefined,
         prefill: null,
         samplers: {
           ...request.samplers,
@@ -230,9 +234,82 @@ const baseProviderRequest = (request: AssembledRequest, model: ModelInput): Prov
   }
 }
 
+const emptyUsage = () => ({
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+})
+
+/** A reply's reasoning as pi-ai's thinking parts, in the order the provider sent them. */
+const thinkingParts = (replay: ReplayedReasoning) =>
+  replay.native.parts.map((part) => ({
+    type: "thinking" as const,
+    thinking: part.text,
+    ...(part.signature !== undefined ? { thinkingSignature: part.signature } : {}),
+    ...(part.redacted ? { redacted: true } : {})
+  }))
+
+/**
+ * Earlier replies' own reasoning on their messages (the `reasoning-replay` stage decided which):
+ * Chat Completions (OpenRouter) gets `reasoning_details`, or plain `reasoning`, on the message;
+ * other APIs get the reply's thinking parts first, which pi-ai sends as the provider's blocks
+ * (Anthropic thinking and redacted thinking, Responses reasoning items). Each such reply is
+ * marked (HISTORY_REPLAY) with the provider layer's record of what it answered, so the final
+ * check (thinkingBinding.ts) can still leave a block out.
+ */
+const withReplay = (request: AssembledRequest, model: ModelInput, wire: ProviderRequest): ProviderRequest => {
+  const replay = request.replay
+  if (!replay?.length) return wire
+  const replayed = (content: AssistantMessage["content"], r: ReplayedReasoning): Message =>
+    Object.assign(
+      {
+        role: "assistant" as const,
+        content: [...thinkingParts(r), ...content],
+        api: model.api as Api,
+        provider: model.kind,
+        model: model.key,
+        usage: emptyUsage(),
+        stopReason: "stop" as const,
+        timestamp: 0
+      } satisfies AssistantMessage,
+      { [HISTORY_REPLAY]: true },
+      r.native.record === undefined ? {} : { thinkingRecord: r.native.record }
+    )
+  if (model.api === "openai-completions") {
+    const sent = Array.isArray(wire.payload.messages)
+      ? [...(wire.payload.messages as Array<Record<string, unknown>>)]
+      : []
+    const context = [...wire.context.messages]
+    for (const r of replay) {
+      const message = sent[r.message]
+      if (message?.role !== "assistant") continue
+      const details = r.form === "signed" ? reasoningDetails(r.native) : undefined
+      sent[r.message] = details
+        ? { ...message, reasoning_details: details }
+        : { ...message, reasoning: r.native.parts.map((part) => part.text).join("\n") }
+      // The context only feeds the usage estimate, and the final check's record.
+      if (details && context[r.message])
+        context[r.message] = replayed([text(typeof message.content === "string" ? message.content : "")], r)
+    }
+    return { ...wire, payload: { ...wire.payload, messages: sent }, context: { ...wire.context, messages: context } }
+  }
+  // The leading system messages became the system prompt: the context starts after them.
+  const offset = withPrefill(request).length - wire.context.messages.length
+  const messages = [...wire.context.messages]
+  for (const r of replay) {
+    const message = messages[r.message - offset]
+    if (r.form !== "signed" || message?.role !== "assistant") continue
+    messages[r.message - offset] = replayed(message.content, r)
+  }
+  return { ...wire, context: { ...wire.context, messages } }
+}
+
 /** Apply model-owned provider options after prompt composition. */
 export const providerRequest = (request: AssembledRequest, model: ModelInput): ProviderRequest => {
-  const base = baseProviderRequest(request, model)
+  const base = withReplay(request, model, baseProviderRequest(request, model))
   const settings = model.settings
   if (!settings) return base
   const { stable, ...wire } = base
@@ -301,7 +378,8 @@ export const wireContext = (request: AssembledRequest, model: ModelInput): WireC
       ]
     }
   }
-  const wire = providerRequest(request, model)
+  // The inspector shows the messages' text; earlier replies' reasoning isn't part of it.
+  const wire = providerRequest({ ...request, replay: undefined }, model)
   const input = withPrefill(request)
   const samplers: Record<string, number> = {}
   for (const [key, value] of Object.entries(wire.payload)) {

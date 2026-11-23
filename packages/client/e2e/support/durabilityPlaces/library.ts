@@ -270,6 +270,17 @@ export const libraryPlaces: ReadonlyArray<Place> = [
     shown: (page) => field(page, /^Start of the reply/)
   }),
   place({
+    name: "Preset provider reasoning send-back count",
+    source: "features/editor/ReplySectionsSettings.tsx:155",
+    setup: lazy,
+    numeric: true,
+    open: async (page, state, ctx) => {
+      await goLibrary(page, ctx, await preset(page, ctx, state))
+      return page.getByRole("spinbutton", { name: "Send the provider's reasoning back for the last replies" })
+    },
+    shown: (page) => page.getByRole("spinbutton", { name: "Send the provider's reasoning back for the last replies" })
+  }),
+  place({
     name: "Merge conflict Edit it",
     source: "features/editor/conflicts.tsx:124 (draft: forkMerge/MergeDialog.tsx:242)",
     setup: lazy,

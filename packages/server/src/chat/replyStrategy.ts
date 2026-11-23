@@ -6,6 +6,8 @@ import { providerRequest } from "../assembler/wire.ts"
 import type { Providers } from "../providers/Providers.ts"
 import { GenerationFailed, type GenerationRequest, type GenerationChunk } from "./Generator.ts"
 import type { ReplyOutputStrategy } from "./replyOutput.ts"
+import { requestDigest, type NativeReasoning } from "../assembler/reasoningReplay.ts"
+import type { AssistantMessage } from "@earendil-works/pi-ai"
 
 export interface ReplyStrategy {
   readonly id: string
@@ -37,7 +39,7 @@ const runPlainReply = ({
   purpose,
   target
 }: {
-  readonly request: Pick<GenerationRequest, "userId" | "chatId" | "onWaitingCache" | "outputBudget">
+  readonly request: Pick<GenerationRequest, "userId" | "chatId" | "onWaitingCache" | "outputBudget" | "initial">
   readonly target: GenerationTarget
   readonly generation: Generation
   readonly rolloutId: string
@@ -53,6 +55,35 @@ const runPlainReply = ({
       const resolved = yield* resolveImages(generation.request)
       const wire = providerRequest(resolved, model)
       const showStreaming = model.settings?.stream !== false
+      // The reply's reasoning as the provider sent it, kept with the reply to send back later
+      // (assembler/reasoningReplay.ts): only for a reply of its own, not a continuation or a prefill.
+      let native: NativeReasoning | undefined
+      const keep = (message: AssistantMessage & { readonly thinkingRecord?: unknown }) => {
+        if (request.initial || generation.request.prefill || generation.request.continuation) return
+        const parts = message.content.flatMap((part) =>
+          part.type === "thinking"
+            ? [
+                {
+                  text: part.thinking,
+                  ...(part.thinkingSignature ? { signature: part.thinkingSignature } : {}),
+                  ...(part.redacted ? { redacted: true } : {})
+                }
+              ]
+            : []
+        )
+        if (parts.length === 0) return
+        native = {
+          api: model.api,
+          kind: model.kind,
+          key: model.key,
+          connectionId: model.connectionId,
+          modelId: model.modelId,
+          ...(model.connectionRevision !== undefined ? { connectionRevision: model.connectionRevision } : {}),
+          prefix: requestDigest(generation.request.messages),
+          parts,
+          ...(message.thinkingRecord !== undefined ? { record: message.thinkingRecord } : {})
+        }
+      }
       const chunks = providers
         .stream({
           userId,
@@ -83,10 +114,16 @@ const runPlainReply = ({
           Stream.tap((event) =>
             Effect.sync(() => {
               if (event.type === "waiting-cache") request.onWaitingCache?.(event.waiting)
+              if (event.type === "done") keep(event.message)
             })
           ),
           Stream.mapEffect(output.decode),
           Stream.filterMap((chunk) => chunk),
+          Stream.concat(
+            Stream.suspend(() =>
+              native ? Stream.succeed<GenerationChunk>({ native: JSON.stringify(native) }) : Stream.empty
+            )
+          ),
           Stream.mapError((error) =>
             error._tag === "GenerationFailed"
               ? error

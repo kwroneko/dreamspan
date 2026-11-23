@@ -78,7 +78,7 @@ const useText = (editor: MessageDraft | undefined) =>
   )
 
 const ABOUT =
-  "The reasoning shown folded above the reply. What you write here is saved as plain text, without the provider's signature. Plain chats never send thinking to the model."
+  "The reasoning shown folded above the reply. What you write here is saved as plain text, without the provider's signature, so it isn't sent back to the model."
 /** The thinking is the reply's own tagged thinking (an imported chat's, or parsed from a reply). */
 const ABOUT_IN_REPLY =
   "The thinking in the reply, shown folded above it. The model sees it again only if the preset sends thinking back for the last replies."

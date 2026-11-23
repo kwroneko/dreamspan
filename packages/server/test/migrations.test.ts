@@ -166,7 +166,8 @@ describe("0002_files", () => {
           "share_invitations",
           "share_birth",
           "guidance_target",
-          "reasoning_stats"
+          "reasoning_stats",
+          "native_reasoning"
         ]
       )
       // The existing row is kept, an image by default.
@@ -447,7 +448,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0009_share_invitations",
       "0010_share_birth",
       "0011_guidance_target",
-      "0012_reasoning_stats"
+      "0012_reasoning_stats",
+      "0013_native_reasoning"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -522,6 +524,7 @@ describe("0005_preview_macro", () => {
         "0010_share_birth": _last10,
         "0011_guidance_target": _later11,
         "0012_reasoning_stats": _later12,
+        "0013_native_reasoning": _later13,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -560,6 +563,7 @@ describe("0006_persona_locks", () => {
         "0010_share_birth": _last10,
         "0011_guidance_target": _later11,
         "0012_reasoning_stats": _later12,
+        "0013_native_reasoning": _later13,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -609,6 +613,7 @@ describe("0007_contract_records", () => {
         "0010_share_birth": _last10,
         "0011_guidance_target": _later11,
         "0012_reasoning_stats": _later12,
+        "0013_native_reasoning": _later13,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -637,6 +642,7 @@ describe("0008_attachment_paths", () => {
         "0010_share_birth": _later10,
         "0011_guidance_target": _later11,
         "0012_reasoning_stats": _later12,
+        "0013_native_reasoning": _later13,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -662,6 +668,7 @@ describe("0009_share_invitations", () => {
         "0010_share_birth": _last10,
         "0011_guidance_target": _later11,
         "0012_reasoning_stats": _later12,
+        "0013_native_reasoning": _later13,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -691,6 +698,7 @@ describe("0010_share_birth", () => {
         "0010_share_birth": _new,
         "0011_guidance_target": _later11,
         "0012_reasoning_stats": _later12,
+        "0013_native_reasoning": _later13,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -716,7 +724,12 @@ describe("0011_guidance_target", () => {
   it.effect("adds the reply a composer's guidance is for, null on the drafts already there", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0011_guidance_target": _new, "0012_reasoning_stats": _later12, ...before } = migrations
+      const {
+        "0011_guidance_target": _new,
+        "0012_reasoning_stats": _later12,
+        "0013_native_reasoning": _later13,
+        ...before
+      } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'chat', 'active', 0)`
@@ -734,7 +747,7 @@ describe("0012_reasoning_stats", () => {
   it.effect("adds the reasoning estimate mark and first reasoning/reply times, frozen once closed", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0012_reasoning_stats": _new, ...before } = migrations
+      const { "0012_reasoning_stats": _new, "0013_native_reasoning": _later13, ...before } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* Effect.scoped(Layer.build(Migrations))
@@ -757,6 +770,27 @@ describe("0012_reasoning_stats", () => {
   )
 })
 
+describe("0013_native_reasoning", () => {
+  it.effect("adds a reply's provider reasoning record, nullable, JSON only, and outside the version view", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { "0013_native_reasoning": _new, ...before } = migrations
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* Effect.scoped(Layer.build(Migrations))
+      const columns = yield* sql<{ name: string; notnull: number }>`PRAGMA table_info(version_texts)`
+      assert.deepStrictEqual(
+        columns.filter((c) => c.name === "native_reasoning").map((c) => c.notnull),
+        [0]
+      )
+      const view = yield* sql<{ name: string }>`PRAGMA table_info(version_records)`
+      assert.notInclude(
+        view.map((c) => c.name),
+        "native_reasoning"
+      )
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
 describe("released migrations", () => {
   // A migration's SQL must never change once released, so it can't be built from helpers that
   // later edits could change (review files23 finding 1). The baseline is exempt: it may still
@@ -773,7 +807,8 @@ describe("released migrations", () => {
       "migrationShareInvitations.ts",
       "migrationShareBirth.ts",
       "migrationGuidanceTarget.ts",
-      "migrationReasoningStats.ts"
+      "migrationReasoningStats.ts",
+      "migrationNativeReasoning.ts"
     ]
     for (const module of modules)
       assert.deepStrictEqual(

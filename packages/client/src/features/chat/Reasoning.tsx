@@ -199,18 +199,6 @@ function ReasoningBlock({
             <span>{words(text)}</span>
           </button>
         </Tooltip>
-        {hidden && (
-          <Tooltip label="Saved here; omitted from later replays when the current tool turn ends.">
-            <span
-              className="flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted"
-              data-thinking-hidden=""
-              tabIndex={0}
-            >
-              <Icon name="ghost" size={14} />
-              Hidden from the model
-            </span>
-          </Tooltip>
-        )}
         <span id={hintId} hidden>
           {hint}
         </span>

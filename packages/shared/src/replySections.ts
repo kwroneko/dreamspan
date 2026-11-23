@@ -46,7 +46,12 @@ export const ReplySectionSettings = Schema.Struct({
   enabled: Schema.Boolean,
   pairs: Schema.Array(SectionPair),
   /** The last N replies with sections send them back in their tags; 0: never. */
-  send_back: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 1000 }))
+  send_back: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 1000 })),
+  /**
+   * The last N replies with the provider's own reasoning send it back where the provider takes
+   * it (owner, 2026-11-23: never sent back by default, but not hardcoded); absent or 0: never.
+   */
+  reasoning_send_back: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 1000 })))
 })
 export type ReplySectionSettings = typeof ReplySectionSettings.Type
 
@@ -65,6 +70,9 @@ export const DEFAULT_REPLY_SECTIONS: ReplySectionSettings = {
 /** A preset document's setting in effect. */
 export const replySectionsOf = (doc: { readonly reply_sections?: ReplySectionSettings | undefined }) =>
   doc.reply_sections ?? DEFAULT_REPLY_SECTIONS
+
+/** How many recent replies send the provider's reasoning back (`reasoning_send_back`); 0: none. */
+export const reasoningSendBack = (settings: ReplySectionSettings) => settings.reasoning_send_back ?? 0
 
 /** A literal tag as a pattern matching just it (how the parser compiles a pair that isn't a regex). */
 export const literalPattern = (text: string) => text.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")

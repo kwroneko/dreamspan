@@ -172,6 +172,17 @@ export class AssemblySources extends Context.Service<
     readonly mergeRows?: (
       mergeIds: ReadonlyArray<string>
     ) => Effect.Effect<ReadonlyArray<{ readonly mergeId: string; readonly rows: ReadonlyArray<MergeRow> }>, SourceError>
+    /**
+     * Whether each of these versions has the provider's reasoning, and what the provider sent to
+     * send it back (`version_texts.native_reasoning`, JSON; null without one): the
+     * `reasoning-replay` stage's read. Fixtures without it send no reasoning back.
+     */
+    readonly nativeReasoning?: (
+      versionIds: ReadonlyArray<string>
+    ) => Effect.Effect<
+      ReadonlyArray<{ readonly versionId: string; readonly reasoning: boolean; readonly native: string | null }>,
+      SourceError
+    >
     /** Whether `viewer` knew every message on the path to `leaf` up to position `through`. */
     readonly knewThrough?: (
       leaf: string,
@@ -366,6 +377,10 @@ export interface Assembly {
     images: Array<import("@dreamspan/shared/inspectorApi.ts").ImageLeftOut>
     ranges: Array<import("@dreamspan/shared/inspectorApi.ts").ImagesLeftOut["ranges"][number]>
   }
+  /** The tagged thinking `reply-sections` sent back or left out, for `reasoning-replay` to record. */
+  thinkingSent?: Array<import("@dreamspan/shared/thinkingSends.ts").ThinkingSend>
+  /** Which replies' thinking this request sends back (`reasoning-replay`); absent when the preset sends none. */
+  thinkingSends?: import("@dreamspan/shared/thinkingSends.ts").ThinkingSends
   /** The messages of `history` that enter the context, with the pieces recording their text. */
   resolved?: ReadonlyArray<{ readonly entry: HistoryEntry; readonly piece: number }>
   /** Speakers of those messages who have left the cast, by entity: their messages keep their names. */
@@ -550,6 +565,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
       ...(assembly.noteReplacements?.length ? { noteReplacements: assembly.noteReplacements } : {}),
       ...(assembly.skippedPrompts?.length ? { skippedPrompts: assembly.skippedPrompts } : {}),
       ...(assembly.imagesLeftOut ? { imagesLeftOut: assembly.imagesLeftOut } : {}),
+      ...(assembly.thinkingSends ? { thinkingSends: assembly.thinkingSends } : {}),
       templateWrites: assembly.templateWrites,
       ...(assembly.lcm
         ? {

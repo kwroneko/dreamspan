@@ -183,6 +183,11 @@ export interface AssembledRequest {
   readonly breakpoints: ReadonlyArray<{ readonly message: number; readonly reason: BreakpointReason }>
   /** The bindings in effect, which providers without a `name` field fold into the text, as ST does. */
   readonly names: { readonly user: string; readonly char: string; readonly group: ReadonlyArray<string> }
+  /**
+   * Earlier replies' own reasoning sent back on their messages (`reasoning-replay` stage, the
+   * preset's `reasoning_send_back`); absent: none, the request as it always was.
+   */
+  readonly replay?: ReadonlyArray<import("./reasoningReplay.ts").ReplayedReasoning> | undefined
 }
 
 export type Issue = ContextIssue
@@ -469,6 +474,8 @@ export interface ContextSnapshot {
   readonly skippedPrompts?: ReadonlyArray<Source>
   /** The path's images the request leaves out and why (`images` stage); absent in older snapshots. */
   readonly imagesLeftOut?: import("@dreamspan/shared/inspectorApi.ts").ImagesLeftOut
+  /** Which replies' thinking the request sends back and why not (`reasoning-replay`); absent when the preset sends none. */
+  readonly thinkingSends?: import("@dreamspan/shared/thinkingSends.ts").ThinkingSends
   /** What the sources read, by id and revision, so the context can be read again exactly. */
   readonly wire?: WireContext
   readonly sources?: SourcePins

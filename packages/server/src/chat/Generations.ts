@@ -47,6 +47,8 @@ interface Running {
   several: boolean
   /** The character passed (`no_reply`): the finished version is marked `silent`. */
   silent?: boolean
+  /** The reasoning as the provider sent it, once the reply ended (`native` chunk): saved with the final text. */
+  native?: string
   text: string
   /** The reasoning streamed so far (DESIGN §7.4), kept apart from the text. */
   reasoning: string
@@ -247,6 +249,7 @@ export class Generations extends Context.Service<
               content: written.content,
               ...(written.sections ? { replySections: written.sections } : {}),
               ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
+              ...(entry.native !== undefined && status === "complete" ? { nativeReasoning: entry.native } : {}),
               status,
               error,
               ...(entry.several ? { discardEmpty: true } : {}),
@@ -500,6 +503,10 @@ export class Generations extends Context.Service<
                 }
                 if (typeof chunk === "object" && "silent" in chunk) {
                   entry.silent = true
+                  return Effect.void
+                }
+                if (typeof chunk === "object" && "native" in chunk) {
+                  entry.native = chunk.native
                   return Effect.void
                 }
                 if (typeof chunk === "object" && "post" in chunk)

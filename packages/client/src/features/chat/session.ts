@@ -1272,6 +1272,7 @@ export class ChatSession {
           ...(event.preset === undefined ? {} : { preset: event.preset }),
           ...(event.model === undefined ? {} : { model: event.model }),
           ...(event.images === undefined ? {} : { images: event.images }),
+          ...(event.thinking === undefined ? {} : { thinking: event.thinking }),
           ...(event.imageTokens === undefined ? {} : { imageTokens: event.imageTokens })
         }
         if (

@@ -10,6 +10,7 @@ import { NotFound, ServerError } from "./errors.ts"
 import { LlmRequestId, RequestStatus, UsageSource } from "./usage.ts"
 import { RefId } from "./library.ts"
 import { ScriptRef } from "./regexScripts.ts"
+import { ThinkingSends } from "./thinkingSends.ts"
 
 /** Historical activation decisions; keyword text is scrubbed with the sent request. */
 export const SourceActivation = Schema.Union([
@@ -702,7 +703,9 @@ export const NextContext = Schema.Struct({
   summaryNotes: Schema.optionalKey(Schema.Array(Schema.String)),
   summarizedThrough: Schema.NullOr(Schema.Int),
   /** The images the next request leaves out and why; absent when it can't be assembled. */
-  images: Schema.optionalKey(ImagesLeftOut)
+  images: Schema.optionalKey(ImagesLeftOut),
+  /** Which replies' thinking the next request sends back; absent when the preset sends none or it can't be assembled. */
+  thinking: Schema.optionalKey(ThinkingSends)
 })
 export type NextContext = typeof NextContext.Type
 

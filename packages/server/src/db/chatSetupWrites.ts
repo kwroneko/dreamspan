@@ -870,6 +870,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         content,
         reasoning,
         replySections,
+        nativeReasoning,
         status,
         error,
         rewrite,
@@ -899,6 +900,10 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             error_json = ${error === null ? null : JSON.stringify(error)},
             mark = CASE WHEN ${mark === undefined ? 1 : 0} THEN mark ELSE ${mark ?? null} END, updated_at = ${Date.now()}
             WHERE id = ${versionId}`
+          // The provider's reasoning goes with the reply's final text, only on a complete one.
+          if (nativeReasoning !== undefined && status === "complete")
+            yield* sql`UPDATE version_texts SET native_reasoning = ${nativeReasoning}
+              WHERE version_seq = (SELECT seq FROM versions WHERE id = ${versionId})`
           const version = toVersion(yield* graph.ownedVersion(userId, versionId, false))
           const [slot] = yield* sql<{ chat_id: string }>`SELECT chat_id FROM slots WHERE id = ${row.slot_id}`
           // A round stops with a reply that's stopped or fails (as ST's does), where the fork

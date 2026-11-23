@@ -2,14 +2,18 @@
 // reasoning copies the raw text, stored or streamed so far; Collapse all closes every
 // reasoning block shown, the reply-section panels too, leaving the streaming preference as it
 // is; a reply with both panels shows it once, on the first. A reply-section panel also offers
-// Show as reply text, for a wrong parse (spec/REPLY-SECTIONS.md). Each panel's Hide from the
-// model keeps that thinking out of every later request in the fork shown, on this version only,
-// and leaves it on the message, marked; Show to the model again undoes it.
-import { useState } from "react"
+// Show as reply text, for a wrong parse (spec/REPLY-SECTIONS.md). Each panel's "Sent to the
+// model" / "Not sent to the model" says whether its thinking goes to the model in later
+// requests, as the next request decided it (thinkingStatus.ts), and flips the user's own
+// choice for this thinking only (SetThinkingHidden, in the fork shown): a tool run's thinking
+// for the rest of the run, a finished reply's where the preset sends it back.
+import { useId, useState, useSyncExternalStore } from "react"
+import { Icon } from "../../ui/Icon.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { type ReasoningActionProps, reasoningActions } from "./presentation.tsx"
 import { copy } from "./copy.ts"
+import { thinkingStatus } from "./thinkingStatus.ts"
 
 /** Collapse all: a count every mounted block watches, closing when it moves on. */
 let collapses = 0
@@ -60,24 +64,32 @@ export const registerReasoningActions = () => [
   })
 ]
 
-/** Hide from the model, or show to it again: this panel's thinking, this version, the fork shown. */
-function HideThinking({ version, kind, hidden, session }: ReasoningActionProps) {
+/**
+ * Sent to the model, or not: this panel's thinking in later requests. A click flips the user's
+ * choice for it (this version, the fork shown); where the settings keep it out anyway, the
+ * button says why and does nothing, so it never claims a state the request won't have.
+ */
+function HideThinking({ version, kind, hidden, streaming, session }: ReasoningActionProps) {
   const [busy, setBusy] = useState(false)
+  const hintId = useId()
+  const read = () => session.snapshot().history?.thinking
+  const sends = useSyncExternalStore(session.subscribe, read, read)
+  const status = thinkingStatus({ version, kind, hidden, streaming, sends })
   const run = async () => {
     const entry = session.snapshot().entries.find((e) => e.version.id === version.id)
-    if (!entry || busy) return
+    if (!entry || busy || !status.toggles) return
     setBusy(true)
     const forkId = entry.shownForkId ?? session.snapshot().forkId
     const result = await session.setThinkingHidden(entry, kind, !hidden, forkId)
     setBusy(false)
     if (!result.ok)
       showToast({
-        title: hidden ? "Couldn't show the thinking to the model" : "Couldn't hide the thinking",
+        title: hidden ? "Couldn't send the thinking again" : "Couldn't leave the thinking out",
         description: result.error.message
       })
     else
       showToast({
-        title: hidden ? "Thinking allowed again" : "Thinking hidden",
+        title: hidden ? "Thinking sent again" : "Thinking left out",
         actions: [
           {
             label: "Undo",
@@ -91,26 +103,34 @@ function HideThinking({ version, kind, hidden, session }: ReasoningActionProps) 
         ]
       })
   }
-  const hint =
-    kind === "reasoning"
-      ? hidden
-        ? "Allow reasoning in replays. Plain chats never send it."
-        : "Omit from replays after this tool turn. Plain chats never send it."
-      : hidden
-        ? "Allow this thinking in later replies."
-        : "Omit this thinking when later replies include it."
+  const unavailable = busy || !status.toggles
+  // The hover's text is the button's description too, so it isn't only in a tooltip.
   return (
-    <Tooltip label={hint}>
-      <button
-        type="button"
-        className={`${actionClass} aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}
-        aria-disabled={busy ? true : undefined}
-        aria-pressed={hidden}
-        onClick={() => void run()}
-      >
-        {hidden ? "Show to the model again" : "Hide from the model"}
-      </button>
-    </Tooltip>
+    <>
+      <Tooltip label={status.hint}>
+        <button
+          type="button"
+          data-thinking-sent={status.sent ? "" : undefined}
+          data-thinking-hidden={hidden ? "" : undefined}
+          aria-describedby={hintId}
+          className={`flex items-center gap-1 rounded-md border px-1 py-0.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-focus aria-disabled:cursor-not-allowed ${
+            status.sent
+              ? "border-accent/60 bg-accent/15 text-accent hover:bg-accent/25"
+              : "border-border text-muted hover:bg-hover hover:text-text aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted"
+          }`}
+          aria-disabled={unavailable ? true : undefined}
+          aria-pressed={status.sent}
+          onClick={() => void run()}
+        >
+          {/* Left out by the user: the ghost, as on a hidden message; by the settings: eye-off. */}
+          <Icon name={status.sent ? "eye" : hidden ? "ghost" : "eyeOff"} size={14} />
+          {status.sent ? "Sent to the model" : "Not sent to the model"}
+        </button>
+      </Tooltip>
+      <span id={hintId} hidden>
+        {status.hint}
+      </span>
+    </>
   )
 }
 

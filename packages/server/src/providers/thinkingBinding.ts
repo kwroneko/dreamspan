@@ -41,8 +41,15 @@ export interface ThinkingBinding {
   readonly appliesTo: (target: RequestTarget) => boolean
   /** The payload's conversation messages, in order. */
   readonly messages: (payload: Record<string, unknown>) => ReadonlyArray<unknown> | null
-  /** The payload with its messages replaced. */
-  readonly withMessages: (payload: Record<string, unknown>, messages: ReadonlyArray<unknown>) => Record<string, unknown>
+  /**
+   * The payload with its messages replaced (some signed blocks left out). `history`: they were
+   * earlier replies' reasoning in a plain chat, not a tool turn's, so the request's own settings stay.
+   */
+  readonly withMessages: (
+    payload: Record<string, unknown>,
+    messages: ReadonlyArray<unknown>,
+    options?: { readonly history?: boolean }
+  ) => Record<string, unknown>
   /** What the conversation is bound to besides its messages (system prompt, tools), comparable. */
   readonly head: (payload: Record<string, unknown>) => unknown
   /** The signed blocks' identities in a payload message, in order; empty for none. */
@@ -110,10 +117,12 @@ export const anthropicBinding: ThinkingBinding = {
   finalRequest: { tool_choice: { type: "none" } },
   appliesTo: (target) => target.api === "anthropic-messages",
   messages: (payload) => (Array.isArray(payload.messages) ? payload.messages : null),
-  withMessages: (payload, messages) => ({
+  withMessages: (payload, messages, options) => ({
     ...payload,
     messages: [...messages],
-    ...(object(payload.thinking)?.type === "enabled" ? { thinking: { type: "disabled" } } : {})
+    // A tool turn left without its thinking can't go on with manual thinking; a plain chat's
+    // earlier replies don't bind this reply's thinking.
+    ...(object(payload.thinking)?.type === "enabled" && !options?.history ? { thinking: { type: "disabled" } } : {})
   }),
   head: (payload) => ({
     model: payload.model,
@@ -313,6 +322,32 @@ export const DROP_NOTES: Record<DropReason, string> = {
   refused: "The provider refused earlier thinking, so this request was sent again without it."
 }
 
+/** The same for earlier replies' reasoning a plain chat sends back (assembler/reasoningReplay.ts). */
+export const HISTORY_DROP_NOTES: Record<DropReason, string> = {
+  changed: "Reasoning from an earlier reply wasn't sent back: the request before it changed since it was written.",
+  model: "Reasoning from an earlier reply wasn't sent back: another model or connection wrote it.",
+  refused: "The provider refused earlier replies' reasoning, so this request was sent again without it."
+}
+
+/**
+ * Marks a plain chat's earlier reply that carries its own reasoning (assembler/wire.ts): the
+ * provider layer stamps it with the model it's sent to, so pi-ai keeps its blocks as blocks.
+ * Whether they may go is the binding's check, as for a tool run's turns.
+ */
+export const HISTORY_REPLAY = "historyReplay"
+
+const replayed = (message: Message) =>
+  message.role === "assistant" && (message as unknown as Record<string, unknown>)[HISTORY_REPLAY] === true
+
+/** Whether a context carries earlier replies' reasoning. */
+export const carriesHistoryReplay = (messages: ReadonlyArray<Message>) => messages.some(replayed)
+
+/** The context with its replayed replies stamped as this model's own. */
+export const stampHistoryReplay = (messages: ReadonlyArray<Message>, model: PiModel<Api>): Array<Message> =>
+  messages.map((message) =>
+    replayed(message) ? ({ ...message, provider: model.provider, api: model.api, model: model.id } as Message) : message
+  )
+
 export interface BindResult {
   readonly payload: Record<string, unknown>
   /** Signed blocks left out. */
@@ -335,6 +370,8 @@ export const bindThinking = (
     readonly modelId: string
     readonly connectionStamp?: string
     readonly mode: "check" | "strip" | "keep"
+    /** The signed blocks are a plain chat's earlier replies' (HISTORY_REPLAY): the request's settings stay. */
+    readonly history?: boolean
   }
 ): BindResult => {
   const messages = binding.messages(payload)
@@ -391,7 +428,7 @@ export const bindThinking = (
   }
   return dropped === 0
     ? { payload, dropped: 0, reason: null }
-    : { payload: binding.withMessages(payload, out), dropped, reason }
+    : { payload: binding.withMessages(payload, out, { history: input.history === true }), dropped, reason }
 }
 
 /** The record for a turn that answered `sent` (the payload as it went out, after `bindThinking`). */

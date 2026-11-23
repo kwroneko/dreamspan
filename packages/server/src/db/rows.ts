@@ -224,11 +224,17 @@ const toVersionError = (json: string | null) => {
 
 /**
  * Issues a version doesn't show: a cut history is normal, and so are the card's example
- * dialogues left out once the history fills the context (owner 2026-11-23); both stay in the
- * request inspector. The added closing user turn is visible only there too (contexts assembled
+ * dialogues left out once the history fills the context (owner 2026-11-23), and earlier reasoning
+ * a request couldn't send back; they stay in the request inspector. The added closing user turn is visible only there too (contexts assembled
  * before version 30 recorded it).
  */
-const UNSHOWN: ReadonlySet<string> = new Set(["history_truncated", "examples_truncated", "last_turn_filled"])
+const UNSHOWN: ReadonlySet<string> = new Set([
+  "history_truncated",
+  "examples_truncated",
+  "last_turn_filled",
+  // Earlier reasoning a request couldn't send back is left out silently (owner, 2026-11-23).
+  "reasoning_left_out"
+])
 
 /** The record of what regex scripts did, and whether the text before is kept; never the text itself. */
 const toRewrite = (row: VersionRow) => {
