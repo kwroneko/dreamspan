@@ -333,7 +333,10 @@ export function NoteBlock({
           <HeaderRow>
             <div
               data-note-title-row
-              className={`flex w-full min-w-0 items-center gap-1 ${large ? compactHeaderControls : ""}`}
+              // One size for the row's icon buttons, the rename pencil with them: 32 px, and 24 px
+              // where the header is narrow (a side panel at 1024 px), so an open note's seven
+              // buttons leave its title room instead of crushing it under the chevron.
+              className={`flex w-full min-w-0 items-center gap-1 ${large ? `${compactHeaderControls} sm:[&_[data-rename-pencil]]:size-8! max-sm:[&_[data-rename-pencil]]:size-6!` : "@min-[22rem]/note-header:[&_[data-rename-pencil]]:size-8! @max-[22rem]/note-header:[&_[data-rename-pencil]]:size-6!"}`}
             >
               {/* The note's switch leads the header, as before, so nothing moves when opening
               the note adds its save cluster at the end (owner, 2026-11-03). */}
@@ -361,9 +364,12 @@ export function NoteBlock({
               )}
               {/* The open note's save cluster, its settings and ⋯, together at the end with even
               gaps (DESIGN §10.1); the settings button stays put when opening the note adds Save. */}
-              <span data-note-controls className="ml-auto flex shrink-0 items-center gap-1">
+              <span
+                data-note-controls
+                className={`ml-auto flex shrink-0 items-center gap-1 ${large ? "" : "@max-[22rem]/note-header:[&_button]:size-6!"}`}
+              >
                 {open && loaded && (
-                  <span data-note-save className="inline-flex h-8 items-center">
+                  <span data-note-save className="inline-flex h-8 items-center @max-[22rem]/note-header:h-6">
                     <SaveRevision store={store} />
                   </span>
                 )}

@@ -158,7 +158,8 @@ const setup = (reasons: boolean) =>
     const model = yield* api.AddUserModel({
       connectionId: connection.id,
       key: "cheap-model",
-      overrides: reasons ? { reasoning: true } : {}
+      // Stated either way: reasoning nobody reports is assumed on (resolveModel), so it takes every level.
+      overrides: { reasoning: reasons }
     })
     const pick = `${connection.id} ${model.id}`
     yield* api.ChangeSubagentSettings({
