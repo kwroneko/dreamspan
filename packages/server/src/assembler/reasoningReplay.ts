@@ -11,6 +11,7 @@ import { createHash } from "node:crypto"
 import { Effect, Schema } from "effect"
 import { reasoningSendBack, replySectionsOf } from "@dreamspan/shared/replySections.ts"
 import type { ThinkingSend, ThinkingSendReason } from "@dreamspan/shared/thinkingSends.ts"
+import { keyOf, replayTerms } from "../providers/thinkingBinding.ts"
 import { AssemblySources, need, type AssemblerStage, type Assembly } from "./pipeline.ts"
 import type { ModelInput, RequestMessage } from "./types.ts"
 
@@ -31,6 +32,10 @@ export const NativeReasoning = Schema.Struct({
   connectionRevision: Schema.optionalKey(Schema.Number),
   /** `requestDigest` of the request the reply answered (without its prefill). */
   prefix: Schema.String,
+  /** The same without its last message, when that was the end-of-request message; absent: it wasn't. */
+  bare: Schema.optionalKey(Schema.String),
+  /** The effort pi-ai recorded it was written at (`providerThinkingLevel`), part of its prefix where sent. */
+  level: Schema.optionalKey(Schema.String),
   parts: Schema.Array(NativeReasoningPart),
   /** The provider layer's record of the payload it answered (thinkingBinding.ts `ThinkingRecord`). */
   record: Schema.optionalKey(Schema.Unknown)
@@ -79,13 +84,32 @@ export interface ReasoningReplayRule {
   readonly id: string
   readonly appliesTo: (model: ModelInput) => boolean
   /**
-   * How it takes this reasoning: as signed blocks bound to what preceded them (checked against
-   * the request before the reply), as plain text, or not, and why.
+   * How it takes this reasoning, going to `model`: as signed blocks (`bound`: only while what
+   * preceded the reply is what it was written after, and as an unbroken run, checked against the
+   * request), as plain text, or not, and why. Only what the provider itself checks.
    */
   readonly accepts: (
-    native: NativeReasoning
-  ) => { readonly form: "signed" | "text" } | { readonly form: "none"; readonly reason: ThinkingSendReason }
+    native: NativeReasoning,
+    model: ModelInput
+  ) =>
+    | { readonly form: "signed"; readonly bound: boolean }
+    | { readonly form: "text" }
+    | { readonly form: "none"; readonly reason: ThinkingSendReason }
 }
+
+/** Written by the model it goes to, on that connection as it is now: a signature is the account's and model's. */
+const sameWriter = (native: NativeReasoning, model: ModelInput) =>
+  native.connectionId === model.connectionId &&
+  native.api === model.api &&
+  native.modelId === model.modelId &&
+  native.key === model.key &&
+  (native.connectionRevision ?? null) === (model.connectionRevision ?? null)
+
+/** Signed reasoning from the same writer, bound to its prefix where the provider binds it. */
+const signedTerms = (native: NativeReasoning, model: ModelInput) =>
+  sameWriter(native, model)
+    ? { form: "signed" as const, bound: replayTerms({ api: model.api, key: model.key }).prefix }
+    : { form: "none" as const, reason: "model" as const }
 
 const signed = (native: NativeReasoning) =>
   native.parts.length > 0 && native.parts.every((part) => (part.signature ?? "").trim() !== "")
@@ -97,7 +121,9 @@ const responsesItem = (signature: string | undefined) => {
       typeof item === "object" &&
       item !== null &&
       (item as Record<string, unknown>).type === "reasoning" &&
-      typeof (item as Record<string, unknown>).encrypted_content === "string"
+      typeof (item as Record<string, unknown>).encrypted_content === "string" &&
+      // The provider checks the item under its own id.
+      typeof (item as Record<string, unknown>).id === "string"
     )
   } catch {
     return false
@@ -118,35 +144,41 @@ export const reasoningDetails = (native: NativeReasoning): ReadonlyArray<unknown
 }
 
 /**
- * Sources (2026-11-23): Anthropic takes earlier thinking blocks only with their signature and
- * the conversation they were written in; OpenAI Responses its encrypted reasoning items, the
- * same way; OpenRouter documents `reasoning` (plain text, `reasoning_content` an alias) and
- * `reasoning_details` on assistant messages; DeepSeek ignores `reasoning_content` in a request
- * without tools; Google documents no way to send thought summaries back. Others: not sent.
+ * Sources (2026-11-23; thinkingBinding.ts `replayTerms`): Anthropic Messages takes earlier
+ * thinking blocks back from the model that wrote them; bound-thinking models (claudeThinking.ts
+ * `claudeBoundThinking`) only with everything before each unchanged and as an unbroken run,
+ * earlier models with any history before them while the signature is intact. OpenAI Responses
+ * takes its encrypted reasoning items with any history, intact under their own item ids, and
+ * another model ignores them. OpenRouter documents `reasoning` (plain text, `reasoning_content`
+ * an alias) and `reasoning_details` on assistant messages (taken as bound). DeepSeek ignores
+ * `reasoning_content` in a request without tools; Google documents no way to send thought
+ * summaries back. Others: not sent.
  */
 const builtinReplayRules: ReadonlyArray<ReasoningReplayRule> = [
   {
     id: "anthropic-messages",
     appliesTo: (model) => model.api === "anthropic-messages",
-    accepts: (native) => (signed(native) ? { form: "signed" } : { form: "none", reason: "provider" })
+    accepts: (native, model) => (signed(native) ? signedTerms(native, model) : { form: "none", reason: "provider" })
   },
   {
     id: "openai-responses",
     appliesTo: (model) => model.api === "openai-responses",
-    accepts: (native) =>
+    accepts: (native, model) =>
       native.parts.length > 0 && native.parts.every((part) => responsesItem(part.signature))
-        ? { form: "signed" }
+        ? signedTerms(native, model)
         : { form: "none", reason: "provider" }
   },
   {
     id: "openrouter",
     appliesTo: (model) => model.kind === "openrouter" && model.api === "openai-completions",
-    accepts: (native) =>
-      reasoningDetails(native)
-        ? { form: "signed" }
-        : native.parts.some((part) => part.text.trim() !== "")
-          ? { form: "text" }
-          : { form: "none", reason: "provider" }
+    accepts: (native, model) =>
+      !sameWriter(native, model)
+        ? { form: "none", reason: "model" }
+        : reasoningDetails(native)
+          ? { form: "signed", bound: true }
+          : native.parts.some((part) => part.text.trim() !== "")
+            ? { form: "text" }
+            : { form: "none", reason: "provider" }
   },
   {
     id: "deepseek",
@@ -176,9 +208,26 @@ const messageOf = (assembly: Assembly) => {
 /** How many versions a read asks about at once, newest first, until the last N are found. */
 const BATCH = 64
 
+/**
+ * A reply's last signed block as the provider layer keys it (thinkingBinding.ts `signed`), and
+ * the last one its request carried (its record's `prev`): the block it followed.
+ */
+const chainOf = (native: NativeReasoning) => {
+  const details = native.api === "openai-completions" ? reasoningDetails(native) : undefined
+  const last = details
+    ? keyOf(JSON.stringify(details))
+    : native.parts.flatMap((part) => (part.signature ? [keyOf(part.signature)] : [])).at(-1)
+  const prev = (native.record as { readonly prev?: unknown } | undefined)?.prev
+  return { last, prev: typeof prev === "string" ? prev : null }
+}
+
 const LEFT_OUT: Partial<Record<ThinkingSendReason, (n: number) => string>> = {
   changed: (n) =>
     `Reasoning from ${n === 1 ? "an earlier reply" : `${n} earlier replies`} wasn't sent back: the request before it changed since it was written, so the provider would refuse it.`,
+  end: (n) =>
+    `Reasoning from ${n === 1 ? "an earlier reply" : `${n} earlier replies`} wasn't sent back: this model takes it only with everything before it unchanged, and the end-of-request text it was written after isn't kept in the history.`,
+  chain: (n) =>
+    `Reasoning from ${n === 1 ? "an earlier reply" : `${n} earlier replies`} wasn't sent back: this model takes earlier reasoning only as an unbroken run, and a later reply's reasoning it was followed by isn't sent.`,
   model: (n) =>
     `Reasoning from ${n === 1 ? "an earlier reply" : `${n} earlier replies`} wasn't sent back: another model or connection wrote it.`,
   provider: (n) =>
@@ -194,11 +243,12 @@ const LEFT_OUT: Partial<Record<ThinkingSendReason, (n: number) => string>> = {
 /**
  * The `reasoning-replay` stage, after `request` and `images`: the last N replies of the card
  * being written that have reasoning (as the tagged-thinking send-back counts, ST's
- * `max_additions`), each sent back when the user didn't hide it and the provider takes it.
- * Signed reasoning also needs the same model and connection and everything before its reply
- * unchanged; at the first that changed, it and every later signed one are left out, as the
- * provider layer's check does. A tool run starts from the replies' text, and a summary sees
- * their text only. Records the tagged-thinking decisions of `reply-sections` beside its own.
+ * `max_additions`), each sent back when the user didn't hide it and the provider takes it, on
+ * the terms the provider itself checks (the rules). Signed reasoning a provider binds also needs
+ * everything before its reply unchanged, and the bound ones sent must be an unbroken run: from
+ * the newest that fits, each older one only while it is the block the next one followed. A tool
+ * run starts from the replies' text, and a summary sees their text only. Records the
+ * tagged-thinking decisions of `reply-sections` beside its own.
  */
 export const reasoningReplayStage = (
   rules: ReadonlyArray<ReasoningReplayRule> = builtinReplayRules
@@ -217,6 +267,8 @@ export const reasoningReplayStage = (
           assembly.thinkingSends = { sections, reasoning: n, ...(toolRun && n > 0 ? { toolRun: true } : {}), items }
       }
       const model = assembly.model
+      // Every request of a chat that sends reasoning back is built so a later one can repeat it.
+      if (n > 0 && !toolRun) assembly.result = { ...need(assembly, "result"), replayReasoning: true }
       const sources = yield* AssemblySources
       if (n === 0 || toolRun || !model || !sources.nativeReasoning) return (finish(), assembly)
       const speaker = need(assembly, "cast").speaker?.entity ?? null
@@ -240,7 +292,12 @@ export const reasoningReplayStage = (
       }
       const at = messageOf(assembly)
       const rule = rules.find((r) => r.appliesTo(model))
-      const decided: Array<{ versionId: string; reason: ThinkingSendReason; replay?: ReplayedReasoning }> = []
+      const decided: Array<{
+        versionId: string
+        reason: ThinkingSendReason
+        replay?: ReplayedReasoning
+        bound?: boolean
+      }> = []
       for (const { entry, native: json } of chosen) {
         const versionId = entry.versionId
         if (entry.thinkingHidden?.includes("reasoning")) {
@@ -253,19 +310,9 @@ export const reasoningReplayStage = (
           continue
         }
         const value = native.value
-        const terms = rule?.accepts(value) ?? { form: "none" as const, reason: "provider" as const }
+        const terms = rule?.accepts(value, model) ?? { form: "none" as const, reason: "provider" as const }
         if (terms.form === "none") {
           decided.push({ versionId, reason: terms.reason })
-          continue
-        }
-        if (
-          value.connectionId !== model.connectionId ||
-          value.modelId !== model.modelId ||
-          value.key !== model.key ||
-          value.api !== model.api ||
-          (value.connectionRevision ?? null) !== (model.connectionRevision ?? null)
-        ) {
-          decided.push({ versionId, reason: "model" })
           continue
         }
         const message = at.get(versionId)
@@ -273,21 +320,42 @@ export const reasoningReplayStage = (
           decided.push({ versionId, reason: "merged" })
           continue
         }
-        decided.push({ versionId, reason: "sent", replay: { message, form: terms.form, native: value } })
+        decided.push({
+          versionId,
+          reason: "sent",
+          replay: { message, form: terms.form, native: value },
+          bound: terms.form === "signed" && terms.bound
+        })
       }
-      // Signed reasoning, oldest first: kept while what precedes it is what it was written after.
-      const signedReplays = decided
-        .filter((d) => d.replay?.form === "signed")
-        .toSorted((a, b) => a.replay!.message - b.replay!.message)
+      // Bound reasoning: each kept only while what precedes its reply is what it was written after.
+      const boundReplays = decided
+        .filter((d) => d.replay && d.bound)
+        .toSorted((a, b) => b.replay!.message - a.replay!.message)
       const result = need(assembly, "result")
-      const digests = prefixDigests(result.messages, new Set(signedReplays.map((d) => d.replay!.message)))
-      let dropping = false
-      for (const d of signedReplays) {
-        if (!dropping && digests.get(d.replay!.message) !== d.replay!.native.prefix) dropping = true
-        if (dropping) {
-          d.reason = "changed"
-          delete d.replay
+      const digests = prefixDigests(result.messages, new Set(boundReplays.map((d) => d.replay!.message)))
+      const leave = (d: (typeof decided)[number], reason: ThinkingSendReason) => {
+        d.reason = reason
+        delete d.replay
+      }
+      for (const d of boundReplays) {
+        const before = digests.get(d.replay!.message)
+        // Written with pi-ai's effort messages (before the chat sent reasoning back), which this
+        // request doesn't have (Providers.ts `replayReasoning`): its prefix can't match.
+        if (d.replay!.native.level !== undefined) {
+          leave(d, "changed")
+          continue
         }
+        if (before === d.replay!.native.prefix) continue
+        // Only the end-of-request message it was written before is missing: the history never has it.
+        leave(d, before !== undefined && before === d.replay!.native.bare ? "end" : "changed")
+      }
+      // Then an unbroken run, newest first: leaving out older ones is allowed, one in between not.
+      let next: string | null | undefined
+      for (const d of boundReplays) {
+        if (!d.replay) continue
+        const chain = chainOf(d.replay.native)
+        if (next !== undefined && (next === null || chain.last !== next)) leave(d, "chain")
+        else next = chain.prev
       }
       for (const d of decided)
         items.push({

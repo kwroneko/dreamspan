@@ -1,7 +1,11 @@
 // A fake Anthropic Messages endpoint that enforces signed thinking the way the API documents
-// it (preserved thinking's history-editing check): a thinking or redacted_thinking block is
-// valid only while system, ordered tools and preceding non-thinking content match the
-// request that produced it. Signatures themselves are not part of later blocks' prefixes.
+// it (preserved thinking's prefix check): a thinking or redacted_thinking block is valid only
+// while system, ordered tools and preceding non-thinking content match the request that
+// produced it, and each sent block but the first follows the same block it followed then.
+// Signatures themselves are not part of later blocks' prefixes. `relaxed` plays an earlier
+// model, which checks only that the signature is its own. With
+// `thinking.block_binding.prefix_mismatch_behavior: "drop_block"` and its beta, a failing block
+// is dropped and listed in `input_transformations` instead of refused.
 // It also plays an older model on request: a continued tool turn must start with its thinking.
 // Its own canonical form is written independently of the app's (src/providers/thinkingBinding.ts).
 import { createHash, randomUUID } from "node:crypto"
@@ -77,14 +81,24 @@ export interface Issued {
   readonly prev: string | null
 }
 
-export type Verdict = { readonly ok: true } | { readonly ok: false; readonly message: string }
+export type Verdict =
+  { readonly ok: true; readonly dropped?: ReadonlyArray<string> } | { readonly ok: false; readonly message: string }
 
 /** The documented check, over a request body and the signatures this fake issued. */
 export const verify = (
   body: AnthropicBody,
   issued: ReadonlyMap<string, Issued>,
-  options: { readonly needsTurnThinking?: boolean } = {}
+  options: {
+    readonly needsTurnThinking?: boolean
+    readonly relaxed?: boolean
+    readonly chain?: boolean
+    readonly dropBlocks?: boolean
+  } = {}
 ): Verdict => {
+  const dropped: Array<string> = []
+  // The last signed block sent before this one, and whether one was.
+  let previous: string | null = null
+  let any = false
   for (const [index, message] of body.messages.entries()) {
     if (message.role !== "assistant") continue
     for (const [at, block] of blocks(message).entries()) {
@@ -93,6 +107,17 @@ export const verify = (
       const known = issued.get(signature)
       const where = `messages.${index}.content.${at}`
       if (!known) return { ok: false, message: `${where}: Invalid \`signature\` in \`thinking\` block.` }
+      if (options.relaxed) continue
+      if (options.chain && any && known.prev !== previous) {
+        if (options.dropBlocks) {
+          dropped.push(where)
+          continue
+        }
+        return {
+          ok: false,
+          message: `${where}: Invalid \`signature\` in \`thinking\` block. The block is bound to a different conversation. An earlier thinking block is missing or out of order.`
+        }
+      }
       if (
         known.prefix !==
         prefixOf(
@@ -102,7 +127,11 @@ export const verify = (
             .slice(0, at)
             .filter((b) => !isSigned(b))
         )
-      )
+      ) {
+        if (options.dropBlocks) {
+          dropped.push(where)
+          continue
+        }
         return {
           ok: false,
           message: `${where}: Invalid \`signature\` in \`thinking\` block. The block is bound to a different conversation. Content before this block differs from when it was created, first at ${
@@ -120,6 +149,9 @@ export const verify = (
               : "request"
           }.`
         }
+      }
+      previous = signature
+      any = true
     }
   }
   if (options.needsTurnThinking && (body as { thinking?: { type?: string } }).thinking?.type === "enabled") {
@@ -132,10 +164,10 @@ export const verify = (
         message: `messages.${at}.content.0.type: Expected \`thinking\` or \`redacted_thinking\`, but found \`tool_use\`. When \`thinking\` is enabled, a final \`assistant\` message must start with a thinking block.`
       }
   }
-  return { ok: true }
+  return dropped.length ? { ok: true, dropped } : { ok: true }
 }
 
-const start = (model: string) => ({
+const start = (model: string, transformations?: ReadonlyArray<string>) => ({
   type: "message_start",
   message: {
     id: `msg_${randomUUID()}`,
@@ -144,9 +176,20 @@ const start = (model: string) => ({
     model,
     content: [],
     stop_reason: null,
-    usage: { input_tokens: 10, output_tokens: 1 }
+    usage: { input_tokens: 10, output_tokens: 1 },
+    ...(transformations
+      ? {
+          input_transformations: transformations.map((path) => ({
+            type: "thinking_dropped",
+            path,
+            reason: "prefix_binding_mismatch"
+          }))
+        }
+      : {})
   }
 })
+
+const BINDING_BETA = "thinking-binding-controls-2026-08-01"
 
 /** The endpoint: what to answer is the test's (`reply`), the check and the signatures are its own. */
 export const enforcingAnthropic = (options: {
@@ -156,13 +199,35 @@ export const enforcingAnthropic = (options: {
     readonly text?: string
   }
   readonly needsTurnThinking?: () => boolean
+  /** An earlier model: only the signature is checked. */
+  readonly relaxed?: boolean
+  /** Also check that the blocks sent are an unbroken run. */
+  readonly chain?: boolean
+  /** Blocks to report dropped besides its own finding (with the binding beta), by path. */
+  readonly reportDropped?: (body: AnthropicBody) => ReadonlyArray<string>
 }) => {
   const issued = new Map<string, Issued>()
   const verdicts: Array<{ readonly body: AnthropicBody; readonly verdict: Verdict }> = []
   const handler = (request: Recorded, res: ServerResponse) => {
     if (!request.path.startsWith("/v1/messages")) return json(res, 404, {})
     const body = request.body as unknown as AnthropicBody
-    const verdict = verify(body, issued, { needsTurnThinking: options.needsTurnThinking?.() ?? false })
+    const beta = String(request.headers["anthropic-beta"] ?? "")
+      .split(",")
+      .map((b) => b.trim())
+      .includes(BINDING_BETA)
+    const binding = (body as { thinking?: { block_binding?: { prefix_mismatch_behavior?: string } } }).thinking
+      ?.block_binding
+    if (binding && !beta)
+      return json(res, 400, {
+        type: "error",
+        error: { type: "invalid_request_error", message: "thinking.block_binding: Extra inputs are not permitted" }
+      })
+    const verdict = verify(body, issued, {
+      needsTurnThinking: options.needsTurnThinking?.() ?? false,
+      relaxed: options.relaxed ?? false,
+      chain: options.chain ?? false,
+      dropBlocks: binding?.prefix_mismatch_behavior === "drop_block"
+    })
     verdicts.push({ body, verdict })
     if (!verdict.ok)
       return json(res, 400, { type: "error", error: { type: "invalid_request_error", message: verdict.message } })
@@ -175,7 +240,7 @@ export const enforcingAnthropic = (options: {
         .at(-1) ?? null
     issued.set(signature, { prefix: prefixOf(body, body.messages.length), prev, source: structuredClone(body) })
     const events: Array<{ type: string } & Record<string, unknown>> = [
-      start(body.model),
+      start(body.model, beta ? [...(verdict.dropped ?? []), ...(options.reportDropped?.(body) ?? [])] : undefined),
       { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } },
       { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: answer.thinking } },
       { type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature } },

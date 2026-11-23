@@ -2897,6 +2897,7 @@ const messagesStage = sync("messages", (assembly) => {
   if (continuation)
     messages.push({ role: "assistant", content: continuation.text, pieces: [continuation.piece], kind: "volatile" })
   if (end) messages.push({ ...end, kind: "volatile" })
+  assembly.endsWithEnd = !!end
   // The only fallback (DESIGN §2.2): without an end-of-request message, a request that would end
   // on an assistant message, with no prefill to continue it, asks for the speaker's message (or,
   // continuing, for the rest of it). Decided on the whole final request, including trailing system prompts.
@@ -2914,6 +2915,7 @@ const messagesStage = sync("messages", (assembly) => {
           FALLBACK_TEXT
         )
     messages.push({ role: "user", content: env.text(piece), pieces: [piece], kind: "volatile" })
+    assembly.endsWithEnd = true
   }
   assembly.messages = messages.map(({ role, content, name, pieces, kind }) => ({
     role,
@@ -2965,7 +2967,8 @@ const requestStage = sync("request", (assembly) => {
       : {}),
     useSystemPrompt: doc.use_sysprompt,
     breakpoints: assembly.breakpoints ?? [],
-    names: assembly.postNames ?? { user: "", char: "", group: [] }
+    names: assembly.postNames ?? { user: "", char: "", group: [] },
+    ...(assembly.endsWithEnd ? { endMessage: true as const } : {})
   }
   const imageCount = assembly.result.messages.reduce((n, m) => n + (m.images?.length ?? 0), 0)
   if (imageCount && assembly.model?.vision === false)

@@ -1,4 +1,4 @@
-import { claudeThinkingDefaults, claudeThinkingForm } from "./claudeThinking.ts"
+import { claudeBoundThinking, claudeThinkingDefaults, claudeThinkingForm } from "./claudeThinking.ts"
 import { sanitizeSurrogates } from "@earendil-works/pi-ai/utils/sanitize-unicode"
 // Signed thinking is replayed only with its original request prefix. This runs after every
 // wire transform, so compaction, loading, Resume and plugin definitions share one guard.
@@ -62,7 +62,32 @@ export interface ThinkingBinding {
   readonly piSigned: (message: AssistantMessage) => ReadonlyArray<string>
   readonly before?: (message: unknown, key: string) => unknown | null
   readonly reply?: (message: AssistantMessage, model: PiModel<Api>) => ReadonlyArray<unknown>
+  /**
+   * The payload asking the provider to drop, not refuse, a signed block whose prefix differs
+   * (a safety net for earlier replies' reasoning on a model that binds it); absent: no such option.
+   */
+  readonly dropOnMismatch?: (payload: Record<string, unknown>) => Record<string, unknown>
 }
+
+/**
+ * What a provider checks when a plain chat sends earlier replies' signed reasoning back: always
+ * that the model it goes to wrote it, on the connection that wrote it (a signature or an
+ * encrypted item is the account's and model's); `prefix`, also that everything before the block
+ * is what it was written after, and that the blocks sent form an unbroken run. Anthropic Messages
+ * binds the prefix on bound-thinking models (claudeThinking.ts `claudeBoundThinking`) and checks
+ * only the signature on earlier ones; OpenAI Responses checks only that the encrypted item is
+ * intact under its own item id (measured 2026-11-23); others are assumed to bind it.
+ */
+export interface ReplayTerms {
+  readonly prefix: boolean
+}
+
+export const replayTerms = (target: { readonly api: string; readonly key: string }): ReplayTerms => ({
+  prefix: target.api === "anthropic-messages" ? claudeBoundThinking(target.key) : target.api !== "openai-responses"
+})
+
+/** The beta that `thinking.block_binding` needs on Anthropic Messages. */
+export const THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01"
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
@@ -71,7 +96,7 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
 const stable = (value: unknown): string => JSON.stringify(value) ?? "null"
 
 /** A short identity for a signature (signatures run to kilobytes). */
-const keyOf = (signature: string) => createHash("sha256").update(signature).digest("hex").slice(0, 32)
+export const keyOf = (signature: string) => createHash("sha256").update(signature).digest("hex").slice(0, 32)
 
 /** Remove a marker only on a content block, retaining identically named tool arguments. */
 const unmarked = (value: unknown): unknown => {
@@ -194,7 +219,19 @@ export const anthropicBinding: ThinkingBinding = {
       part.type === "thinking" && part.thinkingSignature && part.thinkingSignature.trim() !== ""
         ? [keyOf(part.thinkingSignature)]
         : []
-    )
+    ),
+  // pi-ai sends `betas` as the `anthropic-beta` header. Not with thinking off, where the option
+  // is refused; left out, it is adaptive on these models, so stating that changes nothing else.
+  dropOnMismatch: (payload) => {
+    const thinking = object(payload.thinking) ?? { type: "adaptive" }
+    if (thinking.type === "disabled" || thinking.type === "between_tools") return payload
+    const betas = Array.isArray(payload.betas) ? payload.betas.filter((b) => b !== THINKING_BINDING_BETA) : []
+    return {
+      ...payload,
+      betas: [...betas, THINKING_BINDING_BETA],
+      thinking: { ...thinking, block_binding: { prefix_mismatch_behavior: "drop_block" } }
+    }
+  }
 }
 
 // Claude through OpenRouter's Chat Completions: the signed blocks travel as `reasoning_details`
@@ -329,6 +366,29 @@ export const HISTORY_DROP_NOTES: Record<DropReason, string> = {
   refused: "The provider refused earlier replies' reasoning, so this request was sent again without it."
 }
 
+/** The note for earlier replies' reasoning the provider itself left out (`providerDroppedThinking`). */
+export const providerDropNote = (n: number) =>
+  `${n === 1 ? "A block of earlier replies' reasoning was" : `${n} blocks of earlier replies' reasoning were`} left out by the provider: what came before changed, or another model or account wrote it.`
+
+/**
+ * How many sent thinking blocks the provider says it dropped, from a raw Anthropic stream event:
+ * the `input_transformations` the binding beta adds (`thinking_dropped` entries, for
+ * `prefix_binding_mismatch`, `model_binding_mismatch` or `organization_binding_mismatch`), on
+ * `message_start`'s message, or on the final `message_delta` after a mid-stream fallback, which
+ * then counts. Undefined when the event doesn't carry them.
+ */
+export const providerDroppedThinking = (event: unknown): number | undefined => {
+  const data = object(event)
+  const list =
+    data?.type === "message_start"
+      ? object(data.message)?.input_transformations
+      : data?.type === "message_delta"
+        ? (data.input_transformations ?? object(data.delta)?.input_transformations)
+        : undefined
+  if (!Array.isArray(list)) return undefined
+  return list.filter((entry) => object(entry)?.type === "thinking_dropped").length
+}
+
 /**
  * Marks a plain chat's earlier reply that carries its own reasoning (assembler/wire.ts): the
  * provider layer stamps it with the model it's sent to, so pi-ai keeps its blocks as blocks.
@@ -370,8 +430,11 @@ export const bindThinking = (
     readonly modelId: string
     readonly connectionStamp?: string
     readonly mode: "check" | "strip" | "keep"
-    /** The signed blocks are a plain chat's earlier replies' (HISTORY_REPLAY): the request's settings stay. */
-    readonly history?: boolean
+    /**
+     * The signed blocks are a plain chat's earlier replies' (HISTORY_REPLAY): the request's
+     * settings stay, and each is checked only as the provider checks it (`replayTerms`).
+     */
+    readonly history?: ReplayTerms
   }
 ): BindResult => {
   const messages = binding.messages(payload)
@@ -402,6 +465,7 @@ export const bindThinking = (
       continue
     }
     const leaving = new Set<string>()
+    const terms = input.history ?? { prefix: true }
     for (const key of keys) {
       const record = records.get(key)
       const written =
@@ -409,6 +473,14 @@ export const bindThinking = (
         record.connectionId === input.connectionId &&
         record.modelId === input.modelId &&
         record.connectionStamp === input.connectionStamp
+      if (!terms.prefix) {
+        // The provider checks each block on its own: only this one is left out.
+        if (!written) {
+          leaving.add(key)
+          reason ??= record !== undefined ? "model" : "changed"
+        }
+        continue
+      }
       const prefix = hash.copy()
       const before = binding.before?.(message, key)
       if (before != null) prefix.update(stable(before))
@@ -428,7 +500,7 @@ export const bindThinking = (
   }
   return dropped === 0
     ? { payload, dropped: 0, reason: null }
-    : { payload: binding.withMessages(payload, out, { history: input.history === true }), dropped, reason }
+    : { payload: binding.withMessages(payload, out, { history: input.history !== undefined }), dropped, reason }
 }
 
 /** The record for a turn that answered `sent` (the payload as it went out, after `bindThinking`). */

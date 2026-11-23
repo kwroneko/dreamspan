@@ -221,7 +221,9 @@ const BEDROCK_BETAS = new Set([
   "fine-grained-tool-streaming-2025-05-14",
   "context-1m-2025-08-07",
   "token-efficient-tools-2025-02-19",
-  "output-128k-2025-02-19"
+  "output-128k-2025-02-19",
+  // Preserved thinking's controls (thinkingBinding.ts `dropOnMismatch`), which Bedrock documents.
+  "thinking-binding-controls-2026-08-01"
 ])
 
 /** Bedrock's exception names as Anthropic's error types, so errors read as Anthropic's do. */

@@ -10,7 +10,12 @@ import { ThinkingPart, VersionId } from "./chat.ts"
  * - `sent`: within the last N, and the provider takes it;
  * - `hidden`: the user left it out (SetThinkingHidden);
  * - `changed`: something before it changed since it was written, so the provider would refuse
- *   its signature (an earlier one changed, for every one after it too);
+ *   its signature (an earlier one changed, for every one after it too), on a model that binds
+ *   reasoning to what preceded it;
+ * - `end`: the same, where what's missing is only the end-of-request text that followed then,
+ *   which the history doesn't keep;
+ * - `chain`: such a model takes earlier reasoning only as an unbroken run, and the reasoning of
+ *   a later reply that followed it isn't sent;
  * - `model`: written by another model or connection, whose signature this one refuses;
  * - `provider`: this provider doesn't take earlier replies' reasoning;
  * - `ignored`: this provider takes it but ignores it, so it isn't sent;
@@ -21,6 +26,8 @@ export const ThinkingSendReason = Schema.Literals([
   "sent",
   "hidden",
   "changed",
+  "end",
+  "chain",
   "model",
   "provider",
   "ignored",

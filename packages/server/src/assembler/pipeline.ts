@@ -390,6 +390,8 @@ export interface Assembly {
   renderEndOfRequest?: () => StMessage | undefined
   /** The end-of-request message (DESIGN §2.2), the request's last; absent: none this turn. */
   endOfRequest?: StMessage
+  /** The request's last message is the end-of-request message or its fallback (`messages`). */
+  endsWithEnd?: boolean
   /** Local tokenizer prepared for this assembly, with a bounded fragment cache. */
   countText?: (text: string) => number
   composition?: Composition

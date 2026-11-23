@@ -1,9 +1,12 @@
 // Earlier replies' own reasoning sent back in plain chats (the preset's `reasoning_send_back`,
 // owner 2026-11-23), through real generation against fake providers: off by default, signed
-// blocks replayed only while what preceded them is unchanged and the same model writes, plain
-// reasoning only where the provider documents taking it, and the thinking panels' indicator
-// (`NextContext.thinking`) always the request's own decision. Tool runs keep their thinking at
-// any setting. Synthetic chats only; nothing reaches a real provider.
+// blocks replayed only to the model that wrote them and on the terms its provider checks (a
+// bound-thinking Claude model: what preceded them unchanged, as an unbroken run, with the
+// provider's drop_block opted into; an earlier Claude model and OpenAI Responses: any history,
+// so with the preset's end-of-request text too), plain reasoning only where the provider
+// documents taking it, and the thinking panels' indicator (`NextContext.thinking`) always the
+// request's own decision. Tool runs keep their thinking at any setting. Synthetic chats only;
+// nothing reaches a real provider.
 import { assert, describe, it } from "@effect/vitest"
 import { Type } from "@earendil-works/pi-ai"
 import type { Chat, VersionId } from "@dreamspan/shared/chat.ts"
@@ -29,17 +32,17 @@ const mockOf = (handler: (request: Recorded, res: ServerResponse) => void | Prom
     (m) => Effect.promise(() => m.close())
   )
 
-/** The imported ST default, its turn text ("When a character speaks") emptied. */
-const noTurnText = importStPreset(JSON.stringify({ frequency_penalty: 0 })).document!.prompts.map((p) =>
-  p.identifier === GROUP_NUDGE ? { ...p, content: "" } : p
-)
+/** The imported ST default, with its turn text ("When a character speaks"), the end-of-request message. */
+const withTurnText = importStPreset(JSON.stringify({ frequency_penalty: 0 })).document!.prompts
+/** The same, its turn text emptied. */
+const noTurnText = withTurnText.map((p) => (p.identifier === GROUP_NUDGE ? { ...p, content: "" } : p))
 
-/** The preset: the reasoning send-back as given (absent: the default), and no end-of-request text. */
-const presetWith = (reasoning: number | undefined, sections = 0) => ({
+/** The preset: the reasoning send-back as given (absent: the default), and no end-of-request text unless asked. */
+const presetWith = (reasoning: number | undefined, sections = 0, endText = false) => ({
   presetFields: {
     // The turn text is the request's last message, which a later request doesn't repeat: a
-    // signed block written after it never fits again. Without it the request ends on the user's.
-    prompts: noTurnText,
+    // bound block written after it never fits again. Without it the request ends on the user's.
+    prompts: endText ? withTurnText : noTurnText,
     reply_sections: {
       enabled: true,
       pairs: DEFAULT_SECTION_PAIRS,
@@ -57,10 +60,21 @@ const thinkingIn = (body: AnthropicBody) =>
       : []
   )
 
-/** Mira's n-th reply thinks "Thought n." and says "Reply n." */
-const numbered = () => {
+/** A bound-thinking model (claudeThinking.ts `claudeBoundThinking`), and an earlier one. */
+const BOUND = "claude-opus-5-5"
+const EARLIER = "claude-opus-5"
+
+/**
+ * Mira's n-th reply thinks "Thought n." and says "Reply n.", from an endpoint that checks what
+ * the model checks: the prefix and the run for a bound model, only the signature for an earlier one.
+ */
+const numbered = (
+  options: { readonly relaxed?: boolean; readonly reportDropped?: (body: AnthropicBody) => ReadonlyArray<string> } = {}
+) => {
   let n = 0
   return enforcingAnthropic({
+    chain: true,
+    ...options,
     reply: () => {
       n++
       return { thinking: `Thought ${n}.`, text: `Reply ${n}.` }
@@ -68,13 +82,23 @@ const numbered = () => {
   })
 }
 
-const anthropic = (api: Api, url: string, reasoning: number | undefined, sections = 0) =>
+const anthropic = (
+  api: Api,
+  url: string,
+  reasoning: number | undefined,
+  sections = 0,
+  options: { readonly key?: string; readonly endText?: boolean } = {}
+) =>
   generateReply(api, {
     connection: { kind: "anthropic", baseUrl: url, apiKey: "sk-ant-made-up-for-tests-0000" },
-    modelKey: "claude-test-model",
+    modelKey: options.key ?? BOUND,
     model: {},
-    ...presetWith(reasoning, sections)
+    ...presetWith(reasoning, sections, options.endText)
   })
+
+/** Every request was taken as sent: nothing refused, and nothing the provider had to drop. */
+const clean = (fake: ReturnType<typeof numbered>) =>
+  fake.verdicts.every((v) => v.verdict.ok && !(v.verdict.dropped?.length ?? 0))
 
 /** The user says something, and Mira replies. */
 const turn = (api: Api, chat: Chat, events: ReadonlyArray<ChatEvent>, content: string) =>
@@ -117,7 +141,7 @@ describe("provider reasoning sent back in plain chats", () => {
         assert.strictEqual(version.reasoning, "Thought 1.")
         yield* turn(api, chat, events, "The tide turns.")
         yield* turn(api, chat, events, "Mira laughs.")
-        assert.isTrue(fake.verdicts.every((v) => v.verdict.ok))
+        assert.isTrue(clean(fake))
         for (const { body } of fake.verdicts) assert.deepStrictEqual(thinkingIn(body), [])
         assert.isUndefined(yield* nextSends(api, chat), "nothing to show as sent")
       }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
@@ -169,10 +193,7 @@ describe("provider reasoning sent back in plain chats", () => {
       )
       yield* turn(api, chat, events, "Night falls.")
       assert.deepStrictEqual(thinkingIn(fake.verdicts.at(-1)!.body), ["Thought 3.", "Thought 4."])
-      assert.isTrue(
-        fake.verdicts.every((v) => v.verdict.ok),
-        JSON.stringify(fake.verdicts.map((v) => v.verdict))
-      )
+      assert.isTrue(clean(fake), JSON.stringify(fake.verdicts.map((v) => v.verdict)))
       // The thinking block goes first in the reply's message, the text after it.
       const last = fake.verdicts.at(-1)!.body
       const replay = last.messages.find(
@@ -207,7 +228,7 @@ describe("provider reasoning sent back in plain chats", () => {
       assert.deepStrictEqual([...reasons.values()].map((i) => i.reason).toSorted(), ["changed", "changed", "sent"])
       yield* turn(api, chat, events, "Night falls.")
       assert.deepStrictEqual(thinkingIn(fake.verdicts.at(-1)!.body), ["Thought 1."])
-      assert.isTrue(fake.verdicts.every((v) => v.verdict.ok))
+      assert.isTrue(clean(fake))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
@@ -280,37 +301,170 @@ describe("provider reasoning sent back in plain chats", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
-  // The indicator is the request's own decision: what it says is sent is exactly what goes.
-  for (const n of [0, 1, 2, 3])
-    for (const change of ["none", "edit", "hide"] as const)
-      it.live(`the indicator matches the request (N=${n}, ${change})`, () =>
-        Effect.gen(function* () {
-          const fake = numbered()
-          const mock = yield* mockOf(fake.handler)
-          const api = yield* client()
-          const { chat, events, version: first } = yield* anthropic(api, mock.url, n)
-          const second = yield* turn(api, chat, events, "The tide turns.")
-          const third = yield* turn(api, chat, events, "Mira laughs.")
-          if (change === "edit")
-            yield* api.EditVersion({
-              slotId: third.user.slotId,
-              sourceVersionId: third.user.version.id,
-              content: "Mira laughs aloud.",
-              expectedRowVersion: third.user.rowVersion
-            })
-          if (change === "hide")
-            yield* api.SetThinkingHidden({ versionId: second.version.id, part: "reasoning", hidden: true })
-          const sends = yield* nextSends(api, chat)
-          const said = new Set(
-            (sends?.items ?? []).filter((i) => i.sent && i.part === "reasoning").map((i) => i.versionId)
-          )
-          yield* turn(api, chat, events, "Night falls.")
-          const went = new Set(thinkingIn(fake.verdicts.at(-1)!.body))
-          for (const [i, version] of [first, second.version, third.version].entries())
-            assert.strictEqual(said.has(version.id), went.has(`Thought ${i + 1}.`), `reply ${i + 1}`)
-          assert.isTrue(fake.verdicts.every((v) => v.verdict.ok))
-        }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  it.live("with the preset's end-of-request text, an earlier Claude model takes the last N back", () =>
+    Effect.gen(function* () {
+      const fake = numbered({ relaxed: true })
+      const mock = yield* mockOf(fake.handler)
+      const api = yield* client()
+      const { chat, events } = yield* anthropic(api, mock.url, 2, 0, { key: EARLIER, endText: true })
+      const second = yield* turn(api, chat, events, "The tide turns.")
+      // The end text is the request's own last message, after the user's.
+      const sent = fake.verdicts.at(-1)!.body.messages
+      const user = sent.findLastIndex((m) => JSON.stringify(m.content).includes("The tide turns."))
+      assert.isTrue(
+        sent.slice(user + 1).some((m) => JSON.stringify(m.content).includes("Mira")),
+        JSON.stringify(sent)
       )
+      assert.deepStrictEqual(thinkingIn(fake.verdicts.at(-1)!.body), ["Thought 1."])
+      yield* turn(api, chat, events, "Mira laughs.")
+      // Any history before it: even an edited earlier message keeps every one.
+      yield* api.EditVersion({
+        slotId: second.user.slotId,
+        sourceVersionId: second.user.version.id,
+        content: "The tide turns early.",
+        expectedRowVersion: second.user.rowVersion
+      })
+      yield* turn(api, chat, events, "Night falls.")
+      assert.deepStrictEqual(thinkingIn(fake.verdicts.at(-1)!.body), ["Thought 2.", "Thought 3."])
+      assert.isTrue(clean(fake))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("with the end-of-request text, a bound model gets none, and the panel and inspector say why", () =>
+    Effect.gen(function* () {
+      const fake = numbered()
+      const mock = yield* mockOf(fake.handler)
+      const api = yield* client()
+      const { chat, events } = yield* anthropic(api, mock.url, 2, 0, { endText: true })
+      yield* turn(api, chat, events, "The tide turns.")
+      const sends = yield* nextSends(api, chat)
+      assert.deepStrictEqual(
+        sends?.items.filter((i) => i.part === "reasoning").map((i) => [i.sent, i.reason]),
+        [
+          [false, "end"],
+          [false, "end"]
+        ]
+      )
+      const next = yield* turn(api, chat, events, "Mira laughs.")
+      assert.deepStrictEqual(thinkingIn(fake.verdicts.at(-1)!.body), [])
+      assert.isTrue(clean(fake))
+      const run = yield* api.GetRunContext({ versionId: next.version.id })
+      assert.isTrue(run.issues.some((i) => i.kind === "reasoning_left_out" && i.message.includes("end-of-request")))
+      assert.notInclude(yield* shownIssues(api, next.version.id), "reasoning_left_out")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("a bound model's requests that send thinking back opt into the provider's check", () =>
+    Effect.gen(function* () {
+      const fake = numbered()
+      const headers: Array<string> = []
+      const mock = yield* mockOf((request, res) => {
+        headers.push(String(request.headers["anthropic-beta"] ?? ""))
+        return fake.handler(request, res)
+      })
+      const api = yield* client()
+      const { chat, events } = yield* anthropic(api, mock.url, 1)
+      yield* turn(api, chat, events, "The tide turns.")
+      const binding = (i: number) =>
+        (fake.verdicts[i]!.body as { thinking?: { block_binding?: unknown } }).thinking?.block_binding
+      // The first request sends nothing back; the second does, with the setting and its beta.
+      assert.isUndefined(binding(0))
+      assert.notInclude(headers[0]!, "thinking-binding-controls-2026-08-01")
+      assert.deepStrictEqual(thinkingIn(fake.verdicts[1]!.body), ["Thought 1."])
+      assert.deepStrictEqual(binding(1), { prefix_mismatch_behavior: "drop_block" })
+      assert.include(headers[1]!, "thinking-binding-controls-2026-08-01")
+      // No mid-conversation effort messages, which the next request couldn't repeat as they were.
+      for (const { body } of fake.verdicts)
+        assert.isFalse(
+          body.messages.some((m) => m.role === "system"),
+          JSON.stringify(body.messages)
+        )
+      assert.isTrue(clean(fake))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("what the provider says it left out is in the request inspector only", () =>
+    Effect.gen(function* () {
+      const fake = numbered({
+        reportDropped: (body) => (thinkingIn(body).length > 0 ? ["messages.2.content.0"] : [])
+      })
+      const mock = yield* mockOf(fake.handler)
+      const api = yield* client()
+      const { chat, events } = yield* anthropic(api, mock.url, 1)
+      const next = yield* turn(api, chat, events, "The tide turns.")
+      assert.deepStrictEqual(thinkingIn(fake.verdicts.at(-1)!.body), ["Thought 1."])
+      const run = yield* api.GetRunContext({ versionId: next.version.id })
+      assert.isTrue(
+        run.issues.some((i) => i.kind === "reasoning_left_out" && i.message.includes("left out by the provider")),
+        JSON.stringify(run.issues)
+      )
+      assert.notInclude(yield* shownIssues(api, next.version.id), "reasoning_left_out")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("a bound model gets an unbroken run: hiding one in between keeps only the newer", () =>
+    Effect.gen(function* () {
+      const fake = numbered()
+      const mock = yield* mockOf(fake.handler)
+      const api = yield* client()
+      const { chat, events, version: first } = yield* anthropic(api, mock.url, 3)
+      const second = yield* turn(api, chat, events, "The tide turns.")
+      const third = yield* turn(api, chat, events, "Mira laughs.")
+      yield* api.SetThinkingHidden({ versionId: second.version.id, part: "reasoning", hidden: true })
+      const sends = yield* nextSends(api, chat)
+      const reason = new Map(sends!.items.filter((i) => i.part === "reasoning").map((i) => [i.versionId, i.reason]))
+      assert.strictEqual(reason.get(first.id), "chain")
+      assert.strictEqual(reason.get(second.version.id), "hidden")
+      assert.strictEqual(reason.get(third.version.id), "sent")
+      yield* turn(api, chat, events, "Night falls.")
+      assert.deepStrictEqual(thinkingIn(fake.verdicts.at(-1)!.body), ["Thought 3."])
+      assert.isTrue(clean(fake))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  // The indicator is the request's own decision: what it says is sent is exactly what goes, on
+  // a bound model (with and without the end-of-request text) and an earlier one.
+  for (const model of ["bound", "bound, end text", "earlier, end text"] as const)
+    for (const n of [0, 1, 2, 3])
+      for (const change of ["none", "edit", "hide"] as const)
+        it.live(`the indicator matches the request (${model}, N=${n}, ${change})`, () =>
+          Effect.gen(function* () {
+            const fake = numbered({ relaxed: model.startsWith("earlier") })
+            const mock = yield* mockOf(fake.handler)
+            const api = yield* client()
+            const {
+              chat,
+              events,
+              version: first
+            } = yield* anthropic(api, mock.url, n, 0, {
+              key: model.startsWith("earlier") ? EARLIER : BOUND,
+              endText: model.endsWith("end text")
+            })
+            const second = yield* turn(api, chat, events, "The tide turns.")
+            const third = yield* turn(api, chat, events, "Mira laughs.")
+            if (change === "edit")
+              yield* api.EditVersion({
+                slotId: third.user.slotId,
+                sourceVersionId: third.user.version.id,
+                content: "Mira laughs aloud.",
+                expectedRowVersion: third.user.rowVersion
+              })
+            if (change === "hide")
+              yield* api.SetThinkingHidden({ versionId: second.version.id, part: "reasoning", hidden: true })
+            const sends = yield* nextSends(api, chat)
+            const said = new Set(
+              (sends?.items ?? []).filter((i) => i.sent && i.part === "reasoning").map((i) => i.versionId)
+            )
+            yield* turn(api, chat, events, "Night falls.")
+            const went = new Set(thinkingIn(fake.verdicts.at(-1)!.body))
+            for (const [i, version] of [first, second.version, third.version].entries())
+              assert.strictEqual(said.has(version.id), went.has(`Thought ${i + 1}.`), `reply ${i + 1}`)
+            assert.isTrue(clean(fake))
+            // A bound model never fits after the end text; an earlier one always takes the newest.
+            if (model === "bound, end text") assert.strictEqual(said.size, 0)
+            else if (n > 0 && (model === "earlier, end text" || change === "none")) assert.isAbove(said.size, 0)
+          }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+        )
 })
 
 // --- OpenAI Responses: encrypted reasoning items
@@ -377,6 +531,30 @@ describe("encrypted reasoning on OpenAI Responses", () => {
       assert.deepStrictEqual(reasoningItems(mock.requests().at(-1)!.body), ["opaque-2", "opaque-3"])
       const at = input.findIndex((item) => item.encrypted_content === "opaque-3")
       assert.strictEqual(input[at + 1]!.role, "assistant", "the reply's message follows its reasoning")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("with the preset's end-of-request text, the last N replies' items still go back", () =>
+    Effect.gen(function* () {
+      const mock = yield* mockOf(responsesHandler())
+      const api = yield* client()
+      const { chat, events } = yield* generateReply(api, {
+        connection: { kind: "openai-responses", baseUrl: mock.url, apiKey: "synthetic-key" },
+        model: {},
+        ...presetWith(2, 0, true)
+      })
+      yield* turn(api, chat, events, "The tide turns.")
+      assert.deepStrictEqual(reasoningItems(mock.requests().at(-1)!.body), ["opaque-1"])
+      yield* turn(api, chat, events, "Mira laughs.")
+      assert.deepStrictEqual(reasoningItems(mock.requests().at(-1)!.body), ["opaque-1", "opaque-2"])
+      const sends = yield* nextSends(api, chat)
+      assert.deepStrictEqual(
+        sends?.items.map((i) => [i.sent, i.reason]),
+        [
+          [true, "sent"],
+          [true, "sent"]
+        ]
+      )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
@@ -507,7 +685,7 @@ describe("tool runs", () => {
           ...presetWith(setting)
         })
         assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
-        assert.isTrue(fake.verdicts.every((v) => v.verdict.ok))
+        assert.isTrue(clean(fake))
         assert.deepStrictEqual(thinkingIn(fake.verdicts.at(-1)!.body), ["I should check the keeper."])
       }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
     )
