@@ -53,14 +53,14 @@ for (const width of [1440, 390])
         for (const name of [
           "Creators: Any creator",
           "Sites: All sites",
-          "Kind: Characters and lorebooks",
+          "Kind: All kinds",
           "Tokens: ≥ 300 tokens",
           "Added: any date",
           "Created: any date"
         ])
           await expect(main.locator("[data-filter-panels]").getByRole("button", { name, exact: true })).toBeVisible()
         await expect(
-          main.locator("[data-filter-panels]").getByRole("button", { name: /^Rating: (Safe|Everything|Mature only)$/ })
+          main.locator("[data-filter-panels]").getByRole("button", { name: /^Rating: NSFW (hidden|included|only)$/ })
         ).toBeVisible()
         await expect(main.getByRole("checkbox", { name: "Only cards with a cover", exact: true })).toBeChecked()
       } else await expect(filters).toBeVisible()

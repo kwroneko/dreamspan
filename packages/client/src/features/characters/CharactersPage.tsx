@@ -11,8 +11,8 @@ import { homeIntro } from "./homeSlots.ts"
 import { browseCards, mixesPersonas, useGroupedFamilies } from "./cardBrowse.tsx"
 import { useHomeBrowse } from "./useHomeBrowse.ts"
 import type { HomeBrowse } from "./homeSearch.ts"
-import { SourceResults, useSourceBrowse } from "../cardSources/browse.tsx"
-import { SourceChips, SourceFiltersPanel } from "../cardSources/filters.tsx"
+import { SourceResultLine, SourceResults, useSourceBrowse } from "../cardSources/browse.tsx"
+import { SourceChips, SourceFiltersPanel, SourceHiddenNote } from "../cardSources/filters.tsx"
 import { CardGridControls } from "./CardGridControls.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
 import { browsable, CharacterGrid, shellAtom, type ShellLibrary } from "./shellData.tsx"
@@ -78,6 +78,8 @@ function Home({ data }: { data: ShellLibrary }) {
         <>
           <SourceFiltersPanel browse={sources} id="home-source-filters" filtersButton />
           <SourceChips browse={sources} />
+          <SourceResultLine browse={sources} />
+          <SourceHiddenNote browse={sources} />
           <SourceResults browse={sources} className={COLUMNS} />
         </>
       ) : (

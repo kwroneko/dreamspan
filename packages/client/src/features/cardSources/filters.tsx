@@ -19,7 +19,13 @@ import { Segmented } from "../../ui/Segmented.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { RangeSlider } from "../../ui/Slider.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
-import { clearFilters, requirementMet, SourceFiltersButton, totalLabel, type SourceBrowse } from "./browse.tsx"
+import {
+  clearFilters,
+  requirementMet,
+  SourceFiltersButton,
+  totalLabel,
+  type SourceBrowse
+} from "./browse.tsx"
 import { problemText, type SourceProblem, useSourceCall } from "./remote.ts"
 
 const numberFormat = new Intl.NumberFormat()
@@ -508,6 +514,9 @@ interface Panel {
   readonly filters: Array<SourceFilter>
 }
 
+/** The panels the bar has a control for, in the archive's order; any other group renders nothing. */
+const PANEL_KEYS = ["Creators", "Sites", "Kind", "Rating", "Tokens", "Added", "Created"]
+
 /** The bar from the capabilities: the panels, the checkboxes, and what sits by the search. */
 const layoutOf = (caps: SourceCapabilities) => {
   const panels: Array<Panel> = []
@@ -516,12 +525,17 @@ const layoutOf = (caps: SourceCapabilities) => {
   for (const filter of caps.filters) {
     if (filter.place === "none" || filter.id === caps.tags.anyFilterId) continue
     if (filter.place === "search") search.push(filter)
-    else if (filter.place === "switches" || (!filter.group && filter.kind === "toggle")) switches.push(filter)
-    else {
-      const key = filter.group ?? filter.id
+    else if (filter.place === "switches" && filter.kind === "toggle") switches.push(filter)
+    else if (filter.place === "switches" && caps.hiddenByDefault?.some((d) => d.filterId === filter.id && d.toggle))
+      switches.push(filter)
+    else if (!filter.group || !PANEL_KEYS.includes(filter.group)) {
+      // A parameter with no control of its own renders nothing, never a button of its own.
+      if (import.meta.env.DEV) console.warn(`card source filter with no control, left out: ${filter.id}`)
+    } else {
+      const key = filter.group
       const found = panels.find((p) => p.key === key)
       if (found) found.filters.push(filter)
-      else panels.push({ key, title: filter.group ?? filter.label, filters: [filter] })
+      else panels.push({ key, title: filter.group, filters: [filter] })
     }
   }
   return { panels, switches, search }
@@ -573,55 +587,55 @@ const floorOf = (browse: SourceBrowse, filter: SourceFilter) =>
   activeDefaults(browse).find((d) => d.filterId === filter.id)?.min
 
 /** What a panel's button says: what's chosen in it. */
-const summaryOf = (browse: SourceBrowse, panel: Panel) => {
+const summaryOf = (browse: SourceBrowse, panel: Panel): string => {
   const caps = browse.caps!
   const filters = browse.remote.filters
   const first = panel.filters[0]!
-  if (creatorIds(caps).includes(first.id)) {
-    const { mode, chosen } = creatorChoice(caps, filters)
-    if (chosen.length === 0) return `Any ${first.label.toLowerCase()}`
-    if (mode === "not") return `Not by ${chosen.length} ${chosen.length === 1 ? "creator" : "creators"}`
-    return chosen.length === 1 ? "By 1 creator" : `Any of ${chosen.length} creators`
+  const text = (id: string | undefined) => (id && typeof filters[id] === "string" ? (filters[id] as string) : "")
+  const list = (id: string | undefined) => {
+    const value = id ? filters[id] : undefined
+    return Array.isArray(value) ? value : typeof value === "string" ? [value] : []
   }
-  if (isDatePair(panel)) {
-    const from = filters[first.id]
-    const until = filters[panel.filters[1]!.id]
-    return dateWords(panel.title, typeof from === "string" ? from : "", typeof until === "string" ? until : "")
-  }
-  if (first.kind === "range") {
-    const value = filters[first.id]
-    const range = isRange(value) ? value : {}
-    return rangeWords(range.min ?? floorOf(browse, first) ?? 0, range.max, first.unit ?? "")
-  }
-  if (first.kind === "choice" && !first.multi && panel.filters.length === 1) {
-    // One choice: what applies, the source's default rating or its first option when none is chosen.
-    const value = filters[first.id]
-    const ratings = caps.ratings
-    const current =
-      typeof value === "string"
-        ? value
-        : ratings?.filterId === first.id && ratings.default
-          ? ratings.default
-          : first.options[0]?.value
-    return first.options.find((o) => o.value === current)?.label ?? panel.title
-  }
-  if (first.kind === "choice") {
-    const exclude = first.excludeId ? panel.filters.find((f) => f.id === first.excludeId) : undefined
-    const list = (id: string) => {
-      const value = filters[id]
-      return Array.isArray(value) ? value : typeof value === "string" ? [value] : []
+  const labelOf = (value: string) =>
+    (first.kind === "choice" ? first.options.find((o) => o.value === value)?.label : undefined) ?? value
+  const exclude = first.kind === "choice" ? first.excludeId : undefined
+  switch (panel.key) {
+    case "Creators": {
+      const { mode, chosen } = creatorChoice(caps, filters)
+      if (chosen.length === 0) return "Any creator"
+      if (mode === "not") return `Not by ${chosen.length} ${chosen.length === 1 ? "creator" : "creators"}`
+      return chosen.length === 1 ? "By 1 creator" : `Any of ${chosen.length} creators`
     }
-    const names = (values: ReadonlyArray<string>) =>
-      values.length <= 2
-        ? values.map((v) => first.options.find((o) => o.value === v)?.label ?? v).join(", ")
-        : `${values.length} ${panel.title.toLowerCase()}`
-    const shown = [
-      list(first.id).length ? names(list(first.id)) : "",
-      exclude && list(exclude.id).length ? `Exclude ${names(list(exclude.id))}` : ""
-    ].filter(Boolean)
-    return shown.length ? shown.join("; ") : `All ${panel.title.toLowerCase()}`
+    case "Sites": {
+      const names = (values: ReadonlyArray<string>) =>
+        values.length <= 2
+          ? values.map((v) => labelOf(v)).join(", ")
+          : `${values.length} sites`
+      const shown = [
+        list(first.id).length ? names(list(first.id)) : "",
+        list(exclude).length ? `Exclude ${names(list(exclude))}` : ""
+      ].filter(Boolean)
+      return shown.length ? shown.join("; ") : "All sites"
+    }
+    case "Kind": {
+      const value = text(first.id)
+      return value && value !== "both" ? labelOf(value) : "All kinds"
+    }
+    case "Rating": {
+      const value = text(first.id) || caps.ratings?.default || "include"
+      return value === "exclude" ? "NSFW hidden" : value === "only" ? "NSFW only" : "NSFW included"
+    }
+    case "Tokens": {
+      const value = filters[first.id]
+      const range = isRange(value) ? value : {}
+      return rangeWords(range.min ?? floorOf(browse, first) ?? 0, range.max, "tokens")
+    }
+    case "Added":
+    case "Created":
+      return dateWords(panel.key, text(first.id), text(panel.filters[1]?.id))
+    default:
+      return ""
   }
-  return panel.title
 }
 
 /** Two dates, from and to, with Clear; each applies as soon as it's a whole date. */
@@ -939,10 +953,10 @@ function IncludeExcludePanel({ panel, browse, set }: { panel: Panel; browse: Sou
         <Button
           variant="ghost"
           className="self-start"
-          hint={`Shows cards on every ${panel.title.toLowerCase().replace(/s$/, "")}.`}
+          hint="Shows cards from every site."
           onClick={() => writeList("include", [])}
         >
-          All {panel.title.toLowerCase()}
+          All sites
         </Button>
       )}
     </fieldset>
@@ -1098,38 +1112,33 @@ function CreatorsPanel({ browse, set }: { browse: SourceBrowse; set: SetFilters 
   )
 }
 
-/** A panel's controls. */
+/** A panel's controls: each panel has its own, as the archive's page has; nothing else renders. */
 function PanelBody({ panel, browse, set }: { panel: Panel; browse: SourceBrowse; set: SetFilters }) {
   const caps = browse.caps!
   const filters = browse.remote.filters
   const first = panel.filters[0]!
-  if (creatorIds(caps).includes(first.id)) return <CreatorsPanel browse={browse} set={set} />
-  if (isDatePair(panel)) return <DatePanel panel={panel} filters={filters} set={set} />
-  if (first.kind === "choice" && first.excludeId) return <IncludeExcludePanel panel={panel} browse={browse} set={set} />
-  return (
-    <div className="flex flex-col gap-3">
-      {panel.filters.map((filter) =>
-        filter.kind === "range" ? (
-          <RangePanel key={filter.id} filter={filter} browse={browse} set={set} />
-        ) : filter.kind === "choice" ? (
-          filter.multi ? (
-            <ChecksPanel key={filter.id} filter={filter} filters={filters} set={set} />
-          ) : (
-            <ChoicePanel key={filter.id} filter={filter} filters={filters} set={set} browse={browse} />
-          )
-        ) : filter.kind === "toggle" ? (
-          <ToggleBox key={filter.id} filter={filter} filters={filters} set={set} />
-        ) : (
-          <Field key={filter.id} label={filter.label} about={filter.about}>
-            <Input
-              value={typeof filters[filter.id] === "string" ? (filters[filter.id] as string) : ""}
-              onChange={(e) => set({ [filter.id]: e.currentTarget.value || undefined })}
-            />
-          </Field>
-        )
-      )}
-    </div>
-  )
+  switch (panel.key) {
+    case "Creators":
+      return creatorIds(caps).includes(first.id) ? <CreatorsPanel browse={browse} set={set} /> : null
+    case "Sites":
+      return first.kind === "choice" && first.excludeId ? (
+        <IncludeExcludePanel panel={panel} browse={browse} set={set} />
+      ) : first.kind === "choice" ? (
+        <ChecksPanel filter={first} filters={filters} set={set} />
+      ) : null
+    case "Kind":
+    case "Rating":
+      return first.kind === "choice" && !first.multi ? (
+        <ChoicePanel filter={first} filters={filters} set={set} browse={browse} />
+      ) : null
+    case "Tokens":
+      return first.kind === "range" ? <RangePanel filter={first} browse={browse} set={set} /> : null
+    case "Added":
+    case "Created":
+      return isDatePair(panel) ? <DatePanel panel={panel} filters={filters} set={set} /> : null
+    default:
+      return null
+  }
 }
 
 const panelAbout = (panel: Panel) => panel.filters.find((f) => f.about)?.about
@@ -1395,7 +1404,7 @@ export function SourceFiltersPanel({
           <PanelButton key={panel.key} panel={panel} browse={browse} set={set} />
         ))}
         {(caps.tags.include || caps.tags.exclude) && (
-          <div className="w-64">
+          <div className="max-w-64 min-w-48 flex-1">
             <TagInput browse={browse} />
           </div>
         )}
@@ -1411,7 +1420,7 @@ export function SourceFiltersPanel({
 }
 
 const chipClass =
-  "inline-flex h-7 min-w-0 max-w-full items-center gap-1 rounded-full border bg-surface pr-0.5 pl-2.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-focus"
+  "inline-flex h-8 min-w-0 max-w-full items-center gap-1 rounded-full border bg-surface pr-0.5 pl-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
 
 function Chip({
   children,
@@ -1653,7 +1662,6 @@ export function SourceChips({ browse }: { browse: SourceBrowse }) {
         </Chip>
       )
   }
-  const chosen = chips.length
   for (const hidden of activeDefaults(browse))
     chips.push(
       <Chip
@@ -1663,24 +1671,52 @@ export function SourceChips({ browse }: { browse: SourceBrowse }) {
         removeLabel={`Include ${hidden.label.toLowerCase()}`}
         onRemove={() => change({ [hidden.filterId]: hidden.off as SourceFilterValue })}
       >
-        {hidden.label} hidden (default)
+        {hidden.label} hidden <span className="text-xs">(default)</span>
       </Chip>
     )
   if (chips.length === 0 && browse.filterCount === 0) return null
   return (
-    <div role="group" aria-label="Active filters" className="flex min-w-0 flex-wrap items-center gap-1.5">
+    <div role="group" aria-label="Active filters" className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
       {chips}
-      {/* Also when only a default was switched off (covers included): every filter back to its default. */}
-      {(chosen > 0 || browse.filterCount > 0) && (
-        <Button
-          variant="ghost"
-          className="h-7 px-2 text-xs"
-          hint="Puts every filter back to its default."
+      {/* As on the archive's page: whenever a chip shows, every filter back to its default. */}
+      <Tooltip label="Puts every filter back to its default.">
+        <button
+          type="button"
+          className="rounded-sm px-1 text-accent underline outline-none focus-visible:ring-2 focus-visible:ring-focus"
           onClick={() => clearFilters(browse)}
         >
           Clear all
-        </Button>
-      )}
+        </button>
+      </Tooltip>
     </div>
+  )
+}
+
+/** "1,000+ more cards are hidden (no cover or under 300 tokens). Show them": only when the defaults hid some. */
+export function SourceHiddenNote({ browse }: { browse: SourceBrowse }) {
+  const results = browse.results
+  const active = browse.caps ? activeDefaults(browse) : []
+  const hidden = results?.hidden ?? 0
+  if (hidden <= 0 || active.length === 0) return null
+  const reasons = active.map((d) => (d.min !== undefined ? `under ${count(d.min)} tokens` : "no cover"))
+  const one = hidden === 1 && !results?.hiddenCapped
+  return (
+    <p data-source-hidden-note className="text-sm text-muted">
+      {count(hidden)}
+      {results?.hiddenCapped ? "+" : ""} more {one ? "card is" : "cards are"} hidden ({reasons.join(" or ")}).{" "}
+      <Tooltip label="Includes the cards the archive leaves out by default.">
+        <button
+          type="button"
+          className="rounded-sm text-accent underline outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          onClick={() => {
+            const next = { ...browse.remote.filters }
+            for (const d of active) next[d.filterId] = d.off as SourceFilterValue
+            browse.change({ filters: next })
+          }}
+        >
+          Show them
+        </button>
+      </Tooltip>
+    </p>
   )
 }

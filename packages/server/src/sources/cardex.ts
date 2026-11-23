@@ -341,6 +341,21 @@ const PLACEMENT: Record<string, { readonly group?: string; readonly place?: "sea
   picture: { place: "none" }
 }
 const PLACED = Object.keys(PLACEMENT)
+/** The parameters read elsewhere: the words, the tags (the tag field) and the token range (one panel). */
+const READ_ELSEWHERE = ["q", "tags", "not_tags", "min_tokens", "max_tokens"]
+/**
+ * The archive's parameters no control of ours stands for. Each is left out of the bar (a
+ * parameter never becomes a button of its own), and the adapter logs them so a new one is noticed.
+ */
+export const unmappedParameters = (raw: unknown): ReadonlyArray<string> =>
+  !isRecord(raw) || !Array.isArray(raw.filters)
+    ? []
+    : raw.filters
+        .filter(isRecord)
+        .map((f) => f.name)
+        .filter(
+          (name): name is string => typeof name === "string" && !READ_ELSEWHERE.includes(name) && !PLACED.includes(name)
+        )
 const placedAt = (id: string) => (PLACED.includes(id) ? PLACED.indexOf(id) : PLACED.length)
 const EXTRA_LISTS = new Set(["fields", "not_source"])
 const EXTRA_TEXT = new Set([
@@ -441,7 +456,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
   ])
   for (const descriptor of named.values()) {
     const { name, type, label, description } = descriptor
-    if (handled.has(name)) continue
+    if (handled.has(name) || !PLACED.includes(name)) continue
     const common = {
       id: name,
       label: FILTER_LABELS[name] ?? label ?? name,
@@ -988,9 +1003,16 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
     key: "none",
     rate: { perSecond: 10, burst: 60 },
     capabilities: (http) =>
-      Effect.flatMap(getJson(http, api("/capabilities")), (raw) =>
-        Effect.try({ try: () => capabilitiesOf(raw), catch: () => bad() })
-      ),
+      Effect.flatMap(getJson(http, api("/capabilities")), (raw) => {
+        const unmapped = unmappedParameters(raw)
+        return Effect.try({ try: () => capabilitiesOf(raw), catch: () => bad() }).pipe(
+          Effect.tap(() =>
+            unmapped.length
+              ? Effect.logWarning(`cardex: parameters with no control, left out: ${unmapped.join(", ")}`)
+              : Effect.void
+          )
+        )
+      }),
     search: (http, query, token) =>
       Effect.gen(function* () {
         const semantic = query.filters.mode === "semantic"
@@ -1075,7 +1097,11 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
           ...(restarted ? { reset: true } : {}),
           ...(total === undefined ? {} : { total }),
           ...(!semantic && (token === null || restarted) ? { totalCapped } : {}),
-          ...(semantic && raw.total_is_estimate === true ? { totalEstimated: true } : {})
+          ...(semantic && raw.total_is_estimate === true ? { totalEstimated: true } : {}),
+          // What its defaults left out (no cover, under its token floor), for "N more are hidden".
+          ...(isRecord(raw.defaults) && typeof raw.defaults.hidden === "number" && raw.defaults.hidden >= 0
+            ? { hidden: raw.defaults.hidden, hiddenCapped: raw.defaults.hidden_capped === true }
+            : {})
         }
       }),
     tags: (http, prefix) =>
