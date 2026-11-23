@@ -691,6 +691,98 @@ test("the inspector in a workbench frame scrolls with its frame alone", async ({
   if (process.env.LAYOUT_AUDIT) await expectLayout(page, info, "inspector-scroll-frame-1440")
 })
 
+// The page follows its frame's width, not the window's: at 1440 a half- or third-width frame is
+// narrower than a phone's page, and the Usage table overflowed a half-width one (2026-11-23).
+// The context is the shared reply's, with a second (retried, estimated) attempt, a long model
+// id and a long note, so every part has text to wrap.
+const widths = [
+  { name: "half-1440", viewport: 1440, shares: [0.5, 0.5], table: false },
+  { name: "third-1440", viewport: 1440, shares: [1 / 3, 1 / 3, 1 / 3], table: false },
+  { name: "phone-390", viewport: 390, shares: [], table: false },
+  { name: "page-1440", viewport: 1440, shares: [], table: true }
+] as const
+for (const { name, viewport, shares, table: wide } of widths)
+  for (const theme of ["light", "dark"] as const)
+    test(`the inspector fits its frame, ${name} ${theme}`, async ({ page }, info) => {
+      await page.setViewportSize({ width: viewport, height: viewport < 640 ? 844 : 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.routeWebSocket("**/rpc", (ws) => {
+        const upstream = ws.connectToServer()
+        upstream.onMessage((message) => {
+          const rewrite = (value: unknown): void => {
+            if (!value || typeof value !== "object") return
+            const object = value as Record<string, unknown>
+            if (Array.isArray(object.messages) && object.samplers && object.builtAt) {
+              const requests = object.requests as Array<Record<string, unknown>>
+              if (requests[0])
+                object.requests = [{ ...requests[0], id: "retried", usageSource: "estimated" }, ...requests]
+              const model = object.model as Record<string, unknown> | null
+              if (model) model.model = "an-unusually-long-synthetic-model-identifier-with-no-spaces-2026-11-23"
+              object.issues = [
+                {
+                  kind: "history_truncated",
+                  message:
+                    "History was cut to fit: 412 earlier messages weren't sent. A-very-long-unbroken-synthetic-token-that-must-wrap-inside-the-box."
+                }
+              ]
+              return
+            }
+            for (const child of Object.values(object)) rewrite(child)
+          }
+          const data: unknown = JSON.parse(String(message))
+          rewrite(data)
+          ws.send(JSON.stringify(data))
+        })
+      })
+      const at = `/chats/${chat.id}/context/${chat.reply}`
+      const wb =
+        shares.length > 0
+          ? `?wb=${encodeURIComponent(JSON.stringify(["r", shares, ...shares.slice(1).map(() => [0, `/chats/${chat.id}`]), [0, "="]]))}`
+          : ""
+      await page.goto(`${server().url}${at}${wb}`)
+      const usage = page.getByRole("heading", { name: "Usage", exact: true })
+      await expect(usage).toBeVisible()
+      await expect(page.getByText("Notes on this context")).toBeVisible()
+      await expect(page.getByRole("region", { name: "Messages" }).locator("summary").first()).toBeVisible()
+      await page.getByRole("region", { name: "Messages" }).locator("summary").first().click()
+      // The frame the inspector is in, or the page's column on a phone.
+      const frame =
+        shares.length > 0
+          ? page.locator("[data-frame-body]").filter({ has: usage })
+          : page.locator("main").filter({ has: usage }).first()
+      await expect(frame).toHaveCount(1)
+      const outside = await frame.evaluate((root) => {
+        const edge = root.getBoundingClientRect()
+        const page = root.querySelector("[data-request-inspector]") ?? root
+        const out: Array<string> = []
+        for (const el of page.querySelectorAll<HTMLElement>("*")) {
+          const r = el.getBoundingClientRect()
+          if (r.width === 0 || r.height === 0) continue
+          if (r.right > edge.right + 1 || r.left < edge.left - 1)
+            out.push(`${el.tagName.toLowerCase()} "${(el.textContent ?? "").slice(0, 40)}" ${r.left}–${r.right}`)
+        }
+        for (const el of [root, ...root.querySelectorAll<HTMLElement>("*")])
+          if (el.scrollWidth > el.clientWidth + 1 && ["auto", "scroll"].includes(getComputedStyle(el).overflowX))
+            out.push(`${el.tagName.toLowerCase()} scrolls sideways (${el.scrollWidth} > ${el.clientWidth})`)
+        return { out, width: edge.width }
+      })
+      expect(outside.out, `inside a ${Math.round(outside.width)} px frame`).toEqual([])
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+      // Both attempts: a table on the page's full column, label/value rows in anything narrower.
+      const stacked = page.getByLabel("Usage by attempt")
+      const table = page.locator("table").filter({ hasText: "Tokens/s" })
+      if (wide) {
+        await expect(table.locator("tbody tr")).toHaveCount(2)
+        await expect(stacked).toBeHidden()
+      } else {
+        await expect(stacked.locator("dl")).toHaveCount(2)
+        await expect(table).toBeHidden()
+      }
+      await shoot(page, `inspector-width-${name}-${theme}`)
+      await expectLayout(page, info, `inspector-width-${name}-${theme}`, { scope: "[data-request-inspector]" })
+    })
+
 test("source explanations retain distinct equal labels and show historical activation decisions", async ({ page }) => {
   const messages = await denseContext(page, true)
   await expect(messages.getByText("Lorebook Harbor: entry 0", { exact: true })).toHaveCount(2)
