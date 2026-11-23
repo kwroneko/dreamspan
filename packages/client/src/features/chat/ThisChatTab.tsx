@@ -18,6 +18,9 @@ import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { CodeEditor } from "../../ui/CodeEditor.tsx"
+import { type InstructionTabTarget, instructionTabHref } from "../editor/fieldTab.ts"
+import { useFieldTabLink } from "../editor/openFieldTab.ts"
+import { INSTRUCTION_FIELD, instructionTarget } from "./instructionDraft.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Field, Fieldset } from "../../ui/Field.tsx"
 import { Disclosure } from "../../ui/Surface.tsx"
@@ -50,15 +53,19 @@ function Instruction({
   view,
   write,
   disabled,
-  targetId
+  targetId,
+  tab
 }: {
   view: LcmSettingsView
   write: Write
   disabled: boolean
   targetId: string
+  /** The instruction's own tab (textTabs.tsx), the same draft. */
+  tab: InstructionTabTarget
 }) {
   const saved = view.resolved.tail ?? BUILTIN_SUMMARY_INSTRUCTION
-  const draft = useUserDraft(targetId, "Summarization instruction", saved)
+  const draft = useUserDraft(targetId, INSTRUCTION_FIELD, saved)
+  const expandTab = useFieldTabLink(instructionTabHref(tab))
   const { text, setText } = draft
   const base = saved
   const [problem, setProblem] = useState<string | null>(null)
@@ -80,6 +87,7 @@ function Instruction({
         rows={5}
         onChange={setText}
         tools={<UserDraftUndo draft={draft} />}
+        expandTab={expandTab}
       />
       <div className="flex flex-wrap items-center gap-2">
         <Button
@@ -333,7 +341,8 @@ export function SummarySettings({ session }: { session: ChatSession }) {
                 instruction: (
                   <Instruction
                     key={view.forkId}
-                    targetId={`chat:${session.id}:fork:${view.forkId}`}
+                    targetId={instructionTarget(session.id, view.forkId)}
+                    tab={{ chatId: session.id, forkId: view.forkId, leafSlotId: view.leafSlotId }}
                     view={settings}
                     write={write}
                     disabled={false}

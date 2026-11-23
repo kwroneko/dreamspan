@@ -35,7 +35,10 @@ import type { ChatSession } from "./session.ts"
 import { useCoverageRail } from "./chatViewParams.ts"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { audienceName, SummaryViewer } from "./SummaryViewer.tsx"
-import { SummaryDraft } from "./summaryDraft.ts"
+import { useSharedSummaryDraft } from "./summaryDraft.ts"
+import { SummaryDraftStatus, summaryTabLabel, summaryTextLabel, useSummaryBase } from "./summaryEdit.tsx"
+import { summaryTabHref } from "../editor/fieldTab.ts"
+import { useFieldTabLink } from "../editor/openFieldTab.ts"
 import { summaryPreviews } from "./presentation.tsx"
 
 function Problem({ error }: { error: AppError | null }) {
@@ -49,50 +52,20 @@ function Problem({ error }: { error: AppError | null }) {
 /** The text of a summary being edited, saved as a draft while typing and as a revision on Save. */
 function Editor({ session, summary, onDone }: { session: ChatSession; summary: LcmSummary; onDone: () => void }) {
   const userId = useSession().user.id
-  const [store] = useState(() => new SummaryDraft(session, userId, summary))
+  // The same draft as the summary's own tab, when that's open (summaryEdit.tsx).
+  const store = useSharedSummaryDraft(session, userId, summary)
   const view = useSyncExternalStore(store.subscribe, store.snapshot)
-  useEffect(() => {
-    void store.open()
-    return () => store.dispose()
-  }, [store])
   useEffect(() => store.update(summary), [store, summary])
-  const baseId = store.comparisonRevisionId
-  const [comparison, setComparison] = useState<SummaryRevision | null>(null)
-  const [comparisonError, setComparisonError] = useState<AppError | null>(null)
-  const [comparisonAttempt, setComparisonAttempt] = useState(0)
-  useEffect(() => {
-    if (baseId === summary.revisionId) return
-    let live = true
-    void session
-      .call((client) =>
-        client("ListSummaryRevisions", {
-          forkId: session.snapshot().forkId,
-          summaryId: summary.id
-        })
-      )
-      .then((result) => {
-        if (!live) return
-        if (result.ok) {
-          const revision = result.value.find((revision) => revision.id === baseId)
-          setComparison(revision ?? null)
-          setComparisonError(
-            revision
-              ? null
-              : {
-                  tag: "NotFound",
-                  message: "The saved text this draft started from is unavailable.",
-                  problems: [],
-                  reason: null
-                }
-          )
-        } else setComparisonError(result.error)
-      })
-    return () => {
-      live = false
-    }
-  }, [session, baseId, summary.id, summary.revisionId, comparisonAttempt])
-  const base =
-    baseId === summary.revisionId ? (summary.content ?? "") : comparison?.id === baseId ? comparison.content : null
+  const { base, problem: comparisonError, retry } = useSummaryBase(session, summary, store)
+  const label = summaryTextLabel(summary)
+  const tab = useFieldTabLink(
+    summaryTabHref({
+      chatId: session.id,
+      forkId: session.snapshot().forkId,
+      summaryId: summary.id,
+      label: summaryTabLabel(summary)
+    })
+  )
   const [pending, setPending] = useState(false)
   const finish = async (action: () => Promise<{ ok: boolean }>) => {
     setPending(true)
@@ -115,46 +88,20 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
       <SlotOutlet
         slot={summaryTextEditor}
         props={{
-          label: `Text of the summary of ${rangeText(summary.from, summary.to).toLowerCase()}`,
+          label,
           value: view.text,
           base: base ?? "",
           readOnly: view.loading || base === null,
-          onChange: (value) => store.setText(value)
+          onChange: (value) => store.setText(value),
+          expandTab: tab
         }}
       />
-      <p className="text-xs text-muted" aria-live="polite">
-        {view.unsaved
-          ? view.error
-            ? "Not on the server yet: kept in this browser, and sent again when you open this edit."
-            : "Keeping your text…"
-          : view.changed
-            ? "Draft kept. Save to use it."
-            : "Unchanged."}
-        {summary.fresh ? "" : " Once saved, it stays as you write it, though its messages changed."}
-      </p>
-      {view.outdated && (
-        <Alert tone="warning">
-          This draft started from an older text than the one in use. Saving replaces that one.
-        </Alert>
-      )}
-      {view.displaced !== null && (
-        <Alert tone="warning">Another tab had typed here too; its text is one step back in the undo history.</Alert>
-      )}
-      {view.restored > 0 && <Alert>Text typed here earlier and kept in this browser is back in the box.</Alert>}
-      {view.recovered > 0 && (
-        <Alert>Earlier text from this summary edit is kept in the bin, under Recovered text.</Alert>
-      )}
+      <SummaryDraftStatus view={view} fresh={summary.fresh} />
       {base !== null && <SlotOutlet slot={summaryEditorTools} props={{ draft: store, base }} />}
       {base === null && comparisonError && (
         <>
           <Problem error={comparisonError} />
-          <Button
-            hint="Retries saving the summary draft."
-            onClick={() => {
-              setComparisonError(null)
-              setComparisonAttempt((attempt) => attempt + 1)
-            }}
-          >
+          <Button hint="Retries saving the summary draft." onClick={retry}>
             Retry saved text
           </Button>
         </>

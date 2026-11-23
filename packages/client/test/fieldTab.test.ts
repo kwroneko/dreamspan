@@ -1,5 +1,7 @@
 // A library field in its own tab (owner, 2026-11-23; editor/fieldTab.ts): its URL round-trips,
-// one tab per entry and field, its title, and its kind opening where a field's tab is showing.
+// one tab per entry and field, its title, and its kind opening where a field's tab is showing. A
+// chat's own texts (its own note, a summary, the summarization instruction) the same way.
+import type { ChatNotePosition } from "@dreamspan/shared/editorApi.ts"
 import { textField, valueField } from "@dreamspan/shared/editing.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { createMemoryHistory } from "@tanstack/react-router"
@@ -10,7 +12,11 @@ import {
   fieldTabKind,
   fieldTabName,
   fieldTabTarget,
-  fieldTabTitle
+  fieldTabTitle,
+  instructionTabHref,
+  instructionTabTarget,
+  summaryTabHref,
+  summaryTabTarget
 } from "../src/features/editor/fieldTab.ts"
 import { itemKey, tabKinds } from "../src/features/workbench/kinds.ts"
 import { focusedTab } from "../src/features/workbench/model.ts"
@@ -89,6 +95,69 @@ it("is one tab per entry and field, titled by the field until the entry names it
   expect(fieldTabName("", "Description")).toBe("Description")
 })
 
+it("names a chat's own note at its branch position, a summary and the instruction under their chat", () => {
+  const at = { chatId: "c1", forkId: "f1", slotId: "s9" } as ChatNotePosition
+  const note = fieldTabHref({
+    refId: ref,
+    field: textField(["content"]),
+    path: ["content"],
+    label: "Text",
+    chatNote: at
+  })
+  expect(url(note).pathname).toBe("/chats/c1/notes/r-1/field")
+  expect(fieldTabTarget(url(note))).toEqual({
+    refId: ref,
+    field: '["content"]',
+    path: ["content"],
+    label: "Text",
+    chatNote: at
+  })
+  // The same note at another position, or the entry in the library, is another tab.
+  const elsewhere = fieldTabHref({
+    refId: ref,
+    field: textField(["content"]),
+    path: ["content"],
+    label: "Text",
+    chatNote: { ...at, slotId: "s10" } as ChatNotePosition
+  })
+  const library = fieldTabHref({ refId: ref, field: textField(["content"]), path: ["content"], label: "Text" })
+  expect(new Set([note, elsewhere, library].map((href) => fieldTabKey(url(href)))).size).toBe(3)
+  // The main branch has no fork, and a position with no slot names none.
+  const main = fieldTabHref({
+    refId: ref,
+    field: textField(["content"]),
+    path: ["content"],
+    label: "Text",
+    chatNote: { chatId: "c1", forkId: null, slotId: null } as ChatNotePosition
+  })
+  expect(fieldTabTarget(url(main))?.chatNote).toEqual({ chatId: "c1", forkId: null, slotId: null })
+
+  const summary = summaryTabHref({ chatId: "c1", forkId: "f1", summaryId: "sum-1", label: "Summary of messages 1–20" })
+  expect(url(summary).pathname).toBe("/chats/c1/summaries/sum-1/text")
+  expect(summaryTabTarget(url(summary))).toEqual({
+    chatId: "c1",
+    forkId: "f1",
+    summaryId: "sum-1",
+    label: "Summary of messages 1–20"
+  })
+  expect(fieldTabTitle(url(summary))).toBe("Summary of messages 1–20")
+  expect(fieldTabKey(url(summary))).not.toBe(
+    fieldTabKey(url(summaryTabHref({ chatId: "c1", forkId: null, summaryId: "sum-1", label: "Summary" })))
+  )
+  expect(summaryTabTarget(url("/chats/c1/summaries/sum-1/request"))).toBeNull()
+
+  const instruction = instructionTabHref({ chatId: "c1", forkId: "f1", leafSlotId: "s9" })
+  expect(instruction).toBe("/chats/c1/instruction?fork=f1&leaf=s9")
+  expect(instructionTabTarget(url(instruction))).toEqual({ chatId: "c1", forkId: "f1", leafSlotId: "s9" })
+  expect(instructionTabHref({ chatId: "c1", forkId: null, leafSlotId: null })).toBe("/chats/c1/instruction")
+  expect(fieldTabTitle(url(instruction))).toBe("Summarization instruction")
+  // One instruction tab per chat and branch, wherever on it it's opened.
+  expect(fieldTabKey(url(instruction))).toBe(
+    fieldTabKey(url(instructionTabHref({ chatId: "c1", forkId: "f1", leafSlotId: "s3" })))
+  )
+  expect(fieldTabKey(url("/chats/c1"))).toBeNull()
+})
+
 it("opens a second field where a field is showing, the editor keeping its frame", () => {
   vi.useFakeTimers()
   vi.stubGlobal("window", new EventTarget())
@@ -128,6 +197,32 @@ it("opens a second field where a field is showing, the editor keeping its frame"
   store.focusTab(editor)
   store.openIn(editorFrame, greeting)
   expect(store.frames()[1]!.tabs.map((tab) => tab.href)).toEqual([description, greeting])
+  dispose()
+  vi.runAllTimers()
+})
+
+it("opens a chat's summary where a field's tab is showing, the chat keeping its frame", () => {
+  vi.useFakeTimers()
+  vi.stubGlobal("window", new EventTarget())
+  const dispose = tabKinds.register(fieldTabKind)
+  const instruction = instructionTabHref({ chatId: "c1", forkId: null, leafSlotId: null })
+  const summary = summaryTabHref({ chatId: "c1", forkId: null, summaryId: "sum-1", label: "Summary of message 1" })
+  const store = new WorkbenchStore(
+    "user",
+    createMemoryHistory({ initialEntries: ["/chats/c1"] }),
+    null,
+    () => {},
+    () => true
+  )
+  const chat = focusedTab(store.layout)!.id
+  const chatFrame = store.frames()[0]!.id
+  store.pin(chat)
+  store.openBeside(instruction)
+  store.focusTab(chat)
+  store.openIn(chatFrame, summary)
+  const [left, right] = store.frames()
+  expect(left!.tabs.map((tab) => tab.href)).toEqual(["/chats/c1"])
+  expect(right!.tabs.map((tab) => tab.href)).toEqual([instruction, summary])
   dispose()
   vi.runAllTimers()
 })

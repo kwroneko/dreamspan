@@ -176,6 +176,15 @@ const useLiveChat = (chatId: string, sourceId: string | undefined, forkId: strin
   })
 
 /**
+ * The store of a chat's own note, at its branch position, of that chat while it's open in the
+ * workbench (its panel's, so a note's own tab and the panel are one text), else undefined.
+ */
+export const useLiveChatNoteStore = (refId: RefId, chatNote: ChatNotePosition | undefined) => {
+  const live = useLiveChat(chatNote?.chatId ?? "", undefined, chatNote?.forkId ?? undefined)
+  return chatNote && live ? live.workspace.store(refId, chatNote) : undefined
+}
+
+/**
  * An editor, named as a region: in a workbench tab the tab is the region, so its header (the
  * switcher, Save, Close) is inside it; elsewhere this section is.
  */

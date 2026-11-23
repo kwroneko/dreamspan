@@ -53,7 +53,10 @@ const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
       durable: "MessageDraft",
       what: "message edit, own version and thinking (message.text-editor slot, Message.tsx, editThinking.tsx)"
     },
-    { durable: "SummaryDraft", what: "summary edit (summary.text-editor slot, SummaryPanel.tsx)" }
+    {
+      durable: "SummaryDraft",
+      what: "summary edit (summary.text-editor slot, SummaryPanel.tsx and its own tab, textTabs.tsx)"
+    }
   ],
 
   // Chat.
@@ -68,6 +71,9 @@ const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
     { durable: "useUserDraft", what: "a new chat's first message, with a typed localStorage backup" }
   ],
   "features/chat/ThisChatTab.tsx": [{ durable: "useUserDraft", what: "this chat's summarization instruction" }],
+  "features/chat/textTabs.tsx": [
+    { durable: "useUserDraft", what: "this chat's summarization instruction in its own tab (the same draft)" }
+  ],
   "features/chat/ChatDefaults.tsx": [{ durable: "useUserDraft", what: "Settings → Chats summarization instruction" }],
   "features/chat/agent/RunSteps.tsx": [{ durable: "useUserDraft", what: "an agent step's text edit" }],
   "features/chat/MergeChatDialog.tsx": [{ durable: "useDurableForm", what: "merge dialog's title and framing line" }],

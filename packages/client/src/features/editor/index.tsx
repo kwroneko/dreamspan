@@ -146,5 +146,15 @@ export const register = () => {
     component: LazyFieldPage,
     fillBelowHeader: true
   })
+  // A chat's own note's field, at the branch position the URL names.
+  routes.register({
+    id: "chat.note-field",
+    parent: "app",
+    path: "/chats/$chatId/notes/$refId/field",
+    component: LazyFieldPage,
+    fillBelowHeader: true
+  })
+  // The kind covers a chat's own texts' tabs too (a summary's, the instruction's): their pages
+  // are the chat feature's (chat/textTabs.tsx).
   tabKinds.register(fieldTabKind)
 }

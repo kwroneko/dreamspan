@@ -3,7 +3,8 @@
 // text and draft as the field in the editor, live both ways and after a reload; the button's
 // right-click menu opens it beside; a second field opens where a field is showing. On a phone
 // it's a full page and Back returns. A card on a card source, not added, opens in the full
-// editor for reading only, its fields openable in tabs, with Add to my cards. Synthetic cards
+// editor for reading only, its fields openable in tabs, with Add to my cards. A chat's summary and
+// its own note open as tabs the same way. Synthetic cards
 // only; the archive is the fake one, so nothing reaches cardex.
 import { createServer } from "node:net"
 import { expect, type Locator, type Page, test } from "@playwright/test"
@@ -11,6 +12,9 @@ import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser, type Client } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, startServer, withAdmin } from "./support/server.ts"
+import { noteText } from "./support/notes.ts"
+import { openPanel } from "./support/panel.ts"
+import { level1 } from "./support/summaries.ts"
 import { textBoxValue } from "./support/textbox.ts"
 
 test.setTimeout(180_000)
@@ -220,3 +224,149 @@ for (const width of [1440, 390])
       await own.stop()
     }
   })
+
+// A chat's own texts keep their expand as tabs too (owner, 2026-11-23): a summary's text and a
+// chat's own note, each the same draft as its box in the chat panel.
+const summarizedChat = async (page: Page, title: string) => {
+  const fixture = await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title })
+      const sent = yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "A harbor." })
+      if (sent._tag !== "Posted") throw new Error("Expected a posted message")
+      return { chatId: chat.id, entry: sent.entry }
+    })
+  )
+  await level1(server().dataDir, fixture.chatId, [fixture.entry], "Original summary.")
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${fixture.chatId}`)
+  await page.locator("article[data-slot]").first().waitFor()
+  return fixture.chatId
+}
+
+const SUMMARY_BOX = /^Text of the summary of message 1$/
+const SUMMARY_LINK = "Open Text of the summary of message 1 in a tab"
+
+const editSummary = async (page: Page) => {
+  const panel = await openPanel(page, "Summaries")
+  const box = panel.getByRole("textbox", { name: SUMMARY_BOX })
+  if ((await box.count()) === 0) await panel.getByRole("button", { name: /Edit the summary/ }).click()
+  await expect(box).toBeEditable()
+  return { panel, box }
+}
+
+const ownNote = async (page: Page) => {
+  const panel = await openPanel(page, "Notes")
+  const own = panel.getByRole("region", { name: "This chat's notes" })
+  if ((await panel.getByRole("region", { name: "Note Note" }).count()) === 0)
+    await own.getByRole("button", { name: "Add note", exact: true }).click()
+  const box = await noteText(panel, "Note")
+  await expect(box).toBeEditable()
+  return { panel, box }
+}
+
+test("1440: a summary's text and a chat's own note open beside the chat, live both ways and after a reload", async ({
+  page
+}, info) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const chatId = await summarizedChat(page, "Harbour log")
+  const frames = page.locator("[data-frame]")
+  const summary = await editSummary(page)
+  await summary.box.fill(LONG)
+  await summary.box.click()
+  const link = summary.panel.getByRole("link", { name: SUMMARY_LINK, exact: true })
+  await link.hover()
+  await expect(page.getByText("Opens Text of the summary of message 1 in its own tab.", { exact: true })).toBeVisible()
+  await link.click({ button: "right" })
+  const menu = page.getByRole("menu", { name: `Actions for ${SUMMARY_LINK}`, exact: true })
+  await expect(menu.getByRole("menuitem")).toHaveText(MENU)
+  await menu.getByRole("menuitem", { name: "Open beside", exact: true }).click()
+
+  await expect(frames).toHaveCount(2)
+  const chat = frames.nth(0)
+  const texts = frames.nth(1)
+  await expect(texts.locator("[data-tab]")).toContainText("Summary of message 1")
+  const own = texts.locator("[data-field-tab]").getByRole("textbox", { name: SUMMARY_BOX })
+  await expect(own).toBeEditable()
+  // The tab focused is the page's URL: the summary's, under its chat.
+  await expect.poll(() => new URL(page.url()).pathname).toMatch(new RegExp(`^/chats/${chatId}/summaries/[^/]+/text$`))
+  await expectFillsAndScrollsInside(texts)
+  await expectLayout(page, info, "summary-tab-1440", { scope: "[data-field-tab]" })
+  await append(own, " Typed in its tab.")
+  // The chat panel is its own column beside the frames.
+  const inPanel = summary.panel.getByRole("textbox", { name: SUMMARY_BOX })
+  await expect.poll(() => textBoxValue(inPanel)).toContain("Typed in its tab.")
+  await append(inPanel, " Typed in the panel.")
+  await expect.poll(() => textBoxValue(own)).toContain("Typed in the panel.")
+
+  // The chat's own note: a plain click opens it where the summary's tab is, the chat keeping its frame.
+  const note = await ownNote(page)
+  await note.box.fill(LONG)
+  await note.box.click()
+  await note.panel.getByRole("link", { name: "Open Text of Note in a tab", exact: true }).click()
+  await expect(frames).toHaveCount(2)
+  await expect(chat.locator("[data-tab]")).toHaveCount(1)
+  await expect(texts.locator("[data-tab]")).toHaveCount(2)
+  const noteTab = texts.locator("[data-field-tab]").getByRole("textbox", { name: "Text of Note", exact: true })
+  await expect(noteTab).toBeEditable()
+  await expect.poll(() => new URL(page.url()).pathname).toMatch(new RegExp(`^/chats/${chatId}/notes/[^/]+/field$`))
+  await expectFillsAndScrollsInside(texts)
+  await expectLayout(page, info, "chat-note-tab-1440", { scope: "[data-field-tab]" })
+  await append(noteTab, " Noted in its tab.")
+  const noteInPanel = note.panel.getByRole("textbox", { name: "Text of Note", exact: true })
+  await expect.poll(() => textBoxValue(noteInPanel)).toContain("Noted in its tab.")
+  await append(noteInPanel, " Noted in the panel.")
+  await expect.poll(() => textBoxValue(noteTab)).toContain("Noted in the panel.")
+  await expectLayout(page, info, "chat-text-tabs-strip-1440", { scope: "[data-tab-strip]" })
+
+  // Kept, then back after a reload: both tabs and their text.
+  await page.waitForTimeout(2500)
+  await page.reload()
+  await expect(frames).toHaveCount(2)
+  await expect
+    .poll(() => textBoxValue(frames.nth(1).locator("[data-field-tab]").getByRole("textbox").first()))
+    .toContain("Noted in its tab. Noted in the panel.")
+  await frames.nth(1).locator("[data-tab]").filter({ hasText: "Summary of message 1" }).click()
+  await expect
+    .poll(() => textBoxValue(frames.nth(1).locator("[data-field-tab]").getByRole("textbox", { name: SUMMARY_BOX })))
+    .toContain("Typed in its tab. Typed in the panel.")
+})
+
+test("390: a summary's text and a chat's own note are full pages, and Back returns to the chat", async ({
+  page
+}, info) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const chatId = await summarizedChat(page, "Phone log")
+  const frame = page.locator("[data-frame]")
+
+  const summary = await editSummary(page)
+  await summary.box.fill(LONG)
+  await summary.box.click()
+  await summary.panel.getByRole("link", { name: SUMMARY_LINK, exact: true }).click()
+  await expect.poll(() => new URL(page.url()).pathname).toMatch(new RegExp(`^/chats/${chatId}/summaries/[^/]+/text$`))
+  await expect(frame).toHaveCount(1)
+  const own = page.locator("[data-field-tab]").getByRole("textbox", { name: SUMMARY_BOX })
+  await expect(own).toBeEditable()
+  await expectFillsAndScrollsInside(frame)
+  await expectLayout(page, info, "summary-tab-390", { scope: "[data-field-tab]" })
+  await append(own, " On the phone.")
+  await page.goBack()
+  await expect.poll(() => new URL(page.url()).pathname).toBe(`/chats/${chatId}`)
+  const back = await editSummary(page)
+  await expect.poll(() => textBoxValue(back.box)).toContain("On the phone.")
+
+  const note = await ownNote(page)
+  await note.box.fill(LONG)
+  await note.box.click()
+  await note.panel.getByRole("link", { name: "Open Text of Note in a tab", exact: true }).click()
+  await expect.poll(() => new URL(page.url()).pathname).toMatch(new RegExp(`^/chats/${chatId}/notes/[^/]+/field$`))
+  await expect(frame).toHaveCount(1)
+  const noteTab = page.locator("[data-field-tab]").getByRole("textbox", { name: "Text of Note", exact: true })
+  await expect(noteTab).toBeEditable()
+  await expectFillsAndScrollsInside(frame)
+  await expectLayout(page, info, "chat-note-tab-390", { scope: "[data-field-tab]" })
+  await append(noteTab, " Noted on the phone.")
+  await page.goBack()
+  await expect.poll(() => new URL(page.url()).pathname).toBe(`/chats/${chatId}`)
+  const noteBack = await ownNote(page)
+  await expect.poll(() => textBoxValue(noteBack.box)).toContain("Noted on the phone.")
+})

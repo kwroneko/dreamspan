@@ -68,6 +68,27 @@ function LazyFirstRequestPage() {
   )
 }
 
+const SummaryTextPage = lazy(() => import("./textTabs.tsx").then((module) => ({ default: module.SummaryTextPage })))
+const InstructionTabPage = lazy(() =>
+  import("./textTabs.tsx").then((module) => ({ default: module.InstructionTabPage }))
+)
+
+function LazySummaryTextPage() {
+  return (
+    <Suspense fallback={<Loading label="Opening the summary…" onRetry={reloadPage} />}>
+      <SummaryTextPage />
+    </Suspense>
+  )
+}
+
+function LazyInstructionTabPage() {
+  return (
+    <Suspense fallback={<Loading label="Opening the instruction…" onRetry={reloadPage} />}>
+      <InstructionTabPage />
+    </Suspense>
+  )
+}
+
 function LazyContextPage() {
   return (
     <Suspense fallback={<Loading label="Loading the context…" onRetry={reloadPage} />}>
@@ -206,6 +227,22 @@ export const register = () => {
     path: "/chats/$chatId/context/$versionId",
     component: LazyContextPage,
     retainSearch: sidebarSearch
+  })
+  // A chat's own texts in tabs of their own (editor/fieldTab.ts; the kind is the field tabs'): a
+  // summary's text and the chat's summarization instruction, each box filling its tab.
+  routes.register({
+    id: "chat.summary-text",
+    parent: "app",
+    path: "/chats/$chatId/summaries/$summaryId/text",
+    component: LazySummaryTextPage,
+    fillBelowHeader: true
+  })
+  routes.register({
+    id: "chat.instruction",
+    parent: "app",
+    path: "/chats/$chatId/instruction",
+    component: LazyInstructionTabPage,
+    fillBelowHeader: true
   })
   // The first request of a chat not sent yet (DESIGN §2.1), as its pending chat's view builds it.
   routes.register({

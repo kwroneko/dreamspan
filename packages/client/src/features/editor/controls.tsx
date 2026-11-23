@@ -217,9 +217,7 @@ export function TextField({
         {fieldTools}
         {extra.tools}
         <FieldEditHistory store={store} field={field} label={label} />
-        {rows !== undefined && !card && !mono && (!readOnly || reading) && tabLink !== undefined && (
-          <ExpandLink label={label} {...tabLink} />
-        )}
+        {rows !== undefined && !card && !mono && (!readOnly || reading) && <ExpandLink label={label} {...tabLink} />}
       </>
     )
     return (
