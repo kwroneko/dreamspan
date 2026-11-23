@@ -31,4 +31,14 @@ describe("a version's context issues", () => {
     )
     expect(version.context?.issues).toEqual([prefill])
   })
+
+  it("leave out routine truncation, history and examples cut by the budget, which only the inspector lists", () => {
+    const version = toVersion(
+      row([
+        { kind: "history_truncated", message: "The context holds the last 40 messages: older ones don't fit." },
+        { kind: "examples_truncated", message: "11 example dialogues didn't fit the preset's context size." }
+      ])
+    )
+    expect(version.context).toEqual({ issues: [] })
+  })
 })
