@@ -66,9 +66,9 @@ export function draftRequestTests() {
         await page.goto(`${server().url}/cards/${entityId}/chat`)
         if (width === 390 && (await page.getByRole("button", { name: "Close", exact: true }).isVisible()))
           await page.getByRole("button", { name: "Close", exact: true }).click()
-        const chip = page.getByRole("button", { name: /^Context: about [\d,]+ tokens in your first request/ })
+        const chip = page.getByRole("button", { name: /^Context: about [\d,]+ of [\d,]+ tokens in your first request/ })
         await expect(chip).toBeVisible()
-        await expect(chip).toContainText(/~[\d.]+k? tokens/)
+        await expect(chip).toContainText(/^[\d.]+k? \/ [\d.]+k$/)
         await expectLayout(page, info, `draft-strip-${width}-${theme}`)
 
         // Typing changes the request: Send's, with the message.
@@ -76,7 +76,7 @@ export function draftRequestTests() {
         await page.getByRole("textbox", { name: "Message", exact: true }).fill(content)
         await chip.click()
         const popover = page.getByRole("dialog", { name: "Context" })
-        await expect(popover).toContainText("what your first send would send")
+        await expect(popover.getByRole("list", { name: "Parts of the request" })).toContainText("Character cards")
         await expect(popover).toContainText("nothing is sent until you send")
         // A request inspector tab, as every other inspector (owner, 2026-11-23): switched to, with
         // the new chat kept in its own tab, and Back returns to it.

@@ -138,8 +138,9 @@ export const register = () => [
   }),
   timelineTransforms.register(timelinePart(threadsTimeline)),
   chatNoteActions.register({ id: "threads.also-change", order: 10, component: AlsoChangeNote }),
-  // Sending to several threads (§6): the strip's chip, and the send it takes over once one is ticked.
-  composerControls.register({ id: "composer.threads", order: 35, placement: "strip", component: SendToThreadsChip }),
+  // Sending to several threads (§6): the strip's chip, among the choices before the next request's size and
+  // cache, and the send it takes over once one is ticked.
+  composerControls.register({ id: "composer.threads", order: 40, placement: "strip", component: SendToThreadsChip }),
   composerSendRoutes.register({
     id: "threads.send",
     order: 10,

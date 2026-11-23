@@ -69,13 +69,20 @@ describe("chat kind looks", () => {
   })
 
   it("gives a workshop the capability chip in place of who replies; a story chat's strip is unchanged", () => {
-    expect(strip("rp")).toEqual(["composer.model", "composer.preset", "composer.cache", "composer.next"])
+    expect(strip("rp")).toEqual([
+      "composer.next",
+      "composer.model",
+      "composer.preset",
+      "composer.context",
+      "composer.cache"
+    ])
     expect(strip("workshop")).toEqual([
+      "workshop.capabilities",
       "composer.model",
       "workshop.subagent-models",
       "composer.preset",
-      "composer.cache",
-      "workshop.capabilities"
+      "composer.context",
+      "composer.cache"
     ])
   })
 
@@ -202,10 +209,11 @@ describe("chat kind looks", () => {
           })
           try {
             expect(strip("synthetic/assistant")).toEqual([
+              "composer.next",
+              "workshop.capabilities",
               "composer.model",
               "composer.preset",
-              "workshop.capabilities",
-              "composer.next"
+              "composer.context"
             ])
             expect(kindHides("synthetic/assistant", "composer.cache")).toBe(true)
             expect(kindTitle("Harbor", "synthetic/assistant")).toBe("Assistant · Harbor")

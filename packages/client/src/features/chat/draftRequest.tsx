@@ -12,11 +12,10 @@ import type { DraftChatPreview } from "@dreamspan/shared/inspectorApi.ts"
 import type { AppRpcs } from "@dreamspan/shared/api.ts"
 import type { Rpc } from "effect/rpc"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Button, LinkButton } from "../../ui/Button.tsx"
+import { Button } from "../../ui/Button.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { useCaller } from "../editor/caller.ts"
-import { tokenizerText } from "../editor/tokenCounts.ts"
-import { compactTokens } from "./CacheIndicator.tsx"
+import { ContextPopover } from "./ContextChip.tsx"
 import { chipClass } from "./nextReplyStrip.tsx"
 import type { PendingComposerContext } from "./pendingComposerControls.tsx"
 
@@ -104,8 +103,6 @@ export function useDraftPreview(
   }
 }
 
-const VIEW_REQUEST_HINT = "Opens an approximate preview of your first request, message by message."
-
 const tokensOf = (preview: DraftChatPreview) => preview.request?.messages.reduce((sum, m) => sum + m.tokens, 0) ?? 0
 
 /** The strip's Context chip of a chat not sent yet: its first request's size, and the request. */
@@ -140,62 +137,22 @@ export function DraftContextChip({ draft }: PendingComposerContext) {
         <p className="text-sm">{failed ?? "Choose a model for this chat to see what your first send would send."}</p>
       </Popover>
     )
-  const tokens = tokensOf(preview)
   const budget = preview.budget ?? null
+  // The chat's own messages don't exist yet: no "messages fit" line.
   return (
-    <Popover
+    <ContextPopover
       open={open}
       onOpenChange={setOpen}
-      trigger={<span className={loading ? "opacity-60" : ""}>~{compactTokens(tokens)} tokens</span>}
-      triggerLabel={`Context: about ${tokens.toLocaleString()} tokens in your first request. Details`}
-      hint="An approximate preview of your first request. Nothing is sent to a model."
-      triggerClassName={chipClass()}
-      title="Context"
-    >
-      <div className="flex min-h-0 flex-col gap-2 overflow-y-auto text-sm">
-        <p>
-          About {tokens.toLocaleString()} tokens: what your first send would send
-          {preview.request.model ? ` to ${preview.request.model.model}` : ""}, with the greetings, your message and the
-          instructions for the reply.
-        </p>
-        {budget && (
-          <p className="text-muted">
-            The model's context holds {budget.maximum.toLocaleString()} tokens;{" "}
-            {budget.responseReserve.toLocaleString()} are kept for the reply.
-          </p>
-        )}
-        <p className="text-xs text-muted">
-          {preview.request.tokenizer ? tokenizerText(preview.request.tokenizer) : "An estimate."} Counted here: nothing
-          is sent until you send.
-        </p>
-        <p className="text-xs text-muted">
-          Random choices, the current time and automatic decisions can change it when you send.
-        </p>
-        {draft.requestHref ? (
-          <LinkButton
-            className="self-start"
-            href={draft.requestHref}
-            hint={VIEW_REQUEST_HINT}
-            onOpen={() => {
-              setOpen(false)
-              draft.openRequest()
-            }}
-          >
-            View request
-          </LinkButton>
-        ) : (
-          <Button
-            className="self-start"
-            hint={VIEW_REQUEST_HINT}
-            onClick={() => {
-              setOpen(false)
-              draft.openRequest()
-            }}
-          >
-            View request
-          </Button>
-        )}
-      </div>
-    </Popover>
+      request="first"
+      tokens={preview.size?.tokens ?? tokensOf(preview)}
+      maximum={budget?.maximum ?? null}
+      reserve={budget?.responseReserve ?? 0}
+      loading={loading}
+      parts={preview.size?.parts ?? []}
+      messages={null}
+      tokenizer={preview.size?.tokenizer ?? preview.request.tokenizer}
+      onViewRequest={draft.openRequest}
+      {...(draft.requestHref === undefined ? {} : { requestHref: draft.requestHref })}
+    />
   )
 }

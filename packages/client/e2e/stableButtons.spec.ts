@@ -138,7 +138,8 @@ for (const width of [1440, 390]) {
     const branch = page.getByRole("button", { name: /^Branch:.*switch branch$/ })
     await expect(branch).toBeDisabled()
     await hint(page, branch, "No other branches yet.")
-    await expect(page.getByRole("button", { name: "Cache unavailable", exact: true })).toBeDisabled()
+    // No dead cache chip: before any estimate there is none.
+    await expect(page.getByRole("button", { name: /^Cache/ })).toHaveCount(0)
     const composer = page.getByTestId("composer-controls")
     const guidance = composer.getByRole("switch", { name: "Guidance", exact: true })
     const send = composer.getByRole("button", { name: "Send", exact: true })
@@ -222,7 +223,9 @@ for (const width of [1440, 390]) {
     await expect(strip.getByRole("button", { name: /^(Choose a model$|Model: )/ })).toBeVisible()
     // The chips have their values, not the "…" they show while loading.
     await expect(strip.getByRole("button", { name: /: loading$/ })).toHaveCount(0)
-    const before = (await boxes(strip)).slice(0, 2)
+    // The model and preset chips, after Next (whose label names who replies): their sizes hold.
+    const sizes = async () => (await boxes(strip)).slice(1, 3).map(({ width, height }) => ({ width, height }))
+    const before = await sizes()
     await admin((api) =>
       Effect.gen(function* () {
         for (const name of ["Mira", "Wren"]) {
@@ -232,9 +235,10 @@ for (const width of [1440, 390]) {
       })
     )
     await expect(next).toBeEnabled()
-    expect((await boxes(strip)).slice(0, 2)).toEqual(before)
-    // Model, preset, cache and Next: Reply now is the empty Send, and Auto replies are in the Cast tab.
-    await expect(strip.locator("button")).toHaveCount(4)
+    expect(await sizes()).toEqual(before)
+    // Next, model and preset: Reply now is the empty Send, Auto replies are in the Cast tab, and
+    // with no model there's no request to size or cache, so no context or cache chip.
+    await expect(strip.locator("button")).toHaveCount(3)
     const controls = page.getByTestId("composer-controls")
     const emptySend = controls.getByRole("button", { name: / repl(?:y|ies)$/ })
     await expect(emptySend).toBeVisible()

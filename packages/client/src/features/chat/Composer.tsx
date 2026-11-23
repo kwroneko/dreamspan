@@ -22,6 +22,7 @@ import type { DraftState } from "@dreamspan/shared/drafts.ts"
 import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
+import { restedText } from "./restedText.ts"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
 import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
 import { buttonClass } from "../../ui/Button.tsx"
@@ -258,6 +259,8 @@ export function Composer({
     error: saveError,
     draftId
   } = useSyncExternalStore(draft.subscribe, draft.snapshot)
+  // The text once typing pauses, for the strip's context chip: keystrokes don't reach it.
+  const [typed] = useState(() => restedText(draft.subscribe, () => draft.snapshot().text))
   // A reply's guidance being edited: the box is still the composer draft (one box, one draft),
   // only aimed at a new version of that reply; the reply's guidance, if any, is typed into it.
   const editor = guidanceEditor(session)
@@ -630,6 +633,7 @@ export function Composer({
     draft: {
       append: (text) => draft.type(draft.snapshot().text + text)
     },
+    typed,
     compact: phone,
     recoverQueued: (withdrawn, images) => {
       if (images?.length) attachmentInput?.restore(images)
@@ -771,6 +775,7 @@ export function Composer({
                     : "Message…"
           }
           onChange={(event) => draft.type(event.currentTarget.value)}
+          onBlur={typed.flush}
           onKeyDown={onKeyDown}
         />
       </ComposerBox>

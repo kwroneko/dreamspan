@@ -25,10 +25,10 @@ const showInFiles = (path: string) => filesHref(parentOf(path), nameOf(path))
 export const register = () => [
   filesSources.register(httpFilesSource),
   userNoticeReceivers.register(filesNoticeReceiver),
-  // The working-folder chip after Model and Preset, before the cache chip (§2.2), workshops only.
+  // The working-folder chip after Model and Preset, before the next request's size and cache (§2.2), workshops only.
   composerControls.register({
     id: FOLDER_CHIP,
-    order: 25,
+    order: 35,
     placement: "strip",
     available: ({ view }) => kindShows(view.chat?.kind, FOLDER_CHIP),
     component: FolderChip

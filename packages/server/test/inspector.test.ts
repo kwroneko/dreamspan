@@ -10,7 +10,6 @@ import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, generateReply } from "./support/generation.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 import { presetDoc } from "./support/docs.ts"
-import { prepareTokenizer } from "../src/importer/tokenizer.ts"
 
 /** Reports a cache read, so the estimate counts as verified. */
 const completion = (_request: Recorded, res: Parameters<typeof sse>[0]) =>
@@ -181,10 +180,16 @@ describe("the cache-warmth estimate", () => {
       })
       const cold = yield* estimate(events, before, (w) => w?.changed != null)
       assert.strictEqual(cold!.changed!.reason, "Message 2 was edited, or another of its swipes chosen.")
-      const count = yield* Effect.promise(() => prepareTokenizer("o200k_base"))
-      assert.strictEqual(cold!.changed!.tokens, count("The road washed out.") + 3 + count(version.content) + 3)
-      // The total the chip shows it out of is the whole request, counted the same way.
-      assert.isAtLeast(cold!.requestTokens!, cold!.changed!.tokens)
+      // Counted as the request view counts those messages (calibrated by the replies' reported
+      // usage), so the chip's numbers are the inspector's.
+      const view = yield* api.GetNextRequest({ chatId: chat.id, leafSlotId: null })
+      const tokensOf = (content: string) => view!.messages.find((m) => m.content === content)!.tokens
+      assert.strictEqual(cold!.changed!.tokens, tokensOf("The road washed out.") + tokensOf(version.content))
+      // The total the chip shows it out of is the request view's total.
+      assert.strictEqual(
+        cold!.requestTokens!,
+        view!.messages.reduce((n, m) => n + m.tokens, 0)
+      )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

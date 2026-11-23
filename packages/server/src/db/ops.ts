@@ -234,7 +234,13 @@ import {
   ProxyMode
 } from "@dreamspan/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@dreamspan/shared/generation.ts"
-import { DraftChatPreview, NextContext, RunContext, VersionMetrics } from "@dreamspan/shared/inspectorApi.ts"
+import {
+  DraftChatPreview,
+  DraftRequest,
+  NextContext,
+  RunContext,
+  VersionMetrics
+} from "@dreamspan/shared/inspectorApi.ts"
 import {
   ActivityCursor,
   ActivityPage,
@@ -6533,6 +6539,21 @@ const ReadOpsOwn = RpcGroup.make(
       leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId))
     },
     success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The next reply's request at the leaf, as the inspector shows a sent one, counted as
+   * `CacheWarmth`'s `size` is. Nothing is written or sent. Null without a model, or when it
+   * can't be assembled.
+   */
+  Rpc.make("NextRequest", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId))
+    },
+    success: Schema.NullOr(DraftRequest),
     error: Schema.Union([NotFound, StorageError])
   }),
   /**

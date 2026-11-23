@@ -150,6 +150,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   GetMessageDraft: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetNetworkSettings: "User-only security, consent, account, credential or network configuration.",
   GetNextContext: "Not in W6's first exposures; use the bounded workshop read tools.",
+  GetNextRequest: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetRecoveredText: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetRevision: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetRolloutSteps: "Not in W6's first exposures; use the bounded workshop read tools.",

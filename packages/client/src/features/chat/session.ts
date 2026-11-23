@@ -1268,6 +1268,7 @@ export class ChatSession {
           ...(event.summaryNotes === undefined ? {} : { summaryNotes: event.summaryNotes }),
           ...(event.presetContext === undefined ? {} : { presetContext: event.presetContext }),
           ...(event.budget === undefined ? {} : { budget: event.budget }),
+          ...(event.size === undefined ? {} : { size: event.size }),
           ...(event.preset === undefined ? {} : { preset: event.preset }),
           ...(event.model === undefined ? {} : { model: event.model }),
           ...(event.images === undefined ? {} : { images: event.images }),

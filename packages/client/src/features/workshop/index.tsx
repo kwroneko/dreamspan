@@ -103,7 +103,7 @@ export const register = () => [
   // Beside the model chip, while subagents are allowed here (spec/SUBAGENTS.md §5.1a).
   composerControls.register({
     id: SUBAGENT_MODELS_CHIP,
-    order: 15,
+    order: 25,
     placement: "strip",
     available: ({ view }) => kindShows(view.chat?.kind, SUBAGENT_MODELS_CHIP),
     component: ({ session }) => <SavedSubagentModelsChip session={session} />
@@ -111,7 +111,7 @@ export const register = () => [
   // In a story, the same place, while its tools allow the story helper (spec/SUBAGENTS.md §9).
   composerControls.register({
     id: STORY_SUBAGENT_MODELS_CHIP,
-    order: 15,
+    order: 25,
     placement: "strip",
     // Where the workshop's chip isn't, with tools on and a chosen tools list (the default list
     // starts no subagents); the chip itself checks that an allowed tool does.
@@ -122,10 +122,10 @@ export const register = () => [
       view.cast.agentTools != null,
     component: ({ session }) => <StorySubagentModelsChip session={session} />
   }),
-  // After the cache chip, where Next stands in a story chat.
+  // First, where Next stands in a story chat: what the reply may do, before the model and preset.
   composerControls.register({
     id: CAPABILITY_CHIP,
-    order: 35,
+    order: 12,
     placement: "strip",
     available: ({ view }) => kindShows(view.chat?.kind, CAPABILITY_CHIP),
     component: CapabilityChip

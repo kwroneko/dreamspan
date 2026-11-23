@@ -2,7 +2,8 @@
 // prefix from the provider's cache, as one compact chip whose popover says why in plain words.
 // The server works the estimate out and pushes it; the countdown runs here from its TTL, and can
 // be turned off. A changed prefix shows whatever the TTL (DESIGN: even with none known); nothing
-// shows when what would be re-sent rounds to 0. Other parts of the chat add notes about what a
+// shows when what would be re-sent rounds to 0, or when there's no estimate (a provider whose cache
+// lifetime is unknown, before anything changed). Other parts of the chat add notes about what a
 // pending change will cost (`cacheNotes`: the insertion editor's re-read), shown in its popover.
 import type { CacheWarmth } from "@dreamspan/shared/inspectorApi.ts"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
@@ -177,19 +178,9 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
     const timer = setTimeout(() => setNow(Date.now()), expiresAt - Date.now())
     return () => clearTimeout(timer)
   }, [warm, countdown, expiresAt])
-  if (view.loading || (shown === null && notes.length === 0))
-    return (
-      <Button
-        variant="ghost"
-        aria-label="Cache unavailable"
-        className={chipClass()}
-        disabled
-        focusableWhenDisabled
-        hint={view.loading ? "Loading the next reply’s cache estimate…" : "No cache estimate is available yet."}
-      >
-        Cache
-      </Button>
-    )
+  // Nothing to say (no lifetime known for this provider, or nothing changed): no chip, never a
+  // dead one. It's last in the strip, so its coming and going moves nothing else.
+  if (view.loading || (shown === null && notes.length === 0)) return null
   if (waiting)
     return (
       <Popover
@@ -247,7 +238,7 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
             ? "Your next reply should read this chat from the provider's cache, at a lower price. Details"
             : "What your next reply can read from the provider's cache. Details"
       }
-      triggerClassName={chipClass(shown?.kind === "uncached" ? "warning" : warm ? "success" : "neutral")}
+      triggerClassName={chipClass(warm ? "success" : "neutral")}
       title={shown?.kind === "uncached" ? "Not cached" : warm ? "Cache warm" : "Cache"}
     >
       <div className="flex min-h-0 flex-col gap-2 overflow-y-auto text-sm">
@@ -272,18 +263,6 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
                 ? "The provider reported using its cache on the last request."
                 : "Assumed: the provider didn't report its cache on the last request."}
             </p>
-            <Button
-              variant="ghost"
-              className="h-7 self-start px-2 text-xs"
-              hint={
-                countdown
-                  ? "The chip stops showing the time left"
-                  : "The chip shows the time left before the cache expires"
-              }
-              onClick={toggle}
-            >
-              {countdown ? "Hide countdown" : "Show countdown"}
-            </Button>
           </>
         )}
         {notes.map((note) => (
@@ -291,6 +270,19 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
         ))}
         <p className="text-xs text-muted">An estimate.</p>
       </div>
+      {/* Outside the part that scrolls, so it always shows within the popover's padding. */}
+      {shown?.kind === "warm" && (
+        <Button
+          variant="ghost"
+          className="h-7 shrink-0 self-start px-2 text-xs"
+          hint={
+            countdown ? "The chip stops showing the time left" : "The chip shows the time left before the cache expires"
+          }
+          onClick={toggle}
+        >
+          {countdown ? "Hide countdown" : "Show countdown"}
+        </Button>
+      )}
     </Popover>
   )
 }

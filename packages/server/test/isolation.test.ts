@@ -2736,6 +2736,10 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           .GetNextContext({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId })
           .pipe(Effect.timeoutOption("1 second"))
         assert.isTrue(Option.isNone(held))
+        // A model to build it with (and so its size): other probes leave the defaults without one.
+        yield* owner.api.SetGenerationDefaults({
+          defaults: { model: { connection: owner.connectionId, model: owner.modelId }, preset: null }
+        })
         const own = yield* owner.api.GetNextContext({ chatId: owner.quiet.chatId, leafSlotId: owner.quiet.slotId })
         assert.strictEqual(own.leafSlotId, owner.quiet.slotId)
         assert.deepStrictEqual(Object.keys(own).sort(), [
@@ -2749,6 +2753,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           "model",
           "preset",
           "presetContext",
+          "size",
           "summarizedThrough",
           "warmth"
         ])
@@ -2775,6 +2780,37 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         if (own.preset) assert.deepStrictEqual(Object.keys(own.preset).sort(), ["name", "ref", "scope"])
         // The model is the owner's own, named from the owner's connection.
         if (own.model) assert.strictEqual(own.model.connection, owner.connectionId)
+      })
+  },
+  GetNextRequest: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.GetNextRequest({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.GetNextRequest({ chatId: actor.chat.chatId, leafSlotId: owner.chat.slotId }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.GetNextRequest({
+            chatId: actor.chat.chatId,
+            leafSlotId: actor.chat.slotId,
+            forkId: owner.chat.forkId
+          }),
+          "NotFound"
+        )
+        // A model to build it with: other probes leave the defaults without one.
+        yield* owner.api.SetGenerationDefaults({
+          defaults: { model: { connection: owner.connectionId, model: owner.modelId }, preset: null }
+        })
+        const own = yield* owner.api.GetNextRequest({ chatId: owner.quiet.chatId, leafSlotId: owner.quiet.slotId })
+        assert.isNotNull(own)
+        // Sources name only the owner's own messages.
+        for (const message of own!.messages)
+          for (const source of message.sources)
+            if (source.slotId !== null) assert.notInclude([actor.chat.slotId, actor.quiet.slotId], source.slotId)
       })
   },
   SubscribeChat: {
@@ -5830,6 +5866,16 @@ const storage: Record<
       assert.strictEqual(own.leafSlotId, owner.chat.replySlotId)
       assert.isNotNull(own.warmth)
       assert.strictEqual(own.warmth!.expiresAt, own.warmth!.lastRequestAt + 300_000)
+    }),
+  // The next request's view, which GetNextRequest reaches only after NextContextAccess.
+  NextRequest: (reader, actor, owner) =>
+    Effect.gen(function* () {
+      yield* refused(reader.NextRequest({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound")
+      yield* refused(
+        reader.NextRequest({ userId: actor.user.id, chatId: actor.chat.chatId, forkId: owner.chat.forkId }),
+        "NotFound"
+      )
+      assert.isNotNull(yield* reader.NextRequest({ userId: owner.user.id, chatId: owner.quiet.chatId }))
     })
 }
 

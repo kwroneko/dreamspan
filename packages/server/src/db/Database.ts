@@ -99,7 +99,8 @@ const BACKGROUND_READS: ReadonlySet<string> = new Set([
   "ShellCards",
   "ShellForks",
   "CacheWarmth",
-  "AssembleDraftChat"
+  "AssembleDraftChat",
+  "NextRequest"
 ])
 
 /**
