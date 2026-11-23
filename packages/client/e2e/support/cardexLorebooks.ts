@@ -11,6 +11,7 @@ import { asUser, type Client } from "./rpc.ts"
 import { ADMIN, apiLogin, startServer, withAdmin } from "./server.ts"
 import { openPanel } from "./panel.ts"
 import { expectLayout } from "./layoutAudit.ts"
+import { closeSection, openSection } from "./sourceFilters.ts"
 
 const freePort = () =>
   new Promise<number>((resolve, reject) => {
@@ -58,12 +59,14 @@ export function cardexLorebookTests() {
 
           // The Kind choice offers all four.
           await main.getByRole("button", { name: /^Filters/ }).click()
-          const kind = page.getByRole("group", { name: "Kind", exact: true })
+          const filterBar = main.getByRole("region", { name: "cardex filters", exact: true })
+          const kind = (await openSection(page, filterBar, "Kind")).getByRole("group", { name: "Kind", exact: true })
           for (const option of ["Characters and lorebooks", "Characters", "Characters with a lorebook", "Lorebooks"])
             await expect(kind.getByRole("button", { name: option, exact: true })).toBeVisible()
           await expectLayout(page, info, `lorebook-kind-${width}-${theme}`)
           await kind.getByRole("button", { name: "Lorebooks", exact: true }).click()
-          await page.getByRole("button", { name: "Close", exact: true }).click()
+          await closeSection(page, "Kind")
+          await filterBar.getByRole("button", { name: "Close", exact: true }).click()
           await expect(main.getByLabel("Filters set", { exact: true })).toContainText("Kind: Lorebooks")
           await expect(tile(first!.slug)).toBeVisible({ timeout: 30_000 })
 

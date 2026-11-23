@@ -310,6 +310,35 @@ const FILTER_HELP: Record<string, string> = {
   created_after: "Cards their creator made on or after this day, as far as cardex knows.",
   created_before: "Cards their creator made before this day, as far as cardex knows."
 }
+/**
+ * Where each criterion sits in the filter bar, modeled on the archive's public search page:
+ * sites, kind, rating, tokens, creators and the two date ranges up front; how the words are
+ * matched, the cover, any-of tags and the picture under More filters; the remaining switches
+ * in the bar's row of switches.
+ */
+const PLACEMENT: Record<string, { readonly group?: string; readonly more?: true }> = {
+  source: { group: "Sites" },
+  not_source: { group: "Sites" },
+  chub_verified: { group: "Sites" },
+  chub_recommended: { group: "Sites" },
+  kind: { group: "Kind" },
+  nsfw: { group: "Rating" },
+  tokens: { group: "Tokens" },
+  author: { group: "Creators" },
+  any_author: { group: "Creators" },
+  not_author: { group: "Creators" },
+  added_after: { group: "Added" },
+  added_before: { group: "Added" },
+  created_after: { group: "Created" },
+  created_before: { group: "Created" },
+  mode: { group: "Search", more: true },
+  fields: { group: "Search", more: true },
+  any_tags: { more: true },
+  has_cover: { more: true },
+  picture: { more: true }
+}
+const PLACED = Object.keys(PLACEMENT)
+const placedAt = (id: string) => (PLACED.includes(id) ? PLACED.indexOf(id) : PLACED.length)
 const EXTRA_LISTS = new Set(["fields", "not_source"])
 const EXTRA_TEXT = new Set([
   "any_tags",
@@ -475,7 +504,10 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
   return {
     text: true,
     tags: { include: named.has("tags"), exclude: named.has("not_tags"), suggest: true },
-    filters,
+    // In the bar's order: the placed criteria as listed above, then the switches.
+    filters: filters
+      .map((filter) => ({ ...filter, ...PLACEMENT[filter.id] }))
+      .sort((a, b) => placedAt(a.id) - placedAt(b.id)),
     sorts: SORTS.filter((s) => s.needs.every((n) => body.sorts.includes(n))).map((s) => ({
       id: s.id,
       label: s.label,

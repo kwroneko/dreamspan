@@ -1,6 +1,6 @@
 // Browsing a card source on home and in the sidebar (spec/CARD-SOURCES.md §3): the source's
 // capabilities, its results page by page, and the parts the shared character controls add
-// while a source is shown (its sorts, Filters and the panel, the chips, the results grid).
+// while a source is shown (its sorts, Filters, the results grid; the panel and chips are in filters.tsx).
 // Nothing here contacts a source unless its option is open: every call below needs a
 // source id, which is null otherwise (§5.1).
 import { useAtomValue } from "@effect/atom-react"
@@ -14,20 +14,16 @@ import type {
 } from "@dreamspan/shared/cardSources.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useAction } from "../../actions.tsx"
-import { AboutHint } from "../../ui/AboutHint.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { Switch } from "../../ui/Choice.tsx"
-import { Field, Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
-import { InlinePanel, pressedButtonClass } from "../../ui/InlinePanel.tsx"
+import { pressedButtonClass } from "../../ui/InlinePanel.tsx"
 import { ContextMenu, Menu, MenuCheckboxItem, MenuItem } from "../../ui/Menu.tsx"
-import { MultiSelect } from "../../ui/MultiSelect.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Alert, Badge, EmptyState } from "../../ui/Surface.tsx"
-import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { RemoteBrowse } from "../characters/homeSearch.ts"
 import { SortDirection, type SortOrder } from "../characters/cardBrowse.tsx"
 import { TILE_CLASS, TILE_SURFACE_CLASS, TileFace, useOpenCharacter } from "../characters/shellData.tsx"
@@ -44,8 +40,7 @@ import {
   type SourceProblem,
   useAdoptRemote,
   useAdoptRemoteLorebook,
-  useSourceCall,
-  problemText
+  useSourceCall
 } from "./remote.ts"
 
 /** The sources this user has on, in the registry's order: what Show offers after the filters. */
@@ -222,11 +217,8 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
 
 const numberFormat = new Intl.NumberFormat()
 
-const isRange = (value: SourceFilterValue | undefined): value is { readonly min?: number; readonly max?: number } =>
-  typeof value === "object" && !Array.isArray(value)
-
 /** What a source option shows once open: its reported total, "~" when it's an estimate. */
-const totalLabel = (results: Results | null) =>
+export const totalLabel = (results: Results | null) =>
   results?.total === undefined
     ? null
     : `${results.estimated ? "~" : ""}${numberFormat.format(results.total)}${results.capped ? "+" : ""}`
@@ -241,7 +233,7 @@ const filterCount = (query: SourceQuery | null, caps: SourceCapabilities | undef
         ([id, value]) => value !== false && !(caps?.ratings?.filterId === id && value === caps.ratings.default)
       ).length
 
-const requirementMet = (filter: SourceFilter, filters: SourceQuery["filters"]) => {
+export const requirementMet = (filter: SourceFilter, filters: SourceQuery["filters"]) => {
   if (filter.kind !== "toggle" || !filter.requires) return true
   const chosen = filters[filter.requires.filterId]
   const values = Array.isArray(chosen) ? chosen : typeof chosen === "string" ? [chosen] : []
@@ -406,487 +398,8 @@ export function SourceFiltersButton({
   )
 }
 
-/** A filter's label, with its explanation in a "?" beside it (the field rule). */
-function FilterLabel({ filter, id }: { filter: SourceFilter; id?: string }) {
-  return (
-    <div className="text-sm leading-5">
-      <span id={id} className="font-medium">
-        {filter.label}
-      </span>
-      {filter.about && (
-        <>
-          {" "}
-          <AboutHint heading={filter.label}>{filter.about}</AboutHint>
-        </>
-      )}
-    </div>
-  )
-}
-
-function RangeFilter({
-  filter,
-  value,
-  onChange
-}: {
-  filter: Extract<SourceFilter, { kind: "range" }>
-  value: { readonly min?: number; readonly max?: number } | undefined
-  onChange: (value: { min?: number; max?: number } | undefined) => void
-}) {
-  const id = useId()
-  const set = (side: "min" | "max", text: string) => {
-    const number = text.trim() === "" ? undefined : Number(text)
-    if (number !== undefined && !Number.isFinite(number)) return
-    const next = { ...value, [side]: number }
-    if (next.min === undefined) delete next.min
-    if (next.max === undefined) delete next.max
-    onChange(next.min === undefined && next.max === undefined ? undefined : next)
-  }
-  const unit = filter.unit ? ` (${filter.unit})` : ""
-  return (
-    <div role="group" aria-labelledby={id} className="flex min-w-0 flex-col gap-1.5">
-      <FilterLabel filter={filter} id={id} />
-      <div className="flex items-center gap-2">
-        <Input
-          type="number"
-          inputMode="numeric"
-          aria-label={`${filter.label}: at least${unit}`}
-          placeholder={filter.min === undefined ? "Min" : `Min ${filter.min}`}
-          value={value?.min ?? ""}
-          onChange={(event) => set("min", event.currentTarget.value)}
-        />
-        <span aria-hidden="true" className="text-muted">
-          –
-        </span>
-        <Input
-          type="number"
-          inputMode="numeric"
-          aria-label={`${filter.label}: at most${unit}`}
-          placeholder={filter.max === undefined ? "Max" : `Max ${filter.max}`}
-          value={value?.max ?? ""}
-          onChange={(event) => set("max", event.currentTarget.value)}
-        />
-      </div>
-    </div>
-  )
-}
-
-/** Suggestions share the existing inline buttons for tags and capability-declared text fields. */
-function useSuggestions(browse: SourceBrowse, kind: "tags" | "creators", prefix: string, enabled = true) {
-  const call = useSourceCall()
-  const sourceId = browse.info?.id ?? null
-  const key = `${sourceId}:${kind}:${prefix}`
-  const [state, setState] = useState<{
-    key: string
-    items: ReadonlyArray<{ value: string; label: string; count?: number }>
-    next: string | null
-    problem?: SourceProblem
-    loading?: boolean
-  }>({ key: "", items: [], next: null })
-  const [attempt, setAttempt] = useState(0)
-  const active = useRef<AbortController | null>(null)
-  const request = (page: string | null) => {
-    active.current?.abort()
-    const controller = new AbortController()
-    active.current = controller
-    setState((old) => ({ key, items: old.key === key ? old.items : [], next: page, loading: true }))
-    void call(
-      (client) => client("SourceSuggestions", { sourceId: sourceId!, kind, prefix, page }),
-      controller.signal
-    ).then((out) => {
-      if (!out || controller.signal.aborted) return
-      setState((old) => {
-        if (!out.ok) return { ...old, loading: false, problem: out.problem }
-        const previous = page && !out.value.reset && old.key === key ? old.items : []
-        const seen = new Set(previous.map((item) => item.value))
-        return {
-          key,
-          items: [...previous, ...out.value.items.filter((item) => !seen.has(item.value))],
-          next: out.value.next
-        }
-      })
-    })
-  }
-  useEffect(() => {
-    if (sourceId === null || !enabled) return
-    const timer = setTimeout(() => request(null), 200)
-    return () => {
-      clearTimeout(timer)
-      active.current?.abort()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the key identifies the request; call is a fresh closure
-  }, [key, enabled, attempt])
-  const current = enabled && state.key === key ? state : { items: [], next: null, problem: undefined, loading: false }
-  return {
-    ...current,
-    more: () => request(current.next),
-    retry: () => (current.next ? request(current.next) : setAttempt((n) => n + 1))
-  }
-}
-
-function SuggestedValues({
-  suggestions,
-  kind,
-  onChoose
-}: {
-  suggestions: ReturnType<typeof useSuggestions>
-  kind: "tags" | "creators"
-  onChoose: (value: string) => void
-}) {
-  return (
-    <div aria-label={`Suggested ${kind}`} className="flex min-w-0 flex-wrap gap-1">
-      {suggestions.items.map((item) => (
-        <Button
-          key={item.value}
-          variant="ghost"
-          className="h-auto min-h-7 max-w-full px-2 text-left text-xs whitespace-normal break-words"
-          hint={`Uses ${item.value} in this filter.`}
-          onClick={() => onChoose(item.value)}
-        >
-          {kind === "creators" ? `${item.label} (${item.value})` : item.label}
-          {item.count !== undefined && (
-            <span className="text-muted tabular-nums">{numberFormat.format(item.count)}</span>
-          )}
-        </Button>
-      ))}
-      {suggestions.problem ? (
-        <div className="w-full text-sm text-muted">
-          {problemText("the archive", suggestions.problem)}{" "}
-          <Button variant="ghost" hint="Asks for these suggestions again." onClick={suggestions.retry}>
-            Retry
-          </Button>
-        </div>
-      ) : suggestions.next ? (
-        <Button
-          variant="ghost"
-          className="h-7 px-2 text-xs"
-          hint={`Shows more ${kind} matching what you typed.`}
-          disabled={suggestions.loading}
-          onClick={suggestions.more}
-        >
-          More {kind}
-        </Button>
-      ) : null}
-    </div>
-  )
-}
-
-function TextFilter({
-  filter,
-  value,
-  onChange,
-  browse
-}: {
-  filter: Extract<SourceFilter, { kind: "text" }>
-  value: string
-  onChange: (value: string | undefined) => void
-  browse: SourceBrowse
-}) {
-  const parts = filter.suggestions?.multiple ? value.split(/(?<!\\),/) : [value]
-  const prefix = (parts.at(-1) ?? "").trim().replace(/\\(.)/g, "$1")
-  const suggestions = useSuggestions(browse, "creators", prefix, !!filter.suggestions && !!prefix)
-  const choose = (chosen: string) => {
-    if (!filter.suggestions?.multiple) return onChange(chosen)
-    const escaped = chosen.replace(/\\/g, "\\\\").replace(/,/g, "\\,")
-    onChange([...parts.slice(0, -1), escaped].join(","))
-  }
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <Field label={filter.label} about={filter.about}>
-        <Input
-          {...(filter.format === "date" ? { type: "date", "data-date-filter": filter.id } : {})}
-          value={value}
-          onChange={(event) => onChange(event.currentTarget.value || undefined)}
-        />
-      </Field>
-      {filter.suggestions && <SuggestedValues suggestions={suggestions} kind="creators" onChoose={choose} />}
-    </div>
-  )
-}
-
-/** The tag field: typing suggests the source's tags with their counts; Enter adds what's typed. */
-function TagField({ browse }: { browse: SourceBrowse }) {
-  const [text, setText] = useState("")
-  const suggestions = useSuggestions(browse, "tags", text.trim(), browse.caps?.tags.suggest === true)
-  const add = (tag: string) => {
-    const clean = tag.trim()
-    if (clean === "" || browse.remote.tags.includes(clean)) return
-    browse.change({
-      tags: [...browse.remote.tags, clean],
-      excludeTags: browse.remote.excludeTags.filter((t) => t !== clean)
-    })
-    setText("")
-  }
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <Field
-        label="Tags"
-        about="Adds a tag the cards must have. Click its chip to exclude it instead, and again to remove it."
-      >
-        <Input
-          value={text}
-          placeholder="Add a tag"
-          onChange={(event) => setText(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault()
-              add(text)
-            }
-          }}
-        />
-      </Field>
-      <SuggestedValues suggestions={suggestions} kind="tags" onChoose={add} />
-    </div>
-  )
-}
-
-/** More choices than this, and a several-choice filter is a picker rather than a row of buttons. */
-const LONG_CHOICES = 8
-
-/** Every criterion the source offers, generated from its capabilities (§2.3). */
-export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: string }) {
-  const caps = browse.caps
-  if (!browse.filtersOpen || !caps) return null
-  const filters = browse.query?.filters ?? {}
-  const set = (filterId: string, value: SourceFilterValue | undefined) => {
-    const next = { ...browse.remote.filters }
-    if (value === undefined) delete next[filterId]
-    else next[filterId] = value
-    browse.change({ filters: next })
-  }
-  return (
-    <InlinePanel id={id} title={`${browse.info?.name ?? ""} filters`} onClose={() => browse.setFiltersOpen(false)}>
-      <div className="grid min-w-0 gap-4 @xl:grid-cols-2">
-        {(caps.tags.include || caps.tags.exclude) && <TagField browse={browse} />}
-        {caps.filters.map((filter) => {
-          const value = filters[filter.id]
-          switch (filter.kind) {
-            case "choice":
-              return (
-                <div key={filter.id} className="flex min-w-0 flex-col gap-1.5">
-                  {filter.multi && filter.options.length > LONG_CHOICES ? (
-                    // A long list of choices: the existing picker, with a search past eight.
-                    <Field label={filter.label} about={filter.about}>
-                      <MultiSelect
-                        items={filter.options.map((o) => ({ value: o.value, label: o.label }))}
-                        value={Array.isArray(value) ? value : []}
-                        addLabel="Add"
-                        chosenLabel={`Chosen: ${filter.label.toLowerCase()}`}
-                        listLabel={`Choose: ${filter.label.toLowerCase()}`}
-                        explanation={filter.about}
-                        onValueChange={(chosen) => set(filter.id, chosen.length ? [...chosen] : undefined)}
-                      />
-                    </Field>
-                  ) : (
-                    <FilterLabel filter={filter} />
-                  )}
-                  {filter.multi && filter.options.length > LONG_CHOICES ? null : filter.multi ? (
-                    <Segmented
-                      multiple
-                      wrap
-                      label={filter.label}
-                      value={Array.isArray(value) ? value : []}
-                      onValueChange={(chosen) => set(filter.id, chosen.length ? chosen : undefined)}
-                      options={filter.options.map((o) => ({
-                        value: o.value,
-                        label: o.label,
-                        description: `Filters by ${filter.label.toLowerCase()}: ${o.label.toLowerCase()}.`
-                      }))}
-                    />
-                  ) : (
-                    <Segmented
-                      wrap
-                      label={filter.label}
-                      value={typeof value === "string" ? value : null}
-                      onValueChange={(chosen) => set(filter.id, chosen)}
-                      options={filter.options.map((o) => ({
-                        value: o.value,
-                        label: o.label,
-                        description: `Filters by ${filter.label.toLowerCase()}: ${o.label.toLowerCase()}.`
-                      }))}
-                    />
-                  )}
-                </div>
-              )
-            case "range":
-              return (
-                <RangeFilter
-                  key={filter.id}
-                  filter={filter}
-                  value={isRange(value) ? value : undefined}
-                  onChange={(range) => set(filter.id, range)}
-                />
-              )
-            case "toggle":
-              return (
-                <Switch
-                  key={filter.id}
-                  checked={value === true}
-                  disabled={!requirementMet(filter, filters)}
-                  onCheckedChange={(on) => set(filter.id, on ? true : undefined)}
-                  hint={
-                    !requirementMet(filter, filters)
-                      ? filter.requires!.about
-                      : value === true
-                        ? `Click to stop filtering by ${filter.label.toLowerCase()}`
-                        : `Click to show only cards that ${filter.label.toLowerCase().replace(/^has /, "have ")}`
-                  }
-                  {...(filter.about ? { about: filter.about } : {})}
-                >
-                  {filter.label}
-                </Switch>
-              )
-            case "text":
-              return (
-                <TextFilter
-                  key={filter.id}
-                  filter={filter}
-                  browse={browse}
-                  value={typeof value === "string" ? value : ""}
-                  onChange={(next) => set(filter.id, next)}
-                />
-              )
-          }
-        })}
-      </div>
-    </InlinePanel>
-  )
-}
-
-const chipClass =
-  "inline-flex h-7 min-w-0 max-w-full items-center gap-1 rounded-full border border-border bg-surface pr-0.5 pl-2.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-focus"
-
-function Chip({
-  children,
-  onRemove,
-  onClick,
-  hint
-}: {
-  children: ReactNode
-  onRemove: () => void
-  onClick?: (() => void) | undefined
-  hint?: string | undefined
-}) {
-  return (
-    <span
-      data-source-chip
-      data-layout-audit-ignore="inset: A chip's remove button sits in the pill's compact end, as in MultiSelect"
-      className={chipClass}
-    >
-      {onClick ? (
-        <Tooltip label={hint ?? ""}>
-          <button type="button" className="inline-flex min-w-0 items-center gap-1 outline-none" onClick={onClick}>
-            <span data-layout-name className="truncate">
-              {children}
-            </span>
-          </button>
-        </Tooltip>
-      ) : (
-        <span data-layout-name className="min-w-0 truncate">
-          {children}
-        </span>
-      )}
-      <IconButton
-        label="Remove"
-        hint="Removes this filter."
-        icon="close"
-        className="size-6! shrink-0"
-        onClick={onRemove}
-      />
-    </span>
-  )
-}
-
-const rangeText = (label: string, range: { readonly min?: number; readonly max?: number }) =>
-  range.min !== undefined && range.max !== undefined
-    ? `${label} ${numberFormat.format(range.min)}–${numberFormat.format(range.max)}`
-    : range.min !== undefined
-      ? `${label} ≥ ${numberFormat.format(range.min)}`
-      : `${label} ≤ ${numberFormat.format(range.max ?? 0)}`
-
-/** The filters set, as chips on one line under the search; nothing at all when none are (§3.2). */
-export function SourceChips({ browse }: { browse: SourceBrowse }) {
-  const caps = browse.caps
-  if (!caps) return null
-  const { remote } = browse
-  const ratings = caps.ratings
-  const effective = browse.query?.filters ?? {}
-  const chips: Array<ReactNode> = []
-  for (const tag of remote.tags)
-    chips.push(
-      <Chip
-        key={`+${tag}`}
-        hint={`Click to exclude ${tag}`}
-        onClick={
-          caps.tags.exclude
-            ? () =>
-                browse.change({
-                  tags: remote.tags.filter((t) => t !== tag),
-                  excludeTags: [...remote.excludeTags, tag]
-                })
-            : undefined
-        }
-        onRemove={() => browse.change({ tags: remote.tags.filter((t) => t !== tag) })}
-      >
-        +{tag}
-      </Chip>
-    )
-  for (const tag of remote.excludeTags)
-    chips.push(
-      <Chip
-        key={`-${tag}`}
-        hint={`Click to remove the ${tag} filter`}
-        onClick={() => browse.change({ excludeTags: remote.excludeTags.filter((t) => t !== tag) })}
-        onRemove={() => browse.change({ excludeTags: remote.excludeTags.filter((t) => t !== tag) })}
-      >
-        <Icon name="ban" />
-        <span className="sr-only">Not </span>
-        {tag}
-      </Chip>
-    )
-  for (const filter of caps.filters) {
-    const value = effective[filter.id]
-    if (value === undefined) continue
-    // The rating shows as a chip only when it isn't the source's own default (§5.3).
-    if (ratings?.filterId === filter.id && value === ratings.default) continue
-    const remove = () => {
-      const next = { ...remote.filters }
-      delete next[filter.id]
-      if (ratings?.filterId === filter.id && ratings.default !== null) next[filter.id] = ratings.default
-      browse.change({ filters: next })
-    }
-    const label =
-      filter.kind === "toggle"
-        ? filter.label
-        : filter.kind === "choice"
-          ? `${filter.label}: ${(Array.isArray(value) ? value : [String(value)])
-              .map((v) => filter.options.find((o) => o.value === v)?.label ?? v)
-              .join(", ")}`
-          : filter.kind === "range" && isRange(value)
-            ? rangeText(filter.label, value)
-            : `${filter.label}: ${String(value)}`
-    chips.push(
-      <Chip key={filter.id} onRemove={remove}>
-        {label}
-      </Chip>
-    )
-  }
-  if (chips.length === 0) return null
-  return (
-    <div aria-label="Filters set" className="flex min-w-0 flex-wrap items-center gap-1.5">
-      {chips}
-      <Button
-        variant="ghost"
-        className="h-7 px-2 text-xs"
-        hint="Removes every filter."
-        onClick={() => clearFilters(browse)}
-      >
-        Clear filters
-      </Button>
-    </div>
-  )
-}
-
-const clearFilters = (browse: SourceBrowse) => {
+/** Removes every filter: the content rating goes back to the source's default. */
+export const clearFilters = (browse: SourceBrowse) => {
   const ratings = browse.caps?.ratings
   browse.change({
     tags: [],

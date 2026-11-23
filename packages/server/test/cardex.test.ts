@@ -103,31 +103,32 @@ describe("v1 as card sources", () => {
   it.effect("capabilities: the filters a character browser offers, labelled, with v1's defaults", () =>
     Effect.gen(function* () {
       const caps = yield* fakeCardexAdapter(archive).capabilities(direct())
+      // In the filter bar's order, each with its place: a group's section, More filters, or the switches.
       assert.deepStrictEqual(
-        caps.filters.map((f) => [f.id, f.label]),
+        caps.filters.map((f) => [f.id, f.label, f.more ? "more" : (f.group ?? "")]),
         [
-          ["nsfw", "Rating"],
-          ["mode", "Match"],
-          ["tokens", "Tokens"],
-          ["exclude_forks", "Leave out forks"],
-          ["source", "Site"],
-          ["author", "Creator"],
-          ["fields", "Search in"],
-          ["kind", "Kind"],
-          ["not_source", "Exclude sites"],
-          ["any_tags", "Any of these tags"],
-          ["has_cover", "Cover"],
-          ["any_author", "Any of these creators"],
-          ["not_author", "Exclude creators"],
-          ["picture", "Picture"],
-          ["added_after", "Added after"],
-          ["added_before", "Added before"],
-          ["created_after", "Created after"],
-          ["created_before", "Created before"],
-          ["deleted_from_source", "Deleted from all sites"],
-          ["deleted_from_any_source", "Deleted from a site"],
-          ["chub_verified", "Chub verified"],
-          ["chub_recommended", "Chub recommended"]
+          ["source", "Site", "Sites"],
+          ["not_source", "Exclude sites", "Sites"],
+          ["chub_verified", "Chub verified", "Sites"],
+          ["chub_recommended", "Chub recommended", "Sites"],
+          ["kind", "Kind", "Kind"],
+          ["nsfw", "Rating", "Rating"],
+          ["tokens", "Tokens", "Tokens"],
+          ["author", "Creator", "Creators"],
+          ["any_author", "Any of these creators", "Creators"],
+          ["not_author", "Exclude creators", "Creators"],
+          ["added_after", "Added after", "Added"],
+          ["added_before", "Added before", "Added"],
+          ["created_after", "Created after", "Created"],
+          ["created_before", "Created before", "Created"],
+          ["mode", "Match", "more"],
+          ["fields", "Search in", "more"],
+          ["any_tags", "Any of these tags", "more"],
+          ["has_cover", "Cover", "more"],
+          ["picture", "Picture", "more"],
+          ["exclude_forks", "Leave out forks", ""],
+          ["deleted_from_source", "Deleted from all sites", ""],
+          ["deleted_from_any_source", "Deleted from a site", ""]
         ]
       )
       const rating = caps.filters.find((f) => f.id === "nsfw")!
