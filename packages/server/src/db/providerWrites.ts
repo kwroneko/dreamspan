@@ -3,7 +3,8 @@ import { admitRequest } from "./lcmBackfill.ts"
 // Connection, model and ledger write handlers (spec/PROVIDERS.md §2, §3, §9). They run
 // in the writer worker, each as one transaction. Secrets arrive already encrypted.
 import { uuidv7 } from "@dreamspan/shared/id.ts"
-import type { ConnectionSettings, ModelId } from "@dreamspan/shared/providers.ts"
+import { applyModelPatch } from "@dreamspan/shared/modelPatch.ts"
+import type { ConnectionSettings, ModelId, ModelOverrides } from "@dreamspan/shared/providers.ts"
 import { findProvider, providerChanges } from "@dreamspan/shared/providerDefinitions.ts"
 import { CurrentProviderDefinitions } from "../providers/definitions.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
@@ -413,6 +414,39 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
           RETURNING id`
         return { changed: changed.map((row) => row.id) }
       }).pipe(transaction(sql, "SetModelsHidden")),
+
+    EditModels: ({ userId, patches }) =>
+      Effect.gen(function* () {
+        const ids = [...new Set(patches.flatMap((patch) => patch.modelIds))]
+        // Every id must be one of the user's live models, or nothing changes.
+        const rows = yield* sql<{ id: ModelId; overrides_json: string }>`
+          SELECT m.id, m.overrides_json FROM models m JOIN connections c ON c.id = m.connection_id
+          WHERE m.id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
+            AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND c.purged_at IS NULL`
+        const stored = new Map(rows.map((row) => [row.id, JSON.parse(row.overrides_json) as Record<string, unknown>]))
+        const missing = ids.find((id) => !stored.has(id))
+        if (missing !== undefined) return yield* Effect.fail(new NotFound({ entity: "model", id: missing }))
+        // Each model's overrides as they were, and as the patches leave them.
+        const current = new Map(stored)
+        for (const patch of patches)
+          for (const id of patch.modelIds)
+            current.set(
+              id,
+              applyModelPatch(current.get(id)!, patch.paths, patch.values).next as Record<string, unknown>
+            )
+        const changed: Array<{ modelId: ModelId; paths: Array<ReadonlyArray<string>>; values: ModelOverrides }> = []
+        const paths = patches.flatMap((patch) => patch.paths)
+        for (const id of ids) {
+          const before = stored.get(id)!
+          const after = current.get(id)!
+          const { previous } = applyModelPatch(before, paths, after)
+          if (previous === null) continue
+          yield* sql`UPDATE models SET overrides_json = ${JSON.stringify(after)}, row_version = row_version + 1
+                     WHERE id = ${id}`
+          changed.push({ modelId: id, paths: previous.paths, values: previous.values as ModelOverrides })
+        }
+        return { changed }
+      }).pipe(transaction(sql, "EditModels")),
 
     SetAppSetting: ({ key, value }) =>
       writeSetting(sql, "app", "", key, value)

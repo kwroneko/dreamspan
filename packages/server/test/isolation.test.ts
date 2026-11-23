@@ -1325,6 +1325,15 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   SetModelsHidden: {
     probe: (actor, owner) => refused(actor.api.SetModelsHidden({ modelIds: [owner.modelId], hidden: true }), "NotFound")
   },
+  EditModels: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.EditModels({
+          patches: [{ modelIds: [owner.modelId], paths: [["vision"]], values: { vision: false } }]
+        }),
+        "NotFound"
+      )
+  },
   GetNetworkSettings: { adminOnly: (actor) => refused(actor.api.GetNetworkSettings(), "Forbidden") },
   SetNetworkSettings: {
     adminOnly: (actor, owner) =>

@@ -291,7 +291,7 @@ test("Edit N entries changes two settings at once, shows Mixed, and clears an em
   await expect(sticky).toBeDisabled()
   await expect(sticky).toHaveValue("")
   await expect(sticky).toHaveAttribute("placeholder", "Mixed")
-  await expect(dialog.locator("[data-setting=sticky] [data-mixed]")).toHaveAccessibleName("Mixed: 1 empty, 1 3")
+  await expect(dialog.locator("[data-setting=sticky] [data-mixed]")).toHaveAccessibleName("Differs: 1 empty, 1 3")
   // Order is shared? No: 10 and 20, also Mixed. Depth is shared: shown greyed.
   await expect(dialog.getByRole("spinbutton", { name: "Depth", exact: true })).toHaveValue("4")
   await expect(dialog.getByRole("button", { name: /^Apply to 0 entries/ })).toBeDisabled()

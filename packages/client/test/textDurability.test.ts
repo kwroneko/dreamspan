@@ -264,13 +264,24 @@ const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
   ],
   "features/connections/modelTable.tsx": [kept("usePlaceParam", "the model list's filter, in the URL (q)")],
   "features/connections/models.tsx": [kept("useUserDraft", "Add a model: model id")],
-  "features/connections/ModelSettingsEditor.tsx": times(
-    8,
-    kept("useUserDraft", "model settings: name, history target, seed, images, caching, routing lists")
-  ),
+  "features/connections/ModelSettingsEditor.tsx": [
+    ...times(
+      8,
+      kept(
+        "useUserDraft",
+        "model settings: name, history target, seed, images, caching, routing lists (Edit N…: useDurableForm)"
+      )
+    ),
+    ...times(
+      2,
+      kept("useDurableForm", "Edit N… on the model list: the models' own context window and output limit", [
+        "features/connections/ModelMassEdit.tsx"
+      ])
+    )
+  ],
   "features/connections/modelControls.tsx": times(
     4,
-    kept("useUserDraft", "model settings: a number, a limit, a row's name and value", [
+    kept("useUserDraft", "model settings: a number, a limit, a row's name and value (Edit N…: useDurableForm)", [
       "features/connections/ModelSettingsEditor.tsx"
     ])
   ),

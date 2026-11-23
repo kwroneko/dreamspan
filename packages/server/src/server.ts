@@ -20,6 +20,7 @@ import {
   AuthenticatedFilesApi,
   AuthenticatedChatEventsApi,
   AuthenticatedMessageVersionApi,
+  AuthenticatedModelEditApi,
   AuthenticatedMoveApi,
   AuthenticatedStImportPlanApi,
   AuthenticatedChatMergeApi,
@@ -107,7 +108,7 @@ import { makeComposerHandlers } from "./api/composer.ts"
 import { makeNoticeHandlers } from "./api/notices.ts"
 import { makeInspectorHandlers } from "./api/inspector.ts"
 import { Notices } from "./chat/Notices.ts"
-import { makeProviderHandlers, makeProviderListHandlers } from "./api/providers.ts"
+import { makeModelEditHandlers, makeProviderHandlers, makeProviderListHandlers } from "./api/providers.ts"
 import { makeStImportHandlers, makeStImportPlanHandlers } from "./api/stImport.ts"
 import {
   imageRoute as SourceImageRoute,
@@ -233,6 +234,7 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedWorkshopPresetApi.toLayer(makeWorkshopPresetHandlers),
   AuthenticatedMessageVersionApi.toLayer(makeMessageVersionHandlers),
   AuthenticatedMoveApi.toLayer(makeMoveHandlers),
+  AuthenticatedModelEditApi.toLayer(makeModelEditHandlers),
   AuthenticatedStImportPlanApi.toLayer(makeStImportPlanHandlers),
   AuthenticatedShellUpdatesApi.toLayer(
     Effect.map(makeChatSetupHandlers, ({ WatchShellCards, WatchShellForks }) => ({

@@ -108,6 +108,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   DiscardMessageDraft: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   DiscardSummaryDraft: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   EditModel: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  EditModels: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   EditQueued: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   EditSummary: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   EndFileDraft: "The editor's own unsaved text of a file; the assistant changes files with its file tools.",

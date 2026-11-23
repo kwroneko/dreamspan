@@ -74,6 +74,18 @@ export const makeProviderListHandlers = Effect.gen(function* () {
   }
 })
 
+/** Several models' settings at once (`AuthenticatedModelEditApi`): one writer transaction. */
+export const makeModelEditHandlers = Effect.gen(function* () {
+  const writer = yield* Writer
+  const warmth = yield* CacheWarmth
+  return {
+    EditModels: ({ patches }: { readonly patches: Parameters<typeof writer.EditModels>[0]["patches"] }) =>
+      Effect.flatMap(CurrentUser, (user) =>
+        writer.EditModels({ userId: user.id, patches }).pipe(Effect.tap(() => warmth.refreshUser(user.id, true)))
+      ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("EditModels")))
+  }
+})
+
 export const makeProviderHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer

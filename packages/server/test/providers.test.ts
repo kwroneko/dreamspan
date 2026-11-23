@@ -198,6 +198,131 @@ describe("connections", () => {
     }).pipe(Effect.provide(database()))
   )
 
+  it.effect("edits some settings of many models in one change, and undoes exactly that", () =>
+    Effect.gen(function* () {
+      const { writer, reader, ana, bo, create } = yield* setup
+      const conn = yield* create(ana)
+      const keys = Array.from({ length: 1200 }, (_, i) => `synthetic-${String(i).padStart(4, "0")}`)
+      yield* writer.SyncFetchedModels({
+        userId: ana,
+        connectionId: conn.id,
+        models: keys.map((key) => ({ key, upstream: {} })),
+        fetchedAt: 1
+      })
+      const all = yield* reader.ListModels({ userId: ana, connectionId: conn.id, includeHidden: true })
+      // Some already have their own settings: a name, a temperature, a stop string, a learned size.
+      yield* writer.EditModel({
+        userId: ana,
+        modelId: all[0]!.id,
+        overrides: { name: "Kept", settings: { samplers: { temperature: 0.3, top_p: 0.9 }, stop: ["END"] } },
+        expectedRowVersion: all[0]!.rowVersion
+      })
+      yield* writer.SetLearnedContext({ userId: ana, modelId: all[1]!.id, context: 9000, at: 5 })
+      yield* writer.EditModel({
+        userId: ana,
+        modelId: all[2]!.id,
+        overrides: { settings: { samplers: { temperature: 0.7 } }, vision: true },
+        expectedRowVersion: all[2]!.rowVersion
+      })
+      const before = new Map(
+        (yield* reader.ListModels({ userId: ana, connectionId: conn.id, includeHidden: true })).map((m) => [m.id, m])
+      )
+      const picked = all.slice(0, 1000).map((m) => m.id)
+
+      // Two paths: temperature set, the stop strings removed; nothing else on any model moves.
+      const edit = yield* writer.EditModels({
+        userId: ana,
+        patches: [
+          {
+            modelIds: picked,
+            paths: [
+              ["settings", "samplers", "temperature"],
+              ["settings", "stop"]
+            ],
+            values: { settings: { samplers: { temperature: 1.2 } } }
+          }
+        ]
+      })
+      assert.strictEqual(edit.changed.length, 1000)
+      const after = new Map(
+        (yield* reader.ListModels({ userId: ana, connectionId: conn.id, includeHidden: true })).map((m) => [m.id, m])
+      )
+      for (const id of picked) {
+        const model = after.get(id)!
+        assert.strictEqual(model.overrides.settings?.samplers?.temperature, 1.2)
+        assert.isUndefined(model.overrides.settings?.stop)
+        assert.strictEqual(model.rowVersion, before.get(id)!.rowVersion + 1)
+      }
+      assert.strictEqual(after.get(all[0]!.id)!.overrides.name, "Kept")
+      assert.strictEqual(after.get(all[0]!.id)!.overrides.settings?.samplers?.top_p, 0.9)
+      assert.deepStrictEqual(after.get(all[1]!.id)!.overrides.learned, { context: 9000, at: 5 })
+      assert.isTrue(after.get(all[2]!.id)!.overrides.vision)
+      // Models not picked are untouched.
+      for (const model of all.slice(1000)) assert.deepStrictEqual(after.get(model.id), before.get(model.id))
+      // What changed is reported with what it held: only the stop strings on the first model.
+      const first = edit.changed.find((entry) => entry.modelId === all[0]!.id)!
+      assert.deepStrictEqual(first.values, { settings: { samplers: { temperature: 0.3 }, stop: ["END"] } })
+      const plain = edit.changed.find((entry) => entry.modelId === all[5]!.id)!
+      assert.deepStrictEqual(plain.paths, [["settings", "samplers", "temperature"]])
+      assert.deepStrictEqual(plain.values, {})
+
+      // The same edit again changes nothing.
+      const again = yield* writer.EditModels({
+        userId: ana,
+        patches: [
+          {
+            modelIds: picked,
+            paths: [["settings", "samplers", "temperature"]],
+            values: { settings: { samplers: { temperature: 1.2 } } }
+          }
+        ]
+      })
+      assert.deepStrictEqual(again.changed, [])
+
+      // Undo: the previous values back, exactly, on exactly the models changed.
+      const undone = yield* writer.EditModels({
+        userId: ana,
+        patches: edit.changed.map((entry) => ({ modelIds: [entry.modelId], paths: entry.paths, values: entry.values }))
+      })
+      assert.strictEqual(undone.changed.length, 1000)
+      const restored = yield* reader.ListModels({ userId: ana, connectionId: conn.id, includeHidden: true })
+      for (const model of restored) assert.deepStrictEqual(model.overrides, before.get(model.id)!.overrides)
+
+      // Groups with different values in one change: each model gets its own.
+      yield* writer.EditModels({
+        userId: ana,
+        patches: [
+          { modelIds: [all[10]!.id], paths: [["maxImages"]], values: { maxImages: 2 } },
+          { modelIds: [all[11]!.id], paths: [["maxImages"]], values: { maxImages: 3 } }
+        ]
+      })
+      const grouped = yield* reader.ListModels({ userId: ana, connectionId: conn.id, includeHidden: true })
+      assert.strictEqual(grouped.find((m) => m.id === all[10]!.id)!.overrides.maxImages, 2)
+      assert.strictEqual(grouped.find((m) => m.id === all[11]!.id)!.overrides.maxImages, 3)
+
+      // One model of another user's in the batch: refused, and nothing changes.
+      const other = yield* create(bo)
+      const foreign = yield* writer.AddUserModel({ userId: bo, connectionId: other.id, key: "theirs", overrides: {} })
+      yield* fails(
+        writer.EditModels({
+          userId: ana,
+          patches: [{ modelIds: [...picked.slice(0, 20), foreign.id], paths: [["vision"]], values: { vision: false } }]
+        }),
+        "NotFound"
+      )
+      yield* fails(
+        writer.EditModels({
+          userId: bo,
+          patches: [{ modelIds: [picked[0]!], paths: [["vision"]], values: { vision: false } }]
+        }),
+        "NotFound"
+      )
+      const refused = yield* reader.ListModels({ userId: ana, connectionId: conn.id, includeHidden: true })
+      assert.deepStrictEqual(refused, grouped)
+      assert.deepStrictEqual((yield* reader.GetModel({ userId: bo, modelId: foreign.id })).overrides, {})
+    }).pipe(Effect.provide(database()))
+  )
+
   it.effect("credentials are their owner's alone", () =>
     Effect.gen(function* () {
       const { writer, reader, ana, bo, create } = yield* setup

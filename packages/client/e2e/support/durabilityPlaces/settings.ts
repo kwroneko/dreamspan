@@ -184,6 +184,23 @@ export const settingsPlaces = [
     })
   }),
   place({
+    name: "Models: Edit N…, a sampler's number",
+    source: "features/connections/ModelMassEdit.tsx",
+    setup: async (ctx) => {
+      const saved = await connection(ctx)
+      for (const n of [1, 2])
+        await ctx.rpc((api) => api.AddUserModel({ connectionId: saved.id, key: `mass-${n}-${ctx.tag}`, overrides: {} }))
+      return saved
+    },
+    open: async (page, saved, ctx) => {
+      await go(page, ctx, `/settings/connections/${saved.id}`)
+      await page.getByRole("checkbox", { name: "Select all shown", exact: true }).click()
+      await page.getByRole("button", { name: "Edit 2…", exact: true }).click()
+      return page.getByRole("dialog").getByRole("textbox", { name: "Temperature", exact: true })
+    },
+    shown: (page) => page.getByRole("dialog").getByRole("textbox", { name: "Temperature", exact: true })
+  }),
+  place({
     name: "Models: filter",
     source: "features/connections/modelTable.tsx:315",
     setup: async (ctx) => {

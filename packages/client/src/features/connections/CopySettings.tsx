@@ -9,17 +9,21 @@ import { type ModelSelection, useModelUse } from "../pickers/modelSelection.ts"
 
 export function CopySettingsButton({
   model,
+  label = "Copy settings from…",
+  hint = "Fill this form with another model’s settings: reasoning, lengths, samplers, stop strings and extra parameters. Nothing is saved until you press Save.",
   onCopy
 }: {
-  /** The model being edited: not offered as a source. */
-  model: Model
+  /** The model being edited: not offered as a source. None: every model is. */
+  model?: Model
+  label?: string
+  hint?: string
   /** The chosen model, as stored, and its name as the picker lists it. */
   onCopy: (source: Model, label: string) => void
 }) {
   const load = useAction()
   const { used, refresh } = useModelUse()
   const { choices, loaded } = useModelChoiceList(true)
-  const own = modelValue(model.connectionId, model.id)
+  const own = model ? modelValue(model.connectionId, model.id) : null
   const selection: ModelSelection = {
     loaded,
     value: null,
@@ -44,11 +48,11 @@ export function CopySettingsButton({
         trigger={
           <>
             <Icon name="copy" size={14} />
-            Copy settings from…
+            {label}
           </>
         }
         triggerLabel="Copy settings from another model"
-        hint="Fill this form with another model’s settings: reasoning, lengths, samplers, stop strings and extra parameters. Nothing is saved until you press Save."
+        hint={hint}
         side="bottom"
       />
       <ErrorAlert error={load.error} />
