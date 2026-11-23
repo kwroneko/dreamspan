@@ -5,7 +5,7 @@
 import type { ModelOverrides } from "@dreamspan/shared/providers.ts"
 
 export type Tri = "auto" | "yes" | "no"
-export const triOf = (value: boolean | undefined): Tri => (value === undefined ? "auto" : value ? "yes" : "no")
+const triOf = (value: boolean | undefined): Tri => (value === undefined ? "auto" : value ? "yes" : "no")
 export const flagOf = (tri: Tri) => (tri === "auto" ? undefined : tri === "yes")
 
 export type PrefillChoice = "auto" | NonNullable<ModelOverrides["prefill"]>
@@ -155,7 +155,7 @@ export const typeOf = (value: unknown) =>
             : "group"
 
 /** A stored value as a row shows it: text that reads as something else gets its quotes. */
-export const showTyped = (value: unknown): string => {
+const showTyped = (value: unknown): string => {
   if (typeof value === "string") {
     const reads = parseTyped(value)
     return reads === value ? value : `"${value}"`
