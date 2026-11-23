@@ -12,9 +12,10 @@ export function CardFavourite({ entityId }: { entityId: string }) {
   const card = AsyncResult.isSuccess(shell)
     ? [...shell.value.cards, ...shell.value.personas, ...shell.value.archived].find((c) => c.card.entityId === entityId)
     : undefined
-  // One group, so a wrapping row (the side panel's) never parts the star from the archive.
+  // One group, so a wrapping row (the side panel's) never parts the star from the archive. Its
+  // gap is the header row's, so the star, archive and save buttons sit evenly apart.
   return card ? (
-    <span className="inline-flex shrink-0 items-center">
+    <span className="inline-flex shrink-0 items-center gap-1">
       <FavouriteStar card={card} />
       <CardSurface placement="archive-toggle" entityId={entityId as EntityId} />
     </span>

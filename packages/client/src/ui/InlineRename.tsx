@@ -140,6 +140,7 @@ export function InlineRename({
             label={editLabel ?? `Rename ${label}`}
             hint={hint}
             icon="edit"
+            data-rename-pencil=""
             data-layout-overlay={
               lastLine ? "Pencil follows the text inside the blank part of a multiline heading's box" : undefined
             }

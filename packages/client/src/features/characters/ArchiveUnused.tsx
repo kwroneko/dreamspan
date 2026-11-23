@@ -215,8 +215,10 @@ function ArchiveDialog({ close }: { close: () => void }) {
   )
 }
 
-export function ArchiveUnused() {
-  const [open, setOpen] = useOpenPlace("archive-unused")
+export function ArchiveUnused({ place }: { place: string }) {
+  // Per host: Home and the sidebar can both show the Archived view, and one shared place opened
+  // two modal dialogs, each hiding the other from assistive technology.
+  const [open, setOpen] = useOpenPlace(`archive-unused:${place}`)
   return (
     <div>
       <Button hint="Review older unused cards to archive together" aria-pressed={open} onClick={() => setOpen(true)}>

@@ -15,8 +15,11 @@ export const sidebarFoot = defineSlot<Record<string, never>>("sidebar.foot")
 /** Actions above a single character's chats, outside group and branch scopes. */
 export const characterChatActions = defineSlot<{ entityId: EntityId; label: string }>("sidebar.character-chat-actions")
 
-/** Actions for the explicit Archived view, shared by Home and the sidebar. */
-export const archivedCardActions = defineSlot<Record<string, never>>("cards.archived-actions")
+/**
+ * Actions for the explicit Archived view, shared by Home and the sidebar. `place` names the host
+ * ("home", "sidebar"): both can show at once, so what one opens must not open in the other too.
+ */
+export const archivedCardActions = defineSlot<{ place: string }>("cards.archived-actions")
 
 /** Results offered after an ordinary local card search. */
 export const cardSearchExtras = defineSlot<{
