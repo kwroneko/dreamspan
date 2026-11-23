@@ -120,6 +120,29 @@ describe("the request inspector", () => {
       assert.strictEqual(missing._tag, "NotFound")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
+
+  it.live("lists routine truncation that the version's notes leave out (owner 2026-11-23)", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* mockProvider
+      const api = yield* client()
+      // A greeting and examples too long for the preset: history and examples are cut, nothing else.
+      const { version, chat } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        preset: { openai_max_context: 1000, openai_max_tokens: 200 },
+        greeting: "long ".repeat(2000),
+        example: "<START>\n{{user}}: Hi\n{{char}}: Short.\n<START>\n{{user}}: Hi\n{{char}}: " + "long ".repeat(2000)
+      })
+      assert.strictEqual(version.status, "complete")
+      const run = yield* api.GetRunContext({ versionId: version.id })
+      assert.deepStrictEqual(run.issues.map((i) => i.kind).toSorted(), ["examples_truncated", "history_truncated"])
+      const window = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+      const reply = window.entries.find((e) => e.version.id === version.id)!
+      assert.deepStrictEqual(reply.version.context, { issues: [] })
+      assert.deepStrictEqual(version.context, { issues: [] })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
 })
 
 describe("the cache-warmth estimate", () => {
