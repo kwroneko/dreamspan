@@ -5,7 +5,7 @@ import { DocumentSwitcher } from "./DocumentSwitcher.tsx"
 import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useCast } from "../chat/cast.ts"
-import { usePlaceParam } from "../../usePlaceParam.ts"
+import { usePlaceList, usePlaceParam } from "../../usePlaceParam.ts"
 import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 import type { PresetContext } from "@dreamspan/shared/inspectorApi.ts"
@@ -152,6 +152,18 @@ export function Editor({
     measure()
     return () => observer.disconnect()
   }, [loaded])
+  // A link from elsewhere at one field (the request inspector's: `?at=["description"]`, a
+  // preset's utility text) lands on it as a search visit does: its tab and section open, the
+  // caret at its start, scrolled to, its box flashed. Again on a reload: the URL is the place.
+  const [landing] = usePlaceList("at")
+  const landingKey = JSON.stringify(landing)
+  // Only a new target lands (once the entry has loaded), not each render of the same one.
+  const landingTarget = loaded && landing.length > 0 ? landingKey : null
+  const [landed, setLanded] = useState<string | null>(null)
+  if (landingTarget !== landed) {
+    setLanded(landingTarget)
+    if (landingTarget !== null) setSearchMatch({ path: landing, at: 0, length: 0, landed: true })
+  }
   const bookOnly = bookView && state.snapshot?.ref.kind === "card"
   const bookName = useText(store, ["character_book", "name"])?.trim()
   const bookTitle = bookName || `${state.snapshot?.ref.label ?? ""}'s lorebook`

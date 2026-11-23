@@ -15,6 +15,7 @@ import { Select, type SelectItem } from "../../ui/Select.tsx"
 import { chromeButton } from "../../ui/FieldFrame.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
+import { flashItem } from "../../ui/reveal.ts"
 import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { ReplayNotice } from "./ReplayNotice.tsx"
 import { FieldRevert, linesText } from "./FieldRevert.tsx"
@@ -178,6 +179,8 @@ export function TextField({
       if (parent instanceof HTMLDetailsElement) parent.open = true
     }
     const frame = requestAnimationFrame(() => {
+      const box = target.current?.querySelector<HTMLElement>("[data-field-frame]") ?? target.current
+      if (match.landed && box) flashItem(box)
       const input = target.current?.querySelector("input, textarea") as HTMLInputElement | HTMLTextAreaElement | null
       if (!input) return
       input.focus({ preventScroll: true })

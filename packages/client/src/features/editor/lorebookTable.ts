@@ -9,6 +9,14 @@ import { makeRegistry } from "../../registry.ts"
 import type { IconName } from "../../ui/Icon.tsx"
 import type { EditorStore } from "./store.ts"
 
+/** The URL state of a book's table at `root` in the item `refId`: its search, filter, sort and entry keys start with it. */
+export const entriesScope = (refId: string, root: FieldPath) => `entries:${refId}:${root.join("/")}`
+/**
+ * The URL key of the entry a book's page table opens and lands on (a link to it from elsewhere,
+ * such as the request inspector's): `{ [entryParam(ref, root)]: String(uid) }`.
+ */
+export const entryParam = (refId: string, root: FieldPath) => `${entriesScope(refId, root)}:entry`
+
 /** What a cell or an action gets: the entry as the store has it now, and where it is. */
 export interface LorebookEntryContext {
   readonly store: EditorStore
