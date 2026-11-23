@@ -40,7 +40,8 @@ for (const theme of ["light", "dark"] as const)
             .getByRole("textbox", { name: view === "Chats" ? "Find a chat" : "Find a character", exact: true })
             .filter({ visible: true })
           // The chats' field shares its row with the message-text toggle: the row is the field's place.
-          const field = view === "Chats" ? input.locator("xpath=..") : input
+          // (The row, not the clear button's span around the field.)
+          const field = view === "Chats" ? input.locator("xpath=ancestor::div[1]") : input
           const before = { switcher: await box(switcher), input: await box(field) }
           if (!process.env.LEFTSEARCH_BEFORE) {
             const host = await box(switcher.locator("../.."))
