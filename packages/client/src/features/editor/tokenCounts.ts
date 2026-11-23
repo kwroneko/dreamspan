@@ -9,6 +9,7 @@ import { useAtomValue } from "@effect/atom-react"
 import { COUNT_TOKENS_CHARS, COUNT_TOKENS_TEXTS, type TokenizerInfo } from "@dreamspan/shared/generation.ts"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useId, useState, useSyncExternalStore } from "react"
+import type { ModelChoice } from "@dreamspan/shared/lcmSettings.ts"
 import { AppClient } from "../../rpc.ts"
 import { defaultsAtom } from "../pickers/defaults.ts"
 import { type Caller, useCaller } from "./caller.ts"
@@ -29,7 +30,9 @@ export const refreshTokenCounts = () => {
 const cache = new Map<string, number>()
 const tokenizers = new Map<string, TokenizerInfo>()
 const inFlight = new Set<string>()
-let wanted: Array<{ readonly model: string; readonly text: string }> = []
+/** A chat's own model, which counts instead of the account's (a message edited in that chat). */
+export type CountModel = typeof ModelChoice.Type
+let wanted: Array<{ readonly model: string; readonly text: string; readonly choice: CountModel | undefined }> = []
 let timer: ReturnType<typeof setTimeout> | null = null
 let version = 0
 const listeners = new Set<() => void>()
@@ -57,23 +60,34 @@ async function send(call: Caller) {
   const epoch = calibrationVersion
   const batch = wanted
   wanted = []
-  for (let at = 0; at < batch.length; at += COUNT_TOKENS_TEXTS) {
-    const part = batch.slice(at, at + COUNT_TOKENS_TEXTS)
-    const result = await call((client) => client("CountTokens", { texts: part.map((w) => w.text) }))
-    for (const [i, w] of part.entries()) {
-      inFlight.delete(key(w.model, w.text))
-      if (result.ok && epoch === calibrationVersion) remember(key(w.model, w.text), result.value.counts[i] ?? 0)
+  // One request per model counting: the account's, and each chat's own.
+  const byModel = Map.groupBy(batch, (w) => w.model)
+  for (const group of byModel.values())
+    for (let at = 0; at < group.length; at += COUNT_TOKENS_TEXTS) {
+      const part = group.slice(at, at + COUNT_TOKENS_TEXTS)
+      const choice = part[0]!.choice
+      const result = await call((client) =>
+        client("CountTokens", { texts: part.map((w) => w.text), ...(choice ? { model: choice } : {}) })
+      )
+      for (const [i, w] of part.entries()) {
+        inFlight.delete(key(w.model, w.text))
+        if (result.ok && epoch === calibrationVersion) remember(key(w.model, w.text), result.value.counts[i] ?? 0)
+      }
+      if (result.ok && epoch === calibrationVersion) tokenizers.set(part[0]!.model, result.value.tokenizer)
     }
-    if (result.ok && epoch === calibrationVersion && part[0]) tokenizers.set(part[0].model, result.value.tokenizer)
-  }
   if (epoch !== calibrationVersion) {
-    for (const w of batch) requestCounts(call, w.model, [w.text])
+    for (const w of batch) requestCounts(call, w.model, [w.text], w.choice)
   }
   changed()
 }
 
-/** Asks for the texts not counted for `model` yet. */
-export function requestCounts(call: Caller, model: string, texts: ReadonlyArray<string>) {
+/** Asks for the texts not counted for `model` (the cache's key; `choice`, a chat's own model) yet. */
+export function requestCounts(
+  call: Caller,
+  model: string,
+  texts: ReadonlyArray<string>,
+  choice: CountModel | undefined = undefined
+) {
   let added = false
   for (const text of texts) {
     const k = key(model, text)
@@ -83,7 +97,7 @@ export function requestCounts(call: Caller, model: string, texts: ReadonlyArray<
       continue
     }
     inFlight.add(k)
-    wanted.push({ model, text })
+    wanted.push({ model, text, choice })
     added = true
   }
   if (added && timer === null) timer = setTimeout(() => void send(call), GATHER_MS)
@@ -95,15 +109,17 @@ const subscribe = (listener: () => void) => {
   return () => listeners.delete(listener)
 }
 
-/** The chat model, as the cache's key: counts follow it when it changes. */
 /** How each connection counts (`GetTokenCounting`): counts by each way are cached apart. */
 const countingAtom = AppClient.query("GetTokenCounting", undefined, { reactivityKeys: ["settings"] })
 
-/** The chat model, and which connection counts for it, as the cache's key: counts follow both. */
-const useModelKey = () => {
+/**
+ * The model that counts (`given`, a chat's own, else the account's), and which connection counts
+ * for it, as the cache's key: counts follow both.
+ */
+const useModelKey = (given: CountModel | undefined) => {
   const defaults = useAtomValue(defaultsAtom)
   const counting = useAtomValue(countingAtom)
-  const model = AsyncResult.isSuccess(defaults) ? defaults.value.model : null
+  const model = given ?? (AsyncResult.isSuccess(defaults) ? defaults.value.model : null)
   const via =
     AsyncResult.isSuccess(counting) && model !== null
       ? counting.value.find((choice) => choice.connectionId === model.connection)?.via
@@ -120,10 +136,13 @@ export interface TokenCounts {
   readonly pending: boolean
 }
 
-/** `texts`' token counts, counted once they rest (see the top of this file). */
-export function useTokenCounts(texts: ReadonlyArray<string>): TokenCounts {
+/**
+ * `texts`' token counts, counted once they rest (see the top of this file). `chatModel`: in a
+ * chat with its own model, that model counts (the one its next reply uses); else the account's.
+ */
+export function useTokenCounts(texts: ReadonlyArray<string>, chatModel?: CountModel): TokenCounts {
   const call = useCaller()
-  const model = useModelKey()
+  const model = useModelKey(chatModel)
   const joined = texts.join("\u0000")
   const id = useId()
   const [rested, setRested] = useState(texts)
@@ -135,7 +154,7 @@ export function useTokenCounts(texts: ReadonlyArray<string>): TokenCounts {
   }, [joined])
   const restedJoined = rested.join("\u0000")
   useEffect(() => {
-    requestCounts(call, model, rested)
+    requestCounts(call, model, rested, chatModel)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the rested texts, by value
   }, [call, model, restedJoined, calibrationVersion])
   const counted = rested.map((text) => (text === "" ? 0 : (cache.get(key(model, text)) ?? null)))

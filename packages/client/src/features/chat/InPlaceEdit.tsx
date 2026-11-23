@@ -345,7 +345,7 @@ export function EditControls({
         </Button>
       </div>
       <span className="flex-1" />
-      <EditTokens text={text} />
+      <EditTokens text={text} session={session} />
       {selection && <EditorTextActions text={text} selection={selected} shown size="row" />}
       {tools}
     </div>
@@ -353,14 +353,16 @@ export function EditControls({
 }
 
 /**
- * The edited text's tokens with the chat model's tokenizer, counted once typing rests, as a card
- * field's are (editor/tokenCounts.ts). Beside the editor's icon buttons, away from Save and
- * Cancel. Its width is reserved and its digits are tabular, so the row stays put as the number
- * changes; on a phone the number alone, its word in its name and explanation.
+ * The edited text's tokens with the tokenizer of this chat's model (the one its next reply uses,
+ * as the composer's model chip shows: its own, else the account's), counted once typing rests,
+ * as a card field's are (editor/tokenCounts.ts). Beside the editor's icon buttons, away from Save
+ * and Cancel. Its width is reserved and its digits are tabular, so the row stays put as the
+ * number changes; on a phone the number alone, its word in its name and explanation.
  */
-function EditTokens({ text }: { text: string }) {
+function EditTokens({ text, session }: { text: string; session: ChatSession }) {
   const texts = useMemo(() => [text], [text])
-  const { counts, tokenizer, pending } = useTokenCounts(texts)
+  const chatModel = useSyncExternalStore(session.subscribe, () => session.snapshot().cast?.model ?? undefined)
+  const { counts, tokenizer, pending } = useTokenCounts(texts, chatModel)
   const shown = tokensText(counts[0] ?? null, tokenizer, pending)
   return (
     <Tooltip label={`The tokens in this message's text. ${tokenizerText(tokenizer)}`}>

@@ -1,7 +1,8 @@
 import { segmentedTokenCount } from "../importer/tokenizer.ts"
 import { calibrateText } from "./textCalibration.ts"
 // Token counts for what the editors show (ARCHITECTURE §6 "Text tokens"): with the tokenizer of
-// the model the user's chats generate with (their generation default; a chat binds no other),
+// the model the user's chats generate with (their generation default, or the chat's own model
+// for a message edited in a chat that has one),
 // through the registered text counters, else o200k_base as an approximation, saying which. A
 // provider's counting endpoint is asked only where the user chose one for the connection: its
 // own provider or another connection's (owner, 2026-11-02: the text would go to that provider;
@@ -11,6 +12,7 @@ import { calibrateText } from "./textCalibration.ts"
 import { createHash } from "node:crypto"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { TokenizerInfo } from "@dreamspan/shared/generation.ts"
+import type { ModelChoice } from "@dreamspan/shared/lcmSettings.ts"
 import { Context, Effect, Layer, Option, Semaphore } from "effect"
 import { Reader } from "../db/Database.ts"
 import { countingVia } from "../db/tokenCounting.ts"
@@ -29,7 +31,9 @@ export class TextTokens extends Context.Service<
   {
     readonly count: (
       userId: UserId,
-      texts: ReadonlyArray<string>
+      texts: ReadonlyArray<string>,
+      /** A chat's own model, counting instead of the account's. */
+      model?: typeof ModelChoice.Type
     ) => Effect.Effect<{ readonly counts: ReadonlyArray<number>; readonly tokenizer: TokenizerInfo }>
   }
 >()("rp/providers/TextTokens") {
@@ -79,20 +83,24 @@ export class TextTokens extends Context.Service<
           }))
         )
 
-      /** The model chats generate with, by its connection and its key; none when there's no default. */
-      const chosenModel = (userId: UserId) =>
+      /**
+       * The model that counts, by its connection and its key: `given` (a chat's own), else the
+       * one chats generate with; none when there's no default. The model is read as the user's,
+       * and counts by its own connection.
+       */
+      const chosenModel = (userId: UserId, given: typeof ModelChoice.Type | undefined) =>
         Effect.gen(function* () {
-          const defaults = yield* reader.GetGenerationDefaults({ userId })
-          if (defaults.model === null) return Option.none()
-          const model = yield* reader.GetModel({ userId, modelId: defaults.model.model })
-          const via = countingVia(yield* reader.GetTokenCounting({ userId }), defaults.model.connection)
-          return Option.some({ connectionId: defaults.model.connection, modelKey: model.key, via })
+          const choice = given ?? (yield* reader.GetGenerationDefaults({ userId })).model
+          if (choice === null) return Option.none()
+          const model = yield* reader.GetModel({ userId, modelId: choice.model })
+          const via = countingVia(yield* reader.GetTokenCounting({ userId }), model.connectionId)
+          return Option.some({ connectionId: model.connectionId, modelKey: model.key, via })
         }).pipe(Effect.orElseSucceed(() => Option.none()))
 
       return TextTokens.of({
-        count: (userId, texts) =>
+        count: (userId, texts, given) =>
           Effect.gen(function* () {
-            const chosen = yield* chosenModel(userId)
+            const chosen = yield* chosenModel(userId, given)
             if (Option.isNone(chosen))
               return yield* approximate(texts, "No model is chosen for chats, so there's no model's tokenizer to use.")
             const { connectionId, modelKey, via } = chosen.value

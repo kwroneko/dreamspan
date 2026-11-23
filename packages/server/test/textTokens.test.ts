@@ -68,6 +68,36 @@ describe("text token counts", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
+  it.live("a chat's own model counts when it's given; without it, the account's", () =>
+    Effect.gen(function* () {
+      const provider = yield* mock((_request, res) => res.writeHead(500).end())
+      const api = yield* client()
+      // The chat's model first; then the account's, which `useModel` makes the default.
+      const own = yield* api.CreateConnection({
+        kind: "openrouter",
+        settings: {
+          name: "chat's",
+          baseUrl: provider.url,
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        },
+        apiKey: "synthetic-key"
+      })
+      const chatModel = yield* api.AddUserModel({ connectionId: own.id, key: "qwen/qwen3-8b", overrides: {} })
+      yield* useModel(api, "openai-chat", `${provider.url}/v1`, "gpt-4o")
+      const account = yield* api.CountTokens({ texts: ["Hello world!"] })
+      assert.strictEqual(account.tokenizer.id, "openai-encodings")
+      const chat = yield* api.CountTokens({
+        texts: ["Hello world!"],
+        model: { connection: own.id, model: chatModel.id }
+      })
+      assert.strictEqual(chat.tokenizer.id, "open-model-encodings")
+      assert.lengthOf(provider.requests(), 0)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
   it.live("marks segmented counts approximate, including cached results", () =>
     Effect.gen(function* () {
       const provider = yield* mock((_request, res) => res.writeHead(500).end())

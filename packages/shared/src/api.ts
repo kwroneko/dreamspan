@@ -16,6 +16,7 @@ import { MessagesApi, MoveApi } from "./messagesApi.ts"
 import { ExportFormatInfo } from "./libraryImport.ts"
 import { StSettingsImport } from "./modelSettings.ts"
 import { LcmApi, LcmSettingsInvalid, SummaryRequestApi } from "./lcm.ts"
+import { ModelChoice } from "./lcmSettings.ts"
 // The client-facing contract. Every UI action is an RPC in this group (DESIGN §7.7).
 import { Context, Schema } from "effect"
 import { DatabaseStartup } from "./databaseStartup.ts"
@@ -362,13 +363,16 @@ export class AppCoreApi extends RpcGroup.make(
   Rpc.make("GetGenerationDefaults", { success: GenerationDefaults, error: ServerError }),
   /**
    * Each text's tokens with the tokenizer of the model chats generate with, or an approximation
-   * that says so (ARCHITECTURE §6 "Text tokens"), for the counts the editors show.
+   * that says so (ARCHITECTURE §6 "Text tokens"), for the counts the editors show. `model`: a
+   * chat's own model, which counts instead (a message edited in that chat); without it, the
+   * account's.
    */
   Rpc.make("CountTokens", {
     payload: {
       texts: Schema.Array(Schema.String.check(Schema.isMaxLength(COUNT_TOKENS_CHARS))).check(
         Schema.isMaxLength(COUNT_TOKENS_TEXTS)
-      )
+      ),
+      model: Schema.optionalKey(ModelChoice)
     },
     success: Schema.Struct({ counts: Schema.Array(Schema.Int), tokenizer: TokenizerInfo }),
     error: ServerError
