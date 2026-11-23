@@ -19,13 +19,7 @@ import { Segmented } from "../../ui/Segmented.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { RangeSlider } from "../../ui/Slider.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
-import {
-  clearFilters,
-  requirementMet,
-  SourceFiltersButton,
-  totalLabel,
-  type SourceBrowse
-} from "./browse.tsx"
+import { clearFilters, requirementMet, SourceFiltersButton, totalLabel, type SourceBrowse } from "./browse.tsx"
 import { problemText, type SourceProblem, useSourceCall } from "./remote.ts"
 
 const numberFormat = new Intl.NumberFormat()
@@ -608,9 +602,7 @@ const summaryOf = (browse: SourceBrowse, panel: Panel): string => {
     }
     case "Sites": {
       const names = (values: ReadonlyArray<string>) =>
-        values.length <= 2
-          ? values.map((v) => labelOf(v)).join(", ")
-          : `${values.length} sites`
+        values.length <= 2 ? values.map((v) => labelOf(v)).join(", ") : `${values.length} sites`
       const shown = [
         list(first.id).length ? names(list(first.id)) : "",
         list(exclude).length ? `Exclude ${names(list(exclude))}` : ""

@@ -377,7 +377,9 @@ export function SourceResultLine({ browse }: { browse: SourceBrowse }) {
   return (
     <p data-source-result-line className="min-h-5 text-sm leading-5 text-muted">
       {total} {total === "1" ? "result" : "results"}
-      {pages !== null && pages > 1 && ` · page ${numberFormat.format(loaded)} of ${numberFormat.format(pages)}${results.capped ? "+" : ""}`}
+      {pages !== null &&
+        pages > 1 &&
+        ` · page ${numberFormat.format(loaded)} of ${numberFormat.format(pages)}${results.capped ? "+" : ""}`}
     </p>
   )
 }

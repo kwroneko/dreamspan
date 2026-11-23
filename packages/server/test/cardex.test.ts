@@ -424,7 +424,12 @@ describe("v1 as card sources", () => {
 
   it.effect("every parameter the archive describes has a control or is left out on purpose", () =>
     Effect.gen(function* () {
-      const raw = yield* Effect.promise(async () => (await fetch(`${archive.origin}/api/v1/capabilities`)).json())
+      const raw = yield* Effect.promise(
+        async () =>
+          (await (await fetch(`${archive.origin}/api/v1/capabilities`)).json()) as {
+            readonly filters: ReadonlyArray<unknown>
+          }
+      )
       // A parameter added here means the bar has no control for it: map it in cardex.ts's PLACEMENT.
       assert.deepStrictEqual(unmappedParameters(raw), [])
       // One the archive adds later is left out of the bar, never a button of its own.
