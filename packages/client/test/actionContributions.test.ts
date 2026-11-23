@@ -136,22 +136,32 @@ describe("composer contributions", () => {
     expect(send).toHaveBeenCalledTimes(2)
   })
 
-  it("the empty Send asks for a reply with guidance on too, never sends guidance, nor acts while guidance is edited", async () => {
+  it("with guidance on, Generate is the one action: empty, it writes the speaker's turn; Send never acts (owner, 2026-11-23)", async () => {
     const send = vi.fn(async () => {})
     const replyNow = vi.fn(async () => {})
+    const generate = vi.fn(async () => {})
     const context = {
       guidance: true,
       editingGuidance: false,
       hasText: false,
       send,
-      replyNow
+      replyNow,
+      generate
     } as unknown as ComposerControlContext
-    await invokeComposerControl("composer.send", context, "button")
-    expect(replyNow).toHaveBeenCalledTimes(1)
-    await invokeComposerControl("composer.send", { ...context, hasText: true }, "button")
-    await invokeComposerControl("composer.send", { ...context, editingGuidance: true }, "button")
+    expect(availableComposerControls("actions", context).map((c) => c.id)).not.toContain("composer.send")
+    // Empty, guidance on: the speaker's turn (Composer's generate asks for it with no direction).
+    for (const source of ["button", "keyboard"] as const)
+      await invokeComposerControl("composer.generate", context, source)
+    expect(generate).toHaveBeenCalledTimes(2)
+    // Send has no part in guidance mode, typed or empty, or while a reply's guidance is edited.
+    for (const patch of [{}, { hasText: true }, { editingGuidance: true }])
+      await invokeComposerControl("composer.send", { ...context, ...patch }, "keyboard")
     expect(send).not.toHaveBeenCalled()
+    expect(replyNow).not.toHaveBeenCalled()
+    // Guidance off, the empty Send still passes the turn.
+    await invokeComposerControl("composer.send", { ...context, guidance: false }, "button")
     expect(replyNow).toHaveBeenCalledTimes(1)
+    expect(send).not.toHaveBeenCalled()
   })
 
   it("pending Enter follows guidance through overridable registered actions", async () => {
