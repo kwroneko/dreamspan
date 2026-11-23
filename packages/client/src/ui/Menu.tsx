@@ -35,6 +35,17 @@ const useScrollClose = (controlled?: boolean, initial = false) => {
   return { setShown, anchor, actions }
 }
 
+/**
+ * Whether focus can go back to the trigger as the menu closes: not when it has moved on, out of
+ * the menu, to what an item opened (an editor, or a list opened in it during the menu's closing
+ * animation, which taking focus would close). Base UI makes this check itself only when no
+ * `finalFocus` is given, and the menu always gives one.
+ */
+const focusStayed = (popup: HTMLElement | null, trigger: HTMLElement | null) => {
+  const active = document.activeElement
+  return active === null || active === document.body || active === trigger || popup?.contains(active) === true
+}
+
 export function Menu({
   trigger,
   children,
@@ -135,7 +146,11 @@ export function Menu({
             aria-label={label}
             data-menu={marker}
             // Closed by its link's open menu: focus goes with what was opened, not back here.
-            finalFocus={() => (closedByLink.current ? false : finalFocus ? finalFocus() : true)}
+            finalFocus={() => {
+              if (closedByLink.current) return false
+              const chosen = finalFocus ? finalFocus() : true
+              return chosen === true ? focusStayed(popup, anchor.current) : chosen
+            }}
             className="max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none [&:not(:has(.menu-mark))_.menu-slot]:hidden transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
           >
             <MenuActionsContext value>{children}</MenuActionsContext>

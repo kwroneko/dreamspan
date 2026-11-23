@@ -4,7 +4,7 @@
 // next reply re-reads shows in the strip's cache chip while it's open.
 import type { EntityId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
 import type { InsertBody } from "@dreamspan/shared/messagesApi.ts"
-import { useEffect, useId, useState, useSyncExternalStore } from "react"
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import { AutoGrowTextarea } from "../../../ui/AutoGrowTextarea.tsx"
 import { Button } from "../../../ui/Button.tsx"
 import { Icon } from "../../../ui/Icon.tsx"
@@ -51,9 +51,18 @@ export function InsertEditor({
   const choice = useComposerChoice(session)
   const phone = usePhone()
   const fieldId = useId()
+  const form = useRef<HTMLFormElement>(null)
+  // What had focus as it opened: the text box takes focus once its saved text is read, unless
+  // focus has moved out of the editor meanwhile (into the speaker list, say, which it would close).
+  const [focusedAtOpen] = useState(() => document.activeElement)
   useEffect(() => {
-    if (!loading) document.getElementById(fieldId)?.focus()
-  }, [loading, fieldId])
+    if (loading) return
+    const active = document.activeElement
+    // On a phone the editor is a sheet, which takes focus itself as it opens.
+    const frame = form.current?.closest("[role='dialog']") ?? form.current
+    if (active === null || active === document.body || active === focusedAtOpen || frame?.contains(active))
+      document.getElementById(fieldId)?.focus()
+  }, [loading, fieldId, focusedAtOpen])
   const [picked, setPicked] = useState<EntityId | null | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   // When it opened: whether the cache is still warm is read as of then.
@@ -169,6 +178,7 @@ export function InsertEditor({
   const shown = error ?? draftError
   const body = (
     <form
+      ref={form}
       aria-label={title}
       data-testid="insert-editor"
       className="flex flex-col gap-2"
