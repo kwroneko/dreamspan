@@ -15,10 +15,10 @@ import { type FieldPath, parseField } from "@dreamspan/shared/editing.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import type { TabKind } from "../workbench/kinds.ts"
 
-export const FIELD_TAB_PATH = /^\/library\/([^/]+)\/field$/
-export const NOTE_TAB_PATH = /^\/chats\/([^/]+)\/notes\/([^/]+)\/field$/
-export const SUMMARY_TAB_PATH = /^\/chats\/([^/]+)\/summaries\/([^/]+)\/text$/
-export const INSTRUCTION_TAB_PATH = /^\/chats\/([^/]+)\/instruction$/
+const FIELD_TAB_PATH = /^\/library\/([^/]+)\/field$/
+const NOTE_TAB_PATH = /^\/chats\/([^/]+)\/notes\/([^/]+)\/field$/
+const SUMMARY_TAB_PATH = /^\/chats\/([^/]+)\/summaries\/([^/]+)\/text$/
+const INSTRUCTION_TAB_PATH = /^\/chats\/([^/]+)\/instruction$/
 
 export interface FieldTabTarget {
   readonly refId: RefId
