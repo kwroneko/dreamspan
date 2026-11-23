@@ -8,7 +8,17 @@ import { showActions } from "./support/message.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { replaceEditorText, textBoxValue } from "./support/textbox.ts"
 
-const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400", FAKE_GENERATOR_TOKENS: "160" })
+// The generator's prose is fixed: a line, a list, a quote and two paragraphs. Up to the quote the
+// reply's stored text wraps as its rendered text does, at both widths. From there it may not: the
+// quote's border narrows its rendered lines, as a list's indent, a table's rows or the marks of
+// italics and bold can elsewhere, and an edit as tall as the text can scroll the clicked line only
+// so far back to its place (ui/holdCaret.ts).
+const server = serverPerFile({
+  ...withAdmin,
+  FAKE_GENERATOR_TPS: "400",
+  FAKE_GENERATOR_TOKENS: "160",
+  FAKE_GENERATOR_SEED: "10"
+})
 
 const paragraph = (n: number) =>
   `Paragraph ${n}: the tide comes in over the **grey stones**, and the rope by the quay creaks as the boats knock together. Nobody on the pier looks up.`
@@ -19,25 +29,39 @@ const MESSAGE = [
   "Last of all, the rope again: the rope that held the skiff."
 ].join("\n\n")
 
-/** The place in the viewport of letter `into` of the `nth` rendered occurrence of `word` in `body`. */
+/**
+ * The place in the viewport of letter `into` of the `nth` rendered occurrence of `word` in `body`,
+ * scrolled to the middle of the screen. Read once the list has stopped moving, and on the word: the
+ * list measures the rows that came into view and adjusts its scroll over the next frames (after a
+ * reply, back to its end), so a place read at once is where the word no longer is, and a
+ * double-click there lands a line or more away, or off the message.
+ */
 const wordPoint = (body: Locator, word: string, nth: number, into: number) =>
   body.evaluate(
-    (node, { word, nth, into }) => {
+    async (node, { word, nth, into }) => {
       const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT)
       let seen = 0
       for (let text = walker.nextNode(); text; text = walker.nextNode()) {
         const content = text.textContent!
         for (let at = content.indexOf(word); at >= 0; at = content.indexOf(word, at + 1)) {
           if (seen++ !== nth) continue
-          const range = document.createRange()
-          range.setStart(text, at)
-          range.setEnd(text, at + word.length)
-          ;(text.parentElement as HTMLElement).scrollIntoView({ block: "center" })
           const letter = document.createRange()
           letter.setStart(text, at + into)
           letter.setEnd(text, at + into + 1)
-          const rect = letter.getBoundingClientRect()
-          return { x: rect.left + 1, y: rect.top + rect.height / 2, top: rect.top }
+          const frame = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+          for (let attempt = 0; attempt < 10; attempt++) {
+            ;(text.parentElement as HTMLElement).scrollIntoView({ block: "center" })
+            let rect = letter.getBoundingClientRect()
+            for (let still = 0; still < 6;) {
+              await frame()
+              const next = letter.getBoundingClientRect()
+              still = next.top === rect.top && next.left === rect.left ? still + 1 : 0
+              rect = next
+            }
+            const point = { x: rect.left + 1, y: rect.top + rect.height / 2, top: rect.top }
+            if (document.caretPositionFromPoint(point.x, point.y)?.offsetNode === text) return point
+          }
+          throw new Error(`${word} #${nth} doesn't stay on screen`)
         }
       }
       throw new Error(`no ${word} #${nth}`)
@@ -150,7 +174,8 @@ for (const width of [1440, 390])
       await expect(editor).toHaveCount(0)
     }
 
-    // A reply's second version (a swipe), in the generator's markdown: a word found once in it.
+    // A reply's second version (a swipe), in the generator's markdown: a word found once in it, in
+    // the paragraphs and list before its quote (see `server`).
     const reply = page.getByRole("article", { name: "Reply", exact: true })
     await showActions(reply)
     await reply
@@ -161,8 +186,13 @@ for (const width of [1440, 390])
     await settled(page)
     const replyBody = reply.locator(".markdown")
     const word = await replyBody.evaluate((node) => {
-      const words: string[] = node.textContent!.match(/\p{L}{6,}/gu) ?? []
-      const once = words.filter((candidate) => words.indexOf(candidate) === words.lastIndexOf(candidate))
+      const words = (text: string | null): string[] => text?.match(/\p{L}{6,}/gu) ?? []
+      const all = words(node.textContent)
+      const blocks = [...node.children]
+      const quote = blocks.findIndex((block) => !/^(P|UL|OL)$/.test(block.tagName))
+      if (quote < 0) throw new Error("no quote in the reply")
+      const before = blocks.slice(0, quote).flatMap((block) => words(block.textContent))
+      const once = before.filter((candidate) => all.indexOf(candidate) === all.lastIndexOf(candidate))
       if (once.length === 0) throw new Error("no word found once")
       return once[Math.floor(once.length / 2)]!
     })
@@ -176,3 +206,44 @@ for (const width of [1440, 390])
     await reply.getByRole("button", { name: "Cancel" }).click()
     await expect(replyEditor).toHaveCount(0)
   })
+
+// A double-click begun on the plain text shown while the message's renderer loads, and finished
+// on the rendered text that replaced it (a slow phone): the edit opens at the word first pressed.
+test("a double-click across the renderer's load opens the edit at the word first pressed", async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats`)
+  await page.getByLabel("Title of the new chat").fill("Keeper slow")
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await replaceEditorText(page.getByLabel("Message", { exact: true }), MESSAGE)
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await expect(page.getByRole("article", { name: "Reply", exact: true })).toHaveCount(1)
+  await settled(page)
+
+  // The page again, its renderer held back until the first click is in.
+  let release = () => {}
+  const loaded = new Promise<void>((done) => (release = done))
+  await page.route(/\/StMarkdown-[^/]*\.js$/, async (route) => {
+    await loaded
+    await route.continue()
+  })
+  await page.reload()
+  const mine = page.getByRole("article", { name: "Your message", exact: true })
+  const body = mine.locator(".markdown")
+  await expect(body).toContainText("**every cormorant**")
+  const source = MESSAGE.indexOf("cormorant")
+  const point = await wordPoint(body, "cormorant", 0, 4)
+  await page.mouse.move(point.x, point.y)
+  await page.mouse.down({ clickCount: 1 })
+  await page.mouse.up({ clickCount: 1 })
+  release()
+  await expect(body).toContainText("every cormorant")
+  await expect(body).not.toContainText("**every cormorant**")
+  await page.mouse.down({ clickCount: 2 })
+  await page.mouse.up({ clickCount: 2 })
+  const editor = mine.getByRole("textbox", { name: "Message text" })
+  await expect(editor).toBeFocused()
+  await expect.poll(async () => (await caretOf(editor)).head).toBeGreaterThanOrEqual(source)
+  expect((await caretOf(editor)).head).toBeLessThanOrEqual(source + "cormorant".length)
+})
