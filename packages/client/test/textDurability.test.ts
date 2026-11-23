@@ -81,7 +81,7 @@ const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
   "features/editor/controls.tsx": [
     { durable: "EditorStore", what: "TextField: code-editor box" },
     { durable: "EditorStore", what: "TextField: prose Textarea" },
-    { durable: "EditorStore", what: "LargeField: Open large dialog's box (dialog itself is React state)" },
+    { durable: "EditorStore", what: "FieldTabEditor: a field in its own tab, the same store and draft as in place" },
     { durable: "EditorStore", what: "LinesField" }
   ],
   "features/editor/LorebookEntryDetails.tsx": [

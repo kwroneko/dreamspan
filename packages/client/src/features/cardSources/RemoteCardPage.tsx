@@ -10,6 +10,7 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Badge, Card, EmptyState } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
+import { linkMenuProps } from "../../ui/linkMenuState.ts"
 import { useTitle } from "../shell.tsx"
 import { AboutHint } from "../../ui/AboutHint.tsx"
 import { useCapabilities, useSourceList } from "./browse.tsx"
@@ -18,6 +19,8 @@ import {
   type Adopted,
   problemText,
   recentAtom,
+  REMOTE_EDITOR_HINT,
+  remoteEditorHref,
   remoteImageUrl,
   type SourceProblem,
   useAdoptRemote,
@@ -222,6 +225,13 @@ export function RemoteCardPage() {
               >
                 Add to my cards
               </Button>
+            ) : null}
+            {mine === null ? (
+              <Tooltip label={REMOTE_EDITOR_HINT}>
+                <a href={remoteEditorHref(sourceId, remoteId)} {...linkMenuProps} className={buttonClass("ghost")}>
+                  Open in the editor
+                </a>
+              </Tooltip>
             ) : (
               <Tooltip label={`Opens your ${summary.name}.`}>
                 <Link to="/cards/$entityId" params={{ entityId: mine.entityId }} className={buttonClass("primary")}>

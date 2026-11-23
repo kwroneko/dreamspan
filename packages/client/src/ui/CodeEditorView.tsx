@@ -10,9 +10,8 @@ import { bareText, proseTheme } from "./codeTheme.ts"
 import { loadLanguage } from "./codeLanguages.ts"
 import { FieldRevertButton } from "./FieldRevertButton.tsx"
 import { holdCaretAt } from "./holdCaret.ts"
-import { Dialog } from "./Dialog.tsx"
-import { chromeButton, FieldFrame } from "./FieldFrame.tsx"
-import { IconButton } from "./Tooltip.tsx"
+import { FieldFrame } from "./FieldFrame.tsx"
+import { ExpandLink } from "./ExpandLink.tsx"
 import { HeightGrip } from "./HeightGrip.tsx"
 
 /** One persistent view: controlled echoes never reset selection or undo history. */
@@ -27,13 +26,10 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
   // the box has focus, none once it's left for another box, which keeps it unseen.
   const reportSelection = props.onSelectionChange
   useEffect(() => reportSelection?.(selection), [reportSelection, selection])
-  // Open large (owner, 2026-11-02): every prose editor's text in a box filling the middle of the
-  // screen, bound to the same value and changes, so it's the same draft with the same history.
-  const [large, setLarge] = useState(false)
   const [reverting, setReverting] = useState(false)
-  const expand = props.expand !== false && props.textActions !== false && !props.readOnly
-  // A corner grip sets the box's height, as a textarea's corner does.
-  const resizable = props.resizable !== false
+  // A corner grip sets the box's height, as a textarea's corner does; a box filling its place
+  // (`fill`, a field's own tab) takes that place's height instead.
+  const resizable = props.resizable !== false && !props.fill
   const strip =
     props.textActions !== false ||
     props.tools !== undefined ||
@@ -64,7 +60,7 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
   }, [])
   return (
     <div
-      className="group/text flex min-w-0 flex-col"
+      className={`group/text flex min-w-0 flex-col ${props.fill ? "min-h-0 flex-1" : ""}`}
       onFocus={onFocus}
       onBlur={onBlur}
       // A key comes from inside, so the editor has focus: its selection as it is now.
@@ -83,6 +79,7 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
         // The text actions and the field's own controls in the strip inside its bottom border.
         <FieldFrame
           side="bottom"
+          className={props.fill ? "min-h-0 flex-1" : ""}
           strip={strip}
           status={props.status}
           grip={
@@ -117,48 +114,17 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
                   }}
                 />
               )}
-              {expand && (
-                <IconButton
-                  label={`Open ${props.label} large`}
-                  hint={`Opens ${props.label} large over the page, to write in a bigger box; it's the same text.`}
-                  icon="expand"
-                  className={chromeButton}
-                  onClick={() => setLarge(true)}
-                />
-              )}
+              {props.expandTab !== undefined && <ExpandLink label={props.label} {...props.expandTab} />}
             </>
           }
         >
           <div
             data-layout-audit-ignore="inset: Editor surface fills its own bordered field"
             ref={host}
-            className="min-w-0 overflow-hidden rounded-md"
+            className={`min-w-0 overflow-hidden rounded-md ${props.fill ? "min-h-0 flex-1" : ""}`}
             style={cornerGrip ? ({ "--editor-grip-room": "8px" } as CSSProperties) : undefined}
           />
         </FieldFrame>
-      )}
-      {large && (
-        <Dialog
-          open
-          onOpenChange={(open) => !open && setLarge(false)}
-          title={props.label}
-          wide
-          // Back to the box in place, where the same text is.
-          finalFocus={() => {
-            requestAnimationFrame(() => controller.current?.focus())
-            return false
-          }}
-        >
-          <CodeEditorView
-            {...props}
-            expand={false}
-            autoFocus
-            selection={undefined}
-            minHeight="min(65dvh, 48rem)"
-            fullHeight
-            resizable={false}
-          />
-        </Dialog>
       )}
     </div>
   )
@@ -304,6 +270,13 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
   // within the cap, until a double-click on the grip returns to that.
   let chosenHeight: number | null = null
   const size = () => {
+    // Filling its place (a field's own tab): as tall as that, scrolling inside.
+    if (props.fill) {
+      host.style.setProperty("--editor-height", "100%")
+      host.style.setProperty("--editor-max-height", "100%")
+      host.style.setProperty("--editor-min-height", props.minHeight ?? "100%")
+      return
+    }
     if (chosenHeight !== null) {
       host.style.setProperty("--editor-height", `${chosenHeight}px`)
       host.style.setProperty("--editor-max-height", "none")

@@ -27,6 +27,11 @@ export interface CardTab {
   readonly component: ComponentType<CardTabProps>
   /** Whether a field of the card is in this tab: search's Go to opens the tab that holds it. */
   readonly holds?: (path: FieldPath) => boolean
+  /**
+   * Shown for a card opened for reading only (editor/readOnly.ts: a card on a card source): its
+   * panel shows the card without offering changes. Other tabs are left out there.
+   */
+  readonly readable?: boolean
 }
 
 export const cardEditorTabs = makeRegistry<CardTab>()

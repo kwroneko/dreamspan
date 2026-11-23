@@ -53,12 +53,19 @@ export interface RouteEntry {
    * by the route, so a screen added later (a plugin's too) can't fall out of a path list.
    */
   readonly fill?: boolean
+  /**
+   * Under the column header, the screen fills the height and scrolls inside itself: a text box
+   * taking a tab's whole height (a field's own tab), as an editor opened from a chat does.
+   */
+  readonly fillBelowHeader?: boolean
 }
 
 declare module "@tanstack/react-router" {
   interface StaticDataRouteOption {
     /** RouteEntry.fill. */
     fill?: boolean
+    /** RouteEntry.fillBelowHeader. */
+    fillBelowHeader?: boolean
   }
 }
 
@@ -156,7 +163,11 @@ export const buildRouter = (
         const search = entry.retainSearch
           ? { search: { middlewares: [retainSearchParams([...entry.retainSearch])] } }
           : {}
-        const shared = { component: component(entry), staticData: { fill: entry.fill === true }, ...search }
+        const shared = {
+          component: component(entry),
+          staticData: { fill: entry.fill === true, fillBelowHeader: entry.fillBelowHeader === true },
+          ...search
+        }
         const route =
           entry.path === undefined
             ? createRoute({ getParentRoute: () => parent, id: entry.id, ...shared })

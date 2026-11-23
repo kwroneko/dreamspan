@@ -41,8 +41,13 @@ export interface CodeEditorProps {
   tools?: ReactNode
   /** At the strip's start: "edited", the token count. */
   status?: ReactNode
-  /** False: no Open large in the strip. Prose that can be edited has it (owner, 2026-11-02). */
-  expand?: boolean | undefined
+  /**
+   * The URL of a tab holding this text on its own (owner, 2026-11-23: a field's expand button
+   * "opens Description in its own tab"): given, the strip has the button, a link to it.
+   */
+  expandTab?: { readonly href: string; readonly open: () => void } | undefined
+  /** Fills its container's height (a column flex box), its text scrolling inside: a field's own tab. */
+  fill?: boolean | undefined
   /**
    * In place of the text it edits (a message's edit): no border, strip, gutter or padding of its
    * own, the font, size, line height and colour of what's around it, a blank line between

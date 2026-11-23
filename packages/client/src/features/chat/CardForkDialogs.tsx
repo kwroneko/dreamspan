@@ -2,6 +2,8 @@ import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import { useSession } from "../../session.ts"
 import { showCardSaved, type CardSaved } from "../editor/cardSaved.ts"
 import { useAtomValue } from "@effect/atom-react"
+import { remoteOf } from "@dreamspan/shared/cardSources.ts"
+import { REMOTE_EDITOR_HINT } from "../cardSources/remote.ts"
 import type { CastCard } from "@dreamspan/shared/chat.ts"
 import type { ChatCard } from "@dreamspan/shared/chatSetupApi.ts"
 import { useNavigate } from "@tanstack/react-router"
@@ -51,10 +53,13 @@ export function EditChatCard({ session, card, info, presentation }: ChatCardActi
     })
   }
   const label = `Open ${card.name} in the full editor`
+  // A card on a source, not added yet, shows there for reading (editor/ReadOnlyCard.tsx).
   const hint =
-    presentation === "header"
-      ? "Opens this card in the large editor."
-      : "Edit every field of the card, in a tab beside the chat."
+    remoteOf(card.entityId) !== null
+      ? REMOTE_EDITOR_HINT
+      : presentation === "header"
+        ? "Opens this card in the large editor."
+        : "Edit every field of the card, in a tab beside the chat."
   const href = info
     ? workspace
       ? workspace.href(info.refId)

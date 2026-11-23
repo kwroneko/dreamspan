@@ -380,8 +380,6 @@ function WriteEditor({
             quietMarkers: true,
             // Text just added to your version: marked and scrolled to, focus left where it is.
             flash: added,
-            // In place in the chat, already as wide as the message: no Open large.
-            expand: false,
             onChange: (value) => draft.setText(value)
           }}
         />

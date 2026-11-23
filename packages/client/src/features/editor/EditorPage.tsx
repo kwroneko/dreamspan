@@ -32,7 +32,6 @@ import { WindowClose } from "../../ui/WindowClose.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card } from "../../ui/Surface.tsx"
-import { useSession } from "../../session.ts"
 import { useTitle } from "../shell.tsx"
 import { CardFavourite } from "../characters/CardFavourite.tsx"
 import { shellAtom } from "../characters/shellData.tsx"
@@ -56,7 +55,9 @@ import { SearchNavigation, type SearchMatch } from "./searchNavigation.ts"
 import { SearchDialog } from "./SearchDialog.tsx"
 import { lorebookScopes, presetScopes } from "./searchScopes.ts"
 import { BookName } from "./LorebookPanelEditor.tsx"
-import { EditorStore, useEditorState, useLeaveGuard, useText } from "./store.ts"
+import { type EditorStore, useEditorState, useLeaveGuard, useText } from "./store.ts"
+import { readOnlyRef, useSharedEditorStore } from "./sharedStore.ts"
+import { ReadOnlyCardEditor } from "./ReadOnlyCard.tsx"
 import { editorActions, editorNotices } from "./editorSlots.ts"
 
 const CARD_BOOK = ["character_book"]
@@ -110,8 +111,8 @@ export function Editor({
   const cast = useCast()
   const shell = useAtomValue(shellAtom)
   const call = useCaller()
-  const userId = useSession().user.id
-  const [store] = useState(() => suppliedStore ?? new EditorStore(refId, userId, call))
+  // The one store of the entry on the page, so a field's own tab edits the same text (sharedStore.ts).
+  const store = useSharedEditorStore(refId, suppliedStore)
   const [searchMatch, setSearchMatch] = useState<SearchMatch | null>(null)
   // Every dialog is URL state, so a reload opens it again: the fork's names are a durable draft.
   const [dialog, setDialog] = usePlaceParam("editorDialog", "", ["", "history", "search", "fork"])
@@ -205,6 +206,8 @@ export function Editor({
   }
   if (state.snapshot === null) return <Loading label="Opening the editor…" onRetry={() => void store.load()} />
   const { ref, usedByChats, variants } = state.snapshot
+  // A card on a card source, not added yet: for reading (ReadOnlyCard.tsx).
+  if (store.readOnly && ref.kind === "card") return <ReadOnlyCardEditor store={store} call={call} />
 
   /**
    * A preset's and a lorebook's search sits in the sticky bar, with what it looks in (owner,
@@ -544,11 +547,22 @@ export function EditorPage() {
   const shownFocus = typeof focus === "string" ? focus : undefined
   // Opened from a chat (PresetWorkspace): the chat's stores and context while it's open, and
   // a Close that returns to it.
-  if (typeof chat === "string" && chat) {
+  const fromChat = typeof chat === "string" && chat !== ""
+  // A source's card opened from a chat's panel: for reading, never through the chat's editable
+  // store; its tab still scrolls on its own, as one opened from a chat does.
+  if (fromChat && readOnlyRef(refId ?? ""))
+    return (
+      <EnsurePortraitViewer>
+        <BoundScroll>
+          <Editor key={refId} refId={refId as RefId} focus={shownFocus} />
+        </BoundScroll>
+      </EnsurePortraitViewer>
+    )
+  if (fromChat) {
     const close = tab && workbench ? () => workbench.close(tab.tabId) : undefined
     return (
       <EnsurePortraitViewer>
-        <ChatBoundEditor key={refId} refId={refId as RefId} focus={shownFocus} chatId={chat} onClose={close}>
+        <ChatBoundEditor key={refId} refId={refId as RefId} focus={shownFocus} chatId={chat as string} onClose={close}>
           {(bound) =>
             own && !bound.session ? (
               <BoundScroll>

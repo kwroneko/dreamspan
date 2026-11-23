@@ -43,6 +43,7 @@ export const registerCardTabs = () => [
     description:
       "What goes into the prompt: description, personality, scenario, example messages and the card's own prompts.",
     component: panel("definition"),
+    readable: true,
     holds: top("description", "personality", "scenario", "mes_example", "system_prompt", "post_history_instructions")
   }),
   cardEditorTabs.register({
@@ -51,6 +52,7 @@ export const registerCardTabs = () => [
     label: "Greetings",
     description: "The first message, alternate greetings, and greetings for group chats.",
     component: panel("greetings"),
+    readable: true,
     holds: top("first_mes", "alternate_greetings", "group_only_greetings")
   }),
   cardEditorTabs.register({
@@ -60,6 +62,7 @@ export const registerCardTabs = () => [
     description:
       "What isn't prompt text: creator's notes, tags, creator, talkativeness in group chats, where the card came from.",
     component: panel("metadata"),
+    readable: true,
     holds: (path) => top("creator_notes", "tags", "creator", "extensions")(path) && !skills(path)
   }),
   cardEditorTabs.register({
@@ -68,6 +71,7 @@ export const registerCardTabs = () => [
     label: "Lorebook",
     description: "The card's own lorebook, which travels with it.",
     component: panel("lorebook"),
+    readable: true,
     holds: top("character_book")
   }),
   cardEditorTabs.register({

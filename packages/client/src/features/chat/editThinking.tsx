@@ -126,7 +126,6 @@ function ThinkingField(props: EditThinkingProps) {
           base: editableThinking(source),
           autoFocus: state.focus,
           quietMarkers: true,
-          expand: false,
           rows: 3,
           tools: (
             <IconButton
