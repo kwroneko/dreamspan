@@ -594,7 +594,8 @@ describe("provider quirks", () => {
         cacheWrite: 20,
         cacheWriteLong: 5,
         output: 7,
-        reasoning: null
+        // No thinking came, so none was spent (Anthropic gives no count of its own).
+        reasoning: 0
       })
       // Built-in price for claude-sonnet-5-5 (Anthropic's page, over pi-ai's $0.20 read): $2 in, $10 out,
       // $0.10 read, $2.50 write (5 min), $4 write (1 h).

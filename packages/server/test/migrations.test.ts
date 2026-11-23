@@ -165,7 +165,8 @@ describe("0002_files", () => {
           "attachment_paths",
           "share_invitations",
           "share_birth",
-          "guidance_target"
+          "guidance_target",
+          "reasoning_stats"
         ]
       )
       // The existing row is kept, an image by default.
@@ -445,7 +446,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0008_attachment_paths",
       "0009_share_invitations",
       "0010_share_birth",
-      "0011_guidance_target"
+      "0011_guidance_target",
+      "0012_reasoning_stats"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -519,6 +521,7 @@ describe("0005_preview_macro", () => {
         "0009_share_invitations": _last,
         "0010_share_birth": _last10,
         "0011_guidance_target": _later11,
+        "0012_reasoning_stats": _later12,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -556,6 +559,7 @@ describe("0006_persona_locks", () => {
         "0009_share_invitations": _last,
         "0010_share_birth": _last10,
         "0011_guidance_target": _later11,
+        "0012_reasoning_stats": _later12,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -604,6 +608,7 @@ describe("0007_contract_records", () => {
         "0009_share_invitations": _last,
         "0010_share_birth": _last10,
         "0011_guidance_target": _later11,
+        "0012_reasoning_stats": _later12,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -631,6 +636,7 @@ describe("0008_attachment_paths", () => {
         "0009_share_invitations": _later,
         "0010_share_birth": _later10,
         "0011_guidance_target": _later11,
+        "0012_reasoning_stats": _later12,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -655,6 +661,7 @@ describe("0009_share_invitations", () => {
         "0009_share_invitations": _new,
         "0010_share_birth": _last10,
         "0011_guidance_target": _later11,
+        "0012_reasoning_stats": _later12,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -680,7 +687,12 @@ describe("0010_share_birth", () => {
   it.effect("adds birth times to shares and invitations and a declined mark, keeping what's there", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0010_share_birth": _new, "0011_guidance_target": _later11, ...before } = migrations
+      const {
+        "0010_share_birth": _new,
+        "0011_guidance_target": _later11,
+        "0012_reasoning_stats": _later12,
+        ...before
+      } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       for (const user of ["u", "v"])
         yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES (${user}, ${user}, 'Owner', 'user', 0)`
@@ -704,7 +716,7 @@ describe("0011_guidance_target", () => {
   it.effect("adds the reply a composer's guidance is for, null on the drafts already there", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0011_guidance_target": _new, ...before } = migrations
+      const { "0011_guidance_target": _new, "0012_reasoning_stats": _later12, ...before } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'chat', 'active', 0)`
@@ -714,6 +726,33 @@ describe("0011_guidance_target", () => {
       assert.deepStrictEqual(yield* sql`SELECT id, content, guidance_slot_id FROM drafts`, [
         { id: "d", content: "Typed.", guidance_slot_id: null }
       ])
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
+describe("0012_reasoning_stats", () => {
+  it.effect("adds the reasoning estimate mark and first reasoning/reply times, frozen once closed", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { "0012_reasoning_stats": _new, ...before } = migrations
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* Effect.scoped(Layer.build(Migrations))
+      const columns = (yield* sql<{ name: string; dflt_value: string | null }>`PRAGMA table_info(llm_requests)`).filter(
+        (c) => ["reasoning_estimated", "first_reasoning_at", "first_reply_at"].includes(c.name)
+      )
+      assert.deepStrictEqual(
+        columns.map((c) => [c.name, c.dflt_value]),
+        [
+          ["reasoning_estimated", "0"],
+          ["first_reasoning_at", null],
+          ["first_reply_at", null]
+        ]
+      )
+      const [trigger] = yield* sql<{
+        sql: string
+      }>`SELECT sql FROM sqlite_master WHERE name = 'llm_requests_closed_frozen_reasoning'`
+      assert.include(trigger!.sql, "OLD.status <> 'running'")
     }).pipe(Effect.provide(layer()))
   )
 })
@@ -733,7 +772,8 @@ describe("released migrations", () => {
       "migrationAttachmentPaths.ts",
       "migrationShareInvitations.ts",
       "migrationShareBirth.ts",
-      "migrationGuidanceTarget.ts"
+      "migrationGuidanceTarget.ts",
+      "migrationReasoningStats.ts"
     ]
     for (const module of modules)
       assert.deepStrictEqual(

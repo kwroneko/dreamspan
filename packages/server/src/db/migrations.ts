@@ -12,6 +12,7 @@ import { attachmentPathsMigration } from "./migrationAttachmentPaths.ts"
 import { shareInvitationsMigration } from "./migrationShareInvitations.ts"
 import { shareBirthMigration } from "./migrationShareBirth.ts"
 import { guidanceTargetMigration } from "./migrationGuidanceTarget.ts"
+import { reasoningStatsMigration } from "./migrationReasoningStats.ts"
 import { rebuildTable, type OutsideStep } from "./tableRebuild.ts"
 
 /**
@@ -50,7 +51,9 @@ export const migrationDefinitions = {
   // spec/FILES-AND-ENVIRONMENT.md §1.4: a share also bound to its folder's birth time; declined invitations kept for the owner's view.
   "0010_share_birth": { statements: shareBirthMigration },
   // DESIGN §2.2 (owner, 2026-11-21): the reply a composer's guidance is written for, kept with its draft.
-  "0011_guidance_target": { statements: guidanceTargetMigration }
+  "0011_guidance_target": { statements: guidanceTargetMigration },
+  // A reply's reasoning apart in its generation figures: whether its count is an estimate, and when its first reasoning and reply tokens came.
+  "0012_reasoning_stats": { statements: reasoningStatsMigration }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 
 const runAll = (statements: ReadonlyArray<string>) =>

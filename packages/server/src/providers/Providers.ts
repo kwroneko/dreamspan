@@ -28,6 +28,7 @@ import type {
   ThinkingLevel
 } from "@earendil-works/pi-ai"
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript"
+import { estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate"
 import type { ChatId, VersionId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
@@ -100,7 +101,15 @@ import {
 import { TokenCountError, type TextCountRequest } from "./textCounters.ts"
 import { countingModelKey } from "./countingModel.ts"
 import { parseServiceAccount } from "./vertex.ts"
-import { type Capture, captureUsageHeaders, costOf, emptyCapture, finalCounts } from "./usage.ts"
+import {
+  type Capture,
+  captureUsageHeaders,
+  costOf,
+  emptyCapture,
+  finalCounts,
+  reasoningPlan,
+  resolveReasoning
+} from "./usage.ts"
 import { firstPrice, priceSources } from "./priceSources.ts"
 import { feedsFor, fetchPriceList, nextPriceFetch, PRICE_RETRY_MS } from "./priceEndpoint.ts"
 
@@ -1590,6 +1599,9 @@ export const layer = (options: ProvidersOptions = {}) =>
           status: null as number | null,
           retryAfterMs: null as number | null,
           firstTokenAt: null as number | null,
+          /** When the first streamed reasoning, and the first reply text or tool call, came. */
+          firstReasoningAt: null as number | null,
+          firstReplyAt: null as number | null,
           partial: null as AssistantMessage | null,
           refused: null as string | null,
           /** The idle limit in seconds when the provider sent nothing that long (spec/AGENTIC.md §12.5). */
@@ -1646,8 +1658,9 @@ export const layer = (options: ProvidersOptions = {}) =>
 
         const writeClose = (message: AssistantMessage, error: ProviderError | null, context: PiContext["messages"]) =>
           Effect.gen(function* () {
-            const { counts, source } = finalCounts(message, state.capture, context, request.options?.replyTool)
-            if (!state.opened) return { counts, cost: null }
+            const final = finalCounts(message, state.capture, context, request.options?.replyTool)
+            const { source } = final
+            if (!state.opened) return { counts: final.counts, cost: null }
             const tokenFormats = Option.getOrNull(formats)
             const baseline = state.textPayload
             const localCounter = registry.textCounters
@@ -1690,6 +1703,41 @@ export const layer = (options: ProvidersOptions = {}) =>
                     }
                   }).pipe(Effect.orElseSucceed(() => undefined))
                 : undefined
+            // The reasoning count: the provider's, or counted here from the thinking that came
+            // (with the model's tokenizer where one is registered), marked as an estimate.
+            const plan = reasoningPlan(message, state.capture, source, request.options?.replyTool)
+            const countText = (text: string): Effect.Effect<number> => {
+              if (text.length === 0) return Effect.succeed(0)
+              if (!tokenFormats) return Effect.succeed(estimateTextTokens(text))
+              const encode: TextCountRequest["encode"] = (encoding, texts) =>
+                tokenFormats
+                  .countTokens(encoding, texts)
+                  .pipe(Effect.mapError(() => new TokenCountError({ message: "The local tokenizer failed." })))
+              const tokens: Effect.Effect<ReadonlyArray<number>, unknown> = localCounter
+                ? localCounter.count({
+                    model: model.key,
+                    texts: [text],
+                    encode,
+                    baseUrl: prepared.baseUrl,
+                    apiKey: null,
+                    headers: {},
+                    fetch: (() => {
+                      throw new Error("Reasoning counts cannot contact providers")
+                    }) as typeof globalThis.fetch,
+                    scrub: (s) => s
+                  })
+                : encode("o200k_base", [text])
+              return tokens.pipe(
+                Effect.map((counted) => counted.reduce((n, c) => n + c, 0)),
+                Effect.orElseSucceed(() => estimateTextTokens(text))
+              )
+            }
+            const counted =
+              plan === null || plan.kind === "reported" || plan.kind === "none"
+                ? null
+                : yield* countText(plan.kind === "thinking" ? plan.text : plan.reply)
+            const thought = resolveReasoning(plan, final.counts.output, counted)
+            const counts = { ...final.counts, reasoning: thought.reasoning }
             // A request with images calibrates its model's image cost (ARCHITECTURE §6).
             const sample =
               error === null && source === "reported" && state.sentImages
@@ -1732,6 +1780,9 @@ export const layer = (options: ProvidersOptions = {}) =>
                       ? null
                       : state.cacheIdentity,
                   firstTokenAt: state.firstTokenAt,
+                  firstReasoningAt: state.firstReasoningAt,
+                  firstReplyAt: state.firstReplyAt,
+                  reasoningEstimated: thought.estimated,
                   responseModel: metadata(
                     message.responseModel ?? (message.model !== model.key ? message.model : null)
                   ),
@@ -2243,7 +2294,11 @@ export const layer = (options: ProvidersOptions = {}) =>
                     event.type === "thinking_delta" ||
                     event.type === "toolcall_delta"
                   ) {
-                    state.firstTokenAt ??= Date.now()
+                    const now = Date.now()
+                    state.firstTokenAt ??= now
+                    if (event.type === "thinking_delta") {
+                      if (event.delta.length > 0) state.firstReasoningAt ??= now
+                    } else state.firstReplyAt ??= now
                     if (event.type === "text_delta") offer({ type: "text", delta: event.delta })
                     if (event.type === "thinking_delta") offer({ type: "thinking", delta: event.delta })
                     if (event.type === "toolcall_delta") {

@@ -207,6 +207,84 @@ export const finalCounts = (
 }
 
 /**
+ * The provider's own count of the reasoning tokens in a usage object, where it gives one:
+ * OpenAI Chat Completions, OpenRouter, DeepSeek and most compatible servers
+ * (`completion_tokens_details.reasoning_tokens`), OpenAI Responses
+ * (`output_tokens_details.reasoning_tokens`), Anthropic-shaped gateways that split it
+ * (`output_tokens_details.thinking_tokens`), Gemini (`thoughtsTokenCount`) and servers that put
+ * `reasoning_tokens` at the top. Anthropic's own API and Bedrock give none. pi-ai turns a missing
+ * count into 0 for Chat and Gemini, so the raw object decides.
+ */
+export const reportedReasoning = (raw: Record<string, unknown>): number | null => {
+  const found = [
+    record(raw.completion_tokens_details)?.reasoning_tokens,
+    record(raw.output_tokens_details)?.reasoning_tokens,
+    record(raw.output_tokens_details)?.thinking_tokens,
+    raw.thoughtsTokenCount,
+    raw.reasoning_tokens
+  ].find((v) => Predicate.isNumber(v) && Number.isSafeInteger(v) && v >= 0)
+  return Predicate.isNumber(found) ? found : null
+}
+
+/**
+ * How a request's reasoning tokens are known: the provider's count; none (no thinking came and
+ * none was counted); the thinking text to count; or, when the provider hid the thinking (Anthropic's
+ * omitted or redacted blocks) and gave no count, the reply to take from the output. Null: unknown.
+ */
+export type ReasoningPlan =
+  | { readonly kind: "reported"; readonly tokens: number }
+  | { readonly kind: "none" }
+  | { readonly kind: "thinking"; readonly text: string }
+  | { readonly kind: "rest"; readonly reply: string }
+
+export const reasoningPlan = (
+  message: AssistantMessage,
+  capture: Capture,
+  source: UsageSource,
+  replyTool?: string
+): ReasoningPlan | null => {
+  if (source === "none") return null
+  if (source === "reported" && capture.rawUsage !== null) {
+    const tokens = reportedReasoning(capture.rawUsage)
+    if (tokens !== null) return { kind: "reported", tokens }
+  }
+  const thinking = message.content.flatMap((block) => (block.type === "thinking" ? [block] : []))
+  if (thinking.length === 0) return { kind: "none" }
+  const hidden = thinking.some((block) => block.redacted === true || block.thinking.trim().length === 0)
+  if (hidden && source === "reported")
+    return {
+      kind: "rest",
+      reply: messageText(
+        { ...message, content: message.content.filter((block) => block.type !== "thinking") },
+        replyTool
+      )
+    }
+  return {
+    kind: "thinking",
+    text: thinking
+      .filter((block) => block.redacted !== true)
+      .map((block) => block.thinking)
+      .join("")
+  }
+}
+
+/** The reasoning count a plan comes to, given the output count and the tokens the app counted for it. */
+export const resolveReasoning = (
+  plan: ReasoningPlan | null,
+  output: number | null,
+  counted: number | null
+): { readonly reasoning: number | null; readonly estimated: boolean } => {
+  if (plan === null) return { reasoning: null, estimated: false }
+  if (plan.kind === "reported") return { reasoning: plan.tokens, estimated: false }
+  if (plan.kind === "none") return { reasoning: 0, estimated: false }
+  if (counted === null) return { reasoning: null, estimated: false }
+  // Reasoning is part of the output, so an estimate never exceeds it.
+  const tokens = plan.kind === "thinking" ? counted : output === null ? null : output - counted
+  if (tokens === null) return { reasoning: null, estimated: false }
+  return { reasoning: Math.max(0, output === null ? tokens : Math.min(tokens, output)), estimated: true }
+}
+
+/**
  * A rate table's cost (PROVIDERS §9.3, PRICES §3.3): multipliers per million tokens, with the tier
  * for the request's total input, plus any flat per-request price. Long cache writes use the
  * table's long-write rate, else twice the input rate (Anthropic's rule, which pi-ai applies too).

@@ -67,15 +67,61 @@ describe("version metrics display", () => {
   it("shows elapsed seconds and output tokens, details in the tooltip", () => {
     const metrics = versionMetricsOf(id, [request({ reasoning: 120 })])
     expect(metricsSummary(metrics)).toBe("12.3 s · 345 tokens")
+    // An older request: one first token, reasoning text on the swipe.
     expect(details(metrics, true)).toEqual({
       "Generation time": "12.3 s",
       "Time to first token": "0.8 s",
-      "Output tokens": "345, reasoning included",
+      "Output tokens": "345 (120 reasoning, 225 reply)",
+      Reasoning: "120 tokens, shown above the reply",
       Speed: "30.0 tokens/s",
       Cost: "unknown (no price for this model)",
-      "Input tokens": "unknown",
-      "Reasoning tokens": "120",
-      "Reasoning time": "not recorded"
+      "Input tokens": "unknown"
+    })
+  })
+
+  it("times streamed reasoning and the reply apart, speed over the streaming only", () => {
+    const shown = versionMetricsOf(id, [
+      request({ reasoning: 512, output: 778, firstTokenAt: 1_200, firstReasoningAt: 1_200, firstReplyAt: 9_400 })
+    ])
+    expect(details(shown, true)).toEqual({
+      "Generation time": "12.3 s",
+      "Time to first reasoning token": "1.2 s",
+      "Time to first reply token": "9.4 s",
+      "Reasoning time": "8.2 s",
+      "Output tokens": "778 (512 reasoning, 266 reply)",
+      Reasoning: "512 tokens, shown above the reply",
+      Speed: "70.1 tokens/s",
+      Cost: "unknown (no price for this model)",
+      "Input tokens": "unknown"
+    })
+  })
+
+  it("says when the provider kept the reasoning back, and counts only the reply's speed", () => {
+    const hidden = versionMetricsOf(id, [
+      request({ reasoning: 512, output: 778, firstTokenAt: 9_800, firstReasoningAt: null, firstReplyAt: 9_800 })
+    ])
+    expect(details(hidden, false)).toMatchObject({
+      "Time to first token": "9.8 s",
+      "Output tokens": "778 (512 reasoning, 266 reply)",
+      Reasoning: "512 tokens, not returned by the provider",
+      Speed: "106.4 tokens/s (reply only)"
+    })
+    // An older request with no times: the swipe's missing text says it wasn't streamed.
+    expect(details(versionMetricsOf(id, [request({ reasoning: 100 })]), false).Speed).toBe("21.3 tokens/s (reply only)")
+  })
+
+  it("marks the app's reasoning estimate, and says none or unknown", () => {
+    const estimated = versionMetricsOf(id, [request({ reasoning: 120, reasoningEstimated: true })])
+    expect(details(estimated, true)).toMatchObject({
+      "Output tokens": "345 (~120 reasoning, ~225 reply)",
+      Reasoning: "~120 tokens, shown above the reply"
+    })
+    const none = versionMetricsOf(id, [request({ reasoning: 0, firstReasoningAt: null, firstReplyAt: 800 })])
+    expect(details(none, false)).toMatchObject({ "Output tokens": "345", Reasoning: "none" })
+    const unknown = versionMetricsOf(id, [request()])
+    expect(details(unknown, false)).toMatchObject({
+      "Output tokens": "345, reasoning count unknown",
+      Reasoning: "none returned, count unknown"
     })
   })
 
@@ -88,7 +134,7 @@ describe("version metrics display", () => {
     expect(details(unknown, true)).toMatchObject({
       "Time to first token": "unknown",
       Speed: "unknown",
-      "Reasoning tokens": "unknown"
+      Reasoning: "shown above the reply, count unknown"
     })
   })
 
