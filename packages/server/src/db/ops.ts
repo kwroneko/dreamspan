@@ -225,6 +225,7 @@ import {
   Model,
   ModelEndpoints,
   ModelId,
+  ModelIds,
   ModelOverrides,
   ModelUse,
   ModelUpstream,
@@ -2169,6 +2170,15 @@ const WriteOpsChatOwn = RpcGroup.make(
   Rpc.make("SetModelHidden", {
     payload: { userId: UserId, modelId: ModelId, hidden: Schema.Boolean },
     success: Model,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Hides or shows several of the user's models in one transaction; NotFound, changing none,
+   * when any isn't theirs. Returns the ids whose state changed: `!hidden` on those is the Undo.
+   */
+  Rpc.make("SetModelsHidden", {
+    payload: { userId: UserId, modelIds: ModelIds, hidden: Schema.Boolean },
+    success: Schema.Struct({ changed: Schema.Array(ModelId) }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Instance-wide settings (admin). Callers check the role; storage doesn't know it. */

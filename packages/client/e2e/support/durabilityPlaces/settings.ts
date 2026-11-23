@@ -166,6 +166,20 @@ export const settingsPlaces = [
     shown: (page) => page.getByRole("dialog").getByLabel("Advanced model settings (JSON)", { exact: true })
   }),
   place({
+    name: "Models: filter",
+    source: "features/connections/modelTable.tsx:315",
+    setup: async (ctx) => {
+      const saved = await connection(ctx)
+      await ctx.rpc((api) => api.AddUserModel({ connectionId: saved.id, key: `filter-${ctx.tag}`, overrides: {} }))
+      return saved
+    },
+    open: async (page, saved, ctx) => {
+      await go(page, ctx, `/settings/connections/${saved.id}`)
+      return page.getByRole("searchbox", { name: "Filter models", exact: true })
+    },
+    shown: (page) => page.getByRole("searchbox", { name: "Filter models", exact: true })
+  }),
+  place({
     name: "Add a model: model id",
     source: "features/connections/models.tsx:810",
     setup: connection,

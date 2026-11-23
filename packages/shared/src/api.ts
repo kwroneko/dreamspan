@@ -66,6 +66,7 @@ import {
   Model,
   ModelUse,
   ModelId,
+  ModelIds,
   ModelOverrides,
   ProviderKind,
   ProviderKindInfo,
@@ -312,6 +313,16 @@ export class AppCoreApi extends RpcGroup.make(
   Rpc.make("SetModelHidden", {
     payload: { modelId: ModelId, hidden: Schema.Boolean },
     success: Model,
+    error: Schema.Union([...StorageErrors])
+  }),
+  /**
+   * Hides or shows several models in one change (the model list's bulk Hide and Show). NotFound,
+   * changing none, when any isn't the user's. `changed` are those whose state changed: `!hidden`
+   * on them is the Undo.
+   */
+  Rpc.make("SetModelsHidden", {
+    payload: { modelIds: ModelIds, hidden: Schema.Boolean },
+    success: Schema.Struct({ changed: Schema.Array(ModelId) }),
     error: Schema.Union([...StorageErrors])
   }),
   // --- Instance network settings, admins only (PROVIDERS §6.2).

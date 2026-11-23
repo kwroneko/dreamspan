@@ -253,6 +253,7 @@ const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
     kept("useUserDraft", "new connection: concurrency")
   ],
   "features/connections/models.tsx": times(4, kept("useUserDraft", "model limits, name, samplers, Add a model")),
+  "features/connections/modelTable.tsx": [kept("usePlaceParam", "the model list's filter, in the URL (q)")],
   "features/connections/providerFields.tsx": [
     ...times(2, kept("useUserDraft", "region and project", ["features/connections/detail.tsx"])),
     secret,

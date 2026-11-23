@@ -3,7 +3,7 @@ import { admitRequest } from "./lcmBackfill.ts"
 // Connection, model and ledger write handlers (spec/PROVIDERS.md §2, §3, §9). They run
 // in the writer worker, each as one transaction. Secrets arrive already encrypted.
 import { uuidv7 } from "@dreamspan/shared/id.ts"
-import type { ConnectionSettings } from "@dreamspan/shared/providers.ts"
+import type { ConnectionSettings, ModelId } from "@dreamspan/shared/providers.ts"
 import { findProvider, providerChanges } from "@dreamspan/shared/providerDefinitions.ts"
 import { CurrentProviderDefinitions } from "../providers/definitions.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
@@ -395,6 +395,24 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         yield* sql`UPDATE models SET hidden = ${hidden ? 1 : 0}, row_version = row_version + 1 WHERE id = ${modelId}`
         return yield* reloadModel(modelId)
       }).pipe(transaction(sql, "SetModelHidden")),
+
+    SetModelsHidden: ({ userId, modelIds, hidden }) =>
+      Effect.gen(function* () {
+        const ids = JSON.stringify([...new Set(modelIds)])
+        // Every id must be one of the user's live models, or nothing changes.
+        const owned = yield* sql<{ id: string }>`
+          SELECT m.id FROM models m JOIN connections c ON c.id = m.connection_id
+          WHERE m.id IN (SELECT value FROM json_each(${ids}))
+            AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND c.purged_at IS NULL`
+        const found = new Set(owned.map((row) => row.id))
+        const missing = modelIds.find((id) => !found.has(id))
+        if (missing !== undefined) return yield* Effect.fail(new NotFound({ entity: "model", id: missing }))
+        const changed = yield* sql<{ id: ModelId }>`
+          UPDATE models SET hidden = ${hidden ? 1 : 0}, row_version = row_version + 1
+          WHERE id IN (SELECT value FROM json_each(${ids})) AND hidden <> ${hidden ? 1 : 0}
+          RETURNING id`
+        return { changed: changed.map((row) => row.id) }
+      }).pipe(transaction(sql, "SetModelsHidden")),
 
     SetAppSetting: ({ key, value }) =>
       writeSetting(sql, "app", "", key, value)

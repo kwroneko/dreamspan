@@ -59,7 +59,7 @@ test("the empty home leads to a connection, and the user chooses its default mod
   const defaults = await admin((api) => api.GetGenerationDefaults())
   expect(defaults.model).not.toBeNull()
   // Each model's id shows only where it differs from its name.
-  const models = page.getByRole("list", { name: "Models" })
+  const models = page.getByRole("table", { name: "Models" })
   await expect(models.getByText("fake-large", { exact: true })).toBeVisible()
 
   await using.getByRole("link", { name: "Change" }).click()

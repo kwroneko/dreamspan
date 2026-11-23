@@ -12,7 +12,7 @@ import {
 } from "./detail.tsx"
 import { DefaultModelSection } from "./defaultModel.tsx"
 import { ConnectionsPage, NewConnectionPage } from "./list.tsx"
-import { ModelsSection } from "./models.tsx"
+import { ModelsSection } from "./modelTable.tsx"
 import { TokenCountingSection } from "./tokenCounting.tsx"
 
 export const register = () => {
