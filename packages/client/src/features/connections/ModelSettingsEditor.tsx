@@ -210,7 +210,7 @@ const SAMPLERS: Readonly<Record<Exclude<SamplerKey, "seed">, SamplerSpec>> = {
 }
 
 const NAMES_ITEMS = [
-  { value: "default", label: "Default", description: "Names in group chats, as ST’s default." },
+  { value: "default", label: "Default", description: "“Name: ” before characters’ messages, in group chats only." },
   { value: "none", label: "None", description: "No names." },
   { value: "completion", label: "Message name field", description: "Each message’s name field." },
   { value: "content", label: "In the message text", description: "“Name: ” before each message’s text." }
@@ -878,16 +878,13 @@ export function ModelSettingsEditor({
           <div className="border-t border-border pt-3">
             <Disclosure
               title="Advanced"
-              hint="Shows message formatting, caching, routing, provider parameters, and importing from an ST preset."
+              hint="Shows message formatting, caching, routing, provider parameters, and importing settings from a preset file."
               open={advanced === "open"}
               onOpenChange={(open) => setAdvanced(open ? "open" : "", true)}
             >
               <AdvancedPart title="Messages">
                 <div className="grid max-w-3xl gap-4 @md:grid-cols-2">
-                  <Field
-                    label="Speaker names"
-                    about="How each message names its speaker (ST’s character names behavior)."
-                  >
+                  <Field label="Speaker names" about="How each message names its speaker.">
                     <Select
                       items={NAMES_ITEMS}
                       value={(settings.names_behavior as string | undefined) ?? "default"}
@@ -898,7 +895,7 @@ export function ModelSettingsEditor({
                   </Field>
                   <Field
                     label="Prompt post-processing"
-                    about="Reshapes the messages for providers that need strict turns (ST’s prompt post-processing)."
+                    about="Reshapes the messages for providers that need strict turns."
                   >
                     <Select
                       items={POSTPROCESS_ITEMS}
