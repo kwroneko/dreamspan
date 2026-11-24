@@ -6571,6 +6571,7 @@ const ReadOpsOwn = RpcGroup.make(
       id: Schema.String,
       targetKind: Schema.Literals(["entity", "file"]),
       targetId: Schema.String,
+      host: Schema.Boolean,
       label: Schema.String,
       fields: Schema.Array(Schema.String),
       before: Schema.Record(Schema.String, Schema.Unknown),

@@ -478,11 +478,15 @@ export const makeChangeReversalReadHandlers = Effect.gen(function* () {
           seq: number
           fields_json: string
           of_json: string
-        }>`SELECT * FROM change_reversal_effects WHERE reversal_id = ${record.id}`
+          host: number | null
+        }>`SELECT x.*, json_extract(e.undo_json, '$.host') AS host
+          FROM change_reversal_effects x JOIN rollout_effects e USING (rollout_id, tool_call_id, seq)
+          WHERE x.reversal_id = ${record.id}`
         return {
           id: record.id,
           targetKind: record.target_kind,
           targetId: record.target_id,
+          host: effects.some((e) => e.host === 1),
           label: record.label,
           fields: JSON.parse(record.fields_json) as Array<string>,
           before: JSON.parse(record.before_json) as Record<string, unknown>,

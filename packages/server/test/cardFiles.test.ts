@@ -11,13 +11,18 @@ import { client, outcome, posted, serverLayer, serverPort, testConfig } from "./
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { cardChunk, json as jsonBytes, png, stCardV2 } from "./formats/support.ts"
-import { readFile } from "node:fs/promises"
+import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { readCardFile } from "../src/formats/cardFile.ts"
 import { defaultLimits } from "../src/formats/safety.ts"
 import { writeZip } from "../src/formats/zip.ts"
 import { mediaPath } from "../src/db/media.ts"
 import { sha256 } from "../src/importer/importers.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
+import type { ToolContext } from "../src/agent/tools.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
+import { tempDir } from "./support/tempDir.ts"
 import { unquoteToolData } from "./support/toolData.ts"
 
 const toolCall = (name: string, args: unknown, id: string) => [
@@ -314,6 +319,70 @@ describe("card files", () => {
     },
     180_000
   )
+
+  it.live("reverts and redoes a card edit in an approved host folder", () => {
+    const root = tempDir("card-file-host")
+    const config = testConfig({ hostFolders: [root] })
+    const path = join(root, "wren.json")
+    return Effect.gen(function* () {
+      yield* Effect.promise(() => writeFile(path, jsonBytes(v3Card("Wren Hollow"))))
+      const api = yield* client()
+      const user = yield* api.Whoami()
+      const chat = yield* api.CreateWorkshop({ title: "Card files" })
+      yield* api.ChangeCast({
+        chatId: chat.id,
+        slotId: null,
+        change: { _tag: "WorkshopFolder", path: root, host: true }
+      })
+      const rolloutId = `r-${chat.id}`
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at) VALUES (?,?,'workshop','running','assistant','interactive',1,1)",
+          params: [rolloutId, chat.id]
+        }
+      ])
+      const tools = yield* ExecutionRegistry
+      const context = {
+        userId: user.id,
+        chatId: chat.id,
+        forkId: chat.currentForkId,
+        leafSlotId: null,
+        slotId: chat.activeLeafSlotId as ToolContext["slotId"],
+        versionId: "unused" as ToolContext["versionId"],
+        rolloutId,
+        toolCallId: "read",
+        reader: yield* Reader,
+        writer: yield* Writer,
+        viewers: null,
+        cache: new Map()
+      } satisfies ToolContext
+      const read = yield* toolForKind(tools, "workshop", "read_card_file")!.execute(context, { path } as never)
+      assert.isUndefined(read.isError, read.text)
+      const edit = yield* toolForKind(tools, "workshop", "edit_card_file")!.execute(
+        { ...context, toolCallId: "edit" },
+        { path, changes: [{ field: "description", text: "A harbour keeper." }] } as never
+      )
+      assert.isUndefined(edit.isError, edit.text)
+      yield* context.writer.RecordRolloutEffects({
+        userId: user.id,
+        rolloutId,
+        toolCallId: "edit",
+        result: edit.text,
+        isError: false,
+        effects: edit.effects ?? []
+      })
+      const effects = yield* api.ListRolloutEffects({ chatId: chat.id })
+      const effect = effects.find((e) => e.toolCallId === "edit")!
+      assert.strictEqual(effect?.undo?.host, true)
+      const key = { rolloutId, toolCallId: effect.toolCallId, seq: effect.seq }
+      const description = () =>
+        Effect.promise(async () => readCardFile(await readFile(path), defaultLimits)!.doc.description)
+      const reverted = yield* api.RevertChange({ effects: [key] })
+      assert.strictEqual(yield* description(), stCardV2().data.description)
+      yield* api.RedoChange({ reversalId: reverted.reversalId! })
+      assert.strictEqual(yield* description(), "A harbour keeper.")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
 
   it.live(
     "requires approval for a card import and refuses when Files are off",

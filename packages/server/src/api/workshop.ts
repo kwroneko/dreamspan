@@ -180,7 +180,8 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       const path = edits[0]?.effect.targetId
       if (edits.length === 0 || path === undefined)
         return yield* new EffectUndoRefused({ message: "This change was undone already." })
-      if (edits.some((e) => e.card === null || e.effect.targetId !== path))
+      const host = edits[0]!.effect.undo?.host === true
+      if (edits.some((e) => e.card === null || e.effect.targetId !== path || (e.effect.undo?.host === true) !== host))
         return yield* new EffectUndoRefused({ message: "Only edits of one item are reverted together." })
       const selected = edits.map(({ effect, card }) => {
         const { before: original, after: changed } = card!
@@ -193,6 +194,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       return yield* onHost(
         files.reverseCardFile(actor, {
           path,
+          host,
           patches: selected.map(({ patch }) => patch).reverse(),
           choices: options.choices,
           expectedHead: options.expectedHead,
@@ -224,6 +226,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       return yield* onHost(
         files.reverseCardFile(actor, {
           path: record.targetId,
+          host: record.host,
           patches: [{ original: docOfUnits(record.before), changed: docOfUnits(record.after), fields }],
           choices: options.choices,
           expectedHead: options.expectedHead,

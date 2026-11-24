@@ -2046,6 +2046,24 @@ export const makeFileTools = (deps: FileToolDeps) => {
     )
   }
 
+  const recordedFilePlace = (actor: User, path: string, host: boolean) =>
+    Effect.gen(function* () {
+      const env = accountEnv(deps, actor.id)
+      // A recorded host path still requires admin access and a current allowlist match.
+      if (host) {
+        const allowed =
+          actor.role === "admin" &&
+          deps.hostFolders !== undefined &&
+          (yield* Effect.promise(() => deps.hostFolders!.allows(path).catch(() => false)))
+        if (!allowed) return yield* new EffectUndoRefused({ message: "That folder on the server isn't available now." })
+      }
+      return {
+        env,
+        top: host ? "/" : env.filesRoot,
+        segments: host ? path.split("/").filter(Boolean) : resolveFilesPath(path, FILES_MOUNT).segments
+      }
+    })
+
   /** Puts a file back as it was before the agent's write or edit (§7.1), if it's still as the agent left it. */
   const undoEffect = (actor: User, effect: RolloutEffect) =>
     Effect.gen(function* () {
@@ -2053,22 +2071,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
       const recipe = effect.undo as { path?: unknown; before?: unknown; after?: unknown; host?: unknown } | null
       if (!recipe || typeof recipe.path !== "string" || typeof recipe.after !== "string")
         return yield* new EffectUndoRefused({ message: "This change cannot be undone." })
-      const env = accountEnv(deps, actor.id)
-      // A host folder's file (§3.7): only while the account is an admin and the folder is still
-      // allowed; reached by the no-follow walk from "/".
       const host = recipe.host === true
-      if (host) {
-        const path = recipe.path
-        const allowed =
-          actor.role === "admin" &&
-          deps.hostFolders !== undefined &&
-          (yield* Effect.promise(() => deps.hostFolders!.allows(path).catch(() => false)))
-        if (!allowed) return yield* new EffectUndoRefused({ message: "That folder on the server isn't available now." })
-      }
-      const top = host ? "/" : env.filesRoot
-      const segments = host
-        ? recipe.path.split("/").filter(Boolean)
-        : resolveFilesPath(recipe.path, FILES_MOUNT).segments
+      const { env, top, segments } = yield* recordedFilePlace(actor, recipe.path, host)
       return yield* withFileTree(
         env.userId,
         Effect.gen(function* () {
@@ -2135,6 +2139,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     actor: User,
     input: {
       readonly path: string
+      readonly host: boolean
       readonly patches: ReadonlyArray<ReversalPatch>
       readonly choices?: Readonly<Record<string, ConflictChoice>> | undefined
       readonly expectedHead?: string | undefined
@@ -2150,12 +2155,11 @@ export const makeFileTools = (deps: FileToolDeps) => {
     Effect.gen(function* () {
       const formats = deps.formats
       if (!formats) return yield* new EffectUndoRefused({ message: "Card files can't be read on this server." })
-      const env = accountEnv(deps, actor.id)
-      const segments = resolveFilesPath(input.path, FILES_MOUNT).segments
+      const { env, top, segments } = yield* recordedFilePlace(actor, input.path, input.host)
       return yield* withFileTree(
         env.userId,
         Effect.gen(function* () {
-          const current = yield* attempt(() => readRegularFile(env.filesRoot, segments, CARD_FILE_BYTES + 1)).pipe(
+          const current = yield* attempt(() => readRegularFile(top, segments, CARD_FILE_BYTES + 1)).pipe(
             Effect.orElseSucceed(() => null)
           )
           if (!current || current.truncated)
@@ -2195,9 +2199,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
           yield* writeWithVersion(
             env.userId,
             input.path,
-            env.filesRoot,
+            top,
             segments,
-            false,
+            input.host,
             { ...current, sha256: beforeHash, byteSize: current.bytes.byteLength },
             next,
             "restore",
