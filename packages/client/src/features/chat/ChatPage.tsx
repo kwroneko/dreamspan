@@ -94,10 +94,12 @@ export interface Flashes {
 
 /** Load more history when the first or last rendered message is this close to the loaded edge. */
 const EDGE = 5
-/** Within this many pixels of the end counts as at the end. */
+/** Distance for correcting an incidental scroll or saving an end-held position. */
 const END_PX = 48
 /** Allow for rounding when comparing the native scroll offset with the end. */
-const EXACT_END_PX = 1
+const NATIVE_END_PX = 2
+
+const distanceFromEnd = (list: HTMLElement) => list.scrollHeight - list.scrollTop - list.clientHeight
 
 const SUMMARIZED: ContextMark = {
   kind: "summarized",
@@ -144,10 +146,7 @@ export function MessageList({
   const settled = useRef(false)
   /** Whether the list stays at the end as messages grow or arrive (below). */
   const [follow] = useState({ stuck: true })
-  const scrollbarPointer = useRef<number | null>(null)
-  // A scrollbar drag chooses a specific offset. Require the actual end until follow resumes.
-  const scrollbarNeedsEnd = useRef(false)
-  const followEndTolerance = useCallback(() => (scrollbarNeedsEnd.current ? EXACT_END_PX : END_PX), [])
+  const scrollbarDrag = useRef<{ pointerId: number; offset: number; endHeight: number | null } | null>(null)
   const { entries } = view
   const { prefs } = useViewPrefs()
   // The spacing shown follows the account's choice one commit later, once what's being read
@@ -244,8 +243,7 @@ export function MessageList({
   const setFollow = useCallback(
     (instance: Virtualizer<HTMLDivElement, Element>, on: boolean) => {
       follow.stuck = on
-      if (on) scrollbarNeedsEnd.current = false
-      instance.options.scrollEndThreshold = on ? EXACT_END_PX : -1
+      instance.options.scrollEndThreshold = on ? NATIVE_END_PX : -1
       // The threshold governs future follow. TanStack Virtual has no cancellation API
       // for an end scroll already reconciling by row index.
       if (!on && instance["scrollState"]?.align === "end") instance["scrollState"] = null
@@ -314,7 +312,7 @@ export function MessageList({
     gap: metrics.gap,
     // TanStack Virtual follows a row growing at the very end itself; once the user lets go,
     // it mustn't (below).
-    scrollEndThreshold: follow.stuck ? EXACT_END_PX : -1
+    scrollEndThreshold: follow.stuck ? NATIVE_END_PX : -1
   })
   const hold = useCallback((on: boolean) => setFollow(virtualizer, on), [setFollow, virtualizer])
 
@@ -577,7 +575,7 @@ export function MessageList({
         event?.target instanceof Node &&
         !list.contains(event.target) &&
         virtualizer.options.followOnAppend &&
-        virtualizer.isAtEnd(END_PX)
+        virtualizer.isAtEnd(NATIVE_END_PX)
       revealing.current = false
       cancelAnimationFrame(frame)
       virtualizer.shouldAdjustScrollPositionOnItemSizeChange = previousAdjustment
@@ -658,20 +656,20 @@ export function MessageList({
     }
     const onPointerDown = (event: PointerEvent) => {
       const onScrollbar = event.target === list && event.offsetX >= list.clientWidth
-      if (onScrollbar && event.button === 0) {
-        scrollbarPointer.current = event.pointerId
-        scrollbarNeedsEnd.current = true
-      }
+      if (onScrollbar && event.button === 0)
+        scrollbarDrag.current = { pointerId: event.pointerId, offset: list.scrollTop, endHeight: null }
       if (onScrollbar || event.button === 1) letGo()
     }
     const onPointerEnd = (event: PointerEvent) => {
-      if (scrollbarPointer.current !== event.pointerId) return
-      scrollbarPointer.current = null
+      const drag = scrollbarDrag.current
+      if (drag?.pointerId !== event.pointerId) return
+      scrollbarDrag.current = null
       intent.current = performance.now()
-      // Read the native position before stream growth or virtualizer measurements move the end.
+      // Content can grow under a stationary thumb after the drag reached the end.
+      const grewAtEnd = drag.endHeight !== null && list.scrollTop === drag.offset && list.scrollHeight > drag.endHeight
       if (
         event.type === "pointerup" &&
-        list.scrollHeight - list.scrollTop - list.clientHeight <= EXACT_END_PX &&
+        (distanceFromEnd(list) <= NATIVE_END_PX || grewAtEnd) &&
         !revealing.current &&
         menus.current.open === 0 &&
         session.snapshot().newer === null
@@ -683,19 +681,24 @@ export function MessageList({
     }
     // Capture runs before the virtualizer's own listener, whose render may follow at once.
     const onScroll = () => {
-      const fromEnd = list.scrollHeight - list.scrollTop - list.clientHeight
-      if (fromEnd > followEndTolerance()) {
-        if (follow.stuck && virtualizer.options.followOnAppend) virtualizer.scrollToEnd()
+      const fromEnd = distanceFromEnd(list)
+      const drag = scrollbarDrag.current
+      if (drag !== null) {
+        if (list.scrollTop !== drag.offset) {
+          drag.offset = list.scrollTop
+          drag.endHeight = fromEnd <= NATIVE_END_PX ? list.scrollHeight : null
+        }
+        // The thumb can pass through the end before the same drag takes it away again.
         return
       }
+      if (fromEnd > END_PX && follow.stuck && virtualizer.options.followOnAppend) virtualizer.scrollToEnd()
       // Capture reaching the end before the virtualizer measures its newly mounted rows.
       // Their corrected estimates can grow the list beyond the threshold in that same commit.
       if (
+        fromEnd <= NATIVE_END_PX &&
         spacing === "compact" &&
         !revealing.current &&
         menus.current.open === 0 &&
-        // The thumb can pass through the end before the same drag takes it away again.
-        scrollbarPointer.current === null &&
         performance.now() - intent.current > 300
       )
         hold(true)
@@ -721,7 +724,7 @@ export function MessageList({
       window.removeEventListener("pointercancel", onPointerEnd, true)
       list.removeEventListener("scroll", onScroll, { capture: true })
     }
-  }, [hold, spacing, follow, followEndTolerance, virtualizer, session])
+  }, [hold, spacing, follow, virtualizer, session])
   // The list held at the end stays there when it gets shorter: the composer below growing with
   // a line of text, or a note above it appearing. The browser keeps the scroll position, which
   // left the last message behind the list's edge until something else rendered the list.
@@ -747,17 +750,17 @@ export function MessageList({
   useEffect(() => {
     const list = parent.current
     if (list === null || entries.length === 0 || !view.follow) return
-    const fromEnd = list.scrollHeight - list.scrollTop - list.clientHeight
+    const fromEnd = distanceFromEnd(list)
     if (
       !follow.stuck &&
       !revealing.current &&
       menus.current.open === 0 &&
-      scrollbarPointer.current === null &&
-      fromEnd <= followEndTolerance() &&
+      scrollbarDrag.current === null &&
+      fromEnd <= NATIVE_END_PX &&
       performance.now() - intent.current > 300
     )
       hold(true)
-    if (follow.stuck && fromEnd > EXACT_END_PX) virtualizer.scrollToEnd()
+    if (follow.stuck && fromEnd > NATIVE_END_PX) virtualizer.scrollToEnd()
   })
 
   useEffect(() => {
@@ -800,7 +803,7 @@ export function MessageList({
     const save = () => {
       if (!settled.current || !view.forkId) return
       const bounds = list.getBoundingClientRect()
-      const bottom = view.newer === null && list.scrollHeight - list.scrollTop - list.clientHeight <= END_PX
+      const bottom = follow.stuck && view.newer === null && distanceFromEnd(list) <= END_PX
       const article = [...list.querySelectorAll<HTMLElement>("article[data-slot]")].find(
         (el) => el.getBoundingClientRect().bottom > bounds.top
       )
@@ -829,7 +832,7 @@ export function MessageList({
       list.removeEventListener("scroll", scroll)
       window.removeEventListener("pagehide", save)
     }
-  }, [navigate, session, userId, view.forkId, view.newer, embedded])
+  }, [navigate, session, userId, view.forkId, view.newer, embedded, follow])
 
   const items = virtualizer.getVirtualItems()
   const first = items[0]?.index
@@ -839,7 +842,7 @@ export function MessageList({
     if (first < EDGE && (!summaries || lcm === null || (entries[0] ? positionOf(entries[0]) : 0) > lcmCursor(lcm) + 1))
       void session.loadOlder()
     if (last >= rowCount - EDGE) void session.loadNewer()
-    if (view.newer === null && scrollbarPointer.current === null && virtualizer.isAtEnd(followEndTolerance()))
+    if (view.newer === null && scrollbarDrag.current === null && virtualizer.isAtEnd(NATIVE_END_PX))
       session.followAtBottom()
   })
 
