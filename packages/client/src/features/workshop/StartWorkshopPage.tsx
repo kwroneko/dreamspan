@@ -10,7 +10,7 @@
 // they go into its composer as the saved composer's attachments (`composer_library` on its
 // draft), so a reload keeps them and the first send carries them; the URL then drops them.
 import { useSearch } from "@tanstack/react-router"
-import { useEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef } from "react"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useLiveLibraryComposers } from "../chat/libraryAttachments.tsx"
 import { DRAFT_PARAM, TitledDraftChatPage } from "../chat/DraftChatPage.tsx"
@@ -24,9 +24,15 @@ export function StartWorkshopPage() {
   const draft = typeof search[DRAFT_PARAM] === "string" ? (search[DRAFT_PARAM] as string) : ""
   const composers = useLiveLibraryComposers()
   const composer = draft === "" ? undefined : composers.find((live) => live.chatId === draft)
-  // Handed over once, when the new workshop's composer is there. The URL keeps them until the
-  // server has them on its draft, so a reload before that hands them over again.
-  const handed = useRef(false)
+  // Handed over once per workshop and items, when its composer is there: a workshop opened in
+  // place of one swept meanwhile gets them too (rev-dd3 #5). The URL keeps them until the server
+  // has them on that draft, so a reload before that hands them over again; an answer for a
+  // workshop or items the page no longer shows leaves the URL as it is.
+  const handed = useRef<string | null>(null)
+  const current = useRef("")
+  useLayoutEffect(() => {
+    current.current = `${draft}|${attachParam}`
+  })
   const shown = useRef(true)
   useEffect(() => {
     shown.current = true
@@ -35,14 +41,15 @@ export function StartWorkshopPage() {
     }
   }, [])
   useEffect(() => {
-    if (handed.current || composer === undefined) return
+    const handoff = `${draft}|${attachParam}`
+    if (handed.current === handoff || composer === undefined) return
     const ids = attachParam.split(",").filter((id) => id !== "")
     if (ids.length === 0) return
-    handed.current = true
+    handed.current = handoff
     void composer.add(ids, true).then((ok) => {
-      if (ok && shown.current) setAttach("", true)
+      if (ok && shown.current && current.current === handoff) setAttach("", true)
     })
-  }, [composer, attachParam, setAttach])
+  }, [composer, draft, attachParam, setAttach])
   return (
     <TitledDraftChatPage
       draftFor={`workshop:${card}:${persona}`}

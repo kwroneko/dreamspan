@@ -183,6 +183,25 @@ test.describe("work on in a workshop", () => {
     await expect(page).not.toHaveURL(/workshopAttach=/)
   })
 
+  test("a handover past the limit says so and doesn't hold Send (rev-dd3 #7)", async ({ page }) => {
+    test.setTimeout(120_000)
+    await setUp(page, 1340, "dark")
+    // One login for all of them: the server throttles logins.
+    const books = await admin((api) =>
+      Effect.forEach(
+        Array.from({ length: 17 }, (_, i) => i),
+        (i) => Effect.map(api.CreateLorebook({ label: `Chart ${i}` }), (book) => book.id)
+      )
+    )
+    await page.goto(`${server().url}/new/workshop?workshopAttach=${books.join(",")}`)
+    await expect(page).toHaveURL(/[?&]draft=/)
+    await page.getByLabel("Message", { exact: true }).fill("Sort the charts.")
+    await expect(page.getByText("A message can carry at most 16 cards, lorebooks and presets.")).toBeVisible({
+      timeout: 15_000
+    })
+    await expect(page.getByRole("button", { name: /^Send( as .+)?$/ })).toBeEnabled({ timeout: 10_000 })
+  })
+
   test("a handover the server failed once is tried again, and the first send carries it (rev-dfu1 #5)", async ({
     page
   }) => {
@@ -228,6 +247,116 @@ test.describe("work on in a workshop", () => {
     const sent = message.getByLabel("Attached from your library").locator("[data-library-tile]")
     await expect(sent).toHaveCount(1)
     await expect(sent.first()).toHaveAttribute("data-library-tile", book.id)
+  })
+
+  test("after a reload whose read of the attached items failed, the first send still carries them (rev-dd3 #6)", async ({
+    page
+  }) => {
+    test.setTimeout(120_000)
+    await setUp(page, 1340, "dark")
+    const book = await admin((api) => api.CreateLorebook({ label: "Tide tables" }))
+    // Armed for the reload: its first GetComposerLibrary fails.
+    let armed = false
+    let failed = false
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: unknown }) : null
+        if (armed && !failed && request?.tag === "GetComposerLibrary") {
+          failed = true
+          socket.send(
+            JSON.stringify({
+              _tag: "Exit",
+              requestId: request.id,
+              exit: {
+                _tag: "Failure",
+                cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Connection dropped" } }]
+              }
+            })
+          )
+          return
+        }
+        upstream.send(data)
+      })
+      upstream.onMessage((data) => socket.send(data))
+    })
+    await page.goto(`${server().url}/new/workshop?workshopAttach=${book.id}`)
+    await expect(page).toHaveURL(/[?&]draft=/)
+    await expect(page).not.toHaveURL(/workshopAttach/, { timeout: 15_000 })
+    armed = true
+    await page.reload()
+    await expect.poll(() => failed).toBe(true)
+    await page.getByLabel("Message", { exact: true }).fill("Read the tides.")
+    await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+    await expect(page).toHaveURL(/\/chats\//, { timeout: 30_000 })
+    const message = page.getByRole("article").filter({ hasText: "Read the tides." })
+    const sent = message.getByLabel("Attached from your library").locator("[data-library-tile]")
+    await expect(sent).toHaveCount(1)
+  })
+
+  test("a new workshop swept while its handover was retrying hands it to the one opened in its place (rev-dd3 #5)", async ({
+    page
+  }) => {
+    test.setTimeout(120_000)
+    await setUp(page, 1340, "dark")
+    const book = await admin((api) => api.CreateLorebook({ label: "Lighthouse logs" }))
+    // The adds fail while `failing`; while `offline`, the page can't connect at all.
+    let failing = true
+    let offline = false
+    let failures = 0
+    const sockets: Array<{ close: () => Promise<void> }> = []
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      if (offline) return void socket.close()
+      sockets.push(socket)
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: unknown }) : null
+        if (failing && request?.tag === "SetComposerLibrary") {
+          failures++
+          socket.send(
+            JSON.stringify({
+              _tag: "Exit",
+              requestId: request.id,
+              exit: {
+                _tag: "Failure",
+                cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Connection dropped" } }]
+              }
+            })
+          )
+          return
+        }
+        upstream.send(data)
+      })
+      upstream.onMessage((data) => socket.send(data))
+    })
+    await page.goto(`${server().url}/new/workshop?workshopAttach=${book.id}`)
+    await expect(page).toHaveURL(/[?&]draft=/)
+    const first = new URL(page.url()).searchParams.get("draft")!
+    await expect.poll(() => failures).toBeGreaterThan(0)
+    // The page goes offline; meanwhile its workshop is swept (another device's doing).
+    offline = true
+    for (const socket of sockets.splice(0)) await socket.close()
+    await admin((api) => api.LeaveDraftChat({ chatId: first as never }))
+    await expect
+      .poll(
+        () =>
+          admin((api) =>
+            Effect.match(api.GetChat({ chatId: first as never }), { onFailure: () => "gone", onSuccess: () => "there" })
+          ),
+        {
+          timeout: 20_000
+        }
+      )
+      .toBe("gone")
+    failing = false
+    offline = false
+    // Back online: a new workshop opens in its place, with the item still to hand over.
+    await expect.poll(() => new URL(page.url()).searchParams.get("draft"), { timeout: 30_000 }).not.toBe(first)
+    await page.getByLabel("Message", { exact: true }).fill("Log the lamp.")
+    await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+    await expect(page).toHaveURL(/\/chats\//, { timeout: 30_000 })
+    const message = page.getByRole("article").filter({ hasText: "Log the lamp." })
+    await expect(message.getByLabel("Attached from your library").locator("[data-library-tile]")).toHaveCount(1)
   })
 
   test("a card's More menu has it as a submenu", async ({ page }) => {

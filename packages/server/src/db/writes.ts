@@ -213,7 +213,9 @@ export const makeWriteHandlers = (bin: Bin) =>
           const dropped = yield* droppedReplyLabel(sql, userId, droppedTarget)
           const owned =
             key.targetKind !== "insert" ||
-            (yield* sql<{ n: number }>`SELECT 1 AS n FROM chats
+            (yield* sql<{
+              n: number
+            }>`SELECT 1 AS n FROM chats /* chat:includes-pending: the one chat an insertion draft names, the user's own; a pending chat's dropped reply files its text too */
               WHERE id = ${key.targetId} AND owner_user_id = ${userId}`).length > 0
           // Images can't be kept in recovered texts: the save isn't taken, so the browser keeps
           // its copy, images and all, for Browser recovery (rev-dd2 #2).
