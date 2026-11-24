@@ -692,6 +692,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       Effect.gen(function* () {
         const title = `Writing ${action}`
         const { api, path, bytes, importId } = yield* freshRun(title)
+        const imports = yield* StImports
         const writer = yield* Writer
         const reader = yield* Reader
         const userId = (yield* api.Whoami()).id
@@ -708,6 +709,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             })
           )
         )
+        const pause = vi.spyOn(imports, "withFilesPaused")
+        yield* Effect.addFinalizer(() => Effect.sync(() => pause.mockRestore()))
         yield* Effect.addFinalizer(() => Effect.sync(() => hook.mockRestore()))
         yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
         const sending = yield* Effect.forkScoped(sendStFile(importId, path, bytes, {}, 400))
@@ -743,7 +746,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         )
         assert.strictEqual(computed.forks.find((fork) => fork.sourceChatId === chat.id)!.messages, partial.length)
         let continued: string | undefined
-        let next: { importId: string } | undefined
+        const replacement =
+          action === "supersede" ? yield* Effect.forkScoped(api.StartStImport({ unsupported: [] })) : null
         if (action === "open and continue") {
           continued = (yield* posted(
             api.SendMessage({
@@ -754,7 +758,10 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             })
           )).entry.slotId
         } else if (action === "bin") yield* api.DeleteChat({ chatId: chat.id })
-        else next = yield* api.StartStImport({ unsupported: [] })
+        else
+          yield* Effect.promise(() =>
+            vi.waitFor(() => assert.isTrue(pause.mock.calls.some(([, id]) => id === importId)))
+          )
         yield* Deferred.succeed(release, undefined)
         const answer = yield* Fiber.join(sending)
         if (action === "open and continue") {
@@ -762,6 +769,17 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, continued)
           assert.strictEqual(new Set((yield* stImportGraph(config.dataDir, chat.id)).map((row) => row.id)).size, 41)
           yield* api.FinishStImport({ importId, notSent: [] })
+        } else if (replacement !== null) {
+          const next = yield* Fiber.join(replacement)
+          assert.strictEqual(answer.outcome, "added")
+          const previous = yield* api.GetStImport({ importId })
+          assert.strictEqual(previous.job.status, "interrupted")
+          assert.strictEqual(previous.report!.counts.chat?.added, 1)
+          assert.strictEqual((yield* sendFile(importId, "characters/Alice.png", CARD)).status, 404)
+          yield* sendStFile(next.importId, "characters/Alice.png", CARD)
+          assert.strictEqual((yield* sendStFile(next.importId, path, bytes)).outcome, "unchanged")
+          yield* api.FinishStImport({ importId: next.importId, notSent: [] })
+          assert.lengthOf(yield* entries(api, chat.id), 40)
         } else {
           assert.strictEqual(answer.outcome, "failed")
           assert.strictEqual(
@@ -772,15 +790,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             new Set((yield* stImportGraph(config.dataDir, chat.id)).map((row) => row.id)).size,
             partial.length
           )
-          if (next !== undefined) {
-            yield* sendStFile(next.importId, "characters/Alice.png", CARD)
-            yield* sendStFile(next.importId, path, bytes)
-            yield* api.FinishStImport({ importId: next.importId, notSent: [] })
-            assert.lengthOf(yield* entries(api, chat.id), 40)
-          } else {
-            assert.isFalse((yield* api.ListChats({ limit: 200, before: null })).some((c) => c.id === chat.id))
-            yield* api.CancelStImport({ importId })
-          }
+          assert.isFalse((yield* api.ListChats({ limit: 200, before: null })).some((c) => c.id === chat.id))
+          yield* api.CancelStImport({ importId })
         }
         assert.strictEqual(yield* staged, 0)
       })

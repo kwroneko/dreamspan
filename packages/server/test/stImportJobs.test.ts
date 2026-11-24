@@ -12,11 +12,13 @@ import { vi } from "vitest"
 import type { Notice } from "@dreamspan/shared/noticeApi.ts"
 import { classifyStPath } from "@dreamspan/shared/stFolder.ts"
 import { Deferred, Effect, Fiber, Stream } from "effect"
-import { Writer } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { StorageError } from "../src/db/ops.ts"
 import { databaseFile } from "../src/db/connection.ts"
 import { Report } from "../src/importer/stReport.ts"
 import { StImports } from "../src/importer/StImports.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 import { card, encode, header, jsonl, message, stFolder } from "./support/stFolder.ts"
 import { jobEnded, sendFile, sendStFile } from "./support/stUpload.ts"
 import { tempDir } from "./support/tempDir.ts"
@@ -364,6 +366,54 @@ describe("ST import jobs", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
+  it.live("a failed replacement leaves the current upload running and able to finish", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const reader = yield* Reader
+      const files = stFolder()
+      const { importId } = yield* api.StartStImport({ unsupported: [] })
+      yield* sendStFile(importId, "settings.json", files.get("settings.json")!)
+      const replacement = api.StartStImport({ unsupported: [] })
+      const read = vi
+        .spyOn(reader, "StImportSources")
+        .mockImplementationOnce(() =>
+          Effect.fail(
+            new StorageError({
+              operation: "StImportSources",
+              reason: "other",
+              message: "Synthetic source read failure"
+            })
+          )
+        )
+      const readFailure = yield* Effect.flip(replacement).pipe(Effect.ensuring(Effect.sync(() => read.mockRestore())))
+      assert.strictEqual(readFailure._tag, "ServerError")
+      assert.strictEqual((yield* api.GetStImport({ importId })).job.status, "running")
+
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: `CREATE TRIGGER reject_replacement BEFORE INSERT ON st_import_jobs
+            BEGIN SELECT RAISE(ABORT, 'Synthetic job insert failure'); END`
+        }
+      ])
+      const insertFailure = yield* Effect.flip(replacement)
+      assert.strictEqual(insertFailure._tag, "ServerError")
+      const jobs = yield* api.ListStImports()
+      assert.deepStrictEqual(
+        jobs.map((job) => [job.id, job.status]),
+        [[importId, "running"]]
+      )
+
+      const preset = "OpenAI Settings/Default.json"
+      assert.strictEqual((yield* sendStFile(importId, preset, files.get(preset)!)).outcome, "added")
+      yield* api.FinishStImport({ importId, notSent: [] })
+      const { job, report } = yield* api.GetStImport({ importId })
+      assert.strictEqual(job.status, "complete")
+      assert.strictEqual(report!.counts.preset?.added, 1)
+      assert.isFalse(report!.issues.some((issue) => issue.code === "st.preset_missing"))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live(
     "a job running when the server stopped is interrupted at the next start, with what it had",
     () => {
@@ -374,16 +424,17 @@ describe("ST import jobs", () => {
           const api = yield* client()
           const user = yield* api.Whoami()
           const writer = yield* Writer
-          yield* writer.StImportJobStart({
+          yield* writer.StImportBegin({
             userId: user.id,
-            id,
-            mode: "path",
-            source: "/somewhere/ST",
-            root: "/somewhere/ST",
-            prefix: "",
-            filesTotal: 10,
-            bytesTotal: 1000,
-            at: Date.now()
+            importId: id,
+            job: {
+              mode: "path",
+              source: "Synthetic ST folder",
+              root: null,
+              prefix: "",
+              filesTotal: 10,
+              bytesTotal: 1000
+            }
           })
           const report = new Report()
           report.issue("settings.json", "warning", "st.preset_missing", "The selected preset wasn't imported.")

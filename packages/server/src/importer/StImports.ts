@@ -338,6 +338,8 @@ const on = <K extends Exclude<StFile["kind"], "unsupported">>(
 
 const result = (outcome: StFileResult["outcome"], message = "") => new StFileResult({ outcome, message })
 
+export type StImportStartOptions = Omit<Parameters<Writer["Service"]["StImportBegin"]>[0], "userId" | "importId">
+
 export class StImports extends Context.Service<
   StImports,
   {
@@ -348,7 +350,8 @@ export class StImports extends Context.Service<
     readonly start: (
       user: User,
       unsupported: ReadonlyArray<string>,
-      expect?: StPlanExpect
+      expect?: StPlanExpect,
+      options?: StImportStartOptions
     ) => Effect.Effect<string, ServerError>
     readonly report: (user: User, importId: string) => Effect.Effect<StImportReport, NotFound>
     /** One uploaded file, or one part of a chat file. */
@@ -406,7 +409,12 @@ export class StImports extends Context.Service<
           return session?.id === importId ? session.files.withPermit(transition) : transition
         })
 
-      const start = (user: User, unsupported: ReadonlyArray<string>, expect: StPlanExpect | undefined) =>
+      const start = (
+        user: User,
+        unsupported: ReadonlyArray<string>,
+        expect: StPlanExpect | undefined,
+        options: StImportStartOptions | undefined
+      ) =>
         Effect.gen(function* () {
           const sources = yield* reader.StImportSources({ userId: user.id })
           const session: Session = {
@@ -469,7 +477,7 @@ export class StImports extends Context.Service<
             }
           }
           // Every run before it is over: none of them writes any more (ARCHITECTURE.md §13).
-          yield* writer.StImportBegin({ userId: user.id, importId: session.id })
+          yield* writer.StImportBegin({ ...options, userId: user.id, importId: session.id })
           sessions.set(user.id, session)
           return session.id
         })
@@ -2059,8 +2067,8 @@ export class StImports extends Context.Service<
       }
 
       return StImports.of({
-        start: (user, unsupported, expect) =>
-          start(user, unsupported, expect).pipe(
+        start: (user, unsupported, expect, options) =>
+          start(user, unsupported, expect, options).pipe(
             Effect.catch((error) =>
               Effect.logError("starting an ST import failed", error).pipe(
                 Effect.andThen(Effect.fail(new ServerError({ message: "The import couldn't start." })))
