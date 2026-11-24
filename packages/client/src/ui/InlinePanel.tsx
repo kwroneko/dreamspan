@@ -3,6 +3,7 @@
 // X of dialogs and sheets (WindowClose), and Escape inside it closes it; the button that opened
 // it shows itself pressed while it's open (`aria-pressed`, `pressedButtonClass`).
 import type { ReactNode } from "react"
+import { TitledContainer, useRepeatsTitle } from "./titledContainer.tsx"
 import { WindowClose } from "./WindowClose.tsx"
 
 /** A toggle button's look while the panel it opens is open. */
@@ -26,11 +27,14 @@ export function InlinePanel({
   className?: string
   children: ReactNode
 }) {
+  const repeats = useRepeatsTitle(title, titleHidden, "The panel's title")
+  const hidden = titleHidden || repeats
   return (
     <section
+      {...(repeats ? { "data-title-repeated": "" } : {})}
       id={id}
       aria-label={title}
-      className={`relative flex min-w-0 flex-col gap-2 rounded-md border border-border bg-surface p-2 ${titleHidden ? "pr-11" : ""} ${className}`}
+      className={`relative flex min-w-0 flex-col gap-2 rounded-md border border-border bg-surface p-2 ${hidden ? "pr-11" : ""} ${className}`}
       onKeyDown={(event) => {
         if (event.key !== "Escape" || event.defaultPrevented) return
         event.preventDefault()
@@ -38,7 +42,7 @@ export function InlinePanel({
         onClose()
       }}
     >
-      {titleHidden ? (
+      {hidden ? (
         <>
           <h3 className="sr-only">{title}</h3>
           <span className="absolute top-2 right-1.5">
@@ -51,7 +55,8 @@ export function InlinePanel({
           <WindowClose onClick={onClose} />
         </div>
       )}
-      {children}
+      {/* A hidden title names the panel for assistive technology only: its field may show the words. */}
+      <TitledContainer title={hidden ? null : title}>{children}</TitledContainer>
     </section>
   )
 }

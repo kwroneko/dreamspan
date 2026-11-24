@@ -4,6 +4,7 @@
 import { Slider as BaseSlider } from "@base-ui/react/slider"
 import { useId, type ReactNode } from "react"
 import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
+import { useRepeatsTitle } from "./titledContainer.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 
 export function Slider({
@@ -33,6 +34,7 @@ export function Slider({
   onValueCommitted: (value: number) => void
 }) {
   const aboutId = useId()
+  const repeats = useRepeatsTitle(label, false, "The slider's label")
   return (
     <BaseSlider.Root
       value={value}
@@ -48,7 +50,9 @@ export function Slider({
     >
       <div className="flex items-baseline justify-between gap-3">
         <LabelWithHelp help={about && <AboutHint heading={label}>{about}</AboutHint>}>
-          <BaseSlider.Label className="inline text-sm font-medium text-text">{label}</BaseSlider.Label>
+          <BaseSlider.Label className={repeats ? "sr-only" : "inline text-sm font-medium text-text"}>
+            {label}
+          </BaseSlider.Label>
         </LabelWithHelp>
         <span className="text-sm text-muted tabular-nums">{valueText(value)}</span>
       </div>

@@ -184,7 +184,8 @@ for (const width of [1440, 390])
       const panel = page.getByRole("tabpanel", { name: "Mira", exact: true })
       const notes = await cardFieldsTab(panel, "Notes")
       const header = notes.locator("[data-note-section-header]")
-      await expect(header.getByRole("heading", { name: "Mira" })).toBeVisible()
+      // The card's name heads the panel already: the section's heading isn't shown again (dupelabel1).
+      await expect(header.getByRole("heading", { name: "Mira" })).toHaveClass(/sr-only/)
       await header.getByRole("button", { name: "Add note", exact: true }).click()
       const made = notes.getByRole("region", { name: "Note Note" })
       // A card's note opens with its settings (Replaces first, DESIGN §4.2), taller than a phone's

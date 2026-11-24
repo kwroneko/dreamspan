@@ -425,9 +425,11 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       about: "One creator's cards, written as site/name, for example chub/someone."
     })
   }
-  // Reuse the generic panel's choices, text fields and switches for the remaining v1
-  // criteria. Standalone lorebooks come back beside characters (§3.9) and open in the
-  // lorebook editor, never in a character's draft chat.
+  // The remaining v1 criteria the bar places (PLACEMENT), as choices, text fields and switches.
+  // A criterion it doesn't know is left out, never shown as a generic control named after the
+  // parameter (owner, 2026-11-23: a "Created after" popover over a "Created after" field).
+  // Standalone lorebooks come back beside characters (§3.9) and open in the lorebook editor,
+  // never in a character's draft chat.
   const handled = new Set([
     "q",
     "tags",
@@ -441,7 +443,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
   ])
   for (const descriptor of named.values()) {
     const { name, type, label, description } = descriptor
-    if (handled.has(name)) continue
+    if (handled.has(name) || !Object.hasOwn(PLACEMENT, name)) continue
     const common = {
       id: name,
       label: FILTER_LABELS[name] ?? label ?? name,

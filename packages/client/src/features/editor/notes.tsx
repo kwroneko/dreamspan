@@ -776,10 +776,16 @@ export function NoteSectionHeader({
   title,
   addHint,
   onNew,
-  onPick
+  onPick,
+  titleHidden = false
 }: {
   /** The section's name: "This chat", a card's name. */
   title: string
+  /**
+   * The name for assistive technology only, where the heading above already says it (a card's
+   * own Notes tab, under the card's name): the buttons stay at the right.
+   */
+  titleHidden?: boolean
   /** What Add note adds and where: "Adds a new note to this chat." */
   addHint: string
   onNew: () => void
@@ -818,8 +824,8 @@ export function NoteSectionHeader({
   )
   return (
     <div ref={row} data-note-section-header="" className="flex min-h-8 min-w-0 items-center gap-2">
-      <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</h3>
-      <span className="flex shrink-0 items-center gap-1">
+      <h3 className={titleHidden ? "sr-only" : "min-w-0 flex-1 truncate text-sm font-semibold"}>{title}</h3>
+      <span className={`flex shrink-0 items-center gap-1 ${titleHidden ? "ml-auto" : ""}`}>
         {action("Add note", "plus", addHint, onNew)}
         {action("Link shared note", "link", SHARED_NOTE_HINT, onPick)}
       </span>

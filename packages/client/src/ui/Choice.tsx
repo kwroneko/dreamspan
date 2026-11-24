@@ -10,6 +10,7 @@ import { Switch as BaseSwitch } from "@base-ui/react/switch"
 import { Fragment, type ReactElement, type ReactNode, useId, useRef } from "react"
 import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
 import { inlineExplanationClass } from "./Explanation.tsx"
+import { useRepeatsTitle } from "./titledContainer.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 
 const focusRing =
@@ -75,7 +76,7 @@ export function Checkbox({
   hint,
   indeterminate = false,
   disabled = false,
-  labelHidden = false,
+  labelHidden: hideLabel = false,
   hintInline = true
 }: {
   checked: boolean
@@ -101,6 +102,8 @@ export function Checkbox({
 }) {
   const id = useId()
   const aboutId = useId()
+  // A label repeating the title of the popover or panel it's in: the title names it.
+  const labelHidden = useRepeatsTitle(children, hideLabel, "The label") || hideLabel
   const help =
     labelHelp ??
     (about ? (
@@ -215,7 +218,7 @@ export function Switch({
   labelHelp,
   hint,
   describedBy,
-  labelHidden = false,
+  labelHidden: hideLabel = false,
   disabled = false,
   compact = false,
   mixed = false
@@ -242,6 +245,8 @@ export function Switch({
 }) {
   const id = useId()
   const aboutId = useId()
+  // A label repeating the title of the popover or panel it's in: the title names it.
+  const labelHidden = useRepeatsTitle(children, hideLabel, "The label") || hideLabel
   const help =
     labelHelp ??
     (about ? (
