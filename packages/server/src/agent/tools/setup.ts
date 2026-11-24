@@ -18,6 +18,7 @@ import { findRevision } from "./versions.ts"
 import { changedUnits, pickedUnits, planReversal, unitName } from "@dreamspan/shared/changeReversal.ts"
 import type { Doc, RevisionId } from "@dreamspan/shared/library.ts"
 import { workshopLimits as limits } from "../../workshopLimits.ts"
+import { classOfKind } from "../capabilities.ts"
 
 const receiptFirst = <A>(tool: RolloutTool<A>): RolloutTool<A> => ({
   ...tool,
@@ -69,6 +70,16 @@ const key = (ctx: ToolContext) => ({
         }))
       }
     : {})
+})
+const writeKey = Effect.fnUntraced(function* (ctx: ToolContext, ref: LibraryRef) {
+  const sight = ctx.sight
+  if (sight && ctx.approvalDigest && !(yield* sight.inView(ref.entityId))) {
+    const allowed = yield* sight.gate(classOfKind(ref.kind), `It wants to open “${ref.label}”.`)
+    if (!allowed.ok) return yield* Effect.fail(new ToolInputRefused(allowed.text))
+  }
+  const call = key(ctx)
+  if (!sight?.position) return call
+  return { ...call, librarySight: { ...(yield* sight.position), refId: ref.id } }
 })
 const safely = <E>(body: Effect.Effect<ToolOutput, E>) =>
   body.pipe(
@@ -299,6 +310,7 @@ const editCard: RolloutTool<{
     safely(
       Effect.gen(function* () {
         const ref = yield* findRef(ctx, "card", args.card)
+        const writing = yield* writeKey(ctx, ref)
         const saved =
           (ctx.cache.get(`approval:edit:${ctx.toolCallId}`) as
             Effect.Success<ReturnType<ToolContext["reader"]["OpenEditor"]>> | undefined) ??
@@ -307,7 +319,7 @@ const editCard: RolloutTool<{
         if ("error" in result) return { text: result.error, isError: true }
         const doc = result.doc
         const text = yield* ctx.writer.AgentReviseEntity({
-          ...key(ctx),
+          ...writing,
           refId: ref.id,
           expectedRowVersion: saved.ref.rowVersion,
           doc,
@@ -355,7 +367,7 @@ const cloneCard: RolloutTool<{
       Effect.gen(function* () {
         const ref = yield* findRef(ctx, "card", args.card)
         const text = yield* ctx.writer.AgentCloneCard({
-          ...key(ctx),
+          ...(yield* writeKey(ctx, ref)),
           refId: ref.id,
           name: args.name,
           nickname: args.nickname ?? "",
@@ -540,7 +552,7 @@ const editLibraryDocument = (kind: "preset" | "lorebook", schema: Schema.Top): R
           const cached = ctx.cache.get(`approval:document:${ctx.toolCallId}`) as typeof fresh | undefined
           const { saved, doc } = cached ?? fresh
           const text = yield* ctx.writer.AgentReviseEntity({
-            ...key(ctx),
+            ...(yield* writeKey(ctx, saved.ref)),
             refId: saved.ref.id,
             expectedRowVersion: saved.ref.rowVersion,
             doc,
@@ -569,7 +581,7 @@ const prepareCardNote = (ctx: ToolContext, args: CardNoteEdit) =>
         new ToolInputRefused("This note shows shared text. Edit the shared note in its editor.")
       )
     remember(ctx, "note", args.note, saved.ref)
-    return saved
+    return { ...saved, cardRef: ref }
   })
 const editCardNote: RolloutTool<CardNoteEdit> = {
   source: import.meta.url,
@@ -602,7 +614,7 @@ const editCardNote: RolloutTool<CardNoteEdit> = {
             Effect.Success<ReturnType<typeof prepareCardNote>> | undefined) ?? (yield* prepareCardNote(ctx, args))
         return {
           text: yield* ctx.writer.AgentReviseEntity({
-            ...key(ctx),
+            ...(yield* writeKey(ctx, saved.cardRef)),
             refId: saved.ref.id,
             expectedRowVersion: saved.ref.rowVersion,
             doc: { ...saved.doc, content: args.content }
@@ -682,7 +694,7 @@ const editLibraryNote: RolloutTool<LibraryNoteEdit> = {
             Effect.Success<ReturnType<typeof prepareLibraryNote>> | undefined) ?? (yield* prepareLibraryNote(ctx, args))
         return {
           text: yield* ctx.writer.AgentReviseEntity({
-            ...key(ctx),
+            ...(yield* writeKey(ctx, prepared.saved.ref)),
             refId: prepared.saved.ref.id,
             expectedRowVersion: prepared.saved.ref.rowVersion,
             doc: prepared.doc
@@ -767,7 +779,7 @@ const revertChange: RolloutTool<RevertArgs> = {
         if ("error" in found) return { text: found.error, isError: true }
         return {
           text: yield* ctx.writer.AgentRevertRevision({
-            ...key(ctx),
+            ...(yield* writeKey(ctx, ref)),
             refId: ref.id,
             revisionId: found.revision.id,
             ...(args.fields === undefined ? {} : { fields: args.fields }),

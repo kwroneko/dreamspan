@@ -4,6 +4,7 @@
 // what the caller names from the branch's state (the workshop's own cast, a story's cast and
 // books beside it). Allow always grants are the user's settings (`workshop.cardGrants`,
 // `workshop.alwaysGrants`), written only by the user's answer or Remove.
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { Effect } from "effect"
@@ -12,7 +13,7 @@ import { capabilityDefaults, libraryClassIds, workshopCapabilities } from "../ag
 import { callsFrom } from "../agent/steps.ts"
 import { inFork } from "./forkState.ts"
 import { lcmPath } from "./lcmPath.ts"
-import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
+import { type LibrarySightPosition, NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { ALWAYS_GRANTS, CARD_GRANTS, putUserSetting, readSetting } from "./settings.ts"
 import { resumeLineage } from "./subagentEffects.ts"
 import { query, transaction } from "./tx.ts"
@@ -224,46 +225,63 @@ export const writeClassGrant = (sql: Sql, userId: string, capability: string, ca
     })
   })
 
+/** Read the same sight and grants during a tool call or inside its writer transaction. */
+export const libraryAccess = (
+  sql: Sql,
+  {
+    userId,
+    chatId,
+    forkId,
+    leafSlotId,
+    rolloutId,
+    entities,
+    refs,
+    card
+  }: LibrarySightPosition & {
+    readonly userId: UserId
+    readonly chatId: ChatId
+    readonly rolloutId: string
+  }
+) =>
+  Effect.gen(function* () {
+    const [chat] = yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}
+      AND kind = 'workshop' AND deleted_at IS NULL`
+    if (!chat) return yield* new NotFound({ entity: "workshop", id: chatId })
+    const { replyId, runs } = yield* replyRuns(sql, rolloutId)
+    const { inView } = yield* pathView(sql, userId, chatId, leafSlotId, replyId, entities, refs)
+    const chatGrants = yield* sql<{ capability: string; mode: "off" | "ask" | "allow" }>`SELECT capability, mode
+      FROM workshop_grants WHERE chat_id = ${chatId} AND owner_user_id = ${userId} AND target = ''
+        AND capability IN (SELECT value FROM json_each(${JSON.stringify(libraryClassIds)}))
+        AND (expires_at IS NULL OR expires_at > ${Date.now()})`
+    const answers = yield* sql<{ capability: string; status: "used" | "denied"; note: string | null }>`
+      SELECT capability, status, note FROM tool_approvals
+      WHERE rollout_id IN (SELECT value FROM json_each(${JSON.stringify(runs)}))
+        AND capability IN (SELECT value FROM json_each(${JSON.stringify(libraryClassIds)}))
+        AND json_type(prompt_json, '$.scoped') = 'object'
+        AND ((status = 'used' AND answer <> 'deny') OR status = 'denied')
+      ORDER BY answered_at DESC`
+    const [named] =
+      card === null
+        ? []
+        : yield* sql<{ label: string }>`SELECT r.label FROM entities e JOIN entity_refs r ON r.entity_id = e.id
+            WHERE e.id = ${card} AND e.owner_user_id = ${userId} AND e.kind = 'card'`
+    return {
+      inView,
+      replyId,
+      card: card !== null && named ? { entityId: card, name: named.label } : null,
+      chat: chatGrants,
+      cardGrants: card !== null && named ? ((yield* cardGrantsOf(sql, userId))[card] ?? {}) : {},
+      always: yield* alwaysGrantsOf(sql, userId),
+      replyAllowed: [...new Set(answers.filter((a) => a.status === "used").map((a) => a.capability))],
+      replyDeclined: answers.filter((a) => a.status === "denied").map(({ capability, note }) => ({ capability, note }))
+    }
+  }).pipe(inFork(sql, chatId, forkId, leafSlotId))
+
 export const makeWorkshopSightReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
     LibraryGrants: ({ userId }) => libraryGrantsOf(sql, userId).pipe(query("LibraryGrants")),
-    LibraryAccess: ({ userId, chatId, forkId, leafSlotId, rolloutId, entities, refs, card }) =>
-      Effect.gen(function* () {
-        const [chat] = yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}
-          AND kind = 'workshop' AND deleted_at IS NULL`
-        if (!chat) return yield* new NotFound({ entity: "workshop", id: chatId })
-        const { replyId, runs } = yield* replyRuns(sql, rolloutId)
-        const { inView } = yield* pathView(sql, userId, chatId, leafSlotId, replyId, entities, refs)
-        const chatGrants = yield* sql<{ capability: string; mode: "off" | "ask" | "allow" }>`SELECT capability, mode
-          FROM workshop_grants WHERE chat_id = ${chatId} AND owner_user_id = ${userId} AND target = ''
-            AND capability IN (SELECT value FROM json_each(${JSON.stringify(libraryClassIds)}))
-            AND (expires_at IS NULL OR expires_at > ${Date.now()})`
-        const answers = yield* sql<{ capability: string; status: "used" | "denied"; note: string | null }>`
-          SELECT capability, status, note FROM tool_approvals
-          WHERE rollout_id IN (SELECT value FROM json_each(${JSON.stringify(runs)}))
-            AND capability IN (SELECT value FROM json_each(${JSON.stringify(libraryClassIds)}))
-            AND json_type(prompt_json, '$.scoped') = 'object'
-            AND ((status = 'used' AND answer <> 'deny') OR status = 'denied')
-          ORDER BY answered_at DESC`
-        const [named] =
-          card === null
-            ? []
-            : yield* sql<{ label: string }>`SELECT r.label FROM entities e JOIN entity_refs r ON r.entity_id = e.id
-                WHERE e.id = ${card} AND e.owner_user_id = ${userId} AND e.kind = 'card'`
-        return {
-          inView,
-          replyId,
-          card: card !== null && named ? { entityId: card, name: named.label } : null,
-          chat: chatGrants,
-          cardGrants: card !== null && named ? ((yield* cardGrantsOf(sql, userId))[card] ?? {}) : {},
-          always: yield* alwaysGrantsOf(sql, userId),
-          replyAllowed: [...new Set(answers.filter((a) => a.status === "used").map((a) => a.capability))],
-          replyDeclined: answers
-            .filter((a) => a.status === "denied")
-            .map(({ capability, note }) => ({ capability, note }))
-        }
-      }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("LibraryAccess")),
+    LibraryAccess: (input) => libraryAccess(sql, input).pipe(query("LibraryAccess")),
     ChangedInViewSince: ({ userId, chatId, forkId, leafSlotId, entities }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}

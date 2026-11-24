@@ -71,6 +71,27 @@ export const classStanding = (
   return { mode: resolveMode(registries, new Map(), capability, "read"), from: "default" }
 }
 
+/** The current grant, including an Allow for this reply. An explicit Off takes precedence. */
+export const libraryClassMode = (
+  registries: CapabilityRegistries,
+  access: {
+    readonly chat: ReadonlyArray<{ readonly capability: string; readonly mode: CapabilityMode }>
+    readonly card: { readonly name: string } | null
+    readonly cardGrants: Readonly<Record<string, "allow">>
+    readonly always: StandingGrants["always"]
+    readonly replyAllowed: ReadonlyArray<string>
+  },
+  capability: LibraryClass
+): CapabilityMode => {
+  const standing = classStanding(
+    registries,
+    new Map(access.chat.map((grant) => [grant.capability, grant.mode])),
+    { ...(access.card ? { card: { name: access.card.name, grants: access.cardGrants } } : {}), always: access.always },
+    capability
+  )
+  return standing.mode === "ask" && access.replyAllowed.includes(capability) ? "allow" : standing.mode
+}
+
 const ALL_MODES: ReadonlyArray<CapabilityMode> = ["off", "ask", "allow"]
 
 /** Whether commands reach the internet (spec/FILES-AND-ENVIRONMENT.md §3.5): a setting of `commands`. */

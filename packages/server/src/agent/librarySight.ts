@@ -11,13 +11,15 @@ import type { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
 import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { foldState } from "@dreamspan/shared/state.ts"
-import type { CapabilityMode } from "@dreamspan/shared/workshopApi.ts"
 import { Deferred, Effect, Exit } from "effect"
+import type { LibrarySightPosition } from "../db/ops.ts"
 import { askUser, type PermitDeps } from "./approvals.ts"
-import { classStanding, type LibraryClass } from "./capabilities.ts"
+import { libraryClassMode, type LibraryClass } from "./capabilities.ts"
 import type { ToolContext } from "./tools.ts"
 
 export interface LibrarySight {
+  /** The reply's positioned view, also used to verify a write in the database worker. */
+  readonly position?: Effect.Effect<LibrarySightPosition, unknown>
   /** Whether this entity is in view for the reply now (its own creations so far included). */
   readonly inView: (entityId: string) => Effect.Effect<boolean>
   /**
@@ -88,20 +90,23 @@ const fixedView = (context: ToolContext) =>
 export const makeLibrarySight =
   (deps: PermitDeps): LibrarySightFor =>
   (context, onWaiting) => {
-    const access = Effect.gen(function* () {
-      const fixed = yield* fixedView(context)
-      return yield* context.reader.LibraryAccess({
-        userId: deps.userId as UserId,
-        chatId: deps.chatId as ChatId,
+    const position = fixedView(context).pipe(
+      Effect.map((fixed): LibrarySightPosition => ({
         forkId: context.forkId,
         leafSlotId: context.leafSlotId,
+        ...fixed
+      }))
+    )
+    const access = Effect.flatMap(position, (at) =>
+      context.reader.LibraryAccess({
+        userId: deps.userId as UserId,
+        chatId: deps.chatId as ChatId,
         rolloutId: deps.rolloutId,
-        entities: fixed.entities,
-        refs: fixed.refs,
-        card: fixed.card
+        ...at
       })
-    })
+    )
     return {
+      position,
       inView: (entityId) =>
         access.pipe(
           Effect.map((found) => found.inView.includes(entityId)),
@@ -114,22 +119,13 @@ export const makeLibrarySight =
             const noun = entry?.scoped?.noun ?? "library"
             const label = entry?.label ?? capability
             const decide = (found: Effect.Success<typeof access>): Decision | null => {
-              const chat = new Map<string, CapabilityMode>(found.chat.map((g) => [g.capability, g.mode]))
-              const standing = classStanding(
-                deps.registries,
-                chat,
-                {
-                  ...(found.card ? { card: { name: found.card.name, grants: found.cardGrants } } : {}),
-                  always: found.always
-                },
-                capability
-              )
-              if (standing.mode === "off")
+              const mode = libraryClassMode(deps.registries, found, capability)
+              if (mode === "off")
                 return {
                   ok: false,
                   text: `“${label}” is turned off in this workshop, so this wasn't done. Ask the user to attach what you need, or to turn it on.`
                 }
-              if (standing.mode === "allow" || found.replyAllowed.includes(capability)) return { ok: true }
+              if (mode === "allow") return { ok: true }
               const declined = found.replyDeclined.find((answer) => answer.capability === capability)
               return declined ? { ok: false, text: declinedText(noun, declined.note) } : null
             }

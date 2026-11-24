@@ -283,6 +283,31 @@ describe("library sight", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("turning Cards off during a write approval leaves the pinned card unchanged", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const { api, open } = yield* setup({
+        edit: [["edit_card", { card: "Mara Quill", changes: [{ field: "description", text: "New text." }] }, "edit"]]
+      })
+      const { chat, events } = yield* open([
+        { capability: "library.cards", mode: "allow" },
+        { capability: "library.write", mode: "ask" }
+      ])
+      const before = (yield* api.ListLibrary({ kind: "card" })).find((r) => r.label === "Mara Quill")!
+      const edit = yield* task(api, chat, "edit")
+      const prompt = yield* awaitApproval(events, edit, "edit")
+      assert.strictEqual(prompt.capability, "library.write")
+      yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.cards", mode: "off" })
+      yield* answer(api, prompt, "allow")
+      yield* done(events, edit)
+      const [result] = yield* results(api, edit, 1)
+      assert.isTrue(result!.isError)
+      assert.include(result!.text, "turned off in this workshop")
+      assert.strictEqual((yield* api.OpenEditor({ refId: before.id })).ref.headRevisionId, before.headRevisionId)
+      assert.isEmpty(yield* api.ListRolloutEffects({ chatId: chat.id }))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("Allow always and Allow always for the card hold in new workshops, are listed, and are removed", () => {
     const config = testConfig()
     return Effect.gen(function* () {
