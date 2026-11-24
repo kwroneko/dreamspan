@@ -1,4 +1,4 @@
-import { toolData, toolDataPage, TOOL_RESULT_CHARS } from "./toolData.ts"
+import { toolData, toolDataPage, toolDataParts, TOOL_RESULT_CHARS } from "./toolData.ts"
 import { admitsEffect, outsideEffect, UNCERTAIN_EFFECT } from "./effects.ts"
 // The agent reply strategy (spec/AGENTIC.md §3): a pi-agent-core loop over the frozen request.
 // The assembler built the context once; each provider request is that prefix plus the
@@ -52,6 +52,7 @@ import { forTarget, rolloutRequest } from "./wire.ts"
 import { Mailbox } from "./mailbox.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { declarePresence } from "./tools/sendPresence.ts"
+import { storyMcpResultPage } from "./tools/mcp.ts"
 import {
   BAD_ARGS,
   CALL_TOOL,
@@ -1002,17 +1003,13 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               .filter((step) => step.kind === "tool")
               .findLastIndex((step) => step.id === toolCallId) + 1
           const recovery = `[Result shortened. read_run with message 0 and from_step=${Math.max(1, stepNumber)} recovers it; follow its page cursors for the rest.]`
-          // A story has no read_run: its server results are paged by read_result, this run's only.
-          const storyMore = (end: number) =>
-            /^[A-Za-z0-9_.:-]{1,128}$/.test(toolCallId)
-              ? `[Result shortened. read_result with call "${toolCallId}" and offset=${end} continues it.]`
-              : `[Result shortened. read_result with this call's id and offset=${end} continues it.]`
           // Page the original, not the envelope this wrapped it in: paging the envelope quoted it twice.
           const pageSource = result !== raw ? raw.text : fullText
           let sentText =
             quote && fullText.length > TOOL_RESULT_CHARS
-              ? toolDataPage(pageSource, { frame: raw.frame, more: workshopData ? () => recovery : storyMore }).text ||
-                (workshopData ? recovery : storyMore(0))
+              ? workshopData
+                ? toolDataPage(pageSource, { frame: raw.frame, more: () => recovery }).text || recovery
+                : storyMcpResultPage(pageSource, toolCallId, raw.frame)
               : fullText
           if (execution.chatKinds.get(run.kind ?? "")?.summaryTranscript && !raw.replayed) {
             const turn = agent.state.messages.findLastIndex((m) => m.role === "assistant")
@@ -1553,11 +1550,20 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                         })
                     )
                   )
+          const mcpReceipt = receipt !== null && !workshopData && frozen.some((t) => t.name === call.name && t.mcp)
+          const receiptPage = mcpReceipt && receipt.text.length > TOOL_RESULT_CHARS ? toolDataParts(receipt.text) : null
           const refusal = dispatchRefusal(call)
           const result = receipt
             ? {
-                content: [{ type: "text" as const, text: workshopData ? receipt.text : budgetResult(receipt.text) }],
-                details: null,
+                content: [
+                  {
+                    type: "text" as const,
+                    text: workshopData || mcpReceipt ? receipt.text : budgetResult(receipt.text)
+                  }
+                ],
+                details: receiptPage
+                  ? { sentText: storyMcpResultPage(receiptPage.text, call.id, receiptPage.frame) }
+                  : null,
                 isError: receipt.isError
               }
             : refusal && (!dispatch || refusal !== BAD_ARGS)

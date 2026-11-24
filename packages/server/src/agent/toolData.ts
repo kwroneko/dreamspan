@@ -22,12 +22,20 @@ export const escapeToolData = (text: string): string =>
 /** App-owned opening/closing framing, with the same escaping for every quoted body. */
 export const dataEnvelope = (text: string, open: string, close: string) => `${open}\n${escapeToolData(text)}\n${close}`
 
-/** The original text of a `toolData` envelope (its exact inverse); any other text as it is. */
-export const toolDataBody = (stored: string): string => {
+/** Recover the original body and app-owned frame from a stored tool result. */
+export const toolDataParts = (stored: string): { text: string; frame?: string } => {
   const open = stored.indexOf("<tool_data>\n")
-  if (!stored.startsWith(TOOL_DATA_NOTICE) || open < 0 || !stored.endsWith("\n</tool_data>")) return stored
-  return decodeToolData(stored.slice(open + "<tool_data>\n".length, -"\n</tool_data>".length))
+  const prefix = TOOL_DATA_NOTICE.length + 1
+  if (!stored.startsWith(`${TOOL_DATA_NOTICE}\n`) || open < prefix || !stored.endsWith("\n</tool_data>"))
+    return { text: stored }
+  return {
+    text: decodeToolData(stored.slice(open + "<tool_data>\n".length, -"\n</tool_data>".length)),
+    frame: stored.slice(prefix, open).trimEnd()
+  }
 }
+
+/** The original text of a `toolData` envelope (its exact inverse); any other text as it is. */
+export const toolDataBody = (stored: string): string => toolDataParts(stored).text
 
 /** `frame` is app-owned metadata, never a document, label, exception or generated prose. */
 export const toolData = (text: string, frame = "", notice = true) =>

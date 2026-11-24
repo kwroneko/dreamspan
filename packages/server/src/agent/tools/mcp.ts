@@ -363,6 +363,15 @@ export const mcpToolFromFrozen = (
 /** A provider's call id, shown back to the model only when it is plain (they're source text). */
 const plainCallId = (call: string) => /^[A-Za-z0-9_.:-]{1,128}$/.test(call)
 
+/** The model sees a bounded first page; the full quoted result stays in the story transcript. */
+export const storyMcpResultPage = (text: string, call: string, frame?: string) => {
+  const more = (end: number) =>
+    plainCallId(call)
+      ? `[Result shortened. read_result with call "${call}" and offset=${end} continues it.]`
+      : `[Result shortened. read_result with this call's id and offset=${end} continues it.]`
+  return toolDataPage(text, { frame, more }).text || more(0)
+}
+
 /**
  * The rest of a long server result in a story (spec/MCP.md §9): pages a result of this run's own
  * transcript, by its call id, and nothing else, so it never reads another run.
