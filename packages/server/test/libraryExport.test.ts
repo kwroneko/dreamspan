@@ -9,7 +9,7 @@ import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { FrozenTool, ToolContext } from "../src/agent/tools.ts"
 import { FILE_TOOLS } from "../src/agent/tools/files.ts"
-import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { cardDoc, presetDoc } from "./support/docs.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
@@ -93,10 +93,15 @@ describe("export_to_file", () => {
         const description = Array.from({ length: 3000 }, (_, i) => `Shelf ${i + 1} holds charts of the coast.`).join(
           "\n"
         )
+        const embedded = "The oldest tide chart is under the stairs."
         const card = yield* create(
           "card",
           "Mara Quill",
-          cardDoc("Mara Quill", { description, alternate_greetings: ["The door creaks.", "A lamp flickers."] })
+          cardDoc("Mara Quill", {
+            description,
+            alternate_greetings: ["The door creaks.", "A lamp flickers."],
+            character_book: loreBook([loreEntry({ content: embedded }, 7)]).document
+          })
         )
 
         // A field, to the working folder, named after the item, the exact text.
@@ -146,6 +151,15 @@ describe("export_to_file", () => {
         assert.include(prompt.text, "Prose prompt main.txt")
 
         // An earlier revision, by number.
+        const attached = yield* posted(
+          api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: chat.activeLeafSlotId,
+            branch: false,
+            content: "Keep a copy of this card.",
+            library: [{ kind: "card", refId: card.id }]
+          })
+        )
         const head = yield* base.reader.GetRef({ userId: me.id, refId: card.id })
         yield* writer.EditRef({
           userId: me.id,
@@ -164,6 +178,41 @@ describe("export_to_file", () => {
         })
         assert.isUndefined(old.isError, old.text)
         assert.include((yield* run("read_file", { path: "/files/notes/old.txt", limit: 20_000 })).text, "Shelf 3000")
+
+        const lorebooksOff: Partial<ToolContext> = {
+          sight: {
+            inView: () => Effect.succeed(false),
+            gate: (capability) =>
+              Effect.succeed(capability === "library.cards" ? { ok: true } : { ok: false, text: "Lorebooks are off." })
+          }
+        }
+        const revision = { kind: "card", item: card.id, revision: "1" }
+        const redacted = yield* run("export_to_file", { ...revision, path: "redacted.json" }, lorebooksOff)
+        assert.isUndefined(redacted.isError, redacted.text)
+        const redactedFile = yield* run("read_file", { path: "/files/notes/redacted.json", limit: 20_000 })
+        assert.include(redactedFile.text, '"name": "Mara Quill"')
+        assert.notInclude(redactedFile.text, "character_book")
+        assert.notInclude(redactedFile.text, embedded)
+        const denied = yield* run("export_to_file", { ...revision, entry: 7, path: "denied.txt" }, lorebooksOff)
+        assert.isTrue(denied.isError)
+        assert.include(denied.text, "doesn't have access to this card's lorebook")
+        assert.isTrue((yield* run("read_file", { path: "/files/notes/denied.txt" })).isError)
+
+        const pinned = yield* run(
+          "export_to_file",
+          {
+            ...revision,
+            revision: head.ref.headRevisionId,
+            entry: 7,
+            path: "attached.txt"
+          },
+          {
+            ...lorebooksOff,
+            leafSlotId: attached.entry.slotId
+          }
+        )
+        assert.isUndefined(pinned.isError, pinned.text)
+        assert.include((yield* run("read_file", { path: "/files/notes/attached.txt" })).text, embedded)
 
         // Wrong targets name the choices; nothing is written.
         assert.include(
@@ -213,10 +262,27 @@ describe("export_to_file", () => {
         yield* api.UndoRolloutEffect({ rolloutId, toolCallId: "export", seq: effect.seq })
         assert.isTrue((yield* run("read_file", { path: "/files/notes/Mara Quill description.txt" })).isError)
 
+        const setFiles = (mode: "allow" | "off") => api.SetWorkshopGrant({ chatId: chat.id, capability: "files", mode })
+        const revoked = yield* run(
+          "export_to_file",
+          { ...revision, path: "revoked.json" },
+          {
+            sight: {
+              inView: () => Effect.succeed(false),
+              gate: (capability) =>
+                capability === "library.lorebooks"
+                  ? setFiles("off").pipe(Effect.orDie, Effect.as({ ok: true as const }))
+                  : Effect.succeed({ ok: true })
+            }
+          }
+        )
+        assert.isTrue(revoked.isError)
+        assert.include(revoked.text, "off in this workshop")
         // Files turned off in this workshop: refused like every file tool.
-        yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "files", mode: "off" })
         const off = yield* run("export_to_file", { kind: "card", item: card.id, path: "off.txt" })
         assert.include(off.text, "off in this workshop")
+        yield* setFiles("allow")
+        assert.isTrue((yield* run("read_file", { path: "/files/notes/revoked.json" })).isError)
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
     },
     120_000

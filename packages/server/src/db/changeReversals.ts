@@ -16,6 +16,7 @@ import {
   type ReversalPlan,
   valuesOfUnits
 } from "@dreamspan/shared/changeReversal.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { validateDoc } from "@dreamspan/shared/editing.ts"
 import type { Doc, RefId } from "@dreamspan/shared/library.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
@@ -299,16 +300,17 @@ export const revisionReversal = (
     if (parent === null) return yield* refuse("That's the item's first revision: it has no change to take back.")
     const [before] = yield* sql<{ doc_json: string }>`SELECT doc_json FROM entity_revisions WHERE id = ${parent}`
     if (!before) return yield* refuse("Its earlier revision is gone.")
-    const [head] = yield* sql<{ doc_json: string; chat_id: string }>`SELECT h.doc_json, r.chat_id
+    const [head] = yield* sql<{ doc_json: string; chat_id: ChatId }>`SELECT h.doc_json, r.chat_id
       FROM entity_revisions h CROSS JOIN rollouts r WHERE h.id = ${ref.head_revision_id} AND r.id = ${rolloutId}`
     const original = JSON.parse(before.doc_json) as Doc
     const changed = JSON.parse(revision.doc_json) as Doc
     const units = changedUnits(original, changed)
+    const selected = pickedUnits(units, names)
     const plan = planReversal({
       original,
       changed,
       now: JSON.parse(head!.doc_json) as Doc,
-      fields: pickedUnits(units, names)
+      fields: selected
     })
     const made = yield* sql<EffectRow>`SELECT e.* FROM rollout_effects e JOIN rollouts r ON r.id = e.rollout_id
       WHERE r.chat_id = ${head!.chat_id} AND e.kind = 'library.revise' AND e.target_id = ${ref.entity_id} AND e.undone_at IS NULL
@@ -320,7 +322,7 @@ export const revisionReversal = (
       of: units,
       fields: units
     }))
-    return { plan, covered, chatId: head!.chat_id }
+    return { plan, selected, covered, chatId: head!.chat_id }
   })
 
 export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef }) =>

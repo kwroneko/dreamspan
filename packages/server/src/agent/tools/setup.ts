@@ -11,12 +11,11 @@ import { newCardDoc } from "@dreamspan/shared/editing.ts"
 import { Effect, Schema } from "effect"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import type { ModelId } from "@dreamspan/shared/providers.ts"
-import type { LibraryRef } from "@dreamspan/shared/library.ts"
+import type { LibraryRef, Revision, RevisionId } from "@dreamspan/shared/library.ts"
 import type { RolloutTool, ToolContext, ToolOutput } from "../tools.ts"
 import { resolveLibrary } from "./library.ts"
 import { findRevision } from "./versions.ts"
-import { changedUnits, pickedUnits, planReversal, unitName } from "@dreamspan/shared/changeReversal.ts"
-import type { RevisionId } from "@dreamspan/shared/library.ts"
+import { changedUnits, pickedUnits, planReversal, unitName, unitPath } from "@dreamspan/shared/changeReversal.ts"
 import { workshopLimits as limits } from "../../workshopLimits.ts"
 import { classOfKind } from "../capabilities.ts"
 
@@ -710,25 +709,46 @@ type RevertArgs = {
   readonly fields?: ReadonlyArray<string>
   readonly message?: string
 }
-/** The revision a `revert_change` names, its parent, and the plan on the head, read for the approval. */
+/** Check the selected units before planning or executing a revert. */
+const revertPatch = Effect.fnUntraced(function* (
+  ctx: ToolContext,
+  ref: LibraryRef,
+  revision: Revision,
+  names: RevertArgs["fields"]
+) {
+  const parent = revision.parents[0] ?? revision.forkedFrom?.revisionId
+  if (parent === undefined)
+    return yield* Effect.fail(new ToolInputRefused("That's the item's first revision: it has no change to take back."))
+  const read = (revisionId: RevisionId) => ctx.reader.GetRevisionDoc({ userId: ctx.userId, refId: ref.id, revisionId })
+  const original = yield* read(parent)
+  const changed = yield* read(revision.id)
+  const fields = pickedUnits(changedUnits(original, changed), names)
+  const sight = ctx.sight
+  if (
+    ref.kind === "card" &&
+    sight &&
+    fields.some((field) => unitPath(field)[0] === "character_book") &&
+    !(yield* sight.inView(ref.entityId))
+  ) {
+    const allowed = yield* sight.gate(
+      "library.lorebooks",
+      `It wants to revert a change to the lorebook in “${ref.label}”.`
+    )
+    if (!allowed.ok) return yield* Effect.fail(new ToolInputRefused(allowed.text))
+  }
+  return { original, changed, fields }
+})
+
+/** The plan on the current head, read for the approval. */
 const prepareRevert = (ctx: ToolContext, args: RevertArgs) =>
   Effect.gen(function* () {
     const ref = yield* findRef(ctx, args.kind, args.item)
     remember(ctx, args.kind, args.item, ref)
     const found = yield* findRevision(ctx, ref, args.revision)
     if ("error" in found) return yield* Effect.fail(new ToolInputRefused(found.error))
-    const parent = found.revision.parents[0] ?? found.revision.forkedFrom?.revisionId
-    if (parent === undefined)
-      return yield* Effect.fail(
-        new ToolInputRefused("That's the item's first revision: it has no change to take back.")
-      )
-    const read = (revisionId: string) =>
-      ctx.reader.GetRevisionDoc({ userId: ctx.userId, refId: ref.id, revisionId: revisionId as RevisionId })
-    const original = yield* read(parent)
-    const changed = yield* read(found.revision.id)
+    const patch = yield* revertPatch(ctx, ref, found.revision, args.fields)
     const head = yield* ctx.reader.GetRef({ userId: ctx.userId, refId: ref.id })
-    const units = changedUnits(original, changed)
-    const plan = planReversal({ original, changed, now: head.doc, fields: pickedUnits(units, args.fields) })
+    const plan = planReversal({ ...patch, now: head.doc })
     return { ref, revision: found.revision, plan, head: head.doc }
   })
 const revertChange: RolloutTool<RevertArgs> = {
@@ -779,6 +799,7 @@ const revertChange: RolloutTool<RevertArgs> = {
         const ref = yield* findRef(ctx, args.kind, args.item)
         const found = yield* findRevision(ctx, ref, args.revision)
         if ("error" in found) return { text: found.error, isError: true }
+        if (ref.kind === "card" && ctx.sight) yield* revertPatch(ctx, ref, found.revision, args.fields)
         return {
           text: yield* ctx.writer.AgentRevertRevision({
             ...(yield* writeKey(ctx, ref)),

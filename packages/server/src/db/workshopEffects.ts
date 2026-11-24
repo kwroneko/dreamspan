@@ -1236,13 +1236,30 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
           "library.write",
           Effect.gen(function* () {
             const before = yield* lib.ownedRef(input.userId, input.refId)
-            const { plan, covered, chatId } = yield* revisionReversal(
+            const { plan, selected, covered, chatId } = yield* revisionReversal(
               sql,
               input.rolloutId,
               before,
               input.revisionId,
               input.fields
             )
+            if (before.kind === "card" && selected.some((field) => unitPath(field)[0] === "character_book")) {
+              const access = input.librarySight
+                ? yield* libraryAccess(sql, {
+                    ...input.librarySight,
+                    userId: input.userId,
+                    chatId,
+                    rolloutId: input.rolloutId
+                  })
+                : null
+              if (
+                access === null ||
+                (!access.inView.includes(before.entity_id) &&
+                  libraryClassMode({ workshopCapabilities, capabilityDefaults }, access, "library.lorebooks") !==
+                    "allow")
+              )
+                return yield* refuseOperation("The workshop no longer has access to this card's lorebook.")
+            }
             const unchanged = {
               result: JSON.stringify({ reverted: false, note: "That change has nothing left to take back." }),
               effects: []

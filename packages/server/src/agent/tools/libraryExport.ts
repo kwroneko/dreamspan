@@ -16,7 +16,7 @@ import { libraryClassIds } from "../capabilities.ts"
 import { CARD_TEXT_FIELDS, findPart, visibleDoc } from "../libraryView.ts"
 import { toolResultFrame } from "../toolData.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
-import { resolveLibrary } from "./library.ts"
+import { cardSightRefusal, mayReadCardBook, resolveLibrary } from "./library.ts"
 import { findRevision } from "./versions.ts"
 
 const EXPORT_TOOL = "export_to_file"
@@ -211,7 +211,14 @@ export const makeLibraryExportTool = (deps: LibraryExportDeps): RolloutTool<Reco
         )
       )
       if ("error" in source) return { text: source.error, isError: true }
-      const target = targetOf(kind, visibleDoc(kind, source.doc), args)
+      const showBook = source.ref === null || (yield* mayReadCardBook(ctx, source.ref, source.doc))
+      if (source.ref !== null) {
+        const refusal = yield* cardSightRefusal(ctx, source.ref)
+        if (refusal !== null) return { text: refusal, isError: true }
+      }
+      if (!showBook && args.entry !== undefined && args.field === undefined)
+        throw new ToolInputRefused("The workshop doesn't have access to this card's lorebook.")
+      const target = targetOf(kind, visibleDoc(kind, source.doc, showBook), args)
       const content = Buffer.from(target.text, "utf8")
       if (content.byteLength > EXPORT_MAX_BYTES)
         throw new ToolInputRefused(

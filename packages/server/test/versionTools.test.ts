@@ -18,6 +18,7 @@ import { findRevision } from "../src/agent/tools/versions.ts"
 import type { LibrarySight } from "../src/agent/librarySight.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
+import { loreBook } from "./support/loreFixtures.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -324,6 +325,51 @@ describe("version tools", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("restarts a paged card diff when Lorebooks visibility changes", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const book = (content: string) => loreBook([{ ...newLorebookEntry(1), content }]).document
+      const first = yield* f.save(f.card, { character_book: book("Old chart."), unknown_fields: { label: "Old" } })
+      const last = yield* f.save(f.card, {
+        character_book: book("New chart. ".repeat(160)),
+        unknown_fields: { label: "New" }
+      })
+      let showBook = true
+      const sight: LibrarySight = {
+        inView: () => Effect.succeed(false),
+        gate: (capability) =>
+          Effect.sync(() =>
+            capability === "library.cards" || showBook ? { ok: true } : { ok: false, text: "Lorebooks are off." }
+          )
+      }
+      const options = { sight, countTokens: (text: string) => Effect.succeed(text.length) }
+      const args = {
+        kind: "card",
+        item: f.card,
+        from: first.ref.headRevisionId,
+        to: last.ref.headRevisionId,
+        fields: ["character_book", "unknown_fields"],
+        max_tokens: 300
+      }
+      const page = yield* f.run("diff_revisions", args, "page", options)
+      assert.include(page, "character_book")
+      const cursor = /cursor="([^"]+)"/.exec(page)?.[1]
+      assert.isString(cursor)
+      const continued = yield* f.run("diff_revisions", { ...args, cursor }, "continued", options)
+      assert.include(continued, "New chart.")
+      showBook = false
+      const refused = yield* f.call("diff_revisions", { ...args, cursor }, "revoked", options)
+      assert.isTrue(refused.isError)
+      assert.include(refused.text, "Restart the diff without a cursor")
+      assert.notInclude(refused.text, "New chart.")
+      const restarted = yield* f.run("diff_revisions", args, "restart", options)
+      assert.include(restarted, "unknown_fields.label: Old → New")
+      assert.notInclude(restarted, "New chart.")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("revert_change takes one revision's change back and keeps later edits, with its message", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -406,6 +452,65 @@ describe("version tools", () => {
         }
       ])
       assert.strictEqual(yield* f.run("revert_change", args, "conflict"), response)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("requires Lorebooks access to preview, return conflicts for, or revert embedded lore", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const book = (content: string) => loreBook([{ ...newLorebookEntry(1), content }]).document
+      const original = book("Original tide chart.")
+      const changed = book("Revised tide chart.")
+      const current = book("Current tide chart.")
+      yield* f.save(f.card, { character_book: original })
+      const edit = yield* f.save(f.card, { character_book: changed, description: "Revised description." })
+      const head = yield* f.save(f.card, { character_book: current })
+      const { context } = f
+      const position = { forkId: context.forkId, leafSlotId: null, entities: [], refs: [], card: null }
+      const args = { kind: "card", item: f.card, revision: edit.ref.headRevisionId }
+      yield* api.SetWorkshopGrant({ chatId: f.chat.id, capability: "library.cards", mode: "allow" })
+      yield* api.SetWorkshopGrant({ chatId: f.chat.id, capability: "library.lorebooks", mode: "off" })
+      const sight: LibrarySight = {
+        position: Effect.succeed(position),
+        inView: () => Effect.succeed(false),
+        gate: (capability) =>
+          Effect.succeed(capability === "library.cards" ? { ok: true } : { ok: false, text: "Lorebooks are off." })
+      }
+      const tool = toolForKind(f.registry, "workshop", "revert_change")!
+      const preview = yield* tool.describe!({ ...context, sight }, args as never).pipe(Effect.flip)
+      assert.include(String(preview), "Lorebooks are off")
+      const refused = yield* f.call("revert_change", args, "outside-view", { sight })
+      assert.isTrue(refused.isError)
+      assert.strictEqual(refused.text, "Lorebooks are off.")
+
+      // The writer must also refuse if consent changed after the caller prepared the change.
+      for (const [toolCallId, revisionId] of [
+        ["conflicting", edit.ref.headRevisionId],
+        ["clean", head.ref.headRevisionId]
+      ] as const) {
+        const key = { userId: context.userId, rolloutId: context.rolloutId, toolCallId }
+        const refusal = yield* context.writer
+          .AgentRevertRevision({ ...key, refId: f.card, revisionId, librarySight: { ...position, refId: f.card } })
+          .pipe(Effect.flip)
+        assert.include(String(refusal), "no longer has access to this card's lorebook")
+        assert.isNull(yield* context.reader.RolloutToolReceipt(key))
+      }
+      assert.strictEqual((yield* f.revisions())[0]?.id, head.ref.headRevisionId)
+      assert.deepStrictEqual((yield* f.doc()).character_book, current)
+
+      yield* f.run("revert_change", { ...args, fields: ["description"] }, "description", { sight })
+      assert.strictEqual((yield* f.doc()).description, ORIGINAL)
+      assert.deepStrictEqual((yield* f.doc()).character_book, current)
+      yield* f.run("revert_change", { ...args, revision: head.ref.headRevisionId }, "in-view", {
+        sight: {
+          ...sight,
+          position: Effect.succeed({ ...position, entities: [head.ref.entityId] }),
+          inView: () => Effect.succeed(true)
+        }
+      })
+      assert.deepStrictEqual((yield* f.doc()).character_book, changed)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

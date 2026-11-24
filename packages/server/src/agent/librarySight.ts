@@ -24,9 +24,10 @@ export interface LibrarySight {
   readonly inView: (entityId: string) => Effect.Effect<boolean>
   /**
    * The class's standing for this call, asking the user first where it says so; `line` says what
-   * the call does ("search your characters and personas for “lighthouse”").
+   * the call does ("search your characters and personas for “lighthouse”"). Use `current` to
+   * recheck consent without opening a new question.
    */
-  readonly gate: (capability: LibraryClass, line: string) => Effect.Effect<Decision>
+  readonly gate: (capability: LibraryClass, line: string, mode?: "current") => Effect.Effect<Decision>
 }
 
 type Decision = { readonly ok: true } | { readonly ok: false; readonly text: string }
@@ -112,7 +113,7 @@ export const makeLibrarySight =
           Effect.map((found) => found.inView.includes(entityId)),
           Effect.orElseSucceed(() => false)
         ),
-      gate: (capability, line) =>
+      gate: (capability, line, mode) =>
         Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {
             const entry = deps.registries.workshopCapabilities.get(capability)
@@ -134,6 +135,7 @@ export const makeLibrarySight =
             while (true) {
               const decided = decide(found)
               if (decided) return decided
+              if (mode === "current") return { ok: false, text: `“${label}” needs a current approval. Try again.` }
               const pending = questions.get(key)
               if (pending) {
                 const answered = yield* restore(Deferred.await(pending))
