@@ -92,14 +92,14 @@ const upload = async (page: Page, name: string, data: unknown) => {
   expect(response.status()).toBe(200)
 }
 
-const setUp = async (page: Page, name: string) => {
+const setUp = async (page: Page, name: string, document = preset()) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await upload(page, `Wren ${name}`, {
     spec: "chara_card_v2",
     spec_version: "2.0",
     data: { name: `Wren ${name}`, description: "A lighthouse keeper.", first_mes: "The lamp turns." }
   })
-  await upload(page, name, preset())
+  await upload(page, name, document)
   return admin((api) =>
     Effect.gen(function* () {
       const ref = (yield* api.ListLibrary({ kind: "preset" })).find((r) => r.label === name)!
@@ -299,6 +299,28 @@ for (const width of [1440, 390])
       await expectSaveState(again, NOTHING_TO_SAVE)
       if (width < 600) await closePanel(page)
     })
+
+test("unbroken prompt titles and previews fit narrow preset rows", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const document = preset()
+  const prompt = document.prompts.find((prompt) => prompt.identifier === "synthetic-1")!
+  const name = "UnbrokenTitle".repeat(20)
+  const content = "PromptIdentifier".repeat(20)
+  prompt.name = name
+  prompt.content = content
+  const { chatId } = await setUp(page, "Unbroken prompt", document)
+  await page.goto(`${server().url}/chats/${chatId}?cpw=260`)
+  const panel = await openPanel(page, "Prompt preset")
+  const row = panel.locator('[data-prompt="synthetic-1"]')
+  const title = row.locator("[data-layout-name]")
+  const preview = row.locator("[data-prompt-column-preview]")
+  await expect(title).toHaveText(name)
+  await expect(preview).toBeVisible()
+  await expect(preview).toHaveText(content)
+  expect.soft(await title.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1)
+  expect.soft(await preview.evaluate((element) => getComputedStyle(element).textOverflow)).toBe("ellipsis")
+  expect(await row.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1)
+})
 
 test("switches are live; a reorder waits for Save, and Revert puts it back without asking", async ({ page }) => {
   await theme(page, 1440, "light")
