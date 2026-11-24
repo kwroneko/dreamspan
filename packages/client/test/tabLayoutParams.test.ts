@@ -174,6 +174,18 @@ it("keeps a lorebook view's open entries short: Expand all on 2000 entries is a 
   ).toBeLessThanOrEqual(OPEN_LIMIT + 1)
 })
 
+it("in Expand all mode keeps the most recently closed entry when the URL's exceptions fill up", () => {
+  const uids = Array.from({ length: 100 }, (_, i) => i + 1)
+  const closed = uids.slice(50)
+  const previous = ["all", ...closed]
+  const open = new Set(decodeOpen(previous, uids))
+  open.delete(1)
+  const next = encodeOpen(open, uids, true, previous)
+  expect(next).toEqual(["all", ...closed.slice(1), 1])
+  expect(decodeOpen(next, uids).has(1)).toBe(false)
+  expect(decodeOpen(next, uids).has(51)).toBe(true)
+})
+
 it("shows a place value just set until the URL's value moves, then never again (Back after it)", () => {
   // Set [3] while the URL had none: shown until the URL changes.
   const local = { base: "undefined", value: [3] }

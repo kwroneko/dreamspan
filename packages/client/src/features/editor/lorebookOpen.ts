@@ -32,7 +32,7 @@ export const decodeOpen = (raw: unknown, uids: ReadonlyArray<number>): ReadonlyS
 }
 
 /** Whether the URL's value is the "all" mode (Expand all, then some closed). */
-const allMode = (raw: unknown) => Array.isArray(raw) && raw[0] === "all"
+const allMode = (raw: unknown): raw is ["all", ...Array<unknown>] => Array.isArray(raw) && raw[0] === "all"
 
 /**
  * The URL's value: absent with none open; in the "all" mode (`all`: Expand all, or the value
@@ -40,9 +40,14 @@ const allMode = (raw: unknown) => Array.isArray(raw) && raw[0] === "all"
  * else the open ones. Only the user's Expand all starts the mode: entries opened one by one
  * never make later ones open.
  */
-export const encodeOpen = (open: ReadonlySet<number>, uids: ReadonlyArray<number>, all = false) => {
+export const encodeOpen = (open: ReadonlySet<number>, uids: ReadonlyArray<number>, all = false, previous?: unknown) => {
   if (open.size === 0) return undefined
-  if (all) return ["all", ...uids.filter((uid) => !open.has(uid)).slice(-OPEN_LIMIT)]
+  if (all) {
+    const closed = new Set(uids.filter((uid) => !open.has(uid)))
+    const prior = allMode(previous) ? uidsOf(previous.slice(1)) : []
+    const ordered = prior.filter((uid) => closed.delete(uid))
+    return ["all", ...[...ordered, ...closed].slice(-OPEN_LIMIT)]
+  }
   return [...open].slice(-OPEN_LIMIT)
 }
 
@@ -56,7 +61,12 @@ export function useOpenEntries(scope: string, initial: number | null, uids: Read
   /** `all`: the user's Expand all, which starts the "all" mode. */
   const setOpen = (next: ReadonlySet<number> | ((open: ReadonlySet<number>) => ReadonlySet<number>), all = false) =>
     setRaw((current) =>
-      encodeOpen(typeof next === "function" ? next(decodeOpen(current, uids)) : next, uids, all || allMode(current))
+      encodeOpen(
+        typeof next === "function" ? next(decodeOpen(current, uids)) : next,
+        uids,
+        all || allMode(current),
+        current
+      )
     )
   // The entry just added when the view mounted opens with it, then is in the URL like any other.
   // Until that write reaches the URL it shows open; once the URL's value has moved at all, never
@@ -74,7 +84,7 @@ export function useOpenEntries(scope: string, initial: number | null, uids: Read
     wrote.current = true
     // The book's entries as they are at mount.
     const all = mounted.uids
-    setRaw((current) => encodeOpen(new Set(decodeOpen(current, all)).add(adding), all, allMode(current)))
+    setRaw((current) => encodeOpen(new Set(decodeOpen(current, all)).add(adding), all, allMode(current), current))
   }, [mounted, setRaw])
   const adding = mounted.initial !== null && !landed && raw === mounted.raw ? mounted.initial : null
   const shown = useMemo(() => (adding === null || open.has(adding) ? open : new Set(open).add(adding)), [open, adding])
