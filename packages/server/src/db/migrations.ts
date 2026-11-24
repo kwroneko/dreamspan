@@ -193,6 +193,17 @@ export const migrationDefinitions = {
         PRIMARY KEY (draft_id, ref_id)
       ) STRICT, WITHOUT ROWID`
     ]
+  },
+  // 0018 named the old new-chat pages' recovered texts by the card their draft's key named, whoever
+  // owned it: a card that isn't the account's own names nothing of its (rev-draftchats3b #10).
+  "0022_recovered_label_owner": {
+    statements: [
+      `UPDATE recovered_texts SET source_label = 'New chat'
+        WHERE source_kind = 'user_field' AND source_id LIKE 'pending-chat:%'
+          AND source_id NOT LIKE 'pending-chat:src:%' AND source_label LIKE 'New chat with %'
+          AND NOT EXISTS (SELECT 1 FROM entities e
+            WHERE e.id = substr(recovered_texts.source_id, 14) AND e.owner_user_id = recovered_texts.user_id)`
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

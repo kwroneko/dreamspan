@@ -175,7 +175,8 @@ describe("0002_files", () => {
           "pending_chats",
           "queue_library_revisions",
           "retained_library_attachments",
-          "composer_library"
+          "composer_library",
+          "recovered_label_owner"
         ]
       )
       // The existing row is kept, an image by default.
@@ -281,6 +282,26 @@ describe("0018_pending_chats", () => {
         (yield* sql<{ id: string }>`SELECT id FROM drafts ORDER BY id`).map((row) => row.id),
         ["source"]
       )
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
+describe("0022_recovered_label_owner", () => {
+  it.effect("names an old new chat's recovered text by its card only when the card is the account's", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* migrate(upTo(21))
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES
+        ('u', 'u', 'Owner', 'user', 0), ('v', 'v', 'Other', 'user', 0)`
+      yield* sql`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('mine', 'u', 'card', 0), ('theirs', 'v', 'card', 0)`
+      yield* sql`INSERT INTO recovered_texts (id, user_id, source_kind, source_id, source_field, source_label, reason, content, byte_size, created_at) VALUES
+        ('a', 'u', 'user_field', 'pending-chat:mine', 'First message', 'New chat with Mira', 'discard', 'Hello.', 6, 1),
+        ('b', 'u', 'user_field', 'pending-chat:theirs', 'First message', 'New chat with Secret', 'discard', 'Hi.', 3, 2)`
+      yield* migrate(migrationDefinitions)
+      assert.deepStrictEqual(yield* sql`SELECT id, source_label FROM recovered_texts ORDER BY id`, [
+        { id: "a", source_label: "New chat with Mira" },
+        { id: "b", source_label: "New chat" }
+      ])
     }).pipe(Effect.provide(layer()))
   )
 })
@@ -505,7 +526,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0018_pending_chats",
       "0019_queue_library_revisions",
       "0020_retained_library_attachments",
-      "0021_composer_library"
+      "0021_composer_library",
+      "0022_recovered_label_owner"
     ])
   }).pipe(Effect.provide(layer()))
 )

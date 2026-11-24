@@ -389,4 +389,135 @@ describe("a pending chat's edges", () => {
       })
     )
   )
+  it.live("a character moved to the bin can still be removed from a new chat", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make, writer, userId } = yield* setup
+        const mira = yield* make("Mira")
+        const tobin = yield* make("Tobin")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const forkId = draft.currentForkId!
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Join", entityId: tobin } })
+        yield* writer.DeleteEntity({ userId, entityId: tobin })
+        const cast = yield* api.ChangeCast({
+          chatId: draft.id,
+          slotId: null,
+          forkId,
+          change: { _tag: "Leave", entityId: tobin }
+        })
+        assert.deepStrictEqual(cast.participants, [mira])
+        assert.deepStrictEqual(
+          (yield* path(api, draft.id)).map((entry) => entry.version.content),
+          ["Mira waves."]
+        )
+      })
+    )
+  )
+  it.live("a save after a sweep is held to the composer's size limit, as a live save is", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make, writer, userId } = yield* setup
+        const mira = yield* make("Mira")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const composer = yield* api.OpenComposer({ chatId: draft.id, forkId: null })
+        assert.isTrue(yield* writer.SweepPendingChat({ userId, chatId: draft.id }))
+        const refused = yield* api
+          .SaveComposer({
+            chatId: draft.id,
+            draftId: composer.id,
+            rowVersion: composer.rowVersion,
+            session: composer.session,
+            next: false,
+            operationId: crypto.randomUUID(),
+            content: "x".repeat(1_000_001)
+          })
+          .pipe(Effect.flip)
+        assert.strictEqual(refused._tag, "TextTooLong")
+        assert.deepStrictEqual(yield* recoveredTexts(api), [])
+      })
+    )
+  )
+  it.live("a greeting edit saved late, after its greeting was made again, reaches the draft that moved", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make } = yield* setup
+        const mira = yield* make("Mira")
+        const tobin = yield* make("Tobin")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const forkId = draft.currentForkId!
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Join", entityId: tobin } })
+        const [, his] = yield* path(api, draft.id)
+        const first = yield* editGreeting(api, his!.version.id, "Tobin nods.")
+        // Another tab removes Mira: Tobin's greeting is made again, his draft moved with it.
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Leave", entityId: mira } })
+        // This tab's next save still names the old greeting.
+        yield* api.SaveMessageDraft({
+          target: { _tag: "Edit", versionId: his!.version.id },
+          draftId: first.id,
+          content: "Tobin nods. He points at the boats.",
+          expectedRowVersion: first.rowVersion,
+          expectedSession: first.session
+        })
+        const [again] = yield* path(api, draft.id)
+        const kept = yield* api.GetMessageDraft({ target: { _tag: "Edit", versionId: again!.version.id } })
+        assert.strictEqual(kept.content, "Tobin nods. He points at the boats.")
+      })
+    )
+  )
+  it.live("two persona switches at once leave only the last one in the cast", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make, writer, userId } = yield* setup
+        const mira = yield* make("Mira")
+        const persona = (name: string) =>
+          Effect.tap(make(name), (entityId) => writer.SetEntityTags({ userId, entityId, tags: ["persona"] }))
+        const p = yield* persona("Pia")
+        for (let round = 0; round < 8; round++) {
+          const q = yield* persona(`Quinn ${round}`)
+          const r = yield* persona(`Rhea ${round}`)
+          const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+          const forkId = draft.currentForkId!
+          yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Persona", entityId: p } })
+          yield* Effect.all(
+            [q, r].map((entityId) =>
+              api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Persona", entityId } })
+            ),
+            { concurrency: "unbounded" }
+          )
+          const cast = yield* api.GetCast({ chatId: draft.id, slotId: null, forkId })
+          // As one switch after the other: the persona played, and Mira; no persona left as an NPC.
+          assert.strictEqual(cast.playedByMe.length, 1, `round ${round}`)
+          assert.sameMembers([...cast.participants], [mira, cast.playedByMe[0]!], `round ${round}`)
+        }
+      })
+    )
+  )
+  it.live("two characters joined at once both offer their group-only greetings", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make } = yield* setup
+        for (let round = 0; round < 6; round++) {
+          const mira = yield* make(`Mira ${round}`, { group_only_greetings: [`Mira ${round} greets everyone.`] })
+          const tobin = yield* make(`Tobin ${round}`, { group_only_greetings: [`Tobin ${round} greets everyone.`] })
+          const draft = yield* api.OpenDraftChat({ draftFor: "empty" })
+          const forkId = draft.currentForkId!
+          yield* Effect.all(
+            [mira, tobin].map((entityId) =>
+              api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Join", entityId } })
+            ),
+            { concurrency: "unbounded" }
+          )
+          const entries = yield* path(api, draft.id)
+          assert.strictEqual(entries.length, 2, `round ${round}`)
+          for (const entry of entries) {
+            const versions = yield* api.ListVersions({ slotId: entry.slotId })
+            assert.isTrue(
+              versions.some((version) => version.content.endsWith("greets everyone.")),
+              `round ${round}: ${versions.map((version) => version.content).join(" | ")}`
+            )
+          }
+        }
+      })
+    )
+  )
 })

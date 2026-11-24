@@ -49,3 +49,7 @@ export const readImages = async (scope: string): Promise<ImageDraftEntry[]> =>
     )
 export const keepImage = (entry: ImageDraftEntry) => transaction("readwrite", (store) => store.put(entry))
 export const dropImage = (id: string) => transaction("readwrite", (store) => store.delete(id))
+/** Moves what `from` holds to `to`, each kept as it is (its upload still to replay, if it was). */
+export const adoptImages = async (from: string, to: string) => {
+  for (const entry of await readImages(from)) await keepImage({ ...entry, scope: to })
+}

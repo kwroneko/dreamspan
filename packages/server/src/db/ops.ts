@@ -3008,6 +3008,11 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       chatId: ChatId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       events: Schema.Array(StoredStateEventData),
+      /**
+       * A persona switch: after `events`, the user plays this one, and the personas played before
+       * leave, as the cast is in this transaction (two switches at once go one after the other).
+       */
+      persona: Schema.optionalKey(EntityId),
       candidates: StartChatFields.greeters
     },
     success: Schema.Struct({ pending: Schema.Boolean, changed: Schema.Boolean, fellBack: Schema.Boolean }),

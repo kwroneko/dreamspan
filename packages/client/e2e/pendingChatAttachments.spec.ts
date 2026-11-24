@@ -204,3 +204,44 @@ test("Generate leaves the attachments in the started chat's composer", async ({ 
   await page.reload()
   await expect(page.getByRole("button", { name: "Remove kept.png" })).toBeVisible({ timeout: 30_000 })
 })
+
+test("an image attached on the old new-chat page before the upgrade shows in the card's new chat", async ({ page }) => {
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const name = "Harbor keeper, before"
+  const card = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.CreateCard({ label: name, name }))
+  const userId = (await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.Whoami())).id
+  await page.goto(`${server().url}/chats`)
+  const buffer = await drawing(page)
+  // What the old page kept in this browser: the image under its own key, not uploaded yet.
+  await page.evaluate(
+    ({ scope, base64 }) =>
+      new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open("dreamspan.message-images", 1)
+        request.onupgradeneeded = () => request.result.createObjectStore("images", { keyPath: "id" })
+        request.onerror = () => reject(request.error)
+        request.onsuccess = () => {
+          const db = request.result
+          const tx = db.transaction("images", "readwrite")
+          const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+          tx.objectStore("images").put({
+            id: crypto.randomUUID(),
+            scope,
+            name: "harbor.png",
+            position: 0,
+            file: new Blob([bytes], { type: "image/png" })
+          })
+          tx.oncomplete = () => {
+            db.close()
+            resolve()
+          }
+          tx.onerror = () => reject(tx.error)
+        }
+      }),
+    { scope: `${userId}:pending:pending-chat:${card.entityId}`, base64: buffer.toString("base64") }
+  )
+  await page.goto(`${server().url}/cards/${card.entityId}/chat`)
+  await expect(page.getByLabel("Message", { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(attached(page).getByRole("listitem")).toHaveCount(1, { timeout: 30_000 })
+})
