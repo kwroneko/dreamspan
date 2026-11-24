@@ -150,9 +150,10 @@ const renderings = (item: AttachedItem, count: CountText) => {
  * The elements a workshop message carries for its attached items (spec/WORKSHOP-CARDS.md §4.3
  * point 1): one budget of `limit` tokens for them all, counted on the rendered elements. Each
  * item first gets a compact reference (its name, id and revision, to read with the tools); then,
- * in the order attached, each is shown whole where that still fits, else with its summary where
- * that fits, else stays compact. When even the compact references don't fit, they are all the
- * message carries (a message sent before the budget, or a model with a tiny window).
+ * in the order attached, each is shown whole where that still fits, else with as many summary
+ * lines as fit, else stays compact. When even the compact references don't fit, they are all the
+ * message carries, a name too long for the limit shown as "…" (a message sent before the budget,
+ * or a model with a tiny window).
  * Owner [D]: attached items are worked on, never played ("You're not adding cards to have a
  * pointless chat about them").
  */
@@ -175,6 +176,9 @@ export const attachedElements = (items: ReadonlyArray<AttachedItem>, count: Coun
     return summary
   })
 }
+
+/** An item's compact reference with its name: what the budget reserves for it first. */
+export const compactElement = (item: AttachedItem, count: CountText) => renderings(item, count).compact(Infinity)
 
 // --- Paged reads (read_card, read_lorebook, read_preset; spec/WORKSHOP-CARDS.md §4.3 point 2).
 

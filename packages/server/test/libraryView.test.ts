@@ -2,7 +2,7 @@
 // §4.3): the inline limit, the whole element, the reference with its summary, and a card's own
 // text never closing its element. Synthetic documents only.
 import { describe, expect, it } from "vitest"
-import { attachedElements, inlineLimit, summaryLines } from "../src/agent/libraryView.ts"
+import { attachedElements, compactElement, inlineLimit, summaryLines } from "../src/agent/libraryView.ts"
 import { prepareTokenizer } from "../src/importer/tokenizer.ts"
 
 const count = (text: string) => Math.ceil(text.length / 4)
@@ -94,18 +94,23 @@ describe("libraryView", () => {
     expect(elements[2]).toContain("description: 3,000 tokens")
     const total = elements.reduce((sum, e) => sum + count(e), 0)
     expect(total).toBeLessThanOrEqual(8_000)
-    // A budget a summary doesn't fit leaves the reference compact, still naming what to read.
+    // A budget no summary line fits leaves the reference compact, still naming what to read.
     // Room for the first whole and every compact reference, and no more.
-    const compact = attachedElements(items, count, 0).map(count)
-    const budget = count(attachedElements([items[0]!], count, 8_000)[0]!) + compact[1]! + compact[2]!
+    const compact = items.map((i) => compactElement(i, count))
+    const budget = count(attachedElements([items[0]!], count, 8_000)[0]!) + count(compact[1]!) + count(compact[2]!)
     const tight = attachedElements(items, count, budget)
-    expect(tight.map((e) => /whole="no"/.test(e))).toEqual([false, true, true])
-    expect(tight[2]).toContain("It isn't included here: read it with read_card")
+    expect(tight.slice(1)).toEqual(compact.slice(1))
+    expect(tight[2]).toContain("It isn't included whole here: read it with read_card")
     expect(tight[2]).toContain('id="ref-c" revision="rev-1"')
     expect(tight.reduce((sum, e) => sum + count(e), 0)).toBeLessThanOrEqual(budget)
-    // Past even the compact references: those alone.
+    // A little more room: the next item's first summary lines, saying more are left out.
+    const more = attachedElements(items, count, budget + 40)
+    expect(more[1]).toContain("description: 3,000 tokens")
+    expect(more[1]).toContain("More details are available with the read tool.")
+    expect(more.reduce((sum, e) => sum + count(e), 0)).toBeLessThanOrEqual(budget + 40)
+    // Past even the compact references: those alone, the names cut short.
     const tiny = attachedElements(items, count, 10)
-    expect(tiny.every((e) => e.includes("It isn't included here"))).toBe(true)
+    expect(tiny.every((e) => e.includes("It isn't included whole here") && e.includes('name="…"'))).toBe(true)
   })
 
   it("summarizes lorebook entries and preset prompts in order", () => {
