@@ -105,14 +105,22 @@ export interface MacroLookup {
   readonly get: (id: string) => MacroEntry | undefined
 }
 
+const LEGACY_NAMES: Readonly<Record<string, string>> = {
+  "<USER>": "{{user}}",
+  "<BOT>": "{{char}}",
+  "<CHAR>": "{{char}}",
+  "<GROUP>": "{{group}}",
+  "<CHARIFNOTGROUP>": "{{charIfNotGroup}}"
+}
+const LEGACY_NAME = /<(?:USER|BOT|CHAR|GROUP|CHARIFNOTGROUP)>/gi
+
+/** Whether text may contain a macro, including a legacy name marker. */
+export const hasMacroMarker = (text: string) => text.includes("{{") || text.search(LEGACY_NAME) !== -1
+
 const preprocess = (text: string) =>
   text
     .replace(/\{\{time_(UTC[+-]\d+)\}\}/gi, "{{time::$1}}")
-    .replace(/<USER>/gi, "{{user}}")
-    .replace(/<BOT>/gi, "{{char}}")
-    .replace(/<CHAR>/gi, "{{char}}")
-    .replace(/<GROUP>/gi, "{{group}}")
-    .replace(/<CHARIFNOTGROUP>/gi, "{{charIfNotGroup}}")
+    .replace(LEGACY_NAME, (marker) => LEGACY_NAMES[marker.toUpperCase()]!)
 
 const LF = 0x0a
 const CR = 0x0d
