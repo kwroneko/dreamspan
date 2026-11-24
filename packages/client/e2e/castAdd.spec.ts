@@ -117,7 +117,13 @@ for (const width of [1440, 1024, 390]) {
     await expect(page).toHaveURL(/\/library\//)
     await editor.getByRole("button", { name: "Close", exact: true }).click()
     await expect(editor).toHaveCount(0)
-    await expect(page).toHaveURL(originalUrl.toString())
+    // Back where it was, the chat's tab now kept (opening the editor kept it beside it), which
+    // the URL records as its one kept tab so a reload keeps it.
+    originalUrl.searchParams.set("wb", JSON.stringify([0, "="]))
+    const sorted = (url: URL) => [...url.searchParams].map(([k, v]) => `${k}=${v}`).sort()
+    await expect(page).toHaveURL(
+      (url) => url.pathname === originalUrl.pathname && sorted(url).join("&") === sorted(originalUrl).join("&")
+    )
     if (width === 390) await openPanel(page, "Cast")
     await expect(members(page).getByRole("listitem")).toHaveCount(1)
 
