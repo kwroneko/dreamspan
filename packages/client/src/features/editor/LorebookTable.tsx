@@ -713,13 +713,19 @@ export function LorebookTable(props: {
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set())
   // Editing several at once is URL state with the entries it edits, so a reload opens it again on them.
   const [massEdit, setMassEdit] = useOpenChoice(`mass-edit:${store.refId}:${root.join("/")}:`)
-  const massUids =
+  const massSelection =
     massEdit === null
       ? []
-      : massEdit
-          .split(",")
-          .map(Number)
-          .filter((uid) => book.entries.some((entry) => entry.uid === uid))
+      : [
+          ...new Set(
+            massEdit
+              .split(",")
+              .filter((uid) => uid.trim() !== "")
+              .map(Number)
+              .filter(Number.isInteger)
+          )
+        ]
+  const massUids = massSelection.filter((uid) => book.entries.some((entry) => entry.uid === uid))
   const sort = sorts.find((s) => s.id === sortId) ?? sorts[0]
 
   // The order is worked out when what decides it changes, not on every edit.
@@ -1130,7 +1136,13 @@ export function LorebookTable(props: {
         />
       )}
       {massEdit !== null && (
-        <MassEditDialog store={store} root={root} uids={massUids} onClose={() => setMassEdit(null)} />
+        <MassEditDialog
+          store={store}
+          root={root}
+          selection={massSelection.toSorted((a, b) => a - b).join(",")}
+          uids={massUids}
+          onClose={() => setMassEdit(null)}
+        />
       )}
     </div>
   )

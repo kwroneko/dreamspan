@@ -184,7 +184,7 @@ it.each([
       session(current, (tag, payload) => {
         if (tag === "OpenComposer") return Effect.succeed(current)
         replayed.push(payload)
-        return online ? Effect.succeed({ draft: current, recovered: false }) : Effect.fail("offline")
+        return online ? Effect.succeed({ draft: current, recovered: false, accepted: true }) : Effect.fail("offline")
       }),
       "user",
       {
@@ -288,7 +288,11 @@ it.each(["legacy", "stale", "fresh"] as const)(
     const transport = session(t, (tag, p) => {
       if (tag === "OpenComposer") return Effect.succeed(t)
       sent = p
-      return Effect.succeed({ draft: new Draft({ ...t, content: String(p.content), rowVersion: 6 }), recovered: false })
+      return Effect.succeed({
+        draft: new Draft({ ...t, content: String(p.content), rowVersion: 6 }),
+        recovered: false,
+        accepted: true
+      })
     })
     const store = new ComposerDraft(transport, "user", {
       setTimer: () => 0,

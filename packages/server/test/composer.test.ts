@@ -429,6 +429,56 @@ describe("the composer's drafts", () => {
     )
   }
 
+  it.live("recovers unsent text even when it appears in old messages or was sent from another fork", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateChat({ title: "Synthetic recovery" })
+      const root = yield* posted(
+        api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "Nobody knew." })
+      )
+      const main = root.chat.currentForkId!
+      const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: main, atSlotId: root.entry.slotId })
+      const sent = yield* typeInto(api, chat.id, fork.id, "No")
+      const different = yield* typeInto(api, chat.id, main, "A different turn")
+      for (const draft of [sent, different]) {
+        yield* posted(
+          api.SendMessage({
+            chatId: chat.id,
+            forkId: draft.key.field as ForkId,
+            parentSlotId: root.entry.slotId,
+            branch: false,
+            content: draft.content,
+            composer: takenFrom(draft)
+          })
+        )
+      }
+      const late = {
+        chatId: chat.id,
+        draftId: different.id,
+        rowVersion: different.rowVersion,
+        session: different.session,
+        next: false,
+        operationId: crypto.randomUUID(),
+        content: "No"
+      }
+      for (const copy of [late, late]) {
+        const replayed = yield* api.SaveComposer(copy)
+        assert.isTrue(replayed.recovered)
+        assert.isFalse(replayed.accepted)
+      }
+      const duplicate = yield* api.SaveComposer({
+        ...late,
+        operationId: crypto.randomUUID(),
+        content: different.content
+      })
+      assert.isFalse(duplicate.recovered)
+      assert.deepStrictEqual(
+        (yield* api.ListRecoveredTexts({ limit: 100, before: null })).map((entry) => entry.content),
+        ["No"]
+      )
+    }).pipe(Effect.scoped, withServer(testConfig()))
+  )
+
   it.live("keeps separate composers for two forks at the same message, and a send commits only its own", () =>
     Effect.gen(function* () {
       const api = yield* client()

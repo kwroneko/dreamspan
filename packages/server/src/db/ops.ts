@@ -183,7 +183,8 @@ import {
   ComposerImageKey,
   AttachmentComposer,
   SetComposerImageFields,
-  ComposerChoice
+  ComposerChoice,
+  ComposerSaveResult
 } from "@dreamspan/shared/composerApi.ts"
 import {
   AccountRejected,
@@ -1588,7 +1589,7 @@ const WriteOpsChatOwn = RpcGroup.make(
    */
   Rpc.make("SaveComposer", {
     payload: { userId: UserId, ...SaveComposerFields },
-    success: Schema.Struct({ draft: Schema.NullOr(Draft), recovered: Schema.Boolean }),
+    success: ComposerSaveResult,
     error: Schema.Union([NotFound, DraftTooLarge, StorageError])
   }),
   Rpc.make("RestoreComposer", {

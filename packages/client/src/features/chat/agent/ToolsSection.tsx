@@ -47,7 +47,7 @@ function RequestCapField({
   place: string
   cap: number
   disabled: boolean
-  onSave: (cap: number | null) => void
+  onSave: (cap: number | null) => Promise<boolean>
 }) {
   const typed = useDurableText(`request-cap:${place}`, "Model requests per reply", String(cap))
   const text = typed.text
@@ -58,8 +58,7 @@ function RequestCapField({
     if (text === String(cap)) return
     // Left with a number out of range, it goes back to the saved one, as before.
     if (!valid) return void typed.discard()
-    if (value !== cap) onSave(value === DEFAULT_REQUEST_CAP ? null : value)
-    void typed.commit(async () => true)
+    void typed.commit(async () => value === cap || (await onSave(value === DEFAULT_REQUEST_CAP ? null : value)))
   }
   return (
     <Field
@@ -107,6 +106,7 @@ export function ToolsSection({ session }: { session: ChatSession }) {
     const outcome = await session.changeCast(change)
     setPending(false)
     setError(outcome.ok ? null : `Tools weren't changed: ${outcome.error.message}`)
+    return outcome.ok
   }
   return (
     <section aria-label="Tools" className="flex flex-col gap-3">
@@ -185,7 +185,7 @@ export function ToolsSection({ session }: { session: ChatSession }) {
           place={session.id}
           cap={cast.requestCap ?? DEFAULT_REQUEST_CAP}
           disabled={pending}
-          onSave={(cap) => void write({ _tag: "RequestCap", cap })}
+          onSave={(cap) => write({ _tag: "RequestCap", cap })}
         />
       )}
       {on && (

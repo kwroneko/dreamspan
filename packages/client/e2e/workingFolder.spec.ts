@@ -73,9 +73,16 @@ test.describe("working folder", () => {
         // New folder here: made inside the working folder, and worked in.
         await chip(page).click()
         await popover.getByRole("button", { name: "New folder here" }).click()
+        await expect(popover.getByLabel("Name of the new folder")).toBeVisible()
+        await page.keyboard.press("Escape")
+        await expect(popover).toBeHidden()
+        await chip(page).click()
+        await expect(popover.getByLabel("Name of the new folder")).toBeHidden()
+        await popover.getByRole("button", { name: "New folder here" }).click()
         await popover.getByLabel("Name of the new folder").fill("drafts")
         await popover.getByRole("button", { name: "Make folder" }).click()
         await expect(chip(page)).toHaveAccessibleName(`Working folder: /files/paper-${width}-${theme}/drafts`)
+        await expect(popover).toBeHidden()
         expect(await files.has(`/files/paper-${width}-${theme}/drafts`)).toBe(true)
 
         // A new workshop with the same assistant starts in its last folder.

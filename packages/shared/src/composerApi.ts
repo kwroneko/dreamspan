@@ -59,6 +59,13 @@ export const ComposerBeacon = Schema.Struct({
   content: Schema.String
 })
 
+export const ComposerSaveResult = Schema.Struct({
+  draft: Schema.NullOr(Draft),
+  recovered: Schema.Boolean,
+  /** The save was accepted into the session the returned draft is still in. */
+  accepted: Schema.Boolean
+})
+
 export const ComposerImage = Schema.Struct({
   position: Schema.Int,
   id: Schema.String,
@@ -119,7 +126,7 @@ export class ComposerApi extends RpcGroup.make(
    */
   Rpc.make("SaveComposer", {
     payload: ComposerBeacon.fields,
-    success: Schema.Struct({ draft: Schema.NullOr(Draft), recovered: Schema.Boolean }),
+    success: ComposerSaveResult,
     error: Schema.Union([...Errors, TextTooLong])
   }),
   /** The restorable states of the composer draft's text, newest first. */

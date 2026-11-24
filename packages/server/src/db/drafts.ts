@@ -35,6 +35,7 @@ import { EDIT_THINKING_FIELD } from "@dreamspan/shared/chatApi.ts"
 import { editableThinking, type ReplySections } from "@dreamspan/shared/replySections.ts"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
+import { createHash } from "node:crypto"
 import { DraftTooLarge, NotFound, StaleWrite } from "./ops.ts"
 import { makeLibraryQueries } from "./library.ts"
 import { attachmentJson } from "./rows.ts"
@@ -667,26 +668,13 @@ export const makeDraftStore = (
 
   const shown = (draft: DraftRow | null) => (draft?.status === "active" ? draft.content : "")
 
-  /** How many of a chat's newest messages a late composer save is checked against. */
-  const SENT_CHECKED = 100
+  const composerCommitHash = (content: string) => createHash("sha256").update(content, "utf16le").digest("hex")
 
-  /**
-   * `content` is in one of the chat's newest messages (as typed, before scripts rewrote it),
-   * one-turn directions or queued entries: a composer's text that was sent already.
-   */
-  const sentInChat = (chatId: string, content: string) =>
+  /** Only the commit that took this composer session can account for a late copy. */
+  const composerCommitted = (draftId: string, session: number, content: string) =>
     sql<{ found: number }>`SELECT EXISTS (
-        SELECT 1 FROM (
-          SELECT t.content, t.raw_content, t.direction FROM slots s
-          JOIN versions v ON v.slot_id = s.id
-          JOIN version_texts t ON t.version_seq = v.seq
-          WHERE s.chat_id = ${chatId} AND (v.writer != 'model' OR t.direction IS NOT NULL)
-          ORDER BY v.seq DESC LIMIT ${SENT_CHECKED}
-        ) WHERE instr(content, ${content}) > 0 OR instr(coalesce(raw_content, ''), ${content}) > 0
-          OR instr(coalesce(direction, ''), ${content}) > 0
-      ) OR EXISTS (
-        SELECT 1 FROM queued_messages q WHERE q.chat_id = ${chatId}
-          AND (instr(q.content, ${content}) > 0 OR instr(coalesce(q.raw_content, ''), ${content}) > 0)
+        SELECT 1 FROM composer_commits WHERE draft_id = ${draftId} AND session = ${session}
+          AND content_hash = ${composerCommitHash(content)}
       ) AS found`.pipe(Effect.map(([row]) => row?.found === 1))
 
   /**
@@ -746,16 +734,16 @@ export const makeDraftStore = (
         formEdit?.content ?? content
       )
       if (deleted || reconciled.rejected || (ended && options.ended === "recover" && options.next !== true)) {
-        // Only text that's nowhere else goes to the recovered texts: not text the draft still
-        // holds, nor a composer's text that was sent (a browser copy of it, replayed late).
-        const held = draft.target_kind === "user_field" ? content === shown(draft) : shown(draft).includes(content)
-        const recovered =
-          toBin(draft) &&
-          content.trim() !== "" &&
-          !held &&
-          !(ended && draft.target_kind === "composer" && (yield* sentInChat(draft.target_id, content)))
+        // A different session's text cannot account for an old composer copy.
+        const kept =
+          ended && draft.target_kind === "composer" && content.trim() !== ""
+            ? yield* composerCommitted(draft.id, base.session, content)
+            : draft.target_kind === "user_field"
+              ? content === shown(draft)
+              : shown(draft).includes(content)
+        const recovered = toBin(draft) && content.trim() !== "" && !kept
         if (recovered) yield* recover(draft.user_id, toDraft(draft).key, [content], "discard")
-        return { draft: toDraft(draft, recovered ? 1 : 0), recovered }
+        return { draft: toDraft(draft, recovered ? 1 : 0), recovered, accepted: false }
       }
       let recoveredInput = false
       if (reconciled.changed || formEdit?.changed) {
@@ -812,7 +800,8 @@ export const makeDraftStore = (
       )
       return {
         draft: toDraft((yield* byId(draft.id))!, recovered + Number(recoveredInput), displaced),
-        recovered: recovered > 0 || recoveredInput
+        recovered: recovered > 0 || recoveredInput,
+        accepted: true
       }
     })
 
@@ -1135,6 +1124,13 @@ export const makeDraftStore = (
         (draft.images_json === null ||
           (destination.images !== undefined && draft.images_json === imageJson(destination.images)))
       ) {
+        if (draft.target_kind === "composer" && draft.content.trim() !== "") {
+          yield* sql`INSERT INTO composer_commits ${sql.insert({
+            draft_id: draft.id,
+            session: draft.session,
+            content_hash: composerCommitHash(draft.content)
+          })}`
+        }
         const ended = yield* end(draft, "committed", destination.revision ?? null)
         if (destination.moveTo === undefined || !keepsHistory(draft)) return ended
         yield* moveTo(draft.id, draft.target_id, destination.moveTo)
@@ -1314,7 +1310,8 @@ export const makeDraftStore = (
         const [receipt] = yield* sql<{
           recovered: number
           displaced_json: string | null
-        }>`SELECT recovered, displaced_json FROM composer_save_receipts
+          accepted_session: number | null
+        }>`SELECT recovered, displaced_json, accepted_session FROM composer_save_receipts
           WHERE chat_id = ${chatId} AND operation_id = ${base.operationId}`
         if (receipt !== undefined) {
           let displaced: DraftDisplacement | null = null
@@ -1327,7 +1324,8 @@ export const makeDraftStore = (
           }
           return {
             draft: draft === null ? null : toDraft(draft, receipt.recovered, displaced),
-            recovered: receipt.recovered === 1
+            recovered: receipt.recovered === 1,
+            accepted: draft !== null && receipt.accepted_session === draft.session
           }
         }
       }
@@ -1335,7 +1333,7 @@ export const makeDraftStore = (
       if (draft === null) {
         const recovered = content.trim() !== ""
         if (recovered) yield* recover(userId, composerKey(chatId, null), [content], "discard")
-        saved = { draft: null, recovered }
+        saved = { draft: null, recovered, accepted: false }
       } else {
         const next = base.next && draft.session <= base.session + 1
         saved = yield* saveOnto(draft, base, content, { baseRevision: null, ended: "recover", next })
@@ -1350,6 +1348,7 @@ export const makeDraftStore = (
           chat_id: chatId,
           operation_id: base.operationId,
           recovered: saved.recovered ? 1 : 0,
+          accepted_session: saved.accepted ? saved.draft!.session : null,
           displaced_json:
             displaced == null || entry === undefined
               ? null

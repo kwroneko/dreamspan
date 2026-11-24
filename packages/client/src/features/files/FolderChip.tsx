@@ -9,6 +9,7 @@
 // server lists HOST_FOLDERS, also gets Folder on the server… (§3.7): a folder outside Files, shown
 // with a server badge. Where the workshop runs commands without a sandbox, the chip says so.
 import { useDurableText, useOpenPlace } from "../editor/durable.tsx"
+import { useRouter } from "@tanstack/react-router"
 import { FILES_TOP, isTop, joinPath, nameOf, nameProblem } from "@dreamspan/shared/files.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
@@ -23,6 +24,7 @@ import { Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
+import { writePlaceValue } from "../../usePlaceParam.ts"
 import type { ComposerControlContext } from "../chat/composerControls.tsx"
 import { ChipText, chipClass, LoadingChip } from "../chat/nextReplyStrip.tsx"
 import type { ChatSession } from "../chat/session.ts"
@@ -97,11 +99,14 @@ export const useFolderChoices = (session: ChatSession, enabled = true) => {
 export function FolderChip({ session }: ComposerControlContext) {
   const folder = useFolderChoices(session)
   const source = useFilesSource()
+  const router = useRouter()
   // The popover and its New folder form are URL state; the name typed is kept.
-  const [open, setOpen] = useOpenPlace(`folder-chip:${session.chatId}`)
+  const place = `folder-chip:${session.chatId}`
+  const newFolderPlace = `folder-chip-new:${session.chatId}`
+  const [open, setOpen] = useOpenPlace(place)
   const [error, setError] = useState<string | null>(null)
-  const [naming, setNaming] = useOpenPlace(`folder-chip-new:${session.chatId}`)
-  const typedName = useDurableText(`folder-chip-new:${session.chatId}`, "Name", "New folder")
+  const [naming, setNaming] = useOpenPlace(newFolderPlace)
+  const typedName = useDurableText(newFolderPlace, "Name", "New folder")
   const [pending, setPending] = useState(false)
   const [browsing, setBrowsing] = useState(false)
   const [hostPick, setHostPick] = useState<string | null>(null)
@@ -115,13 +120,19 @@ export function FolderChip({ session }: ComposerControlContext) {
   const shown = current ?? FILES_TOP
   // A folder on the server, outside Files (§3.7).
   const host = folder.stored?.host === true
+  const close = () => {
+    writePlaceValue(router, "open", (current) => {
+      if (!Array.isArray(current)) return current
+      const remaining = current.filter((id) => id !== place && id !== newFolderPlace)
+      return remaining.length ? remaining : undefined
+    })
+  }
   const pick = async (path: string, onServer = false) => {
     setPending(true)
     setError(null)
     try {
       await folder.choose(path, onServer)
-      setOpen(false)
-      setNaming(false)
+      close()
       setBrowsing(false)
     } catch (cause) {
       setError(`The folder wasn't changed: ${cause instanceof Error ? cause.message : String(cause)}`)
@@ -150,9 +161,9 @@ export function FolderChip({ session }: ComposerControlContext) {
       <Popover
         open={open}
         onOpenChange={(next) => {
-          setOpen(next)
-          if (next) folder.refresh()
-          else setNaming(false)
+          if (!next) return close()
+          setOpen(true)
+          folder.refresh()
         }}
         trigger={
           <ChipText>
