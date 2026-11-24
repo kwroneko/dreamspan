@@ -121,6 +121,22 @@ interface Results {
   readonly problem?: SourceProblem | undefined
 }
 
+const sourceOfKey = (key: string) => key.slice(0, key.indexOf("\u0000"))
+
+/**
+ * The results shown while `key`'s first page is asked for: nothing is blanked that's already
+ * known. The same search asked again (the source shown again) keeps its cards, count and
+ * notes as they are until the answer replaces them; another search of the same source keeps
+ * the last one's, dimmed as loading, so the count and the grid don't flicker off in between.
+ * Another source's results are never shown for this one.
+ */
+const asking = (r: Results | null, key: string): Results => {
+  if (r === null || sourceOfKey(r.key) !== sourceOfKey(key) || (r.status === "failed" && r.key !== key))
+    return { key, items: [], next: null, status: "loading" }
+  if (r.key === key && r.status === "ready") return r
+  return { ...r, key, next: null, status: "loading", problem: undefined }
+}
+
 /**
  * A source's results for a query, a page at a time: typing waits 300 ms, and a new query
  * cancels the one in flight (the server drops the source's request when nobody waits on it).
@@ -149,7 +165,7 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
     const delay = first.current ? 0 : 300
     first.current = false
     const timer = setTimeout(() => {
-      setResults((r) => ({ key, items: r?.key === key ? r.items : (r?.items ?? []), next: null, status: "loading" }))
+      setResults((r) => asking(r, key))
       void fetchPage(null, controller).then((out) => {
         if (out === null || controller.signal.aborted) return
         setResults(
@@ -176,7 +192,8 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
     }
   }, [key, attempt, fetchPage])
   useEffect(() => () => inFlight.current?.abort(), [])
-  const current = results !== null && results.key === key ? results : null
+  // While another search waits out its 300 ms, what's known stays shown (dimmed) rather than blanking.
+  const current = key === null ? null : results !== null && results.key === key ? results : asking(results, key)
   // Rate limited: one automatic retry when the source says it may (§5.4).
   const wait = current?.problem?.reason === "rate_limited" ? (current.problem.retryAfterMs ?? 5000) : null
   useEffect(() => {

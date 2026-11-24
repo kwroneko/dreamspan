@@ -258,13 +258,17 @@ export function cardexCriteriaTests() {
               await page.getByRole("menuitemcheckbox", { name: "Name", exact: true }).click()
             }
             const search = scope.getByRole("searchbox", { name: "Search cardex", exact: true })
-            await fetch(`http://127.0.0.1:${port}/__fake/fail?path=/api/v1/search&sort=name&status=500&times=1`)
+            // Twice: on a phone the sheet's side panel and the wide one each ask, and when their two
+            // identical searches don't arrive together the server can't share one, so a single failure
+            // would leave one of them, perhaps the one shown, answered in name order. Cleared after.
+            await fetch(`http://127.0.0.1:${port}/__fake/fail?path=/api/v1/search&sort=name&status=500&times=2`)
             await search.fill("synthetic")
             await expect(
               scope.getByText("cardex couldn't use name order just now. Showing best matches.", {
                 exact: true
               })
             ).toBeVisible()
+            await fetch(`http://127.0.0.1:${port}/__fake/fail?times=0`)
             await expectLayout(page, info, `cardex-temporary-sort-${place}-${width}-${theme}`, {
               scope: place === "home" ? "main" : "[data-shell-list]"
             })
