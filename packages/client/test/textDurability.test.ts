@@ -347,7 +347,6 @@ const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
   "features/threads/StartThreadsDialog.tsx": [kept("useDurableText", "Start threads: the rows, names included")],
   "features/workshop/CardSkills.tsx": times(2, kept("useDurableForm", "a card skill's name and tools")),
   "features/workshop/ConvertPreset.tsx": [kept("useUserDraft", "Convert to workshop: name")],
-  "features/workshop/StartWorkshopPage.tsx": [kept("useUserDraft", "title of the new workshop")],
   "features/workshop/SubagentModelsChip.tsx": [search("add a model")],
   "features/workshop/SubagentSettings.tsx": times(4, kept("useDurableForm", "subagent limits and models")),
   "features/workshop/SubagentTypes.tsx": times(3, kept("useDurableForm", "a subagent type's label, id, explanation"))

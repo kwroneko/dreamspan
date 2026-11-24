@@ -3315,7 +3315,9 @@ const WriteOpsLibraryOwn = RpcGroup.make(
   Rpc.make("CreateWorkshop", {
     payload: {
       userId: UserId,
-      ...WorkshopCreationFields
+      ...WorkshopCreationFields,
+      /** A new-workshop page's chat (`OpenDraftChat`): made pending, for this entry. */
+      draftFor: Schema.optionalKey(Schema.String)
     },
     success: Chat,
     error: Schema.Union([NotFound, StorageError])

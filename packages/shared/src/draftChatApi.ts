@@ -9,6 +9,7 @@ import { NotFound, ServerError } from "./errors.ts"
 export const DraftFor = Schema.Union([
   Schema.TemplateLiteral(["card:", Schema.String]),
   Schema.TemplateLiteral(["group:", Schema.String]),
+  Schema.TemplateLiteral(["workshop:", Schema.String]),
   Schema.Literal("empty")
 ])
 export type DraftFor = typeof DraftFor.Type
@@ -19,7 +20,9 @@ export class DraftChatApi extends RpcGroup.make(
    * first turn, that nothing lists and that changes nothing (no last used time, no count) until
    * then, so the page is the saved chat's from the start. `draftFor` is the entry it is for:
    * `card:<entity>` (the card's greeting, the persona locked to it or the default),
-   * `group:<chat>` (each member's random greeting, the group's name), `empty` (nobody yet).
+   * `group:<chat>` (each member's random greeting, the group's name), `empty` (nobody yet),
+   * `workshop:<card>:<persona>` (a workshop, its assistant and persona as `CreateWorkshop` takes
+   * them: either empty for the workshop default, the persona `none` for none).
    * Each call makes a fresh one with fresh greetings, and sweeps the user's pending chats that
    * no tab has had open for a minute (their typing to recovered texts). `reopen`: the one the
    * page's URL names, returned as it is when it is still the user's (committed or pending for

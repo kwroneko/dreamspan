@@ -84,17 +84,15 @@ test.describe("chats started from the Chats page", () => {
       await page.goto(`${server().url}/chats`)
       await page.getByLabel("Title of the new workshop").fill(title)
       await page.getByRole("button", { name: "New workshop", exact: true }).click()
-      await expect(page).toHaveURL(/\/new\/workshop/)
+      // A pending chat under that title, on the saved workshop's page.
+      await expect(page).toHaveURL(/\/new\/workshop\?.*draft=[^&]+/, { timeout: 30_000 })
+      const pendingUrl = page.url()
       await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible()
-      await expect(page.locator("[data-workshop-intro]")).toBeVisible()
-      await expect(page.getByLabel("Title of the new workshop")).toHaveValue(title)
-      await expect(page.getByRole("button", { name: /^Assistant: / })).toBeVisible()
-      // The saved workshop's composer: speaker, Guidance, Generate, Send, and the strip's chips.
-      const box = page.getByLabel("Message", { exact: true })
-      await expect(box).toBeFocused()
+      await expect(page.locator("[data-center-header]").first().getByText("new", { exact: true })).toBeVisible()
+      // The saved workshop's composer: Guidance, Generate, and the strip's chips.
+      await expect(page.getByLabel("Message", { exact: true })).toBeVisible()
       await expect(page.getByRole("switch", { name: "Guidance" })).toBeVisible()
-      await expect(page.getByRole("button", { name: /^Generate/ })).toBeVisible()
-      await expect(page.getByRole("button", { name: /^Send/ })).toBeVisible()
+      await expect(page.getByTestId("composer-controls").getByRole("button", { name: /^Generate/ })).toBeVisible()
       await expect(page.getByRole("button", { name: /^Model: / })).toBeVisible()
       await expect(page.getByRole("button", { name: /^Prompt preset: / })).toBeVisible()
       const chip = page.getByRole("button", { name: /^What the assistant may do: / })
@@ -107,7 +105,7 @@ test.describe("chats started from the Chats page", () => {
       await page.waitForTimeout(800)
       await page.reload()
       await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible({ timeout: 30_000 })
-      await expect(page.getByLabel("Title of the new workshop")).toHaveValue(title)
+      expect(page.url()).toBe(pendingUrl)
       expect((await workshops()).length).toBe(before)
 
       // A grant chosen before the first send: changing the library, Ask first.
@@ -128,7 +126,10 @@ test.describe("chats started from the Chats page", () => {
 
       // Generate with nothing typed is a first send: it makes the workshop, then asks for the turn.
       const asked = provider().bodies.length
-      await page.getByRole("button", { name: /^Generate/ }).click()
+      await page
+        .getByTestId("composer-controls")
+        .getByRole("button", { name: /^Generate/ })
+        .click()
       await expect(page).toHaveURL(/\/chats\/[^/?]+/, { timeout: 30_000 })
       const chatId = new URL(page.url()).pathname.split("/").at(-1)!
       const made = await workshops()
@@ -141,16 +142,16 @@ test.describe("chats started from the Chats page", () => {
       expect(granted.mode).toBe("ask")
       expect(granted.chosen).toBe(true)
       await expect.poll(() => provider().bodies.length, { timeout: 30_000 }).toBeGreaterThan(asked)
-      await expect(page.locator("[data-workshop-intro]")).toHaveCount(0)
       await shot(page, `new-workshop-made-${width}`)
     })
 
-    test(`New workshop with a card shows its portrait and greeting, kept by the first send at ${width}`, async ({
+    test(`New workshop with a card is the saved workshop's page, and the first send moves nothing, at ${width}`, async ({
       page
     }, info) => {
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
-      await page.emulateMedia({ reducedMotion: "reduce" })
+      await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" })
+      await page.addInitScript(() => localStorage.setItem("dreamspan.theme", "dark"))
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const name = `Quill ${width}`
       const greeting = `Quill sharpens a pen at ${width}.`
@@ -171,31 +172,55 @@ test.describe("chats started from the Chats page", () => {
       const workshops = async () => (await chats()).filter((chat) => chat.kind === "workshop")
       const before = (await workshops()).length
       await page.goto(`${server().url}/new/workshop?workshopCard=${card.entityId}`)
-      // The card as the workshop's personality (spec/WORKSHOP-CARDS.md §3): its greeting where the
-      // messages will be, its portrait in the header, the start choices under it.
-      const shown = page.getByRole("article", { name: `Greeting from ${name}` })
-      await expect(shown).toContainText(greeting)
-      await expect(page.locator("[data-workshop-intro]")).toBeVisible()
-      await expect(page.locator("[data-workshop-pending]").getByText("new", { exact: true })).toBeVisible()
-      await expect(page.getByLabel("Message", { exact: true })).toBeFocused()
-      const portrait = page.locator('[data-layout-audit-ignore^="overlap: Header portraits"]')
-      if (width > 640) await expect(portrait).toBeVisible()
-      await expect(page.locator("[data-workshop-pending] p.truncate").first()).toHaveText(name)
-      const at = width > 640 ? await portrait.boundingBox() : null
+      // A pending chat (spec/WORKSHOP-CARDS.md §3): the card's greeting is its first message, its
+      // header, composer and strip the saved workshop's, with "new" and the kind's badge.
+      await expect(page).toHaveURL(/\/new\/workshop\?.*draft=[^&]+/, { timeout: 30_000 })
+      const first = page.getByRole("article").first()
+      await expect(first).toContainText(greeting)
+      const header = page.locator("[data-center-header]").first()
+      await expect(header.getByText("new", { exact: true })).toBeVisible()
+      await expect(header.getByText("Workshop", { exact: true })).toHaveCount(2)
+      // What needs a started chat stays in place, disabled, saying why.
+      if (width > 640) await expect(header.getByRole("button", { name: "Pin this branch" })).toBeDisabled()
+      const box = page.getByLabel("Message", { exact: true })
+      await expect(box).toBeVisible()
       expect((await workshops()).length).toBe(before)
+      const places = async () => ({
+        header: await header.boundingBox(),
+        greeting: await first.boundingBox(),
+        composer: await page.getByTestId("composer-box").boundingBox(),
+        strip: await page
+          .getByRole("group", { name: "Next reply" })
+          .or(page.locator('[aria-label="Next reply"]'))
+          .first()
+          .boundingBox(),
+        controls: await page.getByTestId("composer-controls").getByRole("button").count(),
+        chips: await page
+          .locator('[aria-label="Next reply"]')
+          .first()
+          .getByRole("button")
+          .allInnerTexts()
+          .then((texts) => texts.map((text) => text.replace(/[0-9.]+k?/g, "#")))
+      })
+      await page.waitForTimeout(300)
+      const pending = await places()
       await shot(page, `new-workshop-card-${width}`)
       await expectLayout(page, info, `new-workshop-card-${width}`)
 
-      // The first send makes it with that greeting as its first message; the portrait stays put.
-      await page.getByLabel("Message", { exact: true }).fill("Write me a card about a lighthouse.")
+      // The first send starts it in place: the greeting is its first message, and nothing moved.
+      await box.fill("Write me a card about a lighthouse.")
       await page.getByRole("button", { name: /^Send/ }).click()
       await expect(page).toHaveURL(/\/chats\/[^/?]+/, { timeout: 30_000 })
       const chatId = new URL(page.url()).pathname.split("/").at(-1)!
-      await expect(page.getByRole("article").filter({ hasText: greeting })).toHaveCount(1)
       await expect(page.getByRole("article").filter({ hasText: "Write me a card about a lighthouse." })).toHaveCount(1)
-      if (at !== null)
-        expect(await page.locator('[data-layout-audit-ignore^="overlap: Header portraits"]').boundingBox()).toEqual(at)
-      expect((await workshops()).map((chat) => chat.id)).toContain(chatId)
+      // Its answer is in: the strip is as it rests.
+      await expect(page.getByRole("article")).toHaveCount(3, { timeout: 60_000 })
+      await expect(page.getByTestId("composer-controls").getByRole("button", { name: /^Generate/ })).toBeVisible()
+      await page.waitForTimeout(500)
+      await expect.poll(places, { timeout: 30_000 }).toEqual(pending)
+      const made = await workshops()
+      expect(made.map((chat) => chat.id)).toContain(chatId)
+      expect(made.find((chat) => chat.id === chatId)?.title).toBe("Workshop")
       await shot(page, `new-workshop-card-sent-${width}`)
     })
   }

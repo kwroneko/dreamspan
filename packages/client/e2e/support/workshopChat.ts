@@ -155,7 +155,7 @@ export function workshopChatTests() {
           await page.getByLabel("Title of the new workshop").fill(title)
           await page.getByRole("button", { name: "New workshop", exact: true }).click()
           // Nothing is made until the first send (DESIGN 7.7): the pending workshop's own page.
-          await expect(page).toHaveURL(/\/new\/workshop$/)
+          await expect(page).toHaveURL(/\/new\/workshop\?draft=[^&]+$/, { timeout: 30_000 })
           await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible()
           await expect(page.getByTestId("composer")).toBeVisible()
 
