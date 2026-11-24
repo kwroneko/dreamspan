@@ -270,7 +270,8 @@ test("an earlier reply and a swipe each open their own request from the message'
       const path = yield* api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
       const last = path.entries.at(-1)!
       const swipe = yield* api.Regenerate({ slotId: last.slotId, expectedRowVersion: last.rowVersion })
-      return { id: chatId, first: first.entry.version.id, swipe: swipe.version.id }
+      yield* settled
+      return { id: chatId, first: first.entry.version.id, firstSlot: first.entry.slotId, swipe: swipe.version.id }
     })
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -286,8 +287,13 @@ test("an earlier reply and a swipe each open their own request from the message'
   await scrollUntil(messages, messages.getByRole("link", { name: "Message 3, swipe 1" }))
   await expect(messages.getByRole("link", { name: "Message 3, swipe 1" })).toBeVisible()
   await page.getByRole("link", { name: "← Back to the reply" }).click()
-  // The earlier reply opens its own request.
-  await messageMenu(replies.first(), "Open request inspector")
+  // Back opens the linked swipe. Scroll to the earlier reply before opening its action.
+  const timeline = page.getByTestId("messages")
+  await timeline.hover()
+  await page.mouse.wheel(0, -600)
+  const earlier = timeline.locator(`article[data-slot="${made.firstSlot}"]`)
+  await expect(earlier).toBeInViewport()
+  await messageMenu(earlier, "Open request inspector")
   await expect(page).toHaveURL(new RegExp(`/chats/${made.id}/context/${made.first}\\?fork=[^&]+(&wb=[^&]*)?$`))
   await expect(page.getByText(/^normal, /)).toBeVisible()
   await scrollUntil(messages, messages.getByText("The bell rang twice.", { exact: true }))
