@@ -245,3 +245,72 @@ test("an image attached on the old new-chat page before the upgrade shows in the
   await expect(page.getByLabel("Message", { exact: true })).toBeVisible({ timeout: 30_000 })
   await expect(attached(page).getByRole("listitem")).toHaveCount(1, { timeout: 30_000 })
 })
+
+test("a group's new chat reopened after its group was renamed takes no other group's old attachments (rev-dd2 #3)", async ({
+  page
+}) => {
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const as = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+  const mira = await as((api) => api.CreateCard({ label: "Mira Harbor", name: "Mira Harbor" }))
+  const tobin = await as((api) => api.CreateCard({ label: "Tobin Harbor", name: "Tobin Harbor" }))
+  const userId = (await as((api) => api.Whoami())).id
+  const group = async (name: string) => {
+    const started = await as((api) =>
+      api.StartChat({
+        cards: [mira.entityId, tobin.entityId],
+        persona: null,
+        greeting: null,
+        first: { _tag: "Send", content: `${name} begins.`, speakerEntityId: null }
+      })
+    )
+    await as((api) => api.RenameChat({ chatId: started.chat.id, name }))
+    return started.chat.id
+  }
+  const harbor = await group("Harbor")
+  await group("Night Watch")
+  // Harbor's new chat is made, as Harbor is then.
+  await page.goto(`${server().url}/groups/${harbor}/new`)
+  await expect(page.getByLabel("Message", { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(page).toHaveURL(/[?&]draft=/)
+  // Another tab renames Harbor to Night Watch; Night Watch's old page kept an image here.
+  await as((api) => api.RenameChat({ chatId: harbor, name: "Night Watch" }))
+  const buffer = await drawing(page)
+  const members = [mira.entityId, tobin.entityId].sort().join(",")
+  const keep = (name: string, scope: string) =>
+    page.evaluate(
+      ({ scope, base64, name }) =>
+        new Promise<void>((resolve, reject) => {
+          const request = indexedDB.open("dreamspan.message-images", 1)
+          request.onupgradeneeded = () => request.result.createObjectStore("images", { keyPath: "id" })
+          request.onerror = () => reject(request.error)
+          request.onsuccess = () => {
+            const db = request.result
+            const tx = db.transaction("images", "readwrite")
+            const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+            tx.objectStore("images").put({
+              id: crypto.randomUUID(),
+              scope,
+              name,
+              position: 0,
+              file: new Blob([bytes], { type: "image/png" })
+            })
+            tx.oncomplete = () => {
+              db.close()
+              resolve()
+            }
+            tx.onerror = () => reject(tx.error)
+          }
+        }),
+      { scope, name, base64: buffer.toString("base64") }
+    )
+  await keep("night.png", `${userId}:pending:pending-group-chat:${members}:Night Watch`)
+  // Harbor's own old image is this chat's.
+  await keep("harbor.png", `${userId}:pending:pending-group-chat:${members}:Harbor`)
+  await page.reload()
+  await expect(page.getByLabel("Message", { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole("button", { name: "Remove harbor.png" })).toBeVisible({ timeout: 30_000 })
+  await page.waitForTimeout(2000)
+  await expect(attached(page).getByRole("listitem")).toHaveCount(1)
+})
