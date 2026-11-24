@@ -32,8 +32,8 @@ function CapacityField({ field, label, value }: { field: keyof BinLimits; label:
   const setText = (next: string) => form.edit({ text: next })
   const setUnit = (next: SizeUnit) => form.edit({ unit: next })
   const action = useAction()
-  const plain = text.replaceAll(",", "")
-  const number = size ? parseByteSize(text, unit) : /^\d+$/.test(plain) ? Number(plain) : null
+  const plain = size ? text.replace(",", ".") : text.replaceAll(",", "")
+  const number = size ? parseByteSize(plain, unit) : /^\d+$/.test(plain) ? Number(plain) : null
   const valid = number !== null && Number.isSafeInteger(number) && number >= 1
   return (
     <form
@@ -70,7 +70,10 @@ function CapacityField({ field, label, value }: { field: keyof BinLimits; label:
             onBlur={() => {
               if (!size) setText(grouped(text))
             }}
-            onChange={(event) => setText(event.currentTarget.value.replace(/,/g, ""))}
+            onChange={(event) => {
+              const value = event.currentTarget.value
+              setText(size ? value : value.replaceAll(",", ""))
+            }}
             required
           />
           {size && (
