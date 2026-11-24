@@ -4624,6 +4624,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       versionId: VersionId,
       /** The state the point read: a later user/tool change or swipe makes the effect stale. */
       expectedState: Schema.String,
+      /** The effective message versions and text revisions used by the decision. */
+      expectedWindow: Schema.String,
       events: Schema.Array(StoredStateEventData)
     },
     success: Schema.Boolean,

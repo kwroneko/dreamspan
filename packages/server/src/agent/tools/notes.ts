@@ -118,7 +118,8 @@ export const notesAt = (context: NotesPosition) =>
             ? n.card !== null && viewers.includes(n.card)
             : condition.when !== "turn" || condition.cards.some((card) => viewers.includes(card))
         }),
-      state
+      state,
+      events
     }
   })
 

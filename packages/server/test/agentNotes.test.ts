@@ -103,7 +103,7 @@ const stepResults = (api: Api, versionId: VersionId) =>
     .pipe(Effect.map((steps) => steps.flatMap((s) => (s.kind === "tool" ? [s.result] : []))))
 
 describe("agent note tools", () => {
-  for (const deniedBy of ["note", "chat", "link", "linked replacement"] as const)
+  for (const deniedBy of ["note", "chat", "link", "linked replacement", "swapped card's replacement"] as const)
     it.live(`edit_card respects a tail note's permission denied by the ${deniedBy}`, () => {
       const config = testConfig()
       const model = scriptedModel()
@@ -119,13 +119,14 @@ describe("agent note tools", () => {
           mira: { description: "She wears a grey coat.", agent_editable_fields: ["description"] },
           state: [{ key: "agent.enabled", value: { on: true } }]
         })
+        const swapped = deniedBy === "swapped card's replacement"
         const tail = yield* chatNote(
           api,
           chat.id,
-          "Mira's current description",
+          swapped ? "Locked description" : "Mira's current description",
           "Keep this text.",
-          deniedBy !== "note",
-          deniedBy === "linked replacement"
+          deniedBy !== "note" && !swapped,
+          deniedBy === "linked replacement" || swapped
             ? [
                 [
                   valueField(["replaces"]),
@@ -143,6 +144,26 @@ describe("agent note tools", () => {
           })
         const me = yield* api.Whoami()
         const reader = yield* Reader
+        if (swapped) {
+          const writer = yield* Writer
+          yield* writer.AddStateEvent({
+            userId: me.id,
+            chatId: chat.id,
+            slotId: null,
+            versionId: null,
+            scope: null,
+            data: { key: "note.activate", value: { note: tail.entityId } }
+          })
+          yield* api.ForkCardForChat({
+            chatId: chat.id,
+            forkId: chat.currentForkId,
+            slotId: version.slotId,
+            entityId: mira.entityId,
+            name: "Mira",
+            nickname: "",
+            characterVersion: "Fork"
+          })
+        }
         if (deniedBy === "chat") {
           const writer = yield* Writer
           yield* writer.AddStateEvent({
@@ -161,7 +182,9 @@ describe("agent note tools", () => {
         assert.deepStrictEqual(yield* stepResults(api, swipe.version.id), [
           deniedBy === "link" || deniedBy === "linked replacement"
             ? "“Mira's current description” shows a shared note, which only its editor changes."
-            : "You may not change “Mira's current description”."
+            : swapped
+              ? "A note you may not change replaces Mira's description."
+              : "You may not change “Mira's current description”."
         ])
         const notes = yield* reader.ChatNoteEntries({
           userId: me.id,

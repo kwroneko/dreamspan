@@ -124,13 +124,15 @@ const shellForksAtom = Atom.family((key: string) =>
 export const PAGE_ROWS = 100
 const empty: ShellRows = { rows: [], total: 0 }
 
+export const shellForksQuery = (view: ShellForksView) => shellForksAtom(JSON.stringify(view))
+
 /**
  * The fork rows of `view`'s sections. While a longer list or another search of the same lists
  * is read, the last answer stays, so lists don't flash a spinner; another scope shows none
  * until its own. `loading`: nothing to show yet. `failure`: the read's error, for a retry.
  */
 export function useShellForks(view: ShellForksView) {
-  const atom = shellForksAtom(JSON.stringify(view))
+  const atom = shellForksQuery(view)
   const result = useAtomValue(atom)
   const lists = JSON.stringify([
     view.entity,

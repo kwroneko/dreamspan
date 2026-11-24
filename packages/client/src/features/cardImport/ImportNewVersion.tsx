@@ -231,16 +231,19 @@ export function NewVersionDialog({
     if (!shown) return
     setReplaceProblem(null)
     setStaging(true)
-    const outcome = await stageVersion(shown.file, refId, source?.link)
-    setStaging(false)
-    if (outcome._tag !== "Done") {
-      setReplaceProblem(outcome._tag === "Failed" ? outcome.message : "Log in again to import a file.")
-      return
+    try {
+      const outcome = await stageVersion(shown.file, refId, source?.link)
+      if (outcome._tag !== "Done") {
+        setReplaceProblem(outcome._tag === "Failed" ? outcome.message : "Log in again to import a file.")
+        return
+      }
+      const revisionId = outcome.result.library?.stagedRevisionId
+      if (!revisionId) return setReplaceProblem("The file couldn't be set aside for merging.")
+      await source?.taken()
+      setStaged({ revisionId, file: shown.file.name })
+    } finally {
+      setStaging(false)
     }
-    const revisionId = outcome.result.library?.stagedRevisionId
-    if (!revisionId) return setReplaceProblem("The file couldn't be set aside for merging.")
-    await source?.taken()
-    setStaged({ revisionId, file: shown.file.name })
   }
 
   if (staged)
@@ -373,7 +376,7 @@ export function NewVersionDialog({
           Cancel
         </Button>
         {shown && !source && (
-          <Button hint={EXPLAIN.another} onClick={() => setStep({ _tag: "Pick" })}>
+          <Button hint={EXPLAIN.another} disabled={staging} onClick={() => setStep({ _tag: "Pick" })}>
             Choose another file
           </Button>
         )}
@@ -401,7 +404,13 @@ export function NewVersionDialog({
           </Button>
         )}
         {shown && (
-          <Button variant="primary" hint={EXPLAIN.replace} pending={action.pending} onClick={() => void replace()}>
+          <Button
+            variant="primary"
+            hint={EXPLAIN.replace}
+            pending={action.pending}
+            disabled={staging}
+            onClick={() => void replace()}
+          >
             Replace
           </Button>
         )}

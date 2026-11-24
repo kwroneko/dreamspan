@@ -41,6 +41,7 @@ import { PANEL_MESSAGES } from "@dreamspan/shared/panelDataApi.ts"
 import {
   displayEndOf,
   displayLength,
+  displayThrough,
   type PathPiece,
   pathPieces,
   positionOf,
@@ -206,6 +207,18 @@ export const displayWindow = (
     WHERE w.slot_id IS NOT NULL
     ORDER BY position`
 }
+
+/** The last slots through a named leaf, with the same selections and visibility as ReadPath. */
+export const readPathTail = (sql: SqlClient.SqlClient, chatId: ChatId, fork: string, leaf: SlotId, limit: number) =>
+  Effect.gen(function* () {
+    const shown = yield* displayThrough(sql, chatId, fork, leaf)
+    const rows = shown
+      ? yield* displayWindow(sql, shown.pieces, Math.max(0, shown.end - limit + 1), shown.end, fork)
+      : (yield* rearranges(sql, chatId, fork))
+        ? []
+        : yield* pathWindow(sql, chatId, leaf, limit, fork)
+    return rows.filter((row) => row.slot_deleted === 0).map(toPathEntry)
+  })
 
 /** Rows of a structural window, numbered by depth: without insertions, a path's positions are its depths. */
 const byDepth = (rows: ReadonlyArray<PathRow>) => rows.map((row) => ({ ...row, position: row.depth }))

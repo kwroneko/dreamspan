@@ -372,7 +372,14 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         // A note's condition cards and link name only the user's own (§14.3).
         if (ref.kind === "note") yield* steps.checkReferences(userId, valid.doc)
         if (ref.kind === "note") {
-          const conflict = yield* replacementConflict(sql, userId, ref.entity_id, valid.doc, chatNote, head)
+          const conflict = yield* replacementConflict(
+            sql,
+            userId,
+            ref.entity_id,
+            valid.doc,
+            resolved && chatNote ? { ...chatNote, forkId: resolved.fork } : undefined,
+            head
+          )
           if (conflict) return yield* new InvalidDocument({ problems: [conflict] })
         }
         const change = yield* chatNote
@@ -425,7 +432,14 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         const message = `Restored the revision of ${saved} UTC`
         const origin = JSON.stringify({ restored: revisionId })
         if (ref.kind === "note") {
-          const conflict = yield* replacementConflict(sql, userId, ref.entity_id, doc, chatNote, head)
+          const conflict = yield* replacementConflict(
+            sql,
+            userId,
+            ref.entity_id,
+            doc,
+            resolved && chatNote ? { ...chatNote, forkId: resolved.fork } : undefined,
+            head
+          )
           if (conflict) return yield* refused(ref, conflict)
         }
         const change =
@@ -520,19 +534,17 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           const valid = validateDoc(ref.kind, applied.doc)
           // A draft that wouldn't make a valid document leaves the entry as saved: Save says why.
           if (!valid.ok || droppedDrafts(ref.kind, applied.doc, valid.doc, kept).length > 0) continue
+          const notePosition = resolved ? { ...position, forkId: resolved.fork } : undefined
           if (ref.kind === "note") {
             const checked = yield* steps.checkReferences(userId, valid.doc).pipe(
               Effect.as(true),
               Effect.catchTag("NotFound", () => Effect.succeed(false))
             )
             if (!checked) continue
-            if (
-              yield* replacementConflict(sql, userId, ref.entity_id, valid.doc, resolved ? position : undefined, head)
-            )
-              continue
+            if (yield* replacementConflict(sql, userId, ref.entity_id, valid.doc, notePosition, head)) continue
           }
-          const change = resolved
-            ? yield* chatNoteEdit(userId, ref, valid.doc, null, position, "generation", usedBy)
+          const change = notePosition
+            ? yield* chatNoteEdit(userId, ref, valid.doc, null, notePosition, "generation", usedBy)
             : yield* userEdit(ref, valid.doc, null, usedBy, "generation")
           if (change.ref.headRevisionId !== ref.head_revision_id) cut++
           for (const row of kept) yield* drafts.end(row, "committed", change.ref.headRevisionId)

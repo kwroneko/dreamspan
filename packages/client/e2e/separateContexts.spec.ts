@@ -20,6 +20,7 @@ let cookie: string
 let provider: FakeProvider
 let decide: Server
 let decisionConnection = ""
+let decisionGate: Promise<void> | undefined
 /** The characters the scene check says left during the latest message. */
 const leaving = new Set<string>()
 
@@ -32,7 +33,8 @@ test.beforeAll(async () => {
   decide = createServer((request, response) => {
     let raw = ""
     request.on("data", (chunk) => (raw += chunk))
-    request.on("end", () => {
+    request.on("end", async () => {
+      await decisionGate
       const body = JSON.parse(raw) as { questions: Record<string, { instructions?: string }> }
       const answers = Object.fromEntries(
         Object.entries(body.questions).map(([id, question]) => {
@@ -250,6 +252,31 @@ const sceneCheck = (on: boolean) =>
       })
     })
   )
+
+test("an open Activity panel shows final scene-check usage when the cast stays the same", async ({ page }) => {
+  await look(page, 1440, "light")
+  await sceneCheck(true)
+  const gate = Promise.withResolvers<void>()
+  decisionGate = gate.promise
+  leaving.clear()
+  try {
+    const { chatId, slotId } = await threeCharacters()
+    const ids = await castIds()
+    await admin((api) => api.Generate({ chatId, parentSlotId: slotId, branch: false, speakerEntityId: ids.mira }))
+    await expect.poll(async () => (await admin((api) => api.ListActivity({ chatId }))).rows[0]?.status).toBe("running")
+    await page.goto(`${server().url}/chats/${chatId}`)
+    const activity = await openPanel(page, "Activity")
+    const decision = activity.locator('[data-activity="decision"]')
+    await expect(decision.getByText("running", { exact: true })).toBeVisible()
+    gate.resolve()
+    await expect(decision.getByText("finished", { exact: true })).toBeVisible()
+    await expect(decision.getByText("320", { exact: true })).toBeVisible()
+  } finally {
+    gate.resolve()
+    decisionGate = undefined
+    await sceneCheck(false)
+  }
+})
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {

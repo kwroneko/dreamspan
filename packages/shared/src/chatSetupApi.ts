@@ -267,11 +267,12 @@ export const ShellSection = Schema.Literals([
 ])
 export type ShellSection = typeof ShellSection.Type
 const ShellForkSort = Schema.Literals(["recent", "created", "added", "name"])
+export const SHELL_CHAT_IDS_LIMIT = 500
 export const ShellForksView = Schema.Struct({
   entity: Schema.NullOr(EntityId),
   chat: Schema.NullOr(ChatId),
   /** Only these chats (a list's rows), when given. */
-  chats: Schema.optionalKey(Schema.Array(ChatId).check(Schema.isMaxLength(500))),
+  chats: Schema.optionalKey(Schema.Array(ChatId).check(Schema.isMaxLength(SHELL_CHAT_IDS_LIMIT))),
   /**
    * Matched against each fork's name and its cast's names, ignoring case; within one `chat`,
    * every word against the branch's own name and its last message (`branchMatches`).

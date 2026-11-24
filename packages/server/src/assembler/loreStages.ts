@@ -340,8 +340,8 @@ export const loreActivationStage: AssemblerStage = {
         const included = new Set(lore.map((e) => `${e.book}:${e.entry.uid}`))
         const candidates = result.skipped
           .filter(
-            ({ book, entry, reason }) =>
-              (reason === "no_primary" || reason === "secondary") &&
+            ({ book, entry, reason, keywordMiss }) =>
+              (keywordMiss || reason === "no_primary" || reason === "secondary") &&
               !entry.constant &&
               (entry.decision_hint ?? "").trim() !== "" &&
               !included.has(`${book}:${entry.uid}`)

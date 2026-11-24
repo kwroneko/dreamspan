@@ -319,6 +319,58 @@ describe("decision models", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, capture.generator)))
   })
 
+  it.live("presence: amending the preceding message invalidates an in-flight answer", () => {
+    const config = testConfig()
+    const capture = engineCapture()
+    return Effect.gen(function* () {
+      let pending: ServerResponse | undefined
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            if (request.path === "/decide") {
+              pending = res
+              return
+            }
+            sse(res, completionChunks(["Mira looks up."], { prompt_tokens: 10, completion_tokens: 2 }))
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, chat, sent } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        characters: ["Wren"],
+        content: "Wren left."
+      })
+      const userId = (yield* api.Whoami()).id
+      yield* decisionConnection(api, mock.url, { presence: { on: true, threshold: 0.85 } })
+      const reply = {
+        userId,
+        chatId: chat.id,
+        slotId: version.slotId,
+        versionId: version.id,
+        forkId: chat.currentForkId
+      }
+      const fiber = yield* capture.get().afterReply(reply).pipe(Effect.forkScoped)
+      yield* eventually(() => pending !== undefined)
+      assert.include(JSON.stringify(mock.requests().find((r) => r.path === "/decide")!.body?.state), "Wren left.")
+      const writer = yield* Writer
+      yield* writer.AmendVersion({
+        userId,
+        forkId: reply.forkId,
+        versionId: sent.version.id,
+        expectedRowVersion: sent.version.rowVersion,
+        content: "Wren stayed."
+      })
+      json(pending!, 200, { answers: { c0: { noul: 0.99 }, c1: { noul: 0.01 } } })
+      assert.isFalse(yield* Fiber.join(fiber))
+      const reader = yield* Reader
+      const events = yield* reader.StateEventsAt(reply)
+      assert.deepStrictEqual(foldState(events).away, [])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, capture.generator)))
+  })
+
   it.live("a point that isn't on for any connection sends nothing", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -371,7 +423,14 @@ describe("decision models", () => {
       const { version, chat } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        lorebook: book
+        lorebook: {
+          ...book,
+          entries: [
+            { ...book.entries[0]!, exclude_recursion: true },
+            book.entries[1]!,
+            loreEntry({ constant: true, content: "An unrelated constant starts recursion." }, 2)
+          ]
+        }
       })
       assert.strictEqual(version.status, "complete")
       const decided = mock.requests().filter((r) => r.path === "/decide")
