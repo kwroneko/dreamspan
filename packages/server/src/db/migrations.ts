@@ -300,6 +300,29 @@ export const migrationDefinitions = {
         WHERE g.capability = 'library.read'`,
       "DELETE FROM workshop_grants WHERE capability = 'library.read'"
     ]
+  },
+  "0028_composer_library_carries": {
+    statements: [
+      `CREATE TABLE composer_library_carries (
+        draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
+        source_chat_id TEXT NOT NULL,
+        ref_id TEXT NOT NULL,
+        PRIMARY KEY (draft_id, source_chat_id, ref_id)
+      ) STRICT, WITHOUT ROWID`
+    ]
+  },
+  "0029_composer_library_handovers": {
+    statements: [
+      `CREATE TABLE composer_library_handovers (
+        origin_chat_id TEXT NOT NULL,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        operation_id TEXT NOT NULL,
+        ref_id TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        PRIMARY KEY (origin_chat_id, user_id, operation_id, ref_id)
+      ) STRICT, WITHOUT ROWID`,
+      "CREATE INDEX composer_library_handovers_chat ON composer_library_handovers(chat_id, ref_id)"
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

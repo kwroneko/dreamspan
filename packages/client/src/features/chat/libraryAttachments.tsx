@@ -4,7 +4,7 @@
 // a kind or replace one. The items wait in the composer's draft on the server
 // (`GetComposerLibrary`), so a reload keeps them, and go with the message the user sends.
 import type { MessageLibrary, PathEntry, VersionLibrary } from "@dreamspan/shared/chat.ts"
-import type { ComposerLibraryItem } from "@dreamspan/shared/composerApi.ts"
+import type { ComposerLibraryHandover, ComposerLibraryItem } from "@dreamspan/shared/composerApi.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import {
   type ComponentType,
@@ -69,13 +69,15 @@ const useLibraryAttachKinds = () => {
   return [...snapshot.entries].sort((a, b) => a.order - b.order)
 }
 
+type LibraryTransfer = { readonly carriedFrom: string } | { readonly handover: ComposerLibraryHandover }
+
 export interface ComposerLibrary {
   readonly items: ReadonlyArray<ComposerLibraryItem>
   readonly ready: boolean
   readonly busy: boolean
   readonly error: string | null
-  /** By id: the server knows each one's kind. True once the server has them. `hold`: as `LiveLibraryComposer`'s. */
-  readonly add: (refIds: ReadonlyArray<string>, hold?: boolean) => Promise<boolean>
+  /** By id: the server knows each one's kind. A transfer waits for the writer to resolve it. */
+  readonly add: (refIds: ReadonlyArray<string>, transfer?: LibraryTransfer) => Promise<boolean>
   readonly remove: (refId: string) => void
   /** What a send carries: the items shown now. */
   readonly capture: () => MessageLibrary
@@ -90,7 +92,7 @@ const MAX = 16
 const HANDOVER_RETRY_MS = 2_000
 
 /**
- * What was handed over (`hold`) to new chat `chatId`'s composer in this browser tab and not sent
+ * What was handed over to new chat `chatId`'s composer in this browser tab and not sent
  * or removed since, kept for a reload: a chat opened in its place after a sweep (its composer
  * and attachments gone with it) gets them too, though the URL no longer names them (rev-dd4a #2).
  * Read (`next` undefined) or kept (empty: none).
@@ -120,11 +122,10 @@ export interface LiveLibraryComposer {
   /** Its workbench tab, null outside a workbench. */
   readonly tabId: string | null
   /**
-   * True once the server has them on the composer's draft. `hold`: a handover the message must
-   * carry (a new workshop's item): tried again until the server takes or refuses it, the send
-   * waiting meanwhile.
+   * True when the server answered with the composer's list. A transfer retries until the
+   * writer takes or refuses it, with the send waiting meanwhile.
    */
-  readonly add: (refIds: ReadonlyArray<string>, hold?: boolean) => Promise<boolean>
+  readonly add: (refIds: ReadonlyArray<string>, transfer?: LibraryTransfer) => Promise<boolean>
   readonly focus: () => void
 }
 
@@ -157,7 +158,7 @@ export function useLiveLibraryComposer(composer: Omit<LiveLibraryComposer, "add"
       chatId,
       title: title ?? "",
       tabId: tabId ?? null,
-      add: (refIds, hold) => handle.current.add(refIds, hold),
+      add: (refIds, transfer) => handle.current.add(refIds, transfer),
       focus: () => handle.current.focus()
     }
     live.add(entry)
@@ -226,7 +227,7 @@ export function useComposerLibrary(
   }
   const call = async (
     rpc: "GetComposerLibrary" | "SetComposerLibrary",
-    change?: { add: ReadonlyArray<RefId>; remove: ReadonlyArray<RefId>; carriedFrom?: string }
+    change?: { add: ReadonlyArray<RefId>; remove: ReadonlyArray<RefId>; transfer?: LibraryTransfer }
   ) => {
     if (draftId === null) return null
     const key = { chatId: session.chatId, draftId }
@@ -237,7 +238,7 @@ export function useComposerLibrary(
             ...key,
             add: change!.add,
             remove: change!.remove,
-            ...(change!.carriedFrom === undefined ? {} : { carriedFrom: change!.carriedFrom })
+            ...change!.transfer
           })
     )
     if (!outcome.ok) {
@@ -250,7 +251,51 @@ export function useComposerLibrary(
       return null
     }
     setError(null)
+    if (change?.transfer !== undefined) {
+      const retained = handedOver(session.chatId).filter((id) => !change.add.some((refId) => refId === id))
+      const accepted = outcome.value.filter((item) => change.add.includes(item.refId)).map((item) => item.refId)
+      handedOver(session.chatId, [...retained, ...accepted])
+    }
     return outcome.value
+  }
+  const addOnce = (added: ReadonlyArray<string>, transfer?: LibraryTransfer) => {
+    const requested = [...new Set(added as ReadonlyArray<RefId>)]
+    const fresh = requested.filter((refId) => !shown.current.some((there) => there.refId === refId))
+    if (transfer === undefined && fresh.length === 0) return Promise.resolve(true)
+    if (draftId === null) {
+      if (transfer !== undefined) return Promise.resolve(false)
+      early.current = [...new Set([...early.current, ...fresh])]
+      return new Promise<boolean>((resolve) => earlyDone.current.push(resolve))
+    }
+    if (requested.length > MAX || shown.current.length + fresh.length > MAX) {
+      // Refused: tried again it would only hold the send (rev-dd3 #7).
+      refused.current = true
+      setError(`A message can carry at most ${MAX} cards, lorebooks and presets.`)
+      return Promise.resolve(false)
+    }
+    return run(() =>
+      call(
+        "SetComposerLibrary",
+        transfer === undefined ? { add: fresh, remove: [] } : { add: requested, remove: [], transfer }
+      )
+    )
+  }
+  // A handover tried again goes to the draft as it is then (known by now, when it wasn't).
+  const latestAdd = useRef(addOnce)
+  useLayoutEffect(() => {
+    latestAdd.current = addOnce
+  })
+  /** A handover the message must carry: tried again until the server takes or refuses it. */
+  const addHeld = (added: ReadonlyArray<string>, transfer: LibraryTransfer) => {
+    setHolding((n) => n + 1)
+    const attempt = async (): Promise<boolean> => {
+      refused.current = false
+      const ok = await latestAdd.current(added, transfer)
+      if (ok || refused.current || !mounted.current) return ok
+      await new Promise((resolve) => setTimeout(resolve, HANDOVER_RETRY_MS))
+      return mounted.current ? attempt() : false
+    }
+    return attempt().finally(() => setHolding((n) => n - 1))
   }
   useEffect(() => {
     if (!takes || draftId === null) return
@@ -271,8 +316,7 @@ export function useComposerLibrary(
         if (replaced !== null && carried.length > 0) {
           handedOver(session.chatId, [...new Set([...handedOver(session.chatId), ...carried])])
           handedOver(replaced, [])
-          const missing = carried.filter((refId) => !items.some((there) => there.refId === refId))
-          if (missing.length > 0) void addHeld(missing, replaced)
+          void addHeld(carried, { carriedFrom: replaced })
         }
       }
       return items
@@ -293,54 +337,13 @@ export function useComposerLibrary(
     // One read per draft: the queue and the calls read the newest state through refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [takes, draftId])
-  const addOnce = (added: ReadonlyArray<string>, carriedFrom?: string) => {
-    const fresh = [...new Set(added as ReadonlyArray<RefId>)].filter(
-      (refId) => !shown.current.some((there) => there.refId === refId)
-    )
-    if (fresh.length === 0) return Promise.resolve(true)
-    if (draftId === null) {
-      early.current = [...new Set([...early.current, ...fresh])]
-      return new Promise<boolean>((resolve) => earlyDone.current.push(resolve))
-    }
-    if (shown.current.length + fresh.length > MAX) {
-      // Refused: tried again it would only hold the send (rev-dd3 #7).
-      refused.current = true
-      setError(`A message can carry at most ${MAX} cards, lorebooks and presets.`)
-      return Promise.resolve(false)
-    }
-    return run(() =>
-      call("SetComposerLibrary", { add: fresh, remove: [], ...(carriedFrom === undefined ? {} : { carriedFrom }) })
-    )
-  }
-  // A handover tried again goes to the draft as it is then (known by now, when it wasn't).
-  const latestAdd = useRef(addOnce)
-  useLayoutEffect(() => {
-    latestAdd.current = addOnce
-  })
-  /** A handover the message must carry: tried again until the server takes or refuses it. */
-  const addHeld = (added: ReadonlyArray<string>, carriedFrom?: string) => {
-    setHolding((n) => n + 1)
-    const attempt = async (): Promise<boolean> => {
-      refused.current = false
-      const ok = await latestAdd.current(added, carriedFrom)
-      if (ok || refused.current || !mounted.current) return ok
-      await new Promise((resolve) => setTimeout(resolve, HANDOVER_RETRY_MS))
-      return mounted.current ? attempt() : false
-    }
-    return attempt()
-      .then((ok) => {
-        if (ok) handedOver(session.chatId, [...new Set([...handedOver(session.chatId), ...added])])
-        return ok
-      })
-      .finally(() => setHolding((n) => n - 1))
-  }
   if (!takes) return null
   return {
     items,
     ready,
     busy: busy || holding > 0 || (draftId !== null && loaded !== draftId),
     error,
-    add: (added, hold = false) => (hold ? addHeld(added) : addOnce(added)),
+    add: (added, transfer) => (transfer === undefined ? addOnce(added) : addHeld(added, transfer)),
     remove: (refId) => {
       handedOver(
         session.chatId,

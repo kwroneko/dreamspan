@@ -58,12 +58,12 @@ const noteSweptLibrary = (sql: SqlClient.SqlClient, userId: UserId, chatId: stri
     yield* sql`INSERT OR REPLACE INTO swept_pending_chats (chat_id, user_id, label, swept_at)
       VALUES (${SWEPT_LIBRARY + chatId}, ${userId}, ${JSON.stringify(held.map((row) => row.ref_id))}, ${now})`
   })
-/** What swept chat `chatId`'s composer held, none when there's no receipt of it (another user's, or expired). */
+/** What swept chat `chatId`'s composer held. Null when there's no receipt (another user's, or expired). */
 export const sweptComposerLibrary = (sql: SqlClient.SqlClient, userId: UserId, chatId: string) =>
   sql<{ label: string }>`SELECT label FROM swept_pending_chats
     WHERE chat_id = ${SWEPT_LIBRARY + chatId} AND user_id = ${userId}
       AND swept_at >= ${Date.now() - SWEPT_KEPT_MS}`.pipe(
-    Effect.map(([row]) => (row === undefined ? [] : (JSON.parse(row.label) as ReadonlyArray<string>)))
+    Effect.map(([row]) => (row === undefined ? null : (JSON.parse(row.label) as ReadonlyArray<string>)))
   )
 
 /** The label a late save to the removed reply's `targetId` (a slot or a version) is filed under. */
@@ -131,6 +131,7 @@ export const commitPendingChat = (sql: SqlClient.SqlClient, chatId: string, at: 
       WHERE id = ${chatId} AND status = 'pending'`
     yield* sql`UPDATE forks SET created_at = ${at}, last_chatted_at = ${at}, row_version = row_version + 1
       WHERE chat_id = ${chatId}`
+    yield* sql`DELETE FROM composer_library_handovers WHERE origin_chat_id = ${chatId}`
     return true
   })
 
@@ -267,6 +268,8 @@ export const sweepPendingChat = (
     // SaveComposer); kept a week.
     const names = yield* castNames(sql, chat)
     const now = Date.now()
+    yield* sql`DELETE FROM composer_library_handovers WHERE origin_chat_id IN (
+      SELECT chat_id FROM swept_pending_chats WHERE swept_at < ${now - SWEPT_KEPT_MS})`
     yield* sql`DELETE FROM swept_pending_chats WHERE swept_at < ${now - SWEPT_KEPT_MS}`
     yield* sql`INSERT OR REPLACE INTO swept_pending_chats (chat_id, user_id, label, swept_at)
       VALUES (${chatId}, ${userId}, ${names.length === 0 ? "New chat" : `New chat with ${names.join(" & ")}`}, ${now})`
