@@ -50,9 +50,7 @@ export const attachLibrary = (sql: SqlClient.SqlClient, versionId: string, pins:
     pins,
     ({ kind, refId, revisionId, name }, ordinal) => sql`
       INSERT INTO version_library (version_id, ordinal, kind, ref_id, revision_id, name)
-      SELECT ${versionId}, ${ordinal}, ${kind}, ${refId}, ${revisionId}, ${name}
-      WHERE EXISTS (SELECT 1 FROM entity_revisions WHERE id = ${revisionId})
-        AND EXISTS (SELECT 1 FROM entity_refs WHERE id = ${refId})`,
+      VALUES (${versionId}, ${ordinal}, ${kind}, ${refId}, ${revisionId}, ${name})`,
     { discard: true }
   )
 
@@ -60,3 +58,13 @@ export const attachLibrary = (sql: SqlClient.SqlClient, versionId: string, pins:
 export const copyLibrary = (sql: SqlClient.SqlClient, from: string, to: string) =>
   sql`INSERT INTO version_library (version_id, ordinal, kind, ref_id, revision_id, name)
     SELECT ${to}, ordinal, kind, ref_id, revision_id, name FROM version_library WHERE version_id = ${from}`
+
+/** A version's library documents, in their sent order, including purged library revisions it holds. */
+export const libraryDocuments = (sql: SqlClient.SqlClient) => sql`(
+  SELECT json_group_array(json_object('kind', l.kind, 'refId', l.ref_id, 'revisionId', l.revision_id,
+      'name', l.name, 'doc', json(coalesce(r.doc_json, p.doc_json))) ORDER BY l.ordinal)
+  FROM version_library l
+  LEFT JOIN entity_revisions r ON r.id = l.revision_id
+  LEFT JOIN purged_library_documents p ON p.revision_id = l.revision_id
+  WHERE l.version_id = v.id AND (r.id IS NOT NULL OR p.revision_id IS NOT NULL)
+)`

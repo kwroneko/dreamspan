@@ -1,6 +1,6 @@
 import { loreEffectsAt, type LoreReceipt, type LoreTimeline } from "../assembler/loreTiming.ts"
 import { refSourcePathSql } from "./library.ts"
-import { hasVersionPayload } from "./libraryAttachments.ts"
+import { hasVersionPayload, libraryDocuments } from "./libraryAttachments.ts"
 import { bookSourceName } from "@dreamspan/shared/lorebookLink.ts"
 import { sharedNote } from "./sharedNotes.ts"
 import { originalReply, type ReplySections } from "@dreamspan/shared/replySections.ts"
@@ -680,10 +680,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
                 'excluded', json(CASE WHEN a.kind <> 'file' AND ${imageExcludedIn(sql, fork, "o.id", "a.media_id")} THEN 'true' ELSE 'false' END))) FROM
               (SELECT va.media_id, va.kind, va.name, va.path, m.mime, m.byte_size FROM version_attachments va
                 JOIN media_assets m ON m.id = va.media_id WHERE va.version_id=v.id AND va.path IS NOT NULL ORDER BY va.ordinal) a) AS attachments_json,
-            (SELECT json_group_array(json_object('kind', l.kind, 'refId', l.ref_id, 'revisionId', l.revision_id,
-                'name', l.name, 'doc', json(r.doc_json))) FROM
-              (SELECT * FROM version_library WHERE version_id = v.id ORDER BY ordinal) l
-              JOIN entity_revisions r ON r.id = l.revision_id) AS library_json,
+            ${libraryDocuments(sql)} AS library_json,
             (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.fork_id IS NULL
               AND NOT ${versionDeletedIn(sql, fork, "c")}) AS version_count,
             f.writer AS first_writer, f.origin AS first_origin,

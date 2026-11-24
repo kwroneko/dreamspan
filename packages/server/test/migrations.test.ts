@@ -171,7 +171,9 @@ describe("0002_files", () => {
           "composer_save_session",
           "composer_commits",
           "workshop_starts",
-          "library_attachments"
+          "library_attachments",
+          "queue_library_revisions",
+          "retained_library_attachments"
         ]
       )
       // The existing row is kept, an image by default.
@@ -335,10 +337,13 @@ describe("the migrator", () => {
         yield* migrate(upTo(5))
         // One broken row was there already; the new change adds two more of the same kind.
         yield* orphanPins(["old"])
+        // This case exercises one ordinary run. Migration 0018 commits its rebuild separately.
+        const ordinary = upTo(17)
+        const pending = Object.keys(ordinary).filter((key) => Number(key.slice(0, 4)) > 5)
         const exit = yield* Effect.exit(
           migrate({
-            ...migrationDefinitions,
-            [fakeKey("breaks")]: {
+            ...ordinary,
+            ["0018_breaks"]: {
               statements: [
                 "PRAGMA defer_foreign_keys = ON",
                 "INSERT INTO chat_pins (user_id, chat_id) VALUES ('u', 'new1'), ('u', 'new2')"
@@ -349,7 +354,7 @@ describe("the migrator", () => {
         assert.isTrue(Exit.isFailure(exit))
         assert.strictEqual(
           messages(Cause.squash((exit as Exit.Failure<unknown, unknown>).cause)),
-          `Dreamspan won't start: this update's database changes ${[...after5, fakeKey("breaks")].join(", ")} would leave` +
+          `Dreamspan won't start: this update's database changes ${[...pending, "0018_breaks"].join(", ")} would leave` +
             " 2 rows pointing at rows that don't exist: 2 in chat_pins (pointing into chats). " +
             "So these database changes were undone, and the data is not served. " +
             "Nothing else was changed: the data is as the version you ran before left it. Go back to that version, or restore the backup taken before this update, and report this problem."
@@ -457,7 +462,9 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0014_composer_save_session",
       "0015_composer_commits",
       "0016_workshop_starts",
-      "0017_library_attachments"
+      "0017_library_attachments",
+      "0018_queue_library_revisions",
+      "0019_retained_library_attachments"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -762,4 +769,47 @@ describe("released migrations", () => {
         module
       )
   })
+})
+
+describe("0018_queue_library_revisions", () => {
+  it.effect("upgrades older queue pins and admits sends consisting solely of library items", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* migrate(upTo(17))
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'workshop', 'active', 0)`
+      yield* sql.withTransaction(
+        Effect.gen(function* () {
+          yield* sql`INSERT INTO version_records
+            (id, slot_id, ordinal, status, writer, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+            VALUES ('reply', 's', 0, 'generating', 'model', 'verbatim', 'generated', 0, 0, 'c')`
+          yield* sql`INSERT INTO slots (id, chat_id, depth, selected_version_id, created_at, fork_id)
+            VALUES ('s', 'c', 0, 'reply', 0, 'c')`
+        })
+      )
+      yield* sql`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('book', 'u', 'lorebook', 0)`
+      yield* sql`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
+        VALUES ('first-revision', 'book', '{}', 'hash', 1, 'user', 0)`
+      yield* sql`INSERT INTO entity_refs (id, entity_id, head_revision_id, label, created_at, updated_at)
+        VALUES ('book-ref', 'book', 'first-revision', 'Synthetic book', 0, 0)`
+      const list = JSON.stringify([
+        { kind: "lorebook", refId: "book-ref" },
+        { kind: "lorebook", refId: "book-ref" }
+      ])
+      yield* sql`INSERT INTO queued_messages
+        (id, chat_id, reply_slot_id, seq, kind, content, created_at, updated_at, library_json)
+        VALUES ('q', 'c', 's', 0, 'message', 'Queued', 0, 0, ${list})`
+      yield* migrate(upTo(18))
+      const [row] = yield* sql<{ library_json: string }>`SELECT library_json FROM queued_messages WHERE id = 'q'`
+      assert.deepStrictEqual(JSON.parse(row!.library_json), [
+        { kind: "lorebook", refId: "book-ref", revisionId: "first-revision", name: "Synthetic book" }
+      ])
+      yield* sql`UPDATE queued_messages SET content = '' WHERE id = 'q'`
+      assert.isTrue(
+        Exit.isFailure(yield* Effect.exit(sql`UPDATE queued_messages SET library_json = '[]' WHERE id = 'q'`))
+      )
+      yield* migrate(migrationDefinitions)
+      assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, [])
+    }).pipe(Effect.provide(layer()))
+  )
 })

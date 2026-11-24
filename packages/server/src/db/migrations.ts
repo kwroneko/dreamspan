@@ -134,6 +134,47 @@ export const migrationDefinitions = {
         )
       ) WHERE library_json <> '[]'`
     ]
+  },
+  // Message and queue attachments outlive their library entry. Keep purged documents only
+  // while a version or queued send still carries the revision.
+  "0019_retained_library_attachments": {
+    statements: [
+      `CREATE TABLE purged_library_documents (
+        revision_id TEXT PRIMARY KEY,
+        doc_json TEXT NOT NULL CHECK (json_valid(doc_json))
+      ) STRICT, WITHOUT ROWID`,
+      `CREATE TABLE retained_version_library (
+        version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('card', 'lorebook', 'preset')),
+        ref_id TEXT NOT NULL,
+        revision_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        PRIMARY KEY (version_id, ordinal)
+      ) STRICT, WITHOUT ROWID`,
+      `INSERT INTO retained_version_library SELECT * FROM version_library`,
+      `DROP TABLE version_library`,
+      `ALTER TABLE retained_version_library RENAME TO version_library`,
+      `CREATE INDEX version_library_ref ON version_library(ref_id)`,
+      `CREATE INDEX version_library_revision ON version_library(revision_id)`,
+      `CREATE TRIGGER version_library_release_document AFTER DELETE ON version_library
+      WHEN EXISTS (SELECT 1 FROM purged_library_documents WHERE revision_id = OLD.revision_id)
+      BEGIN
+        DELETE FROM purged_library_documents WHERE revision_id = OLD.revision_id
+          AND NOT EXISTS (SELECT 1 FROM version_library WHERE revision_id = OLD.revision_id)
+          AND NOT EXISTS (SELECT 1 FROM queued_messages q, json_each(q.library_json) j
+            WHERE j.value ->> '$.revisionId' = OLD.revision_id);
+      END`,
+      `CREATE TRIGGER queued_library_release_documents AFTER DELETE ON queued_messages
+      WHEN OLD.library_json <> '[]'
+      BEGIN
+        DELETE FROM purged_library_documents
+          WHERE revision_id IN (SELECT value ->> '$.revisionId' FROM json_each(OLD.library_json))
+          AND NOT EXISTS (SELECT 1 FROM version_library WHERE revision_id = purged_library_documents.revision_id)
+          AND NOT EXISTS (SELECT 1 FROM queued_messages q, json_each(q.library_json) j
+            WHERE j.value ->> '$.revisionId' = purged_library_documents.revision_id);
+      END`
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 
