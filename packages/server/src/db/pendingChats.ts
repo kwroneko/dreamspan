@@ -3,13 +3,13 @@
 // commits it, in the write that makes that turn, and a pending chat nobody keeps is swept, its
 // typing filed to recovered texts. Only this module changes a chat's status or deletes a pending
 // chat (test/chatReaders.test.ts).
-import type { ChatId, EntityId } from "@dreamspan/shared/chat.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { DraftKey } from "@dreamspan/shared/drafts.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
-import { chatStateAt, loadCards } from "./cards.ts"
+import { chatCast, chatStateAt } from "./cards.ts"
 
 /**
  * A chat's default title: its characters, never just the first character's name (DESIGN §2.1).
@@ -29,17 +29,15 @@ interface PendingRow {
   readonly active_leaf_slot_id: string | null
 }
 
-/** The characters a pending chat has now, by name, in cast order: who you play left out. */
+/**
+ * The characters a pending chat has now, by name, in cast order: who you play left out. Each
+ * by the revision the chat uses (a pinned one's name, not the library's), as its list row has it.
+ */
 const castNames = (sql: SqlClient.SqlClient, chat: PendingRow) =>
   Effect.gen(function* () {
-    const state = yield* chatStateAt(sql, chat.id, chat.active_leaf_slot_id)
-    const playing = new Set(state.playedByMe)
-    const ids = state.participants.filter((id) => !playing.has(id)) as Array<EntityId>
-    const cards = new Map((yield* loadCards(sql, chat.owner_user_id, ids)).map((card) => [card.card.entityId, card]))
-    return ids.flatMap((id) => {
-      const card = cards.get(id)
-      return card === undefined ? [] : [card.card.name]
-    })
+    const playing = new Set<string>((yield* chatStateAt(sql, chat.id, chat.active_leaf_slot_id)).playedByMe)
+    const cast = yield* chatCast(sql, chat.owner_user_id, chat.id, chat.active_leaf_slot_id)
+    return cast.filter((card) => !playing.has(card.entityId)).map((card) => card.name)
   })
 
 const pendingRow = (sql: SqlClient.SqlClient, chatId: string) =>

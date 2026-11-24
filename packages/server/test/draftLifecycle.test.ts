@@ -290,6 +290,72 @@ describe("pending chats", () => {
   )
 })
 
+describe("a pending chat's names", () => {
+  it.live("come from the card revision it uses, for recovered texts and the title it commits with", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId } = yield* setup
+        const writer = yield* Writer
+        const made = yield* writer.CreateEntity({
+          userId,
+          kind: "card",
+          label: "Pilot",
+          subtitle: "",
+          doc: cardDoc("Oriel", { first_mes: "Oriel checks the charts." }),
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
+        const first = made.ref.headRevisionId
+        yield* writer.EditRef({
+          userId,
+          refId: made.ref.id,
+          doc: cardDoc("Renamed", { first_mes: "Oriel checks the charts." }),
+          expectedRowVersion: made.ref.rowVersion,
+          message: null,
+          commitDraft: null
+        })
+        // A draft that uses the card's first revision, named Oriel there.
+        const pinned = (chatId: string) =>
+          writer.AddStateEvent({
+            userId,
+            chatId: chatId as never,
+            slotId: null,
+            versionId: null,
+            scope: null,
+            data: { key: "card.binding", value: { entity: made.entityId, revision: first } }
+          })
+        const left = yield* api.OpenDraftChat({ draftFor: `card:${made.entityId}` })
+        yield* pinned(left.id)
+        const composer = yield* api.OpenComposer({ chatId: left.id, forkId: null })
+        yield* api.SaveComposer({
+          chatId: left.id,
+          draftId: composer.id,
+          rowVersion: composer.rowVersion,
+          session: composer.session,
+          next: false,
+          operationId: crypto.randomUUID(),
+          content: "Check the charts again."
+        })
+        assert.isTrue(yield* writer.SweepPendingChat({ userId, chatId: left.id }))
+        const [recovered] = yield* api.ListRecoveredTexts({ limit: 1, before: null })
+        assert.strictEqual(recovered!.sourceLabel, "New chat with Oriel")
+
+        const sent = yield* api.OpenDraftChat({ draftFor: `card:${made.entityId}` })
+        yield* pinned(sent.id)
+        const greeting = yield* greetingOf(userId, sent.id)
+        yield* api.SendMessage({
+          chatId: sent.id,
+          parentSlotId: greeting.entry.slotId,
+          branch: false,
+          content: "Hello."
+        })
+        assert.match((yield* api.GetChat({ chatId: sent.id })).title, /^Oriel, /)
+      })
+    )
+  )
+})
+
 describe("what a pending chat can't own", () => {
   it.live("no note or snippet of its own: the library would list it and the sweep would strand it", () =>
     run(
