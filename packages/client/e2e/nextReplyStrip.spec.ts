@@ -393,7 +393,10 @@ test("an open next request refreshes after a sampler-only model edit", async ({ 
 test.describe("a chat not sent yet", () => {
   for (const width of [1440, 390])
     for (const theme of ["light", "dark"] as const)
-      test(`its context chip has the same popover and View request (${width} ${theme})`, async ({ page }, info) => {
+      test(`its context chip has the same popover and View request (${width} ${theme})`, async ({
+        page,
+        context
+      }, info) => {
         const entityId = await admin((api) =>
           Effect.gen(function* () {
             const created = yield* api.CreateConnection({
@@ -437,7 +440,34 @@ test.describe("a chat not sent yet", () => {
           hovered: true
         })
         await shoot(page, `new-chat-context-popover-${width}-${theme}`)
-        await details.getByRole("link", { name: "View request", exact: true }).click()
+        const link = details.getByRole("link", { name: "View request", exact: true })
+        const url = new URL((await link.getAttribute("href"))!, page.url())
+        const inspector = await context.newPage()
+        await inspector.setViewportSize(page.viewportSize()!)
+        await inspector.emulateMedia({ colorScheme: theme })
+        let releaseChat: (() => void) | undefined
+        await inspector.routeWebSocket(/\/rpc$/, (socket) => {
+          const upstream = socket.connectToServer()
+          socket.onMessage((data) => {
+            const rpc = typeof data === "string" ? JSON.parse(data) : null
+            if (rpc?.tag === "GetChat" && rpc.payload.chatId === url.searchParams.get("chat"))
+              releaseChat = () => upstream.send(data)
+            else upstream.send(data)
+          })
+        })
+        await inspector.goto(url.href)
+        await expect.poll(() => Boolean(releaseChat)).toBe(true)
+        await expect(inspector.getByText(/^Built now: .* tokens\./)).toBeVisible()
+        await expect(inspector.getByRole("heading", { name: "Your request", exact: true })).toBeVisible()
+        await expect(inspector.getByText(/^Your request as it would be sent now/)).toBeVisible()
+        await expect(inspector).toHaveTitle("Your request · Dreamspan")
+        releaseChat!()
+        await expect(inspector.getByRole("heading", { name: "Your first request", exact: true })).toBeVisible()
+        await expect(inspector.getByText(/^Your first request as it would be sent now/)).toBeVisible()
+        await expect(inspector).toHaveTitle("Your first request · Dreamspan")
+        await inspector.close()
+
+        await link.click()
         // A new chat is a pending chat (draftchats3): its request is the chat's own, named its first.
         await expect(page).toHaveURL(/\/request\/next\?/)
         await expect(page.getByRole("heading", { name: "Your first request", exact: true })).toBeVisible()

@@ -20,10 +20,12 @@ export function NextRequestPage() {
   useSyncExternalStore(nextRequests.subscribe, nextRequests.version)
   const live = chat === null ? null : nextRequests.find(chat, chatTab)
   const at = live ?? { leaf, fork, revision: null }
-  // Without the opening view, whether the chat is pending, as last read with the request.
-  const [readPending, setReadPending] = useState(false)
-  const request = (live?.pending ?? readPending) ? "first" : "next"
-  useTitle(`Your ${request} request`)
+  // Without the opening view, use the status read for this chat once it arrives.
+  const [readStatus, setReadStatus] = useState<{ chatId: ChatId; pending: boolean } | null>(null)
+  const pending = live?.pending ?? (readStatus?.chatId === chat ? readStatus.pending : undefined)
+  const request = pending === undefined ? "request" : pending ? "first request" : "next request"
+  const title = `Your ${request}`
+  useTitle(title)
   const call = useCaller()
   const asked = JSON.stringify([chat, at.leaf, at.fork, at.revision])
   const [state, setState] = useState<{
@@ -40,7 +42,7 @@ export function NextRequestPage() {
     let current = true
     if (live === null)
       void call((client) => client("GetChat", { chatId: chat })).then((result) => {
-        if (current && result.ok) setReadPending(result.value.status === "pending")
+        if (current && result.ok) setReadStatus({ chatId: chat, pending: result.value.status === "pending" })
       })
     void call((client) => client("GetNextRequest", { chatId: chat, leafSlotId: at.leaf, forkId: at.fork })).then(
       (result) => {
@@ -67,11 +69,11 @@ export function NextRequestPage() {
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
       <header className="flex flex-col gap-1">
         <CenterHeaderContent>
-          <h1 className="text-lg font-semibold">Your {request} request</h1>
+          <h1 className="text-lg font-semibold">{title}</h1>
         </CenterHeaderContent>
         <p className="text-sm text-muted">
-          Your {request} request as it would be sent now, before what you're typing. Random choices, the current time and
-          automatic decisions can change it when you send. Nothing has been sent.
+          {title} as it would be sent now, before what you're typing. Random choices, the current time and automatic
+          decisions can change it when you send. Nothing has been sent.
         </p>
       </header>
       {chat === null ? (
@@ -89,7 +91,7 @@ export function NextRequestPage() {
       ) : !fresh ? (
         <Loading label="Building the request…" />
       ) : (
-        <p className="text-sm">{state.error ?? `Choose a model for this chat to see its ${request} request.`}</p>
+        <p className="text-sm">{state.error ?? `Choose a model for this chat to see its ${request}.`}</p>
       )}
     </div>
   )
