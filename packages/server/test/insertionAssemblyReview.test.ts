@@ -67,7 +67,7 @@ const setup = Effect.gen(function* () {
 const texts = (snapshot: ContextSnapshot) => snapshot.request.messages.map((m) => m.content).join("\n")
 
 describe("insertion assembly review", () => {
-  it.effect("keeps a fixture chat’s request byte-identical to master’s version 38", () =>
+  it.effect("keeps the version 38 fixture’s request bytes with the current end-of-request marker", () =>
     Effect.gen(function* () {
       // Captured on master 175acd7 using these same synthetic inputs, before unit 4.
       const before = JSON.parse(readFileSync(new URL("fixtures/preInsertionRequest.json", import.meta.url), "utf8"))
@@ -80,7 +80,8 @@ describe("insertion assembly review", () => {
         ],
         preset: importStPreset(JSON.stringify({ openai_max_context: 4096, openai_max_tokens: 300 })).document!
       })
-      assert.strictEqual(JSON.stringify(after.request), JSON.stringify(before))
+      // Reasoning replay marks the existing end-of-request message (b4ba8bfa7).
+      assert.strictEqual(JSON.stringify(after.request), JSON.stringify({ ...before, endMessage: true }))
     })
   )
 
