@@ -7,12 +7,14 @@ import { Effect } from "effect"
 import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { unitKey } from "@dreamspan/shared/changeReversal.ts"
 import { newCardDoc, textField } from "@dreamspan/shared/editing.ts"
+import { newLorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { unifiedDiff } from "@dreamspan/shared/unifiedDiff.ts"
 import { builtinSkills } from "../src/agent/skills.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
+import type { LibrarySight } from "../src/agent/librarySight.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 
@@ -46,8 +48,11 @@ const fixture = (dataDir: string, api: Api) =>
       viewers: null,
       cache: new Map()
     }
-    const call = (name: string, args: unknown, id: string) =>
-      toolForKind(registry, "workshop", name)!.execute({ ...context, toolCallId: id }, args as never)
+    const call = (name: string, args: unknown, id: string, sight?: LibrarySight) =>
+      toolForKind(registry, "workshop", name)!.execute(
+        { ...context, toolCallId: id, ...(sight ? { sight } : {}) },
+        args as never
+      )
     const run = (name: string, args: unknown, id: string) =>
       Effect.map(call(name, args, id), (out) => {
         assert.isUndefined(out.isError, out.text)
@@ -102,6 +107,58 @@ const editDescription = (f: Effect.Success<ReturnType<typeof fixture>>, id: stri
   )
 
 describe("version tools", () => {
+  it.live("card reads and diffs honor separate consent for an embedded lorebook", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const saved = yield* api.OpenEditor({ refId: f.card })
+      const secret = "A tide chart under the stairs."
+      yield* (yield* Writer).EditRef({
+        userId: (yield* api.Whoami()).id,
+        refId: f.card,
+        expectedRowVersion: saved.ref.rowVersion,
+        commitDraft: null,
+        message: null,
+        doc: {
+          ...saved.doc,
+          description: "Revised description.",
+          character_book: {
+            schema_version: 1,
+            name: "Lighthouse",
+            description: "",
+            scan_depth: null,
+            token_budget: null,
+            recursive_scanning: null,
+            extensions: {},
+            entries: [{ ...newLorebookEntry(1), content: secret }]
+          }
+        }
+      })
+      const sight: LibrarySight = {
+        inView: () => Effect.succeed(false),
+        gate: (capability) =>
+          Effect.succeed(capability === "library.cards" ? { ok: true } : { ok: false, text: "Lorebooks are off." })
+      }
+      const head = yield* f.call("read_card", { card: f.card, fields: ["description"] }, "head", sight)
+      const entry = yield* f.call("read_card", { card: f.card, view: "entry", entry: 1 }, "entry", sight)
+      const item = { kind: "card", item: f.card }
+      const revision = yield* f.call("read_revision", { ...item, revision: "latest" }, "revision", sight)
+      const diff = yield* f.call("diff_revisions", { ...item, from: "1" }, "diff", sight)
+      for (const out of [head, revision, diff]) {
+        assert.include(out.text, "Revised description.")
+        assert.notInclude(out.text, "character_book")
+      }
+      assert.isTrue(entry.isError)
+      assert.notInclude(entry.text, secret)
+      const attached = yield* f.call("read_card", { card: f.card, view: "entry", entry: 1 }, "in-view", {
+        ...sight,
+        inView: () => Effect.succeed(true)
+      })
+      assert.include(attached.text, secret)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("read a revision by number, id or latest, and refuse one it doesn't have", () => {
     const config = testConfig()
     return Effect.gen(function* () {

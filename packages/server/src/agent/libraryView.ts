@@ -36,8 +36,13 @@ export const CARD_TEXT_FIELDS = [
 ] as const
 
 /** What the model reads of an item: a card without its skills (they're shown only once approved). */
-export const visibleDoc = (kind: LibraryKind, doc: Doc): Doc =>
-  kind === "card" ? withoutCardSkills(doc as { readonly extensions?: Readonly<Record<string, unknown>> }) : doc
+export const visibleDoc = (kind: LibraryKind, doc: Doc, showBook = true): Doc => {
+  if (kind !== "card") return doc
+  const card = withoutCardSkills(doc as { readonly extensions?: Readonly<Record<string, unknown>> })
+  if (showBook) return card
+  const { character_book: _, ...rest } = card as Doc
+  return rest
+}
 
 const text = (value: unknown) => (typeof value === "string" ? value : "")
 const list = (value: unknown): ReadonlyArray<unknown> => (Array.isArray(value) ? value : [])

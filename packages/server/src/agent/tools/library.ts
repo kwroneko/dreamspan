@@ -36,6 +36,19 @@ const kindNoun: Record<EntityKind, string> = {
   preset_overlay: "preset overlay"
 }
 
+/** A card outside view needs separate consent for its embedded lorebook. */
+export const mayReadCardBook = Effect.fnUntraced(function* (
+  context: ToolContext,
+  ref: LibraryRef,
+  ...docs: ReadonlyArray<Readonly<Record<string, unknown>>>
+) {
+  const sight = context.sight
+  if (ref.kind !== "card" || !sight || !docs.some((doc) => doc.character_book != null)) return true
+  if (yield* sight.inView(ref.entityId)) return true
+  const allowed = yield* sight.gate("library.lorebooks", `It wants to read the lorebook in “${ref.label}”.`)
+  return allowed.ok
+})
+
 /**
  * A library item by name, library id or entity id, through what the reply may see
  * (spec/WORKSHOP-CARDS.md §2): an item in view resolves without asking; anything else, a miss or
@@ -359,7 +372,8 @@ const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Re
           revision: snapshot.ref.headRevisionId
         }
       }
-      const visible = visibleDoc(kind, source.doc)
+      const showBook = source.ref === null || (yield* mayReadCardBook(context, source.ref, source.doc))
+      const visible = visibleDoc(kind, source.doc, showBook)
       const count: CountEffect = context.countTokens
         ? (text) => context.countTokens!(text).pipe(Effect.orElseSucceed(() => Math.ceil(text.length / 4)))
         : estimateCount

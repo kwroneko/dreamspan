@@ -12,7 +12,7 @@ import { type CountEffect, estimateCount, pageTokens, visibleDoc } from "../libr
 import { toolResultFrame } from "../toolData.ts"
 import type { RolloutTool, ToolContext } from "../tools.ts"
 import { libraryClassIds } from "../capabilities.ts"
-import { pagedView, resolveLibrary, VIEWS, viewHelp } from "./library.ts"
+import { mayReadCardBook, pagedView, resolveLibrary, VIEWS, viewHelp } from "./library.ts"
 
 type Kind = "card" | "preset" | "lorebook"
 const KINDS = Type.Union([Type.Literal("card"), Type.Literal("preset"), Type.Literal("lorebook")])
@@ -102,7 +102,8 @@ const readRevision: RolloutTool<Readonly<Record<string, unknown>>> = {
         refId: resolved.ref.id,
         revisionId: found.revision.id
       })
-      const visible = visibleDoc(kind, doc)
+      const showBook = yield* mayReadCardBook(ctx, resolved.ref, doc)
+      const visible = visibleDoc(kind, doc, showBook)
       const fields = args.fields as ReadonlyArray<string> | undefined
       const shown =
         kind === "card" && fields
@@ -176,8 +177,11 @@ const diffRevisions: RolloutTool<{
       if (to !== null && "error" in to) return { text: to.error, isError: true }
       const read = (revisionId: RevisionId) =>
         ctx.reader.GetRevisionDoc({ userId: ctx.userId, refId: ref.id, revisionId })
-      const before = visibleDoc(args.kind, yield* read(from.revision.id))
-      const after = visibleDoc(args.kind, yield* read(to === null ? ref.headRevisionId : to.revision.id))
+      const beforeDoc = yield* read(from.revision.id)
+      const afterDoc = yield* read(to === null ? ref.headRevisionId : to.revision.id)
+      const showBook = yield* mayReadCardBook(ctx, ref, beforeDoc, afterDoc)
+      const before = visibleDoc(args.kind, beforeDoc, showBook)
+      const after = visibleDoc(args.kind, afterDoc, showBook)
       const changes = documentDiff(before, after).filter(
         (c) => args.fields === undefined || args.fields.includes(topField(c.field))
       )
