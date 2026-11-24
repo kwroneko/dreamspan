@@ -638,7 +638,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           return toChat(yield* graph.ownedChat(userId, chatId))
         }).pipe(transaction("OpenDraftChat")),
       SweepPendingChat: ({ userId, chatId }) =>
-        sweepPendingChat(sql, bin.recover, userId, chatId).pipe(transaction("SweepPendingChat")),
+        sweepPendingChat(sql, bin, userId, chatId).pipe(transaction("SweepPendingChat")),
       StartChat: ({ guidance, userId, cards, persona, greeters, first, title }) =>
         Effect.gen(function* () {
           const { chatId, root } = yield* greetingChat({ userId, cards, persona, greeters, title })

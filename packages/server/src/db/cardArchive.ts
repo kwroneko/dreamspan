@@ -1,4 +1,4 @@
-import { listedSql } from "./listedChats.ts"
+import { committedSql } from "./listedChats.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { cardArchiveCriteria, type ArchiveCriteria } from "@dreamspan/shared/cardArchive.ts"
@@ -15,7 +15,7 @@ export const archiveCandidatesSql = `SELECT e.id AS entityId, r.id AS refId, r.l
         coalesce((SELECT max(v.created_at) FROM version_participants p
           JOIN versions v ON v.id = p.version_id
           JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
-          WHERE p.entity_id = e.id AND c.owner_user_id = ? AND ${listedSql("c")}
+          WHERE p.entity_id = e.id AND c.owner_user_id = ? AND ${committedSql("c")}
             AND v.origin != 'greeting' AND NOT (v.origin = 'imported' AND s.parent_slot_id IS NULL AND v.writer = 'model') AND (v.writer = 'human' OR v.content_length > 0)
             AND v.purged_at IS NULL AND s.purged_at IS NULL), 0),
         coalesce((SELECT max(er.created_at) FROM entity_revisions er
@@ -31,7 +31,7 @@ export const archiveCandidatesSql = `SELECT e.id AS entityId, r.id AS refId, r.l
       CASE WHEN o.entity_id IS NULL THEN 0 ELSE (SELECT count(DISTINCT v.slot_id) FROM version_participants p
           JOIN versions v ON v.id = p.version_id
           JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
-          WHERE p.entity_id = e.id AND c.owner_user_id = ? AND ${listedSql("c")} AND v.writer = 'human'
+          WHERE p.entity_id = e.id AND c.owner_user_id = ? AND ${committedSql("c")} AND v.writer = 'human'
             AND v.purged_at IS NULL AND s.purged_at IS NULL) END AS userMessages
     FROM entities e JOIN entity_refs r ON r.entity_id = e.id
       LEFT JOIN card_summaries cs ON cs.revision_id = r.head_revision_id

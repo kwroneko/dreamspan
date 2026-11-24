@@ -130,6 +130,30 @@ describe("card archive", () => {
       assert.isFalse(all.some((c) => c.entityId === cards[6]!.entityId))
     }).pipe(Effect.scoped, withServer(config))
   })
+  it.live("a binned chat's messages count until it is purged, and a draft's greeting never counts", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const used = yield* api.CreateCard({ label: "Binned keeper", name: "Binned keeper" })
+      const drafted = yield* api.CreateCard({ label: "Only drafted", name: "Only drafted" })
+      const started = yield* api.StartChat({
+        cards: [used.entityId],
+        persona: null,
+        greeting: null,
+        first: { _tag: "Send", content: "Synthetic hello.", speakerEntityId: null },
+        title: "Only conversation"
+      })
+      yield* api.OpenDraftChat({ draftFor: `card:${drafted.entityId}` })
+      yield* fixtureSql(config.dataDir, [
+        { sql: "UPDATE entity_refs SET created_at=?", params: [Date.now() - 400 * 86400000] }
+      ])
+      const never = () =>
+        Effect.map(api.ListArchiveCandidates({ criteria: { never: 30 } }), (rows) => rows.map((c) => c.entityId))
+      assert.deepStrictEqual(yield* never(), [drafted.entityId])
+      yield* api.DeleteChat({ chatId: started.chat.id })
+      assert.deepStrictEqual(yield* never(), [drafted.entityId])
+    }).pipe(Effect.scoped, withServer(config))
+  })
   it.live("reuses archive state, excludes every discovery read and retains favourites and existing casts", () =>
     Effect.gen(function* () {
       const api = yield* client()
