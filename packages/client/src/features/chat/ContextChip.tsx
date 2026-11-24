@@ -42,6 +42,7 @@ export const ContextChip = memo(function ContextChip({
   const [open, setOpen] = useState(false)
   const navigate = useNavigate()
   const workbenchTab = useWorkbenchTab()
+  const tabId = workbenchTab?.tabId ?? null
   const rested = useSyncExternalStore(typed.subscribe, typed.snapshot)
   // While a reply's guidance is edited the box makes a new version of it, not the next request.
   const text = editingGuidance ? "" : rested.trim()
@@ -58,12 +59,12 @@ export const ContextChip = memo(function ContextChip({
   useEffect(() => {
     if (chatId === null || view.contextRevision === 0) nextRequests.withdraw(token)
     else
-      nextRequests.publish(token, chatId, {
+      nextRequests.publish(token, chatId, tabId, {
         leaf: view.leafSlotId,
         fork: view.forkId,
         revision: view.contextRevision
       })
-  }, [token, chatId, view.leafSlotId, view.forkId, view.contextRevision])
+  }, [token, chatId, tabId, view.leafSlotId, view.forkId, view.contextRevision])
   useEffect(() => () => nextRequests.withdraw(token), [token])
   if (view.loading || size === undefined || chatId === null) return null
   // The typed text as the request would hold it: its tokens, and 3 for its message.
@@ -76,7 +77,7 @@ export const ContextChip = memo(function ContextChip({
     ...size.parts,
     ...(typedTokens > 0 ? [{ id: "typed", label: typedLabel(guidance), tokens: typedTokens }] : [])
   ]
-  const href = nextRequestHref(chatId, view.leafSlotId, view.forkId)
+  const href = nextRequestHref(chatId, view.leafSlotId, view.forkId, tabId)
   return (
     <ContextPopover
       open={open}

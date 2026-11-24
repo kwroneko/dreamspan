@@ -1,5 +1,6 @@
 // The composer's next-reply strip (fcomposer): the cache chip's states, and controls whose
 // placement follows the width, as a plugin's can.
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
 import type { CacheWarmth } from "@dreamspan/shared/inspectorApi.ts"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
@@ -16,6 +17,7 @@ import {
 } from "../src/features/chat/composerControls.tsx"
 import { registerComposerControls } from "../src/features/chat/registerComposerControls.tsx"
 import { contextText } from "../src/features/chat/ContextChip.tsx"
+import { nextRequestHref, nextRequestOf, nextRequests } from "../src/features/chat/nextRequest.ts"
 import { REST_MS, restedText } from "../src/features/chat/restedText.ts"
 import type { ChatSession } from "../src/features/chat/session.ts"
 
@@ -31,6 +33,31 @@ const warmth = (over: Partial<CacheWarmth>): CacheWarmth => ({
   prefixTokens: 2_926,
   changed: null,
   ...over
+})
+
+it("follows only the chat tab that opened the next request", () => {
+  const chat = "chat" as ChatId
+  const a = { leaf: null, fork: "fork-a" as ForkId, revision: 1 }
+  const b = { leaf: null, fork: "fork-b" as ForkId, revision: 1 }
+  const first = Symbol()
+  const second = Symbol()
+  const href = nextRequestHref(chat, a.leaf, a.fork, "tab-a")
+  const opened = nextRequestOf(Object.fromEntries(new URLSearchParams(href.split("?")[1])))
+  nextRequests.publish(first, chat, "tab-a", a)
+  nextRequests.publish(second, chat, "tab-b", b)
+  try {
+    expect(opened).toEqual({ chat, leaf: null, fork: a.fork, chatTab: "tab-a" })
+    expect(nextRequests.find(chat, opened.chatTab)).toEqual(a)
+    const changed = { ...a, revision: 2 }
+    nextRequests.publish(first, chat, "tab-a", changed)
+    expect(nextRequests.find(chat, opened.chatTab)).toEqual(changed)
+    nextRequests.withdraw(first)
+    expect(nextRequests.find(chat, opened.chatTab)).toBeNull()
+    expect(nextRequests.find(chat, "tab-b")).toEqual(b)
+  } finally {
+    nextRequests.withdraw(first)
+    nextRequests.withdraw(second)
+  }
 })
 
 describe("the cache chip", () => {

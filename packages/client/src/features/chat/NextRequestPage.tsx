@@ -13,10 +13,10 @@ import { nextRequestOf, nextRequests } from "./nextRequest.ts"
 const DraftRequestView = lazy(() => import("./ContextPage.tsx").then((m) => ({ default: m.DraftRequestView })))
 
 export function NextRequestPage() {
-  const { chat, leaf, fork } = nextRequestOf(useSearch({ strict: false }))
+  const { chat, leaf, fork, chatTab } = nextRequestOf(useSearch({ strict: false }))
   useTitle("Your next request")
   useSyncExternalStore(nextRequests.subscribe, nextRequests.version)
-  const live = chat === null ? null : nextRequests.find(chat)
+  const live = chat === null ? null : nextRequests.find(chat, chatTab)
   const at = live ?? { leaf, fork, revision: null }
   const call = useCaller()
   const asked = JSON.stringify([chat, at.leaf, at.fork, at.revision])
