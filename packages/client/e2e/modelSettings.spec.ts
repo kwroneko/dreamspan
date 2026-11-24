@@ -115,13 +115,14 @@ for (const [width, height] of [
     await contextSlider.focus()
     await page.keyboard.press("Home")
     await expect(context).toHaveValue("1024")
+    // A log step: a hundredth of the track, to a readable value.
     await page.keyboard.press("ArrowRight")
-    await expect(context).toHaveValue("2048")
+    await expect(context).toHaveValue("1100")
     await page.keyboard.press("End")
     await expect(context).toHaveValue("")
     // Exact entry.
     await context.fill("50000")
-    await expect(contextSlider).toHaveAttribute("aria-valuenow", "50000")
+    await expect(contextSlider).toHaveAttribute("aria-valuetext", "50,000")
 
     // The window's own limit, in the same control.
     await length.getByRole("button", { name: "Set the context window yourself", exact: true }).click()
@@ -130,12 +131,12 @@ for (const [width, height] of [
     await window.fill("60000")
     await expect(length.locator('[data-limit="context"]')).toContainText("Max 60,000")
 
-    // Reply length: below its default by one step.
+    // Reply length: below its default by one (log) step.
     const reply = length.getByRole("textbox", { name: "Reply length", exact: true })
     await expect(reply).toHaveAttribute("placeholder", "4,096")
     await length.getByRole("slider", { name: "Reply length slider" }).focus()
     await page.keyboard.press("ArrowLeft")
-    await expect(reply).toHaveValue("4032")
+    await expect(reply).toHaveValue("3900")
 
     // A sampler: slid, then typed.
     const temperature = samplers.getByRole("textbox", { name: "Temperature", exact: true })
@@ -158,7 +159,7 @@ for (const [width, height] of [
     expect(stored.overrides.context).toBe(60000)
     expect(stored.overrides.settings?.samplers).toMatchObject({
       openai_max_context: 50000,
-      openai_max_tokens: 4032,
+      openai_max_tokens: 3900,
       temperature: 0.7
     })
     expect(stored.overrides.sampling).toEqual({ top_n_sigma: 1.5 })
@@ -171,7 +172,7 @@ for (const [width, height] of [
     await expect(dialog.getByRole("textbox", { name: "Your context window (tokens)", exact: true })).toHaveValue(
       "60000"
     )
-    await expect(dialog.getByRole("textbox", { name: "Reply length", exact: true })).toHaveValue("4032")
+    await expect(dialog.getByRole("textbox", { name: "Reply length", exact: true })).toHaveValue("3900")
     await expect(dialog.getByRole("textbox", { name: "Temperature", exact: true })).toHaveValue("0.7")
     // Advanced was open, and the URL keeps it open.
     await expect(dialog.getByRole("textbox", { name: "Parameter value 1", exact: true })).toHaveValue("1.5")
@@ -188,6 +189,77 @@ for (const [width, height] of [
     await expect(dialog).toBeHidden()
     expect((await saved(gpt)).overrides.settings?.samplers?.verbosity).toBe("high")
   })
+
+// Context and Reply length run on a log scale (logslider1, owner 2026-11-24): a quarter of the
+// track is far below a tenth of the maximum, keys move by log steps, a typed value sits at its
+// log place, and nothing in the layout moves.
+test("context and reply length sliders are logarithmic, at 1340 dark", async ({ page }, info) => {
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1340, height: 900 })
+  await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/settings/connections/${connectionId}`)
+  const dialog = await open(page, "copy-source-1440")
+  const length = dialog.getByRole("group", { name: "Length", exact: true })
+  const context = length.getByRole("textbox", { name: "Context", exact: true })
+  const slider = length.getByRole("slider", { name: "Context slider" })
+  const shot = (name: string) => length.screenshot({ path: info.outputPath(`${name}.png`) })
+  await expect(context).toHaveValue("300000")
+  const before = await length.boundingBox()
+  await shot("1-context-300000")
+
+  // A drag to a quarter of the track: a log value, far under a tenth of the 300,000 maximum.
+  const track = (await slider.locator("xpath=../..").boundingBox())!
+  const y = track.y + track.height / 2
+  await page.mouse.move(track.x + track.width * 0.9, y)
+  await page.mouse.down()
+  await page.mouse.move(track.x + track.width * 0.25, y, { steps: 8 })
+  await page.mouse.up()
+  const quarter = Number(await context.inputValue())
+  expect(quarter).toBeGreaterThan(1024)
+  expect(quarter).toBeLessThan(30_000 / 3)
+  await shot("2-context-quarter")
+
+  // Keys: Home and End are the ends; arrows a log step; Page Up a bigger one.
+  await slider.focus()
+  await page.keyboard.press("Home")
+  await expect(context).toHaveValue("1024")
+  await page.keyboard.press("ArrowRight")
+  const one = Number(await context.inputValue())
+  expect(one).toBeGreaterThan(1024)
+  expect(one).toBeLessThan(1200)
+  await page.keyboard.press("PageUp")
+  const big = Number(await context.inputValue())
+  expect(big / one).toBeGreaterThan(1.5)
+  expect(big / one).toBeLessThan(2.5)
+  await page.keyboard.press("ArrowLeft")
+  expect(Number(await context.inputValue())).toBeLessThan(big)
+  await shot("3-context-low")
+  await page.keyboard.press("End")
+  await expect(context).toHaveValue("")
+
+  // A typed value stays exact, its thumb at its log place: 17,527 is halfway from 1,024 to 300,000.
+  await context.fill("17527")
+  await expect(slider).toHaveAttribute("aria-valuetext", "17,527")
+  const thumb = (await slider.locator("xpath=..").boundingBox())!
+  // The thumb's centre runs from half a thumb in to half a thumb before the end.
+  const halfway = track.x + track.width / 2
+  expect(Math.abs(thumb.x + thumb.width / 2 - halfway)).toBeLessThan(4)
+  await shot("4-context-17527")
+
+  // Reply length too: Home is 64, a quarter of the way in keys is a few hundred.
+  const reply = length.getByRole("textbox", { name: "Reply length", exact: true })
+  await length.getByRole("slider", { name: "Reply length slider" }).focus()
+  await page.keyboard.press("Home")
+  await expect(reply).toHaveValue("64")
+  for (let i = 0; i < 25; i += 1) await page.keyboard.press("ArrowRight")
+  expect(Number(await reply.inputValue())).toBeLessThan(1000)
+  await shot("5-reply-quarter")
+
+  // Nothing moved.
+  expect(await length.boundingBox()).toEqual(before)
+  await expectLayout(page, info, "model-settings-log-1340", { scope: "[role=dialog]" })
+})
 
 test("on a large screen the dialog is wide, in columns, and needs no scrolling", async ({ page }, info) => {
   await page.setViewportSize({ width: 2560, height: 1440 })

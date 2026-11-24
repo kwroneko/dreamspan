@@ -17,6 +17,7 @@ import { Icon } from "../../ui/Icon.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
+import { LOG_POSITIONS, logScale, significant } from "../../ui/logScale.ts"
 import { RangeSlider } from "../../ui/Slider.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { clearFilters, requirementMet, SourceFiltersButton, totalLabel, type SourceBrowse } from "./browse.tsx"
@@ -700,22 +701,13 @@ function DatePanel({ panel, filters, set }: { panel: Panel; filters: Filters; se
   )
 }
 
-/** The slider's positions: 0 to `STEPS`, on a log scale up to its top value. */
-const STEPS = 1000
+/** The slider's positions: 0 to `STEPS`, on the ui's log scale up to its top value. */
+const STEPS = LOG_POSITIONS
 /** Two significant digits from 100 up, whole numbers below. */
-const round = (n: number) => {
-  if (n < 100) return Math.round(n)
-  const unit = 10 ** (Math.floor(Math.log10(n)) - 1)
-  return Math.round(n / unit) * unit
-}
+const round = (n: number) => (n < 100 ? Math.round(n) : significant(n, 2))
 const scaleOf = (top: number) => {
-  const span = Math.log10(top + 1)
-  return {
-    valueAt: (position: number) =>
-      position <= 0 ? 0 : position >= STEPS ? top : Math.min(top, round(10 ** ((position / STEPS) * span) - 1)),
-    positionOf: (value: number) =>
-      value <= 0 ? 0 : value >= top ? STEPS : Math.round((Math.log10(value + 1) / span) * STEPS)
-  }
+  const log = logScale(0, top, round)
+  return { valueAt: log.valueAt, positionOf: (value: number) => Math.round(log.positionOf(value)) }
 }
 
 /**

@@ -685,6 +685,7 @@ export function ModelFields({
                   max={window}
                   step={1024}
                   whole
+                  scale="log"
                   {...(many ? {} : { limit: contextLimitControl })}
                   note={clampNote("openai_max_context") ?? eachLimit}
                   error={shownProblem("settings.samplers.openai_max_context")}
@@ -709,6 +710,7 @@ export function ModelFields({
                   max={maxOutput}
                   step={64}
                   whole
+                  scale="log"
                   {...(many ? {} : { limit: outputLimitControl })}
                   note={clampNote("openai_max_tokens") ?? eachLimit}
                   error={shownProblem("settings.samplers.openai_max_tokens")}
