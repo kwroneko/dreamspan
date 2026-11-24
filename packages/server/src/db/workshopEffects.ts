@@ -334,7 +334,8 @@ const reviseUndoer: Undoer = {
               userId: ctx.userId,
               refId: ref.id as RefId,
               revisionId: String(effect.undo!.before) as RevisionId,
-              expectedRowVersion: ref.row_version
+              expectedRowVersion: ref.row_version,
+              preserveDrafts: true
             })
       if (reverted)
         yield* recordAssistantRevertUndo(ctx.sql, ctx.userId, effect, ref.head_revision_id, change.ref.headRevisionId)

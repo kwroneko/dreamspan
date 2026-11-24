@@ -172,7 +172,8 @@ const refPolicy = (id: string): OperationPolicy =>
               userId,
               refId: input.refId,
               revisionId: before.ref.head_revision_id as never,
-              expectedRowVersion: now.ref.row_version
+              expectedRowVersion: now.ref.row_version,
+              preserveDrafts: true
             })
         yield* sql`UPDATE entity_refs SET label = ${before.ref.label}, subtitle = ${before.ref.subtitle},
       row_version = row_version + 1, updated_at = ${Date.now()} WHERE id = ${input.refId}`

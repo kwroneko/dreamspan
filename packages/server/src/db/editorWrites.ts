@@ -399,7 +399,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         return new RefChange({ ...change, setAside: [...orphans], recovered, recoveredFields })
       }).pipe(transaction(sql, "CommitEditorDrafts")),
 
-    RestoreRevision: ({ userId, refId, revisionId, expectedRowVersion, chatNote, message: given }) =>
+    RestoreRevision: ({ userId, refId, revisionId, expectedRowVersion, chatNote, preserveDrafts, message: given }) =>
       Effect.gen(function* () {
         const owned = yield* lib.ownedRef(userId, refId)
         // A chat's own note is restored on its branch, from the position on, as its Save writes.
@@ -446,6 +446,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           resolved && chatNote
             ? yield* chatNoteEdit(userId, ref, doc, message, chatNote, "user", origin, resolved)
             : yield* userEdit(ref, doc, message, origin)
+        if (preserveDrafts) return change
         // Live text is what's shown and sent: the fields changed since their last revision take
         // the restored text too, as a new state of their edit history, so nothing typed is lost.
         const restored = editedDoc(ref.kind, doc)

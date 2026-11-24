@@ -110,6 +110,37 @@ const userEdit = (api: Api, refId: RefId, key: string, content: string) =>
 const agentEdit = (f: Effect.Success<ReturnType<typeof fixture>>, changes: unknown, id: string) =>
   f.run("edit_card", { card: f.card, changes }, id)
 
+describe("exact Undo of a workshop edit", () => {
+  it.live("restores the saved card while leaving its active field draft intact", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const before = yield* f.doc()
+      yield* agentEdit(f, [{ field: "description", text: "Assistant edit." }], "c1")
+      const field = textField(["personality"])
+      const opened = yield* api.OpenEditor({ refId: f.card })
+      const draft = yield* api.SaveEditorDraft({
+        refId: f.card,
+        field,
+        content: "Unsaved human text.",
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+      const [key] = yield* f.editKeys(["c1"])
+      yield* api.UndoRolloutEffect(key!)
+      const restored = yield* api.OpenEditor({ refId: f.card })
+      assert.strictEqual(restored.doc.description, before.description)
+      assert.deepStrictEqual(
+        restored.drafts.find((d) => d.key.field === field),
+        draft
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+})
+
 describe("revert a change", () => {
   it.live("puts the fields back as a new revision of the user's, and the change says it's reverted", () => {
     const config = testConfig()
