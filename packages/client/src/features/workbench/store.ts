@@ -513,7 +513,7 @@ export class WorkbenchStore {
     // tile scopes the sidebar to the character's chats).
     this.shellChange = shellCarried(href)
     try {
-      const tabId = this.open(href, { frame, preview, affinity: false })
+      const tabId = this.open(href, { frame, preview, affinity: false, mirror: preview ? "REPLACE" : "PUSH" })
       if (preview) this.set(focusFrame(this.layout, focused.id))
       return tabId
     } finally {
