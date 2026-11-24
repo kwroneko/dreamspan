@@ -2,7 +2,7 @@
 // with tabs. One item and no split looks as the single view did; the strip appears once a
 // frame has two tabs or the column is split. The side panel stays beside the frames and shows
 // the chat focused last (tab.tsx `useSidePanelPlace`); the portrait column stays left of the
-// frames, one for all of them (`usePortraitHost`). The side panel coming or going takes its
+// frames, one for all of them. The side panel coming or going takes its
 // width from the frames beside it only (`useKeepDividers`), so no other divider moves.
 //
 // Each tab renders its own router (TabHost) into an element of its own, which is put in its
@@ -32,6 +32,7 @@ import { Tooltip, IconButton, iconButtonClass } from "../../ui/Tooltip.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { CenterPage, sidebarToggle } from "../shell.tsx"
 import { PanelPlaceholder } from "../chat/PanelPlaceholder.tsx"
+import { WorkbenchPortraitColumn } from "../chat/PortraitColumn.tsx"
 import { defaultTitle, itemKey, nearOf, tabKind } from "./kinds.ts"
 import {
   allTabs,
@@ -121,7 +122,6 @@ function WorkbenchFor({ userId }: { userId: string }) {
   const layout = useSyncExternalStore(store.subscribe, store.snapshot)
   const wide = useWideScreen()
   const [sideHost, setSideHost] = useState<HTMLElement | null>(null)
-  const [portraitHost, setPortraitHost] = useState<HTMLElement | null>(null)
   const [panelToggleHost, setPanelToggleHost] = useState<HTMLElement | null>(null)
   const [slots, setSlots] = useState<ReadonlyMap<string, HTMLElement>>(new Map())
   /** A frame's body, where its shown tab's element goes; the returned function forgets it. */
@@ -147,10 +147,12 @@ function WorkbenchFor({ userId }: { userId: string }) {
   // A maximized frame shows alone; the others keep their tabs (VS Code's Maximize Editor Group).
   const maximized = layout.maximized ? frames(layout.root).find((f) => f.id === layout.maximized) : undefined
   return (
-    <WorkbenchContext value={{ store, sideHost, portraitHost, panelToggleHost }}>
+    <WorkbenchContext value={{ store, sideHost, panelToggleHost }}>
       <PanelToggleHostRef value={setPanelToggleHost}>
         <div ref={setOuter} className="flex min-h-0 min-w-0 flex-1">
-          <div ref={setPortraitHost} className="contents" data-portrait-host />
+          <div className="contents" data-portrait-host>
+            {wide && <WorkbenchPortraitColumn store={store} />}
+          </div>
           <div ref={setCenter} data-workbench className="flex min-h-0 min-w-0 flex-1 flex-col">
             {wide ? (
               <NodeView node={maximized ?? layout.root} layout={layout} store={store} slotRef={slotRef} />

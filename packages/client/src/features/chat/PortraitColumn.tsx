@@ -9,7 +9,6 @@
 // extra column as it does"): never inside a frame, where it would cover the next one. It is one
 // column for all the frames (portraitSources.ts): pictures opened from any view stack in it.
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react"
-import { createPortal } from "react-dom"
 import { MAX_UPSCALE, type NaturalSize } from "../../ui/ImageViewer.tsx"
 import { mediaUrl, pictureUrl } from "../../ui/mediaImage.ts"
 import { popupOpen } from "../../ui/openPopups.ts"
@@ -25,7 +24,8 @@ import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { ViewerHeader, ViewerMoves } from "../../ui/ViewerHeader.tsx"
 import { Menu, MenuCheckboxItem, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
-import { type TabContextValue, useOpenAsTab, usePortraitHost } from "../workbench/tab.tsx"
+import type { WorkbenchStore } from "../workbench/store.ts"
+import { type TabContextValue, useOpenAsTab, useWorkbenchTab } from "../workbench/tab.tsx"
 import { pictureHref } from "./PicturePage.tsx"
 import { portraitSources, usePortraitSources } from "./portraitSources.ts"
 
@@ -50,39 +50,30 @@ interface Measured {
 
 export function PortraitColumn({ wide }: { wide: boolean }) {
   const viewer = usePortraitViewer()
-  const place = usePortraitHost()
+  const tab = useWorkbenchTab()
   if (!viewer || !wide) return null
-  if (place) return <SharedColumn tab={place.tab} host={place.host} viewer={viewer} />
+  if (tab) return <PublishPortraits tab={tab} viewer={viewer} />
   return viewer.shown.length > 0 ? <Column asTabOf={() => null} /> : null
 }
 
-/**
- * A view in the workbench gives its pictures to the one column; the oldest view renders it
- * (portraitSources.ts), in the shell's column left of the frames.
- */
-function SharedColumn({
-  tab,
-  host,
-  viewer
-}: {
-  tab: TabContextValue
-  host: HTMLElement | null
-  viewer: PortraitViewer
-}) {
+function PublishPortraits({ tab, viewer }: { tab: TabContextValue; viewer: PortraitViewer }) {
   const sources = portraitSources(tab.store)
   const asTab = useOpenAsTab()
   useLayoutEffect(() => sources.publish(tab.tabId, { viewer, asTab }))
   useLayoutEffect(() => () => sources.remove(tab.tabId), [sources, tab.tabId])
-  // Read from the state, not the store, so each change renders again.
+  return null
+}
+
+/** The workbench owns the viewers for as long as their pictures are open. */
+export function WorkbenchPortraitColumn({ store }: { store: WorkbenchStore }) {
+  const sources = portraitSources(store)
   const state = usePortraitSources(sources)
-  if (state.renderer !== tab.tabId || !host) return null
-  const shared = sources.viewer(state, tab.tabId, viewer)
-  if (shared.shown.length === 0) return null
-  return createPortal(
+  const shared = sources.viewer(state)
+  if (!shared) return null
+  return (
     <PortraitViewerScope viewer={shared}>
       <Column asTabOf={(id) => sources.asTabOf(state, id)} />
-    </PortraitViewerScope>,
-    host
+    </PortraitViewerScope>
   )
 }
 

@@ -43,20 +43,18 @@ type Entries = ReadonlyArray<{ key: string; owned: Owned; weight: number; holder
 
 /** What the column shows, as of the last change: a new object on each, so renders follow it. */
 interface PortraitColumnState {
-  /** The tab that renders the column. */
-  readonly renderer: string | null
   readonly entries: Entries
 }
 
 class PortraitSources {
-  /** By tab, oldest first: the oldest renders the column, so it stays mounted while views come and go. */
+  /** Each tab's latest viewer and tab actions. */
   private readonly sources = new Map<string, PortraitSource>()
   /** Each view's ids at its last change, to tell what it opened since. */
   private readonly published = new Map<string, ReadonlyArray<string>>()
   private readonly signatures = new Map<string, string>()
   /** The column's order, top first. */
   private order: ReadonlyArray<string> = []
-  private state: PortraitColumnState = { renderer: null, entries: [] }
+  private state: PortraitColumnState = { entries: [] }
   private readonly listeners = new Set<() => void>()
 
   readonly subscribe = (listener: () => void) => {
@@ -66,7 +64,7 @@ class PortraitSources {
   readonly snapshot = () => this.state
 
   private notify() {
-    this.state = { renderer: this.sources.keys().next().value ?? null, entries: this.entries() }
+    this.state = { entries: this.entries() }
     for (const listener of this.listeners) listener()
   }
 
@@ -177,8 +175,11 @@ class PortraitSources {
     this.notify()
   }
 
-  /** The column's viewer: the shared stack as `state` has it, with `own` (the rendering view) for what opens. */
-  viewer(state: PortraitColumnState, ownTab: string, own: PortraitViewer): PortraitViewer {
+  /** The column's viewer, using the top picture's source for view-level actions. */
+  viewer(state: PortraitColumnState): PortraitViewer | null {
+    const top = state.entries[0]
+    const own = top && this.sources.get(top.owned.tabId)?.viewer
+    if (!own) return null
     const shown = state.entries.map((e) => ({ portrait: { ...e.owned.portrait, id: e.key }, weight: e.weight }))
     const run = (change: (stack: Stack<Portrait>) => Stack<Portrait>) => this.apply(change)
     return {
@@ -193,10 +194,9 @@ class PortraitSources {
       single: own.single,
       setSingle: (on, keep) => {
         if (on) run((stack) => keepOnly(stack, keep))
-        // The account's choice, through the rendering view, which keeps its own part as above.
-        const holders = this.entries().find((e) => e.key === keep)?.holders ?? []
-        const mine = holders.find((key) => tabOf(key) === ownTab)
-        own.setSingle(on, mine === undefined ? "" : idOf(mine))
+        // Write the preference through the view that holds the selected picture.
+        const holder = this.entries().find((e) => e.key === keep)?.holders[0]
+        if (holder !== undefined) this.sources.get(tabOf(holder))?.viewer.setSingle(on, idOf(holder))
       },
       set: (next) => run(() => next)
     }

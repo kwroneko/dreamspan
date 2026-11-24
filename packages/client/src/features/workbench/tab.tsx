@@ -18,8 +18,6 @@ export const WorkbenchContext = createContext<{
   readonly store: WorkbenchStore
   /** Where the focused chat's side panel goes, beside the frames. */
   readonly sideHost: HTMLElement | null
-  /** Where the portrait column goes, left of the frames. */
-  readonly portraitHost: HTMLElement | null
   /** Where the side panel's toggle goes in tab mode: the end of the top-right frame's strip. */
   readonly panelToggleHost: HTMLElement | null
 } | null>(null)
@@ -93,17 +91,6 @@ export function useSidePanelPlace(wide: boolean): { show: boolean; host: HTMLEle
   )
   if (!tab) return { show: true, host: null }
   return { show: owner, host: wide ? (workbench?.sideHost ?? null) : null }
-}
-
-/**
- * Where the portrait column goes in a workbench: the shell's column left of the frames, one for
- * every view (features/chat/portraitSources.ts). Null outside a workbench, where it sits beside
- * its view.
- */
-export function usePortraitHost(): { tab: TabContextValue; host: HTMLElement | null } | null {
-  const tab = useContext(TabContext)
-  const workbench = useContext(WorkbenchContext)
-  return tab ? { tab, host: workbench?.portraitHost ?? null } : null
 }
 
 /**

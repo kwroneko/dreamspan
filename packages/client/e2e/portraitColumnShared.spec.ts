@@ -84,6 +84,32 @@ const openPortrait = async (frame: Locator) => {
   await messagePortrait(frame).click()
 }
 
+test("closing a tab without pictures preserves the other tab's zoom and pan", async ({ page }) => {
+  await openChat(page, 1800)
+  await page.getByRole("button", { name: "Split right" }).click()
+  await expect(frames(page)).toHaveCount(2)
+  const [left, right] = [frames(page).nth(0), frames(page).nth(1)]
+  await openPortrait(right)
+  const actualSize = viewers(page).getByRole("button", { name: "100%", exact: true })
+  await actualSize.click()
+  await expect(actualSize).toHaveAttribute("aria-pressed", "true")
+  const image = viewers(page).locator("[data-image-viewer]")
+  const translate = () => image.locator("[data-image-stage]").evaluate((node: HTMLElement) => node.style.transform)
+  const centered = await translate()
+  const box = (await image.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 - 50, box.y + box.height / 2 - 70, { steps: 4 })
+  await page.mouse.up()
+  await expect.poll(translate).not.toBe(centered)
+  const panned = await translate()
+
+  await left.getByRole("button", { name: new RegExp(`^Close ${TALL.name}, `) }).click()
+  await expect(frames(page)).toHaveCount(1)
+  await expect(actualSize).toHaveAttribute("aria-pressed", "true")
+  await expect.poll(translate).toBe(panned)
+})
+
 /** The panel of this frame's chat at its Cast: icons in a wide header, one button in a narrow one. */
 const openCast = async (page: Page, frame: Locator) => {
   await focusFrame(frame)
