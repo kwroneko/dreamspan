@@ -242,7 +242,8 @@ export const Price = Schema.Struct({
         cacheRead: Schema.optionalKey(Schema.Number),
         cacheWrite: Schema.optionalKey(Schema.Number),
         cacheWriteLong: Schema.optionalKey(Schema.Number),
-        reasoning: Schema.optionalKey(Schema.Number)
+        reasoning: Schema.optionalKey(Schema.Number),
+        perRequest: Schema.optionalKey(Schema.Number)
       })
     )
   )

@@ -330,7 +330,7 @@ export const pricedCost = (counts: TokenCounts, price: Price): { amount: number;
         (output - thinking) * rates.output +
         thinking * (rates.reasoning ?? rates.output)) /
         1e6 +
-      (price.perRequest ?? 0),
+      (chosen.perRequest ?? price.perRequest ?? 0),
     rates
   }
 }

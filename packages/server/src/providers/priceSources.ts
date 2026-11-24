@@ -73,8 +73,12 @@ export const priceBound = (prices: ReadonlyArray<Price>, inputTokens: number, ou
       ...rates.flatMap((r) => [r.input, r.cacheRead ?? 0, r.cacheWrite ?? 0, r.cacheWriteLong ?? r.input * 2])
     )
     const output = Math.max(...rates.flatMap((r) => [r.output, r.reasoning ?? 0]))
+    const fee = (price.tiers ?? []).reduce(
+      (highest, tier) => (inputTokens > tier.inputTokensAbove ? Math.max(highest, tier.perRequest ?? 0) : highest),
+      price.perRequest ?? 0
+    )
     return {
-      amount: (inputTokens * input + outputTokens * output) / 1e6 + (price.perRequest ?? 0),
+      amount: (inputTokens * input + outputTokens * output) / 1e6 + fee,
       currency: price.currency ?? "USD"
     }
   })

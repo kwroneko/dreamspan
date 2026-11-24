@@ -70,10 +70,18 @@ const priceOf = (
         if (!Predicate.isObject(tier)) return []
         const t = tier as Record<string, unknown>
         const above = rate(t.input_above)
+        const fee = rate(t.per_request)
         // "A field missing from a tier keeps the base rate."
         return above === undefined
           ? []
-          : [{ ...base, ...ratesOf(t), inputTokensAbove: above } as NonNullable<Price["tiers"]>[number]]
+          : [
+              {
+                ...base,
+                ...ratesOf(t),
+                inputTokensAbove: above,
+                ...(fee === undefined ? {} : { perRequest: fee })
+              } as NonNullable<Price["tiers"]>[number]
+            ]
       })
     : []
   return {
