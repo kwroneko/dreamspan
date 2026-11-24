@@ -303,10 +303,8 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
         // was resumed from. A kept call carries its result over; a call made again under the
         // same id has a result of its own, so an earlier run's change isn't listed for it.
         const runs = yield* lineage(sql, version.rollout_id)
-        const calls =
-          version.transcript === null
-            ? new Map<string, string | null>()
-            : callsFrom(JSON.parse(version.transcript) as ReadonlyArray<AgentMessage>, versionId)
+        const transcript = JSON.parse(version.transcript ?? "[]") as ReadonlyArray<AgentMessage>
+        const calls = callsFrom(transcript, versionId)
         const rows = yield* sql<Parameters<typeof toRolloutEffect>[0]>`SELECT e.* FROM rollout_effects e
           WHERE e.rollout_id IN ${sql.in(runs.map((r) => r.id))}
           ORDER BY e.created_at DESC, e.rollout_id DESC, e.tool_call_id DESC, e.seq DESC`
@@ -336,7 +334,7 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
         const children = yield* childEffects(
           sql,
           runs.map((r) => r.id),
-          { calls: new Set(calls.keys()), undone: true }
+          { kept: { calls: new Set(calls.keys()), transcript }, undone: true }
         )
         const own = rows
           .filter((row) => {

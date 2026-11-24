@@ -558,8 +558,9 @@ describe("subagents", () => {
       })
       const look = { name: "list_library", args: { kind: "card" }, id: "parent-list" }
       const make = { name: "agent", args: { type: "maker", task: "Make a card." }, id: "spawn-maker" }
+      const parent = [look, make]
       const script = scripted({
-        parent: [look, make],
+        parent,
         child: [{ name: "create_card", args: { name: "Mara Quill" }, id: "child-create" }],
         report: "Made it."
       })
@@ -583,17 +584,15 @@ describe("subagents", () => {
       const me = yield* api.Whoami()
       const slotId = (yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId!
       const slot = yield* (yield* Reader).GetSlot({ userId: me.id, slotId })
+      parent[1] = { ...look, id: make.id }
       const from = yield* api.ResumeFromStep({ versionId, step: 0, expectedRowVersion: slot.entry.rowVersion })
       yield* eventually(() => finished(events, from.version.id) !== undefined)
       assert.strictEqual(finished(events, from.version.id)!.status, "complete")
       const fresh = (yield* api.ListVersionEffects({ versionId: from.version.id })).filter((e) =>
         e.kind.startsWith("library.")
       )
-      // The new version's own `agent` call (the model asked again) started a subagent of its own.
-      assert.deepStrictEqual(
-        fresh.map((e) => e.subagent?.handle),
-        ["maker-2"]
-      )
+      // The new lookup used the discarded spawn's ID, but did not inherit its changes.
+      assert.isEmpty(fresh)
       const kept = (yield* api.ListVersionEffects({ versionId })).filter((e) => e.kind.startsWith("library."))
       assert.deepStrictEqual(
         kept.map((e) => e.subagent?.handle),
