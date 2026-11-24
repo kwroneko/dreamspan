@@ -26,7 +26,14 @@ const failRead = (error: unknown) =>
   )
 
 const entries = (context: ToolContext, kind: EntityKind, archived = false) =>
-  context.reader.ListLibrary({ userId: context.userId, kind, tag: null, archived, withFilterData: true })
+  context.reader.ListLibrary({
+    userId: context.userId,
+    kind,
+    tag: null,
+    archived,
+    withFilterData: true,
+    ...(kind === "note" ? { globalSharedOnly: true } : {})
+  })
 
 const kindNoun: Record<EntityKind, string> = {
   card: "card",
@@ -432,7 +439,8 @@ const readNote: RolloutTool<{ readonly note: string }> = {
       if ("error" in found) return { text: found.error, isError: true }
       const snapshot = yield* context.reader.OpenEditor({ userId: context.userId, refId: found.ref.id })
       // A chat's note is story text at a branch's position: only the positioned read shows it.
-      if ((snapshot.doc.owner as { chat?: unknown } | undefined)?.chat !== undefined)
+      const owner = snapshot.doc.owner as { chat?: string; shared?: string } | undefined
+      if (owner?.chat !== undefined || (owner?.shared !== undefined && owner.shared !== "global"))
         return { text: "That note belongs to one chat. Read it with list_chat_notes.", isError: true }
       return {
         frame: toolResultFrame({

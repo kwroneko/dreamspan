@@ -5384,6 +5384,8 @@ const ReadOpsOwn = RpcGroup.make(
       /** Only entities with this tag, e.g. "persona" for the persona folder. */
       tag: Schema.NullOr(Schema.String),
       withFilterData: Schema.optionalKey(Schema.Boolean),
+      /** The assistant's library tools leave chat-scoped snippets at their owning chat. */
+      globalSharedOnly: Schema.optionalKey(Schema.Boolean),
       archived: Schema.Boolean
     },
     success: Schema.Array(LibraryRef),
