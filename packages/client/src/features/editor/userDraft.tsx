@@ -77,6 +77,8 @@ export class UserDraftStore {
   private listeners = new Set<() => void>()
   private state = {
     text: null as string | null,
+    /** An acknowledged saved value shared by editors of this draft, when its host publishes one. */
+    saved: null as string | null,
     ready: false,
     error: null as string | null,
     history: null as ReadonlyArray<DraftState> | null,
@@ -106,6 +108,9 @@ export class UserDraftStore {
   private update(change: Partial<typeof this.state>) {
     this.state = { ...this.state, ...change }
     this.listeners.forEach((listener) => listener())
+  }
+  setSaved = (saved: string) => {
+    if (this.state.saved !== saved) this.update({ saved })
   }
   private address = () => ({ ownerId: this.userId, targetId: this.targetId, field: this.field })
   private payload = (content: string, seed = false, editingFrom = this.editingFrom) => ({
@@ -595,7 +600,7 @@ export class UserDraftStore {
  */
 const sharedDrafts = new Map<string, { readonly store: UserDraftStore; users: number; close?: () => void }>()
 
-export function useUserDraft(targetId: string, field: string, saved: string) {
+export function useUserDraft(targetId: string, field: string, initialSaved: string) {
   const { run } = useAction()
   const userId = useSession().user.id
   const key = `${userId}\n${targetId}\n${field}`
@@ -632,8 +637,11 @@ export function useUserDraft(targetId: string, field: string, saved: string) {
       if (sharedDrafts.get(key) === held) sharedDrafts.delete(key)
     }
   }, [key, store])
+  const saved = state.saved ?? initialSaved
   return {
     ...state,
+    saved,
+    setSaved: store.setSaved,
     text: state.text ?? saved,
     setText: (text: string) => store.type(text, saved),
     commit: (content: string, save: () => Promise<boolean>, rebase?: (text: string) => string) =>

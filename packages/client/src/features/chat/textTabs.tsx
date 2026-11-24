@@ -176,15 +176,15 @@ export function SummaryTextPage() {
 }
 
 function InstructionText({ target, settings }: { target: InstructionTabTarget; settings: LcmSettingsView }) {
-  const saved = settings.resolved.tail ?? BUILTIN_SUMMARY_INSTRUCTION
+  const resolved = settings.resolved.tail ?? BUILTIN_SUMMARY_INSTRUCTION
   // The same draft as the box under This chat → Summary settings.
-  const draft = useUserDraft(instructionTarget(target.chatId, target.forkId), INSTRUCTION_FIELD, saved)
+  const draft = useUserDraft(instructionTarget(target.chatId, target.forkId), INSTRUCTION_FIELD, resolved)
   return (
     <>
       <CodeEditor
         label="This chat's summarization instruction"
         value={draft.text}
-        base={saved}
+        base={draft.saved}
         rows={5}
         fill
         minHeight="100%"
@@ -193,7 +193,7 @@ function InstructionText({ target, settings }: { target: InstructionTabTarget; s
       />
       <p className="text-xs text-muted" aria-live="polite">
         {"{{words}} is the summary length."}
-        {draft.text !== saved && " Not saved yet: Save instruction under This chat → Summary settings uses it."}
+        {draft.text !== draft.saved && " Not saved yet: Save instruction under This chat → Summary settings uses it."}
       </p>
       <UserDraftNotices draft={draft} />
     </>

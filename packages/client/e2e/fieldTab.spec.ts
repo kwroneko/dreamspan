@@ -13,7 +13,7 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser, type Client } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, startServer, withAdmin } from "./support/server.ts"
 import { noteText } from "./support/notes.ts"
-import { openPanel, panelTab } from "./support/panel.ts"
+import { openPanel, openSummarySettings, panelTab } from "./support/panel.ts"
 import { level1 } from "./support/summaries.ts"
 import { textBoxValue } from "./support/textbox.ts"
 
@@ -388,6 +388,40 @@ test("1440: a summary's text and a chat's own note open beside the chat, live bo
   await expect
     .poll(() => textBoxValue(frames.nth(1).locator("[data-field-tab]").getByRole("textbox", { name: SUMMARY_BOX })))
     .toContain("Typed in its tab. Typed in the panel.")
+})
+
+test("an open instruction tab follows the panel's save and reset", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const chat = await admin((api) => api.CreateChat({ title: "Instruction tab" }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  const settings = await openSummarySettings(page)
+  const label = "This chat's summarization instruction"
+  const panelBox = settings.getByRole("textbox", { name: label, exact: true })
+  await expect(panelBox).toBeEditable()
+  const defaultInstruction = await textBoxValue(panelBox)
+  const save = settings.getByRole("button", { name: "Save instruction", exact: true })
+  await panelBox.fill("First saved instruction.")
+  await save.click()
+  const reset = settings.getByRole("button", { name: "Use account default", exact: true })
+  await expect(reset).toBeEnabled()
+
+  await settings.getByRole("link", { name: `Open ${label} in a tab`, exact: true }).click({ button: "right" })
+  await page.getByRole("menuitem", { name: "Open beside", exact: true }).click()
+  const field = page.locator("[data-field-tab]")
+  const box = field.getByRole("textbox", { name: label, exact: true })
+  await expect.poll(() => textBoxValue(box)).toBe("First saved instruction.")
+
+  await box.fill("Second saved instruction.")
+  await save.click()
+  await expect(save).toBeDisabled()
+  await expect.poll(() => textBoxValue(box)).toBe("Second saved instruction.")
+  await expect(field.getByText(/Not saved yet/)).toHaveCount(0)
+
+  await reset.click()
+  await expect(reset).toHaveCount(0)
+  await expect.poll(() => textBoxValue(box)).toBe(defaultInstruction)
+  await expect(field.getByText(/Not saved yet/)).toHaveCount(0)
 })
 
 test("390: a summary's text and a chat's own note are full pages, and Back returns to the chat", async ({
