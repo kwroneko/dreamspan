@@ -1,7 +1,7 @@
 // Per-account Files quotas (spec/FILES-AND-ENVIRONMENT.md §1.2) and version retention (§1.3).
 //
 // Usage is the account's Files, its home folder for commands, its commands' kept output
-// (files/commandOutput.ts) and the bytes its file versions hold. It is measured by walking both folders (no links followed, each inode once, a file's
+// (files/commandOutput.ts) and the bytes its file versions and workshop imports hold. It is measured by walking both folders (no links followed, each inode once, a file's
 // own size: a sparse file counts its full size, and a compressing filesystem such as ZFS
 // doesn't make files look smaller, nor do blocks it hasn't allocated yet) after each command, every 10
 // minutes for accounts in use, and when nothing newer is known. App-side writes and uploads
@@ -406,7 +406,13 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
         return true
       },
       /** The file is in place. Give the walk its inode to account for a read under either name. */
-      landed: (file?: Inode) => {
+      landed: (file?: Inode, charged = reserved) => {
+        if (charged < reserved) {
+          const entries = pending.get(userId)
+          if (charged === 0) entries?.delete(id)
+          else entries?.set(id, charged)
+          reserved = charged
+        }
         unstage()
         landing.get(userId)?.set(id, file === undefined ? null : { inode: inodeKey(file), reserved })
       },

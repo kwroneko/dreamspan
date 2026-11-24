@@ -37,6 +37,7 @@ import { makeLibraryQueries } from "./library.ts"
 import { transaction } from "./tx.ts"
 import { workshopLimits as limits } from "../workshopLimits.ts"
 import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
+import { newWorkshopImportMedia } from "./workshopImportMedia.ts"
 
 type Handlers = Parameters<typeof WriteOps.of>[0]
 type OperationName =
@@ -72,7 +73,7 @@ type Key = {
   readonly rolloutId: string
   readonly toolCallId: string
   readonly approvalDigest?: string
-  readonly cardFileImport?: true
+  readonly cardFileImport?: { readonly maxAddedBytes: number }
   readonly expectedRefs?: ReadonlyArray<{
     readonly refId: RefId
     readonly rowVersion: number
@@ -844,6 +845,16 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                     ])
                       if (typeof json === "string") yield* checkDocument(JSON.parse(json))
                   }
+                  const newMedia = input.cardFileImport
+                    ? yield* newWorkshopImportMedia(
+                        sql,
+                        input.userId,
+                        (payload as Parameters<Handlers["ImportFile"]>[0]).media
+                      )
+                    : []
+                  const addedBytes = newMedia.reduce((total, row) => total + row.addedBytes, 0)
+                  if (input.cardFileImport && addedBytes > input.cardFileImport.maxAddedBytes)
+                    return yield* refuseOperation("Available Files storage changed while importing. Try again.")
                   const origin = `${input.rolloutId}:${input.toolCallId}`
                   const result = yield* handler!({
                     ...(payload as object),
@@ -860,6 +871,9 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                   ) as { id: RefId }
                   if (input.operation === "ImportFile" && (result as { created: boolean }).created !== true)
                     return yield* refuseOperation("Import this file from the library page.")
+                  if (newMedia.length)
+                    yield* sql`UPDATE media_refs SET files_quota = 1 WHERE owner_user_id = ${input.userId}
+                      AND media_id IN (SELECT id FROM media_assets WHERE sha256 IN ${sql.in(newMedia.map((row) => row.sha256))})`
                   const first = yield* creation(made.id)
                   const effects = [first]
                   // A card's Undo answers for the notes that came with it (`createUndoer`).
@@ -868,7 +882,13 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                       ORDER BY id LIMIT 1`
                     effects.push(yield* creation(ref!.id))
                   }
-                  return { result: pendingOperationResult(input.operation, result), effects }
+                  return {
+                    result: pendingOperationResult(
+                      input.operation,
+                      input.cardFileImport ? { ...(result as object), addedBytes } : result
+                    ),
+                    effects
+                  }
                 }
                 if (input.operation === "SendOrQueue") {
                   const running = yield* sql`SELECT 1 FROM versions v JOIN slots s ON s.id = v.slot_id

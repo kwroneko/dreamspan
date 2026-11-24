@@ -1096,6 +1096,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     formats: () => deps.formats,
     dataDir: deps.dataDir,
     writer: () => deps.writer,
+    quota: deps.quota,
     holding: deps.holding,
     wrap: (capability, run, cardFileImport) =>
       wrap(capability, (ctx, args, env) => run(ctx, args, env as never), cardFileImport),
