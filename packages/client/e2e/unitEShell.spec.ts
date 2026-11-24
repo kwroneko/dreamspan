@@ -65,9 +65,10 @@ for (const width of [1440, 390]) {
       })
       .click()
     await expect(page).toHaveURL(new RegExp(`/chats/${latest.chat.id}`))
-    const version = character.card.subtitle.trim()
-    const tabLabel = version ? `${character.card.name} · ${version}` : character.card.name
-    await expect(page.getByRole("tab", { name: tabLabel, exact: true })).toHaveAttribute("aria-selected", "true")
+    await expect(page.getByRole("tab", { name: character.card.name, exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
     expect(new URL(page.url()).searchParams.get("slot")).toBe(
       latest.activity.find((a) => a.entityId === character.card.entityId)?.slot ?? null
     )
