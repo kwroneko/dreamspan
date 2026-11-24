@@ -367,6 +367,20 @@ test("a portrait open while the chat splits into two panes shows once, after clo
   await expect(frames(page).first().locator("article[data-slot]").first()).toBeVisible()
   await expect(viewers(page)).toHaveCount(1)
   await closeAll(page)
+
+  // Split again: a click on the shared portrait in the new pane closes it outright, in both
+  // panes' URLs, as a second click in one pane does; a reload keeps the column empty.
+  await openPortrait(frames(page).first())
+  await page.getByRole("button", { name: "Split right" }).click()
+  await expect(frames(page)).toHaveCount(2)
+  await expect(frames(page).nth(1).locator("article[data-slot]").first()).toBeVisible()
+  await expect(viewers(page)).toHaveCount(1)
+  await openPortrait(frames(page).nth(1))
+  await expect(column(page)).toHaveCount(0)
+  await page.reload()
+  await expect(frames(page)).toHaveCount(2)
+  await expect(frames(page).nth(1).locator("article[data-slot]").first()).toBeVisible()
+  await expect(column(page)).toHaveCount(0)
 })
 
 test("each frame's portrait height survives reload when frames show the same card", async ({ page }, info) => {
@@ -477,10 +491,13 @@ for (const theme of ["light", "dark"] as const)
     ).toHaveJSProperty("complete", true)
     await expectLayout(page, info, `shared-attachment-${theme}`, { scope: "[data-portrait-column]" })
     await page.screenshot({ path: info.outputPath(`shared-attachment-${theme}.png`) })
-    // A second click in its frame closes only that frame's: the left frame's stays, in its place.
+    // A second click in either frame closes it outright, as in one pane (owner, 2026-11-24).
     await openAttachment(b)
+    await expect(viewers(page)).toHaveCount(1)
+    expect(await names(page)).toEqual([TALL.name])
+    await openAttachment(a)
     await expect(viewers(page)).toHaveCount(2)
-    expect(await names(page)).toEqual([TALL.name, ATTACHMENT])
+    expect(await names(page)).toEqual([ATTACHMENT, TALL.name])
 
     // A reload brings both back.
     await page.reload()
