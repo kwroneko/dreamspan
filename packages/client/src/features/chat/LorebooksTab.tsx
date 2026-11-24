@@ -186,7 +186,8 @@ function usePresetBooks(store: EditorStore | null) {
   }, [used, none])
   useLeaveGuard(used)
   const books = useValue<ReadonlyArray<PresetLorebook> | undefined>(used, ["lorebooks"]) ?? NO_BOOKS
-  return { books: state.snapshot ? books : NO_BOOKS, label: state.snapshot?.ref.label ?? null }
+  const liveBooks = useValue<ReadonlyArray<PresetLorebook> | undefined>(used, ["lorebooks"], false) ?? NO_BOOKS
+  return { books: state.snapshot ? books : NO_BOOKS, liveBooks, label: state.snapshot?.ref.label ?? null }
 }
 
 export function LorebooksTab({ session, view, active }: { session: ChatSession; view: ChatView; active: boolean }) {
@@ -197,7 +198,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
   const navigate = useNavigate()
   const preset = useChatPreset(session, view)
   const presetStore = preset.ref && workspace ? workspace.store(preset.ref) : null
-  const { books: presetBooks, label: presetName } = usePresetBooks(presetStore)
+  const { books: presetBooks, liveBooks: livePresetBooks, label: presetName } = usePresetBooks(presetStore)
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [added, setAdded] = useState<string | null>(null)
@@ -258,7 +259,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
         { entity: card.entityId, world: card.lorebookWorld },
         cast?.cardLorebookBindings,
         listed.filter((book) => byId.has(book.ref)),
-        presetBooks.filter((book) => byId.has(book.id)),
+        livePresetBooks.filter((book) => byId.has(book.id)),
         (id) => byId.get(id)?.lorebookSource
       )
     ])

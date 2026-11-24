@@ -13,10 +13,13 @@ import type {
 import type { LcmState } from "@dreamspan/shared/lcm.ts"
 import type { ChatEvent, PathWindow } from "@dreamspan/shared/chatApi.ts"
 import { Cast } from "@dreamspan/shared/chatSetupApi.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
+import { Effect } from "effect"
 import { AtomRegistry } from "effect/reactivity"
 import { describe, expect, it, vi } from "vitest"
 import { onAttachRequest, requestAttach } from "../src/features/chat/fileAttachments.ts"
 import { AUTO_POLICY, planReply, replyPolicies } from "../src/features/chat/replyPolicy.ts"
+import type { AppClient } from "../src/rpc.ts"
 
 // rpc.ts reads the page's location when imported.
 vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
@@ -73,9 +76,9 @@ const window = (entries: Array<PathEntry>) =>
   ({ leafSlotId: entries.at(-1)!.slotId, entries, older: null, newer: null }) as unknown as PathWindow
 
 /** A session whose reads wait until the test answers them. */
-const session = () => {
+const session = (notice?: (title: string) => void, stubRead = true) => {
   const registry = AtomRegistry.make()
-  const s = new ChatSession(chatId, null, registry, "user")
+  const s = new ChatSession(chatId, null, registry, "user", notice)
   const answers: Array<(window: PathWindow) => void> = []
   const internals = s as unknown as {
     read: () => Promise<PathWindow>
@@ -88,7 +91,7 @@ const session = () => {
   internals.refreshContext = async () => {}
   // The message editors' drafts are read with their own call, which the stub doesn't answer.
   internals.refreshEditors = async () => {}
-  internals.read = () => new Promise((answer) => answers.push(answer))
+  if (stubRead) internals.read = () => new Promise((answer) => answers.push(answer))
   internals.call = () => Promise.resolve({ ok: true, value: chat })
   return {
     s,
@@ -701,6 +704,63 @@ describe("ChatSession", () => {
         answers[2]!({ ...window([first, second]), forkId: "next" as ForkId })
         await new Promise((settle) => setTimeout(settle, 0))
       }
+      s.dispose()
+    })
+
+  for (const operation of ["slot refresh", "navigation"] as const)
+    it(`keeps the new branch when a stale ${operation} encounters a deleted branch`, async () => {
+      const notice = vi.fn()
+      const { s, receive } = session(notice, false)
+      const root = "root" as ForkId
+      const next = "next" as ForkId
+      const fallback = "current" as ForkId
+      const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+      const missing = Effect.fail(new NotFound({ entity: "fork", id: root }))
+      const around = Promise.withResolvers<void>()
+      const current = Promise.withResolvers<void>()
+      const fallbackStarted = Promise.withResolvers<void>()
+      let deleted = false
+      const readCurrent = vi.fn(() => {
+        fallbackStarted.resolve()
+        return Effect.promise(() => current.promise).pipe(Effect.as({ ...window([first]), forkId: fallback }))
+      })
+      const client = ((tag: string, input: { forkId: ForkId | null; range: { _tag: string } }) => {
+        if (tag !== "ReadPath") return Effect.succeed(chat)
+        if (input.forkId === null) return readCurrent()
+        if (input.forkId === root && deleted)
+          return input.range._tag === "Around"
+            ? Effect.promise(() => around.promise).pipe(Effect.andThen(missing))
+            : missing
+        return Effect.succeed({ ...window([first, second]), forkId: input.forkId })
+      }) as unknown as AppClient["Service"]
+      s.call = (rpc) =>
+        Effect.runPromise(
+          Effect.match(rpc(client), {
+            onFailure: () => ({
+              ok: false as const,
+              error: { tag: "NotFound", message: "Missing", reason: null, problems: [] }
+            }),
+            onSuccess: (value) => ({ ok: true as const, value })
+          })
+        )
+      s.showFork(root, null)
+      await settle()
+      deleted = true
+      if (operation === "slot refresh") receive({ _tag: "Slot", entry: { ...first, shownForkId: next } })
+      else {
+        void s.open(first.slotId)
+        around.resolve()
+        await fallbackStarted.promise
+      }
+      s.showFork(next, null)
+      await settle()
+      around.resolve()
+      current.resolve()
+      await settle()
+      expect(s.snapshot().forkId).toBe(next)
+      expect((s as unknown as { requestedFork: ForkId }).requestedFork).toBe(next)
+      expect(notice).not.toHaveBeenCalled()
+      expect(readCurrent).toHaveBeenCalledTimes(operation === "slot refresh" ? 0 : 1)
       s.dispose()
     })
 

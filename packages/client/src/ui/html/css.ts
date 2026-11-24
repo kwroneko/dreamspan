@@ -290,6 +290,7 @@ interface Out {
   readonly key: string
   readonly type: TokenType
   readonly delim?: string
+  readonly media?: string
 }
 
 const keyOf = (token: CSSToken): string => {
@@ -414,8 +415,13 @@ class Writer {
   hash(value: string) {
     this.push({ text: `#${serializeName(value)}`, key: `${TokenType.Hash}:${value}`, type: TokenType.Hash })
   }
-  string(value: string) {
-    this.push({ text: serializeString(value), key: `${TokenType.String}:${value}`, type: TokenType.String })
+  string(value: string, media?: string) {
+    this.push({
+      text: serializeString(value),
+      key: `${TokenType.String}:${value}`,
+      type: TokenType.String,
+      ...(media === undefined ? {} : { media })
+    })
   }
   delim(char: string) {
     this.push({ text: char, key: `${TokenType.Delim}:${char}`, type: TokenType.Delim, delim: char })
@@ -493,7 +499,6 @@ const REMOTE = /^\s*(?:https?:)?\/\//i
 
 interface Policy {
   readonly mediaScope: string | null | undefined
-  readonly media: string[]
   /** Something naming another site was left out: the message says so. */
   remote: boolean
   readonly keyframes: ReadonlySet<string>
@@ -537,18 +542,14 @@ function writeUrl(address: string, writer: Writer, policy: Policy, options: Valu
   if (value.startsWith("#") && value.length > 1) target = `#${renameId(value.slice(1))}`
   else if (!options.fragmentsOnly && /^data:/i.test(value))
     target = options.fontSource ? dataFont(value, policy) : value
-  else if (!options.fragmentsOnly) {
-    target = proxyMediaUrl(value, policy.mediaScope)
-    // Only proxied addresses go through the download queue (mediaQueue.ts): a saved copy is
-    // this app's own file, and a placeholder makes no request.
-    if (target?.startsWith("/media/external?")) policy.media.push(target)
-  }
+  else if (!options.fragmentsOnly) target = proxyMediaUrl(value, policy.mediaScope)
   if (target === null) {
     policy.remote ||= REMOTE.test(value)
     return false
   }
   writer.fn("url")
-  writer.string(target)
+  // Track queued addresses on the output token, which is discarded with a refused rule.
+  writer.string(target, target.startsWith("/media/external?") ? target : undefined)
   writer.punct(")")
   return true
 }
@@ -1103,7 +1104,6 @@ export function scopeStyles(
   })
   const policy: Policy = {
     mediaScope,
-    media: [],
     remote: false,
     fontBytes: 0,
     fontExpanded: 0,
@@ -1118,7 +1118,7 @@ export function scopeStyles(
       .map((one) => one.css)
       .filter((css) => css !== "")
       .join("\n"),
-    media: policy.media,
+    media: scoped.flatMap((one) => one.media ?? []),
     blocked: scoped.some((one) => one.blocked)
   }
 }
@@ -1160,7 +1160,7 @@ function scopeItems(items: ReadonlyArray<Item>, policy: Policy, mode: ScopeMode)
   }
   const text = writer.text()
   if (text === null) return { css: "", blocked: policy.remote }
-  return { css: text, blocked: policy.remote, media: policy.media }
+  return { css: text, blocked: policy.remote, media: writer.out.flatMap((token) => token.media ?? []) }
 }
 
 /** A CSS value's text from its own writer, checked; null when anything in it is refused. */
@@ -1189,7 +1189,6 @@ export function cleanStyle(
   if (values === null) return { style: null, blocked: false }
   const policy: Policy = {
     mediaScope,
-    media: [],
     remote: false,
     fontBytes: 0,
     fontExpanded: 0,
@@ -1217,7 +1216,6 @@ export function cleanPresentation(value: string): string | null {
   if (values === null) return null
   const policy: Policy = {
     mediaScope: null,
-    media: [],
     remote: false,
     fontBytes: 0,
     fontExpanded: 0,

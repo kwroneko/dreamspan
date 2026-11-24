@@ -619,6 +619,49 @@ describe("v1 as card sources", () => {
     }).pipe(Effect.scoped)
   )
 
+  it.effect("keeps the search results and cursor when count fails or returns invalid data", () =>
+    Effect.gen(function* () {
+      const adapter = fakeCardexAdapter(archive)
+      const http = direct()
+      const query = { ...emptySourceQuery, text: "a" }
+      for (const invalid of [false, true]) {
+        const first = yield* adapter.search(
+          {
+            ...http,
+            get: (url, kind) => {
+              if (!url.pathname.endsWith("/search/count"))
+                return http
+                  .get(url, kind)
+                  .pipe(
+                    Effect.map((page) =>
+                      invalid ? { ...page, json: () => ({ ...(page.json() as object), total: 120 }) } : page
+                    )
+                  )
+              if (invalid)
+                return Effect.succeed({
+                  status: 200,
+                  headers: new Headers(),
+                  bytes: new Uint8Array(),
+                  json: () => ({ total: -1 })
+                })
+              return Effect.fail(
+                new SourceFailed({ sourceId: "cardex", reason: "unreachable", status: 503, message: "Unavailable" })
+              )
+            }
+          },
+          query,
+          null
+        )
+        assert.isNotEmpty(first.items)
+        assert.isString(first.next)
+        assert.strictEqual(first.total, invalid ? 120 : undefined)
+        const second = yield* adapter.search(http, query, first.next)
+        assert.isNotEmpty(second.items)
+        assert.notStrictEqual(first.items[0]!.remoteId, second.items[0]!.remoteId)
+      }
+    })
+  )
+
   it.effect("Cover: Any includes characters hidden by the archive's default cover filter", () =>
     Effect.gen(function* () {
       const fake = yield* Effect.promise(() => startFakeCardex({ cards: 60, coverless: true }))

@@ -186,7 +186,8 @@ export const planStepResume = (
   edit: StepEdit | undefined,
   newCallId: string,
   versionId?: string,
-  historical = 0
+  historical = 0,
+  requiresSignedToolThinking = false
 ): ResumePlan | StepNotResumable => {
   const messages = parse(json)
   if (messages === null) return new StepNotResumable("This reply has no steps to resume from.")
@@ -208,8 +209,13 @@ export const planStepResume = (
     // A turn that wrote nothing (steps.ts: no part of its own) has nothing to change.
     if (edit !== undefined && placed.part < 0)
       return new StepNotResumable("This step wrote nothing, so there's nothing to change. Resume from it instead.")
+    const changedSignedThinking =
+      edit !== undefined && part.type === "thinking" && !!part.thinkingSignature && part.thinking !== edit.text
+    if (changedSignedThinking && calls.length > 0 && requiresSignedToolThinking)
+      return new StepNotResumable("This model needs the original signed thinking to continue this tool turn.")
     const content = turn.content.map((p, i) => {
       if (i !== placed.part || edit === undefined) return p
+      if (changedSignedThinking) return { type: "text" as const, text: `Edited thinking:\n${edit.text}` }
       return p.type === "thinking" ? { ...p, thinking: edit.text } : p.type === "text" ? { ...p, text: edit.text } : p
     })
     kept = [...messages.slice(0, at), { ...turn, content }, ...resultsAfter((id) => calls.includes(id))]

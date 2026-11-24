@@ -3,6 +3,38 @@ import { expect, it } from "vitest"
 import { valueField, applyDrafts } from "@dreamspan/shared/editing.ts"
 import type { Caller } from "../src/features/editor/caller.ts"
 import { EditorStore } from "../src/features/editor/store.ts"
+import { replacedBy } from "../src/features/chat/lorebookRows.ts"
+
+it("uses live preset lorebooks for card replacements while attachment changes are held", async () => {
+  const snapshot = {
+    ref: { id: "lorebook-preset", kind: "preset", headRevisionId: "revision", label: "Synthetic" },
+    doc: { lorebooks: [{ id: "current", enabled: true }] },
+    drafts: []
+  }
+  const store = new EditorStore(
+    "lorebook-preset" as never,
+    "synthetic",
+    (async () => ({ ok: true, value: snapshot })) as unknown as Caller,
+    { setTimer: () => 0, clearTimer: () => {}, now: () => 1, keepalive: async () => false }
+  )
+  await store.load()
+  const live = store.value(["lorebooks"], false)
+  store.attachLorebook({ id: "next", enabled: true })
+  store.detachLorebook("current")
+  expect(store.value(["lorebooks"])).toEqual([{ id: "next", enabled: true }])
+  expect(store.value(["lorebooks"], false)).toBe(live)
+  const replacement = () =>
+    replacedBy(
+      { entity: "card", world: "World" },
+      undefined,
+      [],
+      store.value(["lorebooks"], false) as typeof snapshot.doc.lorebooks,
+      () => "World"
+    )
+  expect(replacement()).toBe("current")
+  store.switchLorebook("current", false)
+  expect(replacement()).toBeNull()
+})
 
 it("a value draft changes only its affected editor snapshots and preserves document bytes", async () => {
   const doc = {

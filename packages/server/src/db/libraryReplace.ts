@@ -98,8 +98,9 @@ const prefilter = (search: LibrarySearch): { readonly where: string; readonly pa
   if (search.regex) return { where: "", params: [] }
   if (search.matchCase)
     return { where: "AND (drafted OR kind = 'preset' OR instr(search_text, ?) > 0)", params: [search.find] }
-  // LIKE folds ASCII letters only, so another letter could miss a differently cased match.
-  if (!ascii.test(search.find)) return { where: "", params: [] }
+  // Unicode simple case folding also matches K/k with K and S/s with ſ.
+  // SQLite's ASCII-only LIKE would drop those matches.
+  if (!ascii.test(search.find) || /[ks]/i.test(search.find)) return { where: "", params: [] }
   return {
     where: "AND (drafted OR kind = 'preset' OR search_text LIKE ? ESCAPE '\\')",
     params: [`%${escapeLike(search.find)}%`]
