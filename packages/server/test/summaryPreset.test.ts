@@ -1,10 +1,46 @@
 import { assert } from "@effect/vitest"
 import { Effect } from "effect"
+import { tokensOf } from "../src/assembler/st.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { takeSummaryPrefix } from "../src/lcm/prefix.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { lcmHarness, lcmTest, requestsTo } from "./support/lcmHarness.ts"
+
+lcmTest("backfill counts the specific summary preset on every planned request", (server) =>
+  Effect.gen(function* () {
+    const h = yield* lcmHarness(server, { messages: 20, message: () => "An old story turn. ".repeat(100) })
+    const short = "Preserve the story."
+    const long = short + " Record every event and the characters involved.".repeat(40)
+    const estimate = (main_prompt: string) =>
+      Effect.gen(function* () {
+        const preset = yield* h.writer.CreateEntity({
+          userId: h.userId,
+          kind: "preset",
+          label: "Summary instructions",
+          subtitle: "",
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null,
+          doc: importStPreset(JSON.stringify({ main_prompt })).document!
+        })
+        yield* h.api.ChangeLcmSettings({ chatId: h.chat.id, change: { withPreset: "specific", preset: preset.ref.id } })
+        return (yield* h.reader.EstimateBackfill({
+          userId: h.userId,
+          chatId: h.chat.id,
+          leafSlotId: h.rows.at(-1)!.slotId
+        })).fromScratch
+      })
+    const smaller = yield* estimate(short)
+    const larger = yield* estimate(long)
+    assert.isAbove(smaller.l1Jobs, 1)
+    assert.strictEqual(larger.l1Jobs, smaller.l1Jobs)
+    assert.strictEqual(larger.condensations, smaller.condensations)
+    assert.strictEqual(larger.tokens, smaller.tokens)
+    const extra = tokensOf({ content: long }) - tokensOf({ content: short })
+    assert.strictEqual(larger.uncachedInput - smaller.uncachedInput, extra * (smaller.l1Jobs + smaller.condensations))
+  })
+)
 
 lcmTest("summaries use a specific preset, fall back for unavailable refs, and replay the selected prompts", (server) =>
   Effect.gen(function* () {

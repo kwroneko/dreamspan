@@ -33,7 +33,7 @@ export const planningContext = Effect.fnUntraced(function* (
   }).pipe(Effect.provide(layer))
 })
 
-export const summaryChunkRoom = Effect.fnUntraced(function* ({
+export const summaryChunkBudget = Effect.fnUntraced(function* ({
   sql,
   assembler,
   layer,
@@ -41,7 +41,8 @@ export const summaryChunkRoom = Effect.fnUntraced(function* ({
   reply,
   settings,
   configuredStyle,
-  chatId
+  chatId,
+  countPrefix = false
 }: {
   sql: SqlClient.SqlClient
   assembler: Assembler
@@ -51,9 +52,10 @@ export const summaryChunkRoom = Effect.fnUntraced(function* ({
   settings: ResolvedLcm
   configuredStyle: string | undefined
   chatId: string
+  countPrefix?: boolean
 }) {
-  // Keep the established path and cost for chats using their reply model for summaries.
-  if (model.modelId === reply.inputs.model?.modelId) return Infinity
+  const sameModel = model.modelId === reply.inputs.model?.modelId
+  if (sameModel && !countPrefix) return { room: Infinity, prefix: null }
   const [chat] = yield* sql<{ kind: string }>`SELECT kind FROM chats WHERE id=${chatId}`
   const workshop = chatKinds.get(chat?.kind ?? "")?.summaryTranscript === true
   const selector = assembler.summaryStyles.get("settings")
@@ -90,10 +92,21 @@ export const summaryChunkRoom = Effect.fnUntraced(function* ({
         })
       )
   }).pipe(Effect.provide(layer))
-  const room =
+  const available =
     (budget.lcm?.measure?.context ?? model.context ?? ASSUMED_CONTEXT) -
     budget.request.messages.reduce((n, message) => n + tokensOf(message), 0) -
     budget.request.samplers.max_tokens
   // Oversized individual messages can be clipped at 1.5 times the planned input size.
-  return Math.max(0, Math.floor(room / 1.5))
+  const room = sameModel ? Infinity : Math.max(0, Math.floor(available / 1.5))
+  if (!countPrefix) return { room, prefix: null }
+  // The estimate counts the variable layer and summary instruction separately.
+  const variable = new Set<number>()
+  for (const piece of budget.pieces) {
+    if (piece.source.kind === "message" || piece.source.kind === "summary" || piece.id === "lcm:instruction")
+      for (const index of piece.messages) variable.add(index)
+  }
+  const prefix = workshop
+    ? 0
+    : budget.request.messages.reduce((n, message, index) => n + (variable.has(index) ? 0 : tokensOf(message)), 0)
+  return { room, prefix }
 })
