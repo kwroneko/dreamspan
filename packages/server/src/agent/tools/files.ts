@@ -1177,14 +1177,17 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const account = env as AccountEnv
         const cwd = yield* currentDir(ctx, account)
         const roots = yield* rootsOf(account, ctx)
-        const asked = resolveIn(ctx, path ?? name, cwd, roots, true)
+        const hostCwd = roots.some((root) => root.host && (cwd === root.mount || cwd.startsWith(`${root.mount}/`)))
+        const start = path === undefined && hostCwd ? FILES_MOUNT : cwd
+        const asked = resolveIn(ctx, path ?? name, start, roots, true)
+        if (asked.root.host) throw new FilePathRefused("Export to a path in your files (/files).")
         // A taken name gets " (2)", " (3)"… beside it, never replaced (reference-harness's uniquifyPath).
         const ext = posix.extname(asked.full)
         const stem = asked.full.slice(0, asked.full.length - ext.length)
         let place = asked
         for (let n = 2; yield* attempt(() => statPath(place.root.hostRoot, place.segments)); n++) {
           if (n > 100) throw new FilePathRefused(`${asked.full} and its numbered names are taken. Give another path.`)
-          place = resolveIn(ctx, `${stem} (${n})${ext}`, cwd, roots, true)
+          place = resolveIn(ctx, `${stem} (${n})${ext}`, start, roots, true)
         }
         const done = yield* replaceFile(ctx, account, place.full, place.root, place.segments, () => content, "create")
         return { full: place.full, effects: done.effects }

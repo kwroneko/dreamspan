@@ -36,8 +36,8 @@ export interface LibraryExportDeps {
     run: (ctx: ToolContext, args: Record<string, unknown>, env: Env) => Effect.Effect<ToolOutput, unknown>
   ) => (ctx: ToolContext, args: Record<string, unknown>) => Effect.Effect<ToolOutput>
   /**
-   * Creates a new file as write_file does (the working folder, the writable roots, quota, an
-   * undoable change), at `path` or, without one, `name` in the working directory; a taken name
+   * Creates a new file with the Files quota and Undo. The default path uses `name` in the
+   * working directory, or in /files when the working directory is a host folder. A taken name
    * gets " (2)", never replaced.
    */
   readonly create: (
@@ -178,7 +178,7 @@ export const makeLibraryExportTool = (deps: LibraryExportDeps): RolloutTool<Reco
   storyRead: "library",
   titleField: "item",
   description:
-    "Writes a card's field, a lorebook entry, a preset prompt or a whole card, lorebook or preset as text to a new file in your files, so search_files and bash can work on all of it when it's too long to read in pages. Give field (and greeting) for a card's field, entry (a uid, also for a card's lorebook) or prompt (an identifier), or none of them for the whole item as JSON. revision reads an earlier revision (a number from list_revisions, an id, or the revision an attachment shows). path: where, absolute or relative to the working directory (default: a file named after the item there); an existing file is never replaced, a taken name gets (2). The file is a copy: changing it changes nothing in the library; change the item with its edit tools. The user can undo the new file.",
+    "Writes a card's field, a lorebook entry, a preset prompt or a whole card, lorebook or preset as text to a new file in your files, so search_files and bash can work on all of it when it's too long to read in pages. Give field (and greeting) for a card's field, entry (a uid, also for a card's lorebook) or prompt (an identifier), or none of them for the whole item as JSON. revision reads an earlier revision (a number from list_revisions, an id, or the revision an attachment shows). path: where in /files, absolute or relative to the working directory (default: a file named after the item there, or at /files when working in a host folder); an existing file is never replaced, a taken name gets (2). The file is a copy: changing it changes nothing in the library; change the item with its edit tools. The user can undo the new file.",
   parameters: Type.Object(
     {
       kind: Type.Union([Type.Literal("card"), Type.Literal("preset"), Type.Literal("lorebook")]),

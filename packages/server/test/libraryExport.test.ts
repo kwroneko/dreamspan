@@ -13,12 +13,16 @@ import { client, serverLayer, serverPort, testConfig } from "./support/config.ts
 import { cardDoc, presetDoc } from "./support/docs.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
+import { tempDir } from "./support/tempDir.ts"
+import { readdir } from "node:fs/promises"
+import { join } from "node:path"
 
 describe("export_to_file", () => {
   it.live(
     "writes a field, an entry, a prompt or a whole item to the working folder, undoably",
     () => {
-      const config = testConfig()
+      const hostFolder = tempDir("export-host")
+      const config = testConfig({ hostFolders: [hostFolder] })
       return Effect.gen(function* () {
         const api = yield* client()
         const me = yield* api.Whoami()
@@ -212,6 +216,30 @@ describe("export_to_file", () => {
         const effect = (yield* api.ListRolloutEffects({ chatId: chat.id })).find((e) => e.toolCallId === "export")!
         yield* api.UndoRolloutEffect({ rolloutId, toolCallId: "export", seq: effect.seq })
         assert.isTrue((yield* run("read_file", { path: "/files/notes/Mara Quill description.txt" })).isError)
+
+        yield* api.ChangeCast({
+          chatId: chat.id,
+          slotId: null,
+          change: { _tag: "WorkshopFolder", path: hostFolder, host: true }
+        })
+        const fromHost = { cache: new Map() }
+        const target = { kind: "card", item: card.id, field: "description" }
+        yield* api.SetFilesQuota({ userId: me.id, quotaBytes: 0 })
+        const noRoom = yield* run("export_to_file", target, fromHost)
+        assert.isTrue(noRoom.isError, noRoom.text)
+        assert.include(noRoom.text, "of 0 B")
+        yield* api.SetFilesQuota({ userId: me.id, quotaBytes: null })
+        const explicitHost = yield* run(
+          "export_to_file",
+          { ...target, path: join(hostFolder, "explicit.txt") },
+          fromHost
+        )
+        assert.isTrue(explicitHost.isError, explicitHost.text)
+        assert.include(explicitHost.text, "/files")
+        const defaultFromHost = yield* run("export_to_file", target, fromHost)
+        assert.isUndefined(defaultFromHost.isError, defaultFromHost.text)
+        assert.include(defaultFromHost.text, "/files/Mara Quill description.txt")
+        assert.deepEqual(yield* Effect.promise(() => readdir(hostFolder)), [])
 
         // Files turned off in this workshop: refused like every file tool.
         yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "files", mode: "off" })
