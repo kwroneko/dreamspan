@@ -2121,7 +2121,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
               `if ${GIT} -C "$top" rev-parse --verify -q "refs/heads/$branch" >/dev/null; then echo taken; exit 1; fi`,
               `mkdir -p ${q(`${FILES_MOUNT}/${COPIES}`)} && ${GIT} -C "$top" worktree add --quiet -b "$branch" ${q(path)} ${q(base)}`
             ].join("\n")
-          : `mkdir -p ${q(path)} && tar -C ${q(source)} --exclude=./${COPIES} -cf - . | tar -C ${q(path)} -xf -`,
+          : `set -o pipefail && mkdir -p ${q(path)} && tar -C ${q(source)} --exclude=./${COPIES} -cf - . | tar -C ${q(path)} -xf -`,
         600_000,
         ctx.chatId
       )
