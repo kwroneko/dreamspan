@@ -253,6 +253,29 @@ describe("subagents that work on files", () => {
     }
   )
 
+  it.live.skipIf(!commands)("a git copy starts in the reply's untracked working directory", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const { api, chat, events, mock } = yield* setup(
+        [
+          {
+            name: "bash",
+            args: {
+              command:
+                "mkdir repo && cd repo && git init -q && git -c user.email=t@example.com -c user.name=T commit --allow-empty -qm first && mkdir scratch && cd scratch"
+            }
+          },
+          { name: "agent", args: { type: "code", task: "[[scratch]] Work here.", copy: true } }
+        ],
+        { scratch: [{ name: "write_file", args: { path: "one.txt", content: "one" } }] }
+      )
+      yield* run(api, chat, events, "copy an untracked folder")
+      const requests = childOf(mock.requests(), "scratch")
+      const [written] = results(requests.at(-1)!)
+      assert.match(written!, /Created \/files\/\.subagents\/code-[a-z0-9]{6}\/scratch\/one\.txt/)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live.skipIf(!commands)("copy: a file copy of a folder that isn't a repository, removed when unchanged", () => {
     const config = testConfig()
     return Effect.gen(function* () {

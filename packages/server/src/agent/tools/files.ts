@@ -103,8 +103,9 @@ export interface SubagentWorkspaces {
   readonly ensureCopy: (
     ctx: ToolContext,
     copy: SubagentCopyRecord,
-    approve?: ApproveCopy
-  ) => Effect.Effect<SubagentCopyRecord, unknown>
+    approve?: ApproveCopy,
+    start?: string
+  ) => Effect.Effect<{ readonly copy: SubagentCopyRecord; readonly start: string }, unknown>
   /** Whether the copy stays (it has changes, or couldn't be checked). */
   readonly finishCopy: (userId: string, copy: SubagentCopyRecord) => Effect.Effect<boolean>
 }
@@ -2051,6 +2052,22 @@ export const makeFileTools = (deps: FileToolDeps) => {
       return copy
     })
 
+  /** Keep the reply's relative directory even when Git didn't track it at the base commit. */
+  const copyStart = (env: AccountEnv, path: string, wanted: string) =>
+    Effect.promise(async () => {
+      if (!wanted.startsWith(`${path}/`)) return path
+      try {
+        const { full, segments } = resolveFilesPath(wanted, FILES_MOUNT)
+        if (!full.startsWith(`${path}/`)) return path
+        const dir = await openFolder(env.filesRoot, segments, { create: true })
+        await dir.close()
+        return full
+      } catch {
+        // The requested path may have been a file or link at the checked-out commit.
+        return path
+      }
+    })
+
   /** A git repository's files at a commit, in bytes: what a worktree of it takes. */
   const treeBytes = (rev: string) =>
     `${GIT} -C "$top" ls-tree -r -l ${rev} | awk '{ if ($4 ~ /^[0-9]+$/) s += $4 } END { print s + 0 }'`
@@ -2141,8 +2158,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
         : { path, from: source, kind: "files" }
       yield* madeCopy(env, copy)
       // It starts where the reply is, inside the copy.
-      const start = isGit ? posix.join(path, prefix) : path
-      return { copy, start: start.replace(/\/$/, "") }
+      const start = yield* copyStart(env, path, posix.join(path, prefix).replace(/\/$/, ""))
+      return { copy, start }
     })
 
   /** Removes a copy outright (a worktree, and its branch where the record names one), in the sandbox; true when it's gone. */
@@ -2195,18 +2212,18 @@ export const makeFileTools = (deps: FileToolDeps) => {
    * again at the same place (a worktree on its branch when that's still there, keeping its commits),
    * within the quota and, under Ask first, once the user allows it.
    */
-  const ensureCopy = (ctx: ToolContext, copy: SubagentCopyRecord, approve?: ApproveCopy) =>
+  const ensureCopy = (ctx: ToolContext, copy: SubagentCopyRecord, approve?: ApproveCopy, start = copy.path) =>
     Effect.gen(function* () {
       const env = accountEnv(deps, ctx.userId)
       yield* attempt(() => prepareAccount(env))
       const there = yield* folderAt(env, copy.path).pipe(Effect.option)
       if (there._tag === "Some") {
         const { kept: _kept, ...rest } = copy
-        return rest
+        return { copy: rest, start: yield* copyStart(env, copy.path, start) }
       }
       if (copy.kind === "files" || !copy.top || !copy.branch) {
         const name = copy.path.slice(`${FILES_MOUNT}/${COPIES}/`.length)
-        return (yield* makeCopy(ctx, name, copy.from, approve)).copy
+        return yield* makeCopy(ctx, name, copy.from, approve)
       }
       const mode = yield* copyMode(ctx)
       // What it takes: its branch's files where the branch is still there, else its base's.
@@ -2242,7 +2259,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
       if (!made.ok || !made.lines.some((line) => line === "kept" || line === "made"))
         return yield* Effect.fail(new ToolInputRefused("The copy couldn't be made again."))
       const { kept: _kept, ...again } = copy
-      return yield* madeCopy(env, again)
+      yield* madeCopy(env, again)
+      return { copy: again, start: yield* copyStart(env, copy.path, start) }
     })
 
   const workspaces: SubagentWorkspaces = {
