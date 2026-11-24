@@ -156,6 +156,47 @@ describe("a pending chat's edges", () => {
     )
   )
 
+  it.live("a binned card's message kept alone in the draft gains the ordinary greetings the card got since (rev-dd4b #4)", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make, writer, userId } = yield* setup
+        const created = yield* writer.CreateEntity({
+          userId,
+          kind: "card",
+          label: "Mira",
+          subtitle: "",
+          doc: cardDoc("Mira", { first_mes: "Hello." }),
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
+        const mira = created.entityId as EntityId
+        const tobin = yield* make("Tobin")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const forkId = draft.currentForkId!
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Join", entityId: tobin } })
+        const [first] = yield* path(api, draft.id)
+        assert.strictEqual(first!.version.content, "Hello.")
+        // Mira's card gets an alternate greeting, then goes to the bin; then Tobin leaves.
+        const opened = yield* api.OpenEditor({ refId: created.ref.id })
+        yield* writer.EditRef({
+          userId: userId as UserId,
+          refId: created.ref.id,
+          doc: { ...opened.doc, alternate_greetings: ["Welcome back."] },
+          expectedRowVersion: opened.ref.rowVersion,
+          message: null,
+          commitDraft: null
+        })
+        yield* writer.DeleteEntity({ userId, entityId: mira })
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Leave", entityId: tobin } })
+        const [kept] = yield* path(api, draft.id)
+        assert.strictEqual(kept!.slotId, first!.slotId)
+        const versions = (yield* api.ListVersions({ slotId: kept!.slotId })).map((version) => version.content)
+        assert.sameMembers(versions, ["Hello.", "Welcome back."])
+      })
+    )
+  )
+
   it.live("a binned card with only a group greeting loses its message once left alone in the draft (rev-dfu1 #3)", () =>
     run(
       Effect.gen(function* () {

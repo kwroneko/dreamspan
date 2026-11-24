@@ -874,8 +874,20 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             const versions = yield* versionsOf(slot.id)
             const have = new Set(versions.map((version) => refIndex(version.ref)))
             let ordinal = Math.max(-1, ...versions.map((version) => version.ordinal)) + 1
-            for (const [index, option] of offered ?? [])
-              if (!have.has(index)) {
+            // Alone with none drawn, the ordinary greetings it lacks come too: one the card got
+            // after the message was made, or one whose text changed (rev-dd4b #4).
+            const missing =
+              offered ??
+              new Map(
+                [...ordinary.entries()]
+                  .filter(
+                    ([card, text]) =>
+                      !versions.some((version) => refIndex(version.ref) === card && version.content === text)
+                  )
+                  .map(([card, text]) => [card, { index: greeter.greetingIndexes.indexOf(card), text, frozen: null }])
+              )
+            for (const [index, option] of missing)
+              if (offered === null || !have.has(index)) {
                 yield* graph.insertVersion(slot.id, ordinal++, greetingVersionOf(greeter, option), at, forkOf, userId)
                 changed = true
               }
