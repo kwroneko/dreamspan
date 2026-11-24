@@ -210,13 +210,18 @@ export const reconcileForm = (
     }
     if (empty(right) && !cleared) {
       if (typeof left === "string" && left !== "") return left
-      // A group gone from the incoming form keeps only what it would keep as an empty group:
-      // its text (and lists) no clear proved removed. A number or a choice in it goes, as it
-      // would on its own: a form that drops an emptied group (a slider back at its default
-      // leaving `samplers` empty) must not get the old value back.
       if (object(left) && !clears.some((clear) => prefix(path, clear.path))) {
-        const kept = merge(left, {}, path)
-        return object(kept) && Object.keys(kept).length === 0 ? right : kept
+        // A group this very edit emptied (a slider back at its default leaving `samplers`
+        // empty, so the form drops it) loses the fields the edit saw there and removed, text
+        // only where a clear proves it; what the edit never saw stays. A group merely absent
+        // from what the edit started from (a stale or seed save) stays whole.
+        const seen = initial === null ? undefined : at(initial, path)
+        if (!seen?.present || !object(seen.value) || Array.isArray(seen.value)) return left
+        const removed = seen.value
+        const kept: Record<string, unknown> = {}
+        for (const key of Object.keys(left))
+          put(kept, key, Object.hasOwn(removed, key) ? merge(left[key], undefined, [...path, key]) : left[key])
+        return Object.keys(kept).length === 0 ? right : kept
       }
     }
     return right
