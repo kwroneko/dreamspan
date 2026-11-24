@@ -512,28 +512,47 @@ export const makeChangeReversalReadHandlers = Effect.gen(function* () {
         }
       }).pipe(query("FileReversal")),
     /**
-     * The workshop's reverts and redos since its last finished reply (spec/WORKSHOP-CARDS.md §8.2):
+     * The workshop's reversals and bins still unseen by a dispatched request (spec/WORKSHOP-CARDS.md §8.2):
      * what the next turn's tail line tells the assistant, once.
      */
     ChatReversalsSince: ({ userId, chatId }) =>
       Effect.gen(function* () {
-        const [last] = yield* sql<{ at: number | null }>`SELECT max(r.completed_at) AS at FROM rollouts r
-          JOIN chats c ON c.id = r.chat_id WHERE r.chat_id = ${chatId} AND c.owner_user_id = ${userId}`
+        // Preserve the pre-upgrade cutoff for old replies. Later untracked runs, including
+        // subagents, must not hide an event that no tracked request has sent.
+        const [legacy] = yield* sql<{ at: number | null }>`
+          WITH first_tracked AS (
+            SELECT min(r.created_at) AS at FROM rollouts r JOIN rollout_payloads p ON p.rollout_id = r.id
+            WHERE r.chat_id = ${chatId} AND json_type(p.context_snapshot_json, '$.turnEvents') = 'array'
+          )
+          SELECT max(r.completed_at) AS at FROM rollouts r
+          JOIN chats c ON c.id = r.chat_id LEFT JOIN rollout_payloads p ON p.rollout_id = r.id
+          CROSS JOIN first_tracked f
+          WHERE r.chat_id = ${chatId} AND c.owner_user_id = ${userId} AND r.spawned_by_rollout_id IS NULL
+            AND json_type(p.context_snapshot_json, '$.turnEvents') IS NULL
+            AND (f.at IS NULL OR r.completed_at < f.at)`
+        const seen = sql`SELECT j.value FROM rollouts r JOIN chats c ON c.id = r.chat_id
+          JOIN rollout_payloads p ON p.rollout_id = r.id
+          CROSS JOIN json_each(p.context_snapshot_json, '$.turnEvents') j
+          WHERE r.chat_id = ${chatId} AND c.owner_user_id = ${userId} AND p.sent_context_json IS NOT NULL AND j.type = 'text'`
         const rows = yield* sql<ReversalRow & { kind: string }>`SELECT r.*,
             coalesce((SELECT e.kind FROM entities e WHERE e.id = r.target_id AND r.target_kind = 'entity'), 'card') AS kind
           FROM change_reversals r
-          WHERE r.user_id = ${userId} AND r.chat_id = ${chatId} AND r.created_at > ${last?.at ?? 0}
+          WHERE r.user_id = ${userId} AND r.chat_id = ${chatId} AND r.created_at > ${legacy?.at ?? 0}
+            AND r.id NOT IN (${seen})
             -- The assistant's own revert_change is in its transcript already, not the user's to tell.
             AND NOT EXISTS (SELECT 1 FROM entity_revisions v WHERE v.id = r.head_after AND v.origin = 'agent')
           ORDER BY r.created_at, r.rowid`
         // Items the reply made that Undo moved to the bin since.
-        const binned = yield* sql<{ title: string }>`SELECT e.title FROM rollout_effects e
+        const binned = yield* sql<{ id: string; title: string }>`
+          SELECT 'bin:' || json_array(e.rollout_id, e.tool_call_id, e.seq) AS id, e.title FROM rollout_effects e
           JOIN rollouts r ON r.id = e.rollout_id JOIN chats c ON c.id = r.chat_id
           WHERE r.chat_id = ${chatId} AND c.owner_user_id = ${userId} AND e.kind = 'library.create'
-            AND e.undone_at > ${last?.at ?? 0}
+            AND e.undone_at > ${legacy?.at ?? 0}
+            AND ('bin:' || json_array(e.rollout_id, e.tool_call_id, e.seq)) NOT IN (${seen})
           ORDER BY e.undone_at`
         return {
           reversals: rows.map((r) => ({
+            id: r.id,
             action: r.action,
             targetKind: r.target_kind,
             kind: r.kind,
@@ -542,7 +561,7 @@ export const makeChangeReversalReadHandlers = Effect.gen(function* () {
           })),
           binned: binned.flatMap((b) => {
             const name = /^Created the (?:card|lorebook|preset) (.*)$/s.exec(b.title)?.[1]
-            return name ? [name] : []
+            return name ? [{ id: b.id, name }] : []
           })
         }
       }).pipe(query("ChatReversalsSince"))

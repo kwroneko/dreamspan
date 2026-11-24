@@ -4,7 +4,7 @@
 // takes a revert back; Revert all reverts each item; a made item changed since is binned only when
 // asked; the next turn is told once (§8.2).
 import { assert, describe, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
 import type { EntityId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { unitKey } from "@dreamspan/shared/changeReversal.ts"
 import { newCardDoc, textField } from "@dreamspan/shared/editing.ts"
@@ -13,7 +13,10 @@ import { reversalNote } from "../src/agent/reversalNote.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
-import { client, outcome, serverLayer, testConfig } from "./support/config.ts"
+import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import { eventually, finished, generateReply } from "./support/generation.ts"
+import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -534,6 +537,60 @@ describe("a made item changed since", () => {
 })
 
 describe("the tail line", () => {
+  it.live(
+    "carries a reversal made during a provider request into the following turn",
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const api = yield* client()
+        const f = yield* fixture(config.dataDir, api)
+        yield* agentEdit(f, [{ field: "description", text: "Assistant edit." }], "c1")
+        let answerInFlight: (() => void) | undefined
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((request, res) => {
+              const answer = () => sse(res, completionChunks(["Ready."], {}))
+              const messages = request.body?.messages as ReadonlyArray<{ content?: string }> | undefined
+              if (!answerInFlight && messages?.some((m) => m.content?.includes("Hold this turn."))) {
+                answerInFlight = answer
+                return
+              }
+              answer()
+            })
+          ),
+          (provider) => Effect.promise(() => provider.close())
+        )
+        yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: { context: 200000 }
+        })
+        const events: Array<ChatEvent> = []
+        yield* api.SubscribeChat({ chatId: f.chat.id }).pipe(
+          Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+          Effect.forkScoped
+        )
+        yield* eventually(() => events.length > 0)
+        const send = (content: string, parentSlotId: SlotId | null) =>
+          Effect.gen(function* () {
+            const sent = yield* posted(api.SendMessage({ chatId: f.chat.id, parentSlotId, branch: false, content }))
+            return yield* posted(api.Generate({ chatId: f.chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+          })
+        const inFlight = yield* send("Hold this turn.", f.chat.activeLeafSlotId)
+        yield* eventually(() => answerInFlight !== undefined)
+        const note = "The user reverted your change to Mara Quill (Description)."
+        assert.notInclude(JSON.stringify(mock.requests().at(-1)?.body), note)
+        yield* api.RevertChange({ effects: yield* f.editKeys(["c1"]) })
+        answerInFlight!()
+        yield* eventually(() => finished(events, inFlight.entry.version.id)?.status === "complete")
+        const after = yield* send("Continue.", inFlight.entry.slotId)
+        yield* eventually(() => finished(events, after.entry.version.id)?.status === "complete")
+        assert.include(JSON.stringify(mock.requests().at(-1)?.body), note)
+        assert.isEmpty((yield* (yield* Reader).ChatReversalsSince({ userId: f.user.id, chatId: f.chat.id })).reversals)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    },
+    60_000
+  )
+
   it.live("tells the next turn what the user took back since the last reply, once", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -561,15 +618,41 @@ describe("the tail line", () => {
       yield* api.RevertChange({ effects: yield* f.editKeys(["c1"]) })
       const [made] = (yield* f.effects()).filter((e) => e.toolCallId === "c2")
       yield* api.UndoRolloutEffect({ rolloutId: made!.rolloutId, toolCallId: made!.toolCallId, seq: made!.seq })
+      const pending = yield* line(input)
+      assert.isObject(pending)
+      if (!pending || typeof pending === "string") throw new Error("Expected one-time events")
       assert.strictEqual(
-        yield* line(input),
+        pending.text,
         "The user reverted your change to Mara Quill (Description, Personality).\nThe user undid Ove Brekke (in the bin)."
       )
-      // A reply finishing after them: they were told.
+      assert.lengthOf(pending.events, 2)
+      const at = Date.now() + 1
+      const inFlight = `${f.rolloutId}-next`
+      const afterward = `${f.rolloutId}-afterward`
       yield* fixtureSql(config.dataDir, [
         {
-          sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at,completed_at) VALUES (?,?,'workshop','completed','assistant','interactive',1,1,?)",
-          params: [`${f.rolloutId}-next`, f.chat.id, Date.now() + 1]
+          sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at,completed_at) VALUES (?,?,'workshop','completed','assistant','interactive',?,?,?)",
+          params: [inFlight, f.chat.id, at, at, at]
+        },
+        {
+          sql: "INSERT INTO rollout_payloads(rollout_id, context_snapshot_json, sent_context_json) VALUES (?,?,'{}')",
+          params: [inFlight, JSON.stringify({ turnEvents: [] })]
+        },
+        {
+          sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at) VALUES (?,?,'workshop','running','assistant','interactive',?,?)",
+          params: [afterward, f.chat.id, at + 1, at + 1]
+        },
+        {
+          sql: "INSERT INTO rollout_payloads(rollout_id, context_snapshot_json) VALUES (?,?)",
+          params: [afterward, JSON.stringify({ turnEvents: pending.events })]
+        }
+      ])
+      // Finishing an older request or preparing a new one didn't tell the model.
+      assert.deepStrictEqual(yield* line(input), pending)
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: "UPDATE rollout_payloads SET sent_context_json = '{}' WHERE rollout_id = ?",
+          params: [afterward]
         }
       ])
       assert.isNull(yield* line(input))

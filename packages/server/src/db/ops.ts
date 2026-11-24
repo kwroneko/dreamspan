@@ -6583,12 +6583,13 @@ const ReadOpsOwn = RpcGroup.make(
     }),
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** A workshop's reverts, redos and binned creations since its last finished reply: the tail line's. */
+  /** A workshop's reverts, redos and binned creations still unseen by a dispatched request. */
   Rpc.make("ChatReversalsSince", {
     payload: { userId: UserId, chatId: Schema.String },
     success: Schema.Struct({
       reversals: Schema.Array(
         Schema.Struct({
+          id: Schema.String,
           action: Schema.Literals(["revert", "redo"]),
           targetKind: Schema.Literals(["entity", "file"]),
           kind: Schema.String,
@@ -6596,7 +6597,7 @@ const ReadOpsOwn = RpcGroup.make(
           fields: Schema.Array(Schema.String)
         })
       ),
-      binned: Schema.Array(Schema.String)
+      binned: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))
     }),
     error: StorageError
   }),
