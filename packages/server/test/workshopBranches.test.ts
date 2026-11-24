@@ -262,6 +262,21 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
     })
   )
 
+  it.effect("newer workshops on another branch cannot exhaust this branch's list", () =>
+    Effect.gen(function* () {
+      const h = yield* setup
+      const b = yield* h.branchStory(h.s1.slotId)
+      const onlyA = yield* h.api.CreateWorkshop({ attachTo: h.story.id, attachFork: h.main })
+      for (let i = 0; i < 200; i++) yield* h.api.CreateWorkshop({ attachTo: h.story.id, attachFork: b.fork })
+      assert.lengthOf(yield* h.api.ListAttachedWorkshops({ chatId: h.story.id, forkId: b.fork }), 200)
+      const onA = yield* h.api.ListAttachedWorkshops({ chatId: h.story.id, forkId: h.main })
+      assert.sameMembers(
+        onA.map(({ id }) => id),
+        [onlyA.id, h.workshop.id]
+      )
+    })
+  )
+
   it.effect("opened in its own pane or the center, a workshop branch still reads its paired story branch", () =>
     Effect.gen(function* () {
       const h = yield* setup

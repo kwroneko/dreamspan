@@ -7,7 +7,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps } from "./ops.ts"
 import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
-import { attachedStory, pairedWorkshopForks, storyPositionOf, workshopForkPairs } from "./workshopPairing.ts"
+import { attachedStory, pairedWorkshopTree, storyPositionOf, workshopForkPairs } from "./workshopPairing.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
 import { displaySlots, pathPieces, positionOf } from "./displayPath.ts"
@@ -35,22 +35,22 @@ export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
         const [story] = yield* sql<{ id: string }>`SELECT id FROM chats
           WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL AND status = 'active'`
         if (!story) return yield* new NotFound({ entity: "chat", id: chatId })
+        if (forkId !== undefined) {
+          // Beside one story branch, limit the paired workshops after ordering by activity.
+          const paired = yield* sql<ChatRow>`${pairedWorkshopTree(sql, chatId, forkId)}
+            SELECT c.* FROM w JOIN forks f ON f.id = w.id JOIN chats c ON c.id = f.chat_id
+            WHERE f.deleted_at IS NULL AND f.purged_at IS NULL AND c.owner_user_id = ${userId} AND c.status = 'active'
+            GROUP BY c.id ORDER BY coalesce(max(f.last_chatted_at), max(f.created_at)) DESC,
+              c.created_at DESC, c.id DESC LIMIT 200`
+          return paired.map(toChat)
+        }
         // Only the owner's own live workshops: the event's writer checked the story is theirs too.
         const rows = yield* sql<ChatRow>`SELECT c.* FROM state_events e JOIN chats c ON c.id = e.chat_id
           WHERE json_extract(e.value_json, '$.chat') = ${chatId} AND e.key = 'workshop.attached'
             AND e.slot_id IS NULL AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
             AND c.kind = 'workshop' AND c.status = 'active'
           GROUP BY c.id ORDER BY c.created_at DESC, c.id DESC LIMIT 200`
-        if (forkId === undefined) return rows.map(toChat)
-        // Beside one story branch: those with a live branch going with it (WORKSHOP-BRANCHES §8.1).
-        // The one chatted in last first: each workshop's newest paired branch (listed first per chat).
-        const recency = new Map<string, number>()
-        for (const fork of yield* pairedWorkshopForks(sql, chatId, forkId))
-          if (!recency.has(fork.chat_id)) recency.set(fork.chat_id, fork.last_chatted_at ?? fork.created_at)
-        return rows
-          .filter((row) => recency.has(row.id))
-          .sort((a, b) => recency.get(b.id)! - recency.get(a.id)!)
-          .map(toChat)
+        return rows.map(toChat)
       }).pipe(query("AttachedWorkshops")),
     WorkshopBranches: ({ userId, chatId }) =>
       Effect.gen(function* () {

@@ -45,20 +45,24 @@ export const workshopForkPairs = (sql: SqlClient.SqlClient, workshopId: string) 
     SELECT f.*, one.story AS story_fork_id
     FROM forks f LEFT JOIN one ON one.id = f.id WHERE f.chat_id = ${workshopId}`
 
-/**
- * The live forks of the live workshops beside story `storyId` that go with its fork `forkId`,
- * the workshops' own branches included. One probe of `state_events_workshop_paired` finds the
- * writers (none: the common case, and nothing more is read); then their descendants.
- */
-export const pairedWorkshopForks = (sql: SqlClient.SqlClient, storyId: string, forkId: string) =>
-  sql<ForkRow>`WITH RECURSIVE w(id) AS (
+/** The pairing writers and their descendants that inherit the same pairing. */
+export const pairedWorkshopTree = (sql: SqlClient.SqlClient, storyId: string, forkId: string) =>
+  sql`WITH RECURSIVE w(id) AS (
       SELECT e.fork_id FROM state_events e JOIN chats c ON c.id = e.chat_id
         WHERE json_extract(e.value_json, '$.fork') = ${forkId} AND e.key = 'workshop.paired'
           AND c.kind = 'workshop' AND c.deleted_at IS NULL
           AND EXISTS (SELECT 1 FROM state_events a WHERE a.chat_id = c.id AND a.key = 'workshop.attached'
             AND a.slot_id IS NULL AND json_extract(a.value_json, '$.chat') = ${storyId})
       UNION ALL SELECT c.id FROM w JOIN forks c ON c.parent_fork_id = w.id
-        WHERE NOT ${sql.literal(writesPairing("c"))})
+        WHERE NOT ${sql.literal(writesPairing("c"))})`
+
+/**
+ * The live forks of the live workshops beside story `storyId` that go with its fork `forkId`,
+ * the workshops' own branches included. One probe of `state_events_workshop_paired` finds the
+ * writers (none: the common case, and nothing more is read); then their descendants.
+ */
+export const pairedWorkshopForks = (sql: SqlClient.SqlClient, storyId: string, forkId: string) =>
+  sql<ForkRow>`${pairedWorkshopTree(sql, storyId, forkId)}
     SELECT f.* FROM w JOIN forks f ON f.id = w.id WHERE f.deleted_at IS NULL AND f.purged_at IS NULL
     ORDER BY f.chat_id, f.last_chatted_at IS NULL, f.last_chatted_at DESC, f.created_at DESC, f.id DESC`
 
