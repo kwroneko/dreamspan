@@ -560,7 +560,8 @@ export const makeDraftStore = (
     kind: "edit" | "restore" | "revision",
     now: number,
     displaced: boolean,
-    imagesJson: string | null
+    imagesJson: string | null,
+    trim = true
   ) =>
     Effect.gen(function* () {
       const form = draft.target_kind === "user_field" ? formChange(draft.content, content) : null
@@ -610,7 +611,7 @@ export const makeDraftStore = (
         images_after_json: imagesJson,
         displaced: keep ? 1 : 0
       })}`
-      return yield* retain(draft, content)
+      return trim ? yield* retain(draft, content) : 0
     })
 
   /** The draft the client named, as it saw it: another draft at its key, or a newer version, is stale. */
@@ -778,16 +779,10 @@ export const makeDraftStore = (
         let recovered = 0
         // A form's starting snapshot (`seed`) was never typed: nothing to keep.
         if (options.deliberate !== false) {
-          recovered += yield* record(
-            draft,
-            content,
-            diffPatch(draft.content, content),
-            "edit",
-            at,
-            true,
-            draft.images_json
-          )
-          recovered += yield* record(
+          // The refused snapshot is only an intermediate history state. Trim against
+          // the actual current snapshot after both entries are in place.
+          yield* record(draft, content, diffPatch(draft.content, content), "edit", at, true, draft.images_json, false)
+          recovered = yield* record(
             { ...draft, content },
             draft.content,
             diffPatch(content, draft.content),

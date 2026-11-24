@@ -179,6 +179,48 @@ describe("a stale form save is refused and the current version kept", () => {
     }).pipe(Effect.provide(layer()))
   )
 
+  it.effect("retains history against the active form without evicting unrelated recovered text", () =>
+    Effect.gen(function* () {
+      const { save, writer, reader, user, states } = yield* setup("refuse-retention")
+      yield* writer.ChangeBinLimit({ userId: user.id, key: "recoveredTexts", value: 2 })
+      const unrelatedKey = { ...key, targetId: "unrelated-draft" }
+      const unrelated = yield* writer.SaveDraft({
+        userId: user.id,
+        key: unrelatedKey,
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevision: null,
+        content: "Only recovered copy of an unrelated draft"
+      })
+      yield* writer.ClearDraft({
+        userId: user.id,
+        key: unrelatedKey,
+        draftId: unrelated.id,
+        expectedRowVersion: unrelated.rowVersion,
+        outcome: "discarded"
+      })
+      const activeText = form({ note: "A".repeat(250_000) })
+      const first = yield* save(activeText, null)
+      const second = yield* save(form({ note: "B".repeat(100_000) }), first)
+      const current = yield* save(activeText, second)
+      const stale = form({ note: "C".repeat(100_000) })
+
+      const refused = yield* save(stale, second)
+      assertRefused(refused, current, stale)
+      assert.strictEqual(refused.recovered, 1)
+      assert.strictEqual((yield* states())[0], stale)
+      const recovered = yield* reader.ListRecoveredTexts({ userId: user.id, source: null, limit: 100, before: null })
+      const full = yield* Effect.forEach(recovered, (entry) =>
+        reader.GetRecoveredText({ userId: user.id, id: entry.id })
+      )
+      assert.sameMembers(
+        full.map((entry) => entry.content),
+        [second.content, unrelated.content]
+      )
+    }).pipe(Effect.provide(layer()))
+  )
+
   it.effect("a stale starting snapshot is refused without a history step; the current tab saves on", () =>
     Effect.gen(function* () {
       const { save, reader, user } = yield* setup("refuse-seed")
