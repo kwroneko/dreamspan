@@ -37,7 +37,7 @@ import { composerTextbox } from "../chat/composerFocus.ts"
 import { type Flashes, MessageList } from "../chat/ChatPage.tsx"
 import { KindBadge } from "../chat/KindBadge.tsx"
 import { NewBadge } from "../chat/ChatHeader.tsx"
-import { NOT_STARTED } from "../chat/chatStarted.ts"
+import { NOT_STARTED, reopenSweptDraft } from "../chat/chatStarted.ts"
 import { kindRootProps, useChatKindLook } from "../chat/kindLooks.ts"
 import type { PanelProps } from "../chat/panels.tsx"
 import { ChatSurfaceProviders, chatComposer, chatComposerNotes, chatOverlays } from "../chat/presentation.tsx"
@@ -54,6 +54,7 @@ import {
   chooseSideChat,
   NEW_SIDE_CHAT,
   sideChatSearch,
+  sideDraftFor,
   SIDE_CHAT_PARAM,
   SIDE_CHAT_SCOPE,
   SIDE_CHATS_KEY
@@ -106,6 +107,10 @@ function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as Record<string, unknown>
   const wanted = typeof search[SIDE_CHAT_PARAM] === "string" ? (search[SIDE_CHAT_PARAM] as string) : ""
+  const namedDraft = search[chatPlaceKey(SIDE_CHAT_SCOPE, "draft")]
+  const hasDraft =
+    (typeof namedDraft === "string" && namedDraft !== "") ||
+    reopenSweptDraft(sideDraftFor(session.id, storyFork), null) !== null
   const setWanted = useCallback(
     (id: string, replace = false) => {
       void navigate({
@@ -138,7 +143,12 @@ function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
     !(list ?? []).some((chat) => chat.id === wanted) &&
     (!AsyncResult.isSuccess(all) || all.value.some((chat) => chat.id === wanted))
   const choice =
-    list === null ? null : chooseSideChat(list, created?.moving ? created.chat.id : elsewhere ? null : wanted || null)
+    list === null
+      ? null
+      : chooseSideChat(
+          list,
+          created?.moving ? created.chat.id : elsewhere ? null : wanted || (hasDraft ? NEW_SIDE_CHAT : null)
+        )
   // Once the URL names it, and then once the list has it, it's shown as any other.
   if (created?.moving && wanted === created.chat.id) setCreated({ chat: created.chat, moving: false })
   else if (created && !created.moving && read?.some((chat) => chat.id === created.chat.id)) setCreated(null)

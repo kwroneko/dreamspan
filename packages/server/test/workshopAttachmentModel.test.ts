@@ -7,7 +7,7 @@ import { uuidv7 } from "@dreamspan/shared/id.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { mulberry32 } from "@dreamspan/shared/naturalOrder.ts"
 import { Effect, Stream } from "effect"
-import { reopenSweptDraft } from "../../client/src/features/chat/chatStarted.ts"
+import { rememberDraftFor, reopenSweptDraft } from "../../client/src/features/chat/chatStarted.ts"
 import { Generator } from "../src/chat/Generator.ts"
 import { Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
@@ -56,6 +56,9 @@ const actions = [
   "expiry",
   "reload",
   "side reconnect",
+  "delete story branch",
+  "restore story branch",
+  "purge assistant card",
   "bin",
   "restore",
   "drop reopen reply",
@@ -80,6 +83,14 @@ const model = (seed: number, rounds: number) => {
     const refs = yield* Effect.forEach(["Channel markers", "Tide tables", "Harbour notices"], createBook)
     const binned = new Map<RefId, BinItem["id"]>()
     const story = yield* api.CreateChat({ title: "The lighthouse" })
+    const opening = yield* api.SendMessage({
+      chatId: story.id,
+      parentSlotId: null,
+      branch: false,
+      reply: false,
+      content: "The tide turns."
+    })
+    if (opening._tag !== "Posted") return assert.fail("Expected the story's opening message to post")
     const sideEntry = `side:${story.id}:${story.currentForkId ?? ""}` as const
     const legacyOrigin = uuidv7() as Chat["id"]
     const random = mulberry32(seed)
@@ -94,7 +105,7 @@ const model = (seed: number, rounds: number) => {
       assert.deepStrictEqual(
         [...refs].sort(),
         [...workshop.refs].filter((refId) => !binned.has(refId)).sort(),
-        context()
+        `invariant B, ${context()}`
       )
 
     // The model moves ownership between workshops. Every copy of a URL follows the item
@@ -113,10 +124,12 @@ const model = (seed: number, rounds: number) => {
       Effect.gen(function* () {
         let source = reopen
         while (source?.status === "swept" && source.replacement !== undefined) source = source.replacement
-        const chat = yield* api.OpenDraftChat({
-          draftFor,
-          ...(requestReopen === null ? {} : { reopen: requestReopen })
-        })
+        const opened = yield* api
+          .OpenDraftChat({ draftFor, ...(requestReopen === null ? {} : { reopen: requestReopen }) })
+          .pipe(Effect.result)
+        if (opened._tag === "Failure")
+          return assert.fail(`invariant B, ${context()}: opening ${draftFor} failed with ${opened.failure._tag}`)
+        const chat = opened.success
         if (source?.status === "swept") assert.notInclude([...workshops.keys()], chat.id, context())
         else if (source !== undefined) assert.strictEqual(chat.id, source.chatId, context())
         else assert.notInclude([...workshops.keys()], chat.id, context())
@@ -135,6 +148,7 @@ const model = (seed: number, rounds: number) => {
           for (const refId of source.refs) move(source, workshop, refId)
         }
         workshops.set(chat.id, workshop)
+        if (workshop.status === "pending") rememberDraftFor(chat.id, draftFor)
         const shown = (yield* api.GetComposerLibrary(key(workshop))).map((item) => item.refId)
         checkList(shown, workshop)
         const tab: Tab = { workshop, session: draft.session, shown }
@@ -298,6 +312,71 @@ const model = (seed: number, rounds: number) => {
         )
       })
 
+    const unbinnedRef = Effect.gen(function* () {
+      const refId = pick(refs)
+      const itemId = binned.get(refId)
+      if (itemId !== undefined) {
+        yield* restore(refId, itemId)
+        yield* checkInvariants()
+      }
+      return refId
+    })
+    let deletedBranch: { itemId: BinItem["id"]; predecessor: Workshop; owner: "A" | "B" } | undefined
+    const deleteStoryBranch = (owner: "A" | "B") =>
+      Effect.gen(function* () {
+        if (deletedBranch !== undefined) return
+        const { fork } = yield* api.CreateFork({
+          chatId: story.id,
+          fromForkId: story.currentForkId!,
+          atSlotId: opening.entry.slotId
+        })
+        const side = yield* open(undefined, `side:${story.id}:${fork.id}`)
+        yield* change(side, [yield* unbinnedRef], [])
+        yield* checkInvariants()
+        const item = yield* api.DeleteFork({ forkId: fork.id })
+        side.workshop.status = "swept"
+        side.workshop.recentSweep = true
+        deletedBranch = { itemId: item.id, predecessor: side.workshop, owner }
+        yield* checkInvariants()
+      })
+    const restoreStoryBranch = Effect.gen(function* () {
+      if (deletedBranch === undefined) return
+      const { itemId, predecessor, owner } = deletedBranch
+      deletedBranch = undefined
+      yield* api.RestoreBinItem({ itemId })
+      yield* checkInvariants()
+      // The branch picker discarded side.draft. Returning to the restored branch must still
+      // reopen this tab's pending workshop and recover its current ownership.
+      const entry = predecessor.draftFor
+      const tab = yield* open(predecessor, entry, reopenSweptDraft(entry, null))
+      yield* checkInvariants()
+      return { owner, tab }
+    })
+    const purgeAssistant = Effect.gen(function* () {
+      const card = yield* api.CreateCard({
+        name: "Visiting keeper",
+        label: "Visiting keeper",
+        description: "Synthetic card."
+      })
+      const draftFor = `workshop:${card.entityId}:none` as const
+      const { workshop } = yield* open(undefined, draftFor)
+      const tab = yield* open(workshop)
+      yield* change(tab, [yield* unbinnedRef], [])
+      yield* checkInvariants()
+      const item = yield* writer.DeleteEntity({ userId, entityId: card.entityId })
+      yield* checkInvariants()
+      yield* api.PurgeBinItem({ itemId: item.id })
+      workshop.status = "swept"
+      workshop.recentSweep = true
+      yield* checkInvariants()
+      const replacement = yield* open(workshop)
+      yield* checkInvariants()
+      // The other tab's original URL must follow the same replacement and see the same items.
+      yield* open(workshop)
+      yield* checkInvariants()
+      return replacement
+    })
+
     let first: Tab = yield* open()
     let second: Tab = yield* open(first.workshop)
     const lostReopen = Effect.gen(function* () {
@@ -413,6 +492,17 @@ const model = (seed: number, rounds: number) => {
     yield* follow(first, initial)
     yield* change(second, [refs[2]!], [])
     yield* checkInvariants()
+    // Exercise both paths before random steps can remove their kept items. Different fast
+    // seeds reach each new regression first so either one can fail on the baseline.
+    const purgeAcrossTabs = Effect.gen(function* () {
+      history.push("B purges A's chosen assistant card and A reopens its workshop")
+      yield* purgeAssistant
+    })
+    if (seed === 41) yield* purgeAcrossTabs
+    history.push("A deletes the shown story branch, B restores it, A returns")
+    yield* deleteStoryBranch("A")
+    yield* restoreStoryBranch
+    if (seed !== 41) yield* purgeAcrossTabs
     for (let round = 0; round < rounds; round++) {
       const remaining = [...actions]
       while (remaining.length > 0) {
@@ -476,6 +566,20 @@ const model = (seed: number, rounds: number) => {
             break
           case "side reconnect":
             if (here.draftFor === sideEntry && here.status === "swept") visit(yield* reconnect(here))
+            break
+          case "delete story branch":
+            yield* deleteStoryBranch(left ? "A" : "B")
+            break
+          case "restore story branch": {
+            const restored = yield* restoreStoryBranch
+            if (restored !== undefined) {
+              if (restored.owner === "A") first = restored.tab
+              else second = restored.tab
+            }
+            break
+          }
+          case "purge assistant card":
+            visit(yield* purgeAssistant)
             break
           case "bin": {
             const attached = [...here.refs].filter((item) => !binned.has(item))

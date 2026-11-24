@@ -74,8 +74,7 @@ function DraftChat({
     void run.then((opened) => {
       opening.delete(key)
       if (!live) return
-      // A replacement that failed (its card purged, say): the chat it replaces is gone, so the
-      // error and Try again show instead of it.
+      // The old chat is gone. If opening its replacement fails, show the error and Try again.
       if (!opened.ok) {
         if (replacing.current) setChat(null)
         return

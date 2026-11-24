@@ -339,6 +339,58 @@ test.describe("work on in a workshop", () => {
     expect(new URL(page.url()).searchParams.get("side.draft")).toBe(await pending.getAttribute("data-side-chat"))
   })
 
+  test("deleting and restoring a story branch reopens its pending workshop with its attachment", async ({
+    page,
+    context
+  }) => {
+    await setUp(page, 1340, "dark")
+    const { story, fork, book } = await admin((api) =>
+      Effect.gen(function* () {
+        const story = yield* api.CreateChat({ title: "Harbor story" })
+        yield* api.SendMessage({ chatId: story.id, parentSlotId: null, branch: false, content: "The tide turns." })
+        const shown = yield* api.GetChat({ chatId: story.id })
+        const { fork } = yield* api.CreateFork({
+          chatId: story.id,
+          fromForkId: shown.currentForkId!,
+          atSlotId: shown.activeLeafSlotId,
+          name: "Harbor road"
+        })
+        yield* api.CreateWorkshop({ attachTo: story.id, attachFork: fork.id, title: "Existing workshop" })
+        const book = yield* api.CreateLorebook({ label: "Harbor charts" })
+        return { story, fork, book }
+      })
+    )
+    await page.goto(`${server().url}/chats/${story.id}?fork=${fork.id}&panel=workshop&workshop=new`)
+    const pending = pendingSideChat(page)
+    const tile = pending.locator(`[data-library-tile="${book.id}"]`)
+    await pending.getByRole("button", { name: "Attach", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Lorebooks…" }).click()
+    const books = page.getByRole("dialog", { name: "Attach lorebooks" })
+    await books.getByRole("checkbox", { name: "Harbor charts" }).click()
+    await books.getByRole("button", { name: "Attach 1" }).click()
+    await expect(tile).toBeVisible()
+    const original = await pending.getAttribute("data-side-chat")
+
+    const branch = page.getByRole("button", { name: /switch branch/ })
+    const list = page.getByRole("list", { name: "Branches" })
+    await branch.click()
+    await list.getByRole("button", { name: "Delete Harbor road", exact: true }).click()
+    await expect(page).not.toHaveURL(new RegExp(`fork=${fork.id}`))
+    await expect(tile).toHaveCount(0)
+    await page.getByRole("button", { name: "Undo", exact: true }).click()
+    await expect(branch).toBeEnabled()
+    await page.reload()
+    await branch.click()
+    await list.getByRole("link", { name: /^Harbor road/ }).click()
+    await expect(tile).toBeVisible()
+    await expect(pending).not.toHaveAttribute("data-side-chat", original!)
+    await expect(page).toHaveURL(/[?&]side\.draft=/)
+
+    const other = await context.newPage()
+    await other.goto(page.url())
+    await expect(pendingSideChat(other).locator(`[data-library-tile="${book.id}"]`)).toBeVisible()
+  })
+
   test("a new workshop swept while its handover was retrying hands it to the one opened in its place (rev-dd3 #5)", async ({
     page
   }) => {

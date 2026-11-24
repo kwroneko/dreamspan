@@ -45,17 +45,20 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
       null
     )
   const stepsFor = {
-    createWorkshop: ({
-      userId,
-      title,
-      attachTo,
-      attachFork,
-      card: chosenCard,
-      persona: chosenPersona,
-      preset: chosenPreset,
-      grants,
-      draftFor
-    }: Parameters<Parameters<typeof WriteOps.of>[0]["CreateWorkshop"]>[0]) =>
+    createWorkshop: (
+      {
+        userId,
+        title,
+        attachTo,
+        attachFork,
+        card: chosenCard,
+        persona: chosenPersona,
+        preset: chosenPreset,
+        grants,
+        draftFor
+      }: Parameters<Parameters<typeof WriteOps.of>[0]["CreateWorkshop"]>[0],
+      recovering = false
+    ) =>
       Effect.gen(function* () {
         // A side chat's story: the user's, live, of a kind that takes one (spec/WORKSHOP.md §4).
         const [story] =
@@ -139,11 +142,16 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           stored.persona !== defaults.persona
         )
           yield* putUserSetting(sql, userId, "workshop.defaults", defaults)
-        // This workshop's own choices; they never change the defaults.
-        if (chosenCard !== undefined && !(yield* ownedCard(sql, userId, chosenCard)))
-          return yield* new NotFound({ entity: "card", id: chosenCard })
-        if (chosenPersona != null && !(yield* ownedPersona(sql, userId, chosenPersona)))
-          return yield* new NotFound({ entity: "persona", id: chosenPersona })
+        // A matched recovery keeps the original entry for its receipts and replaces unavailable
+        // participants individually. The draft's choices never change the account defaults.
+        if (chosenCard !== undefined && !(yield* ownedCard(sql, userId, chosenCard))) {
+          if (!recovering) return yield* new NotFound({ entity: "card", id: chosenCard })
+          chosenCard = undefined
+        }
+        if (chosenPersona != null && !(yield* ownedPersona(sql, userId, chosenPersona))) {
+          if (!recovering) return yield* new NotFound({ entity: "persona", id: chosenPersona })
+          chosenPersona = undefined
+        }
         // A preset chosen before the first message: one of the user's live presets.
         const presetRef = chosenPreset?._tag === "Lock" ? chosenPreset.ref : null
         if (presetRef !== null) {
@@ -298,7 +306,7 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
             source = receipt.replacement_chat_id
           }
         }
-        const { chat } = yield* stepsFor.createWorkshop(input)
+        const { chat } = yield* stepsFor.createWorkshop(input, swept !== undefined)
         if (swept !== undefined && draftFor !== undefined) {
           const refs = yield* library.sweptRefs(userId, swept)
           if (refs.length > 0) {
