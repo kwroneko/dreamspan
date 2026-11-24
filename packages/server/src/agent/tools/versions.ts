@@ -17,8 +17,7 @@ type Kind = "card" | "preset" | "lorebook"
 const KINDS = Type.Union([Type.Literal("card"), Type.Literal("preset"), Type.Literal("lorebook")])
 const item = Type.String({ minLength: 1, maxLength: 200, description: "The item's name or id." })
 const revisionArg = (description: string) => Type.String({ minLength: 1, maxLength: 100, description })
-/** How far back a revision is looked for by number: enough for any item's whole history. */
-const HISTORY_PAGES = 20
+const HISTORY_PAGE_SIZE = 500
 
 /** The ref's revision a tool names: "latest", a number from list_revisions (also "#3"), or an id. */
 export const findRevision = (ctx: ToolContext, ref: LibraryRef, wanted: string) =>
@@ -27,16 +26,16 @@ export const findRevision = (ctx: ToolContext, ref: LibraryRef, wanted: string) 
     const number = /^#?(\d+)$/.exec(target)?.[1]
     const id = target === "latest" ? ref.headRevisionId : wanted.trim()
     let before: RevisionId | undefined
-    for (let page = 0; page < HISTORY_PAGES; page++) {
+    for (;;) {
       const revisions: ReadonlyArray<Revision> = yield* ctx.reader.RefHistory({
         userId: ctx.userId,
         refId: ref.id,
-        limit: 500,
+        limit: HISTORY_PAGE_SIZE,
         ...(before ? { before } : {})
       })
       const found = revisions.find((r) => (number !== undefined ? r.number === Number(number) : r.id === id))
       if (found) return { revision: found }
-      if (revisions.length < 500) break
+      if (revisions.length < HISTORY_PAGE_SIZE) break
       before = revisions.at(-1)!.id
     }
     return { error: `${ref.label} has no revision ${wanted}. Use list_revisions to see its revisions.` }
