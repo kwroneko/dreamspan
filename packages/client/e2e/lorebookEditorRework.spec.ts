@@ -311,6 +311,39 @@ test("Edit N entries changes two settings at once, shows Mixed, and clears an em
   await expect(lamp.getByRole("spinbutton", { name: "Order of Lamp", exact: true })).toHaveValue("77")
 })
 
+test("staged lorebook mass edits reopen only for their original selection", async ({ page, context }) => {
+  const tag = "selection"
+  const { panel, chatId, refId } = await setUp(page, tag, 1440)
+  const select = async (editor: Locator, names: readonly string[]) => {
+    for (const name of names) await editor.getByRole("checkbox", { name: `Select ${name}`, exact: true }).click()
+    await editor.getByRole("button", { name: "Edit 2 entries", exact: true }).click()
+  }
+  const dialog = (tab: Page) => tab.getByRole("dialog", { name: "Edit 2 entries", exact: true })
+  const changeOrder = (tab: Page) => dialog(tab).getByRole("checkbox", { name: "Change Order", exact: true })
+  const order = (tab: Page) => dialog(tab).getByRole("spinbutton", { name: "Order", exact: true })
+  await select(await openBook(page, panel, tag), ["Harbour", "Lamp"])
+  await changeOrder(page).click()
+  await order(page).fill("77")
+  const ownerId = (await admin((api) => api.Whoami())).id
+  await expect
+    .poll(() => admin((api) => api.GetUserDraft({ ownerId, targetId: `mass-edit:${refId}::0,1`, field: "Mass edit" })))
+    .toMatchObject({ content: expect.stringContaining("77") })
+
+  const other = await context.newPage()
+  try {
+    await other.goto(`${server().url}/chats/${chatId}`)
+    await select(await openBook(other, await openPanel(other, "Lorebooks"), tag), ["Lamp", "Fog"])
+    await expect(changeOrder(other)).not.toBeChecked()
+    await expect(order(other)).toBeDisabled()
+    await expect(dialog(other).getByRole("button", { name: "Apply to 0 entries", exact: true })).toBeDisabled()
+  } finally {
+    await other.close()
+  }
+  await page.reload()
+  await expect(changeOrder(page)).toBeChecked()
+  await expect(order(page)).toHaveValue("77")
+})
+
 // Owner, 2026-11-23: on a large screen the dialog was a narrow column to scroll through.
 for (const [width, height] of [
   [2560, 1440],
