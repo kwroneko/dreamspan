@@ -12,7 +12,7 @@ import { sidebarCleared, useShellNavigation } from "./shellData.tsx"
  * labels don't fit. A button's " with <name>" (`StartWith`) shows only while every button's does
  * fit on the one row: otherwise all drop it together, and the crumb above names the character.
  */
-export function StartRow({ children }: { children: ReactNode }) {
+export function StartRow({ children, characterLabel }: { children: ReactNode; characterLabel?: string }) {
   const row = useRef<HTMLDivElement>(null)
   const [short, setShort] = useState(false)
   useLayoutEffect(() => {
@@ -42,7 +42,7 @@ export function StartRow({ children }: { children: ReactNode }) {
     observer.observe(el)
     void document.fonts.ready.then(measure)
     return () => observer.disconnect()
-  }, [])
+  }, [characterLabel])
   return (
     <div
       ref={row}

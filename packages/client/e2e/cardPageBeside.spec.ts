@@ -96,6 +96,55 @@ const setup = async (page: Page, server: TestServer) => {
 
 const opened = (page: Page) => page.evaluate(() => (window as unknown as { __opened: Array<string> }).__opened)
 
+for (const width of [1340, 390]) {
+  test(`a held cardex tile's menu opens the same saved chat as its link at ${width}`, async ({ page }) => {
+    const port = await freePort()
+    const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: String(port) })
+    try {
+      await setup(page, server)
+      await page.setViewportSize({ width, height: 900 })
+      const archive = `${server.url}/?show=src.cardex`
+      const tile = page.getByRole("main").locator("[data-remote-card]").first()
+      const link = tile.getByRole("link", { name: /^Open/ })
+      await page.goto(archive)
+      await link.click()
+      await expect(page).toHaveURL(/\/sources\/cardex\/cards\/[^/]+\/chat/)
+      const message = "This message belongs to the saved chat."
+      await page.getByTestId("composer").fill(message)
+      await page.getByRole("button", { name: "Send", exact: true }).click()
+      await expect(page).toHaveURL(/\/chats\//)
+      await expect(page.getByTestId("messages").getByText(message, { exact: true })).toBeVisible()
+
+      await page.goto(archive)
+      await expect(tile).toHaveAttribute("data-held", "true")
+      await link.click()
+      await expect(page).toHaveURL(/\/chats\/[^?]+\?.*character=/)
+      const saved = new URL(page.url())
+      for (const key of ["character", "panel", "fork", "slot"]) expect(saved.searchParams.get(key)).toBeTruthy()
+      const expectSavedPlace = (url: URL) => {
+        expect(url.pathname).toBe(saved.pathname)
+        for (const key of ["character", "panel", "fork", "slot"])
+          expect(url.searchParams.get(key), key).toBe(saved.searchParams.get(key))
+      }
+
+      await page.goto(archive)
+      await choose(page, tile, /^Open in a new browser tab/)
+      const newTab = new URL((await opened(page)).at(-1)!, server.url)
+      if (width > 390) {
+        await choose(page, tile, /^Open beside/)
+        const side = frames(page).nth(1)
+        await expect(side.getByTestId("messages").getByText(message, { exact: true })).toBeVisible()
+        await side.locator("[data-tab]").getByRole("tab").click()
+        await expect(page).toHaveURL(/\/chats\//)
+        expectSavedPlace(new URL(page.url()))
+      }
+      expectSavedPlace(newTab)
+    } finally {
+      await server.stop()
+    }
+  })
+}
+
 test("library cards: Edit beside replaces the side pane's preview", async ({ page }) => {
   const server = await startServer(withAdmin)
   try {
