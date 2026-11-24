@@ -207,6 +207,28 @@ describe("message search", () => {
     }).pipe(Effect.provide(serverLayer(testConfig())))
   )
 
+  it.effect("counts an original swipe only while a live branch shows it", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const swipe = yield* f.writer.AddVersion({
+        userId: f.userId,
+        slotId: f.mainOnly.slotId,
+        version: said("The wick burned out."),
+        select: false,
+        commitDraft: null
+      })
+      yield* f.writer.SelectVersion({
+        userId: f.userId,
+        slotId: f.mainOnly.slotId,
+        versionId: swipe.id,
+        forkId: f.main,
+        expectedVersionId: f.mainOnly.version.id
+      })
+      assert.lengthOf((yield* f.search("main line")).hits, 0)
+      assert.deepStrictEqual(yield* f.api.CountMessages({ text: "main line" }), { messages: 0, chats: 0, more: false })
+    }).pipe(Effect.provide(serverLayer(testConfig())))
+  )
+
   it.effect("pages on from the cursor without repeating or skipping a hit", () =>
     Effect.gen(function* () {
       const f = yield* setup
