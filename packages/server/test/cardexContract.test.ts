@@ -8,7 +8,14 @@ import { afterAll, describe, expect, it } from "vitest"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { type Capture, captureNames, captureShape, responseKind } from "./fixtures/cardex/synthesize.ts"
+import {
+  type Capture,
+  captureNames,
+  captureShape,
+  missingShapes,
+  responseKind,
+  synthesize
+} from "./fixtures/cardex/synthesize.ts"
 import { startFakeCardex } from "./support/fakeCardex.ts"
 
 const dir = fileURLToPath(new URL("./fixtures/cardex/", import.meta.url))
@@ -138,6 +145,32 @@ for (const capture of fixtures) {
 }
 
 describe("the fake cardex has what the live API had", () => {
+  it("synthesizes card-authored extension keys and strings, keeping the archive's metadata shape", () => {
+    const capture: Capture = {
+      name: "download-json",
+      request: { path: "/api/v1/download/synthetic", query: { mode: "json" } },
+      status: 200,
+      headers: {},
+      body: {
+        data: {
+          extensions: {
+            campanulasecret: { type: "Silverbirchwhisper", status: ["wintermarigold"] },
+            cardex: { version: 1, origins: [{ source: "chub", valeriansecret: "snowdropwhisper" }] }
+          },
+          character_book: { extensions: { foxglovesecret: { kind: "heatherwhisper" } } }
+        }
+      }
+    }
+    const [synthetic] = synthesize([capture, named("capabilities")!], fake.origin)
+    expect(JSON.stringify(synthetic!.body)).not.toMatch(
+      /campanulasecret|Silverbirchwhisper|wintermarigold|valeriansecret|snowdropwhisper|foxglovesecret|heatherwhisper/
+    )
+    expect(synthetic!.body).toMatchObject({
+      data: { extensions: { cardex: { version: 1, origins: [{ source: "chub" }] } } }
+    })
+    expect(missingShapes([capture], [synthetic!])).toEqual([])
+  })
+
   it("captures every endpoint the adapter calls", () => {
     for (const name of [
       "capabilities",

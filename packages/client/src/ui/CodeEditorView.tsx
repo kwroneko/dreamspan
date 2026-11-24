@@ -25,7 +25,8 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
   // A host placing the selection's actions itself (`bare`) hears the same: the selection while
   // the box has focus, none once it's left for another box, which keeps it unseen.
   const reportSelection = props.onSelectionChange
-  useEffect(() => reportSelection?.(selection), [reportSelection, selection])
+  const reported = (props.selectionScopeFocused ?? focused) ? selected : ""
+  useEffect(() => reportSelection?.(reported), [reportSelection, reported])
   const [reverting, setReverting] = useState(false)
   // A corner grip sets the box's height, as a textarea's corner does; a box filling its place
   // (`fill`, a field's own tab) takes that place's height instead.
@@ -193,8 +194,15 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
   let props = initial
   let applying = false
   let deferred: string | null = null
-  /** When a pointer last pressed in the text: that focus places its own caret. */
-  let pressedAt = Number.NEGATIVE_INFINITY
+  /** The active press in the text: its focus places its own caret. */
+  let pressed: number | null = null
+  const pointerEvents = new AbortController()
+  const releasePress = (event: PointerEvent) => {
+    if (event.pointerId === pressed) pressed = null
+  }
+  const pointerOptions = { capture: true, signal: pointerEvents.signal }
+  host.ownerDocument.addEventListener("pointerup", releasePress, pointerOptions)
+  host.ownerDocument.addEventListener("pointercancel", releasePress, pointerOptions)
   const attributes = () => [
     EditorState.readOnly.of(props.readOnly ?? false),
     EditorView.contentAttributes.of({
@@ -237,8 +245,8 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
           }
         }),
         EditorView.domEventHandlers({
-          pointerdown: () => {
-            pressedAt = performance.now()
+          pointerdown: (event) => {
+            pressed = event.pointerId
           },
           // Focus that isn't a press in the text (Tab, a command, a closing dialog, the panel focus
           // guard) keeps the editor's caret and selection, as a textarea's does. The browser keeps
@@ -246,7 +254,8 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
           // them) and places one at a line's start, which typing would then go to: the editor's
           // own focus writes its selection back. A press places the caret itself.
           focus: (_event, editor) => {
-            if (performance.now() - pressedAt > 500) editor.focus()
+            if (pressed === null) editor.focus()
+            pressed = null
           },
           blur: () => {
             props.onBlur?.()
@@ -434,6 +443,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       }
     },
     destroy: () => {
+      pointerEvents.abort()
       releaseCaret()
       extensionVersion++
       language = "\0gone" // A mode still loading isn't applied to a destroyed view.

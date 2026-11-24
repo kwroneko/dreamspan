@@ -10,7 +10,7 @@ self.onmessage = (event: MessageEvent<StyleRequest>) => {
   if (request.close) return void caches.delete(request.editor)
   let cache = caches.get(request.editor)
   if (!cache) caches.set(request.editor, (cache = styleCache()))
-  const ranges = messageStyleRanges(request.text, { html: request.html }, cache)
+  const ranges = messageStyleRanges(request.text, { html: request.html, examples: request.examples === true }, cache)
   const response: StyleResponse = { editor: request.editor, id: request.id, ranges }
   self.postMessage(response, { transfer: [ranges.buffer] })
 }

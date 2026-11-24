@@ -7,7 +7,7 @@
 import type { ServerResponse } from "node:http"
 import { execFileSync } from "node:child_process"
 import { existsSync } from "node:fs"
-import { readdir, readFile } from "node:fs/promises"
+import { readdir, readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
@@ -253,18 +253,46 @@ describe("subagents that work on files", () => {
     }
   )
 
+  it.live.skipIf(!commands)("a git copy starts in the reply's untracked working directory", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const { api, chat, events, mock } = yield* setup(
+        [
+          {
+            name: "bash",
+            args: {
+              command:
+                "mkdir repo && cd repo && git init -q && git -c user.email=t@example.com -c user.name=T commit --allow-empty -qm first && mkdir scratch && cd scratch"
+            }
+          },
+          { name: "agent", args: { type: "code", task: "[[scratch]] Work here.", copy: true } }
+        ],
+        { scratch: [{ name: "write_file", args: { path: "one.txt", content: "one" } }] }
+      )
+      yield* run(api, chat, events, "copy an untracked folder")
+      const requests = childOf(mock.requests(), "scratch")
+      const [written] = results(requests.at(-1)!)
+      assert.match(written!, /Created \/files\/\.subagents\/code-[a-z0-9]{6}\/scratch\/one\.txt/)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live.skipIf(!commands)("copy: a file copy of a folder that isn't a repository, removed when unchanged", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const { api, chat, events, mock, me } = yield* setup(
         [
-          { name: "bash", args: { command: "mkdir -p draft && echo text > draft/b.txt && cd draft" } },
+          {
+            name: "bash",
+            args: { command: "mkdir -p draft && echo text > draft/b.txt && echo run > draft/run.sh && cd draft" }
+          },
           { name: "agent", args: { type: "general", task: "[[writer]] Add c.", copy: true } },
-          { name: "agent", args: { type: "general", task: "[[reader]] Read b.", copy: true } }
+          { name: "agent", args: { type: "general", task: "[[reader]] Read b.", copy: true } },
+          { name: "agent", args: { type: "code", task: "[[mode]] Make run.sh executable.", copy: true } }
         ],
         {
           writer: [{ name: "write_file", args: { path: "c.txt", content: "new\n" } }],
-          reader: [{ name: "read_file", args: { path: "b.txt" } }]
+          reader: [{ name: "read_file", args: { path: "b.txt" } }],
+          mode: [{ name: "bash", args: { command: "chmod +x run.sh" } }]
         }
       )
       const versionId = yield* run(api, chat, events, "file copies")
@@ -273,7 +301,7 @@ describe("subagents that work on files", () => {
       assert.include(told, "You work in your own copy of /files/draft: /files/.subagents/general-")
       assert.notInclude(told, "worktree")
       const rows = rowsOf(yield* api.GetRolloutSteps({ versionId }))
-      const [writer, reader] = rows
+      const [writer, reader, mode] = rows
       assert.strictEqual(writer?.copy?.kept, true)
       assert.isUndefined(writer?.copy?.branch)
       const copied = join(root, writer!.copy!.path.slice("/files/".length))
@@ -282,6 +310,9 @@ describe("subagents that work on files", () => {
       assert.isFalse(existsSync(join(root, "draft/c.txt")))
       assert.strictEqual(reader?.copy?.kept, false)
       assert.isFalse(existsSync(join(root, reader!.copy!.path.slice("/files/".length))))
+      assert.strictEqual(mode?.copy?.kept, true)
+      const executable = join(root, mode!.copy!.path.slice("/files/".length), "run.sh")
+      assert.notStrictEqual((yield* Effect.promise(() => stat(executable))).mode & 0o111, 0)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
   it.live.skipIf(!commands)("a follow-up carries a subagent on in its copy, made again where it was removed", () => {

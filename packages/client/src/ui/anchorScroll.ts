@@ -26,7 +26,7 @@ export function useCloseOnAnchorScroll(open: boolean, trigger: RefObject<HTMLEle
   useEffect(() => {
     const anchor = trigger.current
     if (!open || anchor === null) return
-    // How hidden the trigger was in each scroller around it as the menu opened, then at each scroll.
+    // The least clipping seen in each scroller since the menu opened.
     const hidden = new Map<Element, number>()
     const row = anchor.getBoundingClientRect()
     for (let at = anchor.parentElement; at !== null; at = at.parentElement) hidden.set(at, clipped(row, at))
@@ -39,7 +39,7 @@ export function useCloseOnAnchorScroll(open: boolean, trigger: RefObject<HTMLEle
       if (!scroller.contains(anchor)) return
       const now = clipped(anchor.getBoundingClientRect(), scroller)
       const before = hidden.get(scroller) ?? now
-      hidden.set(scroller, now)
+      hidden.set(scroller, Math.min(before, now))
       // A pixel's slack for rounding.
       if (now > before + 1) latest.current()
     }

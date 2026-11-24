@@ -12,6 +12,7 @@ import { join, posix } from "node:path"
 import { Type } from "@earendil-works/pi-ai"
 import { Effect, Semaphore } from "effect"
 import type { User } from "@dreamspan/shared/domain.ts"
+import { ATTACHMENT_COPY_ROOT } from "@dreamspan/shared/files.ts"
 import type { RolloutEffect, RolloutEffectRecord } from "@dreamspan/shared/workshopApi.ts"
 import { foldState, type ChatState } from "@dreamspan/shared/state.ts"
 import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
@@ -103,8 +104,9 @@ export interface SubagentWorkspaces {
   readonly ensureCopy: (
     ctx: ToolContext,
     copy: SubagentCopyRecord,
-    approve?: ApproveCopy
-  ) => Effect.Effect<SubagentCopyRecord, unknown>
+    approve?: ApproveCopy,
+    start?: string
+  ) => Effect.Effect<{ readonly copy: SubagentCopyRecord; readonly start: string }, unknown>
   /** Whether the copy stays (it has changes, or couldn't be checked). */
   readonly finishCopy: (userId: string, copy: SubagentCopyRecord) => Effect.Effect<boolean>
 }
@@ -566,6 +568,22 @@ export const makeFileTools = (deps: FileToolDeps) => {
         })
       )
 
+  /** A copy as sent is addressed by id, with the account's attachment hold checked in the reader. */
+  const readPlace = (ctx: ToolContext, env: AccountEnv, input: string) =>
+    Effect.gen(function* () {
+      const full = input.trim()
+      if (full.startsWith(`${ATTACHMENT_COPY_ROOT}/`)) {
+        const mediaId = full.slice(ATTACHMENT_COPY_ROOT.length + 1)
+        const copy = yield* deps.reader
+          .GetMediaFile({ userId: ctx.userId, mediaId, attachmentOnly: true })
+          .pipe(Effect.mapError(() => new FilePathRefused("That attachment copy isn't available.")))
+        return { full, hostRoot: join(deps.dataDir, "media"), segments: copy.path.split("/").slice(1), mime: copy.mime }
+      }
+      const cwd = yield* currentDir(ctx, env)
+      const file = resolveIn(ctx, input, cwd, yield* rootsOf(env, ctx))
+      return { full: file.full, hostRoot: file.root.hostRoot, segments: file.segments, mime: null }
+    })
+
   // --- read_file
   const readTool: RolloutTool<Record<string, unknown>> = {
     source: import.meta.url,
@@ -577,7 +595,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     storyRead: "account",
     titleField: "path",
     description:
-      "Read a file in your files (/files), or in the app's source (/app-source, read-only), with line numbers. Paths are absolute (/files/...) or relative to the working directory. offset and limit are lines (default: the first 2000). Images come back as images when the model can see them; other binary files are described. Read a file before you change it with write_file or edit_file.",
+      "Read a file in your files (/files), the app's source (/app-source, read-only), or a message attachment (/attachments, read-only), with line numbers. Paths are absolute (/files/...) or relative to the working directory. offset and limit are lines (default: the first 2000). Images come back as images when the model can see them; other binary files are described. Read a file before you change it with write_file or edit_file.",
     parameters: Type.Object(
       {
         path: Type.String({ maxLength: 4096 }),
@@ -589,14 +607,11 @@ export const makeFileTools = (deps: FileToolDeps) => {
     summarize: (args) => String(args.path ?? ""),
     execute: wrap("files", (ctx, args, env) =>
       Effect.gen(function* () {
-        const cwd = yield* currentDir(ctx, env)
-        const { full, root, segments } = resolveIn(ctx, String(args.path), cwd, yield* rootsOf(env, ctx))
-        const { bytes, info, truncated } = yield* attempt(() =>
-          readRegularFile(root.hostRoot, segments, READ_MAX_BYTES)
-        )
-        if (!truncated) ctx.cache.set(readKey(full), sha256(bytes))
+        const { full, hostRoot, segments, mime } = yield* readPlace(ctx, env, String(args.path))
+        const { bytes, info, truncated } = yield* attempt(() => readRegularFile(hostRoot, segments, READ_MAX_BYTES))
+        if (!truncated && mime === null) ctx.cache.set(readKey(full), sha256(bytes))
         const extension = posix.extname(full).toLowerCase()
-        const image = IMAGE_TYPES[extension]
+        const image = mime === null ? IMAGE_TYPES[extension] : Object.values(IMAGE_TYPES).includes(mime) ? mime : null
         if (image && !truncated && bytes.byteLength <= 5 * 2 ** 20)
           return ctx.vision
             ? {
@@ -606,7 +621,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
             : { text: `${full}: ${image}, ${info.size.toLocaleString("en-US")} bytes. This model can't see images.` }
         if (isBinary(bytes))
           return {
-            text: `${full}: a binary file (${extension || "no extension"}), ${info.size.toLocaleString("en-US")} bytes. Use bash to work with it.`
+            text: `${full}: a binary file (${mime ?? (extension || "no extension")}), ${info.size.toLocaleString("en-US")} bytes.${mime === null ? " Use bash to work with it." : ""}`
           }
         const lines = bytes.toString("utf8").split("\n")
         const from = Number(args.offset ?? 1)
@@ -1605,12 +1620,31 @@ export const makeFileTools = (deps: FileToolDeps) => {
           const readOnlyText = setup.readOnly.length
             ? `Read-only in this command, as their owner's files are over their storage limit: ${setup.readOnly.join(", ")}\n`
             : ""
+          // Register before checking the grants again so an immediate recheck can stop this
+          // command even while the final check is reading storage.
+          const checkStart = Effect.gen(function* () {
+            live.add(entry)
+            const why = yield* revoked(entry)
+            return entry.stopped ?? why ?? (entry.controller.signal.aborted ? "it was stopped" : null)
+          })
+          const endOutput = (bytes: number) =>
+            Effect.promise(async () => void (await sink?.end(bytes).catch(() => undefined)))
+          const notStarted = (why: string) => ({ isError: true, text: `Not started: ${why}.` })
 
           if (background) {
-            const before = yield* scanPlaces(setup.places).pipe(
-              Effect.tapError(() => Effect.promise(() => setup.close()))
+            const { before, why } = yield* scanPlaces(setup.places).pipe(
+              Effect.flatMap((before) => Effect.map(checkStart, (why) => ({ before, why }))),
+              Effect.onExit((exit) =>
+                exit._tag === "Success" && exit.value.why === null
+                  ? Effect.void
+                  : Effect.promise(async () => {
+                      live.delete(entry)
+                      await setup.close()
+                      await sink?.end(0).catch(() => undefined)
+                    })
+              )
             )
-            live.add(entry)
+            if (why !== null) return notStarted(why)
             const job: Job = {
               id: sink!.id,
               userId: env.userId,
@@ -1673,29 +1707,35 @@ export const makeFileTools = (deps: FileToolDeps) => {
           }
 
           const run = Effect.gen(function* () {
-            // It may have waited for a free slot: what it was given is checked again first.
-            const why = yield* revoked(entry)
-            if (why) return { notStarted: why } as const
             const before = yield* scanPlaces(setup.places)
-            live.add(entry)
+            const why = yield* checkStart
+            if (why !== null) return { notStarted: why } as const
             const result = yield* attempt((signal) => {
               // Stopping the call (Stop) or taking away what it was given stops the command.
               signal.addEventListener("abort", () => entry.controller.abort(), { once: true })
               if (signal.aborted) entry.controller.abort()
-              return spec(entry.controller.signal)
-            }).pipe(Effect.ensuring(Effect.sync(() => live.delete(entry))))
+              return entry.controller.signal.aborted ? Promise.resolve(null) : spec(entry.controller.signal)
+            })
+            live.delete(entry)
+            if (result === null) return { notStarted: entry.stopped ?? "it was stopped" } as const
             const after = yield* scanPlaces(setup.places)
             return { result, found: diffPlaces(before, after) }
           })
           const ran = yield* Semaphore.withPermit(instance)(Semaphore.withPermit(accountPermits(env.userId))(run)).pipe(
-            Effect.ensuring(Effect.promise(() => setup.close()))
+            Effect.onExit((exit) =>
+              Effect.promise(async () => {
+                live.delete(entry)
+                await setup.close()
+                if (exit._tag !== "Success") await sink?.end(sink.kept()).catch(() => undefined)
+              })
+            )
           )
           if ("notStarted" in ran) {
-            if (sink) yield* Effect.promise(() => sink.end(0).catch(() => undefined))
-            return { isError: true, text: `Not started: ${ran.notStarted}.` }
+            yield* endOutput(0)
+            return notStarted(ran.notStarted)
           }
           const { result, found } = ran
-          if (sink) yield* Effect.promise(() => sink.end(result.outputBytes).catch(() => undefined))
+          yield* endOutput(result.outputBytes)
           if (result.cwd) ctx.cache.set(CWD_KEY, result.cwd)
           const { changes, overQuota } = yield* afterCommand(call, env.userId, result, found)
           const output = result.tail === "" ? result.head : `${result.head}\n…\n${result.tail}`
@@ -1766,11 +1806,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const job = jobs.get(id)
         const own = job && job.userId === env.userId ? job : null
         const limit = Number(args.limit ?? 400)
-        const state = own
-          ? own.ended
-            ? `ended ${Math.round((own.ended.at - own.startedAt) / 1000)} s after it started: ${own.ended.text.trimEnd()}`
-            : `still running (for ${Math.round((Date.now() - own.startedAt) / 1000)} s)`
-          : null
+        const stateOf = (job: Job) =>
+          job.ended
+            ? `ended ${Math.round((job.ended.at - job.startedAt) / 1000)} s after it started: ${job.ended.text.trimEnd()}`
+            : `still running (for ${Math.round((Date.now() - job.startedAt) / 1000)} s)`
         if (own && args.offset === undefined) {
           // The rest only once it ended, so the end comes with its last output.
           if (own.ended === null)
@@ -1781,7 +1820,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
           const more = read && read.next < read.size
           return {
             text:
-              `${id}: ${state}\n` +
+              `${id}: ${stateOf(own)}\n` +
               (text === "" ? "No new output.\n" : `New output:\n${headTail(text)}${text.endsWith("\n") ? "" : "\n"}`) +
               (more ? "[More output follows: call bash_output again.]" : ""),
             isError: own.ended?.failed === true
@@ -1792,7 +1831,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const last = page.from + page.lines.length - 1
         return {
           text:
-            `${id}${state ? `: ${state}` : ""}\nLines ${page.lines.length ? `${page.from}–${last}` : "none"} of ${page.totalLines.toLocaleString("en-US")}${page.cut ? " (the output was longer: only its first 16 MiB are kept)" : ""}:\n` +
+            `${id}${own ? `: ${stateOf(own)}` : ""}\nLines ${page.lines.length ? `${page.from}–${last}` : "none"} of ${page.totalLines.toLocaleString("en-US")}${page.cut ? " (the output was longer: only its first 16 MiB are kept)" : ""}:\n` +
             headTail(page.lines.join("\n")) +
             (last < page.totalLines ? `\n[Read on with offset=${last + 1}.]` : "")
         }
@@ -2051,6 +2090,26 @@ export const makeFileTools = (deps: FileToolDeps) => {
       return copy
     })
 
+  /** Keep the reply's relative directory even when Git didn't track it at the base commit. */
+  const copyStart = (env: AccountEnv, path: string, wanted: string) =>
+    Effect.promise(async () => {
+      if (!wanted.startsWith(`${path}/`)) return path
+      try {
+        const { full, segments } = resolveFilesPath(wanted, FILES_MOUNT)
+        if (!full.startsWith(`${path}/`)) return path
+        const dir = await openFolder(env.filesRoot, segments, { create: true })
+        await dir.close()
+        return full
+      } catch {
+        // The requested path may have been a file or link at the checked-out commit.
+        return path
+      }
+    })
+
+  /** Digest of the copied tree's names, bytes, types and modes, ignoring times and ownership. */
+  const copyFingerprint = (path: string) =>
+    `( cd -- ${q(path)} || exit 1; sockets=$(find . -type s -print -quit) || exit 1; [ -z "$sockets" ] || exit 1; LC_ALL=C tar --sort=name --format=gnu --mtime=@0 --owner=0 --group=0 -cf - . ) | sha256sum`
+
   /** A git repository's files at a commit, in bytes: what a worktree of it takes. */
   const treeBytes = (rev: string) =>
     `${GIT} -C "$top" ls-tree -r -l ${rev} | awk '{ if ($4 ~ /^[0-9]+$/) s += $4 } END { print s + 0 }'`
@@ -2121,7 +2180,11 @@ export const makeFileTools = (deps: FileToolDeps) => {
               `if ${GIT} -C "$top" rev-parse --verify -q "refs/heads/$branch" >/dev/null; then echo taken; exit 1; fi`,
               `mkdir -p ${q(`${FILES_MOUNT}/${COPIES}`)} && ${GIT} -C "$top" worktree add --quiet -b "$branch" ${q(path)} ${q(base)}`
             ].join("\n")
-          : `mkdir -p ${q(path)} && tar -C ${q(source)} --exclude=./${COPIES} -cf - . | tar -C ${q(path)} -xf -`,
+          : [
+              "set -o pipefail",
+              `mkdir -p ${q(path)} && tar -C ${q(source)} --exclude=./${COPIES} -cf - . | tar -C ${q(path)} -xf - || exit 1`,
+              `fingerprint=$(${copyFingerprint(path)}) && printf 'fingerprint:%s\\n' "\${fingerprint%% *}" || :`
+            ].join("\n"),
         600_000,
         ctx.chatId
       )
@@ -2136,13 +2199,14 @@ export const makeFileTools = (deps: FileToolDeps) => {
         })
         return yield* Effect.fail(new ToolInputRefused("The copy couldn't be made."))
       }
+      const fingerprint = made.lines.find((line) => /^fingerprint:[0-9a-f]{64}$/.test(line))?.slice(12)
       const copy: SubagentCopyRecord = isGit
         ? { path, from: source, kind: "git", top, branch, base }
-        : { path, from: source, kind: "files" }
+        : { path, from: source, kind: "files", ...(fingerprint ? { fingerprint } : {}) }
       yield* madeCopy(env, copy)
       // It starts where the reply is, inside the copy.
-      const start = isGit ? posix.join(path, prefix) : path
-      return { copy, start: start.replace(/\/$/, "") }
+      const start = yield* copyStart(env, path, posix.join(path, prefix).replace(/\/$/, ""))
+      return { copy, start }
     })
 
   /** Removes a copy outright (a worktree, and its branch where the record names one), in the sandbox; true when it's gone. */
@@ -2163,7 +2227,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
 
   /**
    * At a subagent's end: a copy with no changes is removed (a worktree whose status, ignored
-   * files included, is clean and whose branch didn't move; a file copy the same as its source);
+   * files included, is clean and whose branch didn't move; a file copy the same as when it was made);
    * one with changes stays. Returns whether it stays. A copy that can't be checked stays.
    */
   const finishCopy = (userId: string, copy: SubagentCopyRecord) =>
@@ -2178,7 +2242,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
           copy.kind === "git"
             ? // Ignored files count: a fresh worktree has none, so any is the subagent's output.
               `safe_git "$dest"\nst=$(${GIT} -C "$dest" status --porcelain --untracked-files=all --ignored) || { echo changed; exit 0; }\nhead=$(${GIT} -C "$dest" rev-parse HEAD) || { echo changed; exit 0; }\nif [ -z "$st" ] && [ "$head" = ${q(copy.base ?? "")} ]; then echo same; else echo changed; fi`
-            : `if diff -rq --no-dereference -x ${COPIES} ${q(copy.from)} "$dest" >/dev/null 2>&1; then echo same; else echo changed; fi`
+            : copy.fingerprint === undefined
+              ? "echo changed"
+              : `set -o pipefail\nfingerprint=$(${copyFingerprint(copy.path)}) || exit 1\nif [ "$fingerprint" = ${q(`${copy.fingerprint}  -`)} ]; then echo same; else echo changed; fi`
         ].join("\n"),
         300_000,
         null
@@ -2195,18 +2261,18 @@ export const makeFileTools = (deps: FileToolDeps) => {
    * again at the same place (a worktree on its branch when that's still there, keeping its commits),
    * within the quota and, under Ask first, once the user allows it.
    */
-  const ensureCopy = (ctx: ToolContext, copy: SubagentCopyRecord, approve?: ApproveCopy) =>
+  const ensureCopy = (ctx: ToolContext, copy: SubagentCopyRecord, approve?: ApproveCopy, start = copy.path) =>
     Effect.gen(function* () {
       const env = accountEnv(deps, ctx.userId)
       yield* attempt(() => prepareAccount(env))
       const there = yield* folderAt(env, copy.path).pipe(Effect.option)
       if (there._tag === "Some") {
         const { kept: _kept, ...rest } = copy
-        return rest
+        return { copy: rest, start: yield* copyStart(env, copy.path, start) }
       }
       if (copy.kind === "files" || !copy.top || !copy.branch) {
         const name = copy.path.slice(`${FILES_MOUNT}/${COPIES}/`.length)
-        return (yield* makeCopy(ctx, name, copy.from, approve)).copy
+        return yield* makeCopy(ctx, name, copy.from, approve)
       }
       const mode = yield* copyMode(ctx)
       // What it takes: its branch's files where the branch is still there, else its base's.
@@ -2242,7 +2308,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
       if (!made.ok || !made.lines.some((line) => line === "kept" || line === "made"))
         return yield* Effect.fail(new ToolInputRefused("The copy couldn't be made again."))
       const { kept: _kept, ...again } = copy
-      return yield* madeCopy(env, again)
+      yield* madeCopy(env, again)
+      return { copy: again, start: yield* copyStart(env, copy.path, start) }
     })
 
   const workspaces: SubagentWorkspaces = {

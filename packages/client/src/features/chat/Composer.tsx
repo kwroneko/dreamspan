@@ -791,6 +791,7 @@ export function Composer({
             show a composer. Guidance is plain; only the styling changes with it, nothing else. */}
         <div data-composer-text className="grid min-w-0">
           <SlotOutlet
+            key={draftId}
             slot={messageTextEditor}
             props={{
               label: guidance ? "Guidance" : "Message",

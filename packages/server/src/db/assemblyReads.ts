@@ -453,7 +453,15 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         const gap =
           next instanceof AssemblyFailed || !start
             ? null
-            : yield* historyGap(sql, chatId, nextFork, sources.pins(), start.depth, summarizedThrough ?? -1)
+            : yield* historyGap(
+                sql,
+                chatId,
+                nextFork,
+                sources.pins(),
+                start.depth,
+                summarizedThrough ?? -1,
+                next.historyCut
+              )
         const summaryNotes = next instanceof AssemblyFailed ? [] : yield* sentSummaryNotes(sql, userId, chatId, next)
         // The next request's size by part, counted as its request view counts it (`NextRequest`).
         const size =

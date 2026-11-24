@@ -77,6 +77,8 @@ export interface CodeEditorProps {
   onSelectionRangeChange?: ((range: { readonly at: number; readonly length: number }) => void) | undefined
   /** The selected text while the box has focus (its bar's or menu's included), else "". */
   onSelectionChange?: ((text: string) => void) | undefined
+  /** Use the host's focus scope for selection reporting when it places the actions outside the box. */
+  selectionScopeFocused?: boolean | undefined
   onBlur?: (() => void) | undefined
   /** More CodeMirror extensions for this box (the message editor's styling); a new value reconfigures them. */
   extensions?: Extension | undefined
@@ -92,6 +94,12 @@ export interface CodeEditorProps {
   hostFiles?: ((data: DataTransfer) => boolean) | undefined
   /** Message text without the message's styling (`message.text-editor`): the composer's guidance. */
   plain?: boolean | undefined
+  /**
+   * Message text in a form field, in the message editor's box (`MessageTextEditor`): a card's
+   * greeting ("message") or its example dialogue ("examples", whose `<START>` lines and speaker
+   * prefixes stay as they are). The message's styling, with the field's own font and metrics.
+   */
+  messageField?: "message" | "examples" | undefined
   ref?: Ref<TextSurfaceHandle> | undefined
 }
 

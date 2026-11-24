@@ -2,6 +2,7 @@
 // registered, replaceable part (owner rule: every feature a registered part), so a plugin can put
 // another store behind the same panel. The built-in source speaks the HTTP contract in
 // `@dreamspan/shared/files.ts`; the first registered source by order is the one used.
+import type { AttachmentComposer } from "@dreamspan/shared/composerApi.ts"
 import {
   AttachedFile,
   Changed,
@@ -55,7 +56,7 @@ export interface FilesSource {
   /** The URL a folder downloads from as one zip. */
   readonly zipUrl: (path: string) => string
   /** A file attached to a workshop message (§6.1): its content kept as the copy the message sends. */
-  readonly attach: (path: string) => Promise<AttachedFile>
+  readonly attach: (path: string, composer?: AttachmentComposer) => Promise<AttachedFile>
   /** The URL an attachment's copy as sent opens at, or downloads from. */
   readonly attachmentUrl: (mediaId: string, name: string, download?: boolean) => string
   /** A text file for the editor, with the hash a save names (§8.2). */
@@ -171,7 +172,7 @@ export const httpFilesSource: FilesSource = {
   rawUrl: (path, download = false) =>
     `${FILES_ROUTES.raw}?${new URLSearchParams(download ? { path, download: "1" } : { path })}`,
   zipUrl: (path) => `${FILES_ROUTES.zip}?${new URLSearchParams({ path })}`,
-  attach: async (path) => json(AttachedFile, await post(FILES_ROUTES.attach, { path })),
+  attach: async (path, composer) => json(AttachedFile, await post(FILES_ROUTES.attach, { path, composer })),
   attachmentUrl: (id, name, download = false) =>
     `${FILES_ROUTES.attachment}?${new URLSearchParams(download ? { id, name, download: "1" } : { id, name })}`,
   readText: async (path) =>

@@ -190,6 +190,7 @@ describe("file routes", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       yield* upload("/files/out/keep.txt", "Kept.")
+      yield* upload("/files/out/Left out of this zip.txt", "My file.")
       const filesDir = join(config.dataDir, "files")
       const out = join(filesDir, accountOf(filesDir), "out")
       // Names a command (or a prompt-injected assistant) can make: a backslash path, a folder of one.
@@ -206,7 +207,11 @@ describe("file routes", () => {
         const length = bytes.readUInt16LE(at + 28)
         names.push(bytes.subarray(at + 46, at + 46 + length).toString("utf8"))
       }
-      assert.deepStrictEqual(names.sort(), ["out/Left out of this zip.txt", "out/keep.txt"])
+      assert.deepStrictEqual(names.sort(), [
+        "out/Left out of this zip (2).txt",
+        "out/Left out of this zip.txt",
+        "out/keep.txt"
+      ])
       for (const name of names) assert.notInclude(name, "\\")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })

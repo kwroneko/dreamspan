@@ -1,8 +1,8 @@
 // What lies between the summarized part (or the chat's start) and the next request's history
 // start, for the timeline's boundary lines (ARCHITECTURE §12 "Context membership"): the last
-// message the budget left out, if any, and whether messages hidden from the model come before
-// the first message sent. Read from the history windows the assembler read (its pins), so it
-// costs one indexed lookup of the hidden candidates' visibility and no path walk.
+// message the budget left out and whether hidden messages come before the first sendable one.
+// The assembler supplies the budget cut. Its history windows identify candidates for the
+// hidden line, whose visibility takes one indexed lookup.
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -31,7 +31,8 @@ export const historyGap = (
   fork: string | null,
   pins: Pick<SourcePins, "history">,
   start: number,
-  through: number
+  through: number,
+  cut: ContextSnapshot["historyCut"]
 ) =>
   Effect.gen(function* () {
     const seen = new Map<string, { readonly depth: number; readonly inContext: boolean }>()
@@ -46,11 +47,10 @@ export const historyGap = (
       }
     }
     const before = [...seen.entries()].filter(([, e]) => e.depth > through && e.depth < start)
-    const sent = before.filter(([, e]) => e.inContext)
-    const cutThrough = sent.length === 0 ? null : Math.max(...sent.map(([, e]) => e.depth))
+    const cutThrough = cut?.last ?? null
     // The first message on the path that would be sent: the start without a cut, else the
     // first one cut, the earliest read when the read reached the top of what isn't summarized.
-    const firstSendable = cutThrough === null ? start : Math.min(...sent.map(([, e]) => e.depth))
+    const firstSendable = cut?.first ?? start
     const candidates = before.filter(([, e]) => !e.inContext && e.depth < firstSendable).map(([id]) => id)
     let hidden = false
     if (candidates.length > 0) {

@@ -188,6 +188,25 @@ describe("text token counts", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
+  it.live("local-only counts stay local and separate from opted-in provider counts", () =>
+    Effect.gen(function* () {
+      const provider = yield* mock(anthropicCount)
+      const api = yield* client()
+      const connectionId = yield* useModel(api, "anthropic", provider.url, "claude-synthetic")
+      yield* api.SetTokenCounting({ connectionId, via: connectionId })
+      const texts = ["hello, world!"]
+      const remote = yield* api.CountTokens({ texts })
+      assert.deepStrictEqual(remote.counts, [2])
+      const asked = provider.requests().length
+      const local = yield* api.CountTokens({ texts: [...texts, "Unsent draft."], localOnly: true })
+      assert.deepStrictEqual(local.counts, [4, 4])
+      assert.isFalse(local.tokenizer.exact)
+      assert.lengthOf(provider.requests(), asked)
+      assert.deepStrictEqual(yield* api.CountTokens({ texts }), remote)
+      assert.lengthOf(provider.requests(), asked)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
   it.live("a separate connection counts, used only for counting: its provider gets the text, the chat's doesn't", () =>
     Effect.gen(function* () {
       const chat = yield* mock((_request, res) => res.writeHead(500).end())

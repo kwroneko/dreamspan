@@ -14,7 +14,7 @@ import type {
 } from "@dreamspan/shared/cardSources.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -106,9 +106,10 @@ const queryOf = (caps: SourceCapabilities, info: SourceInfo, remote: RemoteBrows
   }
 }
 
-type Status = "loading" | "ready" | "more" | "failed" | "more-failed"
+type Status = "loading" | "refreshing" | "ready" | "more" | "failed" | "more-failed"
+type FirstPageRequest = { readonly key: string }
 interface Results {
-  readonly key: string
+  readonly request: FirstPageRequest
   readonly items: ReadonlyArray<RemoteSummary>
   readonly next: string | null
   readonly capped?: boolean | undefined
@@ -130,11 +131,12 @@ const sourceOfKey = (key: string) => key.slice(0, key.indexOf("\u0000"))
  * the last one's, dimmed as loading, so the count and the grid don't flicker off in between.
  * Another source's results are never shown for this one.
  */
-const asking = (r: Results | null, key: string): Results => {
-  if (r === null || sourceOfKey(r.key) !== sourceOfKey(key) || (r.status === "failed" && r.key !== key))
-    return { key, items: [], next: null, status: "loading" }
-  if (r.key === key && r.status === "ready") return r
-  return { ...r, key, next: null, status: "loading", problem: undefined }
+const asking = (r: Results | null, request: FirstPageRequest): Results => {
+  const key = request.key
+  if (r === null || sourceOfKey(r.request.key) !== sourceOfKey(key) || (r.status === "failed" && r.request.key !== key))
+    return { request, items: [], next: null, status: "loading" }
+  const status = r.request.key === key && r.status === "ready" ? "refreshing" : "loading"
+  return { ...r, request, next: null, status, problem: undefined }
 }
 
 /**
@@ -147,6 +149,8 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
   const key = sourceId !== null && query !== null ? `${sourceId}\u0000${JSON.stringify(query)}` : null
   const [results, setResults] = useState<Results | null>(null)
   const [attempt, setAttempt] = useState(0)
+  // Reopening the same query or retrying starts a new first page, even if its key matches.
+  const request = useMemo(() => (key === null ? null : { key, attempt }), [key, attempt])
   const inFlight = useRef<AbortController | null>(null)
   const retried = useRef<string | null>(null)
   const first = useRef(true)
@@ -160,18 +164,17 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
     [key]
   )
   useEffect(() => {
-    if (key === null) return
+    if (request === null) return
     const controller = new AbortController()
     const delay = first.current ? 0 : 300
     first.current = false
     const timer = setTimeout(() => {
-      setResults((r) => asking(r, key))
       void fetchPage(null, controller).then((out) => {
         if (out === null || controller.signal.aborted) return
         setResults(
           out.ok
             ? {
-                key,
+                request,
                 items: out.value.items,
                 next: out.value.next,
                 total: out.value.total,
@@ -182,7 +185,7 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
                 notice: out.value.notice,
                 status: "ready"
               }
-            : { key, items: [], next: null, status: "failed", problem: out.problem }
+            : { request, items: [], next: null, status: "failed", problem: out.problem }
         )
       })
     }, delay)
@@ -190,10 +193,10 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
       clearTimeout(timer)
       controller.abort()
     }
-  }, [key, attempt, fetchPage])
+  }, [request, fetchPage])
   useEffect(() => () => inFlight.current?.abort(), [])
-  // While another search waits out its 300 ms, what's known stays shown (dimmed) rather than blanking.
-  const current = key === null ? null : results !== null && results.key === key ? results : asking(results, key)
+  // Nothing from a previous first-page request can supply a cursor during the debounce or fetch.
+  const current = request === null ? null : results?.request === request ? results : asking(results, request)
   // Rate limited: one automatic retry when the source says it may (§5.4).
   const wait = current?.problem?.reason === "rate_limited" ? (current.problem.retryAfterMs ?? 5000) : null
   useEffect(() => {
@@ -209,9 +212,9 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
     const controller = new AbortController()
     setResults({ ...current, status: "more" })
     void fetchPage(current.next, controller).then((out) => {
-      if (out === null) return
+      if (out === null || controller.signal.aborted) return
       setResults((r) => {
-        if (r === null || r.key !== current.key) return r
+        if (r === null || r.request !== current.request) return r
         if (!out.ok) return { ...r, status: "more-failed", problem: out.problem }
         const previous = out.value.reset ? [] : r.items
         const seen = new Set(previous.map((i) => i.remoteId))
@@ -222,6 +225,8 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
           total: out.value.reset ? out.value.total : (out.value.total ?? r.total),
           capped: out.value.reset ? out.value.totalCapped : (out.value.totalCapped ?? r.capped),
           estimated: out.value.totalEstimated ?? r.estimated,
+          hidden: out.value.reset ? out.value.hidden : r.hidden,
+          hiddenCapped: out.value.reset ? out.value.hiddenCapped : r.hiddenCapped,
           notice: out.value.notice,
           status: "ready"
         }
@@ -999,10 +1004,13 @@ function Sentinel({ onNear }: { onNear: () => void }) {
     // The nearest scrolling ancestor is the root: the sidebar's list, or the page.
     let root: HTMLElement | null = node.parentElement
     while (root && !/(auto|scroll)/.test(getComputedStyle(root).overflowY)) root = root.parentElement
-    const observer = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && near.current(), {
-      root,
-      rootMargin: "0px 0px 800px 0px"
-    })
+    const observer = new IntersectionObserver(
+      (entries) => node.isConnected && entries.some((e) => e.isIntersecting) && near.current(),
+      {
+        root,
+        rootMargin: "0px 0px 800px 0px"
+      }
+    )
     observer.observe(node)
     return () => observer.disconnect()
   }, [])
@@ -1084,7 +1092,7 @@ export function SourceResults({ browse, className }: { browse: SourceBrowse; cla
   return (
     <div
       data-source-results={info.id}
-      aria-busy={results?.status === "loading" || results?.status === "more"}
+      aria-busy={results?.status === "loading" || results?.status === "refreshing" || results?.status === "more"}
       className="flex min-w-0 flex-col gap-3"
     >
       {creator !== null && <CreatorHeader key={creator} browse={browse} creator={creator} />}

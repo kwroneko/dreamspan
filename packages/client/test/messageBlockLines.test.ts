@@ -46,4 +46,10 @@ describe("message block lines", () => {
   it("leaves a paragraph after a list, and a fenced block, as they are", () => {
     expect(insets("- One\n\nA paragraph.\n\n```\n- not a list\n> not a quote\n```")).toEqual([[1, "calc(1.5em)", "- "]])
   })
+
+  it("requires a matching closing fence of at least the opening length, with no info string", () => {
+    expect(
+      insets(["````md", "```", "- code", "~~~~", "> code", "````text", "- code", "`````  ", "- list"].join("\n"))
+    ).toEqual([[9, "calc(1.5em)", "- "]])
+  })
 })

@@ -33,7 +33,7 @@ export function CardGridEmpty({
         {filter === "archived" ? (
           <>
             <p>Archived cards stay here until you unarchive them.</p>
-            {!needle && <SlotOutlet slot={archivedCardActions} props={{ place }} />}
+            <SlotOutlet slot={archivedCardActions} props={{ place }} />
           </>
         ) : filter === "favourites" && !needle ? (
           <p>Star a character to keep it here.</p>

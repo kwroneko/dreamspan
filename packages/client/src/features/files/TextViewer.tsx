@@ -44,7 +44,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 
 /** A text file: editable where it's a file of Files that fits, read-only otherwise. */
 export function TextViewer(props: ViewerProps & { mode: TextMode }) {
-  if (props.size > TEXT_OPEN_MAX_BYTES) return <PagedText {...props} />
+  if (props.size > TEXT_OPEN_MAX_BYTES) return <PagedText key={props.url} {...props} />
   if (props.path !== null && props.source !== null)
     return <EditableText key={props.path} {...props} path={props.path} source={props.source} />
   return <CopyText {...props} />
@@ -365,16 +365,19 @@ function Editing({
   const saveCopy = async () => {
     setBusy(true)
     try {
-      const folder = parentOf(path)
-      const listing = await source.list(folder)
-      const copyName = keepBothName(name, new Set(listing.entries.map((entry) => entry.name)))
-      const bytes = encodeText(view.text, file.lineEnding, file.bom) as Uint8Array<ArrayBuffer>
-      const outcome = await source.upload(joinPath(folder, copyName), new Blob([bytes]), "keep")
-      if (await store.ended()) {
-        store.update(await source.readText(path))
-        setComparing(false)
-        showToast({ title: `Saved as “${nameOf(outcome.path)}”`, description: `“${name}” is as it was on disk.` })
-      }
+      const outcome = await store.saveCopy(async (text) => {
+        const folder = parentOf(path)
+        const listing = await source.list(folder)
+        const copyName = keepBothName(name, new Set(listing.entries.map((entry) => entry.name)))
+        const bytes = encodeText(text, file.lineEnding, file.bom) as Uint8Array<ArrayBuffer>
+        return source.upload(joinPath(folder, copyName), new Blob([bytes]), "keep")
+      })
+      await source.readText(path).then(
+        (latest) => store.update(latest),
+        () => undefined
+      )
+      setComparing(false)
+      showToast({ title: `Saved as “${nameOf(outcome.path)}”`, description: `“${name}” is as it was on disk.` })
     } catch (error) {
       showToast({ title: "The copy wasn’t saved", description: message(error) })
     } finally {
@@ -480,7 +483,8 @@ function Editing({
 
 /** A text file too large to open whole: a page at a time, read-only, by Range requests. */
 function PagedText(props: ViewerProps & { mode: TextMode }) {
-  const [start, setStart] = useState(0)
+  const [starts, setStarts] = useState([0])
+  const start = starts.at(-1)!
   const [page, setPage] = useState<{ for: string; text: string; next: number } | { for: string; error: string } | null>(
     null
   )
@@ -514,14 +518,14 @@ function PagedText(props: ViewerProps & { mode: TextMode }) {
         <Button
           hint="Shows the page before this one."
           disabled={start === 0}
-          onClick={() => setStart(Math.max(0, start - PAGE_BYTES))}
+          onClick={() => setStarts(starts.slice(0, -1))}
         >
           Previous page
         </Button>
         <Button
           hint="Shows the next part of the file."
           disabled={shown === null || "error" in shown || shown.next >= props.size}
-          onClick={() => shown && !("error" in shown) && setStart(shown.next)}
+          onClick={() => shown && !("error" in shown) && setStarts([...starts, shown.next])}
         >
           Next page
         </Button>

@@ -15,7 +15,7 @@ import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 81
+export const ASSEMBLER_VERSION = 83
 
 export type Role = "system" | "user" | "assistant"
 
@@ -394,6 +394,8 @@ export interface ContextSnapshot {
   /** What `{{summary}}` filled in, for the preset editor and the Notes tab. */
   readonly summaryFill?: import("@dreamspan/shared/inspectorApi.ts").SummaryFill
   readonly historyStart?: HistoryStart
+  /** Bounds of the read history left out by the budget, after filtering to the speaker's view. */
+  readonly historyCut?: { readonly first: number; readonly last: number }
   readonly historyMove?: "initial" | "maximum" | "budget" | "restore" | "unchanged"
   readonly historyBudget?: number
   /** Frozen inputs to registered summary transforms, before they shape the outgoing request. */
@@ -885,6 +887,8 @@ export interface ModelInput {
    */
   readonly cacheContract?: string | null
   readonly key: string
+  /** Canonical model ID from the model catalog, when available. */
+  readonly catalogKey?: string
   readonly prefill: "none" | "assistant" | "tool_schema"
   readonly continueUnavailable?: string | undefined
   readonly toolLoading?: "auto" | "every" | "dispatcher"

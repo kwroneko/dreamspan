@@ -88,6 +88,29 @@ const settled = (slotId: SlotId) =>
 const lineCount = (paragraph: Locator) =>
   paragraph.evaluate((p) => Math.round(p.clientHeight / parseFloat(getComputedStyle(p).lineHeight)))
 
+test("switching from expanded guidance to a short swipe removes the disclosure", async ({ page }) => {
+  const { chatId, shortSlot } = await harbor()
+  await settled(shortSlot)
+  await rpc((api) =>
+    Effect.gen(function* () {
+      const path = yield* api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+      const reply = path.entries.find((entry) => entry.slotId === shortSlot)!
+      yield* api.Regenerate({ slotId: shortSlot, expectedRowVersion: reply.rowVersion, direction: LONG })
+    })
+  )
+  await settled(shortSlot)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chatId}`)
+  const reply = page.locator(`article[data-slot="${shortSlot}"]`)
+  const guidance = reply.getByTestId("message-direction")
+  await guidance.getByRole("button", { name: /^Show more/ }).click()
+  await expect(guidance.getByRole("button", { name: /^Show less/ })).toBeVisible()
+  await reply.getByRole("button", { name: /Previous swipe/ }).click()
+  await expect(guidance).toContainText(SHORT)
+  await expect(guidance.getByRole("button", { name: /^Show (more|less)/ })).toHaveCount(0)
+})
+
 for (const width of [1440, 390]) {
   for (const theme of ["light", "dark"] as const) {
     test(`long guidance folds to three lines with Show more, short has none (${width}px, ${theme})`, async ({

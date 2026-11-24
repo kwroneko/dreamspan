@@ -3,11 +3,34 @@ import { type FieldPath, getAt } from "@dreamspan/shared/editing.ts"
 import { type ReactNode, useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
-import { CodeEditor } from "../../ui/CodeEditor.tsx"
+import { CodeEditor, type CodeEditorProps } from "../../ui/CodeEditor.tsx"
+import { MessageTextEditor } from "../../ui/MessageTextEditor.tsx"
+import { flashItem } from "../../ui/reveal.ts"
 import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
-import { type EditorStore, useComparisonRevision, useRevisionDoc } from "./store.ts"
+import { type EditorStore, useComparisonRevision, useEditorKind, useRevisionDoc } from "./store.ts"
 import { useFieldTabHref } from "./useFieldTabHref.ts"
 import { useEditorReadOnly } from "./readOnly.ts"
+
+/**
+ * A card field holding message text, shown styled as the message renders (owner, 2026-11-24:
+ * "the greetings, and the example dialogue fields"): the first message and each alternate or
+ * group greeting are messages, the example dialogue is messages between `<START>` lines and
+ * speaker prefixes. Everything else (description, personality, scenario, the prompts, the
+ * creator's notes) is prompt or reference text and stays plain.
+ */
+function cardMessageField(kind: string | undefined, path: FieldPath): CodeEditorProps["messageField"] {
+  if (kind !== "card") return undefined
+  const [field, index] = path
+  if (path.length === 1 && field === "first_mes") return "message"
+  if (path.length === 1 && field === "mes_example") return "examples"
+  if (
+    path.length === 2 &&
+    (field === "alternate_greetings" || field === "group_only_greetings") &&
+    typeof index === "number"
+  )
+    return "message"
+  return undefined
+}
 
 /** Comparison reads never alter a draft or the identity its next save will name. */
 export function CardTextEditor({
@@ -74,6 +97,8 @@ export function CardTextEditor({
   const [comparison, setComparison] = useState<{ revision: typeof revision; value: string } | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   const key = JSON.stringify(path)
+  const kind = useEditorKind(store)
+  const messageField = mono ? undefined : cardMessageField(kind, path)
   useEffect(() => {
     let live = true
     if (revision !== null)
@@ -93,40 +118,53 @@ export function CardTextEditor({
       live = false
     }
   }, [store, revision, key])
+  const props: CodeEditorProps = {
+    value,
+    autoFocus,
+    selection: searchMatch,
+    highlights,
+    flash,
+    onRevealSelection: (host, top) => {
+      scrollToSearchField(host, top)
+      // The lazy editor's frame exists once its selection can be revealed.
+      if (searchMatch?.landed) {
+        const frame = host.closest<HTMLElement>("[data-field-frame]")
+        if (frame) flashItem(frame)
+      }
+    },
+    base: comparison?.revision === revision ? comparison.value : value,
+    label,
+    rows,
+    minHeight,
+    fullHeight,
+    resizable,
+    mono,
+    // Prose has text actions; a pattern or a template's markers (mono) doesn't.
+    textActions: !mono,
+    readOnly: locked,
+    source,
+    tools,
+    ...(locked ? {} : { lastRevision: typeof saved === "string" ? saved : "" }),
+    onRevert: async () => {
+      const result = await store.revertField(field, path, typeof saved === "string" ? saved : "")
+      setError(result.ok ? null : result.error)
+      return result.ok && getAt(store.working().doc, path) === (typeof saved === "string" ? saved : "")
+    },
+    status,
+    expandTab,
+    fill,
+    onSelectionRangeChange,
+    onChange,
+    onBlur
+  }
   return (
     <>
-      <CodeEditor
-        value={value}
-        autoFocus={autoFocus}
-        selection={searchMatch}
-        highlights={highlights}
-        flash={flash}
-        onRevealSelection={scrollToSearchField}
-        base={comparison?.revision === revision ? comparison.value : value}
-        label={label}
-        rows={rows}
-        minHeight={minHeight}
-        fullHeight={fullHeight}
-        resizable={resizable}
-        mono={mono}
-        // Prose has text actions; a pattern or a template's markers (mono) doesn't.
-        textActions={!mono}
-        readOnly={locked}
-        source={source}
-        tools={tools}
-        {...(locked ? {} : { lastRevision: typeof saved === "string" ? saved : "" })}
-        onRevert={async () => {
-          const result = await store.revertField(field, path, typeof saved === "string" ? saved : "")
-          setError(result.ok ? null : result.error)
-          return result.ok && getAt(store.working().doc, path) === (typeof saved === "string" ? saved : "")
-        }}
-        status={status}
-        expandTab={expandTab}
-        fill={fill}
-        onSelectionRangeChange={onSelectionRangeChange}
-        onChange={onChange}
-        onBlur={onBlur}
-      />
+      {messageField === undefined ? (
+        <CodeEditor {...props} />
+      ) : (
+        // The same box and styling as a message's edit and the composer (ui/MessageTextEditor.tsx).
+        <MessageTextEditor {...props} messageField={messageField} />
+      )}
       <ErrorAlert error={error} />
     </>
   )

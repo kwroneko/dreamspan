@@ -69,26 +69,30 @@ export const locate = (
     const unlocated: Array<PartNode> = []
     let cursor = from
     for (const node of nodes) {
-      // A message goes out without carriage returns (ST's setOpenAIMessages) while its piece
-      // keeps the text as stored, CRLF from an imported card's greeting say: that removal
-      // isn't a rewrite, so a piece not there as recorded is searched without them.
-      const text =
-        node.text.includes("\r") && !content.includes(node.text) ? node.text.replace(/\r/g, "") : node.text
-      if (text.trim() === "") continue
-      let at = content.indexOf(text, cursor)
-      if (at === -1 || !free(at, at + text.length)) {
-        at = -1
-        for (let i = content.indexOf(text, from); i !== -1; i = content.indexOf(text, i + 1))
-          if (free(i, i + text.length)) {
-            at = i
+      if (node.text.trim() === "") continue
+      // History goes out without carriage returns (ST's setOpenAIMessages), while stored
+      // pieces and other prompts may keep them. The first eligible match wins across both forms.
+      const forms = node.text.includes("\r") ? [node.text, node.text.replaceAll("\r", "")] : [node.text]
+      const find = (start: number) => {
+        let match: Span | null = null
+        for (const text of forms) {
+          for (
+            let at = content.indexOf(text, start);
+            at !== -1 && at + text.length <= to && (match === null || at < match.start);
+            at = content.indexOf(text, at + 1)
+          ) {
+            if (!free(at, at + text.length)) continue
+            match = { start: at, end: at + text.length, source: node.source }
             break
           }
+        }
+        return match
       }
-      if (at === -1) {
+      const span = find(cursor) ?? (cursor === from ? null : find(from))
+      if (span === null) {
         if (!node.frame) found.push({ node, span: null })
         continue
       }
-      const span = { start: at, end: at + text.length, source: node.source }
       found.push({ node, span })
       siblings.push(span)
       if (node.parts?.length) {

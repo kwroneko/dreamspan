@@ -81,6 +81,14 @@ describe("reasoning counts per provider usage", () => {
     assert.deepStrictEqual(resolveReasoning(plan, 778, 6), { reasoning: 772, estimated: true })
   })
 
+  it("leaves hidden thinking unknown when ordinary tool output contributes to the reported total", () => {
+    const omitted = { type: "thinking" as const, thinking: "", thinkingSignature: "sig" }
+    const tool = { type: "toolCall" as const, id: "call", name: "search", arguments: { query: "river crossing" } }
+    const raw = { input_tokens: 10, output_tokens: 50 }
+    const plan = reasoningPlan(message("anthropic-messages", [omitted, tool]), captured(raw), "reported")
+    assert.deepStrictEqual(resolveReasoning(plan, 50, 0), { reasoning: null, estimated: false })
+  })
+
   it("none: no thinking and no count is no reasoning; no usage at all is unknown", () => {
     const plan = reasoningPlan(
       message("openai-completions", [reply]),

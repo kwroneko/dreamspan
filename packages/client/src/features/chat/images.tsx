@@ -667,14 +667,17 @@ function ImageScope({
     if (!entry.file && !entry.path) return
     try {
       const attaching = files.current
+      const composer = draftId.current && { chatId: session.chatId, draftId: draftId.current, id: entry.id }
+      if (attaching && !composer) throw new Error("Wait for the chat to load before attaching.")
       // In a workshop, saved in Files first (or already there) and attached by its path (§6.1).
-      const attached = attaching
-        ? entry.file
-          ? await attaching.upload(entry.file, entry.name)
-          : await attaching.attach(entry.path!)
-        : entry.file
-          ? { mediaId: await uploadImage(entry.file) }
-          : null
+      const attached =
+        attaching && composer
+          ? entry.file
+            ? await attaching.upload(entry.file, entry.name, composer)
+            : await attaching.attach(entry.path!, composer)
+          : entry.file
+            ? { mediaId: await uploadImage(entry.file) }
+            : null
       if (!attached) throw new Error("Files can be attached in a workshop only.")
       const uploaded: ImageDraftEntry = {
         id: entry.id,
@@ -711,16 +714,17 @@ function ImageScope({
           })
         )
         if (!remote.ok) throw new Error(remote.error.message)
-        const tombstones = new Set(remote.value.filter((entry) => entry.status !== "active").map((entry) => entry.id))
+        const known = new Map(remote.value.map((entry) => [entry.id, entry.status]))
         for (const entry of remote.value) {
           if (entry.status === "active") await keepImage(fromServer(entry))
           else await dropImage(entry.id)
         }
         for (const entry of stored) {
-          if (tombstones.has(entry.id)) continue
+          const status = known.get(entry.id)
+          if (status && status !== "active") continue
           if (entry.sending)
             setError("A previous send was not acknowledged. Check the chat before sending these attachments again.")
-          await upload(entry)
+          if (!status) await upload(entry)
         }
       } finally {
         if (live) {
@@ -791,10 +795,10 @@ function ImageScope({
   }
   // The Files tab's Attach to message (§6.1).
   useEffect(
-    () => onAttachRequest(session.chatId, (path) => add([], [path])),
-    // `add` reads its state through refs and the queue; one subscription per chat.
+    () => onAttachRequest(session, view.forkId, (path) => add([], [path])),
+    // `add` reads its state through refs and the queue; one subscription per view and fork.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.chatId, ready]
+    [session, view.forkId, ready]
   )
   const capture = () => {
     const captured = entries.filter(
@@ -1079,6 +1083,11 @@ function PendingImageScope({ scope: key, children }: { scope: string; children: 
   const [error, setError] = useState<string | null>(null)
   // Taken by the first send that's out: shown as sending, not removable.
   const [sending, setSending] = useState<ReadonlySet<string>>(new Set())
+  const removing = useRef(new Set<string>())
+  useEffect(() => {
+    // Capture still sees the previous entries until React commits the new list.
+    for (const id of removing.current) if (!entries.some((entry) => entry.id === id)) removing.current.delete(id)
+  }, [entries])
   const queue = useRef(Promise.resolve())
   const enqueue = (run: () => Promise<void>) => {
     queue.current = queue.current.then(run).catch((error: unknown) => {
@@ -1154,16 +1163,25 @@ function PendingImageScope({ scope: key, children }: { scope: string; children: 
       }
     })
   }
-  const remove = (id: string) =>
+  const remove = (id: string) => {
+    if (removing.current.has(id)) return
+    removing.current.add(id)
     void enqueue(async () => {
-      await dropImage(id)
+      try {
+        await dropImage(id)
+      } catch (error) {
+        removing.current.delete(id)
+        throw error
+      }
+      setEntries((current) => current.filter((entry) => entry.id !== id))
       await refresh()
     })
+  }
   const uploaded = entries.filter((entry) => entry.mediaId && !sending.has(entry.id))
   const asSent = (list: readonly ImageDraftEntry[]): MessageImages =>
     list.map((entry) => ({ mediaId: entry.mediaId!, altText: entry.name.slice(0, 2000) }))
   const capture = () => {
-    const captured = uploaded
+    const captured = uploaded.filter((entry) => !removing.current.has(entry.id))
     const ids = new Set(captured.map((entry) => entry.id))
     setSending((current) => new Set([...current, ...ids]))
     return {

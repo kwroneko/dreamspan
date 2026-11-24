@@ -1,3 +1,5 @@
+import remarkParse from "remark-parse"
+import { unified } from "unified"
 import { sliceText, type SourceRun } from "./sourcePositions.ts"
 
 // ST 1.19 public/scripts/power-user.js fixMarkdown(text, true). This is deliberately
@@ -17,43 +19,58 @@ export function fixMarkdownMapped(text: string): { text: string; offsets: Array<
   }
 }
 
-/**
- * Fenced blocks (``` or ~~~, any info string, unterminated ones run to the end) and inline code spans
- * are code, not prose: the display fixes must not touch them (an html panel's `postMessage(x, '*')`).
- */
+const markdown = unified().use(remarkParse)
+type MarkdownRoot = ReturnType<typeof markdown.parse>
+const lineEnding = /(\r\n|\r|\n)/
+
+/** Block code uses the renderer's Markdown parser, whose offsets refer to the original text. */
 function codeRanges(text: string): Array<[number, number]> {
-  const ranges: Array<[number, number]> = []
-  let fence: { char: string; size: number; from: number } | null = null
-  let lineStart = 0
-  let prose = 0 // start of the prose since the last fence, scanned for inline code
-  const inline = (from: number, to: number) => {
-    const part = text.slice(from, to)
-    for (const match of part.matchAll(/(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g))
-      ranges.push([from + match.index, from + match.index + match[0].length])
-  }
-  while (lineStart <= text.length) {
-    const next = text.indexOf("\n", lineStart)
-    const end = next === -1 ? text.length : next
-    const line = text.slice(lineStart, end)
-    if (fence) {
-      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)
-      if (close && close[1]![0] === fence.char && close[1]!.length >= fence.size) {
-        ranges.push([fence.from, end])
-        fence = null
-        prose = end
-      }
-    } else {
-      const open = /^ {0,3}(`{3,}|~{3,})/.exec(line)
-      if (open) {
-        inline(prose, lineStart)
-        fence = { char: open[1]![0]!, size: open[1]!.length, from: lineStart }
+  const blocks: Array<[number, number]> = []
+  // Ordinary prose needs only the inline scan. Include possible quote, list and indent markers.
+  if (/^[ \t>+*\d.)-]*(?:`{3}|~{3}| {4}|\t)/m.test(text)) {
+    const visit = (node: MarkdownRoot | MarkdownRoot["children"][number]) => {
+      if (node.type === "code") {
+        const from = node.position?.start.offset
+        const to = node.position?.end.offset
+        if (from === undefined || to === undefined) return
+        // A list marker on a fence's opening line must not be repaired as emphasis.
+        let start = from
+        while (start > 0 && text[start - 1] !== "\r" && text[start - 1] !== "\n") start--
+        blocks.push([start, to])
+      } else if ("children" in node) {
+        for (const child of node.children) visit(child)
       }
     }
-    if (next === -1) break
-    lineStart = next + 1
+    visit(markdown.parse(text))
   }
-  if (fence) ranges.push([fence.from, text.length])
-  else inline(prose, text.length)
+  const ranges: Array<[number, number]> = []
+  const inline = (from: number, to: number) => {
+    const runs = [...text.slice(from, to).matchAll(/`+|(?:\r\n|\r(?!\n)|\n)[ \t]*(?:\r\n|\r(?!\n)|\n)/g)]
+    const next = new Map<number, number>()
+    const closes: Array<number | undefined> = []
+    for (let i = runs.length - 1; i >= 0; i--) {
+      const run = runs[i]![0]
+      if (run[0] !== "`") next.clear()
+      else {
+        closes[i] = next.get(run.length)
+        next.set(run.length, i)
+      }
+    }
+    for (let i = 0; i < runs.length; i++) {
+      const close = closes[i]
+      if (close === undefined) continue
+      const end = runs[close]!
+      ranges.push([from + runs[i]!.index, from + end.index + end[0].length])
+      i = close
+    }
+  }
+  let prose = 0
+  for (const range of blocks) {
+    inline(prose, range[0])
+    ranges.push(range)
+    prose = range[1]
+  }
+  inline(prose, text.length)
   return ranges
 }
 
@@ -64,7 +81,7 @@ function maskCode(text: string): string {
   let out = ""
   let at = 0
   for (const [from, to] of ranges) {
-    out += text.slice(at, from) + text.slice(from, to).replace(/[^\n]/g, "\u0000")
+    out += text.slice(at, from) + text.slice(from, to).replace(/[^\r\n]/g, "\u0000")
     at = to
   }
   return out + text.slice(at)
@@ -86,8 +103,13 @@ export function fixMarkdownRuns(text: string): { text: string; runs: Array<Sourc
     )
   }
   let fixed = ""
-  for (let i = 0; i < text.length; i++) if (!removed.has(i)) fixed += text[i]
-  const fixedMasked = maskCode(fixed).split("\n")
+  let keptMask = ""
+  for (let i = 0; i < text.length; i++) {
+    if (removed.has(i)) continue
+    fixed += text[i]
+    keptMask += masked[i]
+  }
+  const fixedMasked = keptMask.split(lineEnding)
   const original: SourceRun[] = []
   let source = 0
   let at = 0
@@ -123,21 +145,25 @@ export function fixMarkdownRuns(text: string): { text: string; runs: Array<Sourc
   }
   let cursor = 0
   const result = fixed
-    .split("\n")
+    .split(lineEnding)
     .map((line, index) => {
+      const start = cursor
+      cursor += line.length
+      if (index % 2) {
+        copy(start, cursor)
+        return line
+      }
       let result = line
       for (const char of ["*", '"']) {
         if (fixedMasked[index]!.split(char).length % 2 === 0) result = line.trimEnd() + char
       }
       const closed = result !== line
       const length = closed ? line.trimEnd().length : line.length
-      if (index) copy(cursor - 1, cursor)
-      copy(cursor, cursor + length)
+      copy(start, start + length)
       if (closed) append(1, null)
-      cursor += line.length + 1
       return result
     })
-    .join("\n")
+    .join("")
   return { text: result, runs }
 }
 

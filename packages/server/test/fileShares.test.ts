@@ -80,6 +80,19 @@ const shareAccepted = (
   })
 
 describe("shared folders", () => {
+  it.live("refuses an invitation for a folder containing the server plugins' working copies", () =>
+    Effect.gen(function* () {
+      const wren = as("wren")
+      const ash = as("ash")
+      yield* ash.listing("/files")
+      assert.strictEqual((yield* wren.upload("/files/Plugins/Server/notes.txt", "Synthetic.")).status, 200)
+      const offer = yield* wren.json("/files/share", { path: "/files/Plugins", handle: "ash", mode: "view" })
+      assert.strictEqual(offer.status, 400)
+      assert.include(yield* Effect.promise(() => offer.text()), "server plugins' working copies")
+      assert.isEmpty((yield* ash.listing("/files")).invitations ?? [])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ authMode: "proxy" }))))
+  )
+
   it.live("isolation, Can view, Can edit, stopping, and the owner's move", () =>
     Effect.gen(function* () {
       const wren = as("wren")
@@ -597,6 +610,11 @@ describe("shared folders", () => {
       // Without a recorded birth time (a filesystem with none), the inode and device decide.
       yield* fixtureSql(config.dataDir, [{ sql: "UPDATE file_shares SET birth_ms = NULL" }])
       assert.strictEqual(yield* ash.text("/files/Shared/wren/A/a.txt"), "A.")
+      const downgrade = yield* wren.json("/files/share", { path: "/files/A", handle: "ash", mode: "view" })
+      assert.strictEqual(downgrade.status, 200)
+      assert.deepInclude(yield* wren.read<FolderShare>(downgrade), { status: "active", mode: "view" })
+      assert.strictEqual(yield* statusOf(ash.upload("/files/Shared/wren/A/new.txt", "x")), 403)
+      assert.isEmpty((yield* ash.listing("/files")).invitations ?? [])
       // Sharing it again binds the folder as it is now, birth time included.
       yield* fixtureSql(config.dataDir, [{ sql: "UPDATE file_shares SET birth_ms = 1" }])
       assert.strictEqual(yield* statusOf(ash.list("/files/Shared/wren/A")), 404)

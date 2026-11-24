@@ -60,10 +60,9 @@ for (const theme of ["light", "dark"] as const)
       // Anchored to the title: its left edge at the title's right edge plus the header's gap.
       const gap = await title.evaluate((node) => parseFloat(getComputedStyle(node.parentElement!).columnGap))
       expect(gap, `${what}: header gap`).toBeGreaterThan(0)
-      expect(
-        Math.abs(buttonBox.x - (titleBox.x + titleBox.width + gap)),
-        `${what}: just after the title`
-      ).toBeLessThan(1)
+      expect(Math.abs(buttonBox.x - (titleBox.x + titleBox.width + gap)), `${what}: just after the title`).toBeLessThan(
+        1
+      )
       // The title is whole, and the button inside the header's padding.
       expect(await title.evaluate((node) => node.scrollWidth <= node.clientWidth), `${what}: title whole`).toBe(true)
       const rowEnd = await row.evaluate(

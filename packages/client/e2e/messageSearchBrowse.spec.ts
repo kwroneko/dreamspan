@@ -150,3 +150,46 @@ for (const width of [1440, 390])
     await visit(`?character=${wren}&sideIn=messages&sideQ=lantern&sideChatsShow=solo`)
     await expect.poll(names).toEqual(["Middle wren"])
   })
+
+test("Chat search replaces its loaded page when a rename changes the order", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const rename = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const bravo = yield* api.CreateChat({ title: "Bravo" })
+      const charlie = yield* api.CreateChat({ title: "Charlie" })
+      let parentSlotId = bravo.activeLeafSlotId
+      for (let i = 0; i < 21; i++) {
+        const sent = yield* api.SendMessage({
+          chatId: bravo.id,
+          parentSlotId,
+          branch: false,
+          content: `Compass Bravo ${i}.`,
+          reply: false
+        })
+        if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
+        parentSlotId = sent.entry.slotId
+      }
+      yield* api.SendMessage({
+        chatId: charlie.id,
+        parentSlotId: null,
+        branch: false,
+        content: "Compass Charlie.",
+        reply: false
+      })
+      return bravo.id
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/?sideIn=messages&sideQ=compass&sideMsgSort=chat`)
+  const results = page.getByRole("list", { name: "Messages found" })
+  const hits = results.locator("[data-hit-chat]")
+  await expect(hits).toHaveText(Array<string>(20).fill("Bravo"))
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.RenameChat({ chatId: rename, name: "Zulu" }))
+  const more = results.getByRole("button", { name: "Show more" })
+  await more.click()
+  await expect(hits).toHaveText(["Charlie", ...Array<string>(19).fill("Zulu")])
+  await more.click()
+  await expect(hits).toHaveText(["Charlie", ...Array<string>(21).fill("Zulu")])
+  const text = await results.locator("[data-hit-text]").allTextContents()
+  expect(new Set(text).size).toBe(22)
+})

@@ -5,6 +5,7 @@
 // (`image_block="true"`) to a model that sees images. The lines stay with the message in every
 // later turn, so the file can be found again after summaries.
 import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
+import { ATTACHMENT_COPY_ROOT } from "@dreamspan/shared/files.ts"
 import type { Assembly } from "./pipeline.ts"
 import type { HistoryAttachment, HistoryEntry } from "./types.ts"
 
@@ -26,5 +27,5 @@ export const attachmentLines = (attachments: ReadonlyArray<HistoryAttachment>, v
   attachments.map((a) => {
     const block = a.image && !a.excluded && vision !== false
     const note = a.image && vision === false ? ` note="This model can't see images."` : ""
-    return `<attachment filename="${attribute(a.name)}" type="${attribute(a.mime)}" size="${formatByteSize(a.size)}" path="${attribute(a.path)}"${block ? ` image_block="true"` : ""}${note}/>`
+    return `<attachment filename="${attribute(a.name)}" type="${attribute(a.mime)}" size="${formatByteSize(a.size)}" path="${attribute(`${ATTACHMENT_COPY_ROOT}/${a.mediaId}`)}"${block ? ` image_block="true"` : ""}${note}/>`
   })

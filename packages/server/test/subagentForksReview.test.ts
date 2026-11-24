@@ -209,6 +209,11 @@ describe("subagent forks and types after review", () => {
       yield* api.ChangeSubagentSettings({ picks: [other.pick], rows: { [other.pick]: { alias: "quick", note: "" } } })
       const without = yield* offer()
       assert.notInclude(without, "fork")
+
+      yield* api.ChangeSubagentType({ id: "research", edit: { id: "research", context: "fork" } })
+      const override = JSON.parse(yield* offer())
+      assert.strictEqual(override.parameters.properties.context.const, "task")
+      assert.notInclude(override.parameters.required, "context")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

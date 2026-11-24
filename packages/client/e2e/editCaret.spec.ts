@@ -3,8 +3,10 @@
 // line was on screen, so the view doesn't jump (ui/holdCaret.ts). A long synthetic message with
 // bold, italics, lists and repeated words, and a swipe of the fake generator's markdown reply.
 import { expect, type Locator, type Page, test } from "@playwright/test"
+import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { showActions } from "./support/message.ts"
+import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { replaceEditorText, textBoxValue } from "./support/textbox.ts"
 
@@ -111,6 +113,46 @@ const settledPlace = async (message: Locator) => {
 
 const settled = (page: Page) =>
   expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
+
+test("a double-click uses the amended source when the version changes between presses", async ({ page }) => {
+  const original = "The lamp # marks the pier before dusk."
+  const revised = "The lamp \\# marks the pier after dusk."
+  const { chatId, version } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Caret after amendment" })
+      const sent = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        content: original,
+        reply: false
+      })
+      if (sent._tag !== "Posted") throw new Error("Expected a posted message")
+      return { chatId: chat.id, version: sent.entry.version }
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chatId}`)
+  const message = page.getByRole("article", { name: "Your message", exact: true })
+  const body = message.locator(".markdown")
+  await expect(body.locator("p")).toHaveText(original)
+  const first = await wordPoint(body, "marks", 0, 2)
+  await body.dispatchEvent("mousedown", { detail: 1, clientX: first.x, clientY: first.y })
+
+  const amended = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.AmendVersion({ versionId: version.id, expectedRowVersion: version.rowVersion, content: revised })
+  )
+  expect(amended.id).toBe(version.id)
+  await expect(body.locator("p")).toHaveText("The lamp # marks the pier after dusk.")
+  const second = await wordPoint(body, "marks", 0, 2)
+  expect(Math.hypot(second.x - first.x, second.y - first.y)).toBeLessThanOrEqual(8)
+  await body.dispatchEvent("dblclick", { detail: 2, clientX: second.x, clientY: second.y })
+
+  const editor = message.getByRole("textbox", { name: "Message text", exact: true })
+  await expect(editor).toBeFocused()
+  expect(await textBoxValue(editor)).toBe(revised)
+  expect((await caretOf(editor)).head).toBe(revised.indexOf("marks") + 2)
+})
 
 for (const width of [1440, 390])
   test(`a double-click opens the edit at the clicked word, where it was on screen ${width}`, async ({ page }) => {

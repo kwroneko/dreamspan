@@ -17,11 +17,13 @@ export const parseTable = (text: string, delimiter: "," | "\t", limit = TABLE_RO
   let total = 0
   let row: Array<string> = []
   let field = ""
+  let fieldStarted = false
   let quoted = false
   let i = 0
   const endRow = () => {
     row.push(field)
     field = ""
+    fieldStarted = false
     if (rows.length <= limit) rows.push(row)
     total++
     row = []
@@ -40,17 +42,21 @@ export const parseTable = (text: string, delimiter: "," | "\t", limit = TABLE_RO
       i++
       continue
     }
-    if (c === '"' && field === "") quoted = true
-    else if (c === delimiter) {
+    if (c === delimiter) {
       row.push(field)
       field = ""
+      fieldStarted = false
     } else if (c === "\r" || c === "\n") {
       endRow()
       if (c === "\r" && text[i + 1] === "\n") i++
-    } else field += c
+    } else {
+      fieldStarted = true
+      if (c === '"' && field === "") quoted = true
+      else field += c
+    }
     i++
   }
-  if (field !== "" || row.length > 0) endRow()
+  if (fieldStarted || row.length > 0) endRow()
   const width = Math.max(0, ...rows.map((r) => r.length))
   return {
     rows: rows.map((r) => (r.length < width ? [...r, ...Array<string>(width - r.length).fill("")] : r)),

@@ -72,12 +72,17 @@ export const ComposerImage = Schema.Struct({
 })
 export type ComposerImage = typeof ComposerImage.Type
 export const ComposerImageKey = { chatId: ChatId, draftId: Schema.String }
+/** A composer image slot to fill with a Files copy in the same write. */
+export const AttachmentComposer = Schema.Struct({
+  ...ComposerImageKey,
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))
+})
+export type AttachmentComposer = typeof AttachmentComposer.Type
 export const ComposerImageIds = Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))).check(
   Schema.isMaxLength(32)
 )
 export const SetComposerImageFields = {
-  ...ComposerImageKey,
-  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  ...AttachmentComposer.fields,
   mediaId: Schema.NullOr(Schema.String),
   altText: Schema.String.check(Schema.isMaxLength(2000)),
   kind: Schema.optionalKey(Schema.Literals(["file"])),

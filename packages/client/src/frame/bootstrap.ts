@@ -527,29 +527,18 @@ function wallUp() {
         }
     )
 
-  // The Sanitizer API's calls go through the default policy too, as their unsafe forms do.
-  for (const target of [Element.prototype, ShadowRoot.prototype] as Array<object>) {
-    const unsafe = describe(target, "setHTMLUnsafe")?.value as ((html: string) => void) | undefined
-    if (describe(target, "setHTML") !== undefined)
-      defineProperty(target, "setHTML", {
-        value(this: unknown, html: unknown) {
-          if (unsafe === undefined) throw new DOMException("Not supported in panels.", "NotSupportedError")
-          apply(unsafe, this, [`${html as string}`])
-        },
-        writable: false,
-        configurable: false
-      })
-  }
-  const parseUnsafe = describe(Document, "parseHTMLUnsafe")?.value as ((html: string) => Document) | undefined
-  if (describe(Document, "parseHTML") !== undefined)
-    defineProperty(Document, "parseHTML", {
-      value(html: unknown) {
-        if (parseUnsafe === undefined) throw new DOMException("Not supported in panels.", "NotSupportedError")
-        return apply(parseUnsafe, Document, [`${html as string}`])
-      },
-      writable: false,
-      configurable: false
-    })
+  // These safe methods don't use Trusted Types. Apply the same wall and let the
+  // browser apply its native sanitizer, including any caller-supplied options.
+  const safeHtml = (native: Native) =>
+    function (this: unknown, ...args: Array<unknown>) {
+      if (args.length === 0) return apply(native, this, args)
+      const filtered = wallHtml(`${args[0] as string}`, false)
+      if (filtered === null) throw new TypeError("That HTML isn't allowed in panels.")
+      return apply(native, this, rest(args, 1, [filtered]))
+    }
+  wrapMethod(Element.prototype, "setHTML", safeHtml)
+  wrapMethod(ShadowRoot.prototype, "setHTML", safeHtml)
+  wrapMethod(Document, "parseHTML", safeHtml)
 }
 
 interface TrustedTypePolicyFactory {

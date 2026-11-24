@@ -251,7 +251,9 @@ export const reasoningPlan = (
   const thinking = message.content.flatMap((block) => (block.type === "thinking" ? [block] : []))
   if (thinking.length === 0) return { kind: "none" }
   const hidden = thinking.some((block) => block.redacted === true || block.thinking.trim().length === 0)
-  if (hidden && source === "reported")
+  if (hidden && source === "reported") {
+    // The reply text estimate omits ordinary tool calls, whose output is in the total.
+    if (message.content.some((block) => block.type === "toolCall" && block.name !== replyTool)) return null
     return {
       kind: "rest",
       reply: messageText(
@@ -259,6 +261,7 @@ export const reasoningPlan = (
         replyTool
       )
     }
+  }
   return {
     kind: "thinking",
     text: thinking

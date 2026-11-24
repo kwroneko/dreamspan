@@ -3,7 +3,7 @@
 import type { Model, ModelId } from "@dreamspan/shared/providers.ts"
 import { expect, it } from "vitest"
 import { commonOf, copyFields, fieldsChanged, fieldsSet, massPatches } from "../src/features/connections/modelFields.ts"
-import { draftOf } from "../src/features/connections/modelForm.ts"
+import { afterSave, draftOf } from "../src/features/connections/modelForm.ts"
 
 const model = (id: string, overrides: Model["overrides"]) => ({ id: id as ModelId, overrides }) as unknown as Model
 
@@ -30,6 +30,23 @@ it("what many models share, and how they differ", () => {
   expect(draft.settings).toEqual({})
   expect(mixed.temperature).toBe("not set on 2, 0.2 on 1")
   expect(mixed.vision).toBeUndefined()
+})
+
+it("compares bulk settings by value, preserving array order and explicit nulls", () => {
+  const sampling = { top_k: 30, min_p: 0.1, extra: [1, { b: 2, a: null }] }
+  const a = model("a", { sampling })
+  const same = model("b", { sampling: { extra: [1, { a: null, b: 2 }], min_p: 0.1, top_k: 30 } })
+  const { draft, mixed } = commonOf([a, same])
+  expect(mixed.sampling).toBeUndefined()
+  expect(
+    massPatches(draft, ["sampling"], [{ id: a.id, limits: { context: 8192, maxOutput: 4096 } }])[0]?.values
+  ).toEqual({ sampling })
+  for (const other of [
+    { ...sampling, extra: [{ b: 2, a: null }, 1] },
+    { ...sampling, extra: [1, { b: 2 }] }
+  ]) {
+    expect(commonOf([a, model("b", { sampling: other })]).mixed.sampling).toBeDefined()
+  }
 })
 
 it("a copy fills and names every field the source sets", () => {
@@ -76,4 +93,24 @@ it("patches carry only the ticked paths, each model within its limits", () => {
       values: { settings: { samplers: { temperature: 0.7, openai_max_context: 64_000, openai_max_tokens: 9000 } } }
     }
   ])
+})
+
+// Review of 7e301b2d9 (1): text typed while Save is on its way isn't the saved text's to clear.
+it("a Save clears the typed text it saved, and keeps what was typed while it was on its way", () => {
+  const submitted = { ...draftOf({ name: "Renamed" }, 1), drafts: { "settings.samplers.temperature": "0.70" } }
+  const since = {
+    ...submitted,
+    drafts: { ...submitted.drafts, "settings.context_target": "12.5" },
+    rows: { "settings.stop": [{ name: "", value: "END" }] }
+  }
+  expect(JSON.parse(afterSave(submitted, 2)(JSON.stringify(submitted)))).toMatchObject({
+    rowVersion: 2,
+    drafts: {},
+    rows: {}
+  })
+  expect(JSON.parse(afterSave(submitted, 2)(JSON.stringify(since)))).toMatchObject({
+    rowVersion: 2,
+    drafts: { "settings.context_target": "12.5" },
+    rows: { "settings.stop": [{ name: "", value: "END" }] }
+  })
 })

@@ -356,15 +356,28 @@ export class FileDraft {
     return true
   }
 
-  /** The edit was saved elsewhere (Save as a copy): it ends as committed, and the box shows the file again. */
-  async ended(): Promise<boolean> {
+  /** Uploads the text shown now and commits that edit if it is still current. */
+  async saveCopy<A>(upload: (text: string) => Promise<A>): Promise<A> {
+    const edits = this.edits
+    const text = this.shown()
+    const uploaded = await upload(text)
+    if (this.edits !== edits) return uploaded
     await this.flush()
-    if (this.local !== null) return false
-    if (!(await this.end("committed"))) return false
-    this.base = baseOf(null)
-    this.forget()
-    this.refresh({ error: null, conflict: false })
-    return true
+    await this.serial(async () => {
+      if (this.edits !== edits || this.local !== null || this.shown() !== text) return
+      if (!(await this.end("committed"))) return
+      this.observedDeletion = null
+      if (this.local !== null) {
+        // Text typed while the end was on its way starts a new session on the same file hash.
+        this.base = { ...baseOf(this.draft), sha256: this.typedOn() }
+        this.keep(this.local)
+      } else {
+        this.base = baseOf(this.draft)
+        this.forget()
+      }
+      this.refresh({ error: null })
+    })
+    return uploaded
   }
 
   dispose() {

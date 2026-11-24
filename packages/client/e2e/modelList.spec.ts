@@ -156,6 +156,58 @@ test("ticks survive filter changes; Hide applies to the selected rows shown, wit
   expect(await hiddenKeys(id)).toHaveLength(0)
 })
 
+test("Hide and Show require at most 10,000 selected models in view", async ({ page }) => {
+  test.setTimeout(120_000)
+  const large = await startProvider({
+    models: [
+      ...Array.from({ length: 10_000 }, (_, i) => ({ id: `bulk-model-${i}`, context_length: 32_768 })),
+      { id: "other-model", context_length: 32_768 }
+    ]
+  })
+  try {
+    const connectionId = await admin((api) =>
+      Effect.gen(function* () {
+        const connection = yield* api.CreateConnection({
+          kind: "openai-chat",
+          settings: {
+            name: "Bulk request limit",
+            baseUrl: large.baseUrl,
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          }
+        })
+        yield* api.RefreshModels({ connectionId: connection.id })
+        return connection.id
+      })
+    )
+    await open(page, connectionId)
+    await expect(tab(page, "Visible")).toHaveText("Visible 10,001")
+    await headerTick(page).click()
+    const limit = "Select at most 10,000 models shown here."
+    const hide = (n: string) => page.getByRole("button", { name: `Hide ${n}`, exact: true })
+    await expect(hide("10,001")).toBeDisabled()
+    await expect(hide("10,001")).toHaveAccessibleDescription(limit)
+    await filter(page).fill("bulk-model-")
+    await expect(hide("10,000")).toBeEnabled()
+    await hide("10,000").click()
+    await expect(tab(page, "Visible")).toHaveText("Visible 0")
+    await filter(page).fill("")
+    // Hide the last selected model too, then try the same selection in the other direction.
+    await hide("1").click()
+    await expect(tab(page, "Hidden")).toHaveText("Hidden 10,001")
+    await headerTick(page).click()
+    const show = (n: string) => page.getByRole("button", { name: `Show ${n}`, exact: true })
+    await expect(show("10,001")).toBeDisabled()
+    await expect(show("10,001")).toHaveAccessibleDescription(limit)
+    await filter(page).fill("bulk-model-")
+    await expect(show("10,000")).toBeEnabled()
+  } finally {
+    await large.stop()
+  }
+})
+
 test("selected rows filtered out or on another tab are never acted on", async ({ page }) => {
   const id = await connectionWithModels("llama")
   await open(page, id)

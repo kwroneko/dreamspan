@@ -96,6 +96,28 @@ const toBin = (row: { readonly target_kind: DraftKey["targetKind"]; readonly fie
     (row.field.startsWith("=") || isHeldField(row.field))
   )
 
+/**
+ * What of a draft's lost states goes to the bin: text as it is; of a value, only a list of
+ * text (a lorebook entry's keys), one per line, as typed. Other values (settings) never do.
+ */
+const binTexts = (
+  row: { readonly target_kind: DraftKey["targetKind"]; readonly field: string },
+  states: ReadonlyArray<string>
+): ReadonlyArray<string> => {
+  if (toBin(row)) return states
+  if (isHeldField(row.field)) return []
+  return states.flatMap((state) => {
+    try {
+      const value: unknown = JSON.parse(state)
+      return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string")
+        ? [value.join("\n")]
+        : []
+    } catch {
+      return []
+    }
+  })
+}
+
 /** A field's value in a document, as its draft holds it: text, or a value's JSON. */
 export const fieldContent = (doc: unknown, field: string) => {
   const parsed = parseField(field)
@@ -1020,11 +1042,14 @@ export const makeDraftStore = (
           : null
       // Text the commit keeps (or the revision it was typed on holds) isn't lost.
       const earlier = beforeKept(draft.content, yield* entries(draft.id))
-      const lost = stillLost(outcome === "discarded" ? [draft.content, ...earlier] : earlier, [
-        ...(outcome === "committed" ? [draft.content] : []),
-        ...(based === null ? [] : [based])
-      ])
-      if (toBin(draft))
+      const lost = binTexts(
+        draft,
+        stillLost(outcome === "discarded" ? [draft.content, ...earlier] : earlier, [
+          ...(outcome === "committed" ? [draft.content] : []),
+          ...(based === null ? [] : [based])
+        ])
+      )
+      if (lost.length > 0)
         yield* recover(draft.user_id, toDraft(draft).key, lost, outcome === "discarded" ? "discard" : "commit")
       yield* sql`DELETE FROM draft_history WHERE draft_id = ${draft.id}`
       const updatedAt = now()
@@ -1051,9 +1076,9 @@ export const makeDraftStore = (
           updated_at: updatedAt,
           history_length: 0
         },
-        toBin(draft) ? lost.length : 0
+        lost.length
       )
-      return { draft: ended, recovered: toBin(draft) ? lost.length : 0 }
+      return { draft: ended, recovered: lost.length }
     })
 
   const clear = (

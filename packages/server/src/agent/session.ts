@@ -340,7 +340,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
        * (claudeThinking.ts `claudeBoundThinking`): each image the run sends stays sent, and one
        * past the model's image limit is left out where it arrives (`takeImages`), never later.
        */
-      const appendOnlyImages = model.api === "anthropic-messages" && claudeBoundThinking(model.key)
+      const appendOnlyImages = model.api === "anthropic-messages" && claudeBoundThinking(model.key, model.catalogKey)
       /** Images the run's requests carry: the frozen request's and its transcript's, counted at the first. */
       let imagesSent: number | undefined
       /** How many of `n` new images fit under the model's limit; those are counted as sent. */

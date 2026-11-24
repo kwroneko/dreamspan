@@ -17,9 +17,10 @@ let provider: FakeProvider
 let chat: { readonly id: ChatId; readonly reply: VersionId }
 
 const long = (what: string, lines: number) =>
-  Array.from({ length: lines }, (_, i) => `${what}, line ${i + 1}: the tide charts are kept in the harbor office.`).join(
-    "\n"
-  )
+  Array.from(
+    { length: lines },
+    (_, i) => `${what}, line ${i + 1}: the tide charts are kept in the harbor office.`
+  ).join("\n")
 
 // Two long prompts above the target, a short target, and a much longer prompt right below it.
 const preset = (() => {

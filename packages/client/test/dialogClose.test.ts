@@ -12,6 +12,9 @@ vi.hoisted(() => vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
   useRef: () => ({ current: null }),
+  // Dialog measures its optional layout column in a layout effect after rendering.
+  useState: (initial: () => unknown) => [initial(), vi.fn()],
+  useLayoutEffect: () => undefined,
   // The only context read (ui/away.ts): a window on screen.
   use: () => false
 }))

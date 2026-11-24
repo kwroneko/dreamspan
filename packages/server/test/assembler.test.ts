@@ -1105,6 +1105,25 @@ describe("the context assembler", () => {
     expect(prefilled.request.messages.filter((m) => m.content.startsWith("message")).length).toBeLessThan(sent.length)
   })
 
+  it("does not warn about unread older messages with Chat History off", async () => {
+    const doc = preset({ openai_max_tokens: 200 })
+    const messages: Array<FixtureMessage> = Array.from({ length: 201 }, (_, i) => ({
+      side: i % 2 === 0 ? "assistant" : "user",
+      content: `message ${i} ${"word ".repeat(50)}`
+    }))
+    const modelInput = model({ context: 1000 })
+    const enabled = await assembled(chat({ messages, preset: doc, model: modelInput }))
+    expect(enabled.issues.map((issue) => issue.kind)).toContain("history_truncated")
+    const disabled = await assembled(
+      chat({
+        messages,
+        model: modelInput,
+        preset: { ...doc, order: doc.order.map((e) => (e.identifier === "chatHistory" ? { ...e, enabled: false } : e)) }
+      })
+    )
+    expect(disabled.issues.map((issue) => issue.kind)).not.toContain("history_truncated")
+  })
+
   it("fails when the preset's own prompts don't fit its budget", async () => {
     await expect(
       assembled(

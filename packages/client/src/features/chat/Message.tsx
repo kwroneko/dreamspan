@@ -38,6 +38,7 @@ import {
   useSyncExternalStore
 } from "react"
 import type { AppError } from "../../errors.ts"
+import { useEditorFocus } from "../../textActions.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
@@ -555,6 +556,10 @@ const onControl = (target: EventTarget | null) =>
 
 /** A double-click this close to its first press is on the spot pressed. */
 const SAME_SPOT_PX = 8
+const inEditFocusScope = (article: HTMLElement, node: Node | null) =>
+  node instanceof Element &&
+  article.contains(node) &&
+  node.closest("[data-message-edit-text], [data-message-edit-controls]") !== null
 
 /** Where an edit of `source` opens for a double-click on `spot` (ui/editCaret.ts); null where unknown. */
 const locateSpot = (spot: CaretSpot | null, source: string): EditCaret | null => spot && locateEditCaret(spot, source)
@@ -664,6 +669,7 @@ export const Message = memo(function Message({
   // A fresh one per edit, so an edit never starts with the last one's selection.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const selection = useMemo(() => editSelection(), [inPlace])
+  const editFocus = useEditorFocus(inEditFocusScope)
   // Edits and versions the user writes keep the message's speaker; older ones may have none,
   // and then another version's names it, or the first version's, deleted or not, so deleting
   // the original never makes a character's message the model's.
@@ -739,6 +745,7 @@ export const Message = memo(function Message({
     x: number
     y: number
     versionId: string
+    source: string
     caret: EditCaret | null
     thinking: ThinkingSpot | null
   } | null>(null)
@@ -750,7 +757,7 @@ export const Message = memo(function Message({
     if (event.detail <= 1 && (thinking || !editing)) {
       const source = thinking ? editableThinking(version) : version.content
       const caret = locateSpot(caretSpotAt(event.clientX, event.clientY), source)
-      pressed.current = { x: event.clientX, y: event.clientY, versionId: version.id, caret, thinking }
+      pressed.current = { x: event.clientX, y: event.clientY, versionId: version.id, source, caret, thinking }
     }
     if (pendingEdit.current === null) return
     clearTimeout(pendingEdit.current)
@@ -770,16 +777,15 @@ export const Message = memo(function Message({
     }
     // The caret where it landed in the stored text (ui/editCaret.ts), else at the end.
     const first = pressed.current
+    const source = thinking ? editableThinking(version) : version.content
     const caret =
       (first?.caret &&
       first.versionId === version.id &&
+      first.source === source &&
       first.thinking?.kind === thinking?.kind &&
       Math.hypot(first.x - event.clientX, first.y - event.clientY) <= SAME_SPOT_PX
         ? first.caret
-        : locateSpot(
-            caretSpotAt(event.clientX, event.clientY),
-            thinking ? editableThinking(version) : version.content
-          )) ?? undefined
+        : locateSpot(caretSpotAt(event.clientX, event.clientY), source)) ?? undefined
     clearTimeout(pendingEdit.current ?? undefined)
     const versionId = version.id
     pendingEdit.current = setTimeout(() => {
@@ -910,6 +916,7 @@ export const Message = memo(function Message({
                 onScrollIntoView()
               }}
               selection={selection}
+              selectionScopeFocused={editFocus.focused}
             />
           )
         : null
@@ -1027,6 +1034,8 @@ export const Message = memo(function Message({
 
   return (
     <article
+      onFocus={inPlace ? editFocus.onFocus : undefined}
+      onBlur={inPlace ? editFocus.onBlur : undefined}
       onFocusCapture={(event) => {
         if (
           density === "compact" &&

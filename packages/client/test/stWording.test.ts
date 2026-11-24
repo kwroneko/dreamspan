@@ -23,8 +23,8 @@ const INTEROP_FILES = new Set([
 const INTEROP_STRINGS = new Set([
   "features/ownTurnNotes/fields.tsx\tSillyTavern gets the original",
   "features/chat/headerContributions.tsx\tDownloads the branch shown as a SillyTavern chat file or plain text.",
-  "features/characters/CharactersPage.tsx\tImport from SillyTavern",
-  "features/characters/CharactersPage.tsx\tOpens the SillyTavern importer.",
+  "features/characters/CardGridEmpty.tsx\tImport from SillyTavern",
+  "features/characters/CardGridEmpty.tsx\tOpens the SillyTavern importer.",
   "features/firstRun/FirstRunSteps.tsx\tImport from SillyTavern",
   "features/connections/ModelSettingsEditor.tsx\tShows message formatting, caching, routing, provider parameters, and importing from an ST preset."
 ])

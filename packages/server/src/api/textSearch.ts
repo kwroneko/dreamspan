@@ -60,21 +60,25 @@ export const makeTextSearchHandlers = Effect.gen(function* () {
         const id = yield* userId
         const listed = yield* chatsOf(id, filter, entity, sort === "chat")
         // Z to A: the Chat sort's list the other way round.
-        const chats = sort === "chat" && reversed === true && listed !== null ? [...listed].reverse() : listed
+        const chats =
+          listed === null ? null : sort === "chat" && reversed === true ? [...listed.chats].reverse() : listed.chats
         return yield* reader.SearchMessages({
           userId: id,
           text,
           cursor,
           limit: MESSAGE_PAGE,
           sort: sort ?? "best",
-          chats
+          chats,
+          ...(listed === null || ((filter ?? "all") === "all" && (entity ?? null) === null)
+            ? {}
+            : { forks: listed.forks })
         })
       }).pipe(internal("SearchMessages")),
     CountMessages: ({ text, filter, entity }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const chats = yield* chatsOf(id, filter, entity, false)
-        return yield* reader.CountMessages({ userId: id, text, chats })
+        const scope = yield* chatsOf(id, filter, entity, false)
+        return yield* reader.CountMessages({ userId: id, text, ...scope })
       }).pipe(internal("CountMessages")),
     PreviewLibraryReplace: ({ search }) =>
       Effect.flatMap(userId, (id) => reader.PreviewLibraryReplace({ userId: id, search })).pipe(

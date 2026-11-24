@@ -57,7 +57,7 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
   const store = useSharedSummaryDraft(session, userId, summary)
   const view = useSyncExternalStore(store.subscribe, store.snapshot)
   useEffect(() => store.update(summary), [store, summary])
-  const { base, problem: comparisonError, retry } = useSummaryBase(session, summary, store)
+  const { base, problem: comparisonError, retry } = useSummaryBase(session, store)
   const label = summaryTextLabel(summary)
   const tab = useFieldTabLink(
     summaryTabHref({

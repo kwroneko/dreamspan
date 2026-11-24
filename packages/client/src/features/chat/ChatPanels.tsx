@@ -461,12 +461,15 @@ const followed = (tab: PanelTab | null, cast: ChatView["cast"], follows: Readonl
   const member = (id: string) => members.includes(id)
   let id = tab.slice(5)
   if (member(id)) return null
-  for (let step = 0; step < 8 && !member(id); step++) {
+  const visited = new Set<string>()
+  while (!member(id)) {
+    if (visited.has(id)) return null
+    visited.add(id)
     const to = follows.get(id)
     if (to === undefined) return null
     id = to
   }
-  return member(id) ? `card:${id}` : null
+  return `card:${id}`
 }
 
 /**

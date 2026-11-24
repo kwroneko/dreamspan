@@ -117,6 +117,8 @@ export interface ChatView {
   /** Whether the provider's cache is likely warm for the next reply (DESIGN §5.5); null without an estimate. */
   readonly cache: CacheWarmth | null
   readonly history: Omit<NextContext, "warmth"> | null
+  /** Bumped when the next context is assembled again, even if its estimate is identical. */
+  readonly contextRevision: number
   /** What stands in for older history on the path shown (DESIGN §8); null until read. */
   readonly lcm: LcmState | null
   /** Bumped each time the summaries are read and differ, so a window of coverage reads again. */
@@ -191,6 +193,7 @@ export class ChatSession {
     queue: [],
     cache: null,
     history: null,
+    contextRevision: 0,
     lcm: null,
     lcmVersion: 0,
     lcmViewer: null,
@@ -1268,7 +1271,6 @@ export class ChatSession {
           return
         }
         this.contextReads++
-        // The same estimate again (another tab subscribed) changes nothing on screen.
         const history = {
           assemblyError: event.assemblyError ?? null,
           assemblyErrorReason: event.assemblyErrorReason ?? null,
@@ -1285,12 +1287,11 @@ export class ChatSession {
           ...(event.thinking === undefined ? {} : { thinking: event.thinking }),
           ...(event.imageTokens === undefined ? {} : { imageTokens: event.imageTokens })
         }
-        if (
-          JSON.stringify(event.warmth) === JSON.stringify(this.view.cache) &&
-          JSON.stringify(history) === JSON.stringify(this.view.history)
-        )
-          return
-        return this.update({ cache: event.warmth, history })
+        return this.update({
+          cache: JSON.stringify(event.warmth) === JSON.stringify(this.view.cache) ? this.view.cache : event.warmth,
+          history: JSON.stringify(history) === JSON.stringify(this.view.history) ? this.view.history : history,
+          contextRevision: this.view.contextRevision + 1
+        })
       }
     }
   }

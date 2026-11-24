@@ -176,28 +176,30 @@ export function TextField({
   const tabLink = useFieldTabHref(store, path, label)
   const highlights = useSearchHighlights(store, path)
   const match = useSearchMatch(path)
+  const kind = useEditorKind(store)
+  // Prompt text shares the code editor's macro colours and revision line markers.
+  const codeEditor =
+    rows !== undefined &&
+    (kind === "card" || kind === "preset" || kind === "note" || (kind === "lorebook" && path.at(-1) === "content"))
   const target = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!match) return
     for (let parent = target.current?.parentElement; parent; parent = parent.parentElement) {
       if (parent instanceof HTMLDetailsElement) parent.open = true
     }
+    if (codeEditor) return
     const frame = requestAnimationFrame(() => {
-      const box = target.current?.querySelector<HTMLElement>("[data-field-frame]") ?? target.current
-      if (match.landed && box) flashItem(box)
-      const input = target.current?.querySelector("input, textarea") as HTMLInputElement | HTMLTextAreaElement | null
-      if (!input) return
+      const field = target.current
+      const input = field?.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea")
+      if (!field || !input) return
       input.focus({ preventScroll: true })
       input.setSelectionRange(match.at, match.at + match.length)
-      scrollToSearchField(target.current!)
+      scrollToSearchField(field)
+      if (match.landed) flashItem(input.closest<HTMLElement>("[data-field-frame]") ?? field)
     })
     return () => cancelAnimationFrame(frame)
-  }, [match])
+  }, [match, codeEditor])
   const value = useText(store, path)
-  const kind = useEditorKind(store)
-  // Prompt text shares the code editor's macro colours and revision line markers.
-  const card =
-    kind === "card" || kind === "preset" || kind === "note" || (kind === "lorebook" && path.at(-1) === "content")
   const field = textField(path)
   const props = {
     value,
@@ -217,7 +219,9 @@ export function TextField({
         {fieldTools}
         {extra.tools}
         <FieldEditHistory store={store} field={field} label={label} />
-        {rows !== undefined && !card && !mono && (!readOnly || reading) && <ExpandLink label={label} {...tabLink} />}
+        {rows !== undefined && !codeEditor && !mono && (!readOnly || reading) && (
+          <ExpandLink label={label} {...tabLink} />
+        )}
       </>
     )
     return (
@@ -242,7 +246,7 @@ export function TextField({
                 status={status}
                 onChange={(event) => store.setText(path, event.currentTarget.value)}
               />
-            ) : card ? (
+            ) : codeEditor ? (
               <CardTextEditor
                 store={store}
                 field={field}
@@ -346,6 +350,8 @@ export function FieldTabEditor({
   const list = parsed?.kind === "value" ? parsed.path : null
   const items = useValue<unknown>(store, list ?? path)
   const index = path.at(-1)
+  const missing =
+    list !== null && (!Array.isArray(items) || typeof index !== "number" || typeof items[index] !== "string")
   const write = (next: string) => {
     if (list === null) return store.setText(path, next)
     if (!Array.isArray(items) || typeof index !== "number" || index >= items.length) return
@@ -362,9 +368,9 @@ export function FieldTabEditor({
         fill
         minHeight="100%"
         expand={false}
-        readOnly={readOnly}
+        readOnly={readOnly || missing}
         tools={<FieldEditHistory store={store} field={field} label={label} />}
-        status={<FieldStatus store={store} field={field} />}
+        status={missing ? "This greeting was removed." : <FieldStatus store={store} field={field} />}
         onChange={write}
         onBlur={() => void store.save(field)}
       />

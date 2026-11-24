@@ -54,6 +54,10 @@ test.beforeAll(async () => {
           overrides: { name: "The target", maxOutput: 8000, settings: { samplers: { temperature: 1.2 } } }
         })
       }
+      yield* api.AddUserModel({ connectionId: connection.id, key: "short-output", overrides: { maxOutput: 100 } })
+      for (const key of ["reset-limits-a", "reset-limits-b"]) {
+        yield* api.AddUserModel({ connectionId: connection.id, key, overrides: { context: 1024, maxOutput: 1024 } })
+      }
       return connection.id
     })
   )
@@ -203,6 +207,49 @@ for (const [width, height] of [
     await expect(dialog).toBeHidden()
     expect((await saved(gpt)).overrides.settings?.samplers?.verbosity).toBe("high")
   })
+
+test("clearing bulk limit overrides clamps against inherited limits", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/settings/connections/${connectionId}`)
+  await page.getByRole("searchbox", { name: "Filter models", exact: true }).fill("reset-limits-")
+  await page.getByRole("checkbox", { name: "Select all shown", exact: true }).click()
+  await page.getByRole("button", { name: "Edit 2…", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Edit 2 models", exact: true })
+  const length = dialog.getByRole("group", { name: "Length", exact: true })
+  const output = length.getByRole("textbox", { name: "Output limit (tokens)", exact: true })
+  const window = length.getByRole("textbox", { name: "Context window (tokens)", exact: true })
+  await expect(output).toHaveValue("1024")
+  await expect(window).toHaveValue("1024")
+  await output.fill("")
+  await window.fill("")
+  await length.getByRole("textbox", { name: "Reply length", exact: true }).fill("4096")
+  await length.getByRole("textbox", { name: "Context", exact: true }).fill("4096")
+  await dialog.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(dialog).toBeHidden()
+  for (const key of ["reset-limits-a", "reset-limits-b"]) {
+    const { overrides } = await saved(key)
+    expect(overrides.context).toBeUndefined()
+    expect(overrides.maxOutput).toBeUndefined()
+    expect(overrides.settings?.samplers).toEqual({ openai_max_context: 4096, openai_max_tokens: 4096 })
+  }
+})
+
+test("reply length respects small and single-value slider ranges", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/settings/connections/${connectionId}`)
+  const dialog = await open(page, "short-output")
+  const length = dialog.getByRole("group", { name: "Length", exact: true })
+  const reply = length.getByRole("textbox", { name: "Reply length", exact: true })
+  const slider = length.getByRole("slider", { name: "Reply length slider", exact: true })
+  await slider.focus()
+  await page.keyboard.press("Home")
+  await expect(reply).toHaveValue("64")
+  await page.keyboard.press("End")
+  await expect(reply).toHaveValue("100")
+  await length.getByRole("textbox", { name: "Your output limit (tokens)", exact: true }).fill("50")
+  await expect(slider).toBeDisabled()
+  await expect(slider).toHaveAttribute("aria-valuetext", "50")
+})
 
 // Context and Reply length run on a log scale (logslider1, owner 2026-11-24): a quarter of the
 // track is far below a tenth of the maximum, keys move by log steps, a typed value sits at its

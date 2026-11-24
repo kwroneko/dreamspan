@@ -3,7 +3,13 @@
 // filter and the tab live in the URL; the selection lives in memory, and survives filter and tab
 // changes, but Hide and Show only ever apply to selected rows that are shown.
 import type { ModelRefresh } from "@dreamspan/shared/api.ts"
-import { type Model, type ModelId, pinnedRoute, resolveModel } from "@dreamspan/shared/providers.ts"
+import {
+  type Model,
+  type ModelId,
+  MODELS_HIDDEN_LIMIT,
+  pinnedRoute,
+  resolveModel
+} from "@dreamspan/shared/providers.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { AsyncResult } from "effect/reactivity"
@@ -256,7 +262,7 @@ function ModelTable({
 
   const bulk = useAction()
   const apply = async (ids: ReadonlyArray<ModelId>, hidden: boolean) => {
-    if (ids.length === 0) return
+    if (ids.length === 0 || ids.length > MODELS_HIDDEN_LIMIT) return
     const result = await bulk.run((client) => client("SetModelsHidden", { modelIds: ids, hidden }), ["models"])
     if (!result.ok) {
       showToast({
@@ -424,6 +430,9 @@ function SelectionBar({
   onClear: () => void
   onEdit: () => void
 }) {
+  const tooManyToHide = toHide > MODELS_HIDDEN_LIMIT
+  const tooManyToShow = toShow > MODELS_HIDDEN_LIMIT
+  const limitHint = `Select at most ${MODELS_HIDDEN_LIMIT.toLocaleString()} models shown here.`
   return (
     <div
       role="toolbar"
@@ -467,24 +476,30 @@ function SelectionBar({
           Edit {toEdit.toLocaleString()}…
         </Button>
         <Button
-          disabled={toHide === 0}
+          disabled={toHide === 0 || tooManyToHide}
+          focusableWhenDisabled={tooManyToHide}
           pending={pending && toHide > 0}
           hint={
-            toHide === 0
-              ? "Tick visible models shown here to hide them."
-              : "Leaves the selected models shown here out of the lists where you choose a model."
+            tooManyToHide
+              ? limitHint
+              : toHide === 0
+                ? "Tick visible models shown here to hide them."
+                : "Leaves the selected models shown here out of the lists where you choose a model."
           }
           onClick={onHide}
         >
           Hide {toHide.toLocaleString()}
         </Button>
         <Button
-          disabled={toShow === 0}
+          disabled={toShow === 0 || tooManyToShow}
+          focusableWhenDisabled={tooManyToShow}
           pending={pending && toShow > 0}
           hint={
-            toShow === 0
-              ? "Tick hidden models shown here to show them."
-              : "Lists the selected models shown here again where you choose a model."
+            tooManyToShow
+              ? limitHint
+              : toShow === 0
+                ? "Tick hidden models shown here to show them."
+                : "Lists the selected models shown here again where you choose a model."
           }
           onClick={onShow}
         >

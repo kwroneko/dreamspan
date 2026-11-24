@@ -180,21 +180,50 @@ export const reconcileForm = (
     current = form(draft.content)
   if (incoming === null || current === null) return { content, changed: false, intent: before }
   const clears = intendedClears(before, initial, incoming)
+  // What the edit started from at `path`: what it changed there, and what it left alone.
+  // A group kept as its JSON text before it was kept as an object reads as that object.
+  const asGroup = (value: unknown) => (typeof value === "string" ? (form(value) ?? value) : value)
+  const origin = (path: ReadonlyArray<string>): Value | null => {
+    if (initial === null) return null
+    let found: Value = { present: true, value: initial }
+    for (const segment of path) {
+      found = at(asGroup(found.value), [segment])
+      if (found.unsafe) return null
+      if (!found.present) return found
+    }
+    return found
+  }
   const merge = (left: unknown, right: unknown, path: ReadonlyArray<string>): unknown => {
+    // One side still the group's JSON text (a save from before it was kept as an object).
+    if (object(left) && !Array.isArray(left)) right = asGroup(right)
+    if (object(right) && !Array.isArray(right)) left = asGroup(left)
     if (equal(left, right)) return right
+    // Three ways, where the edit's start is known: what this edit didn't change keeps the
+    // current value (another tab's later typing, or its clear), and what only this edit
+    // changed takes the edit's. Only what both changed is merged below.
+    const start = origin(path)
+    if (start !== null) {
+      const was = start.present ? start.value : undefined
+      if (equal(right, was)) return left
+      if (equal(left, was)) return right
+    }
     const cleared = clears.some((clear) => equal(clear.path, path))
     if (Array.isArray(left)) {
       if (!Array.isArray(right)) return clears.some((clear) => prefix(path, clear.path)) ? right : left
       const key = identityKey([left, right])
+      // A list without ids both changed is taken whole: its order and its rows' text go together.
       if (key === undefined) return initial !== null && !equal(at(initial, path).value, right) ? right : left
-      const merged = right.map((item) => {
-        const segment = `${key}=${String(own(item, key))}`
-        return merge(
-          left.find((candidate) => String(own(candidate, key)) === String(own(item, key))),
-          item,
-          [...path, segment]
-        )
-      })
+      // An item another tab deleted, which this edit left as it was, stays deleted: no hole.
+      const merged = right
+        .map((item) => {
+          const segment = `${key}=${String(own(item, key))}`
+          return merge(
+            left.find((candidate) => String(own(candidate, key)) === String(own(item, key))),
+            item,
+            [...path, segment]
+          )
+        })
+        .filter((item) => item !== undefined)
       for (const item of left)
         if (
           !right.some((candidate) => String(own(candidate, key)) === String(own(item, key))) &&
@@ -205,18 +234,24 @@ export const reconcileForm = (
     }
     if (object(left) && object(right) && !Array.isArray(right)) {
       const result = { ...right }
-      for (const key of Object.keys(left)) put(result, key, merge(left[key], own(right, key), [...path, key]))
+      for (const key of new Set([...Object.keys(left), ...Object.keys(right)]))
+        put(result, key, merge(own(left, key), own(right, key), [...path, key]))
       return result
     }
     if (empty(right) && !cleared) {
       if (typeof left === "string" && left !== "") return left
-      // A group gone from the incoming form keeps only what it would keep as an empty group:
-      // its text (and lists) no clear proved removed. A number or a choice in it goes, as it
-      // would on its own: a form that drops an emptied group (a slider back at its default
-      // leaving `samplers` empty) must not get the old value back.
-      if (object(left) && !clears.some((clear) => prefix(path, clear.path))) {
-        const kept = merge(left, {}, path)
-        return object(kept) && Object.keys(kept).length === 0 ? right : kept
+      if (object(left)) {
+        // A group this edit emptied (a slider back at its default leaving `samplers` empty,
+        // so the form drops it) loses what the edit saw there and removed, text only where a
+        // clear proves it; what the edit never saw stays. A group merely absent from what the
+        // edit started from (a stale or seed save) stays whole, unless a clear inside it says
+        // the edit removed it.
+        const seen = start?.present ? start.value : undefined
+        if (!object(seen) || Array.isArray(seen)) return clears.some((clear) => prefix(path, clear.path)) ? right : left
+        const kept: Record<string, unknown> = {}
+        for (const key of Object.keys(left))
+          put(kept, key, Object.hasOwn(seen, key) ? merge(left[key], undefined, [...path, key]) : left[key])
+        return Object.keys(kept).length === 0 ? right : kept
       }
     }
     return right

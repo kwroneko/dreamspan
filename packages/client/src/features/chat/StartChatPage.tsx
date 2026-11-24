@@ -365,6 +365,7 @@ function Pending({
     // Attachments go with a sent message, in the transaction that makes the chat; with
     // Generate they stay, and move to the saved chat's composer.
     const captured = first === "send" ? attachments?.capture() : undefined
+    if (first === "send" && !text.trim() && !captured?.images.length) return
     // A sent message, or guidance for the first reply, leaves the box as it's sent; whatever
     // is typed while the chat is being made goes along to its composer, and a failure puts
     // the submitted text back. With guidance off, Generate doesn't use the text, which stays

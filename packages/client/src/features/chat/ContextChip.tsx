@@ -12,7 +12,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { memo, useEffect, useState, useSyncExternalStore } from "react"
 import { Button, LinkButton } from "../../ui/Button.tsx"
 import { Popover } from "../../ui/Popover.tsx"
-import { tokenizerText, useTokenCounts } from "../editor/tokenCounts.ts"
+import { type CountModel, tokenizerText, useTokenCounts } from "../editor/tokenCounts.ts"
 import { useWorkbenchTab } from "../workbench/tab.tsx"
 import { compactTokens } from "./CacheIndicator.tsx"
 import { nextRequestHref, nextRequests } from "./nextRequest.ts"
@@ -42,20 +42,29 @@ export const ContextChip = memo(function ContextChip({
   const [open, setOpen] = useState(false)
   const navigate = useNavigate()
   const workbenchTab = useWorkbenchTab()
+  const tabId = workbenchTab?.tabId ?? null
   const rested = useSyncExternalStore(typed.subscribe, typed.snapshot)
   // While a reply's guidance is edited the box makes a new version of it, not the next request.
   const text = editingGuidance ? "" : rested.trim()
-  const counted = useTokenCounts([text])
+  const model = view.history?.model
+  const choice = model
+    ? { connection: model.connection as CountModel["connection"], model: model.model as CountModel["model"] }
+    : undefined
+  const counted = useTokenCounts([choice ? text : ""], choice, true)
   const size = view.history?.size
   const budget = view.history?.budget ?? null
   const chatId = (view.chat?.id ?? null) as ChatId | null
   // Where this view stands, for the next request's tab (nextRequest.ts).
   const [token] = useState(() => Symbol("next request"))
-  const sizeTokens = size?.tokens ?? null
   useEffect(() => {
-    if (chatId === null || sizeTokens === null) nextRequests.withdraw(token)
-    else nextRequests.publish(token, chatId, { leaf: view.leafSlotId, fork: view.forkId, tokens: sizeTokens })
-  }, [token, chatId, view.leafSlotId, view.forkId, sizeTokens])
+    if (chatId === null || view.contextRevision === 0) nextRequests.withdraw(token)
+    else
+      nextRequests.publish(token, chatId, tabId, {
+        leaf: view.leafSlotId,
+        fork: view.forkId,
+        revision: view.contextRevision
+      })
+  }, [token, chatId, tabId, view.leafSlotId, view.forkId, view.contextRevision])
   useEffect(() => () => nextRequests.withdraw(token), [token])
   if (view.loading || size === undefined || chatId === null) return null
   // The typed text as the request would hold it: its tokens, and 3 for its message.
@@ -68,7 +77,7 @@ export const ContextChip = memo(function ContextChip({
     ...size.parts,
     ...(typedTokens > 0 ? [{ id: "typed", label: typedLabel(guidance), tokens: typedTokens }] : [])
   ]
-  const href = nextRequestHref(chatId, view.leafSlotId, view.forkId)
+  const href = nextRequestHref(chatId, view.leafSlotId, view.forkId, tabId)
   return (
     <ContextPopover
       open={open}

@@ -20,6 +20,145 @@ const freePort = () =>
     })
   })
 
+test("the NSFW controls show the account rating in a fresh tab", async ({ page }) => {
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: "0" })
+  try {
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const url = new URL("/?show=src.cardex", server.url).href
+    await page.goto(url)
+    const main = page.getByRole("main")
+    await expect(main.locator("[data-filter-panels]")).toBeVisible()
+    const panel = await openPanel(page, main, "NSFW")
+    await panel.getByRole("radio", { name: "Only NSFW", exact: true }).click()
+    await closePanel(page, "NSFW")
+    await expect.poll(() => new URL(page.url()).searchParams.has("sf")).toBe(true)
+    await expect(page.locator("[data-source-chip]").filter({ hasText: "Only NSFW" })).toBeVisible()
+
+    const fresh = await page.context().newPage()
+    await fresh.setViewportSize({ width: 1440, height: 900 })
+    await fresh.goto(url)
+    const freshMain = fresh.getByRole("main")
+    await expect(freshMain.locator("[data-source-chip]").filter({ hasText: "Only NSFW" })).toBeVisible()
+    await expect(await panelSummary(fresh, freshMain, "NSFW")).toHaveAccessibleName("NSFW only")
+    const freshPanel = await openPanel(fresh, freshMain, "NSFW")
+    await expect(freshPanel.getByRole("radio", { name: "Only NSFW", exact: true })).toBeChecked()
+  } finally {
+    await server.stop()
+  }
+})
+
+test("the cover checkbox follows an explicit setting in a saved search", async ({ page }) => {
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: "0" })
+  try {
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const url = new URL("/?show=src.cardex", server.url)
+    url.searchParams.set("sf", JSON.stringify({ has_cover: "true" }))
+    await page.goto(url.href)
+    const cover = page.getByRole("main").getByRole("checkbox", { name: "Only cards with a cover", exact: true })
+    await expect(cover).toBeChecked()
+    await cover.click()
+    await expect(cover).not.toBeChecked()
+    await expect.poll(() => new URL(page.url()).searchParams.get("sf")).toBe('{"has_cover":"false"}')
+  } finally {
+    await server.stop()
+  }
+})
+
+test("excluding a result's author keeps the included authors editable", async ({ page }) => {
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: "0" })
+  try {
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto(new URL("/?show=src.cardex", server.url).href)
+    const main = page.getByRole("main")
+    await expect(main.locator("[data-filter-panels]")).toBeVisible()
+    let panel = await openPanel(page, main, "Authors")
+    const rows = panel.getByRole("list", { name: "Authors", exact: true }).getByRole("button")
+    await rows.nth(0).click()
+    await rows.nth(1).click()
+    await closePanel(page, "Authors")
+    const filters = () => JSON.parse(new URL(page.url()).searchParams.get("sf") ?? "{}") as Record<string, string>
+    const included = filters().any_author
+    expect(included).toBeTruthy()
+    await expect(main.locator("[data-source-results]")).toHaveAttribute("aria-busy", "false")
+    const byline = main.locator("[data-remote-card]").filter({ has: page.locator("[data-remote-creator]") })
+    await byline.first().getByRole("link").click({ button: "right" })
+    await page.getByRole("menuitem", { name: /^Not by / }).click()
+
+    const chips = main.getByRole("group", { name: "Active filters", exact: true }).locator("[data-source-chip]")
+    const exclusion = chips.filter({ hasText: /^Not by / })
+    await expect(exclusion).toHaveCount(1)
+    await expect(chips.filter({ hasText: /^By / })).toHaveCount(2)
+    await expect(await panelSummary(page, main, "Authors")).toHaveAccessibleName(/Any of 2 authors.*Not by 1 author/)
+    panel = await openPanel(page, main, "Authors")
+    await expect(panel.getByRole("list", { name: "Chosen authors", exact: true }).getByRole("listitem")).toHaveCount(3)
+    await closePanel(page, "Authors")
+    await exclusion.getByRole("button", { name: "Remove", exact: true }).click()
+    await expect(exclusion).toHaveCount(0)
+    expect(filters()).toEqual({ any_author: included })
+  } finally {
+    await server.stop()
+  }
+})
+
+test("typing and validating a token bound preserves the other bound", async ({ page }) => {
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: "0" })
+  try {
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const url = new URL("/?show=src.cardex", server.url)
+    url.searchParams.set("sf", JSON.stringify({ tokens: { min: 500, max: 2000 } }))
+    await page.goto(url.href)
+    const main = page.getByRole("main")
+    await expect(main.locator("[data-filter-panels]")).toBeVisible()
+    const panel = await openPanel(page, main, "Tokens")
+    const min = panel.getByRole("spinbutton", { name: "Min tokens", exact: true })
+    const max = panel.getByRole("spinbutton", { name: "Max tokens", exact: true })
+    const tokens = () => JSON.parse(new URL(page.url()).searchParams.get("sf")!).tokens as object
+    await max.press("ControlOrMeta+a")
+    await max.pressSequentially("1500")
+    await expect(max).toHaveValue("1500")
+    await expect(min).toHaveValue("500")
+    expect(tokens()).toEqual({ min: 500, max: 2000 })
+    await max.press("Enter")
+    await expect.poll(tokens).toEqual({ min: 500, max: 1500 })
+
+    await max.fill("100")
+    await max.press("Enter")
+    await expect.poll(() => max.evaluate((input: HTMLInputElement) => input.validationMessage)).toContain("minimum")
+    expect(tokens()).toEqual({ min: 500, max: 1500 })
+    await max.fill("1600")
+    await min.focus()
+    await expect.poll(tokens).toEqual({ min: 500, max: 1600 })
+  } finally {
+    await server.stop()
+  }
+})
+
+test("a single author with a comma stays one identity when another author is added", async ({ page }) => {
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: "0" })
+  try {
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const url = new URL("/?show=src.cardex", server.url)
+    url.searchParams.set("sf", JSON.stringify({ author: "chub/anna,lee" }))
+    await page.goto(url.href)
+    const main = page.getByRole("main")
+    const chips = main.getByRole("group", { name: "Active filters", exact: true }).locator("[data-source-chip]")
+    await expect(chips.filter({ hasText: /^By / })).toHaveText(["By anna,lee"])
+    const panel = await openPanel(page, main, "Authors")
+    await panel.getByRole("list", { name: "Authors", exact: true }).getByRole("button").first().click()
+    await expect.poll(() => new URL(page.url()).searchParams.get("sf")).toContain("any_author")
+    const filters = JSON.parse(new URL(page.url()).searchParams.get("sf")!) as Record<string, string>
+    expect(filters.any_author).toMatch(/^chub\/anna\\,lee,/)
+    await expect(panel.getByRole("list", { name: "Chosen authors", exact: true }).getByRole("listitem")).toHaveCount(2)
+  } finally {
+    await server.stop()
+  }
+})
+
 for (const width of [1440, 390])
   test(`${width}: the archive's filter bar applies, clears and round-trips the URL`, async ({ page }, info) => {
     test.setTimeout(240_000)
@@ -84,7 +223,9 @@ for (const width of [1440, 390])
       await expectLayout(page, info, `cardex-filters-panel-${width}`, { scope: "body" })
       await closePanel(page, "Added")
       panel = await openPanel(page, main, "Tokens")
-      await panel.getByRole("spinbutton", { name: "Min tokens", exact: true }).fill("100")
+      const min = panel.getByRole("spinbutton", { name: "Min tokens", exact: true })
+      await min.fill("100")
+      await min.press("Enter")
       await closePanel(page, "Tokens")
       controls = await filterControls(page, main)
       await controls.getByRole("checkbox", { name: "Hide forks", exact: true }).click()

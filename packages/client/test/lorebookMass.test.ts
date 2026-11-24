@@ -98,7 +98,7 @@ describe("what search and replace looks in", () => {
 
 describe("a change to many entries (owner, 2026-11-02)", () => {
   it("is an ordinary unsaved change: set as values, never saved or restored on its own", () => {
-    const store = { setValue: vi.fn(), commit: vi.fn(), restoreRevision: vi.fn(), flush: vi.fn() }
+    const store = { setValue: vi.fn(), isDirty: () => false, commit: vi.fn(), restoreRevision: vi.fn(), flush: vi.fn() }
     const edits = patchEdits([], [entry(1), entry(2)], { enabled: false })
     applyMassChange(store as unknown as EditorStore, "Disabled all 2 entries", edits)
     expect(store.setValue.mock.calls).toEqual([
@@ -107,6 +107,17 @@ describe("a change to many entries (owner, 2026-11-02)", () => {
     ])
     expect(store.commit).not.toHaveBeenCalled()
     expect(store.restoreRevision).not.toHaveBeenCalled()
+  })
+
+  // Review of 7e301b2d9 (5): an entry's own unsaved text in the field outranks a value, so the
+  // change goes into that text, else that entry would keep its own.
+  it("goes into an entry's unsaved text in the field, where it has one", () => {
+    const typed = JSON.stringify(["entries", "uid=1", "group"])
+    const store = { setValue: vi.fn(), setText: vi.fn(), isDirty: (key: string) => key === typed }
+    const edits = patchEdits([], [entry(1, { group: "Individual Group" }), entry(2)], { group: "Bulk Group" })
+    applyMassChange(store as unknown as EditorStore, "Changed Group on 2 entries", edits)
+    expect(store.setText.mock.calls).toEqual([[["entries", "uid=1", "group"], "Bulk Group"]])
+    expect(store.setValue.mock.calls).toEqual([[["entries", "uid=2", "group"], "Bulk Group"]])
   })
 
   it("changes nothing when every entry already has it", () => {

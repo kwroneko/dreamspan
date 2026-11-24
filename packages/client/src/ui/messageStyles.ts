@@ -35,6 +35,48 @@ const KIND = Object.fromEntries(STYLE_KINDS.map((kind, i) => [kind, i])) as Reco
 export interface StyleOptions {
   /** "Show HTML as formatting": raw HTML is HTML, not prose (stFormatting's `html`). */
   readonly html?: boolean
+  /**
+   * Example dialogue (a card's `mes_example`): each example's messages styled as the messages
+   * they stand for, one by one, and the `<START>` lines and `{{user}}:` / `{{char}}:` prefixes
+   * between them left as they are (`exampleMessages`).
+   */
+  readonly examples?: boolean
+}
+
+const START_LINE = /^[ \t]*<START>[ \t]*$/i
+const SPEAKER = /^[ \t]*\{\{(?:user|char)\}\}:[ \t]*/i
+
+/**
+ * Where example dialogue's messages are in it, as [from, to) spans: a `<START>` line begins a new
+ * example and is no message's, a line opening with `{{user}}:` or `{{char}}:` begins a message
+ * after that prefix, and a message runs on to the line break before the next of either. Text
+ * before any prefix is a message of its own.
+ */
+export function exampleMessages(text: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = []
+  let from = 0
+  const close = (to: number) => {
+    if (to > from) spans.push([from, to])
+  }
+  for (let at = 0; ;) {
+    const newline = text.indexOf("\n", at)
+    const end = newline === -1 ? text.length : newline
+    const line = text.slice(at, end)
+    if (START_LINE.test(line)) {
+      close(at - 1)
+      from = end + 1
+    } else {
+      const speaker = SPEAKER.exec(line)
+      if (speaker) {
+        close(at - 1)
+        from = at + speaker[0].length
+      }
+    }
+    if (newline === -1) break
+    at = newline + 1
+  }
+  close(text.length)
+  return spans
 }
 
 /**
@@ -226,10 +268,36 @@ function runAt(runs: ReadonlyArray<SourceRun>, at: number): number {
  */
 export function messageStyleRanges(text: string, options: StyleOptions = {}, cache = styleCache()): StyleRanges {
   const html = options.html === true
-  const { text: fixed, runs } = fixMarkdownRuns(text)
-  const { blocks, starts, rendered } = stBlocks(fixed)
   const triples: Array<[number, number, number]> = []
   const seen = new Set<string>()
+  if (options.examples)
+    for (const [from, to] of exampleMessages(text)) collect(text.slice(from, to), from, html, cache, seen, triples)
+  else collect(text, 0, html, cache, seen, triples)
+  if (cache.blocks.size > CACHE_BLOCKS)
+    for (const key of cache.blocks.keys()) if (!seen.has(key)) cache.blocks.delete(key)
+  // Outer first: by start, then the longer, then the kind that wraps the other in the message
+  // (a quote around the node it covers).
+  triples.sort((a, b) => a[0] - b[0] || b[1] - a[1] || a[2] - b[2])
+  const out = new Int32Array(triples.length * 3)
+  triples.forEach(([from, to, kind], i) => {
+    out[3 * i] = from
+    out[3 * i + 1] = to
+    out[3 * i + 2] = kind
+  })
+  return out
+}
+
+/** One message text's ranges, `offset` on in the text it's part of, into `triples`. */
+function collect(
+  text: string,
+  offset: number,
+  html: boolean,
+  cache: StyleCache,
+  seen: Set<string>,
+  triples: Array<[number, number, number]>
+) {
+  const { text: fixed, runs } = fixMarkdownRuns(text)
+  const { blocks, starts, rendered } = stBlocks(fixed)
   for (const [index, block] of blocks.entries()) {
     const start = starts[index]!
     if (start < 0) continue
@@ -248,21 +316,10 @@ export function messageStyleRanges(text: string, options: StyleOptions = {}, cac
       if (to <= from) continue
       const source = runs.length ? startSource(runs, from, runAt(runs, from)) : from
       const sourceEnd = runs.length ? endSource(runs, to, runAt(runs, to - 1)) : to
-      if (source !== null && sourceEnd !== null && sourceEnd > source) triples.push([source, sourceEnd, ranges[i + 2]!])
+      if (source !== null && sourceEnd !== null && sourceEnd > source)
+        triples.push([offset + source, offset + sourceEnd, ranges[i + 2]!])
     }
   }
-  if (cache.blocks.size > CACHE_BLOCKS)
-    for (const key of cache.blocks.keys()) if (!seen.has(key)) cache.blocks.delete(key)
-  // Outer first: by start, then the longer, then the kind that wraps the other in the message
-  // (a quote around the node it covers).
-  triples.sort((a, b) => a[0] - b[0] || b[1] - a[1] || a[2] - b[2])
-  const out = new Int32Array(triples.length * 3)
-  triples.forEach(([from, to, kind], i) => {
-    out[3 * i] = from
-    out[3 * i + 1] = to
-    out[3 * i + 2] = kind
-  })
-  return out
 }
 
 /** The ranges as objects, for tests and readers. */

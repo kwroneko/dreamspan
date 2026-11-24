@@ -17,7 +17,7 @@ export function FilesPanel({ session, view }: Pick<PanelProps, "session" | "view
   // Keyed by the source, so a source registered later starts its hook afresh.
   return working ? (
     <WithWorkingFolder key={working.id} source={working} session={session} view={view}>
-      {(folder) => <Files working={folder} onAttach={(path) => requestAttach(session.chatId, path)} />}
+      {(folder) => <Files working={folder} onAttach={(path) => requestAttach(session, view.forkId, path)} />}
     </WithWorkingFolder>
   ) : (
     <Files working={null} />

@@ -92,6 +92,11 @@ describe("Move to a new frame", () => {
     expect(after(split, toNew("B", "right"))).toEqual(["row", ["A"], ["B"], ["C"]])
   })
 
+  it("moves below the whole sibling split when removing the source would flatten it", () => {
+    const layout = build(["row", ["L"], ["column", ["A"], ["row", ["B"], ["C"]]]])
+    expect(after(layout, toNew("A", "down"))).toEqual(["row", ["L"], ["column", ["row", ["B"], ["C"]], ["A"]]])
+  })
+
   it("can't move the only tab of the only frame", () => {
     const layout = build(["A"])
     for (const side of ["left", "right", "up", "down"] as const) expect(canApply(layout, toNew("A", side))).toBe("none")

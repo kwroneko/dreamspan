@@ -133,6 +133,46 @@ for (const width of [1440, 390]) {
   })
 }
 
+test("the first send leaves out an image whose removal is still on its way", async ({ page }) => {
+  // A new chat's composer is the chat's own: removing an image clears it from the chat's draft
+  // on the server (SetComposerImage), held here until after Send.
+  let release: (() => void) | null = null
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const removal =
+        typeof data === "string" && data.includes('"tag":"SetComposerImage"') && data.includes('"mediaId":null')
+      if (removal && release === null) release = () => upstream.send(data)
+      else upstream.send(data)
+    })
+    upstream.onMessage((data) => socket.send(data))
+  })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const card = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.CreateCard({ label: "Dock clerk", name: "Dock clerk" })
+  )
+  await page.goto(`${server().url}/cards/${card.entityId}/chat`)
+  await expect(page).toHaveURL(/[?&]draft=/)
+  await expect(page.getByRole("button", { name: "Attach images", exact: true })).toBeEnabled()
+  await page
+    .getByLabel("Choose images")
+    .setInputFiles({ name: "removed.png", mimeType: "image/png", buffer: await drawing(page) })
+  await expect(page.getByRole("button", { name: "Remove removed.png" })).toBeVisible()
+  await page.getByLabel("Message", { exact: true }).fill("Only the note goes.")
+  await attached(page).getByRole("img").hover()
+  try {
+    await page.getByRole("button", { name: "Remove removed.png" }).click()
+    await expect.poll(() => release !== null).toBe(true)
+    await page.getByRole("button", { name: /^Send/ }).click()
+  } finally {
+    ;(release as (() => void) | null)?.()
+  }
+  await expect(page).toHaveURL(/\/chats\/[^/?]+/)
+  const sent = page.getByRole("article").filter({ hasText: "Only the note goes." })
+  await expect(sent).toBeVisible()
+  await expect(sent.getByRole("button", { name: /^View image/ })).toHaveCount(0)
+})
+
 test("Generate leaves the attachments in the started chat's composer", async ({ page }) => {
   test.setTimeout(120_000)
   await page.setViewportSize({ width: 1440, height: 900 })

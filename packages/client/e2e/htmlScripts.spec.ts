@@ -15,6 +15,30 @@ import { expectTextBox, textBoxValue } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 
+test("a scripted panel preserves native HTML sanitizer options", async ({ page, browserName }) => {
+  test.skip(browserName !== "chromium", "The native Sanitizer API is exercised in Chromium.")
+  await page.goto(`${server().url}/frame/panel?scripts=1`)
+  const result = await page.evaluate(() => {
+    type Options = { sanitizer: { removeElements: string[] } }
+    type Target = { setHTML(markup: string, options: Options): void; innerHTML: string }
+    const target = document.createElement("div")
+    const shadow = target.attachShadow({ mode: "open" })
+    const options = { sanitizer: { removeElements: ["b"] } }
+    const markup = '<b>bold</b><i>italics</i><link rel="preconnect">'
+    const parsed = (Document as unknown as { parseHTML(markup: string, options: Options): Document }).parseHTML(
+      markup,
+      options
+    )
+    const set = (into: Element | ShadowRoot) => {
+      const html = into as unknown as Target
+      html.setHTML(markup, options)
+      return html.innerHTML
+    }
+    return [set(target), set(shadow), parsed.body.innerHTML, parsed.querySelectorAll("link").length]
+  })
+  expect(result).toEqual(["<i>italics</i>", "<i>italics</i>", "<i>italics</i>", 0])
+})
+
 const greeting = [
   "The notice board of the inn.",
   "",

@@ -165,6 +165,8 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
    * a write after it can't be subtracted twice or wiped.
    */
   const pending = new Map<string, Map<number, number>>()
+  /** A copy staged outside Files is invisible to a quota walk until its database row lands. */
+  const unlandedCopies = new Set<number>()
   /** Bytes app-side deletes and smaller replacements freed since the last measurement, by token. */
   const frees = new Map<string, Map<number, number>>()
   /** Uploads that landed (were renamed into place) while the account's walk ran. */
@@ -202,6 +204,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       // that ends later either counted the file (clearing the free over-counts) or reached it
       // after (clearing is exact); keeping it could subtract bytes the walk never counted.
       const heldBefore = new Map(pending.get(userId))
+      for (const id of heldBefore.keys()) if (unlandedCopies.has(id)) heldBefore.delete(id)
       const landedDuring = new Set<number>()
       landing.set(userId, landedDuring)
       const { filesRoot, home, bin, output } = deps.folders(userId)
@@ -333,8 +336,9 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
    * measurement, which sees the file itself. `release` (a write that didn't land) returns
    * exactly what the hold still counts, whatever walks came between.
    */
-  const hold = (userId: string) => {
+  const hold = (userId: string, outsideFiles = false) => {
     const id = nextId++
+    if (outsideFiles) unlandedCopies.add(id)
     let released = false
     return {
       reserve: (bytes: number, quotaBytes: number) => {
@@ -346,10 +350,12 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       },
       /** The file is in place: a walk running now may not have seen it, so its entry stays. */
       landed: () => {
+        unlandedCopies.delete(id)
         landing.get(userId)?.add(id)
       },
       release: () => {
         released = true
+        unlandedCopies.delete(id)
         pending.get(userId)?.delete(id)
       }
     }

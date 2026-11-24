@@ -9,6 +9,9 @@ import { Schema } from "effect"
 /** The top of the account's Files, as commands and the file tools see it. */
 export const FILES_TOP = "/files"
 
+/** Read-only message snapshots, addressed by media id through read_file. */
+export const ATTACHMENT_COPY_ROOT = "/attachments"
+
 /** The HTTP routes of the file manager. All take and return JSON except upload (the bytes) and raw. */
 export const FILES_ROUTES = {
   /** GET `?path=`: a folder's entries (`FolderListing`). */

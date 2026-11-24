@@ -33,9 +33,12 @@ export function FirstRequestPage() {
     if (pending === null) return
     if (tab === null || !separate) return void navigate({ href: pending })
     // Its own tab, else any tab showing that chat (a reload gives tabs new ids).
+    const key = itemKey(pending)
+    const original = pendingTab === null ? undefined : findTab(tab.store.layout, pendingTab)
     const own =
-      (pendingTab === null ? undefined : findTab(tab.store.layout, pendingTab)) ??
-      allTabs(tab.store.layout).find((t) => t.id !== tab.tabId && itemKey(t.href) === itemKey(pending))
+      original && itemKey(original.href) === key
+        ? original
+        : allTabs(tab.store.layout).find((t) => t.id !== tab.tabId && itemKey(t.href) === key)
     if (own) return tab.store.focusTab(own.id)
     // Kept first, so the chat can't take this tab's place as a preview tab's item.
     tab.store.pin(tab.tabId)

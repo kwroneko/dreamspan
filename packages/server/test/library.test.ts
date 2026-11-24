@@ -730,6 +730,44 @@ describe("library", () => {
     }).pipe(Effect.provide(database()))
   )
 
+  // Review of 7e301b2d9 (8): deleting a lorebook entry ends its fields' drafts. Keys typed into
+  // it (a value draft: a list of text) go to the recovered texts, one per line; settings don't.
+  it.live("a discarded draft of a list of text goes to the recovered texts, a setting's doesn't", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, upstream } = yield* setup()
+      const end = (field: string, content: string) =>
+        Effect.gen(function* () {
+          const key = new DraftKey({ targetKind: "entity_field", targetId: upstream.id, field })
+          const draft = yield* writer.SaveDraft({
+            draftId: null,
+            expectedSession: null,
+            userId,
+            key,
+            content,
+            expectedRowVersion: null,
+            baseRevision: upstream.headRevisionId
+          })
+          const ended = yield* writer.ClearDraft({
+            userId,
+            key,
+            draftId: draft.id,
+            outcome: "discarded",
+            expectedRowVersion: draft.rowVersion
+          })
+          const texts = yield* reader.ListRecoveredTexts({ userId, source: key, limit: 10, before: null })
+          return { recovered: ended.recovered, texts: texts.map((text) => text.content) }
+        })
+      assert.deepStrictEqual(yield* end(`=${JSON.stringify(["entries", "uid=1", "key"])}`, '["dragon","new key"]'), {
+        recovered: 1,
+        texts: ["dragon\nnew key"]
+      })
+      assert.deepStrictEqual(yield* end(`=${JSON.stringify(["entries", "uid=1", "depth"])}`, "4"), {
+        recovered: 0,
+        texts: []
+      })
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("a revision cannot commit field text absent from its stored document", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, upstream, rowVersion } = yield* setup()

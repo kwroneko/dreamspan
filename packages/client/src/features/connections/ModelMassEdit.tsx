@@ -46,12 +46,23 @@ export const selectionDigest = (ids: ReadonlyArray<string>) => {
   return `${ids.length}-${hash.toString(36)}`
 }
 
+const ticks = (ids: ReadonlyArray<FieldId>): Partial<Record<FieldId, true>> =>
+  Object.fromEntries(ids.map((id) => [id, true]))
+const isTickList = (value: unknown): value is ReadonlyArray<FieldId> => Array.isArray(value)
+
 /** What the dialog keeps as typed: the models it edits, the ticked fields, and the form's draft. */
 interface MassForm {
   readonly ids: ReadonlyArray<ModelId>
-  readonly ticked: ReadonlyArray<FieldId>
-  /** The form's draft as text (`Draft`), once edited; until then, what the models share. */
-  readonly draft: string | null
+  /**
+   * The ticked fields, each `true`: kept by name, so ticks from two tabs merge one by one (a
+   * list: a draft kept before that change).
+   */
+  readonly ticked: Readonly<Partial<Record<FieldId, true>>> | ReadonlyArray<FieldId>
+  /**
+   * The form's draft, once edited; until then, what the models share. Kept as an object, so a
+   * save from another tab merges field by field (text: a draft kept before that change).
+   */
+  readonly draft: Draft | string | null
 }
 
 /** A field beside its tick, and the mark that says the models differ in it. */
@@ -110,7 +121,7 @@ export function ModelMassEditDialog({
 }) {
   const form = useDurableForm<MassForm>(`model-mass-edit:${place}`, "Edit models", {
     ids: ids ?? [],
-    ticked: [],
+    ticked: {},
     draft: null
   })
   const chosen = ids ?? form.values.ids
@@ -120,8 +131,13 @@ export function ModelMassEditDialog({
   }, [models, chosen])
   // What the models share: the fields they differ in say so.
   const common = useMemo(() => commonOf(selected), [selected])
-  const values = form.values.draft === null ? common.draft : readDraft(form.values.draft, common.draft)
-  const ticked = new Set(form.values.ticked)
+  const kept = form.values.draft
+  const values =
+    kept === null ? common.draft : readDraft(typeof kept === "string" ? kept : JSON.stringify(kept), common.draft)
+  const keptTicks = form.values.ticked
+  const ticked = new Set(
+    isTickList(keptTicks) ? keptTicks : FIELD_IDS.filter((id) => (keptTicks as Partial<Record<FieldId, true>>)[id])
+  )
   const [submitted, setSubmitted] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
   const save = useAction()
@@ -137,26 +153,28 @@ export function ModelMassEditDialog({
     const edited = new Set([...extra, ...fieldsChanged(values, next)])
     form.edit({
       ids: chosen,
-      draft: JSON.stringify(next),
-      ticked: FIELD_IDS.filter((id) => ticked.has(id) || edited.has(id))
+      draft: next,
+      ticked: ticks(FIELD_IDS.filter((id) => ticked.has(id) || edited.has(id)))
     })
   }
   const tick = (field: FieldId, on: boolean) =>
     form.edit({
       ids: chosen,
-      ticked: FIELD_IDS.filter((id) => (id === field ? on : ticked.has(id)))
+      // The values the tick starts from, so a later edit in another tab merges against them.
+      draft: kept ?? values,
+      ticked: ticks(FIELD_IDS.filter((id) => (id === field ? on : ticked.has(id))))
     })
 
   // Each model's limits as Context and Reply length keep within, with the new ones when ticked.
-  const ownContext = ticked.has("context") ? wholeText(values.context).value : null
-  const ownOutput = ticked.has("maxOutput") ? wholeText(values.maxOutput).value : null
+  const ownContext = ticked.has("context") ? wholeText(values.context).value : undefined
+  const ownOutput = ticked.has("maxOutput") ? wholeText(values.maxOutput).value : undefined
   const targets = selected.map((model) => {
     const limits = effectiveLimits(model)
     return {
       id: model.id,
       limits: {
-        context: ownContext ?? model.overrides.context ?? limits.context.value,
-        maxOutput: ownOutput ?? model.overrides.maxOutput ?? limits.maxOutput.value
+        context: (ownContext === undefined ? model.overrides.context : ownContext) ?? limits.context.value,
+        maxOutput: (ownOutput === undefined ? model.overrides.maxOutput : ownOutput) ?? limits.maxOutput.value
       }
     }
   })

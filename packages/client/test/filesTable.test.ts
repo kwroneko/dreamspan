@@ -25,4 +25,9 @@ describe("CSV and TSV tables", () => {
     expect(table.rows).toHaveLength(11)
     expect(table.total).toBe(50)
   })
+
+  it("keeps a final quoted empty cell without a line ending", () => {
+    for (const delimiter of [",", "\t"] as const)
+      expect(parseTable('heading\n""', delimiter)).toEqual({ rows: [["heading"], [""]], total: 1 })
+  })
 })

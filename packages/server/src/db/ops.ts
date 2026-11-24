@@ -181,6 +181,7 @@ import {
   ComposerImage,
   ComposerImageIds,
   ComposerImageKey,
+  AttachmentComposer,
   SetComposerImageFields,
   ComposerChoice
 } from "@dreamspan/shared/composerApi.ts"
@@ -3013,6 +3014,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       userId: UserId,
       path: Schema.String.check(Schema.isMaxLength(4096)),
       inode: Schema.NullOr(Schema.Number),
+      composer: Schema.optionalKey(AttachmentComposer),
+      maxAddedBytes: Schema.Int,
       media: Schema.Struct({
         sha256: Sha256,
         mime: Schema.String,
@@ -3021,8 +3024,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
         height: Schema.NullOr(Schema.Int)
       })
     },
-    success: Schema.Struct({ mediaId: Schema.String, mime: Schema.String }),
-    error: StorageError
+    success: Schema.NullOr(Schema.Struct({ mediaId: Schema.String, mime: Schema.String, addedBytes: Schema.Int })),
+    error: Schema.Union([NotFound, StorageError])
   }),
   /**
    * A file or folder renamed or moved in the app (spec/FILES-AND-ENVIRONMENT.md §1.1): the stored
@@ -5715,7 +5718,7 @@ const ReadOpsOwn = RpcGroup.make(
   }),
   /** A stored file the user holds a reference to. */
   Rpc.make("GetMediaFile", {
-    payload: { userId: UserId, mediaId: Schema.String },
+    payload: { userId: UserId, mediaId: Schema.String, attachmentOnly: Schema.optionalKey(Schema.Boolean) },
     success: StoredFile,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -5922,7 +5925,8 @@ const ReadOpsOwn = RpcGroup.make(
       cursor: Schema.NullOr(MessageCursor),
       limit: Schema.Int,
       sort: Schema.optionalKey(MessageSort),
-      chats: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
+      chats: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
+      forks: Schema.optionalKey(Schema.Array(ForkId))
     },
     success: MessageSearchPage,
     error: StorageError
@@ -5932,7 +5936,8 @@ const ReadOpsOwn = RpcGroup.make(
     payload: {
       userId: UserId,
       text: MessageQuery,
-      chats: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
+      chats: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
+      forks: Schema.optionalKey(Schema.Array(ForkId))
     },
     success: MessageCount,
     error: StorageError
@@ -6296,9 +6301,9 @@ const ReadOpsOwn = RpcGroup.make(
     ),
     error: StorageError
   }),
-  /** Bytes an account's file versions hold: each stored content once (fileVersions.ts). */
+  /** Bytes an account's file versions hold: each stored content once, optionally just for a hash. */
   Rpc.make("FileVersionBytes", {
-    payload: { userId: UserId },
+    payload: { userId: UserId, sha256: Schema.optionalKey(Sha256) },
     success: Schema.Int,
     error: StorageError
   }),

@@ -76,6 +76,24 @@ const modelFor = (kind: string, api: string, key: string): ModelInput => ({
 })
 
 describe("each provider's request carries a subagent's effort", () => {
+  it("omits the saved effort when the resolved model does not reason", () => {
+    const mapping = { reasoning: false, supportsDeveloperRole: false, revision: "synthetic" }
+    for (const [kind, api, payloadKey] of [
+      ["openai-chat", "openai-completions", "reasoning_effort"],
+      ["openai", "openai-responses", "reasoning"],
+      ["anthropic", "anthropic-messages", "thinking"]
+    ] as const) {
+      const model = withReasoning(modelFor(kind, api, "synthetic"), "high")
+      const wire = providerRequest(request, { ...model, mapping })
+      assert.notProperty(wire, "reasoning")
+      assert.notProperty(wire.payload, payloadKey)
+      assert.strictEqual(
+        providerRequest(request, { ...model, mapping: { ...mapping, reasoning: true } }).reasoning,
+        "high"
+      )
+    }
+  })
+
   it("as the model's own setting would, over it", () => {
     const chat = providerRequest(request, withReasoning(modelFor("openai-chat", "openai-completions", "o"), "high"))
     assert.strictEqual(chat.reasoning, "high")

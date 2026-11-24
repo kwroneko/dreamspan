@@ -34,7 +34,7 @@ const file = (
 ): TextFile => ({ path: PATH, text, ...format, sha256, size: text.length, mtimeMs: 1 })
 
 /** A server with one draft slot and one file, as the RPCs and routes keep them. */
-const fake = (initial: TextFile) => {
+const fake = (initial: TextFile, beforeEndResponse?: () => Promise<void>) => {
   let disk = initial
   let stored: Draft | null = null
   let row = 0
@@ -48,7 +48,7 @@ const fake = (initial: TextFile) => {
       status: "active",
       baseRevision: save.baseSha256,
       rowVersion: row,
-      session: 1,
+      session: stored?.session ?? 1,
       createdAt: 1,
       updatedAt: row,
       recovered: 0,
@@ -62,7 +62,13 @@ const fake = (initial: TextFile) => {
     if (tag === "GetFileDraft") return stored
     if (tag === "SaveFileDraft") return saveDraft(payload as unknown as FileDraftSave)
     if (tag === "EndFileDraft") {
-      stored = new Draft({ ...stored!, status: payload.outcome as "committed", content: "", rowVersion: ++row })
+      stored = new Draft({
+        ...stored!,
+        status: payload.outcome as "committed",
+        content: "",
+        rowVersion: ++row,
+        session: stored!.session + 1
+      })
       return stored
     }
     throw new Error(tag)
@@ -70,6 +76,7 @@ const fake = (initial: TextFile) => {
   const run = (async (call: (c: unknown) => unknown) => {
     // The store's calls are `client(tag, payload)` returning an Effect; here they return values.
     const value = call((tag: string, payload: Record<string, unknown>) => client(tag, payload))
+    if (value instanceof Draft && value.status === "committed") await beforeEndResponse?.()
     return { ok: true, value }
   }) as never
   const source = {
@@ -141,6 +148,51 @@ it("a file changed underneath shows a conflict, keeps the text, and Save writes 
   expect(await store.discard(server.disk())).toBe(true)
   expect(server.draft()?.status).toBe("discarded")
   expect(store.snapshot()).toMatchObject({ text: "Theirs.", conflict: false, changed: false })
+})
+
+it.each([false, true])("keeps edits typed during Save as a copy (autosaved: %s)", async (autosaved) => {
+  const server = fake(file("First.", A))
+  const store = new FileDraft(server.run, server.source, "user", PATH, server.disk())
+  await store.open()
+  store.setText("Copied text.")
+  store.update(file("Changed on disk.", B))
+  const uploaded = Promise.withResolvers<void>()
+  const saving = store.saveCopy((text) => {
+    expect(text).toBe("Copied text.")
+    return uploaded.promise
+  })
+  store.setText("Copied text. More typing.")
+  if (autosaved) await store.saveDraft()
+  uploaded.resolve()
+  await saving
+  expect(store.snapshot()).toMatchObject({ text: "Copied text. More typing.", conflict: true, unsaved: !autosaved })
+  await store.flush()
+  expect(server.draft()).toMatchObject({ status: "active", content: "Copied text. More typing.", baseRevision: A })
+  expect(server.calls).not.toContain("EndFileDraft")
+})
+
+it("backs up typing during the copy's draft commit against the new session", async () => {
+  const ending = Promise.withResolvers<void>()
+  const respond = Promise.withResolvers<void>()
+  const server = fake(file("First.", A), () => {
+    ending.resolve()
+    return respond.promise
+  })
+  const store = new FileDraft(server.run, server.source, "user", PATH, server.disk())
+  await store.open()
+  store.setText("Copied text.")
+  store.update(file("Changed on disk.", B))
+  const saving = store.saveCopy(async () => {})
+  await ending.promise
+  store.setText("Copied text. More typing.")
+  respond.resolve()
+  await saving
+
+  expect([...memory.values()].map((copy) => copy.save)).toMatchObject([
+    { kind: "file", payload: { content: "Copied text. More typing.", expectedSession: 2, baseSha256: A } }
+  ])
+  await store.flush()
+  expect(server.draft()).toMatchObject({ status: "active", content: "Copied text. More typing.", baseRevision: A })
 })
 
 it("reopening finds the draft, and a copy never sent is replayed onto it", async () => {
