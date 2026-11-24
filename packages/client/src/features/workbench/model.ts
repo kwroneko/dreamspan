@@ -464,11 +464,8 @@ const siblingOf = (node: Node, frameId: string): Node | undefined => {
   return undefined
 }
 
-const hasNode = (node: Node, id: string): boolean =>
-  node.id === id || (node.type === "split" && node.children.some((c) => hasNode(c, id)))
-
 /** Puts a new frame beside a node (a frame or a whole split), as `splitFrame` does for a frame. */
-const splitNode = (layout: Layout, nodeId: string, direction: Direction, added: Frame, before: boolean): Layout => {
+const splitNode = (root: Node, nodeId: string, direction: Direction, added: Frame, before: boolean): Node => {
   const replace = (node: Node): Node => {
     if (node.id === nodeId) {
       const children = before ? [added, node] : [node, added]
@@ -476,8 +473,7 @@ const splitNode = (layout: Layout, nodeId: string, direction: Direction, added: 
     }
     return node.type === "frame" ? node : { ...node, children: node.children.map(replace) }
   }
-  // Rebuilt through `updateFrames`, so a split inside one split the same way joins it.
-  return updateFrames({ ...layout, root: replace(layout.root) }, (f) => f)
+  return replace(root)
 }
 
 /**
@@ -500,19 +496,24 @@ export const moveToNewFrame = (
   const added = frameNode([], options.newFrameId ?? newId("f"))
   const before = options.before ?? false
   const { maximized: _, ...whole } = layout
-  const place = (next: Layout) =>
-    focusTab(
-      updateFrames(next, (f) => (f.id === added.id ? insertTab(f, tab) : f)),
-      tabId
+  if (target !== from.id || from.tabs.length > 1) {
+    const focused = focusTab(whole, tabId)
+    const root = splitNode(focused.root, target, direction, added, before)
+    return moveTab(
+      updateFrames({ ...focused, root }, (f) => f),
+      tabId,
+      added.id
     )
-  if (target !== from.id || from.tabs.length > 1)
-    return moveTab(splitNode(focusTab(whole, tabId), target, direction, added, before), tabId, added.id)
+  }
   const sibling = siblingOf(layout.root, from.id)
   // The only tab of the only frame: closing it leaves nothing to split.
   if (!sibling) return layout
-  const removed = updateFrames(whole, (f) => (f.id === from.id ? null : f))
-  const at = hasNode(removed.root, sibling.id) ? sibling.id : frames(sibling)[0]!.id
-  return place(splitNode(removed, at, direction, added, before))
+  // Wrap the whole sibling before removal can flatten it into its grandparent.
+  const root = splitNode(whole.root, sibling.id, direction, insertTab(added, tab), before)
+  return focusTab(
+    updateFrames({ ...whole, root }, (f) => (f.id === from.id ? null : f)),
+    tabId
+  )
 }
 
 /** What a tab's menu does to the layout: Split, Move to the frame beside, Move to a new frame. */

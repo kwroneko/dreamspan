@@ -14,6 +14,7 @@
 // (`chatSpan`), within the same SCAN, and at most CHAT_VISITS chats a page.
 // CountMessages counts the matches that may be shown, capped (MESSAGE_COUNT_CAP, COUNT_SCAN).
 import { importState, unfinishedTitle } from "@dreamspan/shared/stImportApi.ts"
+import { createHash } from "node:crypto"
 import { chatName } from "@dreamspan/shared/chatName.ts"
 import type { ChatId, EntityId, ForkId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
@@ -62,8 +63,10 @@ interface Candidate {
 }
 
 interface ChatForks {
-  readonly name: string
+  readonly title: string
+  readonly shellStamp: number
   readonly currentForkId: string | null
+  name?: string
   /** Live forks, most recently current first. */
   readonly forks: ReadonlyArray<ForkRow & { readonly tip_depth: number | null }>
   readonly pieces: Map<string, ReadonlyArray<PathPiece>>
@@ -151,7 +154,8 @@ const searchMessages = (
   cursor: MessageCursor | null,
   limit: number,
   sort: MessageSort,
-  chatList: ReadonlyArray<string> | null
+  chatList: ReadonlyArray<string> | null,
+  forkIds: ReadonlyArray<ForkId> | undefined
 ) =>
   Effect.gen(function* () {
     const words = queryWords(text)
@@ -159,6 +163,7 @@ const searchMessages = (
     const parsed = parseQuery(text)
     const phrase = focusPhrase(text)
     const chats = new Map<string, ChatForks | null>()
+    const allowed = forkIds === undefined ? undefined : new Set<string>(forkIds)
     const hits: Array<MessageHit> = []
     if (sort === "chat") {
       // By chat name: the caller's list says the order (every chat, when it gave none).
@@ -167,9 +172,12 @@ const searchMessages = (
         (yield* sql<{ id: string }>`SELECT id FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL
           ORDER BY title, id`).map((row) => row.id)
       // A chat at a time, in that order, each newest first between its first and last version.
+      const chatOrder = createHash("sha256").update(JSON.stringify(order)).digest("base64url")
+      const restarted = cursor !== null && cursor.chatOrder !== chatOrder
+      const at = restarted ? null : cursor
       const match = matchAll(parsed)
-      let chat = cursor?.chat ?? 0
-      let before = cursor?.before ?? Number.MAX_SAFE_INTEGER
+      let chat = Math.max(0, at?.chat ?? 0)
+      let before = at?.before ?? Number.MAX_SAFE_INTEGER
       let scanned = 0
       let visits = 0
       while (chat < order.length && hits.length < limit && scanned < SCAN && visits < CHAT_VISITS) {
@@ -178,14 +186,22 @@ const searchMessages = (
         const [span] = yield* chatSpan(sql, id)
         let done = span?.last === null || span?.last === undefined
         while (!done && hits.length < limit && scanned < SCAN) {
-          const batch = yield* batchOf(sql, userId, match, before, true, JSON.stringify([id]), span!.first!)
+          const batch = yield* batchOf(
+            sql,
+            userId,
+            match,
+            Math.min(before, span!.last! + 1),
+            true,
+            JSON.stringify([id]),
+            span!.first!
+          )
           let read = 0
           for (const row of batch) {
             read++
             scanned++
             before = row.seq
             if (row.eligible !== 1) continue
-            const hit = yield* hitOf(sql, userId, chats, row, words, phrase)
+            const hit = yield* hitOf(sql, userId, chats, row, words, phrase, allowed)
             if (hit !== null) hits.push(hit)
             if (hits.length === limit) break
           }
@@ -195,7 +211,11 @@ const searchMessages = (
         chat++
         before = Number.MAX_SAFE_INTEGER
       }
-      return { hits, next: chat >= order.length ? null : { before, chat } } satisfies MessageSearchPage
+      return {
+        hits,
+        next: chat >= order.length ? null : { before, chat, chatOrder },
+        ...(restarted ? { restarted: true as const } : {})
+      } satisfies MessageSearchPage
     }
     const only = chatList === null ? null : JSON.stringify(chatList)
     const down = sort !== "oldest"
@@ -214,7 +234,15 @@ const searchMessages = (
           scanned++
           before = row.seq
           if (row.eligible !== 1) continue
-          const hit = yield* hitOf(sql, userId, chats, row, words, sort === "best" && phase === 1 ? null : phrase)
+          const hit = yield* hitOf(
+            sql,
+            userId,
+            chats,
+            row,
+            words,
+            sort === "best" && phase === 1 ? null : phrase,
+            allowed
+          )
           if (hit !== null) hits.push(hit)
           if (hits.length === limit) break
         }
@@ -240,20 +268,23 @@ const COUNT_SCAN = SCAN
 
 /**
  * How many messages have the words (in `chatList` when given), and in how many chats: the
- * matches that may be shown (`ELIGIBLE`), newest first, stopping at MESSAGE_COUNT_CAP or after
+ * matches shown on a live display path, newest first, stopping at MESSAGE_COUNT_CAP or after
  * COUNT_SCAN matches, so a common word answers as fast as a page.
  */
 const countMessages = (
   sql: SqlClient.SqlClient,
   userId: UserId,
   text: string,
-  chatList: ReadonlyArray<string> | null
+  chatList: ReadonlyArray<string> | null,
+  forkIds: ReadonlyArray<ForkId> | undefined
 ) =>
   Effect.gen(function* () {
     if (queryWords(text).length === 0) return { messages: 0, chats: 0, more: false } satisfies MessageCount
     const match = matchAll(parseQuery(text))
     const only = chatList === null ? null : JSON.stringify(chatList)
     const chats = new Set<string>()
+    const forkCache = new Map<string, ChatForks | null>()
+    const allowed = forkIds === undefined ? undefined : new Set<string>(forkIds)
     let messages = 0
     let scanned = 0
     let before = Number.MAX_SAFE_INTEGER
@@ -263,6 +294,8 @@ const countMessages = (
         scanned++
         before = row.seq
         if (row.eligible !== 1) continue
+        const chat = yield* cachedChatForks(sql, userId, forkCache, row.chat_id!)
+        if (!chat || (yield* visibleForks(sql, chat, row, allowed, 1)).length === 0) continue
         messages++
         chats.add(row.chat_id!)
         if (messages === MESSAGE_COUNT_CAP) return { messages, chats: chats.size, more: true } satisfies MessageCount
@@ -272,7 +305,7 @@ const countMessages = (
     }
   })
 
-/** The chat's name and live forks, read once per search. */
+/** The live forks and path cache, shared by search and count. */
 const chatForks = (sql: SqlClient.SqlClient, userId: UserId, chatId: string) =>
   Effect.gen(function* () {
     const [chat] = yield* sql<{ title: string; current_fork_id: string | null; shell_stamp: number }>`
@@ -282,25 +315,9 @@ const chatForks = (sql: SqlClient.SqlClient, userId: UserId, chatId: string) =>
       SELECT f.*, t.depth AS tip_depth FROM forks f LEFT JOIN slots t ON t.id = f.tip_slot_id
       WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL
       ORDER BY f.id = ${chat.current_fork_id} DESC, ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
-    // The cast as the current branch's list row has it, for a chat named after its characters.
-    const userStamp = yield* summaryStamps(sql, userId)
-    const [stored] = yield* sql<{ cast_json: string }>`SELECT cast_json FROM fork_summaries
-      WHERE fork_id = ${chat.current_fork_id} AND stamp = ${chat.shell_stamp}
-        AND user_stamp = ${userStamp} AND format = ${FORK_SUMMARY_FORMAT}`
-    const current = forks.find((fork) => fork.id === chat.current_fork_id)
-    const castIds =
-      stored !== undefined
-        ? stored.cast_json
-        : JSON.stringify(current === undefined ? [] : (yield* computeForkSummaries(sql, [current]))[0]!.cast)
-    const cast = yield* sql<{ label: string }>`SELECT r.label FROM json_each(${castIds}) j
-      JOIN entity_refs r ON r.entity_id = j.value ORDER BY j.key`
-    const imported = importState(chat.title)
-    const name = chatName(
-      imported.title,
-      cast.map((c) => ({ name: c.label }))
-    ).name
     return {
-      name: imported.unfinished ? unfinishedTitle(name) : name,
+      title: chat.title,
+      shellStamp: chat.shell_stamp,
       currentForkId: chat.current_fork_id,
       forks,
       pieces: new Map(),
@@ -308,82 +325,130 @@ const chatForks = (sql: SqlClient.SqlClient, userId: UserId, chatId: string) =>
     } satisfies ChatForks
   })
 
-const hitOf = (
+const cachedChatForks = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  chats: Map<string, ChatForks | null>,
+  chatId: string
+) {
+  if (!chats.has(chatId)) chats.set(chatId, yield* chatForks(sql, userId, chatId))
+  return chats.get(chatId)
+})
+
+/** The cast as the current branch's list row has it, for a chat named after its characters. */
+const nameOf = Effect.fnUntraced(function* (sql: SqlClient.SqlClient, userId: UserId, chat: ChatForks) {
+  if (chat.name !== undefined) return chat.name
+  const userStamp = yield* summaryStamps(sql, userId)
+  const [stored] = yield* sql<{ cast_json: string }>`SELECT cast_json FROM fork_summaries
+    WHERE fork_id = ${chat.currentForkId} AND stamp = ${chat.shellStamp}
+      AND user_stamp = ${userStamp} AND format = ${FORK_SUMMARY_FORMAT}`
+  const current = chat.forks.find((fork) => fork.id === chat.currentForkId)
+  const castIds =
+    stored !== undefined
+      ? stored.cast_json
+      : JSON.stringify(current === undefined ? [] : (yield* computeForkSummaries(sql, [current]))[0]!.cast)
+  const cast = yield* sql<{ label: string }>`SELECT r.label FROM json_each(${castIds}) j
+    JOIN entity_refs r ON r.entity_id = j.value ORDER BY j.key`
+  const imported = importState(chat.title)
+  const name = chatName(
+    imported.title,
+    cast.map((c) => ({ name: c.label }))
+  ).name
+  chat.name = imported.unfinished ? unfinishedTitle(name) : name
+  return chat.name
+})
+
+const visibleForks = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  chat: ChatForks,
+  row: Candidate,
+  allowed: ReadonlySet<string> | undefined,
+  limit = Number.POSITIVE_INFINITY
+) {
+  const place = { id: row.slot_id!, chainId: row.chain_id!, depth: row.depth! }
+  // Forks whose tip is at or below the message (an inserted one can sit below its tip).
+  const reaching = chat.forks.filter(
+    (f) => (allowed === undefined || allowed.has(f.id)) && (row.inserted === 1 || (f.tip_depth ?? -1) >= place.depth)
+  )
+  if (reaching.length === 0) return []
+  const showing = new Set(
+    (yield* sql<{ id: string }>`
+      SELECT f.value AS id FROM json_each(${JSON.stringify(reaching.map((f) => f.id))}) f
+      CROSS JOIN slots s ON s.id = ${place.id} CROSS JOIN versions v ON v.id = ${row.id}
+      WHERE ${shownIn(sql, sql.literal("f.value"), "s")} = v.id
+        AND NOT ${slotDeletedIn(sql, sql.literal("f.value"), "s")}
+        AND NOT ${shownVersionDeletedIn(sql, sql.literal("f.value"), "v")}`).map((r) => r.id)
+  )
+  const shown: Array<ForkRow> = []
+  for (const fork of reaching) {
+    if (!showing.has(fork.id)) continue
+    let pieces = chat.pieces.get(fork.id)
+    if (pieces === undefined) {
+      pieces = yield* pathPieces(sql, row.chat_id!, fork.id, fork.tip_slot_id)
+      chat.pieces.set(fork.id, pieces)
+    }
+    if (!onDisplayPath(pieces, place)) continue
+    shown.push(fork)
+    if (shown.length === limit) break
+  }
+  return shown
+})
+
+const hitOf = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
   userId: UserId,
   chats: Map<string, ChatForks | null>,
   row: Candidate,
   words: ReadonlyArray<string>,
   /** Where the excerpt is centred, when the message has it side by side. */
-  phrase: ReadonlyArray<string> | null
-) =>
-  Effect.gen(function* () {
-    const chatId = row.chat_id!
-    if (!chats.has(chatId)) chats.set(chatId, yield* chatForks(sql, userId, chatId))
-    const chat = chats.get(chatId)
-    if (!chat) return null
-    const place = { id: row.slot_id!, chainId: row.chain_id!, depth: row.depth! }
-    // Forks whose tip is at or below the message (an inserted one can sit below its tip).
-    const reaching = chat.forks.filter((f) => row.inserted === 1 || (f.tip_depth ?? -1) >= place.depth)
-    if (reaching.length === 0) return null
-    const showing = new Set(
-      (yield* sql<{ id: string }>`
-        SELECT f.value AS id FROM json_each(${JSON.stringify(reaching.map((f) => f.id))}) f
-        CROSS JOIN slots s ON s.id = ${place.id} CROSS JOIN versions v ON v.id = ${row.id}
-        WHERE ${shownIn(sql, sql.literal("f.value"), "s")} = v.id
-          AND NOT ${slotDeletedIn(sql, sql.literal("f.value"), "s")}
-          AND NOT ${shownVersionDeletedIn(sql, sql.literal("f.value"), "v")}`).map((r) => r.id)
-    )
-    const shown: Array<ForkRow & { position: number }> = []
-    for (const fork of reaching) {
-      if (!showing.has(fork.id)) continue
-      let pieces = chat.pieces.get(fork.id)
-      if (pieces === undefined) {
-        pieces = yield* pathPieces(sql, chatId, fork.id, fork.tip_slot_id)
-        chat.pieces.set(fork.id, pieces)
-      }
-      if (!onDisplayPath(pieces, place)) continue
-      shown.push({ ...fork, position: (positionOf(pieces, place) ?? place.depth) + 1 })
-    }
-    if (shown.length === 0) return null
-    const named = shown.slice(0, HIT_BRANCHES)
-    // Only an unnamed branch made from another is named by where it splits off (`forkLabel`):
-    // read its stored summary, or work it out, once per search.
-    const unknown = named.filter(
-      (f) => (f.name === null || f.name === "") && f.parent_fork_id !== null && !chat.splits.has(f.id)
-    )
-    if (unknown.length > 0) {
-      const summaries = yield* chatForkSummaries(sql, userId, chatId, unknown)
-      for (const f of unknown) chat.splits.set(f.id, summaries.get(f.id)?.split ?? null)
-    }
-    const branches = named.map((f): HitBranch => ({
-      forkId: f.id as ForkId,
-      name: f.name,
-      original: f.parent_fork_id === null,
-      split: chat.splits.get(f.id) ?? null,
-      createdAt: f.created_at,
-      current: f.id === chat.currentForkId
-    }))
-    const [content] = yield* sql<{ content: string }>`SELECT content FROM version_texts WHERE version_seq = ${row.seq}`
-    const [speaker] =
-      row.speaker_entity_id === null
-        ? []
-        : yield* sql<{ label: string }>`SELECT r.label FROM entity_refs r JOIN entities e ON e.id = r.entity_id
-            WHERE r.entity_id = ${row.speaker_entity_id} AND e.owner_user_id = ${userId}`
-    return {
-      versionId: row.id as VersionId,
-      slotId: place.id as SlotId,
-      chatId: chatId as ChatId,
-      chatName: chat.name,
-      speakerEntityId: row.speaker_entity_id as EntityId | null,
-      speaker: speaker?.label ?? (row.writer === "human" ? "You" : "Model"),
-      position: shown[0]!.position,
-      createdAt: row.created_at!,
-      excerpt: excerpt(content?.content ?? "", words, undefined, phrase),
-      branches,
-      branchCount: shown.length
-    } satisfies MessageHit
-  })
+  phrase: ReadonlyArray<string> | null,
+  allowed: ReadonlySet<string> | undefined
+) {
+  const chatId = row.chat_id!
+  const chat = yield* cachedChatForks(sql, userId, chats, chatId)
+  if (!chat) return null
+  const shown = yield* visibleForks(sql, chat, row, allowed)
+  if (shown.length === 0) return null
+  const place = { id: row.slot_id!, chainId: row.chain_id!, depth: row.depth! }
+  const pieces = chat.pieces.get(shown[0]!.id)!
+  const named = shown.slice(0, HIT_BRANCHES)
+  // Only an unnamed branch made from another is named by where it splits off (`forkLabel`):
+  // read its stored summary, or work it out, once per search.
+  const unknown = named.filter(
+    (f) => (f.name === null || f.name === "") && f.parent_fork_id !== null && !chat.splits.has(f.id)
+  )
+  if (unknown.length > 0) {
+    const summaries = yield* chatForkSummaries(sql, userId, chatId, unknown)
+    for (const f of unknown) chat.splits.set(f.id, summaries.get(f.id)?.split ?? null)
+  }
+  const branches = named.map((f): HitBranch => ({
+    forkId: f.id as ForkId,
+    name: f.name,
+    original: f.parent_fork_id === null,
+    split: chat.splits.get(f.id) ?? null,
+    createdAt: f.created_at,
+    current: f.id === chat.currentForkId
+  }))
+  const [content] = yield* sql<{ content: string }>`SELECT content FROM version_texts WHERE version_seq = ${row.seq}`
+  const [speaker] =
+    row.speaker_entity_id === null
+      ? []
+      : yield* sql<{ label: string }>`SELECT r.label FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+          WHERE r.entity_id = ${row.speaker_entity_id} AND e.owner_user_id = ${userId}`
+  return {
+    versionId: row.id as VersionId,
+    slotId: place.id as SlotId,
+    chatId: chatId as ChatId,
+    chatName: yield* nameOf(sql, userId, chat),
+    speakerEntityId: row.speaker_entity_id as EntityId | null,
+    speaker: speaker?.label ?? (row.writer === "human" ? "You" : "Model"),
+    position: (positionOf(pieces, place) ?? place.depth) + 1,
+    createdAt: row.created_at!,
+    excerpt: excerpt(content?.content ?? "", words, undefined, phrase),
+    branches,
+    branchCount: shown.length
+  } satisfies MessageHit
+})
 
 export const makeMessageSearchHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -394,7 +459,8 @@ export const makeMessageSearchHandlers = Effect.gen(function* () {
       cursor,
       limit,
       sort,
-      chats
+      chats,
+      forks
     }: {
       readonly userId: UserId
       readonly text: string
@@ -402,15 +468,21 @@ export const makeMessageSearchHandlers = Effect.gen(function* () {
       readonly limit: number
       readonly sort?: MessageSort
       readonly chats?: ReadonlyArray<string> | null
-    }) => searchMessages(sql, userId, text, cursor, limit, sort ?? "best", chats ?? null).pipe(query("SearchMessages")),
+      readonly forks?: ReadonlyArray<ForkId>
+    }) =>
+      searchMessages(sql, userId, text, cursor, limit, sort ?? "best", chats ?? null, forks).pipe(
+        query("SearchMessages")
+      ),
     CountMessages: ({
       userId,
       text,
-      chats
+      chats,
+      forks
     }: {
       readonly userId: UserId
       readonly text: string
       readonly chats?: ReadonlyArray<string> | null
-    }) => countMessages(sql, userId, text, chats ?? null).pipe(query("CountMessages"))
+      readonly forks?: ReadonlyArray<ForkId>
+    }) => countMessages(sql, userId, text, chats ?? null, forks).pipe(query("CountMessages"))
   }
 })

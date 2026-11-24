@@ -371,6 +371,7 @@ export interface Assembly {
   previousHistoryStart?: HistoryStart | null
   historyRevision?: number
   historyStart?: HistoryStart
+  historyCut?: ContextSnapshot["historyCut"]
   historyMove?: ContextSnapshot["historyMove"]
   /** The path's images the request leaves out and why (`images` stage); later stages may add their own. */
   imagesLeftOut?: {
@@ -504,6 +505,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
       ...(assembly.contextBudget ? { contextBudget: assembly.contextBudget } : {}),
       ...(assembly.summaryFill ? { summaryFill: assembly.summaryFill } : {}),
       historyStart: { ...historyStart, ...(historyStart.state ? { state: { ...historyStart.state, revision } } : {}) },
+      ...(assembly.historyCut ? { historyCut: assembly.historyCut } : {}),
       historyMove: need(assembly, "historyMove"),
       ...(assembly.lcm ? { historyBudget: need(assembly, "composition").historyBudget } : {}),
       assemblerVersion: ASSEMBLER_VERSION,

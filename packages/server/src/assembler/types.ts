@@ -394,6 +394,8 @@ export interface ContextSnapshot {
   /** What `{{summary}}` filled in, for the preset editor and the Notes tab. */
   readonly summaryFill?: import("@dreamspan/shared/inspectorApi.ts").SummaryFill
   readonly historyStart?: HistoryStart
+  /** Bounds of the read history left out by the budget, after filtering to the speaker's view. */
+  readonly historyCut?: { readonly first: number; readonly last: number }
   readonly historyMove?: "initial" | "maximum" | "budget" | "restore" | "unchanged"
   readonly historyBudget?: number
   /** Frozen inputs to registered summary transforms, before they shape the outgoing request. */

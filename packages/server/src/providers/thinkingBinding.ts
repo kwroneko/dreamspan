@@ -24,7 +24,7 @@ export interface ThinkingRecord {
   readonly modelId: string
   /** Non-secret digest of the transport identity, including credentials and address. */
   readonly connectionStamp?: string
-  /** Per-item prefixes when a response has separate reasoning and output items. */
+  /** Per-block prefixes, in the order the serialized reply carried its signed blocks. */
   readonly prefixes?: Readonly<Record<string, string>>
 }
 
@@ -485,12 +485,17 @@ export const bindThinking = (
     (input.mode !== "strip" && !messages.some((m) => binding.signed(m).length > 0))
   )
     return { payload, dropped: 0, reason: null }
-  const records = new Map<string, ThinkingRecord>()
+  const records = new Map<string, { readonly record: ThinkingRecord; readonly prev: string | null }>()
   for (const message of input.context) {
     if (message.role !== "assistant") continue
     const record = (message as RecordedAssistant).thinkingRecord
     if (record === undefined) continue
-    for (const key of binding.piSigned(message)) records.set(key, record)
+    // The serialized reply records the order even if some of its blocks were later removed.
+    const order = Object.keys(record.prefixes ?? {})
+    for (const key of binding.piSigned(message)) {
+      const at = order.indexOf(key)
+      records.set(key, { record, prev: at > 0 ? order[at - 1]! : record.prev })
+    }
   }
   const hash = createHash("sha256").update(stable(binding.head(payload)))
   const out: Array<unknown> = []
@@ -511,7 +516,8 @@ export const bindThinking = (
     const leaving = new Set<string>()
     const terms = input.history ?? { prefix: true }
     for (const key of keys) {
-      const record = records.get(key)
+      const bound = records.get(key)
+      const record = bound?.record
       const written =
         record !== undefined &&
         record.connectionId === input.connectionId &&
@@ -533,7 +539,7 @@ export const bindThinking = (
         reason = record !== undefined && !written ? "model" : "changed"
       }
       if (dropping) leaving.add(key)
-      else kept.push({ key, prev: record!.prev, leaving })
+      else kept.push({ key, prev: bound!.prev, leaving })
     }
     const comparable = binding.comparable(message)
     if (comparable !== null) hash.update(stable(comparable))

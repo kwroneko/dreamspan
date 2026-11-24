@@ -232,12 +232,13 @@ export type MessageHit = typeof MessageHit.Type
  * Where the next page starts: past this version in the sort's order (below it newest first,
  * above it oldest first). `phase` "words": among the messages that have the words apart, after
  * every one that has them side by side (Best match). `chat`: the Chat sort's place in its list
- * of chats, `before` within that chat.
+ * of chats, `before` within that chat. `chatOrder` identifies the list that gave it that place.
  */
 export const MessageCursor = Schema.Struct({
   before: Schema.Int,
   phase: Schema.optionalKey(Schema.Literal("words")),
-  chat: Schema.optionalKey(Schema.Int)
+  chat: Schema.optionalKey(Schema.Int),
+  chatOrder: Schema.optionalKey(Schema.String)
 })
 export type MessageCursor = typeof MessageCursor.Type
 
@@ -267,6 +268,8 @@ export const messageCountText = ({ messages, chats, more }: MessageCount) => {
 
 export const MessageSearchPage = Schema.Struct({
   hits: Schema.Array(MessageHit),
+  /** This is a fresh first page because the cursor's chat order changed. */
+  restarted: Schema.optionalKey(Schema.Literal(true)),
   /** Null when nothing older is left. */
   next: Schema.NullOr(MessageCursor)
 })
