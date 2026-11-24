@@ -221,15 +221,22 @@ test("search keyboard navigation reaches the selected model outside the mounted 
   const input = page.getByRole("searchbox", { name: "Find a model", exact: true })
   await input.focus()
   await page.keyboard.press("ArrowDown")
-  await expect(
-    page.getByRole("radio", { name: `${router.connection.name} · ${current.key}`, exact: true })
-  ).toBeFocused()
+  const radio = page.getByRole("radio", { name: `${router.connection.name} · ${current.key}`, exact: true })
+  await expect(radio).toBeFocused()
+  const row = page.locator("[data-picker-row]").filter({ has: radio })
+  // Regrouping must keep Space on Pin, even when the row moves into or out of the window.
+  await page.keyboard.press("Tab")
+  const pin = row.getByRole("button", { name: /^Pin / })
+  const unpin = row.getByRole("button", { name: /^Unpin / })
+  await expect(pin).toBeFocused()
+  await page.keyboard.press("Space")
+  await expect(unpin).toBeFocused()
+  await page.keyboard.press("Space")
+  await expect(pin).toBeFocused()
   // Returning through search must focus even a row the virtualizer already retains.
   await input.focus()
   await page.keyboard.press("ArrowDown")
-  await expect(
-    page.getByRole("radio", { name: `${router.connection.name} · ${current.key}`, exact: true })
-  ).toBeFocused()
+  await expect(radio).toBeFocused()
   await page.keyboard.press("Home")
   await page.keyboard.press("ArrowUp")
   await expect(input).toBeFocused()
