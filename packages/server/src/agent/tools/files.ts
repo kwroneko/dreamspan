@@ -433,18 +433,21 @@ export const makeFileTools = (deps: FileToolDeps) => {
     return resolved
   }
 
+  const authorize = (ctx: ToolContext, capability: string, cardFileImport?: true) =>
+    deps.reader.AuthorizePluginTool({
+      userId: ctx.userId,
+      rolloutId: ctx.rolloutId,
+      toolCallId: ctx.toolCallId,
+      capability,
+      requireApproval: cardFileImport === true,
+      ...(cardFileImport ? { requireFiles: true as const } : {}),
+      ...(ctx.approvalDigest ? { digest: ctx.approvalDigest } : {})
+    })
+
   /** The capability's standing, checked again at the call; the account; its folders made. */
   const proof = (ctx: ToolContext, capability: string, cardFileImport?: true) =>
     Effect.gen(function* () {
-      const actor = yield* deps.reader.AuthorizePluginTool({
-        userId: ctx.userId,
-        rolloutId: ctx.rolloutId,
-        toolCallId: ctx.toolCallId,
-        capability,
-        requireApproval: cardFileImport === true,
-        ...(cardFileImport ? { requireFiles: true as const } : {}),
-        ...(ctx.approvalDigest ? { digest: ctx.approvalDigest } : {})
-      })
+      const actor = yield* authorize(ctx, capability, cardFileImport)
       const env = accountEnv(deps, actor.id)
       yield* attempt(() => prepareAccount(env))
       return { actor, env }
@@ -1004,6 +1007,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
           before = { bytes: read.bytes, info: read.info, sha256: hash, byteSize: read.bytes.byteLength }
         } else if (kind === "edit") throw new FilePathRefused(`${full} doesn't exist. Create it with write_file.`)
         const content = next(before?.bytes ?? null)
+        // An export may have waited for a separate library approval after its initial Files check.
+        if (kind === "create") yield* authorize(ctx, "files")
         const { written, versionId } = yield* writeWithVersion(
           env.userId,
           full,

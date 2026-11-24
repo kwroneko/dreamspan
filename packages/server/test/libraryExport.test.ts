@@ -241,6 +241,25 @@ describe("export_to_file", () => {
         assert.include(defaultFromHost.text, "/files/Mara Quill description.txt")
         assert.deepEqual(yield* Effect.promise(() => readdir(hostFolder)), [])
 
+        const revoked = yield* run(
+          "export_to_file",
+          { ...target, path: "/files/revoked.txt" },
+          {
+            sight: {
+              inView: () => Effect.succeed(false),
+              gate: () =>
+                api
+                  .SetWorkshopGrant({ chatId: chat.id, capability: "files", mode: "off" })
+                  .pipe(Effect.orDie, Effect.as({ ok: true as const }))
+            }
+          }
+        )
+        assert.isTrue(revoked.isError, revoked.text)
+        assert.include(revoked.text, "off in this workshop")
+        assert.isUndefined(revoked.effects)
+        yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "files", mode: "allow" })
+        assert.isTrue((yield* run("read_file", { path: "/files/revoked.txt" })).isError)
+
         // Files turned off in this workshop: refused like every file tool.
         yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "files", mode: "off" })
         const off = yield* run("export_to_file", { kind: "card", item: card.id, path: "off.txt" })
