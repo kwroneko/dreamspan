@@ -1,5 +1,6 @@
 import { loreEffectsAt, type LoreReceipt, type LoreTimeline } from "../assembler/loreTiming.ts"
 import { refSourcePathSql } from "./library.ts"
+import { hasVersionPayload } from "./libraryAttachments.ts"
 import { bookSourceName } from "@dreamspan/shared/lorebookLink.ts"
 import { sharedNote } from "./sharedNotes.ts"
 import { originalReply, type ReplySections } from "@dreamspan/shared/replySections.ts"
@@ -891,7 +892,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           ...(yield* sql<{ eligible: number; receipts: string }>`
           ${path}
           SELECT CASE WHEN ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed'
-            AND (v.content_length > 0 OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN 1 ELSE 0 END AS eligible, ${receipts(sql`v.id`)} AS receipts
+            AND ${hasVersionPayload(sql)} THEN 1 ELSE 0 END AS eligible, ${receipts(sql`v.id`)} AS receipts
           FROM path JOIN slots s ON s.id = path.id JOIN versions v ON v.id = ${selected}
           WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${owned} ORDER BY path.position`)
         ]
@@ -935,7 +936,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const onDisplay = yield* display(leaf)
         const counted = sql`count(*) AS n FROM path JOIN slots s ON s.id = path.id
         JOIN versions v ON v.id = ${selected}
-        WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed' AND (v.content_length > 0 OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id = v.id))`
+        WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed' AND ${hasVersionPayload(sql)}`
         const [row] =
           onDisplay === null
             ? yield* sql<{ n: number }>`

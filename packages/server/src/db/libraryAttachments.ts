@@ -7,6 +7,11 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { NotFound } from "./ops.ts"
 
+/** Whether the selected version (`v`) has content to send, without loading the payload. */
+export const hasVersionPayload = (sql: SqlClient.SqlClient) => sql`(v.content_length > 0
+  OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)
+  OR EXISTS (SELECT 1 FROM version_library l WHERE l.version_id = v.id))`
+
 /** A live library entry of `ownerId`'s of the kind named: its head revision and its name now. */
 const liveRef = (sql: SqlClient.SqlClient, ownerId: string, item: MessageLibrary[number]) =>
   Effect.map(
