@@ -1512,13 +1512,31 @@ export function SourceFiltersPanel({
         </div>
       )}
       <div data-filter-panels className="hidden min-w-0 flex-wrap items-center gap-2 @xl:flex">
-        {panels.map((panel) => (
-          <PanelButton key={panel.key} panel={panel} browse={browse} set={set} />
-        ))}
-        {(caps.tags.include || caps.tags.exclude) && (
-          <div className="min-w-40 flex-1">
-            <TagInput browse={browse} />
-          </div>
+        {(caps.tags.include || caps.tags.exclude) && panels.length > 0 ? (
+          <>
+            {panels.slice(0, -1).map((panel) => (
+              <PanelButton key={panel.key} panel={panel} browse={browse} set={set} />
+            ))}
+            {/* The tag field ends the row; where the button and its 8rem don't fit, they take the
+                next line together, so it never sits there alone. */}
+            <div className="flex flex-auto flex-nowrap items-center gap-2">
+              <PanelButton panel={panels.at(-1)!} browse={browse} set={set} />
+              <div className="w-32 shrink-0 grow">
+                <TagInput browse={browse} />
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            {panels.map((panel) => (
+              <PanelButton key={panel.key} panel={panel} browse={browse} set={set} />
+            ))}
+            {(caps.tags.include || caps.tags.exclude) && (
+              <div className="min-w-40 flex-1">
+                <TagInput browse={browse} />
+              </div>
+            )}
+          </>
         )}
       </div>
       {switches.length > 0 && (
