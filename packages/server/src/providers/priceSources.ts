@@ -64,3 +64,20 @@ export const priceSources = (
 /** The first known price, for formulas that take one rate table. */
 export const firstPrice = (sources: PriceSources) =>
   sources.endpoint?.price ?? sources.list?.price ?? sources.builtin?.price ?? null
+
+/** The most a request could cost across rate tables, cache splits and output splits. */
+export const priceBound = (prices: ReadonlyArray<Price>, inputTokens: number, outputTokens: number) => {
+  const bounds = prices.map((price) => {
+    const rates = [price, ...(price.tiers ?? [])]
+    const input = Math.max(
+      ...rates.flatMap((r) => [r.input, r.cacheRead ?? 0, r.cacheWrite ?? 0, r.cacheWriteLong ?? r.input * 2])
+    )
+    const output = Math.max(...rates.flatMap((r) => [r.output, r.reasoning ?? 0]))
+    return {
+      amount: (inputTokens * input + outputTokens * output) / 1e6 + (price.perRequest ?? 0),
+      currency: price.currency ?? "USD"
+    }
+  })
+  if (new Set(bounds.map((b) => b.currency)).size !== 1) return null
+  return bounds.reduce((a, b) => (b.amount > a.amount ? b : a))
+}
