@@ -127,7 +127,8 @@ export function EditorTextActions({
   size?: "strip" | "row"
   /**
    * The selection's actions stay in place, disabled while nothing is selected, so nothing beside
-   * them moves as a selection comes and goes (the message editor's row; owner, 2026-11-24).
+   * them moves as a selection comes and goes (owner, 2026-11-24): the message editor's row, and a
+   * code editor's strip, where on a phone one coming would wrap the token count.
    */
   keepSelection?: boolean
   className?: string

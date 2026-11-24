@@ -149,7 +149,7 @@ for (const width of [1440, 390])
       await again.press("Control+Home")
       await again.press("Control+Shift+End")
       // The shortcut acts on the selection the editor has published, as its button shows.
-      await expect(notes.getByRole("button", { name: "Send selection to snippet", exact: true })).toBeVisible()
+      await expect(notes.getByRole("button", { name: "Send selection to snippet", exact: true })).toBeEnabled()
       await again.press("Control+Shift+S")
       await page.getByRole("menuitem", { name: /^Untitled snippet/ }).click()
       await expect(notes).toBeVisible()
@@ -182,8 +182,13 @@ test("a library field creates a snippet for all chats outside a chat", async ({ 
   await description.fill("A keeper watches the harbour.")
   await description.press("Control+Home")
   await description.press("Control+Shift+End")
-  // Selection actions mount after the editor publishes its selection to React.
-  await expect(page.getByRole("button", { name: "Send selection to snippet", exact: true })).toBeVisible()
+  // The selection button is enabled once the editor publishes its selection to React.
+  await expect(
+    page
+      .locator("[data-field-frame]")
+      .filter({ has: description })
+      .getByRole("button", { name: "Send selection to snippet", exact: true })
+  ).toBeEnabled()
   await description.press("Control+Shift+S")
   // Outside a chat no snippet is open: the shortcut opens the menu at its button.
   await page.getByRole("menuitem", { name: /^New snippet/ }).click()

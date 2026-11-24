@@ -459,7 +459,10 @@ export const register = () => [
     icon: "snippetSelection",
     editor: "selection",
     shortcut: "s",
-    unavailable: ({ text }) => (text.length === 0 ? "Select text to add it to a snippet." : "The Snippets panel is unavailable."),
+    // A snippet's own editor doesn't offer it, kept in place or not: it would add it to itself.
+    applies: ({ source }) => source !== "snippet",
+    unavailable: ({ text }) =>
+      text.length === 0 ? "Select text to add it to a snippet." : "The Snippets panel is unavailable.",
     available: ({ text, source }) => source !== "snippet" && text.length > 0 && canSend(),
     run: sendOrChoose,
     choices: SnippetChoices

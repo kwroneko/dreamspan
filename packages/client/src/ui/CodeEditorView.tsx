@@ -97,8 +97,16 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
           }
           tools={
             <>
+              {/* The selection's buttons stay, disabled without one: on a phone the strip is full, and
+                  one coming would wrap the token count onto a second line (owner, 2026-11-24). */}
               {props.textActions !== false && (
-                <EditorTextActions text={props.value} selection={selection} shown={focused} source={props.source} />
+                <EditorTextActions
+                  text={props.value}
+                  selection={selection}
+                  shown={focused}
+                  source={props.source}
+                  keepSelection
+                />
               )}
               {props.tools}
               {props.lastRevision !== undefined && !props.readOnly && (

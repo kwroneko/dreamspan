@@ -1,6 +1,6 @@
 // Text the browser's way (owner, 2026-11-01): the browser's own context menu over message text
 // and editors, copying a message's text from a selection, Send to snippet in the editor's own
-// chrome (its selection button comes and goes with the selection), a double-click opening a
+// chrome (its selection button enabled only with a selection), a double-click opening a
 // message for editing without taking triple-click or drag selection, and no Regenerate in the
 // toolbar, where the version arrows' › generates another. Synthetic text, fake generator.
 import { mkdirSync } from "node:fs"
@@ -123,31 +123,31 @@ for (const width of [1440, 390])
       await page.keyboard.press("Backspace")
       expect(await menuPrevented(editor)).toBe(false)
 
-      // The editor's own Send buttons: the whole text's, and the selection's only while it lasts.
+      // The editor's own Send buttons: the whole text's, and the selection's, enabled only while it lasts.
       const sendText = mine.getByRole("button", { name: "Send text to snippet" })
       const sendSelection = mine.getByRole("button", { name: "Send selection to snippet" })
       await expect(sendText).toBeVisible()
-      await expect(sendSelection).toHaveCount(0)
+      await expect(sendSelection).toHaveAttribute("aria-disabled", "true")
       await editor.press("Control+End")
       await editor.press("Control+Shift+ArrowLeft")
       await editor.press("Shift+ArrowLeft")
-      await expect(sendSelection).toBeVisible()
+      await expect(sendSelection).toBeEnabled()
       if (shots) {
         mkdirSync(shots, { recursive: true })
         await mine.screenshot({ path: join(shots, `editor-selection-${width}-${theme}.png`) })
       }
       await editor.press("ArrowRight")
-      await expect(sendSelection).toHaveCount(0)
+      await expect(sendSelection).toHaveAttribute("aria-disabled", "true")
       await expect(sendText).toBeVisible()
       for (let i = 0; i < 5; i++) await editor.press("Shift+ArrowLeft")
-      await expect(sendSelection).toBeVisible()
-      // Left for another box, the editor keeps its selection unseen: its button goes too.
+      await expect(sendSelection).toBeEnabled()
+      // Left for another box, the editor keeps its selection unseen: its button is disabled too.
       await page.getByLabel("Message", { exact: true }).focus()
-      await expect(sendSelection).toHaveCount(0)
+      await expect(sendSelection).toHaveAttribute("aria-disabled", "true")
       await editor.focus()
       await editor.press("End")
       for (let i = 0; i < 5; i++) await editor.press("Shift+ArrowLeft")
-      await expect(sendSelection).toBeVisible()
+      await expect(sendSelection).toBeEnabled()
       // No snippet shown: a menu at the button chooses where it goes.
       await sendSelection.click()
       await page.getByRole("menuitem", { name: /^New snippet/ }).click()
