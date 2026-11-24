@@ -7,11 +7,12 @@
 import { afterAll, assert, describe, it, layer } from "@effect/vitest"
 import { emptySourceQuery, remoteEntityId, SourceFailed } from "@dreamspan/shared/cardSources.ts"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { DraftKey } from "@dreamspan/shared/drafts.ts"
 import { textField } from "@dreamspan/shared/editing.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect, Exit, Fiber, Layer } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
-import { rename } from "node:fs/promises"
+import { rename, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { CardSourceAdapter } from "../src/sources/adapter.ts"
@@ -21,6 +22,7 @@ import * as CardSources from "../src/sources/CardSources.ts"
 import { isPrivateAddress, makeSourceHttp } from "../src/sources/guard.ts"
 import { makeCoalescer, makeLimiter } from "../src/sources/limiter.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
+import { Formats } from "../src/importer/Formats.ts"
 import { client, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { fakeCardexAdapter, startFakeCardex } from "./support/fakeCardex.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
@@ -36,9 +38,29 @@ const config = testConfig({ authMode: "proxy" })
 // Functional RPC tests use Effect's virtual clock. Keep the synthetic archive's burst
 // above this suite's request count; the real rate and waiting/backoff are tested below.
 const functionalRate = { perSecond: 10, burst: 1000 }
+/** Set by a test: declines the next source thumbnail after running, as an eviction landing mid-request. */
+let declineThumbnail: Effect.Effect<void> | null = null
+const hookedFormats = Layer.effect(
+  Formats,
+  Effect.gen(function* () {
+    const real = yield* Formats
+    return {
+      ...real,
+      thumbnail: (input: Parameters<typeof real.thumbnail>[0]) => {
+        const during = declineThumbnail
+        if (during === null) return real.thumbnail(input)
+        declineThumbnail = null
+        return real.thumbnail(input).pipe(
+          Effect.tap(() => during),
+          Effect.map((thumb) => ({ ...thumb, original: true }))
+        )
+      }
+    }
+  })
+)
 const sources = CardSources.layerWith({
   adapters: [{ ...fakeCardexAdapter(archive), key: "optional", rate: functionalRate }]
-})
+}).pipe(Layer.provide(hookedFormats))
 const testServer = serverLayer(config, undefined, undefined, sources)
 const base = Effect.map(serverPort, (port) => `http://127.0.0.1:${port}`)
 
@@ -140,6 +162,37 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
           await rename(`${blob}.held`, blob)
         }
       })
+    })
+  )
+
+  it.effect("an original read after a declined thumbnail survives an eviction between them", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const me = yield* api.Whoami()
+      const service = yield* CardSources.CardSources
+      const { items } = yield* api.SourceSearch({
+        sourceId: "cardex",
+        query: { ...emptySourceQuery, text: "Amber" },
+        page: null
+      })
+      const url = `${yield* base}/sources/cardex/image?k=${items[0]!.thumb}`
+      const original = yield* Effect.promise(async () => {
+        const response = await fetch(url, { headers: alice })
+        return { etag: response.headers.get("etag"), bytes: await response.arrayBuffer() }
+      })
+      const hits = archive.hits()
+      // The cache is cleared after the lookup and before the original is read lazily.
+      declineThumbnail = service.cache.clearUser(me.id, "cardex")
+      const served = yield* Effect.promise(async () => {
+        const response = await fetch(`${url}&w=96`, { headers: alice })
+        return { status: response.status, etag: response.headers.get("etag"), bytes: await response.arrayBuffer() }
+      })
+      assert.isNull(declineThumbnail)
+      assert.strictEqual(served.status, 200)
+      assert.strictEqual(served.etag, original.etag)
+      assert.deepStrictEqual(served.bytes, original.bytes)
+      // Served from the bytes the request held, not fetched again.
+      assert.strictEqual(archive.hits(), hits)
     })
   )
 
@@ -582,6 +635,76 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
         items: [{ remoteId: card.slug, sha256: null }]
       })
       assert.lengthOf(held, 0)
+    })
+  )
+
+  it.effect("a remote draft save reaching the writer after adoption follows the card", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const { id } = yield* api.Whoami()
+      const remoteId = archive.cards[117]!.slug
+      const refId = remoteEntityId("cardex", remoteId) as unknown as RefId
+      const opened = yield* api.OpenEditor({ refId })
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId })
+      const writer = yield* Writer
+      // This was prepared while OpenEditor still resolved to the source card.
+      const draft = yield* writer.SaveDraft({
+        userId: id,
+        key: new DraftKey({
+          targetKind: "remote_card",
+          targetId: `cardex:${remoteId}`,
+          field: textField(["description"])
+        }),
+        draftId: null,
+        content: "A note typed before adoption.",
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevision: null
+      })
+      const reopened = yield* api.OpenEditor({ refId })
+      assert.strictEqual(opened.revisionNumber, 0)
+      assert.strictEqual(reopened.ref.id, added.refId)
+      assert.deepInclude(
+        reopened.drafts.map(({ id, content }) => ({ id, content })),
+        {
+          id: draft.id,
+          content: "A note typed before adoption."
+        }
+      )
+      const lateSave = yield* api.SaveEditorDraft({
+        refId,
+        field: draft.key.field,
+        draftId: null,
+        content: "A competing note from the old editor.",
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+      assert.strictEqual(lateSave.id, draft.id)
+      assert.strictEqual(lateSave.displaced?.content, draft.content)
+      const url = yield* base
+      const response = yield* Effect.promise(() =>
+        fetch(`${url}/library/drafts`, {
+          method: "POST",
+          headers: { ...alice, "content-type": "application/json" },
+          body: JSON.stringify({
+            drafts: [
+              {
+                refId,
+                field: draft.key.field,
+                draftId: lateSave.id,
+                content: "A final edit sent on leaving.",
+                expectedRowVersion: lateSave.rowVersion,
+                expectedSession: lateSave.session,
+                baseRevisionId: opened.ref.headRevisionId
+              }
+            ]
+          })
+        })
+      )
+      assert.strictEqual(response.status, 204)
+      const own = yield* api.OpenEditor({ refId: reopened.ref.id })
+      assert.strictEqual(own.drafts.find((saved) => saved.id === draft.id)?.content, "A final edit sent on leaving.")
     })
   )
 
@@ -1785,7 +1908,7 @@ describe("the cache (§4.1)", () => {
       assert.isNull(yield* cache.peek(key("preview", "card", "missing")))
       assert.strictEqual((yield* cache.peek(key("preview", "card", "opened")))?.used, used)
       assert.strictEqual(cache.size(), 1)
-      assert.strictEqual((yield* cache.readBlob(entry.blob!)).length, 3)
+      assert.strictEqual((yield* cache.readBlob(entry.blob!))?.length, 3)
       yield* cache.sweep
       assert.strictEqual(cache.size(), 0, "preview never prolongs an entry's lifetime")
     })
@@ -1916,12 +2039,66 @@ describe("the cache (§4.1)", () => {
       yield* cache.clearUser("a", null)
       assert.isFalse(cache.has(key("a", "image", "x")))
       const entry = yield* cache.get(key("b", "image", "x"))
-      assert.deepStrictEqual([...(yield* cache.readBlob(entry!.blob!)).subarray(0, 3)], [7, 7, 7])
+      assert.deepStrictEqual([...(yield* cache.readBlob(entry!.blob!))!.subarray(0, 3)], [7, 7, 7])
       // A restart rebuilds the index from the files.
       const again = makeSourceCache({ dataDir, now: () => 0 })
       yield* again.scan
       assert.isTrue(again.has(key("b", "image", "x")))
       assert.isFalse(again.has(key("a", "image", "x")))
+    })
+  )
+
+  it.effect("a concurrent admission keeps the blob when its previous owner clears the cache", () =>
+    Effect.gen(function* () {
+      const { cache } = fresh(() => 0)
+      yield* cache.load
+      const bytes = new Uint8Array([1, 2, 3])
+      const old = key("a", "image", "x")
+      const next = key("b", "image", "x")
+      yield* cache.put(old, { bytes })
+      yield* Effect.all([cache.clearUser("a", null), cache.put(next, { bytes })], { concurrency: "unbounded" })
+      assert.isFalse(cache.has(old))
+      assert.deepStrictEqual([...(yield* cache.getBlob(next))!.bytes], [1, 2, 3])
+    })
+  )
+
+  it.effect("a cache hit with missing bytes is dropped and can be fetched again", () =>
+    Effect.gen(function* () {
+      const { cache, dataDir } = fresh(() => 0)
+      yield* cache.load
+      const image = key("a", "image", "x")
+      const bytes = new Uint8Array([1, 2, 3])
+      const { blob } = yield* cache.put(image, { bytes })
+      yield* Effect.promise(() => unlink(join(dataDir, blobPath(blob!))))
+      assert.isNull(yield* cache.getBlob(image))
+      assert.isFalse(cache.has(image))
+      assert.strictEqual(cache.usedBytes(), 0)
+      yield* cache.put(image, { bytes })
+      assert.deepStrictEqual([...(yield* cache.getBlob(image))!.bytes], [1, 2, 3])
+    })
+  )
+
+  it.effect("counts a thumbnail once across repeated responses and restarts", () =>
+    Effect.gen(function* () {
+      const { cache, dataDir } = fresh(() => 0)
+      yield* cache.load
+      const entry = yield* cache.put(key("a", "image", "x"), { bytes: new Uint8Array(100) })
+      const path = `${blobPath(entry.blob!)}.thumb-v1-128.webp`
+      const base = cache.usedBytes()
+      yield* Effect.promise(() => writeFile(join(dataDir, path), new Uint8Array(40)))
+      yield* cache.noteDerivative(entry.blob!, path)
+      yield* cache.noteDerivative(entry.blob!, path)
+      assert.strictEqual(cache.usedBytes(), base + 40)
+
+      const restarted = makeSourceCache({ dataDir })
+      yield* restarted.load
+      yield* restarted.noteDerivative(entry.blob!, path)
+      assert.strictEqual(restarted.usedBytes(), base + 40)
+      yield* Effect.promise(() => writeFile(join(dataDir, path), new Uint8Array(50)))
+      yield* restarted.noteDerivative(entry.blob!, path)
+      assert.strictEqual(restarted.usedBytes(), base + 50)
+      yield* restarted.clearUser("a", null)
+      assert.strictEqual(restarted.usedBytes(), 0)
     })
   )
 })

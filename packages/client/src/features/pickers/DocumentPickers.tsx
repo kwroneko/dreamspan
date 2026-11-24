@@ -28,6 +28,7 @@ import {
   type PickerBodyProps,
   PickerFooterButton,
   type PickerItem,
+  type PickerListNavigation,
   PickerList,
   PickerPopover,
   PickerSearch
@@ -156,6 +157,7 @@ export function DocumentPicker({
 }: DocumentPickerProps) {
   const [query, setQuery] = useState("")
   const search = useRef<HTMLInputElement>(null)
+  const navigation = useRef<PickerListNavigation>(null)
   const [stored, setView] = useRememberedView(subject)
   const dated = choices.some((choice) => choice.updatedAt !== undefined)
   const view = dated ? stored : "name"
@@ -194,6 +196,7 @@ export function DocumentPicker({
         onChange={setQuery}
         inputRef={focus === "search" ? focusRef : search}
         controls={listId}
+        navigate={(key) => navigation.current?.searchKey(key)}
       />
       {dated && (
         <Segmented<DocumentSort>
@@ -204,6 +207,7 @@ export function DocumentPicker({
         />
       )}
       <PickerList
+        ref={navigation}
         id={listId}
         title={`${subject[0]!.toUpperCase()}${subject.slice(1)}s`}
         items={items}
@@ -309,6 +313,7 @@ export function CardPicker({
   const browse: CardBrowse = { ...remembered, filter, grouped: false }
   const [query, setQuery] = useState("")
   const search = useRef<HTMLInputElement>(null)
+  const navigation = useRef<PickerListNavigation>(null)
   const listId = useId()
   const data = AsyncResult.isSuccess(shell) ? shell.value : null
   const marked = mixesPersonas(browse)
@@ -347,6 +352,7 @@ export function CardPicker({
         onChange={setQuery}
         inputRef={focus === "search" ? focusRef : search}
         controls={listId}
+        navigate={(key) => navigation.current?.searchKey(key)}
       />
       {data && !personasOnly && (
         <CardBrowseBar
@@ -360,6 +366,7 @@ export function CardPicker({
         />
       )}
       <PickerList
+        ref={navigation}
         id={listId}
         title={filter === "personas" ? "Personas" : "Cards"}
         items={items}

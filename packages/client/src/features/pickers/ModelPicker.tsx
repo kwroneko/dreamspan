@@ -87,6 +87,7 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
   const search = useRef<HTMLInputElement>(null)
   const searchRef = focus === "search" ? focusRef : search
   const navigation = useRef<ModelListNavigation>(null)
+  const choosing = useRef(false)
   const listId = useId()
   const { models, value } = selection
   const used = useMemo(() => {
@@ -126,13 +127,22 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
     [choices, ordered, prefs.modelSort, query, connection, orderPins, prefs.modelPins, used]
   )
   const choose = useCallback(
-    (next: string) => {
+    async (next: string) => {
+      if (choosing.current) return
+      if (selection.waitForChoice && next !== value) {
+        choosing.current = true
+        try {
+          if (!(await selection.choose(next))) return
+        } finally {
+          choosing.current = false
+        }
+      }
       if (next.includes(" ")) {
         const at = Date.now()
         void change({ modelRecent: { ...prefs.modelRecent, [next]: at } }, { modelRecent: { [next]: at } })
       }
       onChosen()
-      if (next !== value) void selection.choose(next)
+      if (!selection.waitForChoice && next !== value) void selection.choose(next)
     },
     [change, prefs.modelRecent, onChosen, value, selection]
   )
@@ -195,7 +205,7 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
         used={used}
         pins={prefs.modelPins}
         pinsReady={ready}
-        onChoose={choose}
+        onChoose={(next) => void choose(next)}
         focusRef={focus === "current" ? focusRef : undefined}
         onPin={(id) => {
           if (order && !(id in order.held))

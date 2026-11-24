@@ -29,6 +29,8 @@ export interface ModelSelection {
   readonly used: ReadonlyMap<string, number>
   /** Exactly what choosing in the composer does: the account's model, for every chat's next reply. */
   readonly choose: (value: string) => Promise<boolean>
+  /** Keep the picker open and record the recent choice only after a successful write. */
+  readonly waitForChoice?: boolean
   readonly refresh: () => void
   readonly error: ReturnType<typeof useAction>["error"]
 }

@@ -2,7 +2,7 @@
 // pages/cards keep their normal lifetimes; validators outlive them so a refresh can use 304.
 import { createHash } from "node:crypto"
 import { SourceFailed } from "@dreamspan/shared/cardSources.ts"
-import { Effect, Exit } from "effect"
+import { Effect } from "effect"
 import type { SourceHttp, SourceResponse } from "./adapter.ts"
 import type { SourceCache } from "./cache.ts"
 
@@ -25,12 +25,11 @@ export const withConditionalGets = (
         .update(JSON.stringify([url.href, kind, http.apiKey, Object.entries(headers).sort()]))
         .digest("hex")
       const key = { user, source, kind: "response" as const, id }
-      const hit = yield* cache.get(key)
       // Own the old bytes before waiting on the network: another request can clear or
       // evict the entry while its conditional GET is in flight.
-      const stored = hit?.blob ? yield* Effect.exit(cache.readBlob(hit.blob)) : null
-      const bytes = stored && Exit.isSuccess(stored) ? stored.value : null
-      const previous = bytes !== null ? (hit!.value as ValidatedResponse) : undefined
+      const hit = yield* cache.getBlob(key)
+      const bytes = hit?.bytes ?? null
+      const previous = hit?.entry.value as ValidatedResponse | undefined
       const response = yield* http.get(url, kind, {
         ...headers,
         ...(previous ? { "if-none-match": previous.etag } : {})
@@ -57,7 +56,7 @@ export const withConditionalGets = (
           bytes: response.bytes,
           value: { etag, headers: [...response.headers] } satisfies ValidatedResponse
         })
-      } else if (hit) yield* cache.remove(key)
+      } else if (hit) yield* cache.remove(key, hit.entry)
       return response
     })
 })

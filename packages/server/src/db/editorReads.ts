@@ -247,6 +247,19 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
         )
       }).pipe(inFork(sql, chatId, forkId, slotId), query("ChatNoteEntries")),
 
+    ListSharedNoteRefs: ({ userId }) =>
+      lib
+        .refsWhere(
+          `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL
+           AND json_extract((SELECT h.doc_json FROM entity_revisions h WHERE h.id = r.head_revision_id),
+             '$.owner.shared') = 'global'`,
+          [userId]
+        )
+        .pipe(
+          Effect.map((rows) => rows.map(toLibraryRef)),
+          query("ListSharedNoteRefs")
+        ),
+
     ListSharedNotes: ({ userId, query: search, refId, entityId, chatNote }) =>
       Effect.gen(function* () {
         if (chatNote) yield* chatFork(sql, userId, chatNote.chatId, chatNote.forkId ?? null)

@@ -39,6 +39,7 @@ import { TextSearchApi } from "./textSearchApi.ts"
 import {
   EditorApi,
   OwnTurnNoteApi,
+  SharedNoteRefsApi,
   WorkshopPresetApi,
   ForkMergeApi,
   GalleryApi,
@@ -455,6 +456,7 @@ export const AuthenticatedDraftChatApi = DraftChatApi.middleware(Authentication)
 export const AuthenticatedCardSourcesApi = CardSourcesApi.middleware(Authentication)
 
 export const AuthenticatedOwnTurnNoteApi = OwnTurnNoteApi.middleware(Authentication)
+export const AuthenticatedSharedNoteRefsApi = SharedNoteRefsApi.middleware(Authentication)
 
 export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
 export const AuthenticatedExternalMediaApi = ExternalMediaApi.middleware(Authentication)
@@ -549,6 +551,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedMoveApi)
   .merge(AuthenticatedPluginApi)
   .merge(AuthenticatedOwnTurnNoteApi)
+  .merge(AuthenticatedSharedNoteRefsApi)
   .merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedWorkshopPresetApi)
   .merge(AuthenticatedChatEventsApi)

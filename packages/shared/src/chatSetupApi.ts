@@ -764,7 +764,12 @@ export class ChatSetupApi extends RpcGroup.make(
       chatId: ChatId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       slotId: Schema.NullOr(SlotId),
-      change: CastChange
+      change: CastChange,
+      /**
+       * The caller showed the chat pending (its null slot is the start, before the greetings): if
+       * a first send started it since, the change goes at its tip instead, after what was said.
+       */
+      pending: Schema.optionalKey(Schema.Boolean)
     },
     success: Cast,
     error: Schema.Union([...Errors])

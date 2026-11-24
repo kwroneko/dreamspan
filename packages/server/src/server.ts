@@ -64,6 +64,7 @@ import {
   AuthenticatedGalleryApi,
   AuthenticatedOwnTurnNoteApi,
   AuthenticatedComposerLibraryApi,
+  AuthenticatedSharedNoteRefsApi,
   DatabaseStatusApi,
   AuthenticatedPanelApprovalApi,
   AuthenticatedPanelDataApi,
@@ -98,6 +99,7 @@ import { makeChatSetupHandlers, makeDraftPreviewHandlers } from "./api/chatSetup
 import {
   makeEditorHandlers,
   makeOwnTurnNoteHandlers,
+  makeSharedNoteRefsHandlers,
   makeWorkshopPresetHandlers,
   makeGalleryHandlers,
   makePanelApprovalHandlers,
@@ -236,6 +238,7 @@ const HandlerLayers = Layer.mergeAll(
   DatabaseStatusHandlers,
   AuthenticatedOwnTurnNoteApi.toLayer(makeOwnTurnNoteHandlers),
   AuthenticatedComposerLibraryApi.toLayer(makeComposerLibraryHandlers),
+  AuthenticatedSharedNoteRefsApi.toLayer(makeSharedNoteRefsHandlers),
   AuthenticatedWorkshopPresetApi.toLayer(makeWorkshopPresetHandlers),
   AuthenticatedMessageVersionApi.toLayer(makeMessageVersionHandlers),
   AuthenticatedMoveApi.toLayer(makeMoveHandlers),

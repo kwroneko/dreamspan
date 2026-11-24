@@ -37,6 +37,7 @@ import type { ReadOps } from "./ops.ts"
 import type { LlmRequestRow } from "./providers.ts"
 import type { InspectorUsage } from "@dreamspan/shared/inspectorApi.ts"
 import { query } from "./tx.ts"
+import { recordedPromptTotal } from "./requestInput.ts"
 
 const unique = <A>(list: ReadonlyArray<A>) => [...new Set(list)]
 
@@ -173,6 +174,7 @@ export const rolloutUsage = (sql: SqlClient.SqlClient, userId: UserId, rolloutId
       | "first_token_at"
       | "ended_at"
       | "estimated_input"
+      | "input_total"
       | "input_uncached"
       | "cache_read"
       | "cache_write"
@@ -183,7 +185,7 @@ export const rolloutUsage = (sql: SqlClient.SqlClient, userId: UserId, rolloutId
     >
   >`
     SELECT id, status, started_at, first_token_at, ended_at, estimated_input, input_uncached, cache_read, cache_write, output,
-      usage_source, cost, cost_currency
+      ${recordedPromptTotal(sql)} AS input_total, usage_source, cost, cost_currency
     FROM llm_requests INDEXED BY llm_requests_rollout WHERE rollout_id = ${rolloutId} AND owner_user_id = ${userId}
     ORDER BY started_at, id`
 
@@ -456,6 +458,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           endedAt: r.ended_at,
           usageSource: r.usage_source,
           counts: {
+            ...(r.input_total == null ? {} : { inputTotal: r.input_total }),
             inputUncached: r.input_uncached,
             cacheRead: r.cache_read,
             cacheWrite: r.cache_write,
@@ -488,6 +491,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           first_reasoning_at: number | null
           first_reply_at: number | null
           usage_source: RequestFigures["usageSource"]
+          input_total: number | null
           input_uncached: number | null
           cache_read: number | null
           cache_write: number | null
@@ -509,7 +513,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           )
           SELECT chain.root, q.status, q.started_at, q.first_token_at, q.ended_at, q.output, q.reasoning, q.reasoning_estimated,
             q.first_reasoning_at, q.first_reply_at, q.usage_source, q.input_uncached, q.cache_read, q.cache_write, q.cache_write_long, q.cost, q.cost_currency, q.cost_formula,
-            json_extract(q.cost_rates_json, '$.reasoning') AS reasoning_rate, q.reported_cost
+            ${recordedPromptTotal(sql, "q.")} AS input_total, json_extract(q.cost_rates_json, '$.reasoning') AS reasoning_rate, q.reported_cost
           FROM chain JOIN llm_requests q INDEXED BY llm_requests_version ON q.version_id = chain.id
           WHERE q.purpose IN ('generation', 'workshop') AND q.owner_user_id = ${userId}
           ORDER BY chain.root, q.started_at, q.id`
@@ -529,6 +533,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
               ? {}
               : { firstReasoningAt: row.first_reasoning_at, firstReplyAt: row.first_reply_at }),
             usageSource: row.usage_source,
+            ...(row.input_total === null ? {} : { inputTotal: row.input_total }),
             inputUncached: row.input_uncached,
             cacheRead: row.cache_read,
             cacheWrite: row.cache_write,

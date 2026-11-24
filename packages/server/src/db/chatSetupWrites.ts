@@ -724,7 +724,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             versionIds.length === 0
               ? Effect.succeed([] as Array<SweptDraft>)
               : sql<SweptDraft>`SELECT id, target_kind, target_id, field, content FROM drafts
-                  WHERE user_id = ${userId} AND status = 'active' AND target_kind = 'version_edit'
+                  WHERE user_id = ${userId} AND status IN ('active', 'discarded') AND target_kind = 'version_edit'
                     AND target_id IN ${sql.in(versionIds)}`
           const at = Date.now()
           let changed = false
@@ -790,7 +790,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             }
             record.scratchpads = [
               ...(yield* sql<SweptDraft>`SELECT id, target_kind, target_id, field, content FROM drafts
-                WHERE user_id = ${userId} AND status = 'active' AND target_kind = 'scratchpad' AND target_id = ${slot.id}`)
+                WHERE user_id = ${userId} AND status IN ('active', 'discarded') AND target_kind = 'scratchpad' AND target_id = ${slot.id}`)
             ]
             for (const draft of [...typed, ...record.scratchpads]) yield* aside(draft)
             if (speakers[i] !== null && !gone.has(speakers[i]!)) gone.set(speakers[i]!, record)

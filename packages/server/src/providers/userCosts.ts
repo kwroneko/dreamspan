@@ -1,4 +1,5 @@
 import type { CostRule, CostSettings, CostRates } from "@dreamspan/shared/costFormulas.ts"
+import { totalInputTokens } from "@dreamspan/shared/usage.ts"
 import { priceBound } from "./priceSources.ts"
 import type { CostFormula } from "./registry.ts"
 
@@ -49,12 +50,13 @@ const userFormula = (id: string, scope: Scope): CostFormula => {
       const possible = generic < 0 ? rules : rules.slice(0, generic + 1)
       if (!possible.some((r) => r.upstream !== null)) return undefined
       const counts = input.counts
-      if (counts.inputUncached === null || counts.output === null) return null
+      const inputTokens = totalInputTokens(counts)
+      if (inputTokens === null || counts.output === null) return null
       // No upstream has been selected yet. Quote the conservative route bound or unknown,
       // rather than a lower generic/catalog rate that the request may never receive.
       return self.upperBound!({
         pricing: input.pricing,
-        inputTokens: counts.inputUncached + (counts.cacheRead ?? 0) + (counts.cacheWrite ?? 0),
+        inputTokens,
         outputTokens: counts.output,
         price: input.price,
         ...(input.sources ? { sources: input.sources } : {})
@@ -68,7 +70,7 @@ const userFormula = (id: string, scope: Scope): CostFormula => {
       const read = counts.cacheRead ?? 0,
         write = counts.cacheWrite ?? 0
       const long = Math.min(counts.cacheWriteLong ?? 0, write)
-      const rates = ratesAt(rule, counts.inputUncached + read + write)
+      const rates = ratesAt(rule, counts.inputTotal ?? counts.inputUncached + read + write)
       return {
         amount:
           (counts.inputUncached * rates.input +

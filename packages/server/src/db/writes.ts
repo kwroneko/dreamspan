@@ -16,7 +16,9 @@ import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { cleanName, renamedTitle } from "@dreamspan/shared/chatName.ts"
-import { composerKey, type DraftKey, parseDraftTarget } from "@dreamspan/shared/drafts.ts"
+import { remoteOf } from "@dreamspan/shared/cardSources.ts"
+import { composerKey, DraftKey, parseDraftTarget } from "@dreamspan/shared/drafts.ts"
+import { heldRemoteCards } from "./cardOrigins.ts"
 import { legacyPendingDraft } from "./migrationPendingChats.ts"
 import type { Bin } from "./bin.ts"
 import { EDIT_THINKING_FIELD, NotAmendable } from "@dreamspan/shared/chatApi.ts"
@@ -164,18 +166,38 @@ export const makeWriteHandlers = (bin: Bin) =>
     /** The bodies of SaveDraft and SaveComposer: one transaction each, or all in SaveDraftBatch. */
     const saveDraft = ({
       userId,
-      key,
+      key: requestedKey,
       draftId,
       content,
       images,
       expectedRowVersion,
       expectedSession,
-      baseRevision,
+      baseRevision: requestedRevision,
       observedDeletion,
       seed,
       editingFrom
     }: Parameters<WriteHandlers["SaveDraft"]>[0]) =>
       Effect.gen(function* () {
+        let key = requestedKey
+        let baseRevision = requestedRevision
+        // Adoption and draft saves share the writer, so either adoption moves this draft
+        // or this save already sees the local ref and uses its normal conflict handling.
+        const remote = key.targetKind === "remote_card" ? remoteOf(`src:${key.targetId}`) : null
+        if (remote) {
+          const [held] = yield* heldRemoteCards(sql, {
+            userId,
+            sourceId: remote.sourceId,
+            items: [{ remoteId: remote.remoteId, sha256: null }]
+          })
+          if (held) {
+            key = new DraftKey({ targetKind: "entity_field", targetId: held.refId, field: key.field })
+            if (baseRevision === null || remoteOf(baseRevision) !== null) {
+              const [ref] = yield* sql<{ head_revision_id: string }>`
+                SELECT head_revision_id FROM entity_refs WHERE id = ${held.refId}`
+              baseRevision = ref?.head_revision_id ?? null
+            }
+          } else baseRevision = null
+        }
         if (images !== undefined) yield* checkImages(userId, images)
         const saved = yield* drafts.save({
           userId,
@@ -192,8 +214,12 @@ export const makeWriteHandlers = (bin: Bin) =>
         })
         // An old new-chat page's first message (a browser's copy sent on, or a tab from before):
         // nothing reads its draft any more, so its text goes to recovered texts (0018_pending_chats).
+        // Every text its history holds goes too, as the draft and its history are deleted.
         if (key.targetKind === "user_field" && legacyPendingDraft(key.targetId, key.field)) {
-          yield* fileLate(userId, key, content, "New chat")
+          const [row] = yield* sql<{ id: string }>`SELECT id FROM drafts WHERE user_id = ${userId}
+            AND target_kind = 'user_field' AND target_id = ${key.targetId} AND field = ${key.field}`
+          const texts = row === undefined ? [content] : yield* drafts.unsaved(row.id, content, [])
+          for (const text of texts.toReversed()) yield* fileLate(userId, key, text, "New chat")
           yield* sql`DELETE FROM drafts WHERE user_id = ${userId} AND target_kind = 'user_field'
             AND target_id = ${key.targetId} AND field = ${key.field}`
         }

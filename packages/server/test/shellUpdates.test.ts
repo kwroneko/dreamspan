@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util"
 import { assert, it } from "@effect/vitest"
 import type { ShellCards, ShellCardsUpdate, ShellForks, ShellForksUpdate } from "@dreamspan/shared/chatSetupApi.ts"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { applyShellCards, applyShellForks, shellCardsUpdate, shellForksUpdate } from "@dreamspan/shared/shellUpdates.ts"
 import { Effect, Stream } from "effect"
 import { CurrentUser } from "@dreamspan/shared/api.ts"
@@ -15,6 +16,89 @@ import { eventually } from "./support/generation.ts"
 
 const waitFor = (label: string, check: () => boolean) =>
   eventually(check).pipe(Effect.catchCause(() => Effect.die(new Error(`Shell stream: ${label}`))))
+
+// These shell reads never start generation or estimates.
+const unused = <A extends object>(): A =>
+  new Proxy(
+    {},
+    {
+      get: () => {
+        throw new Error("shell read accessed generation")
+      }
+    }
+  ) as A
+
+it.live("chat event bursts schedule shell reads only for the affected owner", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const owner = yield* api.Whoami()
+    const writer = yield* Writer
+    const other = yield* writer.EnsureUser({ handle: "other", displayName: "Other" })
+    const first = yield* api.CreateChat({ title: "Private chat" })
+    const second = yield* api.CreateChat({ title: "Another private chat" })
+    const hub = yield* ChatHub
+    const reader = yield* Reader
+    const batches: Array<ReadonlyArray<ChatId>> = []
+    const reads: Array<string> = []
+    const handlers = yield* makeChatSetupHandlers.pipe(
+      Effect.provideService(Reader, {
+        ...reader,
+        ShellChatOwners: (payload) =>
+          Effect.suspend(() => {
+            batches.push(payload.chatIds)
+            return reader.ShellChatOwners(payload)
+          }),
+        ShellCardsLive: (payload) =>
+          Effect.suspend(() => {
+            reads.push(`${payload.userId}:cards`)
+            return reader.ShellCardsLive(payload)
+          }),
+        ShellForksLive: (payload) =>
+          Effect.suspend(() => {
+            reads.push(`${payload.userId}:forks`)
+            return reader.ShellForksLive(payload)
+          })
+      }),
+      Effect.provideService(CacheWarmth, unused<CacheWarmth["Service"]>()),
+      Effect.provideService(Generations, unused<Generations["Service"]>()),
+      Effect.provideService(Generator, unused<Generator["Service"]>())
+    )
+    let snapshots = 0
+    const received = () => Effect.sync(() => snapshots++)
+    const view = {
+      entity: null,
+      chat: null,
+      search: "",
+      sort: "recent",
+      sections: [{ id: "chats", limit: 2 }]
+    } as const
+    for (const user of [owner, other]) {
+      yield* handlers
+        .WatchShellCards()
+        .pipe(Stream.runForEach(received), Effect.provideService(CurrentUser, user), Effect.forkScoped)
+      yield* handlers
+        .WatchShellForks(view)
+        .pipe(Stream.runForEach(received), Effect.provideService(CurrentUser, user), Effect.forkScoped)
+    }
+    yield* waitFor("initial snapshots for both users", () => snapshots >= 4)
+    hub.publish(first.id, { _tag: "State" })
+    hub.publish(first.id, { _tag: "Reload" })
+    hub.publish(second.id, { _tag: "Reload" })
+    yield* waitFor(
+      "both owner refreshes",
+      () => reads.includes(`${owner.id}:cards`) && reads.includes(`${owner.id}:forks`)
+    )
+    yield* Effect.sleep("100 millis")
+    assert.deepStrictEqual(batches, [[first.id, second.id]])
+    assert.deepStrictEqual(reads.sort(), [`${owner.id}:cards`, `${owner.id}:forks`])
+    reads.length = 0
+    // Closing uses the known owner even if the chat row is already gone.
+    hub.close(first.id, { _tag: "Deleted" }, owner.id)
+    yield* waitFor("refreshes after close", () => reads.length >= 2)
+    assert.lengthOf(batches, 1)
+    assert.deepStrictEqual(reads.sort(), [`${owner.id}:cards`, `${owner.id}:forks`])
+  }).pipe(Effect.scoped, Effect.provide([serverLayer(testConfig()), ChatHub.layer]))
+)
 
 // The reader service stores stale summaries part by part before it materializes the shell
 // (db/Database.ts, `ShellSummarizeStale`), so the shared snapshot carries none left to store and
@@ -33,16 +117,6 @@ it.live("replaying a shared shell snapshot persists its summaries once", () =>
         writes++
         return original(payload, options)
       })
-    // These one-shot display reads must never start generation or estimates.
-    const unused = <A extends object>(): A =>
-      new Proxy(
-        {},
-        {
-          get: () => {
-            throw new Error("shell read accessed generation")
-          }
-        }
-      ) as A
     const handlers = yield* makeChatSetupHandlers.pipe(
       Effect.provideService(Writer, { ...writer, StoreForkSummaries: counted }),
       Effect.provideService(CacheWarmth, unused<CacheWarmth["Service"]>()),

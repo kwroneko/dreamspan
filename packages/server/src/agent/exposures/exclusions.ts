@@ -159,6 +159,9 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   GetRolloutSteps: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetRunContext: "Not in W6's first exposures; use the bounded workshop read tools.",
   PreviewChat: "A pending chat's own preview, read by its page; an agent works on saved chats.",
+  OpenDraftChat: "Writes a pending chat for the new-chat page that opens it; an agent works on saved chats.",
+  LeaveDraftChat:
+    "Writes the new-chat page's leaving of its pending chat, which may sweep it; an agent works on saved chats.",
   GetRunTranscript: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetSavedMediaStatus: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetSession: "User-only security, consent, account, credential or network configuration.",
@@ -205,6 +208,8 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   ListChatGroups: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListChatSummaries: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListSummaryStyles: "Not in W6's first exposures; use the bounded workshop read tools.",
+  ListSharedNoteRefs:
+    "The Library page's metadata read of shared notes; the assistant lists them with list_shared_notes.",
   ListConnections: "User-only security, consent, account, credential or network configuration.",
   ListCredentials: "User-only security, consent, account, credential or network configuration.",
   ListDecisionPoints: "User-only security, consent, account, credential or network configuration.",

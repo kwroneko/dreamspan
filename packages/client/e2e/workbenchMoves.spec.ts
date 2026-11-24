@@ -32,7 +32,8 @@ test.beforeAll(async () => {
 })
 
 test.beforeEach(async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 })
+  // Wide enough that every Move to a new frame keeps its frames at their least width (minframe1).
+  await page.setViewportSize({ width: 1920, height: 900 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
 })
 

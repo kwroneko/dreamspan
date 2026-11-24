@@ -171,6 +171,7 @@ export interface LlmRequestRow {
   readonly started_at: number
   readonly first_token_at: number | null
   readonly ended_at: number | null
+  readonly input_total?: number | null
   readonly input_uncached: number | null
   readonly cache_read: number | null
   readonly cache_write: number | null
@@ -206,6 +207,7 @@ export const toLlmRequest = (row: LlmRequestRow) =>
     endedAt: row.ended_at,
     cacheStagger: row.cache_stagger_json ? JSON.parse(row.cache_stagger_json) : null,
     counts: {
+      ...(row.input_total == null ? {} : { inputTotal: row.input_total }),
       inputUncached: row.input_uncached,
       cacheRead: row.cache_read,
       cacheWrite: row.cache_write,

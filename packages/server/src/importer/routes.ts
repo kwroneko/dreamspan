@@ -1117,22 +1117,13 @@ export const layer = Layer.unwrap(
       const remoteBases: Array<CacheKey | undefined> = []
       for (const draft of input.value.drafts) {
         if (parseField(draft.field) === null) return jsonError(400, "that isn't a field of a document")
-        // A card on a card source before it's added (spec/CARD-SOURCES.md §4.3): its fields'
-        // drafts are `remote_card`'s, or the user's card's once they have it.
+        // The writer resolves the source card to the user's local ref if it has been added.
         const from = remoteOf(draft.refId)
-        const [held] =
-          from === null
-            ? []
-            : yield* reader.HeldRemoteCards({
-                userId: user.id,
-                sourceId: from.sourceId,
-                items: [{ remoteId: from.remoteId, sha256: null }]
-              })
-        if (from !== null && held === undefined) remoteBases[entries.length] = draftBaseKey(user.id, from)
+        if (from !== null) remoteBases[entries.length] = draftBaseKey(user.id, from)
         entries.push({
           _tag: "draft",
           key:
-            from !== null && held === undefined
+            from !== null
               ? new DraftKey({
                   targetKind: "remote_card",
                   targetId: `${from.sourceId}:${from.remoteId}`,
@@ -1140,14 +1131,14 @@ export const layer = Layer.unwrap(
                 })
               : new DraftKey({
                   targetKind: "entity_field",
-                  targetId: entityDraftTarget(held?.refId ?? draft.refId, draft.scope),
+                  targetId: entityDraftTarget(draft.refId, draft.scope),
                   field: draft.field
                 }),
           draftId: draft.draftId,
           content: draft.content,
           expectedRowVersion: draft.expectedRowVersion,
           expectedSession: draft.expectedSession,
-          baseRevision: from !== null ? null : draft.baseRevisionId
+          baseRevision: draft.baseRevisionId
         })
       }
       for (const { ownerId, targetId, field, ...save } of input.value.userDrafts ?? []) {
@@ -1202,11 +1193,10 @@ export const layer = Layer.unwrap(
           ? []
           : yield* remoteBases.length === 0
               ? save
-              : sources.cache.withDraftBases(
-                  remoteBases,
-                  save,
-                  (results, index) => results[index]?.draft?.status === "active"
-                )
+              : sources.cache.withDraftBases(remoteBases, save, (results, index) => {
+                  const draft = results[index]?.draft
+                  return draft?.status === "active" && draft.key.targetKind === "remote_card"
+                })
       let recovered = 0
       saved.forEach((result, at) => {
         recovered += result.recovered

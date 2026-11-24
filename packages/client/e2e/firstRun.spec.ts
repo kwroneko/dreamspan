@@ -88,6 +88,33 @@ test("the empty home leads to a connection, and the user chooses its default mod
 
 test("a composer with no model says so and offers the choice", async ({ page }) => {
   test.setTimeout(180_000)
+  let refuseDefault = false
+  let recentWrites = 0
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message)) as {
+        tag?: string
+        id?: string
+        payload?: { prefs?: { modelRecent?: object } }
+      }
+      if (request.tag === "SetDisplayPrefs" && request.payload?.prefs?.modelRecent) recentWrites++
+      if (refuseDefault && request.tag === "ChangeGenerationDefaults") {
+        refuseDefault = false
+        socket.send(
+          JSON.stringify({
+            _tag: "Exit",
+            requestId: request.id,
+            exit: {
+              _tag: "Failure",
+              cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Synthetic model choice failure" } }]
+            }
+          })
+        )
+      } else upstream.send(message)
+    })
+    upstream.onMessage((message) => socket.send(message))
+  })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const ref = await admin((api) => api.CreateCard({ label: "First run fixture", name: "Lamp keeper" }))
   await clearDefaultModel()
@@ -106,8 +133,15 @@ test("a composer with no model says so and offers the choice", async ({ page }) 
   expect(note!.y + note!.height).toBeLessThanOrEqual(box!.y)
   expect(note!.width).toBeGreaterThan(box!.width / 2)
   await page.getByRole("button", { name: "Choose a model for all chats" }).click()
-  await page.getByRole("radiogroup", { name: "Model", exact: true }).getByRole("radio").first().click()
+  const pendingModel = page.getByRole("radiogroup", { name: "Model", exact: true }).getByRole("radio").first()
+  refuseDefault = true
+  await pendingModel.click()
+  await expect(page.locator("[data-model-picker]").getByRole("alert")).toContainText("Something failed on the server.")
+  expect((await admin((api) => api.GetGenerationDefaults())).model).toBeNull()
+  expect(recentWrites).toBe(0)
+  await pendingModel.click()
   await expect(page.getByText("No model chosen")).toHaveCount(0)
+  await expect.poll(() => recentWrites).toBe(1)
   expect((await admin((api) => api.GetGenerationDefaults())).model).not.toBeNull()
 
   // An open chat: the note sits above its composer until a model is chosen.

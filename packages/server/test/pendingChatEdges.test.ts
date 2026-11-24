@@ -294,4 +294,99 @@ describe("a pending chat's edges", () => {
       })
     )
   )
+  it.live("a sweep files every text a composer's history holds, not only its last", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make, writer, userId } = yield* setup
+        const mira = yield* make("Mira")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        let composer = yield* api.OpenComposer({ chatId: draft.id, forkId: null })
+        for (const content of ["The tide turns at noon, and the bell rings twice.", "The tide turns"]) {
+          const saved = yield* api.SaveComposer({
+            chatId: draft.id,
+            draftId: composer.id,
+            rowVersion: composer.rowVersion,
+            session: composer.session,
+            next: false,
+            operationId: crypto.randomUUID(),
+            content
+          })
+          composer = saved.draft!
+        }
+        assert.isTrue(yield* writer.SweepPendingChat({ userId, chatId: draft.id }))
+        assert.include(yield* recoveredTexts(api), "The tide turns at noon, and the bell rings twice.")
+      })
+    )
+  )
+
+  it.live("a sweep files a greeting edit that was cancelled", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make, writer, userId } = yield* setup
+        const mira = yield* make("Mira")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const [greeting] = yield* path(api, draft.id)
+        const target = { _tag: "Edit", versionId: greeting!.version.id } as const
+        const edit = yield* editGreeting(api, greeting!.version.id, "Mira waves from the pier, edited.")
+        yield* api.DiscardMessageDraft({ target, draftId: edit.id, expectedRowVersion: edit.rowVersion })
+        assert.isTrue(yield* writer.SweepPendingChat({ userId, chatId: draft.id }))
+        assert.include(yield* recoveredTexts(api), "Mira waves from the pier, edited.")
+      })
+    )
+  )
+
+  it.live("a greeting made again keeps its cancelled edit's history", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make } = yield* setup
+        const mira = yield* make("Mira")
+        const tobin = yield* make("Tobin")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const forkId = draft.currentForkId!
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Join", entityId: tobin } })
+        const [, his] = yield* path(api, draft.id)
+        const target = { _tag: "Edit", versionId: his!.version.id } as const
+        const edit = yield* editGreeting(api, his!.version.id, "Tobin nods at the harbor, edited.")
+        yield* api.DiscardMessageDraft({ target, draftId: edit.id, expectedRowVersion: edit.rowVersion })
+        // Mira leaves: Tobin's greeting is made again, and its editor still has the cancelled text.
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Leave", entityId: mira } })
+        const [again] = yield* path(api, draft.id)
+        const states = yield* api.MessageDraftHistory({
+          target: { _tag: "Edit", versionId: again!.version.id },
+          limit: 20
+        })
+        assert.isTrue(
+          states.some((state) => state.inserted.includes("harbor")),
+          JSON.stringify(states)
+        )
+      })
+    )
+  )
+  it.live("a join asked for on the pending page after another tab's first send goes after it", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make } = yield* setup
+        const mira = yield* make("Mira")
+        const tobin = yield* make("Tobin")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const forkId = draft.currentForkId!
+        const [greeting] = yield* path(api, draft.id)
+        // The other tab's first send lands first.
+        yield* api.SendMessage({ chatId: draft.id, parentSlotId: greeting!.slotId, branch: false, content: "Hello." })
+        // This tab still shows the chat pending: its join names the start.
+        yield* api.ChangeCast({
+          chatId: draft.id,
+          slotId: null,
+          forkId,
+          pending: true,
+          change: { _tag: "Join", entityId: tobin }
+        })
+        const entries = yield* path(api, draft.id)
+        const atStart = yield* api.GetCast({ chatId: draft.id, slotId: greeting!.slotId, forkId })
+        assert.notInclude(atStart.participants, tobin)
+        const atTip = yield* api.GetCast({ chatId: draft.id, slotId: entries.at(-1)!.slotId, forkId })
+        assert.include(atTip.participants, tobin)
+      })
+    )
+  )
 })

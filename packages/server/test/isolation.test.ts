@@ -4117,6 +4117,14 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       })
   },
+  ListSharedNoteRefs: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const mine = yield* actor.api.ListSharedNoteRefs()
+        assert.isTrue(mine.some((ref) => ref.id === actor.editor.sharedRefId))
+        assert.isFalse(mine.some((ref) => ref.id === owner.editor.sharedRefId))
+      })
+  },
   ListSharedNotes: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

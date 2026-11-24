@@ -19,6 +19,7 @@ import type {
   InspectorUsage,
   SourceActivation
 } from "@dreamspan/shared/inspectorApi.ts"
+import { totalInputTokens } from "@dreamspan/shared/usage.ts"
 import { Link, Navigate, useParams, useSearch } from "@tanstack/react-router"
 import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
 import { entryParam } from "../editor/lorebookTable.ts"
@@ -52,8 +53,7 @@ import { runInspectorSections, runInspectorTranscript } from "./presentation.tsx
 const PREVIEW = 200
 
 const inputText = (request: InspectorUsage) => {
-  const c = request.counts
-  const total = c.inputUncached === null ? null : c.inputUncached + (c.cacheRead ?? 0) + (c.cacheWrite ?? 0)
+  const total = totalInputTokens(request.counts)
   return `${count(total)}${request.estimatedInput == null ? "" : ` (~${count(request.estimatedInput)})`}`
 }
 const count = (n: number | null) => (n === null ? "unknown" : n.toLocaleString())

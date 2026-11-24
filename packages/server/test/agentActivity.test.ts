@@ -32,14 +32,17 @@ it.live("Activity pages retain tied start times and purposes without losing or r
     // More than a page, including two purposes on the same rollout and retries in one group.
     for (let i = 0; i < 54; i++) {
       statements.push({
-        sql: "INSERT INTO llm_requests(id,owner_user_id,connection_id,chat_id,rollout_id,purpose,api,provider,model_key,status,started_at,ended_at,input_uncached,cache_read,cache_write,output,usage_source,cost,cost_currency,cost_formula) VALUES(?,?,?,?,?,?,'openai','synthetic','synthetic','complete',1000,2000,10,2,0,3,'reported',0.25,'USD','reported')",
+        sql: "INSERT INTO llm_requests(id,owner_user_id,connection_id,chat_id,rollout_id,purpose,api,provider,model_key,status,started_at,ended_at,input_uncached,cache_read,cache_write,raw_usage_json,output,usage_source,cost,cost_currency,cost_formula) VALUES(?,?,?,?,?,?,'openai','synthetic','synthetic','complete',1000,2000,?,2,?,?,3,'reported',0.25,'USD','reported')",
         params: [
           i < 3 ? `zz-request-${i}` : `aa-request-${i}`,
           user.id,
           connection.id,
           chat.id,
           i < 3 ? rollout : null,
-          i === 0 ? "decision" : "idle_job"
+          i === 0 ? "decision" : "idle_job",
+          i === 1 ? 1 : 10,
+          i === 1 ? 2 : 0,
+          i === 1 ? JSON.stringify({ prompt_tokens: 3 }) : null
         ]
       })
     }
@@ -58,9 +61,10 @@ it.live("Activity pages retain tied start times and purposes without losing or r
       rows.find((r) => r.id === rollout && r.kind === "idle_job"),
       {
         requests: 2,
-        input: 20,
+        input: 11,
+        inputTotal: 15,
         cacheRead: 4,
-        cacheWrite: 0,
+        cacheWrite: 2,
         output: 6,
         cost: { amount: 0.5, currency: "USD" }
       }

@@ -63,7 +63,14 @@ import {
   providerChanges,
   resolveProviderSettings
 } from "@dreamspan/shared/providerDefinitions.ts"
-import type { Cost, LlmRequestId, RequestPurpose, RequestRoute, TokenCounts } from "@dreamspan/shared/usage.ts"
+import {
+  type Cost,
+  type LlmRequestId,
+  type RequestPurpose,
+  type RequestRoute,
+  type TokenCounts,
+  totalInputTokens
+} from "@dreamspan/shared/usage.ts"
 import { createHash, timingSafeEqual } from "node:crypto"
 import { ServerError, StaleWrite } from "@dreamspan/shared/errors.ts"
 import { Cause, Context, Effect, Exit, Layer, Option, Queue, Semaphore, Stream } from "effect"
@@ -1812,13 +1819,7 @@ export const layer = (options: ProvidersOptions = {}) =>
             // A request with images calibrates its model's image cost (ARCHITECTURE §6).
             const sample =
               error === null && source === "reported" && state.sentImages
-                ? imageSample(
-                    state.sentImages,
-                    counts.inputUncached === null
-                      ? null
-                      : counts.inputUncached + (counts.cacheRead ?? 0) + (counts.cacheWrite ?? 0),
-                    state.capture.rawUsage
-                  )
+                ? imageSample(state.sentImages, totalInputTokens(counts), state.capture.rawUsage)
                 : null
             if (sample)
               yield* writer

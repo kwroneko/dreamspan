@@ -148,7 +148,7 @@ export const sweepPendingChat = (
     if (chat === null || chat.owner_user_id !== userId) return false
     const typed = yield* sql<SweptDraft>`
       SELECT d.id, d.target_kind, d.target_id, d.field, d.content FROM drafts d
-      WHERE d.user_id = ${userId} AND d.status = 'active' AND (
+      WHERE d.user_id = ${userId} AND d.status IN ('active', 'discarded') AND (
         (d.target_kind IN ('composer', 'insert', 'queue_edit') AND d.target_id = ${chatId})
         OR (d.target_kind = 'version_edit' AND d.target_id IN (
           SELECT v.id FROM versions v JOIN slots s ON s.id = v.slot_id WHERE s.chat_id = ${chatId}))

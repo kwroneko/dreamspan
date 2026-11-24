@@ -688,10 +688,9 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       SetRefArchived: ({ userId, refId, archived }) =>
         Effect.gen(function* () {
           const ref = yield* lib.ownedRef(userId, refId)
-          yield* sql`UPDATE entities
-            SET archived_at = CASE WHEN ${archived ? 1 : 0} = 1 THEN coalesce(archived_at, ${archiveTime()}) END
-            WHERE id = ${ref.entity_id}`
-          return toLibraryRef(yield* reload(refId))
+          if (archived === (ref.archived_at !== null)) return { ...toLibraryRef(ref), changed: false }
+          yield* sql`UPDATE entities SET archived_at = ${archived ? archiveTime() : null} WHERE id = ${ref.entity_id}`
+          return { ...toLibraryRef(yield* reload(refId)), changed: true }
         }).pipe(transaction(sql, "SetRefArchived")),
 
       EditRef: ({ userId, refId, doc, expectedRowVersion, message, commitDraft, agentOriginRef }) =>
