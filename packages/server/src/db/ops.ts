@@ -217,6 +217,7 @@ import {
   EditorSnapshot,
   InvalidDocument,
   NoteEntry,
+  RefArchiveResult,
   SharedNote
 } from "@dreamspan/shared/editorApi.ts"
 import { NoteDoc, ReplaceTarget } from "@dreamspan/shared/docs/note.ts"
@@ -1940,7 +1941,7 @@ const WriteOpsChatOwn = RpcGroup.make(
    */
   Rpc.make("SetRefArchived", {
     payload: { userId: UserId, refId: RefId, archived: Schema.Boolean },
-    success: LibraryRef,
+    success: RefArchiveResult,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
   /**
