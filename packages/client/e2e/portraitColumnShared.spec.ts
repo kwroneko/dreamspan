@@ -136,33 +136,30 @@ test("pictures from every frame stack in one column; closing one leaves the othe
     [a, b],
     [b, a]
   ] as const) {
-    // Two from one frame, then one from the other: all three, the newest on top.
+    // Two from one frame, then one from the other: the newest on top. Both frames show one
+    // chat, so its portrait opened from the other frame shows once, on top (owner, 2026-11-24).
     await openPortrait(first)
     await openFromCast(page, first)
     await expect(viewers(page)).toHaveCount(2)
-    await openPortrait(second)
-    await expect(column(page)).toHaveCount(1)
-    await expect(viewers(page)).toHaveCount(3)
-    expect(await names(page)).toEqual([TALL.name, STANDARD.name, TALL.name])
-    // A portrait open from one frame, clicked in that frame again, closes only that one.
-    await openPortrait(second)
-    await expect(viewers(page)).toHaveCount(2)
     expect(await names(page)).toEqual([STANDARD.name, TALL.name])
     await openPortrait(second)
-    await expect(viewers(page)).toHaveCount(3)
+    await expect(column(page)).toHaveCount(1)
+    await expect(viewers(page)).toHaveCount(2)
+    expect(await names(page)).toEqual([TALL.name, STANDARD.name])
     await expectLayout(page, test.info(), `shared-column-${first === a ? "ab" : "ba"}`, {
       scope: "[data-portrait-column]"
     })
     // Its own Close leaves the others.
     await viewers(page).nth(1).getByRole("button", { name: "Close the portrait", exact: true }).click()
-    await expect(viewers(page)).toHaveCount(2)
-    expect(await names(page)).toEqual([TALL.name, TALL.name])
+    await expect(viewers(page)).toHaveCount(1)
+    expect(await names(page)).toEqual([TALL.name])
+    // Closing the one picture both frames show closes it in both.
     await closeAll(page)
   }
 
   // Open as a tab opens beside the view the picture came from: the right frame's.
   await openPortrait(b)
-  await openPortrait(a)
+  await openFromCast(page, a)
   await expect(viewers(page)).toHaveCount(2)
   await viewers(page).nth(1).getByRole("button", { name: "Viewer options", exact: true }).click()
   await page.getByRole("menuitem", { name: "Open as a tab", exact: true }).click()
@@ -316,13 +313,14 @@ for (const theme of ["light", "dark"] as const)
     await expect(b.locator("article[data-slot]").first()).toBeVisible()
     await openPortrait(a)
     await openFromCast(page, a)
+    // The same portrait from the other frame shows once.
     await openPortrait(b)
-    await expect(viewers(page)).toHaveCount(3)
+    await expect(viewers(page)).toHaveCount(2)
     const before = (await names(page)).sort()
     await page.screenshot({ path: info.outputPath(`shared-1440-${theme}.png`) })
     await page.reload()
     await expect(frames(page)).toHaveCount(2)
-    await expect(viewers(page)).toHaveCount(3)
+    await expect(viewers(page)).toHaveCount(2)
     expect((await names(page)).sort()).toEqual(before)
     await page.screenshot({ path: info.outputPath(`shared-restored-${theme}.png`) })
     await viewers(page).first().getByRole("button", { name: "Viewer options", exact: true }).click()
@@ -338,13 +336,46 @@ for (const theme of ["light", "dark"] as const)
     await closeAll(page)
   })
 
+// 6. "If you have a portrait open, and you split a chat into two panes, the open portrait from
+//    that chat doubles in the gallery" (owner, 2026-11-24): the column holds each picture once.
+test("a portrait open while the chat splits into two panes shows once, after closing one and a reload", async ({
+  page
+}) => {
+  await openChat(page, 1920)
+  await openPortrait(frames(page).first())
+  await expect(viewers(page)).toHaveCount(1)
+  await page.getByRole("button", { name: "Split right" }).click()
+  await expect(frames(page)).toHaveCount(2)
+  await expect(frames(page).nth(1).locator("article[data-slot]").first()).toBeVisible()
+  await expect(viewers(page)).toHaveCount(1)
+  expect(await names(page)).toEqual([TALL.name])
+  // Each pane keeps it in its own URL, once.
+  await page.reload()
+  await expect(frames(page)).toHaveCount(2)
+  await expect(frames(page).nth(1).locator("article[data-slot]").first()).toBeVisible()
+  await expect(viewers(page)).toHaveCount(1)
+  expect(await names(page)).toEqual([TALL.name])
+  // Closing either pane leaves it, once.
+  await frames(page)
+    .nth(1)
+    .getByRole("button", { name: new RegExp(`^Close ${TALL.name}, `) })
+    .click()
+  await expect(frames(page)).toHaveCount(1)
+  await expect(viewers(page)).toHaveCount(1)
+  expect(await names(page)).toEqual([TALL.name])
+  await page.reload()
+  await expect(frames(page).first().locator("article[data-slot]").first()).toBeVisible()
+  await expect(viewers(page)).toHaveCount(1)
+  await closeAll(page)
+})
+
 test("each frame's portrait height survives reload when frames show the same card", async ({ page }, info) => {
   await openChat(page, 1440)
   await page.getByRole("button", { name: "Split right" }).click()
   const [a, b] = [frames(page).nth(0), frames(page).nth(1)]
   await expect(b.locator("article[data-slot]").first()).toBeVisible()
   await openPortrait(a)
-  await openPortrait(b)
+  await openFromCast(page, b)
   await expect(viewers(page)).toHaveCount(2)
   const handle = column(page).getByRole("separator", { name: /Resize .+'s and .+'s (portraits|images)/ })
   await handle.press("Shift+ArrowDown")
@@ -429,15 +460,16 @@ for (const theme of ["light", "dark"] as const)
     const [a, b] = [frames(page).nth(0), frames(page).nth(1)]
     await expect(messageImage(b)).toBeVisible()
 
-    // From the left frame, then a portrait and the same image from the right: one stack.
+    // From the left frame, then a portrait and the same image from the right: one stack, the
+    // image once, on top.
     await openAttachment(a)
     await expect(viewers(page)).toHaveCount(1)
     expect(await names(page)).toEqual([ATTACHMENT])
     await openPortrait(b)
     await openAttachment(b)
     await expect(column(page)).toHaveCount(1)
-    await expect(viewers(page)).toHaveCount(3)
-    expect(await names(page)).toEqual([ATTACHMENT, TALL.name, ATTACHMENT])
+    await expect(viewers(page)).toHaveCount(2)
+    expect(await names(page)).toEqual([ATTACHMENT, TALL.name])
     await expect(
       viewers(page)
         .first()
@@ -445,7 +477,7 @@ for (const theme of ["light", "dark"] as const)
     ).toHaveJSProperty("complete", true)
     await expectLayout(page, info, `shared-attachment-${theme}`, { scope: "[data-portrait-column]" })
     await page.screenshot({ path: info.outputPath(`shared-attachment-${theme}.png`) })
-    // A second click in its frame closes only that frame's.
+    // A second click in its frame closes only that frame's: the left frame's stays, in its place.
     await openAttachment(b)
     await expect(viewers(page)).toHaveCount(2)
     expect(await names(page)).toEqual([TALL.name, ATTACHMENT])

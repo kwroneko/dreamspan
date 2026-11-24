@@ -19,6 +19,7 @@ interface PortraitSource {
 
 /** A picture in the shared stack: its view's tab and its own id, as one id. */
 const keyOf = (tabId: string, id: string) => `${tabId}\u0001${id}`
+const idOf = (key: string) => key.slice(key.indexOf("\u0001") + 1)
 
 const signature = (stack: Stack<Portrait>, single: boolean) =>
   JSON.stringify([
@@ -31,7 +32,10 @@ interface Owned {
   readonly portrait: Portrait
 }
 
-type Entries = ReadonlyArray<{ key: string; owned: Owned; weight: number }>
+/** One picture of the column: shown once however many views show it (a chat split into two
+ * panes shows the same portrait in both), under the key that comes first in the column's order;
+ * `holders` are the keys of every view that shows it, that key first. */
+type Entries = ReadonlyArray<{ key: string; owned: Owned; weight: number; holders: ReadonlyArray<string> }>
 
 /** What the column shows, as of the last change: a new object on each, so renders follow it. */
 interface PortraitColumnState {
@@ -69,8 +73,18 @@ class PortraitSources {
     const sig = signature(shown, source.viewer.single)
     if (this.signatures.get(tabId) === sig) return
     this.signatures.set(tabId, sig)
+    const first = !this.published.has(tabId)
     const before = this.published.get(tabId) ?? []
     const ids = shown.map((e) => e.portrait.id)
+    // A view's first pictures that the column already shows from another view (a pane split
+    // from this one, or the tabs coming back after a reload) keep their place, below it.
+    const held = new Map<string, string>()
+    if (first) {
+      for (const key of this.order) {
+        const id = idOf(key)
+        if (ids.includes(id) && !held.has(id)) held.set(id, key)
+      }
+    }
     this.published.set(tabId, ids)
     const removed = new Set(before.filter((id) => !ids.includes(id)).map((id) => keyOf(tabId, id)))
     const added = ids.filter((id) => !before.includes(id))
@@ -81,12 +95,16 @@ class PortraitSources {
     for (const id of added) {
       const was = before[ids.indexOf(id)]
       const wasKey = was === undefined ? undefined : keyOf(tabId, was)
+      if (held.has(id)) continue
       if (!source.viewer.single && wasKey && removed.has(wasKey)) inPlace.set(wasKey, keyOf(tabId, id))
       else onTop.push(keyOf(tabId, id))
     }
+    const below = new Map([...held].map(([id, key]) => [key, keyOf(tabId, id)]))
     this.order = [
       ...onTop,
-      ...this.order.flatMap((key) => (inPlace.has(key) ? [inPlace.get(key)!] : removed.has(key) ? [] : [key]))
+      ...this.order.flatMap((key) =>
+        inPlace.has(key) ? [inPlace.get(key)!] : removed.has(key) ? [] : below.has(key) ? [key, below.get(key)!] : [key]
+      )
     ]
     // "Keep one image open": one opened here closes the other views' ones.
     if (onTop.length > 0 && source.viewer.single) {
@@ -105,17 +123,23 @@ class PortraitSources {
     this.notify()
   }
 
-  /** Every view's pictures, in the column's order, each under its shared id. */
+  /** Every view's pictures, in the column's order, each once under its shared id. */
   private entries(): Entries {
     const all = new Map<string, { owned: Owned; weight: number }>()
     for (const [tabId, source] of this.sources) {
       for (const entry of source.viewer.shown)
         all.set(keyOf(tabId, entry.portrait.id), { owned: { tabId, portrait: entry.portrait }, weight: entry.weight })
     }
-    return this.order.flatMap((key) => {
+    const byId = new Map<string, { key: string; owned: Owned; weight: number; holders: Array<string> }>()
+    for (const key of this.order) {
       const found = all.get(key)
-      return found ? [{ key, ...found }] : []
-    })
+      if (!found) continue
+      const id = found.owned.portrait.id
+      const entry = byId.get(id)
+      if (entry) entry.holders.push(key)
+      else byId.set(id, { key, ...found, holders: [key] })
+    }
+    return [...byId.values()]
   }
 
   /** The source of the picture with shared id `key`. */
@@ -127,13 +151,16 @@ class PortraitSources {
   /** The whole stack changed: the column's order follows it and each view gets its part. */
   private apply(change: (stack: Stack<Portrait>) => Stack<Portrait>) {
     const entries = this.entries()
-    const owners = new Map(entries.map((e) => [e.key, e.owned]))
+    const holders = new Map(entries.map((e) => [e.key, e.holders]))
     const next = change(entries.map((e) => ({ portrait: { ...e.owned.portrait, id: e.key }, weight: e.weight })))
-    this.order = next.map((e) => e.portrait.id)
-    for (const [tabId, source] of this.sources) {
+    // Each change applies to every view that shows the picture: closing it closes it in all.
+    this.order = next.flatMap((e) => holders.get(e.portrait.id) ?? [e.portrait.id])
+    for (const source of this.sources.values()) {
+      const own = new Map(source.viewer.shown.map((s) => [s.portrait.id, s.portrait]))
       const part: Array<StackEntry<Portrait>> = next.flatMap((e) => {
-        const owned = owners.get(e.portrait.id)
-        return owned && owned.tabId === tabId ? [{ portrait: owned.portrait, weight: e.weight }] : []
+        const key = (holders.get(e.portrait.id) ?? []).find((k) => this.sourceOf(k) === source)
+        const portrait = key === undefined ? undefined : own.get(idOf(key))
+        return portrait ? [{ portrait, weight: e.weight }] : []
       })
       if (signature(part, source.viewer.single) !== signature(source.viewer.shown, source.viewer.single))
         source.viewer.set(part)
@@ -158,8 +185,9 @@ class PortraitSources {
       setSingle: (on, keep) => {
         if (on) run((stack) => keepOnly(stack, keep))
         // The account's choice, through the rendering view, which keeps its own part as above.
-        const owned = this.entries().find((e) => e.key === keep)?.owned
-        own.setSingle(on, owned?.tabId === ownTab ? owned.portrait.id : "")
+        const holders = this.entries().find((e) => e.key === keep)?.holders ?? []
+        const mine = holders.find((key) => this.sourceOf(key) === this.sources.get(ownTab))
+        own.setSingle(on, mine === undefined ? "" : idOf(mine))
       },
       set: (next) => run(() => next)
     }
