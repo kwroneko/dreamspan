@@ -1,3 +1,4 @@
+import { refusePending, refusePendingOf } from "./chatKindPolicy.ts"
 import { splitGroups } from "./splitChats.ts"
 import { putUserSetting } from "./settings.ts"
 import { Effect } from "effect"
@@ -19,6 +20,7 @@ export const makeShellWriteHandlers = Effect.gen(function* () {
   return {
     SetSplitChat: ({ userId, forkId, split, title }) =>
       Effect.gen(function* () {
+        yield* refusePendingOf(sql, "branch", forkId)
         const [fork] = yield* sql<{
           id: string
           chat_id: ChatId
@@ -45,6 +47,8 @@ export const makeShellWriteHandlers = Effect.gen(function* () {
       }).pipe(transaction(sql, "SetSplitChat")),
     SetChatPin: ({ userId, chatId, pinned }) =>
       Effect.gen(function* () {
+        // A pending chat (DESIGN §2.1) is never pinned: Home would list it.
+        yield* refusePending(sql, chatId)
         const [chat] =
           yield* sql`SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
         if (!chat) {

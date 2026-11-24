@@ -317,6 +317,8 @@ export const chatExport = (
   Effect.gen(function* () {
     const { chatId, scope, format } = request
     const chat = yield* reader.GetChat({ userId, chatId })
+    // A pending chat (DESIGN §2.1) has no files until it is committed.
+    if (chat.status === "pending") return yield* new NotFound({ entity: "chat", id: chatId })
     // A kind's profile says which files it makes (a workshop's has no ST counterpart).
     if (!exportsAs(chat, format)) return yield* new ExportNotOffered({ format })
     const forks = yield* reader.ListForks({ userId, chatId })

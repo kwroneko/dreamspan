@@ -116,13 +116,13 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
         const dropped = yield* sql<{ media_id: string | null }>`DELETE FROM file_versions
           WHERE origin = 'attachment' ${userId === undefined ? sql`` : sql`AND owner_user_id = ${userId}`}
             AND NOT EXISTS (SELECT 1 FROM version_attachments a
-              JOIN versions v ON v.id = a.version_id JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+              JOIN versions v ON v.id = a.version_id JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id /* chat:includes-pending: a pending chat's files are kept until it is swept */
               WHERE a.media_id = file_versions.media_id AND c.owner_user_id = file_versions.owner_user_id)
             AND NOT EXISTS (SELECT 1 FROM composer_images i JOIN drafts d ON d.id = i.draft_id
               WHERE i.media_id = file_versions.media_id AND i.status = 'active'
                 AND d.user_id = file_versions.owner_user_id)
             AND NOT EXISTS (SELECT 1 FROM version_history h
-              JOIN versions v ON v.id = h.version_id JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+              JOIN versions v ON v.id = h.version_id JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id /* chat:includes-pending: as above */
               WHERE c.owner_user_id = file_versions.owner_user_id AND h.images_json IS NOT NULL
                 AND instr(h.images_json, file_versions.media_id) > 0)
           RETURNING media_id`
@@ -137,7 +137,7 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
                 AND NOT EXISTS (SELECT 1 FROM file_versions WHERE media_id = media_assets.id)
                 AND NOT EXISTS (SELECT 1 FROM media_refs WHERE media_id = media_assets.id)
                 AND NOT EXISTS (SELECT 1 FROM saved_media WHERE media_id = media_assets.id)
-                AND NOT EXISTS (SELECT 1 FROM chats WHERE cover_media_id = media_assets.id)
+                AND NOT EXISTS (SELECT 1 FROM chats WHERE cover_media_id = media_assets.id) /* chat:includes-pending: kept until swept */
                 AND NOT EXISTS (SELECT 1 FROM forks WHERE cover_media_id = media_assets.id)
                 AND NOT EXISTS (SELECT 1 FROM version_attachments WHERE media_id = media_assets.id)
                 AND NOT EXISTS (SELECT 1 FROM composer_images WHERE media_id = media_assets.id)

@@ -1,3 +1,4 @@
+import { listed } from "./listedChats.ts"
 // Library logic shared by the writer and the readers: ref rows, documents, and merge
 // planning (DATA-MODEL §3.2). Merge planning is pure given the three documents, so the
 // reader's preview and the writer's merge always agree.
@@ -252,10 +253,10 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
   const usedByChats = (userId: UserId, ref: Pick<RefRow, "id" | "entity_id" | "kind">) =>
     (ref.kind === "card"
       ? sql<{ n: number }>`SELECT count(*) AS n FROM card_chat_membership m CROSS JOIN chats c ON c.id = m.chat_id
-          WHERE m.entity_id = ${ref.entity_id} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+          WHERE m.entity_id = ${ref.entity_id} AND c.owner_user_id = ${userId} AND ${listed(sql, "c")}`
       : sql<{ n: number }>`
       SELECT count(*) AS n FROM chats c
-      WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL
+      WHERE c.owner_user_id = ${userId} AND ${listed(sql, "c")}
         AND EXISTS (SELECT 1 FROM state_events s WHERE s.chat_id = c.id
           AND s.key IN ('preset.binding', 'lorebook.attach')
           AND json_extract(s.value_json, '$.ref') = ${ref.id})`
@@ -356,7 +357,7 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
           (SELECT json_object('chats', count(DISTINCT c.id), 'last', max(c.last_message_at))
             FROM card_chat_membership s CROSS JOIN chats c ON c.id = s.chat_id
             WHERE s.entity_id = +e.id
-              AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL) AS used
+              AND c.owner_user_id = ${userId} AND ${listed(sql, "c")}) AS used
         FROM family JOIN entities e ON e.id = family.id
         LEFT JOIN entity_refs r ON r.entity_id = e.id
         ORDER BY e.id`

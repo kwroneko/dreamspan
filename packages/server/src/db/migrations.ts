@@ -14,6 +14,7 @@ import { shareBirthMigration } from "./migrationShareBirth.ts"
 import { guidanceTargetMigration } from "./migrationGuidanceTarget.ts"
 import { reasoningStatsMigration } from "./migrationReasoningStats.ts"
 import { nativeReasoningMigration } from "./migrationNativeReasoning.ts"
+import { pendingChatsMigration } from "./migrationPendingChats.ts"
 import { rebuildTable, type OutsideStep } from "./tableRebuild.ts"
 
 /**
@@ -56,7 +57,9 @@ export const migrationDefinitions = {
   // A reply's reasoning apart in its generation figures: whether its count is an estimate, and when its first reasoning and reply tokens came.
   "0012_reasoning_stats": { statements: reasoningStatsMigration },
   // ARCHITECTURE §15 "Reasoning sent back" (owner, 2026-11-23): a plain reply's reasoning as the provider sent it.
-  "0013_native_reasoning": { statements: nativeReasoningMigration }
+  "0013_native_reasoning": { statements: nativeReasoningMigration },
+  // DESIGN §2.1 (owner, 2026-11-23): the new-chat page's chat, pending until its first turn, and the entry it was opened for.
+  "0014_pending_chats": { statements: pendingChatsMigration }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 
 const runAll = (statements: ReadonlyArray<string>) =>
