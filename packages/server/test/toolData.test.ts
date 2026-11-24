@@ -264,6 +264,20 @@ it.effect("read_run pages the cap-boundary tail and oversized arguments without 
   })
 )
 
+it.effect("a read_run page advances its original cursor even with no remaining payload quota", () =>
+  Effect.gen(function* () {
+    const ctx = context(transcript(hostile.repeat(100)))
+    const first = yield* read(ctx, { message: 0 })
+    const page = first.renderPage!(0)
+    const [, cursor] = page.match(/call "(page:v2:1:1:[a-f0-9]{24})"/) ?? []
+    assert.strictEqual(unquote(page), "{")
+    assert.isString(cursor)
+    const second = yield* read(ctx, { message: 0, call: cursor })
+    assert.isUndefined(second.isError)
+    assert.include(second.text, '<step n="1" offset="1"')
+  })
+)
+
 it.effect("a cursor cannot read a changed result or restore a withheld story read", () =>
   Effect.gen(function* () {
     const out = yield* read(context(transcript(hostile.repeat(500))), { message: 0, max_tokens: 200 })

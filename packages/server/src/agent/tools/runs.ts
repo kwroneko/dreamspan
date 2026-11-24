@@ -239,36 +239,46 @@ const readRun: RolloutTool<{
         // Identities, counts, offsets and recovery directions are app-owned framing. A
         // response can hold several complete steps, then a page within one large step.
         const limit = Math.min(TOOL_RESULT_CHARS, max_tokens * 4)
-        const shown: Array<string> = []
-        let used = 0
-        for (const step of chosen) {
-          const content = payload(step, legacy)
-          const stamp = fingerprint(step, content)
-          const frame = `<step n="${step.n}"${step.status === "error" ? ' failed="true"' : ""} offset="${offset}" total_characters="${content.length}" />`
-          const next = chosen.find((s) => s.n > step.n)?.n ?? (cursor ? steps.find((s) => s.n > step.n)?.n : undefined)
-          const following =
-            next === undefined ? "" : `\n[More steps: read_run with message ${message} and from_step=${next}.]`
-          const page = toolDataPage(content, {
-            offset,
-            limit: limit - used - following.length,
-            frame,
-            notice: shown.length === 0,
-            more: (end) =>
-              `[Result continues: read_run with message ${message} and call "page:${pageVersion}:${step.n}:${end}:${stamp}"; keep query and from_step unchanged.]`
-          })
-          if (!page.text) {
-            shown.push(`[More steps: read_run with message ${message} and from_step=${step.n}.]`)
-            break
+        const prepared = new Map<number, { content: string; stamp: string }>()
+        const renderPage = (budget: number) => {
+          const shown: Array<string> = []
+          let used = 0
+          for (const [i, step] of chosen.entries()) {
+            let original = prepared.get(step.n)
+            if (original === undefined) {
+              const content = payload(step, legacy)
+              original = { content, stamp: fingerprint(step, content) }
+              prepared.set(step.n, original)
+            }
+            const { content, stamp } = original
+            const frame = `<step n="${step.n}"${step.status === "error" ? ' failed="true"' : ""} offset="${offset}" total_characters="${content.length}" />`
+            const next = chosen[i + 1]?.n ?? (cursor ? steps.find((s) => s.n > step.n)?.n : undefined)
+            const following =
+              next === undefined ? "" : `\n[More steps: read_run with message ${message} and from_step=${next}.]`
+            const page = toolDataPage(content, {
+              offset,
+              limit: Math.min(limit, budget) - used - following.length,
+              frame,
+              notice: i === 0,
+              minimumProgress: i === 0,
+              more: (end) =>
+                `[Result continues: read_run with message ${message} and call "page:${pageVersion}:${step.n}:${end}:${stamp}"; keep query and from_step unchanged.]`
+            })
+            if (!page.text || page.end === offset) {
+              shown.push(`[More steps: read_run with message ${message} and from_step=${step.n}.]`)
+              break
+            }
+            shown.push(page.text)
+            used += page.text.length + 1
+            if (page.end < content.length) {
+              if (following) shown.push(following.trimStart())
+              break
+            }
+            if (cursor && following) shown.push(following.trimStart())
           }
-          shown.push(page.text)
-          used += page.text.length + 1
-          if (page.end < content.length) {
-            if (following) shown.push(following.trimStart())
-            break
-          }
-          if (cursor && following) shown.push(following.trimStart())
+          return shown.join("\n")
         }
-        return { text: shown.join("\n"), dataOnly: true as const }
+        return { text: renderPage(limit), dataOnly: true as const, renderPage }
       })
     )
 }
