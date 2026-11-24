@@ -120,29 +120,18 @@ for (const reverse of [false, true])
           editingFrom: content,
           content: JSON.stringify({ scripts: offline })
         })
-        const value = JSON.parse(replay.content) as { scripts: Array<{ id: string; name: string }> }
-        assert.strictEqual(
-          value.scripts.find((item) => item.id === "b")?.name,
-          operation === "remove-target" ? undefined : ""
-        )
-        if (operation !== "remove-other")
-          assert.strictEqual(value.scripts.find((item) => item.id === "a")?.name, "Alpha")
-        if (operation === "insert") assert.strictEqual(value.scripts.find((item) => item.id === "c")?.name, c.name)
-        // A delayed copy from the device that cleared the name cannot undo a later item removal.
-        if (operation === "remove-target") {
-          const older = yield* api.SaveUserDraft({
-            ...base,
-            expectedRowVersion: cleared.rowVersion,
-            content: cleared.content
-          })
-          assert.isFalse(
-            (JSON.parse(older.content) as { scripts: Array<{ id: string }> }).scripts.some((item) => item.id === "b")
-          )
-        }
+        // A stale form is refused whole (owner, 2026-11-24): the clear stands as it was saved,
+        // nothing of the offline copy merged in, and the copy is offered back.
+        assert.strictEqual(replay.content, cleared.content)
+        assert.strictEqual(replay.refused?.content, JSON.stringify({ scripts: offline }))
+        // The tab that cleared the name saves on as before.
+        const next = JSON.stringify({ scripts: [...JSON.parse(cleared.content).scripts, c] })
+        const later = yield* api.SaveUserDraft({ ...base, expectedRowVersion: cleared.rowVersion, content: next })
+        assert.strictEqual(later.content, next)
       }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
     )
 
-it.live("an actual stale clear records intent while untouched blanks preserve the other device's input", () =>
+it.live("a stale clear is refused whole: no barrier, the other device's input kept, the clear offered back", () =>
   Effect.gen(function* () {
     const api = yield* client(),
       ownerId = (yield* api.Whoami()).id
@@ -161,20 +150,20 @@ it.live("an actual stale clear records intent while untouched blanks preserve th
       editingFrom: initial,
       content: JSON.stringify({ name: "Remote name", baseUrl: "https://b.invalid" })
     })
-    const cleared = yield* api.SaveUserDraft({
+    const clear = JSON.stringify({ name: "", baseUrl: "" })
+    const cleared = yield* api.SaveUserDraft({ ...base, editingFrom: initial, content: clear })
+    assert.strictEqual(cleared.content, remote.content)
+    assert.strictEqual(cleared.refused?.content, clear)
+    assert.deepStrictEqual(Object.keys(cleared.deletions ?? {}), [])
+    // Chosen again on the current version ("Use this tab's version"), the clear is a clear.
+    const used = yield* api.SaveUserDraft({
       ...base,
-      editingFrom: initial,
-      content: JSON.stringify({ name: "", baseUrl: "" })
+      expectedRowVersion: cleared.rowVersion,
+      editingFrom: remote.content,
+      content: clear
     })
-    assert.deepStrictEqual(JSON.parse(cleared.content), { name: "", baseUrl: "https://b.invalid" })
-    assert.deepStrictEqual(Object.keys(cleared.deletions!), ['["name"]'])
-    const replay = yield* api.SaveUserDraft({
-      ...base,
-      expectedRowVersion: remote.rowVersion,
-      editingFrom: initial,
-      content: remote.content
-    })
-    assert.deepStrictEqual(JSON.parse(replay.content), { name: "", baseUrl: "https://b.invalid" })
+    assert.strictEqual(used.content, clear)
+    assert.deepStrictEqual(Object.keys(used.deletions!).sort(), ['["baseUrl"]', '["name"]'])
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
 
@@ -192,24 +181,19 @@ it.live("anonymous-array deletion conflicts retain the array instead of projecti
       content: initial
     })
     const base = { ...address, draftId: first.id, expectedRowVersion: first.rowVersion, expectedSession: first.session }
-    yield* api.SaveUserDraft({
+    const cleared = yield* api.SaveUserDraft({
       ...base,
       editingFrom: initial,
       content: JSON.stringify({ items: [{ name: "Alpha" }, { name: "" }], other: "" })
     })
-    const replay = yield* api.SaveUserDraft({
-      ...base,
-      editingFrom: initial,
-      content: JSON.stringify({
-        items: [{ name: "Bravo deleted" }, { name: "Alpha" }],
-        other: "unrelated last keystroke"
-      })
-    })
-    assert.deepStrictEqual(JSON.parse(replay.content), {
-      items: [{ name: "Alpha" }, { name: "" }],
+    const stale = JSON.stringify({
+      items: [{ name: "Bravo deleted" }, { name: "Alpha" }],
       other: "unrelated last keystroke"
     })
-    assert.isAbove(replay.recovered, 0)
+    const replay = yield* api.SaveUserDraft({ ...base, editingFrom: initial, content: stale })
+    // Refused whole (owner, 2026-11-24): nothing projected, the copy one step back in history.
+    assert.strictEqual(replay.content, cleared.content)
+    assert.strictEqual(replay.refused?.content, stale)
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
 
@@ -228,24 +212,27 @@ it.live("retrying an actual clear cannot create a new barrier while updating ano
       content: initial
     })
     const base = { ...address, draftId: first.id, expectedRowVersion: first.rowVersion, expectedSession: first.session }
-    yield* api.SaveUserDraft({ ...base, editingFrom: initial, content: typed })
-    const cleared = yield* api.SaveUserDraft({ ...base, editingFrom: typed, content: initial })
+    const named = yield* api.SaveUserDraft({ ...base, editingFrom: initial, content: typed })
+    const onNamed = { ...base, expectedRowVersion: named.rowVersion }
+    const cleared = yield* api.SaveUserDraft({ ...onNamed, editingFrom: typed, content: initial })
+    assert.isNotEmpty(Object.keys(cleared.deletions!))
+    // Retried on the version it cleared from, with another input changed: a stale form, refused,
+    // so no new barrier either.
     const repeated = yield* api.SaveUserDraft({
-      ...base,
+      ...onNamed,
       editingFrom: typed,
       content: JSON.stringify({ name: "", baseUrl: "https://last.invalid" })
     })
     assert.deepStrictEqual(repeated.deletions, cleared.deletions)
+    assert.strictEqual(repeated.content, cleared.content)
+    const freshText = JSON.stringify({ name: "Fresh after the actual deletion", baseUrl: "" })
     const fresh = yield* api.SaveUserDraft({
       ...base,
       expectedRowVersion: cleared.rowVersion,
       editingFrom: initial,
-      content: JSON.stringify({ name: "Fresh after the actual deletion", baseUrl: "" })
+      content: freshText
     })
-    assert.deepStrictEqual(JSON.parse(fresh.content), {
-      name: "Fresh after the actual deletion",
-      baseUrl: "https://last.invalid"
-    })
+    assert.strictEqual(fresh.content, freshText)
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
 
@@ -268,13 +255,10 @@ it.live("an offline anonymous clear remains protected when its text is reused be
     const base = { ...address, draftId: first.id, expectedRowVersion: first.rowVersion, expectedSession: first.session }
     const saved = yield* api.SaveUserDraft({ ...base, content: moved, editingFrom: origin })
     assert.isNotEmpty(Object.keys(saved.deletions!))
-    const replay = yield* api.SaveUserDraft({
-      ...base,
-      editingFrom: original,
-      content: JSON.stringify({ items: [{ name: "Deleted name", note: "", other: "unrelated fresh key" }] })
-    })
-    assert.strictEqual(JSON.parse(replay.content).items[0].name, "")
-    assert.strictEqual(JSON.parse(replay.content).items[0].note, "Deleted name")
-    assert.isAbove(replay.recovered, 0)
+    const stale = JSON.stringify({ items: [{ name: "Deleted name", note: "", other: "unrelated fresh key" }] })
+    const replay = yield* api.SaveUserDraft({ ...base, editingFrom: original, content: stale })
+    // Refused whole (owner, 2026-11-24): the clear stands, the copy offered back.
+    assert.strictEqual(replay.content, moved)
+    assert.strictEqual(replay.refused?.content, stale)
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )

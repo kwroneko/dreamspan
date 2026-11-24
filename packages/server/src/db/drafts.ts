@@ -5,7 +5,6 @@ import {
   beforeDeletion,
   deletionMap,
   reconcileDeletedFields,
-  reconcileForm,
   trackDeletions,
   type DeletionBase
 } from "@dreamspan/shared/draftDeletions.ts"
@@ -24,6 +23,7 @@ import {
   invertPatch,
   isDestructive,
   isEmptyPatch,
+  isFormContent,
   parseDraftTarget,
   type Patch,
   type ObservedDeletion
@@ -201,10 +201,16 @@ const imageJson = (images: MessageImages) =>
   )
 const imageFields = (json: string | null) => (json === null ? {} : { images: JSON.parse(json) as MessageImages })
 
-const toDraft = (row: DraftRow, recovered = 0, displaced: DraftDisplacement | null = null) =>
+const toDraft = (
+  row: DraftRow,
+  recovered = 0,
+  displaced: DraftDisplacement | null = null,
+  refused?: DraftDisplacement
+) =>
   new Draft({
     recovered,
     displaced,
+    ...(refused === undefined ? {} : { refused }),
     id: row.id,
     key: { targetKind: row.target_kind, targetId: row.target_id, field: row.field },
     content: row.content,
@@ -746,14 +752,63 @@ export const makeDraftStore = (
       const barrier = deletionMap(toDraft(draft))[""]
       const deleted = barrier !== undefined && beforeDeletion(draft.id, barrier, deletionBase)
       const original = content
-      const formEdit =
-        draft.target_kind === "user_field"
-          ? reconcileForm(toDraft(draft), deletionBase, content, options.editingFrom, options.deliberate ?? true)
-          : null
+      // What the edit's input clears are measured from: the text it says it was edited from,
+      // or, typed on exactly this version, this version's text.
+      const editedFrom =
+        options.deliberate === false
+          ? null
+          : (options.editingFrom ??
+            (deletionBase.draftId === draft.id && deletionBase.expectedRowVersion === draft.row_version
+              ? draft.content
+              : null))
+      // A form typed on a version that isn't the current one (owner, 2026-11-24): refused, never
+      // merged. The draft keeps its value; the refused version goes into its history one step
+      // behind it (marked displaced, so it reaches the recovered texts if the session ends
+      // without it), and the answer names it, so its tab can show the current one and offer it back.
+      if (
+        !deleted &&
+        draft.target_kind === "user_field" &&
+        draft.status === "active" &&
+        !ended &&
+        (base === null || draft.text_version > base.rowVersion) &&
+        content !== draft.content &&
+        isFormContent(content) &&
+        isFormContent(draft.content)
+      ) {
+        const at = now()
+        let recovered = 0
+        // A form's starting snapshot (`seed`) was never typed: nothing to keep.
+        if (options.deliberate !== false) {
+          recovered += yield* record(
+            draft,
+            content,
+            diffPatch(draft.content, content),
+            "edit",
+            at,
+            true,
+            draft.images_json
+          )
+          recovered += yield* record(
+            { ...draft, content },
+            draft.content,
+            diffPatch(content, draft.content),
+            "restore",
+            at,
+            true,
+            draft.images_json
+          )
+        }
+        const refused = new DraftDisplacement({ at, content })
+        return {
+          draft: toDraft((yield* byId(draft.id))!, recovered, null, refused),
+          recovered: recovered > 0,
+          accepted: false
+        }
+      }
       const reconciled = reconcileDeletedFields(
         toDraft(draft),
         options.deliberate === false ? null : deletionBase,
-        formEdit?.content ?? content
+        content
       )
       if (deleted || reconciled.rejected || (ended && options.ended === "recover" && options.next !== true)) {
         // A different session's text cannot account for an old composer copy.
@@ -768,7 +823,7 @@ export const makeDraftStore = (
         return { draft: toDraft(draft, recovered ? 1 : 0), recovered, accepted: false }
       }
       let recoveredInput = false
-      if (reconciled.changed || formEdit?.changed) {
+      if (reconciled.changed) {
         if (toBin(draft) && content.trim() !== "") {
           yield* recover(draft.user_id, toDraft(draft).key, [content], "discard")
           recoveredInput = true
@@ -818,7 +873,7 @@ export const makeDraftStore = (
         changed,
         imagesJson,
         options.deliberate ?? true,
-        formEdit === null ? undefined : { before: formEdit.intent, content: original }
+        draft.target_kind === "user_field" ? { before: editedFrom, content: original } : undefined
       )
       return {
         draft: toDraft((yield* byId(draft.id))!, recovered + Number(recoveredInput), displaced),
