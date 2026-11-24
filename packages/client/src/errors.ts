@@ -90,9 +90,11 @@ const describeError = (error: unknown): AppError => {
     return make(
       "NotFound",
       // A library entry is an "item" to the user; a link to one may be stale or mistyped.
-      error.entity === "ref"
-        ? "This item was deleted or never existed."
-        : `This ${entityWord(error.entity)} doesn't exist any more.`
+      error.entity === "story-persona"
+        ? "A workshop beside a story can't use the story's persona or one of its characters. Pick another persona and send again."
+        : error.entity === "ref"
+          ? "This item was deleted or never existed."
+          : `This ${entityWord(error.entity)} doesn't exist any more.`
     )
   if (error instanceof StaleWrite) return stale(error.entity)
   if (error instanceof ProviderError) return make("ProviderError", sentence(error.message), error.reason)

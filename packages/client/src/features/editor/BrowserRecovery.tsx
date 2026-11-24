@@ -7,6 +7,7 @@ import { Button } from "../../ui/Button.tsx"
 import { textareaResize } from "../../ui/HeightGrip.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { copiesOfUser, type Copy, dropCopy, flushCopies, pendingOf, subscribeCopies } from "./backup.ts"
+import { adoptTypedBackups } from "./typedBackup.ts"
 
 import { dropTypedBackup } from "./typedBackup.ts"
 
@@ -51,12 +52,14 @@ export function BrowserRecovery({
     let version = 0
     const refresh = () => {
       const current = ++version
-      void copiesOfUser(userId).then((next) => {
-        if (active && current === version) {
-          setNow(Date.now())
-          setCopies(next)
-        }
-      })
+      void adoptTypedBackups(userId)
+        .then(() => copiesOfUser(userId))
+        .then((next) => {
+          if (active && current === version) {
+            setNow(Date.now())
+            setCopies(next)
+          }
+        })
     }
     const unsubscribe = subscribeCopies(refresh)
     refresh()

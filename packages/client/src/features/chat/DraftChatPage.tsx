@@ -10,7 +10,7 @@
 import type { Chat, ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import type { DraftFor } from "@dreamspan/shared/draftChatApi.ts"
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type ActionResult, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { useCaller } from "../editor/caller.ts"
@@ -37,8 +37,8 @@ function DraftChat({
   onOpened
 }: {
   draftFor: DraftFor
-  /** A pending chat was opened for the page: a fresh one, or the one its URL named. */
-  onOpened?: ((chat: Chat) => void) | undefined
+  /** A pending chat was opened for the page: a fresh one, or (`reopened`) the one its URL named. */
+  onOpened?: ((chat: Chat, reopened: boolean) => void) | undefined
 }) {
   const search = useSearch({ strict: false }) as Record<string, unknown>
   const named =
@@ -93,8 +93,8 @@ function DraftChat({
       }
       rememberDraftFor(value.id, draftFor)
       setChat(value)
-      // A reopened one too: a reload before the start card's title reached it still names it.
-      onOpened?.(value)
+      // A reopened one too: a reload before the rename this tab meant for it still names it.
+      onOpened?.(value, value.id === reopen)
       if (value.id !== reopen)
         void navigate({
           to: ".",
@@ -203,7 +203,7 @@ function DraftChatPage({
   pageTitle = "New chat"
 }: {
   draftFor: DraftFor
-  onOpened?: (chat: Chat) => void
+  onOpened?: (chat: Chat, reopened: boolean) => void
   pageTitle?: string
 }) {
   useTitle(pageTitle)
@@ -238,6 +238,22 @@ export function EmptyDraftChatPage() {
 }
 
 /**
+ * The rename this browser tab meant for new chat `chatId` and hasn't seen through, kept for a
+ * reload: read (`name` null), kept (a name), or done (""). Per tab, by the chat's id.
+ */
+const meantTitle = (chatId: string, name: string | null): string | null => {
+  const key = `dreamspan.meantTitle:${chatId}`
+  try {
+    if (name === null) return sessionStorage.getItem(key)
+    if (name === "") sessionStorage.removeItem(key)
+    else sessionStorage.setItem(key, name)
+  } catch {
+    // Storage unavailable: a reload before the rename leaves the chat its default title.
+  }
+  return null
+}
+
+/**
  * A new chat named by the title typed on the Chats page's start card (`titleKey`, its user
  * draft): a rename, which starts nothing; the title's draft ends once it's the chat's.
  */
@@ -252,19 +268,33 @@ export function TitledDraftChatPage({
 }) {
   const title = useUserDraft(titleKey, "Title", "")
   const call = useCaller()
-  const [opened, setOpened] = useState<Chat | null>(null)
+  const [opened, setOpened] = useState<{ readonly chat: Chat; readonly reopened: boolean } | null>(null)
+  const onOpened = useCallback((chat: Chat, reopened: boolean) => setOpened({ chat, reopened }), [])
   // The name given, once read: a fresh chat opened after a sweep gets it too.
   const named = useRef<string | null>(null)
   useEffect(() => {
-    if (opened === null || !title.ready) return
-    const first = named.current === null
-    if (first) named.current = title.text.trim()
-    const name = named.current!
-    if (name === "") return
-    void call((client) => client("RenameChat", { chatId: opened.id, name })).then((result) => {
-      if (result.ok && first) void title.commit(title.text, async () => true)
+    if (opened === null) return
+    const { chat, reopened } = opened
+    // A chat its URL named takes only the rename this tab meant for it and hadn't seen through (a
+    // reload before it), never what the start card holds now: that's for the next new chat.
+    let name: string | null
+    let first = false
+    if (reopened) name = meantTitle(chat.id, null)
+    else {
+      if (!title.ready) return
+      first = named.current === null
+      if (first) named.current = title.text.trim()
+      name = named.current
+    }
+    if (name === null || name === "") return
+    meantTitle(chat.id, name)
+    void call((client) => client("RenameChat", { chatId: chat.id, name })).then((result) => {
+      if (!result.ok) return
+      meantTitle(chat.id, "")
+      // The start card's title ends once it's this chat's, and only then.
+      if (first || (title.ready && title.text.trim() === name)) void title.commit(title.text, async () => true)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per chat opened, when the title is read
   }, [opened, title.ready])
-  return <DraftChatPage draftFor={draftFor} onOpened={setOpened} {...(pageTitle === undefined ? {} : { pageTitle })} />
+  return <DraftChatPage draftFor={draftFor} onOpened={onOpened} {...(pageTitle === undefined ? {} : { pageTitle })} />
 }
