@@ -191,11 +191,27 @@ const world = (
       return Effect.succeed(input.versions.map((_, i) => `v${versions.length}-${i}`))
     }
   }
+  const checkQuota = (userId: string) => {
+    quotaCalls.push(`check ${userId}`)
+    return state.overQuota.has(userId) ? Effect.fail(new QuotaExceeded("over")) : Effect.succeed({})
+  }
   const quota = {
-    check: (userId: string) => {
-      quotaCalls.push(`check ${userId}`)
-      return state.overQuota.has(userId) ? Effect.fail(new QuotaExceeded("over")) : Effect.succeed({})
-    },
+    check: checkQuota,
+    replacement: (userId: string) =>
+      checkQuota(userId).pipe(
+        Effect.as({
+          over: () => "over",
+          reserve: () => true,
+          keep: (_size, previousBytes, record) =>
+            Effect.flatMap(record(previousBytes), (saved) =>
+              saved === null ? Effect.fail(new QuotaExceeded("over")) : Effect.succeed(saved)
+            ),
+          stage: () => undefined,
+          committing: () => undefined,
+          landed: () => undefined,
+          release: () => undefined
+        } satisfies Effect.Success<ReturnType<FilesQuota["replacement"]>>)
+      ),
     afterCommand: (userId: string) => {
       quotaCalls.push(`after ${userId}`)
       return Effect.succeed(state.overQuota.has(userId) ? "over" : null)
@@ -669,10 +685,14 @@ it.live.skipIf(!commands)(
         yield* call("write_file", { path: "/files/Shared/mara/notes/b.txt", content: "x" }),
         "only read it"
       )
-      assert.notInclude(
-        yield* call("write_file", { path: "/files/.subagents/c1/x.txt", content: "x" }),
-        "outside your copy"
+      const written = yield* w.run(
+        "ben",
+        "write_file",
+        { path: "/files/.subagents/c1/x.txt", content: "x" },
+        new Map(),
+        copy
       )
+      assert.isNotTrue(written.isError, written.text)
       assert.strictEqual(yield* Effect.promise(() => readFile(join(w.root("ben"), ".subagents/c1/x.txt"), "utf8")), "x")
       // Once the share is stopped, the subagent doesn't see it either.
       w.state.shares = []

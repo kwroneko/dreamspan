@@ -371,25 +371,36 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const hold = (userId: string, stage?: "outside-files" | { readonly temporaryName: string }) => {
     const id = nextId++
     if (stage !== undefined) stagingHolds.add(id)
-    if (typeof stage === "object") {
+    let temporaryName: string | undefined
+    const stageName = (name: string) => {
+      temporaryName = name
       const names = stagingNames.get(userId) ?? new Set<string>()
-      names.add(stage.temporaryName)
+      names.add(name)
       stagingNames.set(userId, names)
     }
+    if (typeof stage === "object") stageName(stage.temporaryName)
     const unstage = () => {
       stagingHolds.delete(id)
-      if (typeof stage !== "object") return
+      if (temporaryName === undefined) return
       const names = stagingNames.get(userId)
-      names?.delete(stage.temporaryName)
+      names?.delete(temporaryName)
       if (names?.size === 0) stagingNames.delete(userId)
     }
     let released = false
     let reserved = 0
+    const fits = (bytes: number, quotaBytes: number) => {
+      const known = usages.get(userId)
+      return (
+        !released &&
+        known?.partial !== true &&
+        (known?.usedBytes ?? 0) + total(pending.get(userId)) - total(frees.get(userId)) + bytes <= quotaBytes
+      )
+    }
     return {
+      stage: stageName,
+      fits,
       reserve: (bytes: number, quotaBytes: number) => {
-        if (released) return false
-        const known = usages.get(userId)?.usedBytes ?? 0
-        if (known + total(pending.get(userId)) - total(frees.get(userId)) + bytes > quotaBytes) return false
+        if (!fits(bytes, quotaBytes)) return false
         reserved += bytes
         grow(userId, id, bytes)
         return true
@@ -400,6 +411,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
         landing.get(userId)?.set(id, file === undefined ? null : { inode: inodeKey(file), reserved })
       },
       release: () => {
+        if (released) return
         released = true
         unstage()
         landing.get(userId)?.delete(id)
@@ -407,6 +419,62 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       }
     }
   }
+
+  /** Reserve the net charge after the old live file is replaced and its version is kept. */
+  const replacement = (
+    userId: string,
+    before: Stats | null,
+    version: { readonly sha256: string; readonly byteSize: number } | null,
+    bytes: number,
+    what: string,
+    held?: ReturnType<typeof hold>
+  ) =>
+    Effect.gen(function* () {
+      const released = before?.isFile() && before.nlink === 1 ? before.size : 0
+      const retained =
+        version && (yield* deps.reader.FileVersionBytes({ userId: userId as never, sha256: version.sha256 })) === 0
+          ? version.byteSize
+          : 0
+      const cost = (size: number, kept = retained) => size + kept - released
+      const room = yield* check(userId, cost(bytes), what)
+      const holdBytes = held ?? hold(userId, "outside-files")
+      let reserved = 0
+      let credit = 0
+      const over = (size: number, kept = retained) => overText(room.usedBytes + cost(size, kept), room.quotaBytes, what)
+      const reserve = (size: number, kept = retained) => {
+        const more = cost(size, kept) - reserved
+        if (more <= 0) return holdBytes.fits(more, room.quotaBytes)
+        if (!holdBytes.reserve(more, room.quotaBytes)) return false
+        reserved += more
+        return true
+      }
+      return {
+        over,
+        reserve,
+        keep: <A, E, R>(
+          size: number,
+          previousBytes: number,
+          record: (maxAddedBytes: number) => Effect.Effect<A | null, E, R>
+        ) =>
+          Effect.gen(function* () {
+            const first = yield* record(retained)
+            if (first !== null) return first
+            if (!reserve(size, previousBytes)) return yield* Effect.fail(new QuotaExceeded(over(size, previousBytes)))
+            const saved = yield* record(previousBytes)
+            if (saved === null) return yield* Effect.fail(new QuotaExceeded(over(size, previousBytes)))
+            return saved
+          }),
+        stage: holdBytes.stage,
+        committing: (size: number, kept: number) => {
+          credit = freed(userId, reserved - cost(size, kept))
+        },
+        landed: holdBytes.landed,
+        release: () => {
+          holdBytes.release()
+          unfreed(userId, credit)
+        }
+      }
+    })
 
   /** The refusal for a streaming write that ran out of room. */
   const overMessage = (used: number, quotaBytes: number, what: string) => overText(used, quotaBytes, what)
@@ -492,6 +560,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
     setQuota,
     sweepVersions,
     remeasureActive,
+    replacement,
     intervals: { measureMs: MEASURE_EVERY, retentionMs: 60 * 60_000 }
   }
 }
