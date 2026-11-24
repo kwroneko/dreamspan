@@ -1,6 +1,7 @@
 // Synthetic replies only: keyboard controls must preserve drafts and share visible actions.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
+import { typeInto } from "./support/composer.ts"
 import { startContinueProvider } from "./support/continueProvider.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -19,6 +20,45 @@ const admin = <A>(use: (api: Client) => Effect.Effect<A, unknown>) => {
   cookie ??= loginCookie(server(), ADMIN.handle, ADMIN.password)
   return cookie.then((value) => withCookie(server(), value, use))
 }
+
+test("composer undo belongs to the branch draft where the text was typed", async ({ page }) => {
+  const { chat, root, fork } = await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Composer undo" })
+      const root = chat.currentForkId!
+      const sent = yield* api.SendMessage({
+        chatId: chat.id,
+        forkId: root,
+        parentSlotId: null,
+        branch: false,
+        content: "The fork point",
+        reply: false
+      })
+      if (sent._tag !== "Posted") throw new Error("Expected a posted message")
+      const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: root, atSlotId: sent.entry.slotId })
+      yield* api.NameFork({ forkId: fork.id, name: "Existing draft branch" })
+      yield* typeInto(api, chat.id, fork.id, "abcdef")
+      return { chat, root, fork }
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chat.id}?fork=${root}`)
+  const box = page.getByTestId("composer")
+  await expect(box).toBeEditable()
+  await box.focus()
+  await page.keyboard.insertText("abc")
+  await expectTextBox(box, "abc")
+
+  await page.getByRole("button", { name: /^Branch:.*switch branch$/ }).click()
+  await page
+    .getByRole("dialog", { name: "Branches of this chat" })
+    .getByRole("link", { name: /^Existing draft branch/ })
+    .click()
+  await expectTextBox(box, "abcdef")
+  await box.press("ControlOrMeta+z")
+  await expectTextBox(box, "abcdef")
+  expect((await admin((api) => api.OpenComposer({ chatId: chat.id, forkId: fork.id }))).content).toBe("abcdef")
+})
 
 const setup = (human = false) =>
   admin((api) =>
