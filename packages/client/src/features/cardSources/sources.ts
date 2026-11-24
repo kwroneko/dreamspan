@@ -159,20 +159,30 @@ const risuRecognizer: SourceRecognizer = {
   }
 }
 
-// cardex (cardex.zip), a public card archive. A card's page there is https://cardex.zip/c/<slug>
-// (its API v1, https://cardex.zip/docs/api); a card added from it has that URL in `source`, or
-// `cardex:<slug>` when cardex gave none (spec/CARD-SOURCES.md §4.5). Files cardex serves carry
-// `extensions.cardex`: `url`, the card's page there, and `origins`, each a page on a site cardex
+// cardex (cardex.zip), a public card archive (its API v1, https://cardex.zip/docs/api). A card's
+// page there is https://cardex.zip/c/<slug>, and its page for one site's listing of it is
+// https://cardex.zip/<site>/<id> (`site` the site's v1 name, `id` its id there). A card added from
+// cardex has its /c/ URL in `source`, or `cardex:<slug>` when cardex gave none
+// (spec/CARD-SOURCES.md §4.5). Files cardex serves carry `extensions.cardex`: `url`, the page for
+// the listing the file came from (a /<site>/<id> URL), and `origins`, each a page on a site cardex
 // found it on (`source` its site's v1 name, `url` the page), linked under that site's name.
 const CARDEX_HOST = "cardex.zip"
-const cardexSlug = (url: URL) => {
-  const [kind, slug] = url.pathname.split("/").filter(Boolean)
-  if (kind !== "c" || !slug) return undefined
+// First path segments on cardex that aren't a site: pictures, thumbnails, creators, the API, docs.
+const CARDEX_NOT_SITES = new Set(["api", "docs", "i", "t", "u"])
+const decoded = (part: string) => {
   try {
-    return decodeURIComponent(slug)
+    return decodeURIComponent(part)
   } catch {
-    return slug
+    return part
   }
+}
+/** The label for a cardex page: a card's slug, or the site and id of a listing's page. */
+const cardexLabel = (url: URL) => {
+  const [first, ...rest] = url.pathname.split("/").filter(Boolean)
+  if (!first || !rest.length) return undefined
+  if (first === "c") return rest.length === 1 ? decoded(rest[0]!) : undefined
+  if (!/^[a-z0-9_]{1,40}$/.test(first) || CARDEX_NOT_SITES.has(first)) return undefined
+  return `${CARDEX_SITE_LABELS[first] ?? first}: ${rest.map(decoded).join("/")}`
 }
 const cardexRecognizer: SourceRecognizer = {
   id: "card-sources.cardex",
@@ -182,8 +192,8 @@ const cardexRecognizer: SourceRecognizer = {
     const extension = record(doc.extensions["cardex"])
     const page = webUrl(text(extension?.["url"]) ?? "")
     if (page && hostOf(page) === CARDEX_HOST) {
-      const slug = cardexSlug(page)
-      links.push({ url: page.href, ...(slug ? { label: slug } : {}) })
+      const label = cardexLabel(page)
+      links.push({ url: page.href, ...(label ? { label } : {}) })
     }
     for (const entry of doc.source ?? []) {
       const id = /^cardex:(.+)$/.exec(entry.trim())?.[1]?.trim()
@@ -193,8 +203,8 @@ const cardexRecognizer: SourceRecognizer = {
       }
       const url = webUrl(entry)
       if (!url || hostOf(url) !== CARDEX_HOST) continue
-      const slug = cardexSlug(url)
-      links.push({ url: url.href, ...(slug ? { label: slug } : {}), from: entry })
+      const label = cardexLabel(url)
+      links.push({ url: url.href, ...(label ? { label } : {}), from: entry })
     }
     const origins = extension?.["origins"]
     for (const origin of Array.isArray(origins) ? origins : []) {
