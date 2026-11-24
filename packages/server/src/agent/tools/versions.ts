@@ -12,7 +12,7 @@ import { type CountEffect, estimateCount, pageEnd, pageTokens, visibleDoc } from
 import { toolResultFrame } from "../toolData.ts"
 import type { RolloutTool, ToolContext } from "../tools.ts"
 import { libraryClassIds } from "../capabilities.ts"
-import { pagedView, resolveLibrary, VIEWS, viewHelp } from "./library.ts"
+import { pagedView, resolveLibrary, VIEWS, viewHelp, withExportHint } from "./library.ts"
 
 type Kind = "card" | "preset" | "lorebook"
 const KINDS = Type.Union([Type.Literal("card"), Type.Literal("preset"), Type.Literal("lorebook")])
@@ -116,7 +116,7 @@ const readRevision: RolloutTool<Readonly<Record<string, unknown>>> = {
         revision: found.revision.id
       })
       const viewed = yield* pagedView(kind, visible, shown, head, args, count(ctx), ctx.window)
-      if (viewed !== null) return { frame, ...viewed }
+      if (viewed !== null) return { frame, ...withExportHint(ctx, viewed) }
       return {
         frame,
         text: JSON.stringify({ id: resolved.ref.id, name: resolved.ref.label, ...named(found.revision), doc: shown })

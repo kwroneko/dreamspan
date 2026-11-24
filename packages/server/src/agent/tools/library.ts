@@ -281,6 +281,21 @@ export const pagedView = (
     )
   })
 
+/**
+ * A cut page, or a summary in place of the whole, says the item can be saved to a file, where the
+ * run offers export_to_file (§4.3 point 2): in the result, so the read tools' definitions stay
+ * the same bytes whether files are offered or not.
+ */
+export const withExportHint = <T extends { readonly text: string; readonly isError?: boolean }>(
+  context: ToolContext,
+  viewed: T
+): T =>
+  viewed.isError !== true &&
+  /Read on with offset=|Too long to read whole/.test(viewed.text) &&
+  context.offer?.tools.some((tool) => tool.name === "export_to_file") === true
+    ? { ...viewed, text: `${viewed.text}\nTo search or work on all of it, save it to a file with export_to_file.` }
+    : viewed
+
 const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Record<string, unknown>>> => ({
   source: import.meta.url,
   id: `read_${kind}`,
@@ -382,7 +397,7 @@ const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Re
             )
           : visible
       const viewed = yield* pagedView(kind, visible, doc, head, args, count, context.window)
-      if (viewed !== null) return { frame, ...viewed }
+      if (viewed !== null) return { frame, ...withExportHint(context, viewed) }
       const notes =
         kind === "card" && source.ref
           ? yield* context.reader.ListCardNotes({ userId: context.userId, cardRefId: source.ref.id })
