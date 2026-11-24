@@ -1,0 +1,102 @@
+{
+  "name": "tags-prefix",
+  "request": {
+    "path": "/api/v1/tags",
+    "query": {
+      "limit": "10",
+      "q": "vio"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=300",
+    "etag": "W/\"56ea748aafb0ccd67ff492f001a96804c91bc174c79472a32b57222462cbbcfa\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "q": "vio",
+    "tags": [
+      {
+        "slug": "music-14",
+        "label": "music 14",
+        "card_count": 50,
+        "match_kind": "direct"
+      },
+      {
+        "slug": "desert",
+        "label": "Desert",
+        "card_count": 164110,
+        "via_alias": true,
+        "match_kind": "split",
+        "matched_label": "desert"
+      },
+      {
+        "slug": "village-2",
+        "label": "village 2",
+        "card_count": 147164,
+        "match_kind": "direct"
+      },
+      {
+        "slug": "friendly-3",
+        "label": "FRIENDLY 3",
+        "card_count": 93651,
+        "via_alias": true,
+        "match_kind": "split",
+        "matched_label": "friendly 3"
+      },
+      {
+        "slug": "painter-3",
+        "label": "painter 3",
+        "card_count": 32439,
+        "via_alias": true,
+        "match_kind": "split",
+        "matched_label": "painter 3"
+      },
+      {
+        "slug": "sports-14",
+        "label": "sports 14",
+        "card_count": 23672,
+        "match_kind": "direct"
+      },
+      {
+        "slug": "mountains-6",
+        "label": "mountains 6",
+        "card_count": 18207,
+        "via_alias": true,
+        "match_kind": "split",
+        "matched_label": "Mountains 6"
+      },
+      {
+        "slug": "western-7",
+        "label": "Western 7",
+        "card_count": 11494,
+        "via_alias": true,
+        "match_kind": "split",
+        "matched_label": "western 7"
+      },
+      {
+        "slug": "mountains-5",
+        "label": "Mountains 5",
+        "card_count": 1382,
+        "via_alias": true,
+        "match_kind": "split",
+        "matched_label": "mountains 5"
+      },
+      {
+        "slug": "historical-3",
+        "label": "historical 3",
+        "card_count": 1134,
+        "via_alias": true,
+        "match_kind": "split",
+        "matched_label": "historical 3"
+      }
+    ],
+    "page": 1,
+    "pages": 1,
+    "total": 10,
+    "next": "HJ45czNgvi4iXd7tAAnB6QmkaNdduKq4MjrQ75gqrQUtX7F-8udHk-guxnEzGHW-iz"
+  }
+}

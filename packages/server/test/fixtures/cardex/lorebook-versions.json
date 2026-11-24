@@ -1,0 +1,77 @@
+{
+  "name": "lorebook-versions",
+  "request": {
+    "path": "/api/v1/versions/chub/lorebooks%2FButtondriftbut%2Ftrailrid-2b846fc0b866",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "no-store",
+    "ratelimit-limit": "60",
+    "ratelimit-remaining": "60",
+    "ratelimit-reset": "0",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "items": [
+      {
+        "id": "8189385",
+        "version": {
+          "slug": "trailrid-lorebook-c220230d",
+          "content_hash": "de78bda26fedd5a25e0f4e0514111ccf81c08c0b31d08c88eabf0373acae2802",
+          "card_path": "/c/trailrid-lorebook-c220230d",
+          "origin_path": "/chub/lorebooks/Buttondriftbut/trailrid-2b846fc0b866?v=cf7f57cfa3e1130b",
+          "active_from": "2026-11-06T17:11:48.698899Z",
+          "active_to": null,
+          "is_current": true,
+          "is_viewing": false,
+          "meta": {
+            "character_version": null,
+            "created": null,
+            "modified": null,
+            "sources": [],
+            "creator": null
+          }
+        },
+        "compare": {
+          "fields": {
+            "description": "392f07fe227d3ee3",
+            "lorebook": "2c276956c2f9f46f",
+            "lorebook_text": "94ffdb59794d9cf7",
+            "name": "12beaf818484f52a",
+            "other": "a522b3594b28b7c2"
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 0,
+            "first_mes": 0,
+            "notes": 0,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 0,
+          "first_mes_key": null,
+          "depth_prompt_key": null,
+          "tokens": 1177
+        },
+        "lorebook_entries": 415,
+        "lorebook_attached_by": null,
+        "cover_key": null,
+        "cover_thumb_url": "/t/bcf738ad933c9df76994574545277db5b4deff021eedc4c620101249aa2b24fb.512.webp?v=1",
+        "nsfw": true,
+        "cover_listing_fallback": true,
+        "texts": {},
+        "key_hashes": {
+          "character_book": "2ec64052833cb3703bf193211ca06194"
+        },
+        "json_url": "/api/v1/download/e6c1b1065929aecad38772a459205fc817891e892c3781f48faad96c99c15167?mode=json"
+      }
+    ],
+    "next": null
+  }
+}

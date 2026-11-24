@@ -1,0 +1,19 @@
+{
+  "name": "image-thumb-64",
+  "request": {
+    "path": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.64.webp",
+    "query": {
+      "v": "1"
+    }
+  },
+  "status": 404,
+  "headers": {
+    "content-type": "text/plain",
+    "cache-control": "max-age=60",
+    "x-content-type-options": "nosniff"
+  },
+  "bodyInfo": {
+    "bytes": 10,
+    "magic": "6e6f7420"
+  }
+}

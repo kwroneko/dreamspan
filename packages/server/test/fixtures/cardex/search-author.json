@@ -1,0 +1,190 @@
+{
+  "name": "search-author",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "author": "janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"4bb7a93763645e1121ecb730b2e750e6aac65b0c96a58a1a72ebe38c7de1bfdc\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": {
+      "source": "janitorai",
+      "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+      "display_name": "Violetmi"
+    },
+    "author_error": null,
+    "query": {
+      "author": "janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "newest",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "topaz-oliverive-d1f392ca",
+        "path": "/c/topaz-oliverive-d1f392ca",
+        "name": "Hill petal echo",
+        "tagline": "River maple ivy rose hollow timber maple marble dawn arch autumn mist winter breeze hazel glade pepper fable chime kettle moss arch daisy comet laurel candle reed beacon violet mint linen olive river maple ivy rose hollow timber maple marb",
+        "thumb_url": "/t/944f9fd8e1a8c0ef7b7e1a6fae754b05368ba0639322d159637d4651f3f32727.512.webp?v=1",
+        "cover_w": 440,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "sci-fi",
+            "label": "Sci Fi"
+          }
+        ],
+        "tag_count": 6,
+        "token_budget": 2183,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:37.982754Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 0,
+      "hidden_capped": false
+    },
+    "items": [
+      {
+        "slug": "topaz-oliverive-d1f392ca",
+        "url": "/c/topaz-oliverive-d1f392ca",
+        "name": "Hill petal echo",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "comedy",
+          "fantasy",
+          "baker-3",
+          "sci-fi",
+          "adventure",
+          "slice-of-life"
+        ],
+        "tagline": "River maple ivy rose hollow timber maple marble dawn arch autumn mist winter breeze hazel glade pepper fable chime kettle moss arch daisy comet laurel candle reed beacon violet mint linen olive river maple ivy rose hollow timber maple marb",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 2183,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/944f9fd8e1a8c0ef7b7e1a6fae754b05368ba0639322d159637d4651f3f32727.512.webp?v=1",
+        "image_url": "/i/944f9fd8e1a8c0ef7b7e1a6fae754b05368ba0639322d159637d4651f3f32727.webp",
+        "version": "e6d330be9395aaf0b86cb5369d4672ee37167ee9a439792247c429ae68a09859",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:37.982754Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "6V5tHVnNZET0kCwC8DTXnL8h8_ro0pYVxPMloHrPS6g4CNHibBZfBPcs-MRXe5d-7FQablohOwYeby7t2itmDkjZUidIwNKXMVgxAsrdva2tsXmxMWdkczHTCX4D9uEFYvZa-dtDpKub-70ocPGHQ8rwA2t8QClO23l3Y5WFNBgYC3q8GZS_-fc1qLUjRKFPRy.ECrQnRC3IuaeyNEmOHRkBHCYQuc5j5vLlNJI_voMo6i",
+    "has_more": true
+  }
+}

@@ -1,0 +1,206 @@
+{
+  "name": "search-limit",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "sort": "popular",
+      "limit": "2"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"ccb22fd2fe5bd15fa617ec333c7f14d9335e03780d14836cc970ad9e00159c9e\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "popular",
+      "page": 1,
+      "limit": 2,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "traildelt-valleyl-a8-2216ef5f",
+        "path": "/c/traildelt-valleyl-a8-2216ef5f",
+        "name": "Saffron rain thyme p",
+        "tagline": "Swan petal yarrow larch a",
+        "thumb_url": "/t/37e75c17d5e4b05b1861b7490960943724df179124da016bcb76e9ca6681962c.512.webp?v=1",
+        "cover_w": 832,
+        "cover_h": 1216,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "risuai"
+        ],
+        "top_tags": [],
+        "search_tags": [],
+        "tag_count": 0,
+        "token_budget": 20216,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-23T18:07:22.157000Z",
+        "group": {
+          "key": "69478942fc56c7cc",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "quill",
+          "path": "/u/risuai/quill",
+          "source": "risuai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "traildelt-valleyl-6d400cf3",
+        "path": "/c/traildelt-valleyl-6d400cf3",
+        "name": "Heron cedar apple",
+        "tagline": "Glen field larch sand.",
+        "thumb_url": "/t/829ba95ad15ecaa145a3beed41d9f9f6a80d3297e1dc763a8820916667e07c1e.512.webp?v=1",
+        "cover_w": 701,
+        "cover_h": 1024,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "risuai"
+        ],
+        "top_tags": [],
+        "search_tags": [],
+        "tag_count": 0,
+        "token_budget": 12635,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-02T19:04:33.795681Z",
+        "group": {
+          "key": "69d1023328dae9ea",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "quill",
+          "path": "/u/risuai/quill",
+          "source": "risuai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 2,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "traildelt-valleyl-a8-2216ef5f",
+        "url": "/c/traildelt-valleyl-a8-2216ef5f",
+        "name": "Saffron rain thyme p",
+        "creator": {
+          "name": "quill",
+          "source": "risuai",
+          "handle": "quill",
+          "url": "/u/risuai/quill"
+        },
+        "tags": [],
+        "tagline": "Swan petal yarrow larch a",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 20216,
+        "stats": {
+          "popularity": 954800,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/37e75c17d5e4b05b1861b7490960943724df179124da016bcb76e9ca6681962c.512.webp?v=1",
+        "image_url": "/i/37e75c17d5e4b05b1861b7490960943724df179124da016bcb76e9ca6681962c.jpg",
+        "version": "b8f42868ea8205210abac5e689fe209634f27f06fb5756c383764623ffd3986e",
+        "download_modes": [
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-23T18:07:22.157000Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "traildelt-valleyl-6d400cf3",
+        "url": "/c/traildelt-valleyl-6d400cf3",
+        "name": "Heron cedar apple",
+        "creator": {
+          "name": "quill",
+          "source": "risuai",
+          "handle": "quill",
+          "url": "/u/risuai/quill"
+        },
+        "tags": [],
+        "tagline": "Glen field larch sand.",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 12635,
+        "stats": {
+          "popularity": 690300,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/829ba95ad15ecaa145a3beed41d9f9f6a80d3297e1dc763a8820916667e07c1e.512.webp?v=1",
+        "image_url": "/i/829ba95ad15ecaa145a3beed41d9f9f6a80d3297e1dc763a8820916667e07c1e.jpg",
+        "version": "4435e8c222a38a408a4c5d85a8f7ab6525d3cabdd1f2dd7cd4c38cbb4cefba44",
+        "download_modes": [
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-02T19:04:33.795681Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "MCRtQ7v1XwrlrqA8uS3jJVt-EIkKgJ_vtYNAMTUXH_A0Fqz-GuU9OFW0ucXYOzeZPd4Hjb3TgRE5T6oYLvkRk4euiYwt8vha6x2vK-2HApGQSl_5cui_JCReZa9HY_KLYVkJKFPql1Irpq1YXZOUfkPF2ts.E6_QDWU6jff1YP2Ehl2nqTp5uvZh33XT2LlVPNnka62",
+    "has_more": true
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "name": "lorebook-forks",
+  "request": {
+    "path": "/api/v1/forks/chub/lorebooks%2FButtondriftbut%2Ftrailrid-2b846fc0b866",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "no-store",
+    "ratelimit-limit": "60",
+    "ratelimit-remaining": "59",
+    "ratelimit-reset": "1",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "parent": null,
+    "children": [],
+    "next": null,
+    "viewed_slug": "trailrid-lorebook-c220230d",
+    "compared_with": {
+      "compare": {
+        "fields": {
+          "description": "392f07fe227d3ee3",
+          "lorebook_text": "94ffdb59794d9cf7",
+          "name": "12beaf818484f52a",
+          "other": "a522b3594b28b7c2"
+        },
+        "lens": {
+          "depth_prompt": 0,
+          "examples": 0,
+          "first_mes": 0,
+          "notes": 0,
+          "personality": 0,
+          "post_history": 0,
+          "scenario": 0,
+          "system_prompt": 0
+        },
+        "greetings": 0,
+        "first_mes_key": null,
+        "depth_prompt_key": null,
+        "tokens": 1177
+      },
+      "lorebook_entries": 415,
+      "lorebook_attached_by": null
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "batch-not-canonical",
+  "request": {
+    "path": "/api/v1/cards/batch",
+    "query": {
+      "ids": "ber-sail-gla-db22bb49,appleh-82167127,appleh-82167127"
+    }
+  },
+  "status": 308,
+  "headers": {
+    "cache-control": "public, max-age=300",
+    "location": "/api/v1/cards/batch?ids=appleh-82167127%2Cber-sail-gla-db22bb49",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "bodyInfo": {
+    "bytes": 0,
+    "magic": ""
+  }
+}

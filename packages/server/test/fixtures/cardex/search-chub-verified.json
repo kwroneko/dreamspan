@@ -1,0 +1,73 @@
+{
+  "name": "search-chub-verified",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "source": "chub",
+      "chub_verified": "true",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"8c3093a9c90bc35d0416273edaa2176a92779b6021015597c87fb2b038a3daa8\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [
+        "chub"
+      ],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": true,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "newest",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 0,
+      "hidden_capped": false
+    },
+    "items": [],
+    "total_is_estimate": false,
+    "next_cursor": null,
+    "has_more": false
+  }
+}

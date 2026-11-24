@@ -1,0 +1,19 @@
+{
+  "name": "capabilities-not-modified",
+  "request": {
+    "path": "/api/v1/capabilities",
+    "query": {}
+  },
+  "status": 304,
+  "headers": {
+    "cache-control": "public, max-age=300",
+    "etag": "W/\"d0d623ef2aac021a0908ff0899cbb739ac424cd512809d083cded91a28b8cf8a\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "bodyInfo": {
+    "bytes": 0,
+    "magic": ""
+  }
+}

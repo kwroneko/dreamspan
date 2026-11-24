@@ -77,7 +77,7 @@ export function cardexCreatorTests() {
             await page.getByRole("menuitem", { name: `Cards by ${creator}`, exact: true }).click()
             const header = scope.locator("[data-source-creator]")
             await expect(header.getByRole("heading", { name: `Cards by ${creator} (synthetic)` })).toBeVisible()
-            await expect(header).toContainText(/On Synthetic \w+ · \d+ cards?/)
+            await expect(header).toContainText(/On [A-Z][\w. ]* · \d+ cards?/)
             await expect(header.locator("[data-creator-bio]")).toContainText("A synthetic creator")
             await expect(header.getByRole("link", { name: "Open on cardex", exact: true })).toHaveAttribute(
               "href",
@@ -145,11 +145,17 @@ export function cardexCreatorTests() {
             await expect(header).toHaveCount(0)
             // From a card's page, its creator's name opens the same view on home.
             if (place === "home") {
-              await page.goto(
-                `${server.url}/sources/cardex/cards/${await tiles.first().getAttribute("data-remote-card")}`
+              // A card whose creator has an account there: cardex links no other kind of creator.
+              const slugs = await tiles.evaluateAll((nodes) =>
+                nodes.map((node) => node.getAttribute("data-remote-card"))
               )
               const card = page.locator("[data-remote-card-page]")
               const by = card.getByText(/^by /)
+              for (const slug of slugs) {
+                await page.goto(`${server.url}/sources/cardex/cards/${slug}`)
+                await expect(card.getByRole("heading").first()).toBeVisible()
+                if ((await by.getByRole("link").count()) > 0) break
+              }
               const name = (await by.getByRole("link").innerText()).trim()
               await by.getByRole("link").click()
               await expect(

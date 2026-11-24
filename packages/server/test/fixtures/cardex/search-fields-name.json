@@ -1,0 +1,215 @@
+{
+  "name": "search-fields-name",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "q": "northc",
+      "fields": "name",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"ec3205bbceeb3f2a34f1d7ee19b38948a7b1ffe3fcc61661275b34c6e7eaf452\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": "northc",
+      "fields": [
+        "name"
+      ],
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "relevance",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "Elm valley tulip cedar crane breeze delta garden sail amber violet finch violet hollow sh",
+        "path": "/c/wren-sta-northc-sta-skycandlel-quillfr-grovecop-shellc-winte-br-yarr-a-bir-beaco-701b23ec",
+        "name": "Jade laurel saffron cabin mint larch raven arch sand heron river autumn poppy sand shell lem",
+        "tagline": "Anchor jade bamboo mist otter delta delta sand copper orchard maple cricket amber fern clover willow frost atlas badge grove kettle hollow kite orchard cedar autumn bamboo juniper paper copper mint maple anchor jade bamboo mist otter del",
+        "thumb_url": "/t/d012c098232e056e49d3086192d627ac7c0290419c69fbedd25a50048834dcf5.512.webp?v=1",
+        "cover_w": 1536,
+        "cover_h": 1536,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "game-4",
+            "label": "Game 4"
+          },
+          {
+            "slug": "anime-4",
+            "label": "anime 4"
+          },
+          {
+            "slug": "fictional-4",
+            "label": "Fictional 4"
+          },
+          {
+            "slug": "oc-4",
+            "label": "Oc 4"
+          }
+        ],
+        "tag_count": 11,
+        "token_budget": 2125,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-05T10:02:41.419694Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Delt",
+          "path": "/u/janitorai/e8802c1f-8fa3-11fc-7e7f-3172a8db7bdc",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "Elm valley tulip cedar crane breeze delta garden sail amber violet finch violet hollow sh",
+        "url": "/c/wren-sta-northc-sta-skycandlel-quillfr-grovecop-shellc-winte-br-yarr-a-bir-beaco-701b23ec",
+        "name": "Jade laurel saffron cabin mint larch raven arch sand heron river autumn poppy sand shell lem",
+        "creator": {
+          "name": "Delt",
+          "source": "janitorai",
+          "handle": "e8802c1f-8fa3-11fc-7e7f-3172a8db7bdc",
+          "url": "/u/janitorai/e8802c1f-8fa3-11fc-7e7f-3172a8db7bdc"
+        },
+        "tags": [
+          "teacher-3",
+          "game-4",
+          "fantasy-5",
+          "village-2",
+          "fantasy",
+          "baker-3",
+          "village",
+          "adventure",
+          "places-3",
+          "fictional-4"
+        ],
+        "tagline": "Anchor jade bamboo mist otter delta delta sand copper orchard maple cricket amber fern clover willow frost atlas badge grove kettle hollow kite orchard cedar autumn bamboo juniper paper copper mint maple anchor jade bamboo mist otter del",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 2125,
+        "stats": {
+          "popularity": 756,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/d012c098232e056e49d3086192d627ac7c0290419c69fbedd25a50048834dcf5.512.webp?v=1",
+        "image_url": "/i/d012c098232e056e49d3086192d627ac7c0290419c69fbedd25a50048834dcf5.webp",
+        "version": "25e3c103aa9b85761c90db2b3ff3997c115abad5666d5ef9cb21a1ae42201828",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-05T10:02:41.406661Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "C6sqxwfvwOhwkLMDDjoK0esIGnM9861XHekh_i9hwS0x9_S-jnUDnt-nNFMYii4RjfuhbdW1cHsW6FTf8fNOU4ZyBu15BXFtrWy4q263WtndWjfkObc4cSvzXHDtyiL_8rhyf9VC6oPzOpDl4lVBpxX31zSeTVB.fFFmijtwQOdEuE86mdrl2_U8np5iVLSVJnyAZU4NGN-",
+    "has_more": true
+  }
+}

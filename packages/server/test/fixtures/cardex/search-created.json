@@ -1,0 +1,188 @@
+{
+  "name": "search-created",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "created_after": "2025-01-01",
+      "created_before": "2025-06-01",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"f5f4a3006bd93e1a2423e2ef1d0b000b904f34aef27bbaa4aff4e28ccfe533ed\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": "2025-01-01",
+      "created_before": "2025-06-01",
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "newest",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "honeyo-kite-chime-56622517",
+        "path": "/c/honeyo-kite-chime-56622517",
+        "name": "Comet tulip echo.",
+        "tagline": "Plum glen beacon plum shell juniper arch cedar jade crystal raven cedar dune maple laurel thyme island canyon pop",
+        "thumb_url": "/t/affef8680742c9ea37b160a83f96742cbcbef5e3d4ef19ba2dda4f2a23f1913a.512.webp?v=1",
+        "cover_w": 736,
+        "cover_h": 589,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "crushon"
+        ],
+        "top_tags": [
+          {
+            "slug": "travel",
+            "label": "travel",
+            "shortlist_display": "male"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "travel",
+            "label": "travel"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "friendly-3",
+            "label": "FRIENDLY 3"
+          },
+          {
+            "slug": "cozy-3",
+            "label": "cozy 3"
+          }
+        ],
+        "tag_count": 6,
+        "token_budget": 421,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:10:40.189043Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Hill honey.",
+          "path": "/u/crushon/cfc2b640-4ea3-067a-9e24-4da43679f561",
+          "source": "crushon",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "honeyo-kite-chime-56622517",
+        "url": "/c/honeyo-kite-chime-56622517",
+        "name": "Comet tulip echo.",
+        "creator": {
+          "name": "Hill honey.",
+          "source": "crushon",
+          "handle": "cfc2b640-4ea3-067a-9e24-4da43679f561",
+          "url": "/u/crushon/cfc2b640-4ea3-067a-9e24-4da43679f561"
+        },
+        "tags": [
+          "drama-3",
+          "detective",
+          "travel",
+          "village",
+          "friendly-3",
+          "cozy-3"
+        ],
+        "tagline": "Plum glen beacon plum shell juniper arch cedar jade crystal raven cedar dune maple laurel thyme island canyon pop",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 421,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/affef8680742c9ea37b160a83f96742cbcbef5e3d4ef19ba2dda4f2a23f1913a.512.webp?v=1",
+        "image_url": "/i/affef8680742c9ea37b160a83f96742cbcbef5e3d4ef19ba2dda4f2a23f1913a.jpg",
+        "version": "62c5452127069d924d61aed748c71f3083fbba7cde77ced75c60d7606850f674",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:10:40.189043Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "GzjD6faoaJ-dWIstC4a83ddDYGFxljAIXFb-CESsw4ss2Lowy0zh8g1-wI6La9hztN-4YIIpGXXq5jxooLXDIwNVnK69rypz6Ylo7ZFxAo4iUGXS6FXX0IRe6-5yZW55EfnDozXJf5QJhIZR5adHtP0q1EFShQ9HIcSF2zf55Y4oQfgMI_I5d6Uj3a_oMv9QoT.POQb0OwhT8P-E6UVYqhU9xIXYEdyxY-ohoE6WeWghgK",
+    "has_more": true
+  }
+}

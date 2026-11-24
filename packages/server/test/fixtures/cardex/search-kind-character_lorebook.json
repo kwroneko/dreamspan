@@ -1,0 +1,339 @@
+{
+  "name": "search-kind-character_lorebook",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "kind": "character_lorebook",
+      "limit": "2"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"8243878a21f7342ada9ea0217cd5b71ce03aa125bd664e63f9b57b3bcf3d2f69\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "character_lorebook",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "newest",
+      "page": 1,
+      "limit": 2,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "ber-sail-gla-db22bb49",
+        "path": "/c/ber-sail-gla-db22bb49",
+        "name": "Paper raven.",
+        "tagline": "Jade delta beacon nectar brook meadow autumn velvet paper mellow petal tulip clover hill blossom orchard lagoon breeze moss hazel timber basin clover north lemon mint brook cotton thyme coral creek otter jade d.",
+        "thumb_url": "/t/0d001334b7939975ac836db83ff35ea59483f3f91f415378571a8a1457d6676d.512.webp?v=1",
+        "cover_w": 832,
+        "cover_h": 1248,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "factions",
+            "label": "factions"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "multiple-greetings",
+            "label": "Multiple Greetings"
+          },
+          {
+            "slug": "factions",
+            "label": "factions"
+          },
+          {
+            "slug": "english",
+            "label": "ENGLISH"
+          },
+          {
+            "slug": "strategy",
+            "label": "strategy"
+          },
+          {
+            "slug": "has-lorebook",
+            "label": "has lorebook"
+          },
+          {
+            "slug": "original",
+            "label": "original"
+          },
+          {
+            "slug": "game",
+            "label": "game"
+          },
+          {
+            "slug": "places",
+            "label": "places"
+          }
+        ],
+        "tag_count": 11,
+        "token_budget": 19019,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:07:14.360381Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Harbormarbl",
+          "path": "/u/janitorai/61ca8f90-32f8-0c0e-83f8-9c70b44ef564",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "archl-b3bddd7c",
+        "path": "/c/archl-b3bddd7c",
+        "name": "Oakho",
+        "tagline": "Anchor honey coral star fable valley cabin frost kite lantern willow berry snow bell juniper violet comet rose silver kite chalk cotton lemon garden sand north willow trail drift fjord candle tulip anchor honey coral star fable valley c",
+        "thumb_url": "/t/04e692c88929ba25b592c991bb34eb1207a186f8646a387866a14f6db57d8bfb.512.webp?v=1",
+        "cover_w": 450,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          },
+          {
+            "slug": "cooking",
+            "label": "Cooking"
+          },
+          {
+            "slug": "cyberpunk",
+            "label": "Cyberpunk"
+          }
+        ],
+        "tag_count": 10,
+        "token_budget": 3251,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:19.988094Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 2,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "ber-sail-gla-db22bb49",
+        "url": "/c/ber-sail-gla-db22bb49",
+        "name": "Paper raven.",
+        "creator": {
+          "name": "Harbormarbl",
+          "source": "janitorai",
+          "handle": "61ca8f90-32f8-0c0e-83f8-9c70b44ef564",
+          "url": "/u/janitorai/61ca8f90-32f8-0c0e-83f8-9c70b44ef564"
+        },
+        "tags": [
+          "action",
+          "strategy",
+          "worldbuilding",
+          "fantasy",
+          "places",
+          "factions",
+          "creatures",
+          "english",
+          "adventure",
+          "original"
+        ],
+        "tagline": "Jade delta beacon nectar brook meadow autumn velvet paper mellow petal tulip clover hill blossom orchard lagoon breeze moss hazel timber basin clover north lemon mint brook cotton thyme coral creek otter jade d.",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 19019,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/0d001334b7939975ac836db83ff35ea59483f3f91f415378571a8a1457d6676d.512.webp?v=1",
+        "image_url": "/i/0d001334b7939975ac836db83ff35ea59483f3f91f415378571a8a1457d6676d.webp",
+        "version": "03a9c5b5029cde399a62d46288a324cebda2a87652c3971bf9319f7fdd1e6dab",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:07:14.360381Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "archl-b3bddd7c",
+        "url": "/c/archl-b3bddd7c",
+        "name": "Oakho",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "comedy",
+          "detective",
+          "baker-3",
+          "cooking",
+          "cyberpunk",
+          "dragons",
+          "steampunk",
+          "space",
+          "adventure",
+          "slice-of-life"
+        ],
+        "tagline": "Anchor honey coral star fable valley cabin frost kite lantern willow berry snow bell juniper violet comet rose silver kite chalk cotton lemon garden sand north willow trail drift fjord candle tulip anchor honey coral star fable valley c",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 3251,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/04e692c88929ba25b592c991bb34eb1207a186f8646a387866a14f6db57d8bfb.512.webp?v=1",
+        "image_url": "/i/04e692c88929ba25b592c991bb34eb1207a186f8646a387866a14f6db57d8bfb.webp",
+        "version": "444af0531055820be96002b866ba585ec42f2d71ac682f60a5bbe83dbf5528b2",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:19.988094Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "JiEolaRkdXhet6Srprl7iRWbw8OHjaefQWxwD8b67CsiNoC4JS4OEUchIjlN1KZoisfyog19pkz-MCK5TYFI9Yin2Z5hF5CUwHAqM1kOBHvpJhmXE4j4L-Kj5G8J8jS2QiKG0q-fw7oxJ6Wdb22YoZAYqqmWGojsxVV-E8DjpeJwcylgQqVqgF5UFklyEdaWga.eEG2O_JcT47TXZ-EXYvk_JzjjC1Q26ofJrlnx8jLrwN",
+    "has_more": true
+  }
+}

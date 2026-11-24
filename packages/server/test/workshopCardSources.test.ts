@@ -23,10 +23,10 @@ import { loadSkillDescription, skillsFor } from "../src/agent/toolLoading.ts"
 import * as CardSources from "../src/sources/CardSources.ts"
 import type { CardSourceAdapter } from "../src/sources/adapter.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"
-import { fakeCardexAdapter, startFakeArchive } from "./support/fakeArchive.ts"
+import { fakeCardexAdapter, startFakeCardex } from "./support/fakeCardex.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 
-const archive = await startFakeArchive({ cards: 120 })
+const archive = await startFakeCardex({ cards: 120 })
 afterAll(() => archive.close())
 
 const TOOLS = cardSourceExposures.map((e) => e.id)

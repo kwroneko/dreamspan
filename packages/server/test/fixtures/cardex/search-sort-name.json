@@ -1,0 +1,212 @@
+{
+  "name": "search-sort-name",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "q": "northc",
+      "sort": "name",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"48abefb5528aa69311cb408e30780243265fe8e48441ed9dd09aa6b64fb8de0c\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": "northc",
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "name",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "ivyf-207375b7",
+        "path": "/c/ivyf-207375b7",
+        "name": "c",
+        "tagline": "Fable fern chime chime blossom swan creek echo candle grove ember mist velvet plum raven winter glen raven birch basin reed cobble sand nectar basin drift silver comet daisy breeze lemon badge fable fern chime chime blossom swan creek echo",
+        "thumb_url": "/t/497934e5736cfcaf890b2e63c37579ede880fc0e0a1a16ce73fdd2392f6ad6a2.512.webp?v=1",
+        "cover_w": 832,
+        "cover_h": 1216,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "caveduck"
+        ],
+        "top_tags": [
+          {
+            "slug": "travel",
+            "label": "travel",
+            "shortlist_display": "male"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "travel",
+            "label": "travel"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "cooking-4",
+            "label": "Cooking 4"
+          },
+          {
+            "slug": "fantasy-6",
+            "label": "fantasy 6"
+          },
+          {
+            "slug": "music-4",
+            "label": "music 4"
+          },
+          {
+            "slug": "factions-4",
+            "label": "factions 4"
+          },
+          {
+            "slug": "sports-4",
+            "label": "sports 4"
+          },
+          {
+            "slug": "cooking-7",
+            "label": "Cooking 7"
+          },
+          {
+            "slug": "gardening-7",
+            "label": "gardening 7"
+          }
+        ],
+        "tag_count": 11,
+        "token_budget": 6437,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-24T22:08:24.286436Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Paperree",
+          "path": "/u/caveduck/c80d2918-eef2-64a0-fb8f-8dd8ab23f22f",
+          "source": "caveduck",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "ivyf-207375b7",
+        "url": "/c/ivyf-207375b7",
+        "name": "c",
+        "creator": {
+          "name": "Paperree",
+          "source": "caveduck",
+          "handle": "c80d2918-eef2-64a0-fb8f-8dd8ab23f22f",
+          "url": "/u/caveduck/c80d2918-eef2-64a0-fb8f-8dd8ab23f22f"
+        },
+        "tags": [
+          "gardening-7",
+          "factions-4",
+          "historical",
+          "village-2",
+          "travel",
+          "music-7",
+          "original-6",
+          "sports-7",
+          "cooking-7",
+          "fantasy-6",
+          "cooking-4"
+        ],
+        "tagline": "Fable fern chime chime blossom swan creek echo candle grove ember mist velvet plum raven winter glen raven birch basin reed cobble sand nectar basin drift silver comet daisy breeze lemon badge fable fern chime chime blossom swan creek echo",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 6437,
+        "stats": {
+          "popularity": 20,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/497934e5736cfcaf890b2e63c37579ede880fc0e0a1a16ce73fdd2392f6ad6a2.512.webp?v=1",
+        "image_url": "/i/497934e5736cfcaf890b2e63c37579ede880fc0e0a1a16ce73fdd2392f6ad6a2.png",
+        "version": "f016c040105778d50008502fe33ec3adb1f06d590f3b149a1d8300ab35dcd1fc",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-24T22:08:24.286436Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "PjNEdBTQ62C_fKmFidtSI6t5UGKy3n7ixldp08j4eLkMm1flMCnz8arVbwz8490lkdWIUf4C3_TZizLztGsCCM0rmLIngQfFtW7kJacyQKCz0lqvM7sSHsIpIdPh4Kdts8GDW0QpAN7T_XNLeDmGHmRNKph.6LgnW_tqDjLgKCUMVTudvJYmZ69aWufSg1Otat5XN41",
+    "has_more": true
+  }
+}

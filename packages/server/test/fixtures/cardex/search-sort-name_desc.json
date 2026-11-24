@@ -1,0 +1,137 @@
+{
+  "name": "search-sort-name_desc",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "q": "northc",
+      "sort": "name_desc",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"291d9943ff57419e74fea3742b86e98245115ffc7837178d43da94deb7d59de0\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": "northc",
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "name_desc",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "cove-crys-velve-copp-c5-2-f5b49007",
+        "path": "/c/cove-crys-velve-copp-c5-2-f5b49007",
+        "name": "Chime san",
+        "tagline": null,
+        "thumb_url": "/t/524606bbf70ba6cc9d83a47dcc73cf4acb2d101e3c9ef31aba1651c77a7633c4.512.webp?v=1",
+        "cover_w": 512,
+        "cover_h": 768,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [],
+        "search_tags": [],
+        "tag_count": 0,
+        "token_budget": 16386,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-06T06:46:55.481454Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "appl",
+          "path": "/u/chub/appl",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "cove-crys-velve-copp-c5-2-f5b49007",
+        "url": "/c/cove-crys-velve-copp-c5-2-f5b49007",
+        "name": "Chime san",
+        "creator": {
+          "name": "appl",
+          "source": "chub",
+          "handle": "appl",
+          "url": "/u/chub/appl"
+        },
+        "tags": [],
+        "tagline": null,
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 16386,
+        "stats": {
+          "popularity": 1,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/524606bbf70ba6cc9d83a47dcc73cf4acb2d101e3c9ef31aba1651c77a7633c4.512.webp?v=1",
+        "image_url": "/i/524606bbf70ba6cc9d83a47dcc73cf4acb2d101e3c9ef31aba1651c77a7633c4.png",
+        "version": "56bee140134f3d9ae9e80eb7eb85c86f11c48f7f5bf875a6e4c3af25ea5c6ee6",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-06T07:01:14.383810Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "mmB_AZLaNv1KEFQ7weyjWGs1DxwTlnNGUY9ptQ3RKTgGYZnMlV78eeriIfDuV3AhMKrNJNGUiIVj0-r4orRsUsLnuGO7uqO0LBiswNAHXvRQp00rCmIXZjjtCdj01Ke04zdHRtJA7STabGWfjU5wnEWcr3agkWTB-Ozph50nZrVM2O.LNEEJzfm0W4qJDHL0hPo9EZtWE58E2savFU-Z0wQRye",
+    "has_more": true
+  }
+}

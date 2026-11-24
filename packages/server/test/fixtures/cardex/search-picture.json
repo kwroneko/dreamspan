@@ -1,0 +1,291 @@
+{
+  "name": "search-picture",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "picture": "6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"aab66495c998f64c15ce3d0e40f401302fc71ca7829dca7e1b94db271b93a45d\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": "6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb",
+      "sort": "newest",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "appleh-82167127",
+        "path": "/c/appleh-82167127",
+        "name": "Candle",
+        "tagline": "Quill pepper coral olive larch ocean cedar nectar saffron kettle hazel quiet canyon basin mi!",
+        "thumb_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+        "cover_w": 400,
+        "cover_h": 600,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "botbooru"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "explorer",
+            "label": "explorer",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "summer",
+            "label": "Summer"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "explorer",
+            "label": "explorer"
+          },
+          {
+            "slug": "scholar",
+            "label": "Scholar"
+          },
+          {
+            "slug": "summer",
+            "label": "Summer"
+          },
+          {
+            "slug": "puzzle",
+            "label": "puzzle"
+          },
+          {
+            "slug": "slice-of-life-2",
+            "label": "slice of life 2"
+          },
+          {
+            "slug": "baker",
+            "label": "baker"
+          },
+          {
+            "slug": "calm",
+            "label": "calm"
+          },
+          {
+            "slug": "cheerful",
+            "label": "cheerful"
+          },
+          {
+            "slug": "curious",
+            "label": "curious"
+          },
+          {
+            "slug": "poet",
+            "label": "poet"
+          },
+          {
+            "slug": "teacher",
+            "label": "TEACHER"
+          },
+          {
+            "slug": "friendly",
+            "label": "friendly"
+          },
+          {
+            "slug": "healer",
+            "label": "healer"
+          },
+          {
+            "slug": "wholesome",
+            "label": "wholesome"
+          },
+          {
+            "slug": "sailor",
+            "label": "sailor"
+          },
+          {
+            "slug": "winter",
+            "label": "Winter"
+          },
+          {
+            "slug": "festival",
+            "label": "festival"
+          },
+          {
+            "slug": "merchant",
+            "label": "merchant"
+          },
+          {
+            "slug": "comedy-2",
+            "label": "Comedy 2"
+          },
+          {
+            "slug": "inventor",
+            "label": "inventor"
+          },
+          {
+            "slug": "bard",
+            "label": "bard"
+          },
+          {
+            "slug": "cozy",
+            "label": "cozy"
+          },
+          {
+            "slug": "painter",
+            "label": "painter"
+          },
+          {
+            "slug": "mountains",
+            "label": "mountains"
+          },
+          {
+            "slug": "knight",
+            "label": "knight"
+          }
+        ],
+        "tag_count": 27,
+        "token_budget": 1435,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:03:37.883206Z",
+        "group": null,
+        "creator": {
+          "kind": "named",
+          "name": "trailberryelmlaurels",
+          "path": null,
+          "source": null,
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 0,
+      "hidden_capped": false
+    },
+    "items": [
+      {
+        "slug": "appleh-82167127",
+        "url": "/c/appleh-82167127",
+        "name": "Candle",
+        "creator": {
+          "name": "trailberryelmlaurels",
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "mountains",
+          "winter",
+          "summer",
+          "festival",
+          "puzzle",
+          "inventor",
+          "scholar",
+          "fantasy",
+          "knight",
+          "healer",
+          "bard",
+          "merchant",
+          "sailor",
+          "explorer",
+          "astronomer",
+          "baker",
+          "painter",
+          "poet",
+          "steampunk",
+          "teacher",
+          "friendly",
+          "cheerful",
+          "calm",
+          "curious",
+          "wholesome",
+          "cozy"
+        ],
+        "tagline": "Quill pepper coral olive larch ocean cedar nectar saffron kettle hazel quiet canyon basin mi!",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1435,
+        "stats": {
+          "popularity": 182,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+        "image_url": "/i/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.png",
+        "version": "b82da3ee17b3f301f095caf642dfde5f93f8e16c23b310385ec911cf466e42fc",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:03:37.883206Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "uGiUnqAdnjVWQ956SlrBmuxOdZDMu1CY2Kv-nLESk5cZrMlgwg3C_C8mZhZWJ0EDj_JGk2GVaIhMIv8B_nnzKwJZTX4OgFhBwCYG46XygIzGRJToqilcVrr_dz2U2N4O8aqs7yerPwVC1skF2ruC2lwzbKLUxKri3knGZppss61AJ5nKwgoxB_43pf8epxEtTj.OXvC2uamR9kGPpCP28wsOXVUGGhSsRzqlzYZ3Uj7D1D",
+    "has_more": true
+  }
+}

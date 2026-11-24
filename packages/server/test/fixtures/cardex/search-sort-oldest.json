@@ -1,0 +1,137 @@
+{
+  "name": "search-sort-oldest",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "q": "northc",
+      "sort": "oldest",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"6131c52d900aee9ffe6a1bbe743b05135e70a23cd46a84fd0aa88fbb4d98ba0e\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": "northc",
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "oldest",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "duneho-rave-c681c551",
+        "path": "/c/duneho-rave-c681c551",
+        "name": "Ottert-Fabl",
+        "tagline": "Larch berry mist daisy kite amber linen laurel garden daisy fern crane zephyr clover sail poppy ivy ocean drift island lark heron berry otter river ocean leaf fjord cobble cr",
+        "thumb_url": "/t/0b5851ef6ff6026a4dc2c5acc32d1a623e404b0e59fa39ed63d806f52de40be1.512.webp?v=1",
+        "cover_w": 564,
+        "cover_h": 564,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [],
+        "search_tags": [],
+        "tag_count": 0,
+        "token_budget": 1920,
+        "fork_count": 0,
+        "first_seen_at": "2024-01-17T18:46:31Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Crystal_sail",
+          "path": "/u/janitorai/8a1ce62a-a19f-ec6c-d279-6f4d14d6bc86",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "duneho-rave-c681c551",
+        "url": "/c/duneho-rave-c681c551",
+        "name": "Ottert-Fabl",
+        "creator": {
+          "name": "Crystal_sail",
+          "source": "janitorai",
+          "handle": "8a1ce62a-a19f-ec6c-d279-6f4d14d6bc86",
+          "url": "/u/janitorai/8a1ce62a-a19f-ec6c-d279-6f4d14d6bc86"
+        },
+        "tags": [],
+        "tagline": "Larch berry mist daisy kite amber linen laurel garden daisy fern crane zephyr clover sail poppy ivy ocean drift island lark heron berry otter river ocean leaf fjord cobble cr",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1920,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/0b5851ef6ff6026a4dc2c5acc32d1a623e404b0e59fa39ed63d806f52de40be1.512.webp?v=1",
+        "image_url": "/i/0b5851ef6ff6026a4dc2c5acc32d1a623e404b0e59fa39ed63d806f52de40be1.webp",
+        "version": "357e117682b20774f9e8298a35a533ae5ca9a0a9aba0ee44c32263f8f848edf9",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2024-01-17T18:46:31Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "ZAb3qkx8qieFS2nHSDx0137dWXvGm1W9JAwjh0LnF6E_779LS1iQFKmAcjPQvNsFtUJAcjNPT5JRiG9GcAbEesgWDtm_2LaAnd1Z-kUkp1xtuy3gCjx4ch88j5SrlEdvgn5CG_uZ2GGQNI_uhQICGW-KH3SMpOF8WCPVWyzQFka0UeaGXvtSuK8x.W7wKuGvh1Nu6WzpRpWWPAU-f7xxu4E3L_yrSqqvvOd9",
+    "has_more": true
+  }
+}

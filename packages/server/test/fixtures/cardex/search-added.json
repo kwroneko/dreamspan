@@ -1,0 +1,178 @@
+{
+  "name": "search-added",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "added_after": "2026-01-01",
+      "added_before": "2026-06-01",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"aa6b13a43552ed9513e15c6cbcca78dbe1f1d502d3ec1316d7c4ea763ac7c60a\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": "2026-01-01",
+      "added_before": "2026-06-01",
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "newest",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "lante-cra-tulip-marblesnow-7308d7ed",
+        "path": "/c/lante-cra-tulip-marblesnow-7308d7ed",
+        "name": "Sorrel rose petal thistle.",
+        "tagline": "Maple apple apple boat quiet sorrel glade hollow cabin mist summer glade elm blossom delta island lotus moss sand cove heron sage pepper field marble kettle apple rose shell fjord tide badge maple apple apple boat quiet sorrel glade hollo",
+        "thumb_url": "/t/7fc4236ebd6889f97e6e3365e5f10b8dc701b2b0c4e6925eec56a6ee66215f9d.512.webp?v=1",
+        "cover_w": 447,
+        "cover_h": 447,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          },
+          {
+            "slug": "desert",
+            "label": "Desert"
+          },
+          {
+            "slug": "castle",
+            "label": "castle"
+          },
+          {
+            "slug": "astronomer-3",
+            "label": "Astronomer 3"
+          }
+        ],
+        "tag_count": 7,
+        "token_budget": 1648,
+        "fork_count": 0,
+        "first_seen_at": "2026-05-15T18:27:05.187877Z",
+        "group": null,
+        "creator": null
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "lante-cra-tulip-marblesnow-7308d7ed",
+        "url": "/c/lante-cra-tulip-marblesnow-7308d7ed",
+        "name": "Sorrel rose petal thistle.",
+        "creator": {
+          "name": null,
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "historical",
+          "castle",
+          "astronomer-3",
+          "village",
+          "desert",
+          "explorer-3",
+          "space"
+        ],
+        "tagline": "Maple apple apple boat quiet sorrel glade hollow cabin mist summer glade elm blossom delta island lotus moss sand cove heron sage pepper field marble kettle apple rose shell fjord tide badge maple apple apple boat quiet sorrel glade hollo",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1648,
+        "stats": {
+          "popularity": 0,
+          "rating_avg": 2,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/7fc4236ebd6889f97e6e3365e5f10b8dc701b2b0c4e6925eec56a6ee66215f9d.512.webp?v=1",
+        "image_url": "/i/7fc4236ebd6889f97e6e3365e5f10b8dc701b2b0c4e6925eec56a6ee66215f9d.png",
+        "version": "7fc4236ebd6889f97e6e3365e5f10b8dc701b2b0c4e6925eec56a6ee66215f9d",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-05T03:42:25.157222Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "XPeyWiY-KqbfPHnSpbgOSRcj7-Z-VEVu2YDDyiHBnKA5dW2z5iYZGPLixnmUuESamIo-umgBMRFJl6KBwDYx1YMCfMT4_D-rQucS2gjDATF_ytSZUWpB4c5rXZKTrAgV0Y6j3YLb7-X-iTWrK-Y7G7xx8SlBiGK5J2YD0F8XqpawlXMaatBU-qrg3AmStEYG.g2UeyXLRPFemAkL-epmD4IN00W-10EkKSANa_hGh_Re",
+    "has_more": true
+  }
+}

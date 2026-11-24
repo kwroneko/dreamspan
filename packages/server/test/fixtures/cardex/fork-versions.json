@@ -1,0 +1,86 @@
+{
+  "name": "fork-versions",
+  "request": {
+    "path": "/api/v1/versions/chub/Anchorbam%2Fvelvet-c4f2da84663b",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "no-store",
+    "ratelimit-limit": "60",
+    "ratelimit-remaining": "59",
+    "ratelimit-reset": "1",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "items": [
+      {
+        "id": "928957",
+        "version": {
+          "slug": "velvet-9ef52be7",
+          "content_hash": "6a64a28b745fc40318d88b1d4289b3a1ecf7eb482902c85421c214b0920f6892",
+          "card_path": "/c/velvet-9ef52be7",
+          "origin_path": "/chub/characters/Anchorbam/velvet-c4f2da84663b?v=5131f331910160e6",
+          "active_from": "2025-10-26T03:47:00.848196Z",
+          "active_to": null,
+          "is_current": true,
+          "is_viewing": false,
+          "meta": {
+            "character_version": "lant",
+            "created": null,
+            "modified": null,
+            "sources": [],
+            "creator": null
+          }
+        },
+        "compare": {
+          "fields": {
+            "description": "63f6c51e04d96d15",
+            "greetings": "6d9c79605670c99c",
+            "lorebook": "ea195e7e5038f761",
+            "lorebook_text": "c9b1ebf94102df46",
+            "name": "fd60b805bf5889a8",
+            "notes": "bea85228b0638e1c",
+            "tags": "healer-3"
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 0,
+            "first_mes": 631,
+            "notes": 929,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "86f1e1db9f92eb49",
+          "depth_prompt_key": null,
+          "tokens": 2782
+        },
+        "lorebook_entries": 7,
+        "lorebook_attached_by": null,
+        "cover_key": "300688",
+        "cover_thumb_url": "/t/743780bad622ef6e9b38c70cedcee17cc50ca71b6fd7b896d92125e6e946dd87.512.webp?v=1",
+        "nsfw": true,
+        "cover_listing_fallback": false,
+        "texts": {
+          "tags": "bard-3"
+        },
+        "key_hashes": {
+          "alternate_greetings": "2011eb61560869b7bfdb032e208ccdd0",
+          "character_book": "4951e4805300eb4403de97e354f24ffd",
+          "creator_notes": "0c01f79369fc3201a1ffa184a13366bc",
+          "description": "f14727a31c5e8b9d3d62486ae5950134",
+          "first_mes": "fe3adc83302e22892e2ad605712b917d",
+          "name": "b990520075afa27e2a0526f8ad256cca"
+        },
+        "json_url": "/api/v1/download/743780bad622ef6e9b38c70cedcee17cc50ca71b6fd7b896d92125e6e946dd87?mode=json"
+      }
+    ],
+    "next": null
+  }
+}

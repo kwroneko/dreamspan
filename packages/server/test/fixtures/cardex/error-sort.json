@@ -1,0 +1,21 @@
+{
+  "name": "error-sort",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "sort": "zzqx"
+    }
+  },
+  "status": 400,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "error": "bad_request",
+    "message": "sort must be one of relevance, newest, oldest, created_desc, created_asc, popular, name, name_desc, tokens_asc, tokens_desc"
+  }
+}

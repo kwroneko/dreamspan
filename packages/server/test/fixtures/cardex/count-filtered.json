@@ -1,0 +1,26 @@
+{
+  "name": "count-filtered",
+  "request": {
+    "path": "/api/v1/search/count",
+    "query": {
+      "tags": "village-2",
+      "nsfw": "exclude"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"f4d87988399bb24391dd0c60587f38a19d00f28a3808c802cc8b5c16b345f53f\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "total": 31093,
+    "capped": false,
+    "cap": 100000,
+    "pages": 417,
+    "timed_out": false
+  }
+}

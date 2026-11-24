@@ -1,0 +1,234 @@
+{
+  "name": "search-min-tokens",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "min_tokens": "1000",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"fae8e815d9940d2e2ef26d48fcc68ccce19568924b5c8f859acfe08c1ee1c838\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": 1000,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "newest",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "anchor-dais-thym-cfa4c362",
+        "path": "/c/anchor-dais-thym-cfa4c362",
+        "name": "Crystal paper ba",
+        "tagline": "Lark lotus hill beacon paper bell pepper atlas kite copper breeze valley cotton lotus ridge ivy bell lemon banner sage pin.",
+        "thumb_url": "/t/b32438e85c3aded74538791032d55d86d3ba13ab6c8b800d3ccaa081f338413a.512.webp?v=1",
+        "cover_w": 1280,
+        "cover_h": 1856,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "botbooru"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "explorer",
+            "label": "explorer",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "curious",
+            "label": "curious"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "explorer",
+            "label": "explorer"
+          },
+          {
+            "slug": "scholar",
+            "label": "Scholar"
+          },
+          {
+            "slug": "castle",
+            "label": "castle"
+          },
+          {
+            "slug": "calm",
+            "label": "calm"
+          },
+          {
+            "slug": "cheerful",
+            "label": "cheerful"
+          },
+          {
+            "slug": "curious",
+            "label": "curious"
+          },
+          {
+            "slug": "teacher",
+            "label": "TEACHER"
+          },
+          {
+            "slug": "wholesome",
+            "label": "wholesome"
+          },
+          {
+            "slug": "sailor",
+            "label": "sailor"
+          },
+          {
+            "slug": "winter",
+            "label": "Winter"
+          },
+          {
+            "slug": "festival",
+            "label": "festival"
+          },
+          {
+            "slug": "detective-7",
+            "label": "detective 7"
+          },
+          {
+            "slug": "magic-7",
+            "label": "Magic 7"
+          },
+          {
+            "slug": "space-7",
+            "label": "Space 7"
+          },
+          {
+            "slug": "school-7",
+            "label": "School 7"
+          }
+        ],
+        "tag_count": 17,
+        "token_budget": 1243,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:12:10.527174Z",
+        "group": null,
+        "creator": null
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": null,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "anchor-dais-thym-cfa4c362",
+        "url": "/c/anchor-dais-thym-cfa4c362",
+        "name": "Crystal paper ba",
+        "creator": {
+          "name": null,
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "detective-7",
+          "magic-7",
+          "school-7",
+          "winter",
+          "festival",
+          "scholar",
+          "fantasy",
+          "space-7",
+          "castle",
+          "sailor",
+          "explorer",
+          "astronomer",
+          "teacher",
+          "cheerful",
+          "calm",
+          "curious",
+          "places-3",
+          "wholesome"
+        ],
+        "tagline": "Lark lotus hill beacon paper bell pepper atlas kite copper breeze valley cotton lotus ridge ivy bell lemon banner sage pin.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1243,
+        "stats": {
+          "popularity": 259,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/b32438e85c3aded74538791032d55d86d3ba13ab6c8b800d3ccaa081f338413a.512.webp?v=1",
+        "image_url": "/i/b32438e85c3aded74538791032d55d86d3ba13ab6c8b800d3ccaa081f338413a.png",
+        "version": "94367e4eb552e3654543e906abb567a6faccc15a925a7a8fd0495ae3a2d78986",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:12:10.527174Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "kmb46BLemkaZldwQnIe3URMHBRYcoy4FI3ud9JbN7ew3-kUhg3EgiroIwpEIUZgucrSAEmhbR1j8GDl0gxWkoUuYKKF6ELnXnDRJShC-tXytwWQ_jDx459srwioG9Y48E1SkR-zqv79vp1Hnwtz-Ww4wTxIw5XOP_ZIQd_MOCjXo_k919LmqDCojxB1t8vai3s.SwPK7iAGf8s85vv8e9uoT1kgcuxf2jV6D9kSm8ryVXs",
+    "has_more": true
+  }
+}

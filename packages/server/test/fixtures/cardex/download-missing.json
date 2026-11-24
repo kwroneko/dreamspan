@@ -1,0 +1,21 @@
+{
+  "name": "download-missing",
+  "request": {
+    "path": "/api/v1/download/1232515794896515347790895506399512325157948965153477908955063995",
+    "query": {
+      "mode": "json"
+    }
+  },
+  "status": 404,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "error": "not_found",
+    "message": "not found"
+  }
+}

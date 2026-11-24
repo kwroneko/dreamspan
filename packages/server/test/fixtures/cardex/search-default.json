@@ -1,0 +1,3313 @@
+{
+  "name": "search-default",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"6ca09cb57f52fabdc8299fcfcaa11406a204edcb1677687576bd502535c15691\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "newest",
+      "page": 1,
+      "limit": 24,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "appleh-82167127",
+        "path": "/c/appleh-82167127",
+        "name": "Candle",
+        "tagline": "Quill pepper coral olive larch ocean cedar nectar saffron kettle hazel quiet canyon basin mi!",
+        "thumb_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+        "cover_w": 400,
+        "cover_h": 600,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "botbooru"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "explorer",
+            "label": "explorer",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "summer",
+            "label": "Summer"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "explorer",
+            "label": "explorer"
+          },
+          {
+            "slug": "scholar",
+            "label": "Scholar"
+          },
+          {
+            "slug": "summer",
+            "label": "Summer"
+          },
+          {
+            "slug": "puzzle",
+            "label": "puzzle"
+          },
+          {
+            "slug": "slice-of-life-2",
+            "label": "slice of life 2"
+          },
+          {
+            "slug": "baker",
+            "label": "baker"
+          },
+          {
+            "slug": "calm",
+            "label": "calm"
+          },
+          {
+            "slug": "cheerful",
+            "label": "cheerful"
+          },
+          {
+            "slug": "curious",
+            "label": "curious"
+          },
+          {
+            "slug": "poet",
+            "label": "poet"
+          },
+          {
+            "slug": "teacher",
+            "label": "TEACHER"
+          },
+          {
+            "slug": "friendly",
+            "label": "friendly"
+          },
+          {
+            "slug": "healer",
+            "label": "healer"
+          },
+          {
+            "slug": "wholesome",
+            "label": "wholesome"
+          },
+          {
+            "slug": "sailor",
+            "label": "sailor"
+          },
+          {
+            "slug": "winter",
+            "label": "Winter"
+          },
+          {
+            "slug": "festival",
+            "label": "festival"
+          },
+          {
+            "slug": "merchant",
+            "label": "merchant"
+          },
+          {
+            "slug": "comedy-2",
+            "label": "Comedy 2"
+          },
+          {
+            "slug": "inventor",
+            "label": "inventor"
+          },
+          {
+            "slug": "bard",
+            "label": "bard"
+          },
+          {
+            "slug": "cozy",
+            "label": "cozy"
+          },
+          {
+            "slug": "painter",
+            "label": "painter"
+          },
+          {
+            "slug": "mountains",
+            "label": "mountains"
+          },
+          {
+            "slug": "knight",
+            "label": "knight"
+          }
+        ],
+        "tag_count": 27,
+        "token_budget": 1435,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:03:37.883206Z",
+        "group": null,
+        "creator": {
+          "kind": "named",
+          "name": "trailberryelmlaurels",
+          "path": null,
+          "source": null,
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "bellfl-gladecove-52aa6e5e",
+        "path": "/c/bellfl-gladecove-52aa6e5e",
+        "name": "Beacon kite rose",
+        "tagline": "Bramble reed island tulip glade badge north blossom badge bell ivy candle atlas finch bell glen cre",
+        "thumb_url": "/t/f3f989b70691098426e1ea37293aac27b952f5a2caa81ea8a943e3809a848032.512.webp?v=1",
+        "cover_w": 1280,
+        "cover_h": 1791,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "botbooru"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "scholar",
+            "label": "Scholar"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "puzzle",
+            "label": "puzzle"
+          },
+          {
+            "slug": "baker",
+            "label": "baker"
+          },
+          {
+            "slug": "calm",
+            "label": "calm"
+          },
+          {
+            "slug": "cheerful",
+            "label": "cheerful"
+          },
+          {
+            "slug": "curious",
+            "label": "curious"
+          },
+          {
+            "slug": "poet",
+            "label": "poet"
+          },
+          {
+            "slug": "factions-3",
+            "label": "factions 3"
+          },
+          {
+            "slug": "creatures-3",
+            "label": "creatures 3"
+          },
+          {
+            "slug": "teacher",
+            "label": "TEACHER"
+          },
+          {
+            "slug": "sailor",
+            "label": "sailor"
+          },
+          {
+            "slug": "english-3",
+            "label": "english 3"
+          },
+          {
+            "slug": "original-3",
+            "label": "original 3"
+          },
+          {
+            "slug": "multiple-greetings-3",
+            "label": "multiple greetings 3"
+          },
+          {
+            "slug": "has-lorebook-3",
+            "label": "Has Lorebook 3"
+          },
+          {
+            "slug": "festival",
+            "label": "festival"
+          },
+          {
+            "slug": "merchant",
+            "label": "merchant"
+          },
+          {
+            "slug": "game-3",
+            "label": "Game 3"
+          },
+          {
+            "slug": "anime-3",
+            "label": "anime 3"
+          },
+          {
+            "slug": "fictional-3",
+            "label": "fictional 3"
+          },
+          {
+            "slug": "oc-3",
+            "label": "oc 3"
+          },
+          {
+            "slug": "fantasy-4",
+            "label": "fantasy 4"
+          },
+          {
+            "slug": "adventure-4",
+            "label": "adventure 4"
+          }
+        ],
+        "tag_count": 29,
+        "token_budget": 1023,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:03:13.660470Z",
+        "group": null,
+        "creator": {
+          "kind": "named",
+          "name": "quietridgem",
+          "path": null,
+          "source": null,
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "topaz-oliverive-d1f392ca",
+        "path": "/c/topaz-oliverive-d1f392ca",
+        "name": "Hill petal echo",
+        "tagline": "River maple ivy rose hollow timber maple marble dawn arch autumn mist winter breeze hazel glade pepper fable chime kettle moss arch daisy comet laurel candle reed beacon violet mint linen olive river maple ivy rose hollow timber maple marb",
+        "thumb_url": "/t/944f9fd8e1a8c0ef7b7e1a6fae754b05368ba0639322d159637d4651f3f32727.512.webp?v=1",
+        "cover_w": 440,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "sci-fi",
+            "label": "Sci Fi"
+          }
+        ],
+        "tag_count": 6,
+        "token_budget": 2183,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:37.982754Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "emberocean-3843ada7",
+        "path": "/c/emberocean-3843ada7",
+        "name": "Kitechimec",
+        "tagline": "Clover zephyr lagoon fjord blossom silver olive north atlas zephyr cider cider flint ocean daisy clover atlas teal sage lotus kettle beacon candle trail basin wind arch cabin dune comet ridge banner clover zephyr lagoon fjord blossom",
+        "thumb_url": "/t/9a804c0ed8b4a14abb4eb55519c872f7f88954a002f712bfb64786da9f7339ed.512.webp?v=1",
+        "cover_w": 640,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "magic",
+            "label": "magic"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          },
+          {
+            "slug": "school",
+            "label": "School"
+          }
+        ],
+        "tag_count": 10,
+        "token_budget": 5753,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:32.637105Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "covesil-archce-sta-gle-sno-138cb245",
+        "path": "/c/covesil-archce-sta-gle-sno-138cb245",
+        "name": "North sand kettle arch boat",
+        "tagline": "Crystal kite clover poppy island comet brook sand cove atlas ivy atlas cricket cider harbor thistle poppy daisy drift anchor arch spark winter larch boat velvet chime flint otter lotus river basin crystal kite clover poppy island comet.",
+        "thumb_url": "/t/2532f1f9db2781b5017da7d3e663a0035a3d7038d026a1b358b3bf707b83047d.512.webp?v=1",
+        "cover_w": 800,
+        "cover_h": 533,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "mystery-4",
+            "label": "mystery 4"
+          },
+          {
+            "slug": "slice-of-life-4",
+            "label": "Slice Of Life 4"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "mystery-4",
+            "label": "mystery 4"
+          },
+          {
+            "slug": "slice-of-life-4",
+            "label": "Slice Of Life 4"
+          },
+          {
+            "slug": "comedy-4",
+            "label": "comedy 4"
+          },
+          {
+            "slug": "sci-fi-4",
+            "label": "sci fi 4"
+          },
+          {
+            "slug": "historical-4",
+            "label": "historical 4"
+          }
+        ],
+        "tag_count": 6,
+        "token_budget": 1257,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:30.229064Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Grovet44lo",
+          "path": "/u/janitorai/d83ff87d-6ca1-7a9f-a4d2-76c092c7fb13",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "honeycove-51437a43",
+        "path": "/c/honeycove-51437a43",
+        "name": "Elmhilloa",
+        "tagline": "Poppy saffron mellow otter comet drift slate field chime island banner button frost amber anchor button creek cider lagoon saffron larch sail basin star reed willow frost lemon larch paper lantern summer poppy saffron mellow otter comet dr",
+        "thumb_url": "/t/77822397d3d25ae6fa6f631ff94e679e750479f7d7ad46046d315d15208be642.512.webp?v=1",
+        "cover_w": 800,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          },
+          {
+            "slug": "cyberpunk",
+            "label": "Cyberpunk"
+          },
+          {
+            "slug": "fairy-tale",
+            "label": "Fairy Tale"
+          },
+          {
+            "slug": "mythology",
+            "label": "mythology"
+          }
+        ],
+        "tag_count": 10,
+        "token_budget": 5742,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:30.178260Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "at-come-e00e2649",
+        "path": "/c/at-come-e00e2649",
+        "name": "Pebble b",
+        "tagline": "Laurel kite teal thistle laurel frost sage ridge berry star anchor moss sand glade bramble otter stone marble amber cove honey chime lark boat brook petal velvet mint nectar stone laurel lotus laurel kite teal thistle laurel frost sage rid",
+        "thumb_url": "/t/baafa835fb6e50fde7948ee37047e548ec10fbe6778d60fbe1129a0264dc8f54.512.webp?v=1",
+        "cover_w": 633,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "western",
+            "label": "western"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          },
+          {
+            "slug": "pirates",
+            "label": "pirates"
+          },
+          {
+            "slug": "sci-fi",
+            "label": "Sci Fi"
+          }
+        ],
+        "tag_count": 10,
+        "token_budget": 4097,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:27.623036Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "sp-reed-kettlela-blo-2a81592f",
+        "path": "/c/sp-reed-kettlela-blo-2a81592f",
+        "name": "Mellow delta pond lo",
+        "tagline": "Silver north wind birch lantern brook daisy willow pepper mist arch elm autumn harbor cobble laurel stone copper ocean olive dune lantern sage slate ember rose cider bell shell yarrow marble raven silver north wind birch lantern brook.",
+        "thumb_url": "/t/7c505836b7c1aac9a1d3b4ad8cb6ef7d95c83ed6a6cba68cb25bde6f6b6b2e01.512.webp?v=1",
+        "cover_w": 565,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          },
+          {
+            "slug": "pirates",
+            "label": "pirates"
+          },
+          {
+            "slug": "sci-fi",
+            "label": "Sci Fi"
+          },
+          {
+            "slug": "robots",
+            "label": "robots"
+          }
+        ],
+        "tag_count": 8,
+        "token_budget": 5670,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:25.347673Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "quietancho-islandpo-e9e8f9e8",
+        "path": "/c/quietancho-islandpo-e9e8f9e8",
+        "name": "Delta canyon anchor",
+        "tagline": "Slate boat hazel thistle badge pebble sorrel daisy anchor spruce grove comet grove lotus.",
+        "thumb_url": "/t/62488ae1d5be4a2921d31eb97aaa04f61e89e8c649a830642de2d175f951b521.512.webp?v=1",
+        "cover_w": 512,
+        "cover_h": 512,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "crushon"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "detective-4",
+            "label": "detective 4"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "detective-4",
+            "label": "detective 4"
+          },
+          {
+            "slug": "magic-4",
+            "label": "magic 4"
+          }
+        ],
+        "tag_count": 5,
+        "token_budget": 331,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:24.364505Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "QUIETJAD",
+          "path": "/u/crushon/46d8cbac-181d-71cd-7ca2-6aeb48ec6c5b",
+          "source": "crushon",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "glenqu-dunepon-52e9f316",
+        "path": "/c/glenqu-dunepon-52e9f316",
+        "name": "Apple chalk ju",
+        "tagline": "Lemon copper heron timber leaf larch finch dune delta cider elm cedar boat meadow birch fable frost harbor juniper ocean pine meadow pebble petal bamboo echo robin lark olive beacon crane harbor lemon copper heron timber leaf larch finch du",
+        "thumb_url": "/t/b06ef0cd90db38b4cda5680e7202df9253478be6cf00f76fdeda332fa0d0e291.512.webp?v=1",
+        "cover_w": 542,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "ghosts",
+            "label": "Ghosts"
+          }
+        ],
+        "tag_count": 8,
+        "token_budget": 5020,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:23.865707Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "archl-applecree-ridgete-83522294",
+        "path": "/c/archl-applecree-ridgete-83522294",
+        "name": "Island blossom heron sag)",
+        "tagline": "Ridge juniper drift maple pine shell brook atlas petal flint canyon cotton lotus blossom ivy .",
+        "thumb_url": "/t/623c8807bdff87fde585ec9b3ff0ffc2c964f407c4e2737531b0fd5b6f47e1c7.512.webp?v=1",
+        "cover_w": 1000,
+        "cover_h": 968,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "crushon"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "space-4",
+            "label": "space 4",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "explorer",
+            "label": "explorer",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "magic",
+            "label": "magic"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "magic",
+            "label": "magic"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "explorer",
+            "label": "explorer"
+          },
+          {
+            "slug": "space-4",
+            "label": "space 4"
+          },
+          {
+            "slug": "school-4",
+            "label": "school 4"
+          },
+          {
+            "slug": "baker",
+            "label": "baker"
+          },
+          {
+            "slug": "slice-of-life-4",
+            "label": "Slice Of Life 4"
+          },
+          {
+            "slug": "steampunk-4",
+            "label": "steampunk 4"
+          },
+          {
+            "slug": "cyberpunk-4",
+            "label": "cyberpunk 4"
+          }
+        ],
+        "tag_count": 10,
+        "token_budget": 505,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:23.354353Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Sail gar",
+          "path": "/u/crushon/065344d3-1eb3-81e9-ce01-c4c5a2a6e2db",
+          "source": "crushon",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "blossom-cranep-0548b9ae",
+        "path": "/c/blossom-cranep-0548b9ae",
+        "name": "Thyme rose bam",
+        "tagline": "Lotus linen pine cedar cove spruce arch velvet sand rain paper mint kite poppy mint north chime crane badge glade boat button teal lemon boat sage bramble mint lantern beacon elm banner lotus linen pine cedar cove spruce arch velvet sand",
+        "thumb_url": "/t/00eb807555e2f0318a0a1fd7e1771f0ad5396dd9c6e8708354a657368e7a2803.512.webp?v=1",
+        "cover_w": 450,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "sci-fi",
+            "label": "Sci Fi"
+          }
+        ],
+        "tag_count": 8,
+        "token_budget": 3388,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:21.366412Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "olivem-oceansaffro-49c6ec02",
+        "path": "/c/olivem-oceansaffro-49c6ec02",
+        "name": "Copper river basin",
+        "tagline": "Copper crane glen autumn arch cedar robin poppy banner linen honey crystal lark pine kite brook pebble autumn jade autumn crane kite north crystal olive coral garden reed lark garden shell quiet copper crane glen autumn arch cedar robin p",
+        "thumb_url": "/t/60a1c285aae1777f581467cca1020b2b33487d6d0b35442d268ebb2c0235c4d9.512.webp?v=1",
+        "cover_w": 600,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "cooking",
+            "label": "Cooking"
+          },
+          {
+            "slug": "gardening",
+            "label": "gardening"
+          }
+        ],
+        "tag_count": 7,
+        "token_budget": 2339,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:21.659030Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "chalk-e47864b7",
+        "path": "/c/chalk-e47864b7",
+        "name": "Meado",
+        "tagline": "Paper heron candle birch snow pond button cotton lotus atlas boat maple autumn birch reed kite mint leaf quill topaz mellow marble swan kite ember winter clover ridge creek cobble atlas paper paper heron candle birch snow pond button cotto",
+        "thumb_url": "/t/a66b157e7af55cc4a04325a330f377aa72e4b360703605c297b4a9f9bc989f6c.512.webp?v=1",
+        "cover_w": 375,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          },
+          {
+            "slug": "cooking",
+            "label": "Cooking"
+          },
+          {
+            "slug": "music",
+            "label": "music"
+          }
+        ],
+        "tag_count": 10,
+        "token_budget": 4790,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:19.539394Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "archl-b3bddd7c",
+        "path": "/c/archl-b3bddd7c",
+        "name": "Oakho",
+        "tagline": "Anchor honey coral star fable valley cabin frost kite lantern willow berry snow bell juniper violet comet rose silver kite chalk cotton lemon garden sand north willow trail drift fjord candle tulip anchor honey coral star fable valley c",
+        "thumb_url": "/t/04e692c88929ba25b592c991bb34eb1207a186f8646a387866a14f6db57d8bfb.512.webp?v=1",
+        "cover_w": 450,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          },
+          {
+            "slug": "cooking",
+            "label": "Cooking"
+          },
+          {
+            "slug": "cyberpunk",
+            "label": "Cyberpunk"
+          }
+        ],
+        "tag_count": 10,
+        "token_budget": 3251,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:19.988094Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "berryzephy-quiet-acc09438",
+        "path": "/c/berryzephy-quiet-acc09438",
+        "name": "Brook sky quill.",
+        "tagline": "Cotton button wren timber copper autumn kite thyme cobble glade cotton amber quiet lagoon hollow raven shell amber mint mist arch saffron creek harbor island hill anchor swan island ridge daisy hollow cotton button wren timber copper aut",
+        "thumb_url": "/t/ee554537a20e0a6fb6199b460c422557cdb20df1af7faf7b549c3c60343886e2.512.webp?v=1",
+        "cover_w": 461,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "sports",
+            "label": "sports"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          },
+          {
+            "slug": "cooking",
+            "label": "Cooking"
+          }
+        ],
+        "tag_count": 10,
+        "token_budget": 9380,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:18.955569Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "appleb-deltas-candlela-7d5bb7fe",
+        "path": "/c/appleb-deltas-candlela-7d5bb7fe",
+        "name": "Sage badge lemon comet s",
+        "tagline": "Stone arch copper rain pine ember quill birch pond banner pepper quiet lantern field saffron sage banner mist ivy maple glade sail bramble banner star silver candle wind sand river boat robin stone arch copper rain pine ember quill b",
+        "thumb_url": "/t/04ba75df4cdf9e6080a39e2da981ba4a2ee68206ae3be05d70ad181236246b46.512.webp?v=1",
+        "cover_w": 449,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "pirates",
+            "label": "pirates"
+          },
+          {
+            "slug": "sci-fi",
+            "label": "Sci Fi"
+          }
+        ],
+        "tag_count": 9,
+        "token_budget": 1728,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:18.539138Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "timbe-e32d24eb",
+        "path": "/c/timbe-e32d24eb",
+        "name": "Lante",
+        "tagline": "Fern birch frost jade tide stone frost island hill cedar harbor chalk cove juniper apple bramble cabin zephyr badge garden cobble moss chalk poppy hill cricket shell hill cobble kettle mint cotton fern birch frost jade tide stone frost is",
+        "thumb_url": "/t/2c7bb81b38db22b097f9bfd2083bde763b9b8dfbdde5dfde2c204664d0ae8fe5.512.webp?v=1",
+        "cover_w": 372,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "travel",
+            "label": "travel",
+            "shortlist_display": "male"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "travel",
+            "label": "travel"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          },
+          {
+            "slug": "library",
+            "label": "Library"
+          }
+        ],
+        "tag_count": 9,
+        "token_budget": 5355,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:18.935085Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "tealpet-mossm-creekbann-1a54e4b5",
+        "path": "/c/tealpet-mossm-creekbann-1a54e4b5",
+        "name": "Daisy comet timber lark embe",
+        "tagline": "Harbor snow fjord quill mellow shell linen amber field rain petal olive blossom arch raven orchard bamboo clover silver cider comet heron quill pebble north boat dune wind paper sky leaf atlas harbor snow fjord quill mellow shell linen a",
+        "thumb_url": "/t/6983c37b9cae6e714e6a05e1d93287d58a9f5e7e073885683131a2508dc9f7e9.512.webp?v=1",
+        "cover_w": 323,
+        "cover_h": 323,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "fairy-tale-4",
+            "label": "fairy tale 4"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "mythology-4",
+            "label": "Mythology 4"
+          },
+          {
+            "slug": "western-4",
+            "label": "western 4"
+          },
+          {
+            "slug": "pirates-4",
+            "label": "pirates 4"
+          },
+          {
+            "slug": "dragons-4",
+            "label": "dragons 4"
+          }
+        ],
+        "tag_count": 10,
+        "token_budget": 393,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:17.118655Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "L17QU7FL_07",
+          "path": "/u/janitorai/c468f381-a7ca-cc25-19f5-c2856e161a08",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "islandber-badge-rob-e311e597",
+        "path": "/c/islandber-badge-rob-e311e597",
+        "name": "Elm glade robin mis",
+        "tagline": "Saffron chime violet frost heron crystal sand berry juniper linen frost kettle mint amber island cabin mellow heron cricket cabin grove river kettle breeze comet paper kettle rain maple banner hollow cove saffron chime violet frost",
+        "thumb_url": "/t/973ddeae604f419844352dc12c21f3eb342b679d69c4fdb07e4a3692f1fafbc9.512.webp?v=1",
+        "cover_w": 450,
+        "cover_h": 800,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "cyberpunk",
+            "label": "Cyberpunk"
+          }
+        ],
+        "tag_count": 8,
+        "token_budget": 1758,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:16.636549Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Violetmi",
+          "path": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "mellow-e0044c8e",
+        "path": "/c/mellow-e0044c8e",
+        "name": "Crysta",
+        "tagline": "Jade north jade hazel hollow clover comet finch sand orchard coral hollow quiet lantern rain frost laurel fern brook island candle robin apple honey bramble brook atlas moss .",
+        "thumb_url": "/t/0009eb299131d3b947103d153f70eeb1b10a84b4e85418265db09757d66cc989.512.webp?v=1",
+        "cover_w": 1001,
+        "cover_h": 1451,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "crushon"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "sports",
+            "label": "sports"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "sports",
+            "label": "sports"
+          },
+          {
+            "slug": "robots-4",
+            "label": "Robots 4"
+          }
+        ],
+        "tag_count": 5,
+        "token_budget": 569,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:09.894516Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Pondclover",
+          "path": "/u/crushon/983cb8d2-0b1a-851c-33e6-45b51a0ad63c",
+          "source": "crushon",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "shellh-topazfi-robi-dawng-478d3a60",
+        "path": "/c/shellh-topazfi-robi-dawng-478d3a60",
+        "name": "Ember crystal cove clover.",
+        "tagline": "Yarrow cotton bell lotus star paper amber cobble fjord cobble arch paper canyon daisy comet sky cricket lark river wren heron petal otter chime pond cider flint reed saffron birch ridge comet yarrow cotton bell lotus star paper amber cobb",
+        "thumb_url": "/t/d87893a13d73a0143c259ad8095bf2297300deeff6b3dd68ec98bd6930b75c12.512.webp?v=1",
+        "cover_w": 1024,
+        "cover_h": 1024,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "botbooru"
+        ],
+        "top_tags": [
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "adventure",
+            "label": "adventure"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "ghosts-4",
+            "label": "Ghosts 4"
+          },
+          {
+            "slug": "scholar",
+            "label": "Scholar"
+          },
+          {
+            "slug": "slice-of-life-2",
+            "label": "slice of life 2"
+          },
+          {
+            "slug": "cheerful",
+            "label": "cheerful"
+          },
+          {
+            "slug": "cooking-4",
+            "label": "Cooking 4"
+          },
+          {
+            "slug": "gardening-4",
+            "label": "gardening 4"
+          },
+          {
+            "slug": "puzzle-2",
+            "label": "PUZZLE 2"
+          },
+          {
+            "slug": "music-4",
+            "label": "music 4"
+          },
+          {
+            "slug": "sports-4",
+            "label": "sports 4"
+          },
+          {
+            "slug": "travel-4",
+            "label": "travel 4"
+          },
+          {
+            "slug": "library-4",
+            "label": "library 4"
+          },
+          {
+            "slug": "museum-4",
+            "label": "museum 4"
+          },
+          {
+            "slug": "village-4",
+            "label": "Village 4"
+          },
+          {
+            "slug": "castle-4",
+            "label": "castle 4"
+          },
+          {
+            "slug": "forest-4",
+            "label": "forest 4"
+          },
+          {
+            "slug": "ocean-4",
+            "label": "Ocean 4"
+          },
+          {
+            "slug": "desert-4",
+            "label": "Desert 4"
+          },
+          {
+            "slug": "mountains-4",
+            "label": "mountains 4"
+          },
+          {
+            "slug": "winter-4",
+            "label": "winter 4"
+          },
+          {
+            "slug": "summer-4",
+            "label": "summer 4"
+          },
+          {
+            "slug": "festival-4",
+            "label": "Festival 4"
+          }
+        ],
+        "tag_count": 27,
+        "token_budget": 6139,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:07.168028Z",
+        "group": null,
+        "creator": null
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "chimebad-2b3ccaf4",
+        "path": "/c/chimebad-2b3ccaf4",
+        "name": "Skybutto",
+        "tagline": "Coral linen willow copper ivy hollow pond anchor mint juniper poppy.",
+        "thumb_url": "/t/dc3fd367d45e6fb7ecc25681de88005e97f7f1bf23148a832d008b2733cea69a.512.webp?v=1",
+        "cover_w": 980,
+        "cover_h": 1302,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "crushon"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "robots-4",
+            "label": "Robots 4"
+          },
+          {
+            "slug": "puzzle-4",
+            "label": "puzzle 4"
+          },
+          {
+            "slug": "inventor-4",
+            "label": "inventor 4"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "robots-4",
+            "label": "Robots 4"
+          },
+          {
+            "slug": "puzzle-4",
+            "label": "puzzle 4"
+          },
+          {
+            "slug": "inventor-4",
+            "label": "inventor 4"
+          }
+        ],
+        "tag_count": 4,
+        "token_budget": 610,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:02:03.542532Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Pebbl867",
+          "path": "/u/crushon/d08c5438-0607-1343-3973-8d8645798854",
+          "source": "crushon",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "sail-fff6b48f",
+        "path": "/c/sail-fff6b48f",
+        "name": "Bann",
+        "tagline": "Spruce sky hill rose north creek bell kite paper button pond elm basin delta chalk basin glen bell bell wind berry saffron ro.",
+        "thumb_url": "/t/53eeaba7c803136a6357ec32babe3d27543e74d06c8bf819da3e81f609720ed7.512.webp?v=1",
+        "cover_w": 512,
+        "cover_h": 768,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "crushon"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "robots-4",
+            "label": "Robots 4"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "robots-4",
+            "label": "Robots 4"
+          }
+        ],
+        "tag_count": 4,
+        "token_budget": 703,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:01:50.771719Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Laur#62977534",
+          "path": "/u/crushon/e4de8f9e-4afc-4f14-58ed-cea4feb4e661",
+          "source": "crushon",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 24,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "appleh-82167127",
+        "url": "/c/appleh-82167127",
+        "name": "Candle",
+        "creator": {
+          "name": "trailberryelmlaurels",
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "mountains",
+          "winter",
+          "summer",
+          "festival",
+          "puzzle",
+          "inventor",
+          "scholar",
+          "fantasy",
+          "knight",
+          "healer",
+          "bard",
+          "merchant",
+          "sailor",
+          "explorer",
+          "astronomer",
+          "baker",
+          "painter",
+          "poet",
+          "steampunk",
+          "teacher",
+          "friendly",
+          "cheerful",
+          "calm",
+          "curious",
+          "wholesome",
+          "cozy"
+        ],
+        "tagline": "Quill pepper coral olive larch ocean cedar nectar saffron kettle hazel quiet canyon basin mi!",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1435,
+        "stats": {
+          "popularity": 182,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+        "image_url": "/i/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.png",
+        "version": "b82da3ee17b3f301f095caf642dfde5f93f8e16c23b310385ec911cf466e42fc",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:03:37.883206Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "bellfl-gladecove-52aa6e5e",
+        "url": "/c/bellfl-gladecove-52aa6e5e",
+        "name": "Beacon kite rose",
+        "creator": {
+          "name": "quietridgem",
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "oc-3",
+          "scholar-4",
+          "teacher-3",
+          "anime-3",
+          "festival",
+          "multiple-greetings-3",
+          "puzzle",
+          "scholar",
+          "village-2",
+          "fantasy",
+          "knight-4",
+          "healer-4",
+          "english-3",
+          "fantasy-4",
+          "merchant",
+          "sailor",
+          "fictional-3",
+          "baker",
+          "poet",
+          "steampunk",
+          "teacher",
+          "cheerful",
+          "calm",
+          "explorer-3",
+          "original-3",
+          "curious",
+          "places-3",
+          "adventure-4",
+          "game-3"
+        ],
+        "tagline": "Bramble reed island tulip glade badge north blossom badge bell ivy candle atlas finch bell glen cre",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1023,
+        "stats": {
+          "popularity": 207,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/f3f989b70691098426e1ea37293aac27b952f5a2caa81ea8a943e3809a848032.512.webp?v=1",
+        "image_url": "/i/f3f989b70691098426e1ea37293aac27b952f5a2caa81ea8a943e3809a848032.png",
+        "version": "01622510223f5cd06ce19abc1ea78f8f4340d3be87c769b55f1f88d8685fc592",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:03:13.660470Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "topaz-oliverive-d1f392ca",
+        "url": "/c/topaz-oliverive-d1f392ca",
+        "name": "Hill petal echo",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "comedy",
+          "fantasy",
+          "baker-3",
+          "sci-fi",
+          "adventure",
+          "slice-of-life"
+        ],
+        "tagline": "River maple ivy rose hollow timber maple marble dawn arch autumn mist winter breeze hazel glade pepper fable chime kettle moss arch daisy comet laurel candle reed beacon violet mint linen olive river maple ivy rose hollow timber maple marb",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 2183,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/944f9fd8e1a8c0ef7b7e1a6fae754b05368ba0639322d159637d4651f3f32727.512.webp?v=1",
+        "image_url": "/i/944f9fd8e1a8c0ef7b7e1a6fae754b05368ba0639322d159637d4651f3f32727.webp",
+        "version": "e6d330be9395aaf0b86cb5369d4672ee37167ee9a439792247c429ae68a09859",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:37.982754Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "emberocean-3843ada7",
+        "url": "/c/emberocean-3843ada7",
+        "name": "Kitechimec",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "comedy",
+          "worldbuilding",
+          "fantasy",
+          "detective",
+          "baker-3",
+          "magic",
+          "school",
+          "space",
+          "adventure",
+          "slice-of-life"
+        ],
+        "tagline": "Clover zephyr lagoon fjord blossom silver olive north atlas zephyr cider cider flint ocean daisy clover atlas teal sage lotus kettle beacon candle trail basin wind arch cabin dune comet ridge banner clover zephyr lagoon fjord blossom",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 5753,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/9a804c0ed8b4a14abb4eb55519c872f7f88954a002f712bfb64786da9f7339ed.512.webp?v=1",
+        "image_url": "/i/9a804c0ed8b4a14abb4eb55519c872f7f88954a002f712bfb64786da9f7339ed.webp",
+        "version": "d48b71d7ee4ceae1dc864dae159280337d3712ce10112c1425ab77e9ef0077ed",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:32.637105Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "covesil-archce-sta-gle-sno-138cb245",
+        "url": "/c/covesil-archce-sta-gle-sno-138cb245",
+        "name": "North sand kettle arch boat",
+        "creator": {
+          "name": "Grovet44lo",
+          "source": "janitorai",
+          "handle": "d83ff87d-6ca1-7a9f-a4d2-76c092c7fb13",
+          "url": "/u/janitorai/d83ff87d-6ca1-7a9f-a4d2-76c092c7fb13"
+        },
+        "tags": [
+          "slice-of-life-4",
+          "comedy-4",
+          "mystery-4",
+          "bard-4",
+          "explorer-3",
+          "sci-fi-4"
+        ],
+        "tagline": "Crystal kite clover poppy island comet brook sand cove atlas ivy atlas cricket cider harbor thistle poppy daisy drift anchor arch spark winter larch boat velvet chime flint otter lotus river basin crystal kite clover poppy island comet.",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1257,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/2532f1f9db2781b5017da7d3e663a0035a3d7038d026a1b358b3bf707b83047d.512.webp?v=1",
+        "image_url": "/i/2532f1f9db2781b5017da7d3e663a0035a3d7038d026a1b358b3bf707b83047d.webp",
+        "version": "0df527752a9a0f377a83de545bb1b663d6bc2ba953f3f0b07792f935d5d5d407",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:30.229064Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "honeycove-51437a43",
+        "url": "/c/honeycove-51437a43",
+        "name": "Elmhilloa",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "comedy",
+          "mythology",
+          "fantasy",
+          "detective",
+          "baker-3",
+          "fairy-tale",
+          "cyberpunk",
+          "steampunk",
+          "space",
+          "slice-of-life"
+        ],
+        "tagline": "Poppy saffron mellow otter comet drift slate field chime island banner button frost amber anchor button creek cider lagoon saffron larch sail basin star reed willow frost lemon larch paper lantern summer poppy saffron mellow otter comet dr",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 5742,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/77822397d3d25ae6fa6f631ff94e679e750479f7d7ad46046d315d15208be642.512.webp?v=1",
+        "image_url": "/i/77822397d3d25ae6fa6f631ff94e679e750479f7d7ad46046d315d15208be642.webp",
+        "version": "f48ae36eaf4c2fc7bbc51a2f59c2418d3bd31cc0df547a88d5157394839b8cee",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:30.178260Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "at-come-e00e2649",
+        "url": "/c/at-come-e00e2649",
+        "name": "Pebble b",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "western",
+          "comedy",
+          "fantasy",
+          "detective",
+          "baker-3",
+          "pirates",
+          "sci-fi",
+          "space",
+          "adventure",
+          "slice-of-life"
+        ],
+        "tagline": "Laurel kite teal thistle laurel frost sage ridge berry star anchor moss sand glade bramble otter stone marble amber cove honey chime lark boat brook petal velvet mint nectar stone laurel lotus laurel kite teal thistle laurel frost sage rid",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 4097,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/baafa835fb6e50fde7948ee37047e548ec10fbe6778d60fbe1129a0264dc8f54.512.webp?v=1",
+        "image_url": "/i/baafa835fb6e50fde7948ee37047e548ec10fbe6778d60fbe1129a0264dc8f54.webp",
+        "version": "a31feee27dfd435d4c80bab6811a822c0b810b2a9bbfb9266ae4faa2f7159b49",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:27.623036Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "sp-reed-kettlela-blo-2a81592f",
+        "url": "/c/sp-reed-kettlela-blo-2a81592f",
+        "name": "Mellow delta pond lo",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "comedy",
+          "detective",
+          "pirates",
+          "sci-fi",
+          "robots",
+          "dragons",
+          "space",
+          "slice-of-life"
+        ],
+        "tagline": "Silver north wind birch lantern brook daisy willow pepper mist arch elm autumn harbor cobble laurel stone copper ocean olive dune lantern sage slate ember rose cider bell shell yarrow marble raven silver north wind birch lantern brook.",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 5670,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/7c505836b7c1aac9a1d3b4ad8cb6ef7d95c83ed6a6cba68cb25bde6f6b6b2e01.512.webp?v=1",
+        "image_url": "/i/7c505836b7c1aac9a1d3b4ad8cb6ef7d95c83ed6a6cba68cb25bde6f6b6b2e01.webp",
+        "version": "461c3861ad16664d2afd016f2fc14b4b5abf25987183916dede4c8b186443430",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:25.347673Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "quietancho-islandpo-e9e8f9e8",
+        "url": "/c/quietancho-islandpo-e9e8f9e8",
+        "name": "Delta canyon anchor",
+        "creator": {
+          "name": "QUIETJAD",
+          "source": "crushon",
+          "handle": "46d8cbac-181d-71cd-7ca2-6aeb48ec6c5b",
+          "url": "/u/crushon/46d8cbac-181d-71cd-7ca2-6aeb48ec6c5b"
+        },
+        "tags": [
+          "fantasy",
+          "village",
+          "magic-4",
+          "detective-4",
+          "places-3"
+        ],
+        "tagline": "Slate boat hazel thistle badge pebble sorrel daisy anchor spruce grove comet grove lotus.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 331,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/62488ae1d5be4a2921d31eb97aaa04f61e89e8c649a830642de2d175f951b521.512.webp?v=1",
+        "image_url": "/i/62488ae1d5be4a2921d31eb97aaa04f61e89e8c649a830642de2d175f951b521.jpg",
+        "version": "90d75cd223f77126a8fdc83984381adf928034619f515dd5ba959fb830636ca1",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:24.364505Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "glenqu-dunepon-52e9f316",
+        "url": "/c/glenqu-dunepon-52e9f316",
+        "name": "Apple chalk ju",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "comedy",
+          "fantasy",
+          "detective",
+          "baker-3",
+          "dragons",
+          "ghosts",
+          "adventure",
+          "slice-of-life"
+        ],
+        "tagline": "Lemon copper heron timber leaf larch finch dune delta cider elm cedar boat meadow birch fable frost harbor juniper ocean pine meadow pebble petal bamboo echo robin lark olive beacon crane harbor lemon copper heron timber leaf larch finch du",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 5020,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/b06ef0cd90db38b4cda5680e7202df9253478be6cf00f76fdeda332fa0d0e291.512.webp?v=1",
+        "image_url": "/i/b06ef0cd90db38b4cda5680e7202df9253478be6cf00f76fdeda332fa0d0e291.webp",
+        "version": "6320ca59045758cb0ee3d073f0b135d13d7e1c4cec523deba28f3c40dfcc868c",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:23.865707Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "archl-applecree-ridgete-83522294",
+        "url": "/c/archl-applecree-ridgete-83522294",
+        "name": "Island blossom heron sag)",
+        "creator": {
+          "name": "Sail gar",
+          "source": "crushon",
+          "handle": "065344d3-1eb3-81e9-ce01-c4c5a2a6e2db",
+          "url": "/u/crushon/065344d3-1eb3-81e9-ce01-c4c5a2a6e2db"
+        },
+        "tags": [
+          "slice-of-life-4",
+          "cyberpunk-4",
+          "fantasy",
+          "merchant-4",
+          "steampunk-4",
+          "magic",
+          "school-4",
+          "sailor-4",
+          "baker",
+          "steampunk"
+        ],
+        "tagline": "Ridge juniper drift maple pine shell brook atlas petal flint canyon cotton lotus blossom ivy .",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 505,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/623c8807bdff87fde585ec9b3ff0ffc2c964f407c4e2737531b0fd5b6f47e1c7.512.webp?v=1",
+        "image_url": "/i/623c8807bdff87fde585ec9b3ff0ffc2c964f407c4e2737531b0fd5b6f47e1c7.webp",
+        "version": "9dd21bfa5cd3cd8e17b4fbd4d9386a5c8142cc5b7845a2aff9fc1a8fb7b9c7c9",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:23.354353Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "blossom-cranep-0548b9ae",
+        "url": "/c/blossom-cranep-0548b9ae",
+        "name": "Thyme rose bam",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "comedy",
+          "fantasy",
+          "detective",
+          "baker-3",
+          "sci-fi",
+          "dragons",
+          "adventure",
+          "slice-of-life"
+        ],
+        "tagline": "Lotus linen pine cedar cove spruce arch velvet sand rain paper mint kite poppy mint north chime crane badge glade boat button teal lemon boat sage bramble mint lantern beacon elm banner lotus linen pine cedar cove spruce arch velvet sand",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 3388,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/00eb807555e2f0318a0a1fd7e1771f0ad5396dd9c6e8708354a657368e7a2803.512.webp?v=1",
+        "image_url": "/i/00eb807555e2f0318a0a1fd7e1771f0ad5396dd9c6e8708354a657368e7a2803.webp",
+        "version": "76884ce2bc0549610bcb67e76884d59c2601312ea83ab1afdbdab68c0efa261f",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:21.366412Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "olivem-oceansaffro-49c6ec02",
+        "url": "/c/olivem-oceansaffro-49c6ec02",
+        "name": "Copper river basin",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "fantasy",
+          "detective",
+          "baker-3",
+          "cooking",
+          "gardening",
+          "dragons",
+          "adventure"
+        ],
+        "tagline": "Copper crane glen autumn arch cedar robin poppy banner linen honey crystal lark pine kite brook pebble autumn jade autumn crane kite north crystal olive coral garden reed lark garden shell quiet copper crane glen autumn arch cedar robin p",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 2339,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/60a1c285aae1777f581467cca1020b2b33487d6d0b35442d268ebb2c0235c4d9.512.webp?v=1",
+        "image_url": "/i/60a1c285aae1777f581467cca1020b2b33487d6d0b35442d268ebb2c0235c4d9.webp",
+        "version": "e836b816b9ff019f19e09fe7bb9c34dad12e8c7dd9695fbff0169c1ec60f92aa",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:21.659030Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "chalk-e47864b7",
+        "url": "/c/chalk-e47864b7",
+        "name": "Meado",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "comedy",
+          "music",
+          "fantasy",
+          "detective",
+          "baker-3",
+          "cooking",
+          "dragons",
+          "steampunk",
+          "space",
+          "adventure"
+        ],
+        "tagline": "Paper heron candle birch snow pond button cotton lotus atlas boat maple autumn birch reed kite mint leaf quill topaz mellow marble swan kite ember winter clover ridge creek cobble atlas paper paper heron candle birch snow pond button cotto",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 4790,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/a66b157e7af55cc4a04325a330f377aa72e4b360703605c297b4a9f9bc989f6c.512.webp?v=1",
+        "image_url": "/i/a66b157e7af55cc4a04325a330f377aa72e4b360703605c297b4a9f9bc989f6c.webp",
+        "version": "cefbd26bcfed6be17ae07a33b7f15c2ed95bcc0e25a5416e3f945ed95281682c",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:19.539394Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "archl-b3bddd7c",
+        "url": "/c/archl-b3bddd7c",
+        "name": "Oakho",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "comedy",
+          "detective",
+          "baker-3",
+          "cooking",
+          "cyberpunk",
+          "dragons",
+          "steampunk",
+          "space",
+          "adventure",
+          "slice-of-life"
+        ],
+        "tagline": "Anchor honey coral star fable valley cabin frost kite lantern willow berry snow bell juniper violet comet rose silver kite chalk cotton lemon garden sand north willow trail drift fjord candle tulip anchor honey coral star fable valley c",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 3251,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/04e692c88929ba25b592c991bb34eb1207a186f8646a387866a14f6db57d8bfb.512.webp?v=1",
+        "image_url": "/i/04e692c88929ba25b592c991bb34eb1207a186f8646a387866a14f6db57d8bfb.webp",
+        "version": "444af0531055820be96002b866ba585ec42f2d71ac682f60a5bbe83dbf5528b2",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:19.988094Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "berryzephy-quiet-acc09438",
+        "url": "/c/berryzephy-quiet-acc09438",
+        "name": "Brook sky quill.",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "comedy",
+          "fantasy",
+          "detective",
+          "baker-3",
+          "cooking",
+          "sports",
+          "dragons",
+          "space",
+          "adventure",
+          "slice-of-life"
+        ],
+        "tagline": "Cotton button wren timber copper autumn kite thyme cobble glade cotton amber quiet lagoon hollow raven shell amber mint mist arch saffron creek harbor island hill anchor swan island ridge daisy hollow cotton button wren timber copper aut",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 9380,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/ee554537a20e0a6fb6199b460c422557cdb20df1af7faf7b549c3c60343886e2.512.webp?v=1",
+        "image_url": "/i/ee554537a20e0a6fb6199b460c422557cdb20df1af7faf7b549c3c60343886e2.webp",
+        "version": "ce2956384d6ae3a75cab490873759b96e16d0884266f2385cf5aa4a8e105a48e",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:18.955569Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "appleb-deltas-candlela-7d5bb7fe",
+        "url": "/c/appleb-deltas-candlela-7d5bb7fe",
+        "name": "Sage badge lemon comet s",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "comedy",
+          "worldbuilding",
+          "fantasy",
+          "detective",
+          "baker-3",
+          "pirates",
+          "sci-fi",
+          "adventure",
+          "slice-of-life"
+        ],
+        "tagline": "Stone arch copper rain pine ember quill birch pond banner pepper quiet lantern field saffron sage banner mist ivy maple glade sail bramble banner star silver candle wind sand river boat robin stone arch copper rain pine ember quill b",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1728,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/04ba75df4cdf9e6080a39e2da981ba4a2ee68206ae3be05d70ad181236246b46.512.webp?v=1",
+        "image_url": "/i/04ba75df4cdf9e6080a39e2da981ba4a2ee68206ae3be05d70ad181236246b46.webp",
+        "version": "3da299cd54234c40fe26df09839ecbda33741ebff5d409227156e83426191610",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:18.539138Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "timbe-e32d24eb",
+        "url": "/c/timbe-e32d24eb",
+        "name": "Lante",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "comedy",
+          "library",
+          "detective",
+          "baker-3",
+          "travel",
+          "dragons",
+          "space",
+          "adventure",
+          "slice-of-life"
+        ],
+        "tagline": "Fern birch frost jade tide stone frost island hill cedar harbor chalk cove juniper apple bramble cabin zephyr badge garden cobble moss chalk poppy hill cricket shell hill cobble kettle mint cotton fern birch frost jade tide stone frost is",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 5355,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/2c7bb81b38db22b097f9bfd2083bde763b9b8dfbdde5dfde2c204664d0ae8fe5.512.webp?v=1",
+        "image_url": "/i/2c7bb81b38db22b097f9bfd2083bde763b9b8dfbdde5dfde2c204664d0ae8fe5.webp",
+        "version": "4b04b0cd0d5fab543c77e13a59a0cd826d0d694ba9048336d71af93ab24b6c60",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:18.935085Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "tealpet-mossm-creekbann-1a54e4b5",
+        "url": "/c/tealpet-mossm-creekbann-1a54e4b5",
+        "name": "Daisy comet timber lark embe",
+        "creator": {
+          "name": "L17QU7FL_07",
+          "source": "janitorai",
+          "handle": "c468f381-a7ca-cc25-19f5-c2856e161a08",
+          "url": "/u/janitorai/c468f381-a7ca-cc25-19f5-c2856e161a08"
+        },
+        "tags": [
+          "teacher-3",
+          "western-4",
+          "dragons-4",
+          "fairy-tale-4",
+          "fantasy",
+          "mythology-4",
+          "steampunk",
+          "adventure",
+          "places-3",
+          "pirates-4"
+        ],
+        "tagline": "Harbor snow fjord quill mellow shell linen amber field rain petal olive blossom arch raven orchard bamboo clover silver cider comet heron quill pebble north boat dune wind paper sky leaf atlas harbor snow fjord quill mellow shell linen a",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 393,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/6983c37b9cae6e714e6a05e1d93287d58a9f5e7e073885683131a2508dc9f7e9.512.webp?v=1",
+        "image_url": "/i/6983c37b9cae6e714e6a05e1d93287d58a9f5e7e073885683131a2508dc9f7e9.webp",
+        "version": "1fab38097235ca67954306f386f566cb5ec9092d4f245a845ba1bc0a92f5190b",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:17.118655Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "islandber-badge-rob-e311e597",
+        "url": "/c/islandber-badge-rob-e311e597",
+        "name": "Elm glade robin mis",
+        "creator": {
+          "name": "Violetmi",
+          "source": "janitorai",
+          "handle": "782832c9-787b-41b4-93b3-9d6d91a719b6",
+          "url": "/u/janitorai/782832c9-787b-41b4-93b3-9d6d91a719b6"
+        },
+        "tags": [
+          "comedy",
+          "fantasy",
+          "detective",
+          "baker-3",
+          "cyberpunk",
+          "steampunk",
+          "adventure",
+          "slice-of-life"
+        ],
+        "tagline": "Saffron chime violet frost heron crystal sand berry juniper linen frost kettle mint amber island cabin mellow heron cricket cabin grove river kettle breeze comet paper kettle rain maple banner hollow cove saffron chime violet frost",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1758,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/973ddeae604f419844352dc12c21f3eb342b679d69c4fdb07e4a3692f1fafbc9.512.webp?v=1",
+        "image_url": "/i/973ddeae604f419844352dc12c21f3eb342b679d69c4fdb07e4a3692f1fafbc9.webp",
+        "version": "4980de4e5b70ac1804c2112c894dad074b54d00c18a601a92f096c1bed5dde55",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:16.636549Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "mellow-e0044c8e",
+        "url": "/c/mellow-e0044c8e",
+        "name": "Crysta",
+        "creator": {
+          "name": "Pondclover",
+          "source": "crushon",
+          "handle": "983cb8d2-0b1a-851c-33e6-45b51a0ad63c",
+          "url": "/u/crushon/983cb8d2-0b1a-851c-33e6-45b51a0ad63c"
+        },
+        "tags": [
+          "comedy",
+          "fantasy",
+          "sports",
+          "robots-4",
+          "places-3"
+        ],
+        "tagline": "Jade north jade hazel hollow clover comet finch sand orchard coral hollow quiet lantern rain frost laurel fern brook island candle robin apple honey bramble brook atlas moss .",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 569,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/0009eb299131d3b947103d153f70eeb1b10a84b4e85418265db09757d66cc989.512.webp?v=1",
+        "image_url": "/i/0009eb299131d3b947103d153f70eeb1b10a84b4e85418265db09757d66cc989.jpg",
+        "version": "2d58c93b09ee9f2ddeccaf23b65b5ae31f493eefb1eb5cbbb97b0f7113e1315f",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:09.894516Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "shellh-topazfi-robi-dawng-478d3a60",
+        "url": "/c/shellh-topazfi-robi-dawng-478d3a60",
+        "name": "Ember crystal cove clover.",
+        "creator": {
+          "name": null,
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "puzzle-2",
+          "explorer-4",
+          "teacher-3",
+          "ocean-4",
+          "summer-4",
+          "historical",
+          "castle-4",
+          "scholar",
+          "mystery",
+          "ghosts-4",
+          "mountains-4",
+          "festival-4",
+          "slice-of-life-2",
+          "steampunk",
+          "forest",
+          "music-4",
+          "cheerful",
+          "travel-4",
+          "museum-4",
+          "sports-4",
+          "desert-4",
+          "astronomer-4",
+          "winter-4",
+          "forest-4",
+          "cooking-4"
+        ],
+        "tagline": "Yarrow cotton bell lotus star paper amber cobble fjord cobble arch paper canyon daisy comet sky cricket lark river wren heron petal otter chime pond cider flint reed saffron birch ridge comet yarrow cotton bell lotus star paper amber cobb",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 6139,
+        "stats": {
+          "popularity": 51,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/d87893a13d73a0143c259ad8095bf2297300deeff6b3dd68ec98bd6930b75c12.512.webp?v=1",
+        "image_url": "/i/d87893a13d73a0143c259ad8095bf2297300deeff6b3dd68ec98bd6930b75c12.png",
+        "version": "d87893a13d73a0143c259ad8095bf2297300deeff6b3dd68ec98bd6930b75c12",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:07.168028Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "chimebad-2b3ccaf4",
+        "url": "/c/chimebad-2b3ccaf4",
+        "name": "Skybutto",
+        "creator": {
+          "name": "Pebbl867",
+          "source": "crushon",
+          "handle": "d08c5438-0607-1343-3973-8d8645798854",
+          "url": "/u/crushon/d08c5438-0607-1343-3973-8d8645798854"
+        },
+        "tags": [
+          "fantasy",
+          "puzzle-4",
+          "inventor-4",
+          "robots-4"
+        ],
+        "tagline": "Coral linen willow copper ivy hollow pond anchor mint juniper poppy.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 610,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/dc3fd367d45e6fb7ecc25681de88005e97f7f1bf23148a832d008b2733cea69a.512.webp?v=1",
+        "image_url": "/i/dc3fd367d45e6fb7ecc25681de88005e97f7f1bf23148a832d008b2733cea69a.jpg",
+        "version": "1919cdbb6f8d280a0cf1d9e7dc16ec27605a71354d2c7130f733093a8096b352",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:02:03.542532Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "sail-fff6b48f",
+        "url": "/c/sail-fff6b48f",
+        "name": "Bann",
+        "creator": {
+          "name": "Laur#62977534",
+          "source": "crushon",
+          "handle": "e4de8f9e-4afc-4f14-58ed-cea4feb4e661",
+          "url": "/u/crushon/e4de8f9e-4afc-4f14-58ed-cea4feb4e661"
+        },
+        "tags": [
+          "comedy",
+          "fantasy",
+          "village",
+          "robots-4"
+        ],
+        "tagline": "Spruce sky hill rose north creek bell kite paper button pond elm basin delta chalk basin glen bell bell wind berry saffron ro.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 703,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/53eeaba7c803136a6357ec32babe3d27543e74d06c8bf819da3e81f609720ed7.512.webp?v=1",
+        "image_url": "/i/53eeaba7c803136a6357ec32babe3d27543e74d06c8bf819da3e81f609720ed7.png",
+        "version": "2b12ae316ba5eb6fbfb066789aef6582f9a1df5a7a309f31fe735dc2508c5f2a",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:01:50.771719Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "IGCD2mR9OnX5-EROVNeoFIxrdwi_Uiz6UsK0cxf_Jb46k1RuGAb1xwumoX71_WvLLb3KLCtEVuUqljZSbvRa2cxw5VF0-0ajdmzZzjN_bbg4DZBRBSagn1kyKAXuZbj6c_ULBXkHYezNqyCVmzQ6jM0j3KQvyq8hE6pIU1lmby5YNs1jvAnoYoyw0zNAU50ULh-.BzTs5o-UjLqaB7wN-18XeJDhiorh_kJ44n1orDYGuxW",
+    "has_more": true
+  }
+}

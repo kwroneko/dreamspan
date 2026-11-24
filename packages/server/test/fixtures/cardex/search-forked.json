@@ -1,0 +1,6032 @@
+{
+  "name": "search-forked",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "source": "chub",
+      "sort": "popular",
+      "limit": "48"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"ab7a7015e71474bc50eab8a8691f458ad26e300946d353ca35fc7307ef461e31\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [
+        "chub"
+      ],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "popular",
+      "page": 1,
+      "limit": 48,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": true,
+        "slug": "nectars-3ce20cb5",
+        "path": "/c/nectars-3ce20cb5",
+        "name": "Cranebi",
+        "tagline": "Chime honey swan orchard willow quiet echo cobble reed island trail honey berry quiet marble lemon daisy maple saffron snow heron dawn wind clover orchard moss juniper marble pond grove harbor linen chime honey swan orchard willow qui",
+        "thumb_url": "/t/bc879698afd15a246a2b8148bca4d3a8e418b75a6341e1bad0e882e3d3048eff.512.webp?v=1",
+        "cover_w": 562,
+        "cover_h": 1000,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "puzzle",
+            "label": "puzzle"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "puzzle",
+            "label": "puzzle"
+          }
+        ],
+        "tag_count": 4,
+        "token_budget": 2855,
+        "fork_count": 0,
+        "first_seen_at": "2024-09-04T04:47:57.541755Z",
+        "group": {
+          "key": "b79027b136b2ea11",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "sky_gle_7872",
+          "path": "/u/chub/sky_gle_7872",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 2,
+          "others_list": [
+            {
+              "name": "kitenecta_dunedunela_9605",
+              "path": "/u/chub/kitenecta_dunedunela_9605",
+              "source": "chub",
+              "avatar_url": null,
+              "avatar_nsfw": false,
+              "role": "listing",
+              "variant_count": 0,
+              "card_path": ""
+            },
+            {
+              "name": "rosepeb_velvetplu_9666",
+              "path": "/u/chub/rosepeb_velvetplu_9666",
+              "source": "chub",
+              "avatar_url": null,
+              "avatar_nsfw": false,
+              "role": "listing",
+              "variant_count": 0,
+              "card_path": ""
+            }
+          ]
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "echoros-75a55f78",
+        "path": "/c/echoros-75a55f78",
+        "name": "Deltava",
+        "tagline": "Raven blossom heron ivy grove bamboo poppy sa.",
+        "thumb_url": "/t/e80fb4f55dacd6af9579d6e78ffb710080cc533f6f098e7d18f3d22b69d46b2f.512.webp?v=1",
+        "cover_w": 832,
+        "cover_h": 1216,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "adventure-5",
+            "label": "Adventure 5"
+          },
+          {
+            "slug": "mystery-5",
+            "label": "Mystery 5"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "mystery-5",
+            "label": "Mystery 5"
+          },
+          {
+            "slug": "adventure-5",
+            "label": "Adventure 5"
+          }
+        ],
+        "tag_count": 4,
+        "token_budget": 1643,
+        "fork_count": 0,
+        "first_seen_at": "2024-07-19T21:02:13.417830Z",
+        "group": {
+          "key": "7817c8eb282cbfd7",
+          "others": 2,
+          "other_listings": 2,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "valleyoce",
+          "path": "/u/chub/valleyoce",
+          "source": "chub",
+          "avatar_url": "/t/7e0368971b3ba322383e91061de539c20c6577637766207cc3494cd9c798b008.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": true,
+        "slug": "rob-eaf1b59b",
+        "path": "/c/rob-eaf1b59b",
+        "name": "COM",
+        "tagline": "Glen bell jade reed mellow cove cabin linen glen otter reed tulip tulip robin hill robin laurel drift sky rain meadow cobble bamboo honey mist chalk cabin field comet leaf otter boat glen bell jade reed mellow cove cabin linen gle",
+        "thumb_url": "/t/65960ec07132543110b0d79284fe665cfbf44d6114643eba8f4b396aeed529ae.512.webp?v=1",
+        "cover_w": 684,
+        "cover_h": 1000,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "tag_count": 1,
+        "token_budget": 3932,
+        "fork_count": 0,
+        "first_seen_at": "2025-04-01T04:46:57.277509Z",
+        "group": {
+          "key": "80d708d2d7699ab9",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Lotusbr",
+          "path": "/u/chub/Lotusbr",
+          "source": "chub",
+          "avatar_url": "/t/0f2df2cdd642b2ac21f335161ec01468ae466da4c3fb972dd8f62680b73afc54.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": true,
+        "slug": "win-cov-crys-b6-e6f466db",
+        "path": "/c/win-cov-crys-b6-e6f466db",
+        "name": "Topaz leaf ridge)",
+        "tagline": "Zephyr dune cotton drift cabin hollow ridge violet olive robin field mint chalk rain orchard comet mint cricket lark field marble boat kite canyon bell clover velvet sail atlas badge thistle lantern zephyr dune cotton drift cabi",
+        "thumb_url": "/t/c883caf3264ecc031113ad86b7417b780e518fffc21c75f7bfced098547e87ed.512.webp?v=1",
+        "cover_w": 684,
+        "cover_h": 1000,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "slice-of-life-5",
+            "label": "slice of life 5"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "comedy-5",
+            "label": "comedy 5"
+          },
+          {
+            "slug": "slice-of-life-5",
+            "label": "slice of life 5"
+          },
+          {
+            "slug": "sci-fi-5",
+            "label": "sci fi 5"
+          },
+          {
+            "slug": "historical-5",
+            "label": "historical 5"
+          },
+          {
+            "slug": "detective-5",
+            "label": "detective 5"
+          },
+          {
+            "slug": "magic-5",
+            "label": "MAGIC 5"
+          },
+          {
+            "slug": "space-5",
+            "label": "space 5"
+          },
+          {
+            "slug": "school-5",
+            "label": "School 5"
+          },
+          {
+            "slug": "steampunk-5",
+            "label": "steampunk 5"
+          },
+          {
+            "slug": "cyberpunk-5",
+            "label": "Cyberpunk 5"
+          },
+          {
+            "slug": "fairy-tale-5",
+            "label": "fairy tale 5"
+          },
+          {
+            "slug": "mythology-5",
+            "label": "mythology 5"
+          },
+          {
+            "slug": "western-5",
+            "label": "western 5"
+          },
+          {
+            "slug": "pirates-5",
+            "label": "pirates 5"
+          },
+          {
+            "slug": "dragons-5",
+            "label": "dragons 5"
+          }
+        ],
+        "tag_count": 18,
+        "token_budget": 3399,
+        "fork_count": 0,
+        "first_seen_at": "2025-01-10T16:47:11.341679Z",
+        "group": {
+          "key": "93107153aa653161",
+          "others": 2,
+          "other_listings": 2,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "pepperla",
+          "path": "/u/chub/pepperla",
+          "source": "chub",
+          "avatar_url": "/t/c0de6664b3c7a942adc4c594b028e825285970a06127d0ff71435689b3e48a8c.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": true,
+        "slug": "mellow-cra-sail-br-covecric-90957297",
+        "path": "/c/mellow-cra-sail-br-covecric-90957297",
+        "name": "Amber crane grove delta gla",
+        "tagline": "Laurel juniper lotus rose honey kite boat spark chime sage mist saffron hazel apple badge north button bamboo clover dune cove canyon lantern echo poppy nectar oak island robin maple birch delta laurel juniper lotus rose honey kite boat spa",
+        "thumb_url": "/t/1ad82a405270cc72050cfe1bfff1a2fa960eae4e8654a0d51895e57835058600.512.webp?v=1",
+        "cover_w": 1000,
+        "cover_h": 1000,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "tag_count": 1,
+        "token_budget": 2407,
+        "fork_count": 0,
+        "first_seen_at": "2024-05-08T20:52:28.128368Z",
+        "group": {
+          "key": "c48524dfd7b0b181",
+          "others": 2,
+          "other_listings": 4,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Brookf_BREE",
+          "path": "/u/chub/Brookf_BREE",
+          "source": "chub",
+          "avatar_url": "/t/4c21f7206969c46bafe3c3812d1777fa8ac53d24a727b7773bca577858290a62.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "timbercr-c20a1f5d",
+        "path": "/c/timbercr-c20a1f5d",
+        "name": "timbercr",
+        "tagline": "Arch violet garden daisy stone canyon lark meadow banner button cobble saffron cricket arch bamboo bell arch canyon pepper coral hazel robin sail island blossom zephyr cedar poppy lark lotus river sail arch violet garden daisy stone cany",
+        "thumb_url": "/t/a9dc73549b7e1f050a080a6d2c01031156bd5c7402a9e48b735630d44250ca1f.512.webp?v=1",
+        "cover_w": 619,
+        "cover_h": 841,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "friendly-3",
+            "label": "FRIENDLY 3"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "friendly-3",
+            "label": "FRIENDLY 3"
+          }
+        ],
+        "tag_count": 4,
+        "token_budget": 3874,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-03T15:47:41.192991Z",
+        "group": {
+          "key": "287c0972b93730aa",
+          "others": 3,
+          "other_listings": 3,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Northbutto",
+          "path": "/u/chub/Northbutto",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "po-bir-hon-f9db95b4",
+        "path": "/c/po-bir-hon-f9db95b4",
+        "name": "Slate plum",
+        "tagline": "Ocean plum sand swan chalk juniper fern hazel fi)",
+        "thumb_url": "/t/d45218fcb05a8c7d2d553c50308fd8a7093252f3dced791a0e7cbd157b16b562.512.webp?v=1",
+        "cover_w": 840,
+        "cover_h": 1485,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "magic",
+            "label": "magic"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "magic",
+            "label": "magic"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "castle",
+            "label": "castle"
+          },
+          {
+            "slug": "robots-5",
+            "label": "Robots 5"
+          },
+          {
+            "slug": "inventor-2",
+            "label": "inventor 2"
+          },
+          {
+            "slug": "summer-2",
+            "label": "summer 2"
+          },
+          {
+            "slug": "comedy-4",
+            "label": "comedy 4"
+          },
+          {
+            "slug": "ghosts-5",
+            "label": "ghosts 5"
+          },
+          {
+            "slug": "cooking-5",
+            "label": "COOKING 5"
+          },
+          {
+            "slug": "gardening-5",
+            "label": "Gardening 5"
+          }
+        ],
+        "tag_count": 13,
+        "token_budget": 1817,
+        "fork_count": 0,
+        "first_seen_at": "2024-07-21T00:05:39.400027Z",
+        "group": {
+          "key": "86c0af4521ca5f83",
+          "others": 2,
+          "other_listings": 2,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "laurelgarden_mello_7280",
+          "path": "/u/chub/laurelgarden_mello_7280",
+          "source": "chub",
+          "avatar_url": "/t/a74fe029732aa512c145722a694a0b140cde57b55c6033e018fb37dc1d31da11.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "lagoon-5c295e1d",
+        "path": "/c/lagoon-5c295e1d",
+        "name": "Ivyfli",
+        "tagline": "Sorrel teal cricket violet mint hazel berry river cider glen fern kite hill cotton zephyr delta star jade robin laurel cricket canyon bell nectar olive meadow star badge zephyr larch honey grove sorrel teal cricket violet mint hazel",
+        "thumb_url": "/t/53cee01ef20f02c0168897c9c964cdcca618b8fe9ce4055e3f60d450a15dd254.512.webp?v=1",
+        "cover_w": 1030,
+        "cover_h": 1015,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "music-5",
+            "label": "music 5"
+          },
+          {
+            "slug": "ghosts-5",
+            "label": "ghosts 5"
+          },
+          {
+            "slug": "sports-5",
+            "label": "SPORTS 5"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "music-5",
+            "label": "music 5"
+          },
+          {
+            "slug": "ghosts-5",
+            "label": "ghosts 5"
+          },
+          {
+            "slug": "sports-5",
+            "label": "SPORTS 5"
+          },
+          {
+            "slug": "travel-5",
+            "label": "Travel 5"
+          },
+          {
+            "slug": "library-5",
+            "label": "library 5"
+          },
+          {
+            "slug": "museum-5",
+            "label": "museum 5"
+          },
+          {
+            "slug": "village-5",
+            "label": "Village 5"
+          }
+        ],
+        "tag_count": 7,
+        "token_budget": 1827,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-07T14:38:32.830218Z",
+        "group": {
+          "key": "9bf02ed32c07cf4b",
+          "others": 2,
+          "other_listings": 2,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "cricke",
+          "path": "/u/chub/cricke",
+          "source": "chub",
+          "avatar_url": "/t/4e15cae6b730d7f81ef0419c614525b47039d177ffbeefec9227383735666203.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": true,
+        "slug": "snow-mint-blo-2-0-177831bc",
+        "path": "/c/snow-mint-blo-2-0-177831bc",
+        "name": "Island or",
+        "tagline": "Badge sage cove chalk ivy topaz grove fern pebble heron bell sage breeze autumn atlas saffron petal cricket orchard dawn flint kite daisy daisy laurel chime raven raven clover mist robin comet badge sage cove chalk ivy topaz grove fern pebb",
+        "thumb_url": "/t/8c86d1fe2103a25e1da3e41018d822119d70d782c5af810872f6f52abb70e36a.512.webp?v=1",
+        "cover_w": 512,
+        "cover_h": 768,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          }
+        ],
+        "tag_count": 3,
+        "token_budget": 16132,
+        "fork_count": 0,
+        "first_seen_at": "2024-08-01T04:47:47.823634Z",
+        "group": {
+          "key": "04b9da91dc97f49e",
+          "others": 4,
+          "other_listings": 9,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "meadowi_nect_9877",
+          "path": "/u/chub/meadowi_nect_9877",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "timber-da868fe0",
+        "path": "/c/timber-da868fe0",
+        "name": "Meadow",
+        "tagline": "Maple glade oak ember linen kettle cedar cobble heron field fable cider field crane wind cove field valley tulip hol",
+        "thumb_url": "/t/d79860737f6ee7be33513b6adfc27a303a6c70837f493d5885982e25d8a190d6.512.webp?v=1",
+        "cover_w": 1024,
+        "cover_h": 1024,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub",
+          "botbooru"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "astronomer-3",
+            "label": "Astronomer 3"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "scholar",
+            "label": "Scholar"
+          },
+          {
+            "slug": "astronomer-3",
+            "label": "Astronomer 3"
+          },
+          {
+            "slug": "calm",
+            "label": "calm"
+          },
+          {
+            "slug": "cheerful",
+            "label": "cheerful"
+          },
+          {
+            "slug": "poet",
+            "label": "poet"
+          },
+          {
+            "slug": "teacher",
+            "label": "TEACHER"
+          },
+          {
+            "slug": "friendly",
+            "label": "friendly"
+          },
+          {
+            "slug": "castle-5",
+            "label": "Castle 5"
+          },
+          {
+            "slug": "forest-5",
+            "label": "forest 5"
+          },
+          {
+            "slug": "ocean-5",
+            "label": "Ocean 5"
+          },
+          {
+            "slug": "healer-2",
+            "label": "Healer 2"
+          },
+          {
+            "slug": "desert-5",
+            "label": "desert 5"
+          },
+          {
+            "slug": "mountains-5",
+            "label": "Mountains 5"
+          },
+          {
+            "slug": "winter-5",
+            "label": "winter 5"
+          },
+          {
+            "slug": "summer-5",
+            "label": "summer 5"
+          },
+          {
+            "slug": "festival-5",
+            "label": "festival 5"
+          },
+          {
+            "slug": "puzzle-5",
+            "label": "puzzle 5"
+          },
+          {
+            "slug": "inventor-5",
+            "label": "Inventor 5"
+          },
+          {
+            "slug": "scholar-5",
+            "label": "scholar 5"
+          }
+        ],
+        "tag_count": 23,
+        "token_budget": 1873,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-03T02:06:50.130035Z",
+        "group": {
+          "key": "84ce46e0c746cc46",
+          "others": 2,
+          "other_listings": 3,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "cricke",
+          "path": "/u/chub/cricke",
+          "source": "chub",
+          "avatar_url": "/t/4e15cae6b730d7f81ef0419c614525b47039d177ffbeefec9227383735666203.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": true,
+        "slug": "laure-270f55d8",
+        "path": "/c/laure-270f55d8",
+        "name": "Ancho",
+        "tagline": "Nectar copper olive badge lantern)",
+        "thumb_url": "/t/9b823fc994403bf5aab151ed4c4f029f84b8daeaf2ec558c6b57487872ce1822.512.webp?v=1",
+        "cover_w": 667,
+        "cover_h": 1000,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "english",
+            "label": "ENGLISH"
+          },
+          {
+            "slug": "knight-5",
+            "label": "knight 5"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "english",
+            "label": "ENGLISH"
+          },
+          {
+            "slug": "knight-5",
+            "label": "knight 5"
+          },
+          {
+            "slug": "healer-5",
+            "label": "healer 5"
+          }
+        ],
+        "tag_count": 6,
+        "token_budget": 1278,
+        "fork_count": 0,
+        "first_seen_at": "2024-05-01T23:47:17.339386Z",
+        "group": {
+          "key": "267f5bf831ea1040",
+          "others": 3,
+          "other_listings": 3,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Linenco",
+          "path": "/u/chub/Linenco",
+          "source": "chub",
+          "avatar_url": "/t/db60ac5eb8fe0abf5c5e2e9c4d1b385904355a19c3fb12842f58200a66e3032d.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "ember-cf5c873c",
+        "path": "/c/ember-cf5c873c",
+        "name": "Ancho",
+        "tagline": "Chime amber cider moss cotton cob",
+        "thumb_url": "/t/545ac25fe201000591470cc960793b244ae04b22ca14dbaca3b3a402dcff2048.512.webp?v=1",
+        "cover_w": 832,
+        "cover_h": 1216,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub",
+          "botbooru"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "comedy-5",
+            "label": "comedy 5"
+          },
+          {
+            "slug": "teacher",
+            "label": "TEACHER"
+          },
+          {
+            "slug": "friendly-4",
+            "label": "friendly 4"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "scholar",
+            "label": "Scholar"
+          },
+          {
+            "slug": "calm",
+            "label": "calm"
+          },
+          {
+            "slug": "cheerful",
+            "label": "cheerful"
+          },
+          {
+            "slug": "comedy-5",
+            "label": "comedy 5"
+          },
+          {
+            "slug": "teacher",
+            "label": "TEACHER"
+          },
+          {
+            "slug": "friendly-4",
+            "label": "friendly 4"
+          },
+          {
+            "slug": "bard-5",
+            "label": "Bard 5"
+          },
+          {
+            "slug": "merchant-5",
+            "label": "merchant 5"
+          },
+          {
+            "slug": "sailor-5",
+            "label": "sailor 5"
+          },
+          {
+            "slug": "museum-5",
+            "label": "museum 5"
+          },
+          {
+            "slug": "puzzle-5",
+            "label": "puzzle 5"
+          },
+          {
+            "slug": "explorer-5",
+            "label": "explorer 5"
+          }
+        ],
+        "tag_count": 13,
+        "token_budget": 1231,
+        "fork_count": 0,
+        "first_seen_at": "2024-06-01T13:47:44.204888Z",
+        "group": {
+          "key": "606033e22c74f0a0",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "cricke",
+          "path": "/u/chub/cricke",
+          "source": "chub",
+          "avatar_url": "/t/4e15cae6b730d7f81ef0419c614525b47039d177ffbeefec9227383735666203.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "lotuscha-quietfro-cobblelan-creeklin-honeycott-e2100875",
+        "path": "/c/lotuscha-quietfro-cobblelan-creeklin-honeycott-e2100875",
+        "name": "Field apple river mellow bell north pine jade r",
+        "tagline": "Jade heron beacon hill bamboo cider juniper robin jade linen field quill slate atlas lagoon kettle hollow boat summer maple juniper shell kettle quiet fern glade quill bramble swan timber laurel delta jade heron beacon hill bamboo cider.",
+        "thumb_url": "/t/c8d2055cc854ec8961976f4e12843b6cb60ee17b917b83d7a9aa0de7e541bc3a.512.webp?v=1",
+        "cover_w": 832,
+        "cover_h": 1216,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "tag_count": 1,
+        "token_budget": 7622,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-05T05:54:55.891584Z",
+        "group": {
+          "key": "bf661d851540d97b",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "frostb_trailbadg_50742",
+          "path": "/u/chub/frostb_trailbadg_50742",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "otte-covebasin-laurelh-honeycott-me-timb-wi-bad-be9e6a5d",
+        "path": "/c/otte-covebasin-laurelh-honeycott-me-timb-wi-bad-be9e6a5d",
+        "name": "Canyon orchard pond larch mint copper cabin qui)",
+        "tagline": "Breeze cedar sky sage shell mint saffron orchard sky lantern clover orchard river autumn rain crystal creek cider stone arch amber hazel daisy elm beacon plum drift silver timber garden finch wind breeze cedar sky sage shell mint saffro",
+        "thumb_url": "/t/a0a5f9c1de8cf7f5fb78e8717613dcb2c32d818af8991add37d062f4a90a6ab3.512.webp?v=1",
+        "cover_w": 693,
+        "cover_h": 980,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [],
+        "search_tags": [],
+        "tag_count": 0,
+        "token_budget": 14260,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-08T05:39:49.879746Z",
+        "group": {
+          "key": "522db7d6a256f7c4",
+          "others": 2,
+          "other_listings": 2,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "FABLETI",
+          "path": "/u/chub/FABLETI",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "robinholl-co-orchar-64f37fad",
+        "path": "/c/robinholl-co-orchar-64f37fad",
+        "name": "Poppy heron anchor.",
+        "tagline": "Button echo island island violet teal basin lantern heron crystal creek tide crane chalk anchor ridge button cedar kite cove tulip saffron oak mist comet cricket ivy marble anchor copper lagoon quiet button echo island island violet",
+        "thumb_url": "/t/1b7f10f7c91578a383a401513668b7b1e07d0e00ec6d9acd6388d4c9d8a9c014.512.webp?v=1",
+        "cover_w": 832,
+        "cover_h": 1216,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "cooking-4",
+            "label": "Cooking 4"
+          }
+        ],
+        "tag_count": 6,
+        "token_budget": 5857,
+        "fork_count": 0,
+        "first_seen_at": "2026-09-02T04:26:10.988823Z",
+        "group": {
+          "key": "828dcc05cc3f38b8",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Creek_isl",
+          "path": "/u/chub/Creek_isl",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "amberoa-75e68d59",
+        "path": "/c/amberoa-75e68d59",
+        "name": "Fernnor",
+        "tagline": "Ridge meadow lemon lagoon atlas lotus glen grove otter crystal north wren heron oak pine boat anchor mint sage creek hazel finch anchor glen heron saffr.",
+        "thumb_url": "/t/0fc939bb0b62838bc2afeeee1d5cca78d99d5bf2ba8e316a545073dc93ad6964.512.webp?v=1",
+        "cover_w": 832,
+        "cover_h": 1216,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "astronomer-5",
+            "label": "astronomer 5"
+          },
+          {
+            "slug": "pirates",
+            "label": "pirates"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "astronomer-5",
+            "label": "astronomer 5"
+          },
+          {
+            "slug": "pirates",
+            "label": "pirates"
+          },
+          {
+            "slug": "baker-5",
+            "label": "baker 5"
+          }
+        ],
+        "tag_count": 5,
+        "token_budget": 1338,
+        "fork_count": 0,
+        "first_seen_at": "2024-09-22T04:47:41.139294Z",
+        "group": {
+          "key": "22ce95a88a40f8d6",
+          "others": 3,
+          "other_listings": 3,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "saffronju",
+          "path": "/u/chub/saffronju",
+          "source": "chub",
+          "avatar_url": "/t/5b66249d3eb092b09bd4801eeee3d814a6c069f100337896581468ec6f0481e2.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "moss-90866e69",
+        "path": "/c/moss-90866e69",
+        "name": "Viol",
+        "tagline": "Lotus brook fjord sage blossom trail lagoon.",
+        "thumb_url": "/t/84d3e90da026e099f1fee85ce92c3136b511e5b2516fba686b4eee9982f6416e.512.webp?v=1",
+        "cover_w": 832,
+        "cover_h": 1216,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "painter-5",
+            "label": "Painter 5"
+          },
+          {
+            "slug": "poet-5",
+            "label": "poet 5"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "painter-5",
+            "label": "Painter 5"
+          },
+          {
+            "slug": "poet-5",
+            "label": "poet 5"
+          }
+        ],
+        "tag_count": 3,
+        "token_budget": 1526,
+        "fork_count": 0,
+        "first_seen_at": "2024-05-18T16:47:22.390465Z",
+        "group": {
+          "key": "fb569608c451bfdc",
+          "others": 2,
+          "other_listings": 2,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "valleyoce",
+          "path": "/u/chub/valleyoce",
+          "source": "chub",
+          "avatar_url": "/t/7e0368971b3ba322383e91061de539c20c6577637766207cc3494cd9c798b008.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "pe-sla-rave-f3c60557",
+        "path": "/c/pe-sla-rave-f3c60557",
+        "name": "HAR",
+        "tagline": "Coral clover tulip heron flint dune thistle wind fable crystal drift crane wind button spruce orchard finch trail thistle chalk candle dune sage maple heron m",
+        "thumb_url": "/t/6e709870a457d167617620c8b8df8ba6b25a378f65e8af324c895795a08349b0.512.webp?v=1",
+        "cover_w": 555,
+        "cover_h": 859,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "robots-5",
+            "label": "Robots 5"
+          },
+          {
+            "slug": "teacher-5",
+            "label": "Teacher 5"
+          },
+          {
+            "slug": "friendly-5",
+            "label": "FRIENDLY 5"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "robots-5",
+            "label": "Robots 5"
+          },
+          {
+            "slug": "friendly-5",
+            "label": "FRIENDLY 5"
+          },
+          {
+            "slug": "teacher-5",
+            "label": "Teacher 5"
+          }
+        ],
+        "tag_count": 4,
+        "token_budget": 5638,
+        "fork_count": 0,
+        "first_seen_at": "2024-11-01T01:03:26.528156Z",
+        "group": {
+          "key": "f6e2d3a46bc1c8b4",
+          "others": 2,
+          "other_listings": 4,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "driftfinch_birc_2939",
+          "path": "/u/chub/driftfinch_birc_2939",
+          "source": "chub",
+          "avatar_url": "/t/13e2c0205ba978d1e9008197075ac6dc9dafa7f41d8a09eb043bf57eb8ef6a39.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 1,
+          "others_list": [
+            {
+              "name": "Maplecandle",
+              "path": "/u/chub/Maplecandle",
+              "source": "chub",
+              "avatar_url": null,
+              "avatar_nsfw": false,
+              "role": "listing",
+              "variant_count": 0,
+              "card_path": ""
+            }
+          ]
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "sagecl-d8f6a4c8",
+        "path": "/c/sagecl-d8f6a4c8",
+        "name": "Cotton",
+        "tagline": "Island beacon velvet drift birch frost kite pepper autumn !",
+        "thumb_url": "/t/524d62e02d3e1cb794c6da1d1c04f9359e82375ab7b517f694ee66ea4f4fa5c8.512.webp?v=1",
+        "cover_w": 816,
+        "cover_h": 1216,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "music-5",
+            "label": "music 5"
+          },
+          {
+            "slug": "cheerful-5",
+            "label": "cheerful 5"
+          },
+          {
+            "slug": "calm-5",
+            "label": "calm 5"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "music-5",
+            "label": "music 5"
+          },
+          {
+            "slug": "cheerful-5",
+            "label": "cheerful 5"
+          },
+          {
+            "slug": "calm-5",
+            "label": "calm 5"
+          },
+          {
+            "slug": "curious-5",
+            "label": "curious 5"
+          }
+        ],
+        "tag_count": 5,
+        "token_budget": 978,
+        "fork_count": 0,
+        "first_seen_at": "2024-07-22T22:58:05.771859Z",
+        "group": {
+          "key": "e419288f47151648",
+          "others": 4,
+          "other_listings": 4,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Canyonyarr",
+          "path": "/u/chub/Canyonyarr",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 1,
+          "others_list": [
+            {
+              "name": "Brookf_BREE",
+              "path": "/u/chub/Brookf_BREE",
+              "source": "chub",
+              "avatar_url": "/t/4c21f7206969c46bafe3c3812d1777fa8ac53d24a727b7773bca577858290a62.64.webp?v=1",
+              "avatar_nsfw": false,
+              "role": "listing",
+              "variant_count": 0,
+              "card_path": ""
+            }
+          ]
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "hazel-74e4ac01",
+        "path": "/c/hazel-74e4ac01",
+        "name": "Marbl",
+        "tagline": "Rose echo crane ridge glen sage leaf drift ridge field pond sage echo cricket heron ocean lotus button dune winter garden frost thistle dune jade copper heron crystal valley slate quill north rose echo crane ridge glen sage leaf dri",
+        "thumb_url": "/t/df6bdcdf03cc27298fb7733772913682c9b2c5e0730fa4550e24fe0a365fe8fb.512.webp?v=1",
+        "cover_w": 400,
+        "cover_h": 600,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub",
+          "botbooru"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "curious",
+            "label": "curious"
+          },
+          {
+            "slug": "puzzle-2",
+            "label": "PUZZLE 2"
+          },
+          {
+            "slug": "wholesome-5",
+            "label": "wholesome 5"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "scholar",
+            "label": "Scholar"
+          },
+          {
+            "slug": "castle",
+            "label": "castle"
+          },
+          {
+            "slug": "calm",
+            "label": "calm"
+          },
+          {
+            "slug": "cheerful",
+            "label": "cheerful"
+          },
+          {
+            "slug": "curious",
+            "label": "curious"
+          },
+          {
+            "slug": "poet",
+            "label": "poet"
+          },
+          {
+            "slug": "puzzle-2",
+            "label": "PUZZLE 2"
+          },
+          {
+            "slug": "healer",
+            "label": "healer"
+          },
+          {
+            "slug": "wholesome-5",
+            "label": "wholesome 5"
+          },
+          {
+            "slug": "cozy-5",
+            "label": "Cozy 5"
+          },
+          {
+            "slug": "drama-5",
+            "label": "Drama 5"
+          },
+          {
+            "slug": "action-5",
+            "label": "Action 5"
+          },
+          {
+            "slug": "strategy-5",
+            "label": "strategy 5"
+          },
+          {
+            "slug": "worldbuilding-5",
+            "label": "Worldbuilding 5"
+          },
+          {
+            "slug": "places-5",
+            "label": "places 5"
+          },
+          {
+            "slug": "factions-5",
+            "label": "factions 5"
+          }
+        ],
+        "tag_count": 18,
+        "token_budget": 3755,
+        "fork_count": 0,
+        "first_seen_at": "2025-08-16T04:23:51.602701Z",
+        "group": {
+          "key": "67d7a7df3257612e",
+          "others": 8,
+          "other_listings": 10,
+          "other_listing_source": null
+        },
+        "creator": null
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "northbr-kitech-240c53de",
+        "path": "/c/northbr-kitech-240c53de",
+        "name": "Raven juniper.",
+        "tagline": "Canyon island berry berry birch topaz beacon snow oak yarrow oak poppy honey jade finch berry timber plum hill mellow quill finch apple berry berry basin finch paper juniper lemon laurel button canyon island berry berry birch topaz beacon",
+        "thumb_url": "/t/48996e0a5a11726a35fb950c63c2bbf431a2f8df67480f5a52b863b6f8347039.512.webp?v=1",
+        "cover_w": 1024,
+        "cover_h": 1024,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "creatures-5",
+            "label": "creatures 5"
+          },
+          {
+            "slug": "english-5",
+            "label": "English 5"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "english-5",
+            "label": "English 5"
+          },
+          {
+            "slug": "creatures-5",
+            "label": "creatures 5"
+          }
+        ],
+        "tag_count": 2,
+        "token_budget": 2737,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-02T22:47:27.957704Z",
+        "group": {
+          "key": "0b360513c6476819",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "larkdel",
+          "path": "/u/chub/larkdel",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "bramb-e1f46b64",
+        "path": "/c/bramb-e1f46b64",
+        "name": "Cedar",
+        "tagline": "Snow fable quill meadow quiet daisy maple beacon quiet saffron jade pebble quill north laurel field berry heron pine heron shell cricket willow summer birch pine paper field lark anchor sand badge snow fable quill meadow quiet daisy.",
+        "thumb_url": "/t/756fa7e57e957d7449b494eed37de52fdf9e046fae4de4b131f1e1a085ac3635.512.webp?v=1",
+        "cover_w": 400,
+        "cover_h": 600,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "curious",
+            "label": "curious"
+          },
+          {
+            "slug": "cozy-5",
+            "label": "Cozy 5"
+          },
+          {
+            "slug": "drama-5",
+            "label": "Drama 5"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "curious",
+            "label": "curious"
+          },
+          {
+            "slug": "cozy-5",
+            "label": "Cozy 5"
+          },
+          {
+            "slug": "drama-5",
+            "label": "Drama 5"
+          },
+          {
+            "slug": "original-5",
+            "label": "Original 5"
+          },
+          {
+            "slug": "multiple-greetings-5",
+            "label": "Multiple Greetings 5"
+          },
+          {
+            "slug": "strategy-5",
+            "label": "strategy 5"
+          },
+          {
+            "slug": "has-lorebook-5",
+            "label": "Has Lorebook 5"
+          }
+        ],
+        "tag_count": 7,
+        "token_budget": 2877,
+        "fork_count": 0,
+        "first_seen_at": "2025-08-16T04:23:58.146905Z",
+        "group": {
+          "key": "923fee5e1b1a3bdb",
+          "others": 5,
+          "other_listings": 6,
+          "other_listing_source": null
+        },
+        "creator": null
+      },
+      {
+        "all_origins_removed": true,
+        "slug": "saffront-327cfadc",
+        "path": "/c/saffront-327cfadc",
+        "name": "Mapleclo",
+        "tagline": "Winter river sail bramble bamboo frost badge ember button finch chalk wren bramble comet teal bamboo fable cider clover fern saffron spruce bramble ivy cove badge river sorrel meadow dune tide daisy winter river sail bramble.",
+        "thumb_url": "/t/cc3ca5c498a6cc5d9e35608cc1d86b3e127480d2f6b9384e97125f1067a8bc9b.512.webp?v=1",
+        "cover_w": 749,
+        "cover_h": 1000,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "game-5",
+            "label": "Game 5"
+          },
+          {
+            "slug": "anime-5",
+            "label": "anime 5"
+          },
+          {
+            "slug": "fictional-5",
+            "label": "fictional 5"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "travel-5",
+            "label": "Travel 5"
+          },
+          {
+            "slug": "game-5",
+            "label": "Game 5"
+          },
+          {
+            "slug": "anime-5",
+            "label": "anime 5"
+          },
+          {
+            "slug": "fictional-5",
+            "label": "fictional 5"
+          }
+        ],
+        "tag_count": 6,
+        "token_budget": 1359,
+        "fork_count": 0,
+        "first_seen_at": "2025-01-23T23:47:09.176298Z",
+        "group": {
+          "key": "4f2386619206d3f1",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": null
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "ston-crys-isla-birchhazelb-0e66f2e6",
+        "path": "/c/ston-crys-isla-birchhazelb-0e66f2e6",
+        "name": "Hazel honey autumn )",
+        "tagline": "Beacon lotus plum sorrel saffron pond.",
+        "thumb_url": "/t/92ab97406e2f9808585eb3bd064098ba99934a9a08363637d5951352eef2f985.512.webp?v=1",
+        "cover_w": 1024,
+        "cover_h": 1536,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "explorer",
+            "label": "explorer",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "space-4",
+            "label": "space 4",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "slice-of-life",
+            "label": "slice of life"
+          },
+          {
+            "slug": "explorer",
+            "label": "explorer"
+          },
+          {
+            "slug": "space-4",
+            "label": "space 4"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          },
+          {
+            "slug": "scholar",
+            "label": "Scholar"
+          },
+          {
+            "slug": "desert",
+            "label": "Desert"
+          },
+          {
+            "slug": "summer",
+            "label": "Summer"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "astronomer-3",
+            "label": "Astronomer 3"
+          },
+          {
+            "slug": "puzzle",
+            "label": "puzzle"
+          },
+          {
+            "slug": "oc-5",
+            "label": "Oc 5"
+          },
+          {
+            "slug": "robots-5",
+            "label": "Robots 5"
+          },
+          {
+            "slug": "inventor-2",
+            "label": "inventor 2"
+          },
+          {
+            "slug": "summer-2",
+            "label": "summer 2"
+          },
+          {
+            "slug": "fantasy-6",
+            "label": "fantasy 6"
+          },
+          {
+            "slug": "adventure-6",
+            "label": "adventure 6"
+          },
+          {
+            "slug": "mystery-6",
+            "label": "mystery 6"
+          },
+          {
+            "slug": "cooking-5",
+            "label": "COOKING 5"
+          },
+          {
+            "slug": "slice-of-life-6",
+            "label": "slice of life 6"
+          },
+          {
+            "slug": "comedy-6",
+            "label": "Comedy 6"
+          },
+          {
+            "slug": "sci-fi-6",
+            "label": "sci fi 6"
+          },
+          {
+            "slug": "historical-6",
+            "label": "historical 6"
+          },
+          {
+            "slug": "detective-6",
+            "label": "Detective 6"
+          },
+          {
+            "slug": "magic-6",
+            "label": "magic 6"
+          },
+          {
+            "slug": "space-6",
+            "label": "Space 6"
+          },
+          {
+            "slug": "school-6",
+            "label": "School 6"
+          },
+          {
+            "slug": "steampunk-6",
+            "label": "Steampunk 6"
+          },
+          {
+            "slug": "friendly-5",
+            "label": "FRIENDLY 5"
+          },
+          {
+            "slug": "cyberpunk-6",
+            "label": "cyberpunk 6"
+          }
+        ],
+        "tag_count": 34,
+        "token_budget": 2350,
+        "fork_count": 0,
+        "first_seen_at": "2024-07-21T00:05:35.861383Z",
+        "group": {
+          "key": "95d0580620e28021",
+          "others": 2,
+          "other_listings": 2,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "laurelgarden_mello_7280",
+          "path": "/u/chub/laurelgarden_mello_7280",
+          "source": "chub",
+          "avatar_url": "/t/a74fe029732aa512c145722a694a0b140cde57b55c6033e018fb37dc1d31da11.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "daw-cov-cri-elmat-a8-2b808dec",
+        "path": "/c/daw-cov-cri-elmat-a8-2b808dec",
+        "name": "Pond grove hill saffro",
+        "tagline": "Cricket elm plum heron zephyr flint hill fjord stone ocean sky mist glade frost frost yarrow orchard quill willow finch hollow bamboo rain hazel frost autumn creek silver mint leaf cobble atlas cricket elm plum heron zephyr flint hill fjor",
+        "thumb_url": "/t/5dc39564e59d31b27d1d114562c7268aa39d993b241eba3a1a454610f84fb7c7.512.webp?v=1",
+        "cover_w": 832,
+        "cover_h": 1216,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "comedy-4",
+            "label": "comedy 4"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "comedy-4",
+            "label": "comedy 4"
+          },
+          {
+            "slug": "fairy-tale-6",
+            "label": "fairy tale 6"
+          },
+          {
+            "slug": "mythology-6",
+            "label": "Mythology 6"
+          },
+          {
+            "slug": "space-5",
+            "label": "space 5"
+          },
+          {
+            "slug": "western-6",
+            "label": "Western 6"
+          },
+          {
+            "slug": "mythology-5",
+            "label": "mythology 5"
+          }
+        ],
+        "tag_count": 10,
+        "token_budget": 2516,
+        "fork_count": 0,
+        "first_seen_at": "2024-11-02T01:47:11.988813Z",
+        "group": {
+          "key": "e599ad8c7d69fa66",
+          "others": 2,
+          "other_listings": 2,
+          "other_listing_source": null
+        },
+        "creator": null
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "laurelc-88d32e8d",
+        "path": "/c/laurelc-88d32e8d",
+        "name": "MEA",
+        "tagline": "Juniper oak button poppy reed apple atlas crane north dawn kite laurel fable rose arch paper heron quiet marble plum garden blossom lemon berry island quill leaf honey timber tulip heron orchard juniper oak button poppy reed apple atlas cra",
+        "thumb_url": "/t/9a2a4cf03d9e83253b12ce706405dfc03d647416b8184a7ac5e52ced361cf108.512.webp?v=1",
+        "cover_w": 832,
+        "cover_h": 1216,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [],
+        "search_tags": [],
+        "tag_count": 0,
+        "token_budget": 2586,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-02T16:54:39.273774Z",
+        "group": {
+          "key": "3f2fca6dfac87bf2",
+          "others": 2,
+          "other_listings": 2,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "larkdel",
+          "path": "/u/chub/larkdel",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": true,
+        "slug": "plumclove-b5731c83",
+        "path": "/c/plumclove-b5731c83",
+        "name": "CAN",
+        "tagline": "Lark hollow button basin wind pond kettle autumn saffron bamboo grove meadow cotton glen hill olive tulip apple willow otter frost ivy winter meadow raven plum hazel sage sand cabin apple tulip lark hollow button basin wind pond kett",
+        "thumb_url": "/t/38373a97dca67c830ba2320147cf58e2c09843c6228ecec4aa24c39ea0972230.512.webp?v=1",
+        "cover_w": 667,
+        "cover_h": 1000,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "summer",
+            "label": "Summer"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "summer",
+            "label": "Summer"
+          },
+          {
+            "slug": "pirates-6",
+            "label": "pirates 6"
+          },
+          {
+            "slug": "poet-3",
+            "label": "Poet 3"
+          }
+        ],
+        "tag_count": 6,
+        "token_budget": 4870,
+        "fork_count": 0,
+        "first_seen_at": "2025-01-05T20:47:34.872409Z",
+        "group": {
+          "key": "5eae13c940d3766f",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Snowgla",
+          "path": "/u/chub/Snowgla",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "deltas-f814b96a",
+        "path": "/c/deltas-f814b96a",
+        "name": "Lotuso",
+        "tagline": "Maple robin summer kettle velvet echo bramble !",
+        "thumb_url": "/t/514fee49a95bc1b932d6ae46a393277e1744a2151d38224e41b9555a31892eec.512.webp?v=1",
+        "cover_w": 200,
+        "cover_h": 200,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "robots-4",
+            "label": "Robots 4"
+          },
+          {
+            "slug": "anime-4",
+            "label": "anime 4"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "desert",
+            "label": "Desert"
+          },
+          {
+            "slug": "robots-4",
+            "label": "Robots 4"
+          },
+          {
+            "slug": "anime-4",
+            "label": "anime 4"
+          },
+          {
+            "slug": "dragons-6",
+            "label": "dragons 6"
+          },
+          {
+            "slug": "robots-6",
+            "label": "robots 6"
+          },
+          {
+            "slug": "library",
+            "label": "Library"
+          }
+        ],
+        "tag_count": 9,
+        "token_budget": 583,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-03T05:52:13.415059Z",
+        "group": {
+          "key": "018bd0c3bc1fe074",
+          "others": 2,
+          "other_listings": 2,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Linenr_Dunen",
+          "path": "/u/chub/Linenr_Dunen",
+          "source": "chub",
+          "avatar_url": "/t/484a99811858e6b7d3f7033f9d2d599015b49c168df6207612a2b2e3268a6f61.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": true,
+        "slug": "f-thistleap-mello-5bff483f",
+        "path": "/c/f-thistleap-mello-5bff483f",
+        "name": "Raven velvet arch",
+        "tagline": "Chalk bell delta saffron zephyr finch paper drift apple birch echo moss finch delta timber beacon cider timber candle hill robin autumn cider anchor sand cricket daisy honey ember sand badge ocean chalk bell delta saffron zephyr f",
+        "thumb_url": "/t/bf812e636842ab15dfe2965c5580506689c23e96714b0e86514db1d1e523576d.512.webp?v=1",
+        "cover_w": 684,
+        "cover_h": 1000,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "space",
+            "label": "space"
+          },
+          {
+            "slug": "desert",
+            "label": "Desert"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          }
+        ],
+        "tag_count": 6,
+        "token_budget": 8446,
+        "fork_count": 0,
+        "first_seen_at": "2025-10-11T00:47:07.356878Z",
+        "group": {
+          "key": "f0be33a73b1fec9a",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Pepperapp6",
+          "path": "/u/chub/Pepperapp6",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "velvet-7da32bbd",
+        "path": "/c/velvet-7da32bbd",
+        "name": "Mistam",
+        "tagline": "Heron lagoon birch hazel dune anchor crystal lagoon c",
+        "thumb_url": "/t/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.512.webp?v=1",
+        "cover_w": 1152,
+        "cover_h": 1536,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "summer-2",
+            "label": "summer 2"
+          },
+          {
+            "slug": "forest-2",
+            "label": "Forest 2"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "castle",
+            "label": "castle"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "summer-2",
+            "label": "summer 2"
+          },
+          {
+            "slug": "forest-2",
+            "label": "Forest 2"
+          },
+          {
+            "slug": "sports-2",
+            "label": "Sports 2"
+          },
+          {
+            "slug": "mountains-2",
+            "label": "Mountains 2"
+          },
+          {
+            "slug": "astronomer-2",
+            "label": "astronomer 2"
+          },
+          {
+            "slug": "library-2",
+            "label": "Library 2"
+          },
+          {
+            "slug": "winter-2",
+            "label": "Winter 2"
+          },
+          {
+            "slug": "travel-2",
+            "label": "travel 2"
+          },
+          {
+            "slug": "desert-2",
+            "label": "Desert 2"
+          },
+          {
+            "slug": "ocean-2",
+            "label": "Ocean 2"
+          },
+          {
+            "slug": "museum-2",
+            "label": "Museum 2"
+          },
+          {
+            "slug": "festival-2",
+            "label": "festival 2"
+          }
+        ],
+        "tag_count": 15,
+        "token_budget": 3416,
+        "fork_count": 1,
+        "first_seen_at": "2024-07-19T19:36:47.487507Z",
+        "group": {
+          "key": "69f89a98110c2d05",
+          "others": 3,
+          "other_listings": 3,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Northcan",
+          "path": "/u/chub/Northcan",
+          "source": "chub",
+          "avatar_url": "/t/d969107cff68c27c2b644eea0e59d8694fa0ac629f7b47b4d55d0351791f4c6b.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": true,
+        "slug": "slatejuni-a5ae8181",
+        "path": "/c/slatejuni-a5ae8181",
+        "name": "Cobblehaz",
+        "tagline": "Fable laurel juniper cider cobble copper mea",
+        "thumb_url": "/t/321bc630343e60ffb80d1912d456241d4d85b3fd2e19a479aa48a679c60b44d0.512.webp?v=1",
+        "cover_w": 750,
+        "cover_h": 1000,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "ghosts-6",
+            "label": "Ghosts 6"
+          },
+          {
+            "slug": "cooking-6",
+            "label": "cooking 6"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "ghosts-6",
+            "label": "Ghosts 6"
+          },
+          {
+            "slug": "cooking-6",
+            "label": "cooking 6"
+          }
+        ],
+        "tag_count": 5,
+        "token_budget": 2254,
+        "fork_count": 0,
+        "first_seen_at": "2024-05-23T06:47:29.861078Z",
+        "group": {
+          "key": "072f7e344b051adf",
+          "others": 4,
+          "other_listings": 6,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Northcan",
+          "path": "/u/chub/Northcan",
+          "source": "chub",
+          "avatar_url": "/t/d969107cff68c27c2b644eea0e59d8694fa0ac629f7b47b4d55d0351791f4c6b.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "dais-79ab29a9",
+        "path": "/c/dais-79ab29a9",
+        "name": "Lemo",
+        "tagline": "Kettle island spruce delta kite basin juniper ivy poppy plum crane quiet basin tulip birch moss saffron fable cricket lark.",
+        "thumb_url": "/t/de93482dd118e591c861793946b99459869aba3d634580044479c9b7d1fb180f.512.webp?v=1",
+        "cover_w": 1179,
+        "cover_h": 2556,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub",
+          "risuai"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "comedy",
+            "label": "Comedy"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "scholar",
+            "label": "Scholar"
+          },
+          {
+            "slug": "desert",
+            "label": "Desert"
+          },
+          {
+            "slug": "astronomer-3",
+            "label": "Astronomer 3"
+          },
+          {
+            "slug": "puzzle",
+            "label": "puzzle"
+          }
+        ],
+        "tag_count": 10,
+        "token_budget": 1379,
+        "fork_count": 0,
+        "first_seen_at": "2024-12-19T00:47:15.891924Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Ivygar",
+          "path": "/u/chub/Ivygar",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 1,
+          "others_list": [
+            {
+              "name": "ridgem",
+              "path": "/u/risuai/ridgem",
+              "source": "risuai",
+              "avatar_url": null,
+              "avatar_nsfw": false,
+              "role": "listing",
+              "variant_count": 0,
+              "card_path": ""
+            }
+          ]
+        }
+      },
+      {
+        "all_origins_removed": true,
+        "slug": "fjordcr-viole-e005a5ab",
+        "path": "/c/fjordcr-viole-e005a5ab",
+        "name": "Cider plum ba",
+        "tagline": "Mellow flint otter nectar river spruce finch topaz plum cabin shell reed mellow rose paper laurel poppy topaz willow saffron marble frost star fable win.",
+        "thumb_url": "/t/82f4907efce26954a3c89609d4e0911e3504e997fade20f6a423b2bfe8c41e12.512.webp?v=1",
+        "cover_w": 684,
+        "cover_h": 1000,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "desert",
+            "label": "Desert"
+          },
+          {
+            "slug": "castle",
+            "label": "castle"
+          },
+          {
+            "slug": "astronomer-3",
+            "label": "Astronomer 3"
+          },
+          {
+            "slug": "robots-5",
+            "label": "Robots 5"
+          },
+          {
+            "slug": "inventor-2",
+            "label": "inventor 2"
+          },
+          {
+            "slug": "gardening-6",
+            "label": "Gardening 6"
+          },
+          {
+            "slug": "winter",
+            "label": "Winter"
+          },
+          {
+            "slug": "music-6",
+            "label": "music 6"
+          },
+          {
+            "slug": "sports-6",
+            "label": "sports 6"
+          },
+          {
+            "slug": "travel-6",
+            "label": "Travel 6"
+          }
+        ],
+        "tag_count": 14,
+        "token_budget": 2987,
+        "fork_count": 0,
+        "first_seen_at": "2025-01-31T05:47:22.304447Z",
+        "group": {
+          "key": "f2d5487b57baf9d7",
+          "others": 3,
+          "other_listings": 3,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "blossom",
+          "path": "/u/chub/blossom",
+          "source": "chub",
+          "avatar_url": "/t/16866fe72c63205f231aec441ef8a926cd80865e2d3552fb9f7f6fcc404cb76c.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "elmbel-ro-berryfl-ambe-24bfd0d6",
+        "path": "/c/elmbel-ro-berryfl-ambe-24bfd0d6",
+        "name": "Cricket quill chalk boa",
+        "tagline": "Dawn nectar bamboo raven poppy spruce pebble badge petal boat robin sky garden zephyr creek tulip plum lagoon saffron glade otter harbor thyme willow fable saffron quill rain sand cabin ocean ivy dawn nectar bamboo raven poppy spruce pebbl",
+        "thumb_url": "/t/c11109457344fb255df6d7a82a98571f026a430ceecd02d80d19c3adfee20e8b.512.webp?v=1",
+        "cover_w": 512,
+        "cover_h": 768,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "astronomer-5",
+            "label": "astronomer 5"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "astronomer-5",
+            "label": "astronomer 5"
+          }
+        ],
+        "tag_count": 2,
+        "token_budget": 1172,
+        "fork_count": 0,
+        "first_seen_at": "2024-09-22T04:47:50.572035Z",
+        "group": {
+          "key": "83ea81b7e2e24c33",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "saffronju",
+          "path": "/u/chub/saffronju",
+          "source": "chub",
+          "avatar_url": "/t/5b66249d3eb092b09bd4801eeee3d814a6c069f100337896581468ec6f0481e2.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "snowblo-4b1f947b",
+        "path": "/c/snowblo-4b1f947b",
+        "name": "Oakridg",
+        "tagline": "Stone ember thistle nectar frost blossom lemon hollow grove sand star quiet harbor ivy beacon hill anchor lotu?",
+        "thumb_url": "/t/81409a904c015f8ee0d7eb4e535cc19a7aaa1b3399d3f57847ce660e032a5259.512.webp?v=1",
+        "cover_w": 1056,
+        "cover_h": 1656,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "puzzle",
+            "label": "puzzle"
+          },
+          {
+            "slug": "comedy-5",
+            "label": "comedy 5"
+          },
+          {
+            "slug": "library-6",
+            "label": "Library 6"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "puzzle",
+            "label": "puzzle"
+          },
+          {
+            "slug": "comedy-5",
+            "label": "comedy 5"
+          },
+          {
+            "slug": "library-6",
+            "label": "Library 6"
+          }
+        ],
+        "tag_count": 5,
+        "token_budget": 885,
+        "fork_count": 0,
+        "first_seen_at": "2024-09-21T22:03:40.662094Z",
+        "group": {
+          "key": "c547516837dd45b2",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": null
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "sta-mead-ca-pond-5d99c805",
+        "path": "/c/sta-mead-ca-pond-5d99c805",
+        "name": "Birch island mea",
+        "tagline": "Topaz chime hazel rain ocean vi.",
+        "thumb_url": "/t/ab7f745d5ef6ce9f6844ba9bde60b31b18382782bbdb8ad06b62c6f29736b4d6.512.webp?v=1",
+        "cover_w": 1152,
+        "cover_h": 1536,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "friendly-3",
+            "label": "FRIENDLY 3"
+          },
+          {
+            "slug": "museum-6",
+            "label": "museum 6"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "friendly-3",
+            "label": "FRIENDLY 3"
+          },
+          {
+            "slug": "museum-6",
+            "label": "museum 6"
+          },
+          {
+            "slug": "painter-3",
+            "label": "painter 3"
+          },
+          {
+            "slug": "has-lorebook-4",
+            "label": "has lorebook 4"
+          },
+          {
+            "slug": "village-6",
+            "label": "village 6"
+          }
+        ],
+        "tag_count": 6,
+        "token_budget": 1738,
+        "fork_count": 0,
+        "first_seen_at": "2024-07-19T19:37:41.225672Z",
+        "group": {
+          "key": "98fee1a5808c4a1b",
+          "others": 2,
+          "other_listings": 2,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Northcan",
+          "path": "/u/chub/Northcan",
+          "source": "chub",
+          "avatar_url": "/t/d969107cff68c27c2b644eea0e59d8694fa0ac629f7b47b4d55d0351791f4c6b.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "anchorr-403ce05d",
+        "path": "/c/anchorr-403ce05d",
+        "name": "Winterp",
+        "tagline": "Cotton lotus petal saffron basin b",
+        "thumb_url": "/t/3f468041f234a71b7411afabc66b57125d9f3c100ab3ff09066aca75d8448758.512.webp?v=1",
+        "cover_w": 832,
+        "cover_h": 866,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "library-5",
+            "label": "library 5"
+          },
+          {
+            "slug": "castle-6",
+            "label": "castle 6"
+          },
+          {
+            "slug": "forest-6",
+            "label": "Forest 6"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "castle",
+            "label": "castle"
+          },
+          {
+            "slug": "library-5",
+            "label": "library 5"
+          },
+          {
+            "slug": "castle-6",
+            "label": "castle 6"
+          },
+          {
+            "slug": "forest-6",
+            "label": "Forest 6"
+          },
+          {
+            "slug": "ocean-6",
+            "label": "ocean 6"
+          },
+          {
+            "slug": "desert-6",
+            "label": "desert 6"
+          }
+        ],
+        "tag_count": 7,
+        "token_budget": 2313,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-05T23:11:53.746725Z",
+        "group": {
+          "key": "d80d6991cb6cd595",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "cricke",
+          "path": "/u/chub/cricke",
+          "source": "chub",
+          "avatar_url": "/t/4e15cae6b730d7f81ef0419c614525b47039d177ffbeefec9227383735666203.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "crys-c45229a7",
+        "path": "/c/crys-c45229a7",
+        "name": "Will",
+        "tagline": "Maple sage cricket hazel meadow yarrow orchard heron jade robin b",
+        "thumb_url": "/t/a65dba1bde7555afc8db864c49554387aa838c7f9359e8912232b840ecdf57c1.512.webp?v=1",
+        "cover_w": 700,
+        "cover_h": 1024,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [],
+        "search_tags": [],
+        "tag_count": 0,
+        "token_budget": 1582,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-07T13:04:00.845300Z",
+        "group": {
+          "key": "686015bce60c5baa",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Chim__",
+          "path": "/u/chub/Chim__",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": true,
+        "slug": "butto-c8cb849f",
+        "path": "/c/butto-c8cb849f",
+        "name": "Maple",
+        "tagline": "Swan plum delta lantern cider shell garden birch rose arch saffron blossom garden harbor crane larch bamboo arch badge fern ca.",
+        "thumb_url": "/t/ef5e9cd4bd644782a851a52a1d6b97e66a4a08950109cde3b03e1369cb8aa06b.512.webp?v=1",
+        "cover_w": 684,
+        "cover_h": 1000,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "explorer-3",
+            "label": "explorer 3"
+          },
+          {
+            "slug": "castle",
+            "label": "castle"
+          },
+          {
+            "slug": "astronomer-3",
+            "label": "Astronomer 3"
+          },
+          {
+            "slug": "english",
+            "label": "ENGLISH"
+          },
+          {
+            "slug": "mountains-6",
+            "label": "mountains 6"
+          },
+          {
+            "slug": "winter-6",
+            "label": "Winter 6"
+          },
+          {
+            "slug": "summer-6",
+            "label": "Summer 6"
+          },
+          {
+            "slug": "festival-6",
+            "label": "Festival 6"
+          }
+        ],
+        "tag_count": 12,
+        "token_budget": 3202,
+        "fork_count": 1,
+        "first_seen_at": "2025-04-12T02:49:04.750699Z",
+        "group": {
+          "key": "9c024dd2364cd9ab",
+          "others": 2,
+          "other_listings": 2,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "blossom",
+          "path": "/u/chub/blossom",
+          "source": "chub",
+          "avatar_url": "/t/16866fe72c63205f231aec441ef8a926cd80865e2d3552fb9f7f6fcc404cb76c.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "dune-e6f1438f",
+        "path": "/c/dune-e6f1438f",
+        "name": "Birc",
+        "tagline": "Oak dawn banner bramble canyon apple linen lantern thistle crane dune hazel basin pepper velvet blossom mist river dune copper lemon berry .",
+        "thumb_url": "/t/81c3d3087db72d4784fc0fcb063ed80d6f43b2e6f83414add4242649a78e8f73.512.webp?v=1",
+        "cover_w": 832,
+        "cover_h": 1216,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "puzzle-6",
+            "label": "Puzzle 6"
+          },
+          {
+            "slug": "inventor-6",
+            "label": "Inventor 6"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "puzzle-6",
+            "label": "Puzzle 6"
+          },
+          {
+            "slug": "inventor-6",
+            "label": "Inventor 6"
+          }
+        ],
+        "tag_count": 3,
+        "token_budget": 852,
+        "fork_count": 0,
+        "first_seen_at": "2024-05-10T18:49:24.187214Z",
+        "group": {
+          "key": "46737843bba08c73",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "valleyoce",
+          "path": "/u/chub/valleyoce",
+          "source": "chub",
+          "avatar_url": "/t/7e0368971b3ba322383e91061de539c20c6577637766207cc3494cd9c798b008.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "larkcr-otters-1f0b4f65",
+        "path": "/c/larkcr-otters-1f0b4f65",
+        "name": "Bramble cedar",
+        "tagline": "Grove comet zephyr sage blossom quill birch marble paper pond stone atlas brook raven willow olive atlas frost boat flint comet moss moss jade ivy willow anchor sorrel mist finch anchor lagoon grove comet zephyr sage blossom quill birch m",
+        "thumb_url": "/t/937b390e2d917d7602855a32ca89c41f17b6b365e08cc6b087bba9eee3e0d101.512.webp?v=1",
+        "cover_w": 850,
+        "cover_h": 1242,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [],
+        "search_tags": [],
+        "tag_count": 0,
+        "token_budget": 1443,
+        "fork_count": 0,
+        "first_seen_at": "2024-08-31T10:47:55.214792Z",
+        "group": {
+          "key": "ba3462e23f3895d6",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "violetca_birc_8550",
+          "path": "/u/chub/violetca_birc_8550",
+          "source": "chub",
+          "avatar_url": "/t/4d76b28daa7e8225860a6feae9fdc9174c6a233e1fb0d1b55b7b75a1f510c3d5.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "paper-04763138",
+        "path": "/c/paper-04763138",
+        "name": "Crane",
+        "tagline": "Sage hill cobble clover bramble timber.",
+        "thumb_url": "/t/9c1be20e0d1b9dc88c2a56902ecc105fe87dda3fd8d8d1500cc2b625d7458693.512.webp?v=1",
+        "cover_w": 1024,
+        "cover_h": 1024,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "sports-5",
+            "label": "SPORTS 5"
+          },
+          {
+            "slug": "scholar-6",
+            "label": "scholar 6"
+          },
+          {
+            "slug": "castle-6",
+            "label": "castle 6"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "anime-4",
+            "label": "anime 4"
+          },
+          {
+            "slug": "sports-5",
+            "label": "SPORTS 5"
+          },
+          {
+            "slug": "sailor",
+            "label": "sailor"
+          },
+          {
+            "slug": "scholar-6",
+            "label": "scholar 6"
+          },
+          {
+            "slug": "castle-6",
+            "label": "castle 6"
+          },
+          {
+            "slug": "castle-4",
+            "label": "castle 4"
+          },
+          {
+            "slug": "library-2",
+            "label": "Library 2"
+          },
+          {
+            "slug": "knight-6",
+            "label": "Knight 6"
+          },
+          {
+            "slug": "healer-6",
+            "label": "healer 6"
+          },
+          {
+            "slug": "bard-6",
+            "label": "Bard 6"
+          },
+          {
+            "slug": "village-5",
+            "label": "Village 5"
+          },
+          {
+            "slug": "merchant-6",
+            "label": "Merchant 6"
+          }
+        ],
+        "tag_count": 12,
+        "token_budget": 1669,
+        "fork_count": 1,
+        "first_seen_at": "2026-10-03T15:52:03.105756Z",
+        "group": {
+          "key": "b287b54eaa74da21",
+          "others": 5,
+          "other_listings": 5,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "cricke",
+          "path": "/u/chub/cricke",
+          "source": "chub",
+          "avatar_url": "/t/4e15cae6b730d7f81ef0419c614525b47039d177ffbeefec9227383735666203.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "vel-fe-fin-rain-app-9ad3f1ff",
+        "path": "/c/vel-fe-fin-rain-app-9ad3f1ff",
+        "name": "OTTER",
+        "tagline": "Hollow dawn garden daisy swan linen trail meadow trail tide winter creek chime cabin atlas pine north bramble pebble summer sorrel anchor boat spark tide maple linen hazel bramble snow beacon sand hollow dawn garden daisy swan linen tra",
+        "thumb_url": "/t/f1f0fd865e5b33d42e3655c500319a41df6c109dbd37b6e0234e9e1c75a8e383.512.webp?v=1",
+        "cover_w": 400,
+        "cover_h": 600,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "inventor-4",
+            "label": "inventor 4"
+          },
+          {
+            "slug": "music-5",
+            "label": "music 5"
+          },
+          {
+            "slug": "comedy-6",
+            "label": "Comedy 6"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "inventor-4",
+            "label": "inventor 4"
+          },
+          {
+            "slug": "music-5",
+            "label": "music 5"
+          },
+          {
+            "slug": "comedy-6",
+            "label": "Comedy 6"
+          },
+          {
+            "slug": "sailor-6",
+            "label": "sailor 6"
+          },
+          {
+            "slug": "explorer-6",
+            "label": "explorer 6"
+          }
+        ],
+        "tag_count": 7,
+        "token_budget": 2353,
+        "fork_count": 0,
+        "first_seen_at": "2024-11-01T00:41:09.300355Z",
+        "group": {
+          "key": "3c1740baf80d06ff",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "otter_oce_2887",
+          "path": "/u/chub/otter_oce_2887",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "yarrowm-fe64ed95",
+        "path": "/c/yarrowm-fe64ed95",
+        "name": "Summert",
+        "tagline": "Topaz pond drift moss elm grove h.",
+        "thumb_url": "/t/0b54217af0975af526b216d0e74c6409a45f86e5509eb395fadd5cb05d5a31b7.512.webp?v=1",
+        "cover_w": 1152,
+        "cover_h": 1536,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "summer-2",
+            "label": "summer 2"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "summer-2",
+            "label": "summer 2"
+          },
+          {
+            "slug": "anime-4",
+            "label": "anime 4"
+          },
+          {
+            "slug": "merchant",
+            "label": "merchant"
+          },
+          {
+            "slug": "astronomer-6",
+            "label": "Astronomer 6"
+          },
+          {
+            "slug": "baker-6",
+            "label": "Baker 6"
+          },
+          {
+            "slug": "painter-6",
+            "label": "painter 6"
+          }
+        ],
+        "tag_count": 9,
+        "token_budget": 1791,
+        "fork_count": 0,
+        "first_seen_at": "2024-07-20T23:38:58.888520Z",
+        "group": {
+          "key": "c82d3ba5ebd22297",
+          "others": 2,
+          "other_listings": 2,
+          "other_listing_source": null
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Northcan",
+          "path": "/u/chub/Northcan",
+          "source": "chub",
+          "avatar_url": "/t/d969107cff68c27c2b644eea0e59d8694fa0ac629f7b47b4d55d0351791f4c6b.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "harb-cra-canyo-3531e671",
+        "path": "/c/harb-cra-canyo-3531e671",
+        "name": "Drift cabin or",
+        "tagline": "Clover button grove flint maple coral atlas com.",
+        "thumb_url": "/t/411776164fc72a22c0380371b3ae818ab2d511bc5e7d7f778e50d202f68b4f30.512.webp?v=1",
+        "cover_w": 1280,
+        "cover_h": 1280,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub",
+          "botbooru"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "teacher",
+            "label": "TEACHER"
+          },
+          {
+            "slug": "puzzle-2",
+            "label": "PUZZLE 2"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "scholar",
+            "label": "Scholar"
+          },
+          {
+            "slug": "castle",
+            "label": "castle"
+          },
+          {
+            "slug": "calm",
+            "label": "calm"
+          },
+          {
+            "slug": "cheerful",
+            "label": "cheerful"
+          },
+          {
+            "slug": "poet",
+            "label": "poet"
+          },
+          {
+            "slug": "teacher",
+            "label": "TEACHER"
+          },
+          {
+            "slug": "puzzle-2",
+            "label": "PUZZLE 2"
+          },
+          {
+            "slug": "wholesome",
+            "label": "wholesome"
+          },
+          {
+            "slug": "sports-5",
+            "label": "SPORTS 5"
+          },
+          {
+            "slug": "sailor",
+            "label": "sailor"
+          },
+          {
+            "slug": "travel-5",
+            "label": "Travel 5"
+          },
+          {
+            "slug": "knight-5",
+            "label": "knight 5"
+          },
+          {
+            "slug": "poet-6",
+            "label": "poet 6"
+          },
+          {
+            "slug": "puzzle-5",
+            "label": "puzzle 5"
+          }
+        ],
+        "tag_count": 16,
+        "token_budget": 1294,
+        "fork_count": 0,
+        "first_seen_at": "2024-04-20T03:40:10.885322Z",
+        "group": {
+          "key": "2e9b02d933887362",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "cricke",
+          "path": "/u/chub/cricke",
+          "source": "chub",
+          "avatar_url": "/t/4e15cae6b730d7f81ef0419c614525b47039d177ffbeefec9227383735666203.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "applef-robi-ebaa3cad",
+        "path": "/c/applef-robi-ebaa3cad",
+        "name": "Raven breez",
+        "tagline": "Cedar arch lotus nectar thyme pepper silver birch plum .",
+        "thumb_url": "/t/fdc3bc80c8191fd2205e90de43af007f384e0bdf7a37982e916c8002a996a7a3.512.webp?v=1",
+        "cover_w": 750,
+        "cover_h": 1114,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "puzzle",
+            "label": "puzzle"
+          },
+          {
+            "slug": "has-lorebook-3",
+            "label": "Has Lorebook 3"
+          },
+          {
+            "slug": "teacher-6",
+            "label": "Teacher 6"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "magic",
+            "label": "magic"
+          },
+          {
+            "slug": "desert",
+            "label": "Desert"
+          },
+          {
+            "slug": "puzzle",
+            "label": "puzzle"
+          },
+          {
+            "slug": "creatures-3",
+            "label": "creatures 3"
+          },
+          {
+            "slug": "anime-4",
+            "label": "anime 4"
+          },
+          {
+            "slug": "has-lorebook-3",
+            "label": "Has Lorebook 3"
+          },
+          {
+            "slug": "teacher-6",
+            "label": "Teacher 6"
+          },
+          {
+            "slug": "friendly-6",
+            "label": "friendly 6"
+          },
+          {
+            "slug": "cheerful-6",
+            "label": "cheerful 6"
+          }
+        ],
+        "tag_count": 11,
+        "token_budget": 1272,
+        "fork_count": 0,
+        "first_seen_at": "2024-04-19T15:07:34.646511Z",
+        "group": {
+          "key": "9e5bd71248c62e8f",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": null
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "lago-3f08467c",
+        "path": "/c/lago-3f08467c",
+        "name": "Delt",
+        "tagline": "Pond sky slate grove clover oak petal lotus mist nectar pebble mellow badge zephyr vel?",
+        "thumb_url": "/t/289ffedab939afc37ee90b25f76f4ff612d1f10ba849c37648ca345853a5ffe6.512.webp?v=1",
+        "cover_w": 1024,
+        "cover_h": 1024,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "calm-6",
+            "label": "calm 6"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "historical",
+            "label": "historical"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "calm-6",
+            "label": "calm 6"
+          },
+          {
+            "slug": "curious-6",
+            "label": "curious 6"
+          }
+        ],
+        "tag_count": 6,
+        "token_budget": 1272,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-07T14:35:16.824842Z",
+        "group": {
+          "key": "7c7e90bc20745017",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Pine286",
+          "path": "/u/chub/Pine286",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "kett-badg-otte-delt-san-sail-sor-fr-8974bd92",
+        "path": "/c/kett-badg-otte-delt-san-sail-sor-fr-8974bd92",
+        "name": "NECTARNO",
+        "tagline": "Maple hollow coral glade cedar north petal field plum hazel quiet sage grove echo tulip creek mellow frost yarrow robin chalk fable bramble berry mint spark button boat gr",
+        "thumb_url": "/t/d044fc65bfbf8b47221b8adc844d59028a9f44c3502b7b833252241096daa0d1.512.webp?v=1",
+        "cover_w": 512,
+        "cover_h": 768,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "wholesome-6",
+            "label": "wholesome 6"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "wholesome-6",
+            "label": "wholesome 6"
+          }
+        ],
+        "tag_count": 3,
+        "token_budget": 13406,
+        "fork_count": 1,
+        "first_seen_at": "2024-10-07T08:47:05.907082Z",
+        "group": {
+          "key": "cf7c442f340243e2",
+          "others": 1,
+          "other_listings": 1,
+          "other_listing_source": "risuai"
+        },
+        "creator": {
+          "kind": "account",
+          "name": "pinearch_elmrob_7158",
+          "path": "/u/chub/pinearch_elmrob_7158",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 48,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "nectars-3ce20cb5",
+        "url": "/c/nectars-3ce20cb5",
+        "name": "Cranebi",
+        "creator": {
+          "name": "sky_gle_7872",
+          "source": "chub",
+          "handle": "sky_gle_7872",
+          "url": "/u/chub/sky_gle_7872"
+        },
+        "tags": [
+          "puzzle",
+          "fantasy",
+          "forest",
+          "village"
+        ],
+        "tagline": "Chime honey swan orchard willow quiet echo cobble reed island trail honey berry quiet marble lemon daisy maple saffron snow heron dawn wind clover orchard moss juniper marble pond grove harbor linen chime honey swan orchard willow qui",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 2855,
+        "stats": {
+          "popularity": 58,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/bc879698afd15a246a2b8148bca4d3a8e418b75a6341e1bad0e882e3d3048eff.512.webp?v=1",
+        "image_url": "/i/bc879698afd15a246a2b8148bca4d3a8e418b75a6341e1bad0e882e3d3048eff.png",
+        "version": "bc879698afd15a246a2b8148bca4d3a8e418b75a6341e1bad0e882e3d3048eff",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2024-09-04T04:47:57.541755Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "echoros-75a55f78",
+        "url": "/c/echoros-75a55f78",
+        "name": "Deltava",
+        "creator": {
+          "name": "valleyoce",
+          "source": "chub",
+          "handle": "valleyoce",
+          "url": "/u/chub/valleyoce"
+        },
+        "tags": [
+          "fantasy",
+          "forest",
+          "adventure-5"
+        ],
+        "tagline": "Raven blossom heron ivy grove bamboo poppy sa.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1643,
+        "stats": {
+          "popularity": 41,
+          "rating_avg": 4,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/e80fb4f55dacd6af9579d6e78ffb710080cc533f6f098e7d18f3d22b69d46b2f.512.webp?v=1",
+        "image_url": "/i/e80fb4f55dacd6af9579d6e78ffb710080cc533f6f098e7d18f3d22b69d46b2f.png",
+        "version": "e80fb4f55dacd6af9579d6e78ffb710080cc533f6f098e7d18f3d22b69d46b2f",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-04T21:55:23.922193Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "rob-eaf1b59b",
+        "url": "/c/rob-eaf1b59b",
+        "name": "COM",
+        "creator": {
+          "name": "Lotusbr",
+          "source": "chub",
+          "handle": "Lotusbr",
+          "url": "/u/chub/Lotusbr"
+        },
+        "tags": [
+          "forest"
+        ],
+        "tagline": "Glen bell jade reed mellow cove cabin linen glen otter reed tulip tulip robin hill robin laurel drift sky rain meadow cobble bamboo honey mist chalk cabin field comet leaf otter boat glen bell jade reed mellow cove cabin linen gle",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 3932,
+        "stats": {
+          "popularity": 2,
+          "rating_avg": 5,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/65960ec07132543110b0d79284fe665cfbf44d6114643eba8f4b396aeed529ae.512.webp?v=1",
+        "image_url": "/i/65960ec07132543110b0d79284fe665cfbf44d6114643eba8f4b396aeed529ae.png",
+        "version": "65960ec07132543110b0d79284fe665cfbf44d6114643eba8f4b396aeed529ae",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2025-04-01T04:46:57.277509Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "win-cov-crys-b6-e6f466db",
+        "url": "/c/win-cov-crys-b6-e6f466db",
+        "name": "Topaz leaf ridge)",
+        "creator": {
+          "name": "pepperla",
+          "source": "chub",
+          "handle": "pepperla",
+          "url": "/u/chub/pepperla"
+        },
+        "tags": [
+          "mythology-5",
+          "cozy-6",
+          "detective-5",
+          "western-5",
+          "pirates-5",
+          "magic-5",
+          "fairy-tale-5",
+          "fantasy",
+          "dragons-5",
+          "cyberpunk-5",
+          "village",
+          "steampunk-5",
+          "explorer-3"
+        ],
+        "tagline": "Zephyr dune cotton drift cabin hollow ridge violet olive robin field mint chalk rain orchard comet mint cricket lark field marble boat kite canyon bell clover velvet sail atlas badge thistle lantern zephyr dune cotton drift cabi",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 3399,
+        "stats": {
+          "popularity": 75,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/c883caf3264ecc031113ad86b7417b780e518fffc21c75f7bfced098547e87ed.512.webp?v=1",
+        "image_url": "/i/c883caf3264ecc031113ad86b7417b780e518fffc21c75f7bfced098547e87ed.png",
+        "version": "c883caf3264ecc031113ad86b7417b780e518fffc21c75f7bfced098547e87ed",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2025-01-10T16:47:11.341679Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "mellow-cra-sail-br-covecric-90957297",
+        "url": "/c/mellow-cra-sail-br-covecric-90957297",
+        "name": "Amber crane grove delta gla",
+        "creator": {
+          "name": "Brookf_BREE",
+          "source": "chub",
+          "handle": "Brookf_BREE",
+          "url": "/u/chub/Brookf_BREE"
+        },
+        "tags": [
+          "forest"
+        ],
+        "tagline": "Laurel juniper lotus rose honey kite boat spark chime sage mist saffron hazel apple badge north button bamboo clover dune cove canyon lantern echo poppy nectar oak island robin maple birch delta laurel juniper lotus rose honey kite boat spa",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 2407,
+        "stats": {
+          "popularity": 39,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/1ad82a405270cc72050cfe1bfff1a2fa960eae4e8654a0d51895e57835058600.512.webp?v=1",
+        "image_url": "/i/1ad82a405270cc72050cfe1bfff1a2fa960eae4e8654a0d51895e57835058600.png",
+        "version": "1ad82a405270cc72050cfe1bfff1a2fa960eae4e8654a0d51895e57835058600",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2024-05-08T20:52:28.128368Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "timbercr-c20a1f5d",
+        "url": "/c/timbercr-c20a1f5d",
+        "name": "timbercr",
+        "creator": {
+          "name": "Northbutto",
+          "source": "chub",
+          "handle": "Northbutto",
+          "url": "/u/chub/Northbutto"
+        },
+        "tags": [
+          "village-2",
+          "english-4",
+          "forest",
+          "friendly-3"
+        ],
+        "tagline": "Arch violet garden daisy stone canyon lark meadow banner button cobble saffron cricket arch bamboo bell arch canyon pepper coral hazel robin sail island blossom zephyr cedar poppy lark lotus river sail arch violet garden daisy stone cany",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 3874,
+        "stats": {
+          "popularity": 29,
+          "rating_avg": 5,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/a9dc73549b7e1f050a080a6d2c01031156bd5c7402a9e48b735630d44250ca1f.512.webp?v=1",
+        "image_url": "/i/a9dc73549b7e1f050a080a6d2c01031156bd5c7402a9e48b735630d44250ca1f.png",
+        "version": "a9dc73549b7e1f050a080a6d2c01031156bd5c7402a9e48b735630d44250ca1f",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T15:47:41.192991Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "po-bir-hon-f9db95b4",
+        "url": "/c/po-bir-hon-f9db95b4",
+        "name": "Slate plum",
+        "creator": {
+          "name": "laurelgarden_mello_7280",
+          "source": "chub",
+          "handle": "laurelgarden_mello_7280",
+          "url": "/u/chub/laurelgarden_mello_7280"
+        },
+        "tags": [
+          "inventor-2",
+          "historical",
+          "comedy-4",
+          "fantasy",
+          "summer-2",
+          "castle",
+          "forest",
+          "gardening-5",
+          "cooking-5",
+          "robots-5",
+          "places-3",
+          "ghosts-5",
+          "drama-6"
+        ],
+        "tagline": "Ocean plum sand swan chalk juniper fern hazel fi)",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1817,
+        "stats": {
+          "popularity": 24,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/d45218fcb05a8c7d2d553c50308fd8a7093252f3dced791a0e7cbd157b16b562.512.webp?v=1",
+        "image_url": "/i/d45218fcb05a8c7d2d553c50308fd8a7093252f3dced791a0e7cbd157b16b562.png",
+        "version": "d45218fcb05a8c7d2d553c50308fd8a7093252f3dced791a0e7cbd157b16b562",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-05T11:03:50.127459Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "lagoon-5c295e1d",
+        "url": "/c/lagoon-5c295e1d",
+        "name": "Ivyfli",
+        "creator": {
+          "name": "cricke",
+          "source": "chub",
+          "handle": "cricke",
+          "url": "/u/chub/cricke"
+        },
+        "tags": [
+          "action-6",
+          "music-5",
+          "museum-5",
+          "village-5",
+          "travel-5",
+          "sports-5",
+          "strategy-6"
+        ],
+        "tagline": "Sorrel teal cricket violet mint hazel berry river cider glen fern kite hill cotton zephyr delta star jade robin laurel cricket canyon bell nectar olive meadow star badge zephyr larch honey grove sorrel teal cricket violet mint hazel",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1827,
+        "stats": {
+          "popularity": 91,
+          "rating_avg": 4,
+          "rating_count": 6
+        },
+        "thumbnail_url": "/t/53cee01ef20f02c0168897c9c964cdcca618b8fe9ce4055e3f60d450a15dd254.512.webp?v=1",
+        "image_url": "/i/53cee01ef20f02c0168897c9c964cdcca618b8fe9ce4055e3f60d450a15dd254.png",
+        "version": "53cee01ef20f02c0168897c9c964cdcca618b8fe9ce4055e3f60d450a15dd254",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-07T14:38:32.830218Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "snow-mint-blo-2-0-177831bc",
+        "url": "/c/snow-mint-blo-2-0-177831bc",
+        "name": "Island or",
+        "creator": {
+          "name": "meadowi_nect_9877",
+          "source": "chub",
+          "handle": "meadowi_nect_9877",
+          "url": "/u/chub/meadowi_nect_9877"
+        },
+        "tags": [
+          "fantasy",
+          "forest",
+          "space"
+        ],
+        "tagline": "Badge sage cove chalk ivy topaz grove fern pebble heron bell sage breeze autumn atlas saffron petal cricket orchard dawn flint kite daisy daisy laurel chime raven raven clover mist robin comet badge sage cove chalk ivy topaz grove fern pebb",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 16132,
+        "stats": {
+          "popularity": 5,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/8c86d1fe2103a25e1da3e41018d822119d70d782c5af810872f6f52abb70e36a.512.webp?v=1",
+        "image_url": "/i/8c86d1fe2103a25e1da3e41018d822119d70d782c5af810872f6f52abb70e36a.png",
+        "version": "b5c2bb91b90f17dc7d50f70e19b4f60ee73b47a8d33209fc178775d082b400a7",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2024-09-06T12:55:16.141162Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "timber-da868fe0",
+        "url": "/c/timber-da868fe0",
+        "name": "Meadow",
+        "creator": {
+          "name": "cricke",
+          "source": "chub",
+          "handle": "cricke",
+          "url": "/u/chub/cricke"
+        },
+        "tags": [
+          "teacher-3",
+          "healer-2",
+          "festival-5",
+          "forest-5",
+          "scholar",
+          "inventor-5",
+          "fantasy",
+          "summer-5",
+          "castle-5",
+          "puzzle-5",
+          "ocean-5",
+          "astronomer-3",
+          "poet",
+          "scholar-5",
+          "winter-5",
+          "teacher",
+          "forest",
+          "village",
+          "friendly",
+          "cheerful",
+          "calm",
+          "desert-5",
+          "mountains-5"
+        ],
+        "tagline": "Maple glade oak ember linen kettle cedar cobble heron field fable cider field crane wind cove field valley tulip hol",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1873,
+        "stats": {
+          "popularity": 82,
+          "rating_avg": 5,
+          "rating_count": 5
+        },
+        "thumbnail_url": "/t/d79860737f6ee7be33513b6adfc27a303a6c70837f493d5885982e25d8a190d6.512.webp?v=1",
+        "image_url": "/i/d79860737f6ee7be33513b6adfc27a303a6c70837f493d5885982e25d8a190d6.png",
+        "version": "d79860737f6ee7be33513b6adfc27a303a6c70837f493d5885982e25d8a190d6",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T02:06:50.130035Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "laure-270f55d8",
+        "url": "/c/laure-270f55d8",
+        "name": "Ancho",
+        "creator": {
+          "name": "Linenco",
+          "source": "chub",
+          "handle": "Linenco",
+          "url": "/u/chub/Linenco"
+        },
+        "tags": [
+          "fantasy",
+          "healer-5",
+          "knight-5",
+          "forest",
+          "english",
+          "village"
+        ],
+        "tagline": "Nectar copper olive badge lantern)",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1278,
+        "stats": {
+          "popularity": 25,
+          "rating_avg": 3,
+          "rating_count": 2
+        },
+        "thumbnail_url": "/t/9b823fc994403bf5aab151ed4c4f029f84b8daeaf2ec558c6b57487872ce1822.512.webp?v=1",
+        "image_url": "/i/9b823fc994403bf5aab151ed4c4f029f84b8daeaf2ec558c6b57487872ce1822.png",
+        "version": "9b823fc994403bf5aab151ed4c4f029f84b8daeaf2ec558c6b57487872ce1822",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2024-05-02T11:58:40Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "ember-cf5c873c",
+        "url": "/c/ember-cf5c873c",
+        "name": "Ancho",
+        "creator": {
+          "name": "cricke",
+          "source": "chub",
+          "handle": "cricke",
+          "url": "/u/chub/cricke"
+        },
+        "tags": [
+          "drama-4",
+          "explorer-5",
+          "merchant-5",
+          "scholar",
+          "fantasy",
+          "comedy-5",
+          "bard-5",
+          "puzzle-5",
+          "museum-5",
+          "teacher",
+          "cheerful",
+          "calm",
+          "sailor-5"
+        ],
+        "tagline": "Chime amber cider moss cotton cob",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1231,
+        "stats": {
+          "popularity": 86,
+          "rating_avg": 5,
+          "rating_count": 3
+        },
+        "thumbnail_url": "/t/545ac25fe201000591470cc960793b244ae04b22ca14dbaca3b3a402dcff2048.512.webp?v=1",
+        "image_url": "/i/545ac25fe201000591470cc960793b244ae04b22ca14dbaca3b3a402dcff2048.png",
+        "version": "545ac25fe201000591470cc960793b244ae04b22ca14dbaca3b3a402dcff2048",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T03:57:34.174884Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "lotuscha-quietfro-cobblelan-creeklin-honeycott-e2100875",
+        "url": "/c/lotuscha-quietfro-cobblelan-creeklin-honeycott-e2100875",
+        "name": "Field apple river mellow bell north pine jade r",
+        "creator": {
+          "name": "frostb_trailbadg_50742",
+          "source": "chub",
+          "handle": "frostb_trailbadg_50742",
+          "url": "/u/chub/frostb_trailbadg_50742"
+        },
+        "tags": [
+          "forest"
+        ],
+        "tagline": "Jade heron beacon hill bamboo cider juniper robin jade linen field quill slate atlas lagoon kettle hollow boat summer maple juniper shell kettle quiet fern glade quill bramble swan timber laurel delta jade heron beacon hill bamboo cider.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 7622,
+        "stats": {
+          "popularity": 2,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/c8d2055cc854ec8961976f4e12843b6cb60ee17b917b83d7a9aa0de7e541bc3a.512.webp?v=1",
+        "image_url": "/i/c8d2055cc854ec8961976f4e12843b6cb60ee17b917b83d7a9aa0de7e541bc3a.png",
+        "version": "17c8dd1ce30b5d603aea051aec45598166bd85b4d62eb8ccb13b00225d21bb2f",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-05T14:08:15.675352Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "otte-covebasin-laurelh-honeycott-me-timb-wi-bad-be9e6a5d",
+        "url": "/c/otte-covebasin-laurelh-honeycott-me-timb-wi-bad-be9e6a5d",
+        "name": "Canyon orchard pond larch mint copper cabin qui)",
+        "creator": {
+          "name": "FABLETI",
+          "source": "chub",
+          "handle": "FABLETI",
+          "url": "/u/chub/FABLETI"
+        },
+        "tags": [],
+        "tagline": "Breeze cedar sky sage shell mint saffron orchard sky lantern clover orchard river autumn rain crystal creek cider stone arch amber hazel daisy elm beacon plum drift silver timber garden finch wind breeze cedar sky sage shell mint saffro",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 14260,
+        "stats": {
+          "popularity": 0,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/a0a5f9c1de8cf7f5fb78e8717613dcb2c32d818af8991add37d062f4a90a6ab3.512.webp?v=1",
+        "image_url": "/i/a0a5f9c1de8cf7f5fb78e8717613dcb2c32d818af8991add37d062f4a90a6ab3.png",
+        "version": "a9fbe4f936b457d9c764b76c23072188cb1affef7f3ee0d1eb1706743e0e2aff",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-08T06:38:58.813354Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "robinholl-co-orchar-64f37fad",
+        "url": "/c/robinholl-co-orchar-64f37fad",
+        "name": "Poppy heron anchor.",
+        "creator": {
+          "name": "Creek_isl",
+          "source": "chub",
+          "handle": "Creek_isl",
+          "url": "/u/chub/Creek_isl"
+        },
+        "tags": [
+          "worldbuilding-6",
+          "village-2",
+          "fantasy",
+          "village",
+          "explorer-3",
+          "cooking-4"
+        ],
+        "tagline": "Button echo island island violet teal basin lantern heron crystal creek tide crane chalk anchor ridge button cedar kite cove tulip saffron oak mist comet cricket ivy marble anchor copper lagoon quiet button echo island island violet",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 5857,
+        "stats": {
+          "popularity": 17,
+          "rating_avg": 5,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/1b7f10f7c91578a383a401513668b7b1e07d0e00ec6d9acd6388d4c9d8a9c014.512.webp?v=1",
+        "image_url": "/i/1b7f10f7c91578a383a401513668b7b1e07d0e00ec6d9acd6388d4c9d8a9c014.png",
+        "version": "1b7f10f7c91578a383a401513668b7b1e07d0e00ec6d9acd6388d4c9d8a9c014",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-06T16:39:02.300833Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "amberoa-75e68d59",
+        "url": "/c/amberoa-75e68d59",
+        "name": "Fernnor",
+        "creator": {
+          "name": "saffronju",
+          "source": "chub",
+          "handle": "saffronju",
+          "url": "/u/chub/saffronju"
+        },
+        "tags": [
+          "comedy",
+          "fantasy",
+          "pirates",
+          "baker-5",
+          "astronomer-5"
+        ],
+        "tagline": "Ridge meadow lemon lagoon atlas lotus glen grove otter crystal north wren heron oak pine boat anchor mint sage creek hazel finch anchor glen heron saffr.",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1338,
+        "stats": {
+          "popularity": 39,
+          "rating_avg": 5,
+          "rating_count": 3
+        },
+        "thumbnail_url": "/t/0fc939bb0b62838bc2afeeee1d5cca78d99d5bf2ba8e316a545073dc93ad6964.512.webp?v=1",
+        "image_url": "/i/0fc939bb0b62838bc2afeeee1d5cca78d99d5bf2ba8e316a545073dc93ad6964.png",
+        "version": "0fc939bb0b62838bc2afeeee1d5cca78d99d5bf2ba8e316a545073dc93ad6964",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-05T20:41:30.577194Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "moss-90866e69",
+        "url": "/c/moss-90866e69",
+        "name": "Viol",
+        "creator": {
+          "name": "valleyoce",
+          "source": "chub",
+          "handle": "valleyoce",
+          "url": "/u/chub/valleyoce"
+        },
+        "tags": [
+          "painter-5",
+          "fantasy",
+          "poet-5"
+        ],
+        "tagline": "Lotus brook fjord sage blossom trail lagoon.",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1526,
+        "stats": {
+          "popularity": 25,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/84d3e90da026e099f1fee85ce92c3136b511e5b2516fba686b4eee9982f6416e.512.webp?v=1",
+        "image_url": "/i/84d3e90da026e099f1fee85ce92c3136b511e5b2516fba686b4eee9982f6416e.png",
+        "version": "84d3e90da026e099f1fee85ce92c3136b511e5b2516fba686b4eee9982f6416e",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-07T23:48:42.842912Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "pe-sla-rave-f3c60557",
+        "url": "/c/pe-sla-rave-f3c60557",
+        "name": "HAR",
+        "creator": {
+          "name": "driftfinch_birc_2939",
+          "source": "chub",
+          "handle": "driftfinch_birc_2939",
+          "url": "/u/chub/driftfinch_birc_2939"
+        },
+        "tags": [
+          "fantasy",
+          "teacher-5",
+          "robots-5"
+        ],
+        "tagline": "Coral clover tulip heron flint dune thistle wind fable crystal drift crane wind button spruce orchard finch trail thistle chalk candle dune sage maple heron m",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 5638,
+        "stats": {
+          "popularity": 4,
+          "rating_avg": 1,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/6e709870a457d167617620c8b8df8ba6b25a378f65e8af324c895795a08349b0.512.webp?v=1",
+        "image_url": "/i/6e709870a457d167617620c8b8df8ba6b25a378f65e8af324c895795a08349b0.png",
+        "version": "f022e49a7a097d7c4c04c55318026e2dbda1ade4dc64ee66372ea7038719acd1",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-02T23:28:25.416395Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "sagecl-d8f6a4c8",
+        "url": "/c/sagecl-d8f6a4c8",
+        "name": "Cotton",
+        "creator": {
+          "name": "Canyonyarr",
+          "source": "chub",
+          "handle": "Canyonyarr",
+          "url": "/u/chub/Canyonyarr"
+        },
+        "tags": [
+          "curious-5",
+          "cheerful-5",
+          "music-5",
+          "forest",
+          "calm-5"
+        ],
+        "tagline": "Island beacon velvet drift birch frost kite pepper autumn !",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 978,
+        "stats": {
+          "popularity": 7,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/524d62e02d3e1cb794c6da1d1c04f9359e82375ab7b517f694ee66ea4f4fa5c8.512.webp?v=1",
+        "image_url": "/i/524d62e02d3e1cb794c6da1d1c04f9359e82375ab7b517f694ee66ea4f4fa5c8.png",
+        "version": "524d62e02d3e1cb794c6da1d1c04f9359e82375ab7b517f694ee66ea4f4fa5c8",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-08T01:23:42.526859Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "hazel-74e4ac01",
+        "url": "/c/hazel-74e4ac01",
+        "name": "Marbl",
+        "creator": {
+          "name": null,
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "puzzle-2",
+          "worldbuilding-5",
+          "action-5",
+          "scholar",
+          "fantasy",
+          "places-5",
+          "drama-5",
+          "healer",
+          "castle",
+          "factions-5",
+          "poet",
+          "forest",
+          "cheerful",
+          "calm",
+          "places-6",
+          "strategy-5",
+          "curious",
+          "cozy-5",
+          "wholesome-5"
+        ],
+        "tagline": "Rose echo crane ridge glen sage leaf drift ridge field pond sage echo cricket heron ocean lotus button dune winter garden frost thistle dune jade copper heron crystal valley slate quill north rose echo crane ridge glen sage leaf dri",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 3755,
+        "stats": {
+          "popularity": 118,
+          "rating_avg": 4,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/df6bdcdf03cc27298fb7733772913682c9b2c5e0730fa4550e24fe0a365fe8fb.512.webp?v=1",
+        "image_url": "/i/df6bdcdf03cc27298fb7733772913682c9b2c5e0730fa4550e24fe0a365fe8fb.png",
+        "version": "df6bdcdf03cc27298fb7733772913682c9b2c5e0730fa4550e24fe0a365fe8fb",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T08:08:54.778224Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "northbr-kitech-240c53de",
+        "url": "/c/northbr-kitech-240c53de",
+        "name": "Raven juniper.",
+        "creator": {
+          "name": "larkdel",
+          "source": "chub",
+          "handle": "larkdel",
+          "url": "/u/chub/larkdel"
+        },
+        "tags": [
+          "factions-6"
+        ],
+        "tagline": "Canyon island berry berry birch topaz beacon snow oak yarrow oak poppy honey jade finch berry timber plum hill mellow quill finch apple berry berry basin finch paper juniper lemon laurel button canyon island berry berry birch topaz beacon",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 2737,
+        "stats": {
+          "popularity": 0,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/48996e0a5a11726a35fb950c63c2bbf431a2f8df67480f5a52b863b6f8347039.512.webp?v=1",
+        "image_url": "/i/48996e0a5a11726a35fb950c63c2bbf431a2f8df67480f5a52b863b6f8347039.png",
+        "version": "48996e0a5a11726a35fb950c63c2bbf431a2f8df67480f5a52b863b6f8347039",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-02T22:47:27.957704Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "bramb-e1f46b64",
+        "url": "/c/bramb-e1f46b64",
+        "name": "Cedar",
+        "creator": {
+          "name": null,
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "original-5",
+          "drama-5",
+          "multiple-greetings-5",
+          "has-lorebook-5",
+          "places-6",
+          "curious",
+          "cozy-5"
+        ],
+        "tagline": "Snow fable quill meadow quiet daisy maple beacon quiet saffron jade pebble quill north laurel field berry heron pine heron shell cricket willow summer birch pine paper field lark anchor sand badge snow fable quill meadow quiet daisy.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 2877,
+        "stats": {
+          "popularity": 115,
+          "rating_avg": 5,
+          "rating_count": 2
+        },
+        "thumbnail_url": "/t/756fa7e57e957d7449b494eed37de52fdf9e046fae4de4b131f1e1a085ac3635.512.webp?v=1",
+        "image_url": "/i/756fa7e57e957d7449b494eed37de52fdf9e046fae4de4b131f1e1a085ac3635.png",
+        "version": "756fa7e57e957d7449b494eed37de52fdf9e046fae4de4b131f1e1a085ac3635",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-07T08:20:02.866643Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "saffront-327cfadc",
+        "url": "/c/saffront-327cfadc",
+        "name": "Mapleclo",
+        "creator": {
+          "name": null,
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "anime-5",
+          "fantasy",
+          "fictional-5",
+          "creatures-6",
+          "forest"
+        ],
+        "tagline": "Winter river sail bramble bamboo frost badge ember button finch chalk wren bramble comet teal bamboo fable cider clover fern saffron spruce bramble ivy cove badge river sorrel meadow dune tide daisy winter river sail bramble.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1359,
+        "stats": {
+          "popularity": 52,
+          "rating_avg": 5,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/cc3ca5c498a6cc5d9e35608cc1d86b3e127480d2f6b9384e97125f1067a8bc9b.512.webp?v=1",
+        "image_url": "/i/cc3ca5c498a6cc5d9e35608cc1d86b3e127480d2f6b9384e97125f1067a8bc9b.png",
+        "version": "cc3ca5c498a6cc5d9e35608cc1d86b3e127480d2f6b9384e97125f1067a8bc9b",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2025-01-23T23:47:09.176298Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "ston-crys-isla-birchhazelb-0e66f2e6",
+        "url": "/c/ston-crys-isla-birchhazelb-0e66f2e6",
+        "name": "Hazel honey autumn )",
+        "creator": {
+          "name": "laurelgarden_mello_7280",
+          "source": "chub",
+          "handle": "laurelgarden_mello_7280",
+          "url": "/u/chub/laurelgarden_mello_7280"
+        },
+        "tags": [
+          "teacher-3",
+          "inventor-2",
+          "summer",
+          "puzzle",
+          "scholar",
+          "slice-of-life-6",
+          "village-2",
+          "fantasy",
+          "space-4",
+          "mystery-6",
+          "space-6",
+          "friendly-5",
+          "steampunk-6",
+          "summer-2",
+          "astronomer-3",
+          "explorer",
+          "comedy-6",
+          "magic-6",
+          "cyberpunk-6",
+          "adventure-6",
+          "forest",
+          "english-6",
+          "village",
+          "original-6",
+          "desert",
+          "explorer-3",
+          "space",
+          "cooking-5",
+          "robots-5",
+          "sci-fi-6",
+          "slice-of-life",
+          "historical-6",
+          "fantasy-6",
+          "oc-5"
+        ],
+        "tagline": "Beacon lotus plum sorrel saffron pond.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 2350,
+        "stats": {
+          "popularity": 38,
+          "rating_avg": 5,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/92ab97406e2f9808585eb3bd064098ba99934a9a08363637d5951352eef2f985.512.webp?v=1",
+        "image_url": "/i/92ab97406e2f9808585eb3bd064098ba99934a9a08363637d5951352eef2f985.png",
+        "version": "92ab97406e2f9808585eb3bd064098ba99934a9a08363637d5951352eef2f985",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T23:45:05.196496Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "daw-cov-cri-elmat-a8-2b808dec",
+        "url": "/c/daw-cov-cri-elmat-a8-2b808dec",
+        "name": "Pond grove hill saffro",
+        "creator": {
+          "name": null,
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "mythology-5",
+          "comedy-4",
+          "fantasy",
+          "fairy-tale-6",
+          "multiple-greetings-6",
+          "forest",
+          "village",
+          "explorer-3",
+          "western-6"
+        ],
+        "tagline": "Cricket elm plum heron zephyr flint hill fjord stone ocean sky mist glade frost frost yarrow orchard quill willow finch hollow bamboo rain hazel frost autumn creek silver mint leaf cobble atlas cricket elm plum heron zephyr flint hill fjor",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 2516,
+        "stats": {
+          "popularity": 9,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/5dc39564e59d31b27d1d114562c7268aa39d993b241eba3a1a454610f84fb7c7.512.webp?v=1",
+        "image_url": "/i/5dc39564e59d31b27d1d114562c7268aa39d993b241eba3a1a454610f84fb7c7.png",
+        "version": "5dc39564e59d31b27d1d114562c7268aa39d993b241eba3a1a454610f84fb7c7",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T20:47:29.917200Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "laurelc-88d32e8d",
+        "url": "/c/laurelc-88d32e8d",
+        "name": "MEA",
+        "creator": {
+          "name": "larkdel",
+          "source": "chub",
+          "handle": "larkdel",
+          "url": "/u/chub/larkdel"
+        },
+        "tags": [],
+        "tagline": "Juniper oak button poppy reed apple atlas crane north dawn kite laurel fable rose arch paper heron quiet marble plum garden blossom lemon berry island quill leaf honey timber tulip heron orchard juniper oak button poppy reed apple atlas cra",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 2586,
+        "stats": {
+          "popularity": 0,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/9a2a4cf03d9e83253b12ce706405dfc03d647416b8184a7ac5e52ced361cf108.512.webp?v=1",
+        "image_url": "/i/9a2a4cf03d9e83253b12ce706405dfc03d647416b8184a7ac5e52ced361cf108.png",
+        "version": "9a2a4cf03d9e83253b12ce706405dfc03d647416b8184a7ac5e52ced361cf108",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-02T16:54:39.273774Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "plumclove-b5731c83",
+        "url": "/c/plumclove-b5731c83",
+        "name": "CAN",
+        "creator": {
+          "name": "Snowgla",
+          "source": "chub",
+          "handle": "Snowgla",
+          "url": "/u/chub/Snowgla"
+        },
+        "tags": [
+          "summer",
+          "fantasy",
+          "poet-3",
+          "village",
+          "pirates-6",
+          "explorer-3"
+        ],
+        "tagline": "Lark hollow button basin wind pond kettle autumn saffron bamboo grove meadow cotton glen hill olive tulip apple willow otter frost ivy winter meadow raven plum hazel sage sand cabin apple tulip lark hollow button basin wind pond kett",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 4870,
+        "stats": {
+          "popularity": 35,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/38373a97dca67c830ba2320147cf58e2c09843c6228ecec4aa24c39ea0972230.512.webp?v=1",
+        "image_url": "/i/38373a97dca67c830ba2320147cf58e2c09843c6228ecec4aa24c39ea0972230.png",
+        "version": "38373a97dca67c830ba2320147cf58e2c09843c6228ecec4aa24c39ea0972230",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2025-01-05T20:47:34.872409Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "deltas-f814b96a",
+        "url": "/c/deltas-f814b96a",
+        "name": "Lotuso",
+        "creator": {
+          "name": "Linenr_Dunen",
+          "source": "chub",
+          "handle": "Linenr_Dunen",
+          "url": "/u/chub/Linenr_Dunen"
+        },
+        "tags": [
+          "comedy",
+          "library",
+          "fantasy",
+          "anime-4",
+          "robots-6",
+          "forest",
+          "desert",
+          "robots-4",
+          "dragons-6"
+        ],
+        "tagline": "Maple robin summer kettle velvet echo bramble !",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 583,
+        "stats": {
+          "popularity": 7,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/514fee49a95bc1b932d6ae46a393277e1744a2151d38224e41b9555a31892eec.512.webp?v=1",
+        "image_url": "/i/514fee49a95bc1b932d6ae46a393277e1744a2151d38224e41b9555a31892eec.webp",
+        "version": "be34ea5a4d3120079ea2e6fb941ec7b0e7510c154b4fd4c446cd06657f3139d6",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T05:52:13.415059Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "f-thistleap-mello-5bff483f",
+        "url": "/c/f-thistleap-mello-5bff483f",
+        "name": "Raven velvet arch",
+        "creator": {
+          "name": "Pepperapp6",
+          "source": "chub",
+          "handle": "Pepperapp6",
+          "url": "/u/chub/Pepperapp6"
+        },
+        "tags": [
+          "village-2",
+          "fantasy",
+          "forest",
+          "village",
+          "desert",
+          "space"
+        ],
+        "tagline": "Chalk bell delta saffron zephyr finch paper drift apple birch echo moss finch delta timber beacon cider timber candle hill robin autumn cider anchor sand cricket daisy honey ember sand badge ocean chalk bell delta saffron zephyr f",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 8446,
+        "stats": {
+          "popularity": 8,
+          "rating_avg": 2,
+          "rating_count": 4
+        },
+        "thumbnail_url": "/t/bf812e636842ab15dfe2965c5580506689c23e96714b0e86514db1d1e523576d.512.webp?v=1",
+        "image_url": "/i/bf812e636842ab15dfe2965c5580506689c23e96714b0e86514db1d1e523576d.png",
+        "version": "bf812e636842ab15dfe2965c5580506689c23e96714b0e86514db1d1e523576d",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2025-10-11T00:47:07.356878Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "velvet-7da32bbd",
+        "url": "/c/velvet-7da32bbd",
+        "name": "Mistam",
+        "creator": {
+          "name": "Northcan",
+          "source": "chub",
+          "handle": "Northcan",
+          "url": "/u/chub/Northcan"
+        },
+        "tags": [
+          "has-lorebook-6",
+          "winter-2",
+          "mountains-2",
+          "travel-2",
+          "village-2",
+          "fantasy",
+          "summer-2",
+          "castle",
+          "sports-2",
+          "library-2",
+          "festival-2",
+          "teacher-2",
+          "forest-2",
+          "desert-2"
+        ],
+        "tagline": "Heron lagoon birch hazel dune anchor crystal lagoon c",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 3416,
+        "stats": {
+          "popularity": 85,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.512.webp?v=1",
+        "image_url": "/i/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.png",
+        "version": "6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T12:33:31.489349Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "slatejuni-a5ae8181",
+        "url": "/c/slatejuni-a5ae8181",
+        "name": "Cobblehaz",
+        "creator": {
+          "name": "Northcan",
+          "source": "chub",
+          "handle": "Northcan",
+          "url": "/u/chub/Northcan"
+        },
+        "tags": [
+          "village-2",
+          "fantasy",
+          "cooking-6",
+          "ghosts-6",
+          "forest"
+        ],
+        "tagline": "Fable laurel juniper cider cobble copper mea",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 2254,
+        "stats": {
+          "popularity": 0,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/321bc630343e60ffb80d1912d456241d4d85b3fd2e19a479aa48a679c60b44d0.512.webp?v=1",
+        "image_url": "/i/321bc630343e60ffb80d1912d456241d4d85b3fd2e19a479aa48a679c60b44d0.png",
+        "version": "321bc630343e60ffb80d1912d456241d4d85b3fd2e19a479aa48a679c60b44d0",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2024-05-23T06:47:29.861078Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "dais-79ab29a9",
+        "url": "/c/dais-79ab29a9",
+        "name": "Lemo",
+        "creator": {
+          "name": "Ivygar",
+          "source": "chub",
+          "handle": "Ivygar",
+          "url": "/u/chub/Ivygar"
+        },
+        "tags": [
+          "comedy",
+          "teacher-3",
+          "puzzle",
+          "historical",
+          "scholar",
+          "fantasy",
+          "astronomer-3",
+          "village",
+          "desert",
+          "explorer-3"
+        ],
+        "tagline": "Kettle island spruce delta kite basin juniper ivy poppy plum crane quiet basin tulip birch moss saffron fable cricket lark.",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1379,
+        "stats": {
+          "popularity": 36400,
+          "rating_avg": 5,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/de93482dd118e591c861793946b99459869aba3d634580044479c9b7d1fb180f.512.webp?v=1",
+        "image_url": "/i/de93482dd118e591c861793946b99459869aba3d634580044479c9b7d1fb180f.png",
+        "version": "de93482dd118e591c861793946b99459869aba3d634580044479c9b7d1fb180f",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-02T19:12:33.755423Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "fjordcr-viole-e005a5ab",
+        "url": "/c/fjordcr-viole-e005a5ab",
+        "name": "Cider plum ba",
+        "creator": {
+          "name": "blossom",
+          "source": "chub",
+          "handle": "blossom",
+          "url": "/u/chub/blossom"
+        },
+        "tags": [
+          "teacher-3",
+          "inventor-2",
+          "sports-6",
+          "travel-6",
+          "fantasy",
+          "castle",
+          "game-6",
+          "astronomer-3",
+          "village",
+          "desert",
+          "explorer-3",
+          "robots-5",
+          "gardening-6"
+        ],
+        "tagline": "Mellow flint otter nectar river spruce finch topaz plum cabin shell reed mellow rose paper laurel poppy topaz willow saffron marble frost star fable win.",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 2987,
+        "stats": {
+          "popularity": 147,
+          "rating_avg": 5,
+          "rating_count": 2
+        },
+        "thumbnail_url": "/t/82f4907efce26954a3c89609d4e0911e3504e997fade20f6a423b2bfe8c41e12.512.webp?v=1",
+        "image_url": "/i/82f4907efce26954a3c89609d4e0911e3504e997fade20f6a423b2bfe8c41e12.png",
+        "version": "82f4907efce26954a3c89609d4e0911e3504e997fade20f6a423b2bfe8c41e12",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2025-01-31T05:47:22.304447Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "elmbel-ro-berryfl-ambe-24bfd0d6",
+        "url": "/c/elmbel-ro-berryfl-ambe-24bfd0d6",
+        "name": "Cricket quill chalk boa",
+        "creator": {
+          "name": "saffronju",
+          "source": "chub",
+          "handle": "saffronju",
+          "url": "/u/chub/saffronju"
+        },
+        "tags": [
+          "fantasy",
+          "astronomer-5"
+        ],
+        "tagline": "Dawn nectar bamboo raven poppy spruce pebble badge petal boat robin sky garden zephyr creek tulip plum lagoon saffron glade otter harbor thyme willow fable saffron quill rain sand cabin ocean ivy dawn nectar bamboo raven poppy spruce pebbl",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1172,
+        "stats": {
+          "popularity": 25,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/c11109457344fb255df6d7a82a98571f026a430ceecd02d80d19c3adfee20e8b.512.webp?v=1",
+        "image_url": "/i/c11109457344fb255df6d7a82a98571f026a430ceecd02d80d19c3adfee20e8b.png",
+        "version": "1e2cfe11ba3d8fc85ff90b9389dd30351b243be3dd05591eec7bac4a31f80aeb",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T11:05:33.419358Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "snowblo-4b1f947b",
+        "url": "/c/snowblo-4b1f947b",
+        "name": "Oakridg",
+        "creator": {
+          "name": null,
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "puzzle",
+          "library-6",
+          "fantasy",
+          "comedy-5",
+          "forest"
+        ],
+        "tagline": "Stone ember thistle nectar frost blossom lemon hollow grove sand star quiet harbor ivy beacon hill anchor lotu?",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 885,
+        "stats": {
+          "popularity": 22,
+          "rating_avg": 4,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/81409a904c015f8ee0d7eb4e535cc19a7aaa1b3399d3f57847ce660e032a5259.512.webp?v=1",
+        "image_url": "/i/81409a904c015f8ee0d7eb4e535cc19a7aaa1b3399d3f57847ce660e032a5259.png",
+        "version": "81409a904c015f8ee0d7eb4e535cc19a7aaa1b3399d3f57847ce660e032a5259",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T03:37:12.565819Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "sta-mead-ca-pond-5d99c805",
+        "url": "/c/sta-mead-ca-pond-5d99c805",
+        "name": "Birch island mea",
+        "creator": {
+          "name": "Northcan",
+          "source": "chub",
+          "handle": "Northcan",
+          "url": "/u/chub/Northcan"
+        },
+        "tags": [
+          "painter-3",
+          "village-2",
+          "village-6",
+          "friendly-3",
+          "anime-6",
+          "has-lorebook-4"
+        ],
+        "tagline": "Topaz chime hazel rain ocean vi.",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1738,
+        "stats": {
+          "popularity": 25,
+          "rating_avg": 3,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/ab7f745d5ef6ce9f6844ba9bde60b31b18382782bbdb8ad06b62c6f29736b4d6.512.webp?v=1",
+        "image_url": "/i/ab7f745d5ef6ce9f6844ba9bde60b31b18382782bbdb8ad06b62c6f29736b4d6.png",
+        "version": "ab7f745d5ef6ce9f6844ba9bde60b31b18382782bbdb8ad06b62c6f29736b4d6",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T20:38:55.696450Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "anchorr-403ce05d",
+        "url": "/c/anchorr-403ce05d",
+        "name": "Winterp",
+        "creator": {
+          "name": "cricke",
+          "source": "chub",
+          "handle": "cricke",
+          "url": "/u/chub/cricke"
+        },
+        "tags": [
+          "action-6",
+          "library-5",
+          "fictional-6",
+          "fantasy",
+          "forest-6",
+          "desert-6",
+          "castle",
+          "castle-6",
+          "oc-6"
+        ],
+        "tagline": "Cotton lotus petal saffron basin b",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 2313,
+        "stats": {
+          "popularity": 33,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/3f468041f234a71b7411afabc66b57125d9f3c100ab3ff09066aca75d8448758.512.webp?v=1",
+        "image_url": "/i/3f468041f234a71b7411afabc66b57125d9f3c100ab3ff09066aca75d8448758.png",
+        "version": "3f468041f234a71b7411afabc66b57125d9f3c100ab3ff09066aca75d8448758",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-05T23:11:53.746725Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "crys-c45229a7",
+        "url": "/c/crys-c45229a7",
+        "name": "Will",
+        "creator": {
+          "name": "Chim__",
+          "source": "chub",
+          "handle": "Chim__",
+          "url": "/u/chub/Chim__"
+        },
+        "tags": [],
+        "tagline": "Maple sage cricket hazel meadow yarrow orchard heron jade robin b",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1582,
+        "stats": {
+          "popularity": 1,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/a65dba1bde7555afc8db864c49554387aa838c7f9359e8912232b840ecdf57c1.512.webp?v=1",
+        "image_url": "/i/a65dba1bde7555afc8db864c49554387aa838c7f9359e8912232b840ecdf57c1.png",
+        "version": "a65dba1bde7555afc8db864c49554387aa838c7f9359e8912232b840ecdf57c1",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-07T13:04:00.845300Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "butto-c8cb849f",
+        "url": "/c/butto-c8cb849f",
+        "name": "Maple",
+        "creator": {
+          "name": "blossom",
+          "source": "chub",
+          "handle": "blossom",
+          "url": "/u/chub/blossom"
+        },
+        "tags": [
+          "festival-6",
+          "teacher-3",
+          "fantasy",
+          "castle",
+          "astronomer-3",
+          "winter-6",
+          "forest",
+          "english",
+          "village",
+          "mountains-6",
+          "explorer-3"
+        ],
+        "tagline": "Swan plum delta lantern cider shell garden birch rose arch saffron blossom garden harbor crane larch bamboo arch badge fern ca.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 3202,
+        "stats": {
+          "popularity": 55,
+          "rating_avg": 3,
+          "rating_count": 12
+        },
+        "thumbnail_url": "/t/ef5e9cd4bd644782a851a52a1d6b97e66a4a08950109cde3b03e1369cb8aa06b.512.webp?v=1",
+        "image_url": "/i/ef5e9cd4bd644782a851a52a1d6b97e66a4a08950109cde3b03e1369cb8aa06b.png",
+        "version": "ef5e9cd4bd644782a851a52a1d6b97e66a4a08950109cde3b03e1369cb8aa06b",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2025-04-12T02:49:04.750699Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "dune-e6f1438f",
+        "url": "/c/dune-e6f1438f",
+        "name": "Birc",
+        "creator": {
+          "name": "valleyoce",
+          "source": "chub",
+          "handle": "valleyoce",
+          "url": "/u/chub/valleyoce"
+        },
+        "tags": [
+          "inventor-6",
+          "fantasy",
+          "puzzle-6"
+        ],
+        "tagline": "Oak dawn banner bramble canyon apple linen lantern thistle crane dune hazel basin pepper velvet blossom mist river dune copper lemon berry .",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 852,
+        "stats": {
+          "popularity": 53,
+          "rating_avg": 4,
+          "rating_count": 2
+        },
+        "thumbnail_url": "/t/81c3d3087db72d4784fc0fcb063ed80d6f43b2e6f83414add4242649a78e8f73.512.webp?v=1",
+        "image_url": "/i/81c3d3087db72d4784fc0fcb063ed80d6f43b2e6f83414add4242649a78e8f73.png",
+        "version": "81c3d3087db72d4784fc0fcb063ed80d6f43b2e6f83414add4242649a78e8f73",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-06T04:13:25.835075Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "larkcr-otters-1f0b4f65",
+        "url": "/c/larkcr-otters-1f0b4f65",
+        "name": "Bramble cedar",
+        "creator": {
+          "name": "violetca_birc_8550",
+          "source": "chub",
+          "handle": "violetca_birc_8550",
+          "url": "/u/chub/violetca_birc_8550"
+        },
+        "tags": [],
+        "tagline": "Grove comet zephyr sage blossom quill birch marble paper pond stone atlas brook raven willow olive atlas frost boat flint comet moss moss jade ivy willow anchor sorrel mist finch anchor lagoon grove comet zephyr sage blossom quill birch m",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1443,
+        "stats": {
+          "popularity": 33,
+          "rating_avg": 5,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/937b390e2d917d7602855a32ca89c41f17b6b365e08cc6b087bba9eee3e0d101.512.webp?v=1",
+        "image_url": "/i/937b390e2d917d7602855a32ca89c41f17b6b365e08cc6b087bba9eee3e0d101.png",
+        "version": "3f039343ef024927a4a1240bf5f252a081771717b6a181bc561eca16ffa4b646",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-05T14:06:37.267622Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "paper-04763138",
+        "url": "/c/paper-04763138",
+        "name": "Crane",
+        "creator": {
+          "name": "cricke",
+          "source": "chub",
+          "handle": "cricke",
+          "url": "/u/chub/cricke"
+        },
+        "tags": [
+          "knight-6",
+          "scholar-6",
+          "bard-6",
+          "merchant-6",
+          "library-2",
+          "oc-6",
+          "fantasy-7",
+          "village-5",
+          "sports-5"
+        ],
+        "tagline": "Sage hill cobble clover bramble timber.",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1669,
+        "stats": {
+          "popularity": 587,
+          "rating_avg": 4,
+          "rating_count": 20
+        },
+        "thumbnail_url": "/t/9c1be20e0d1b9dc88c2a56902ecc105fe87dda3fd8d8d1500cc2b625d7458693.512.webp?v=1",
+        "image_url": "/i/9c1be20e0d1b9dc88c2a56902ecc105fe87dda3fd8d8d1500cc2b625d7458693.png",
+        "version": "9c1be20e0d1b9dc88c2a56902ecc105fe87dda3fd8d8d1500cc2b625d7458693",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T15:52:03.105756Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "vel-fe-fin-rain-app-9ad3f1ff",
+        "url": "/c/vel-fe-fin-rain-app-9ad3f1ff",
+        "name": "OTTER",
+        "creator": {
+          "name": "otter_oce_2887",
+          "source": "chub",
+          "handle": "otter_oce_2887",
+          "url": "/u/chub/otter_oce_2887"
+        },
+        "tags": [
+          "fantasy",
+          "music-5",
+          "inventor-4",
+          "adventure-7",
+          "comedy-6",
+          "forest",
+          "mystery-7"
+        ],
+        "tagline": "Hollow dawn garden daisy swan linen trail meadow trail tide winter creek chime cabin atlas pine north bramble pebble summer sorrel anchor boat spark tide maple linen hazel bramble snow beacon sand hollow dawn garden daisy swan linen tra",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 2353,
+        "stats": {
+          "popularity": 27,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/f1f0fd865e5b33d42e3655c500319a41df6c109dbd37b6e0234e9e1c75a8e383.512.webp?v=1",
+        "image_url": "/i/f1f0fd865e5b33d42e3655c500319a41df6c109dbd37b6e0234e9e1c75a8e383.png",
+        "version": "d5ab5f967cb65253e7d572c0dcd18f063f03ccd1dc64f60dfa0785f620eb35c4",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-05T16:08:44.193602Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "yarrowm-fe64ed95",
+        "url": "/c/yarrowm-fe64ed95",
+        "name": "Summert",
+        "creator": {
+          "name": "Northcan",
+          "source": "chub",
+          "handle": "Northcan",
+          "url": "/u/chub/Northcan"
+        },
+        "tags": [
+          "village-2",
+          "fantasy",
+          "summer-2",
+          "merchant",
+          "painter-6",
+          "village",
+          "baker-6"
+        ],
+        "tagline": "Topaz pond drift moss elm grove h.",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1791,
+        "stats": {
+          "popularity": 20,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/0b54217af0975af526b216d0e74c6409a45f86e5509eb395fadd5cb05d5a31b7.512.webp?v=1",
+        "image_url": "/i/0b54217af0975af526b216d0e74c6409a45f86e5509eb395fadd5cb05d5a31b7.png",
+        "version": "0b54217af0975af526b216d0e74c6409a45f86e5509eb395fadd5cb05d5a31b7",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-05T07:05:27.189854Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "harb-cra-canyo-3531e671",
+        "url": "/c/harb-cra-canyo-3531e671",
+        "name": "Drift cabin or",
+        "creator": {
+          "name": "cricke",
+          "source": "chub",
+          "handle": "cricke",
+          "url": "/u/chub/cricke"
+        },
+        "tags": [
+          "puzzle-2",
+          "scholar",
+          "fantasy",
+          "castle",
+          "puzzle-5",
+          "sailor",
+          "knight-5",
+          "english-4",
+          "poet",
+          "teacher",
+          "cheerful",
+          "calm",
+          "travel-5",
+          "slice-of-life-7",
+          "sports-5",
+          "poet-6",
+          "wholesome"
+        ],
+        "tagline": "Clover button grove flint maple coral atlas com.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1294,
+        "stats": {
+          "popularity": 169,
+          "rating_avg": 5,
+          "rating_count": 3
+        },
+        "thumbnail_url": "/t/411776164fc72a22c0380371b3ae818ab2d511bc5e7d7f778e50d202f68b4f30.512.webp?v=1",
+        "image_url": "/i/411776164fc72a22c0380371b3ae818ab2d511bc5e7d7f778e50d202f68b4f30.png",
+        "version": "411776164fc72a22c0380371b3ae818ab2d511bc5e7d7f778e50d202f68b4f30",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T07:02:13.450139Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "applef-robi-ebaa3cad",
+        "url": "/c/applef-robi-ebaa3cad",
+        "name": "Raven breez",
+        "creator": {
+          "name": null,
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "has-lorebook-3",
+          "puzzle",
+          "fantasy",
+          "cheerful-6",
+          "comedy-7",
+          "forest",
+          "desert"
+        ],
+        "tagline": "Cedar arch lotus nectar thyme pepper silver birch plum .",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1272,
+        "stats": {
+          "popularity": 18,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/fdc3bc80c8191fd2205e90de43af007f384e0bdf7a37982e916c8002a996a7a3.512.webp?v=1",
+        "image_url": "/i/fdc3bc80c8191fd2205e90de43af007f384e0bdf7a37982e916c8002a996a7a3.png",
+        "version": "fdc3bc80c8191fd2205e90de43af007f384e0bdf7a37982e916c8002a996a7a3",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T22:15:42.190745Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "lago-3f08467c",
+        "url": "/c/lago-3f08467c",
+        "name": "Delt",
+        "creator": {
+          "name": "Pine286",
+          "source": "chub",
+          "handle": "Pine286",
+          "url": "/u/chub/Pine286"
+        },
+        "tags": [
+          "historical",
+          "fantasy",
+          "curious-6",
+          "forest",
+          "village",
+          "calm-6"
+        ],
+        "tagline": "Pond sky slate grove clover oak petal lotus mist nectar pebble mellow badge zephyr vel?",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1272,
+        "stats": {
+          "popularity": 21,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/289ffedab939afc37ee90b25f76f4ff612d1f10ba849c37648ca345853a5ffe6.512.webp?v=1",
+        "image_url": "/i/289ffedab939afc37ee90b25f76f4ff612d1f10ba849c37648ca345853a5ffe6.png",
+        "version": "289ffedab939afc37ee90b25f76f4ff612d1f10ba849c37648ca345853a5ffe6",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-07T14:35:16.824842Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "kett-badg-otte-delt-san-sail-sor-fr-8974bd92",
+        "url": "/c/kett-badg-otte-delt-san-sail-sor-fr-8974bd92",
+        "name": "NECTARNO",
+        "creator": {
+          "name": "pinearch_elmrob_7158",
+          "source": "chub",
+          "handle": "pinearch_elmrob_7158",
+          "url": "/u/chub/pinearch_elmrob_7158"
+        },
+        "tags": [
+          "fantasy",
+          "sci-fi-7",
+          "forest"
+        ],
+        "tagline": "Maple hollow coral glade cedar north petal field plum hazel quiet sage grove echo tulip creek mellow frost yarrow robin chalk fable bramble berry mint spark button boat gr",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 13406,
+        "stats": {
+          "popularity": 9,
+          "rating_avg": 1,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/d044fc65bfbf8b47221b8adc844d59028a9f44c3502b7b833252241096daa0d1.512.webp?v=1",
+        "image_url": "/i/d044fc65bfbf8b47221b8adc844d59028a9f44c3502b7b833252241096daa0d1.png",
+        "version": "55ed938774ea6d15e3aa85123006504de59809cf5c3255f977d543cf3ba7f770",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-04T22:30:08.130427Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "2dP6MGURXSoTYEQ8-zX_4QHKe8_hD1pB-E1jPaNXfw8J247C985lLzCGUBXb5LgeBj09mfO1N5oEOQ2JkCeK5YUKfoFInlajSmti2Wwom-SCCy8GWVThalVoH7UEOiuoA9P5vr_-69JLDQxCfWVvXL38cpj._857Rk6AMXcrvBBEq1L4f17hlAbekep3HhkcGZalMXg",
+    "has_more": true
+  }
+}

@@ -1,0 +1,259 @@
+{
+  "name": "search-kind-lorebook",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "kind": "lorebook",
+      "limit": "2"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"049d17942598e7e6ca4101d49def7b67ff9373da578cb250f8dc83df13b481c3\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "lorebook",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "newest",
+      "page": 1,
+      "limit": 2,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "trailrid-lorebook-c220230d",
+        "path": "/c/trailrid-lorebook-c220230d",
+        "name": "Flintlar_Topazgro",
+        "tagline": "Sage teal amber cider glen heron cabin plum berry glade banner garden spruce north maple orchard qu.",
+        "thumb_url": null,
+        "cover_w": null,
+        "cover_h": null,
+        "nsfw": true,
+        "kind": "lorebook",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "travel",
+            "label": "travel",
+            "shortlist_display": "male"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "ocean",
+            "label": "Ocean"
+          },
+          {
+            "slug": "desert",
+            "label": "Desert"
+          },
+          {
+            "slug": "castle",
+            "label": "castle"
+          },
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "forest",
+            "label": "FOREST"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "travel",
+            "label": "travel"
+          },
+          {
+            "slug": "desert",
+            "label": "Desert"
+          },
+          {
+            "slug": "castle",
+            "label": "castle"
+          },
+          {
+            "slug": "ocean",
+            "label": "Ocean"
+          }
+        ],
+        "tag_count": 6,
+        "token_budget": 1177,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T17:11:48.698899Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Buttondriftbut",
+          "path": "/u/chub/Buttondriftbut",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "dawncr-drift-mint-lotusa-birc-c3-27-b00d0631",
+        "path": "/c/dawncr-drift-mint-lotusa-birc-c3-27-b00d0631",
+        "name": "Meadow fable juniper river autumn fjord)",
+        "tagline": "Mint clover ocean grove frost poppy fable moss marble canyon bramble apple garden zephyr cove glade atlas mint basin island finch rose robin finch basin glade nor.",
+        "thumb_url": null,
+        "cover_w": null,
+        "cover_h": null,
+        "nsfw": false,
+        "kind": "lorebook",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [],
+        "search_tags": [],
+        "tag_count": 0,
+        "token_budget": 667,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T15:15:43.292040Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "reedcedara_grovenort_65315",
+          "path": "/u/chub/reedcedara_grovenort_65315",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 2,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": null,
+      "has_cover": false,
+      "hidden": null,
+      "hidden_capped": false
+    },
+    "items": [
+      {
+        "slug": "trailrid-lorebook-c220230d",
+        "url": "/c/trailrid-lorebook-c220230d",
+        "name": "Flintlar_Topazgro",
+        "creator": {
+          "name": "Buttondriftbut",
+          "source": "chub",
+          "handle": "Buttondriftbut",
+          "url": "/u/chub/Buttondriftbut"
+        },
+        "tags": [
+          "fantasy",
+          "castle",
+          "travel",
+          "forest",
+          "ocean",
+          "desert"
+        ],
+        "tagline": "Sage teal amber cider glen heron cabin plum berry glade banner garden spruce north maple orchard qu.",
+        "nsfw": true,
+        "kind": "lorebook",
+        "token_count": 1177,
+        "stats": {
+          "popularity": 0,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": null,
+        "image_url": null,
+        "version": "e6c1b1065929aecad38772a459205fc817891e892c3781f48faad96c99c15167",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T17:11:48.698899Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "dawncr-drift-mint-lotusa-birc-c3-27-b00d0631",
+        "url": "/c/dawncr-drift-mint-lotusa-birc-c3-27-b00d0631",
+        "name": "Meadow fable juniper river autumn fjord)",
+        "creator": {
+          "name": "reedcedara_grovenort_65315",
+          "source": "chub",
+          "handle": "reedcedara_grovenort_65315",
+          "url": "/u/chub/reedcedara_grovenort_65315"
+        },
+        "tags": [],
+        "tagline": "Mint clover ocean grove frost poppy fable moss marble canyon bramble apple garden zephyr cove glade atlas mint basin island finch rose robin finch basin glade nor.",
+        "nsfw": false,
+        "kind": "lorebook",
+        "token_count": 667,
+        "stats": {
+          "popularity": 0,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": null,
+        "image_url": null,
+        "version": "12fb4be4f96210a8bb944cf810c0e39af84b53826bf90e075f30980481be21da",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T15:15:43.292040Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "rL3ECw1u6dDWE_cEo9vmVJFeLr_poJoab4eoVry3bpI-KfOmMxJZeU2RqrRG2YZNKt3ANNVoK7gSCgQY9TuMVo9vRQ7SjMBPD6eBEZxryPdflOtvatLtJ889HOj_HW2bozr-IUEV3LkxTZAah1IwJM5cIa6dHghlTEi2dUnNyOSw5LVU80QXLpIb6xLOOYvMbH.QsGyiwYjV6YvbWBi2YLYIeSJnX9W_azGMtzQaedQRtJ",
+    "has_more": true
+  }
+}

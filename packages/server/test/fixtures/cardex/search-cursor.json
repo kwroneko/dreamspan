@@ -1,0 +1,236 @@
+{
+  "name": "search-cursor",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "sort": "popular",
+      "limit": "2",
+      "cursor": "MCRtQ7v1XwrlrqA8uS3jJVt-EIkKgJ_vtYNAMTUXH_A0Fqz-GuU9OFW0ucXYOzeZPd4Hjb3TgRE5T6oYLvkRk4euiYwt8vha6x2vK-2HApGQSl_5cui_JCReZa9HY_KLYVkJKFPql1Irpq1YXZOUfkPF2ts.E6_QDWU6jff1YP2Ehl2nqTp5uvZh33XT2LlVPNnka62"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"ce6f12ba65f32be40d00b866cb7a475a27871157adb471cc781d51dbb4f6a3a8\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "popular",
+      "page": 1,
+      "limit": 2,
+      "cursor": "MCRtQ7v1XwrlrqA8uS3jJVt-EIkKgJ_vtYNAMTUXH_A0Fqz-GuU9OFW0ucXYOzeZPd4Hjb3TgRE5T6oYLvkRk4euiYwt8vha6x2vK-2HApGQSl_5cui_JCReZa9HY_KLYVkJKFPql1Irpq1YXZOUfkPF2ts.E6_QDWU6jff1YP2Ehl2nqTp5uvZh33XT2LlVPNnka62"
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "paper-northbr-honey-dd87579c",
+        "path": "/c/paper-northbr-honey-dd87579c",
+        "name": "Cider cricket garden c",
+        "tagline": "Clover otter olive breeze boat arch hill sand anchor pebble willow anchor creek berry lark cricket kettle crane fern quiet delta honey laurel zephyr stone beacon comet glade lark nectar ember blossom clover otter olive breeze boat arch hill sand",
+        "thumb_url": "/t/df7b227e00b09b55556f3d9696fd1a00ee0dce7f35be9334ba3db81831ccf80c.512.webp?v=1",
+        "cover_w": 684,
+        "cover_h": 1000,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "risuai"
+        ],
+        "top_tags": [
+          {
+            "slug": "friendly-3",
+            "label": "FRIENDLY 3"
+          },
+          {
+            "slug": "action-3",
+            "label": "Action 3"
+          },
+          {
+            "slug": "strategy-3",
+            "label": "strategy 3"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "friendly-3",
+            "label": "FRIENDLY 3"
+          },
+          {
+            "slug": "action-3",
+            "label": "Action 3"
+          },
+          {
+            "slug": "strategy-3",
+            "label": "strategy 3"
+          },
+          {
+            "slug": "worldbuilding-3",
+            "label": "worldbuilding 3"
+          }
+        ],
+        "tag_count": 5,
+        "token_budget": 47297,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-30T18:00:09.454778Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "chimeg6",
+          "path": "/u/risuai/chimeg6",
+          "source": "risuai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "lagoonriver-spr-245d9b98",
+        "path": "/c/lagoonriver-spr-245d9b98",
+        "name": "Oak river hazel",
+        "tagline": "Crystal kite orchard copper pine cotton jade maple willow meadow ridge pine poppy kettle clover river copper sand kite cabin glen oak breeze frost ridge arch echo grove bramble mint fern island crystal kite orchard copper pine cotton jade m",
+        "thumb_url": "/t/c804434da4f1e8d3b1b1080e58b6abf9de7d72ee7563393eaadd52bc5850d0a2.512.webp?v=1",
+        "cover_w": 768,
+        "cover_h": 749,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "risuai"
+        ],
+        "top_tags": [],
+        "search_tags": [],
+        "tag_count": 0,
+        "token_budget": 33850,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-02T18:53:29.483622Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "breezebanne",
+          "path": "/u/risuai/breezebanne",
+          "source": "risuai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 2,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "paper-northbr-honey-dd87579c",
+        "url": "/c/paper-northbr-honey-dd87579c",
+        "name": "Cider cricket garden c",
+        "creator": {
+          "name": "chimeg6",
+          "source": "risuai",
+          "handle": "chimeg6",
+          "url": "/u/risuai/chimeg6"
+        },
+        "tags": [
+          "action-3",
+          "worldbuilding-3",
+          "strategy-3",
+          "friendly-3"
+        ],
+        "tagline": "Clover otter olive breeze boat arch hill sand anchor pebble willow anchor creek berry lark cricket kettle crane fern quiet delta honey laurel zephyr stone beacon comet glade lark nectar ember blossom clover otter olive breeze boat arch hill sand",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 47297,
+        "stats": {
+          "popularity": 610900,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/df7b227e00b09b55556f3d9696fd1a00ee0dce7f35be9334ba3db81831ccf80c.512.webp?v=1",
+        "image_url": "/i/df7b227e00b09b55556f3d9696fd1a00ee0dce7f35be9334ba3db81831ccf80c.png",
+        "version": "9c14f82a21713f25d3d183c07a3b0405c708afe91d295c6ce0b9909a6fcb663a",
+        "download_modes": [
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-30T18:00:09.454778Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "lagoonriver-spr-245d9b98",
+        "url": "/c/lagoonriver-spr-245d9b98",
+        "name": "Oak river hazel",
+        "creator": {
+          "name": "breezebanne",
+          "source": "risuai",
+          "handle": "breezebanne",
+          "url": "/u/risuai/breezebanne"
+        },
+        "tags": [],
+        "tagline": "Crystal kite orchard copper pine cotton jade maple willow meadow ridge pine poppy kettle clover river copper sand kite cabin glen oak breeze frost ridge arch echo grove bramble mint fern island crystal kite orchard copper pine cotton jade m",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 33850,
+        "stats": {
+          "popularity": 573800,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/c804434da4f1e8d3b1b1080e58b6abf9de7d72ee7563393eaadd52bc5850d0a2.512.webp?v=1",
+        "image_url": "/i/c804434da4f1e8d3b1b1080e58b6abf9de7d72ee7563393eaadd52bc5850d0a2.png",
+        "version": "c131335182f5090ef15f62d032540e454f88f10cf96800937643d9be37393998",
+        "download_modes": [
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-02T18:53:29.483622Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "CjJ-cI61vY4UgydMBd90QuQjLJb3tgMb8av4ERzJB64zmF2loVpfPKInT4ZK2ldNj9jHVbZ8RuycOpvU96tdNEdfNk9niWDh1uRU39KkYbpbV866GdO1zG2J4CZNUfsgo_3837ivZf3pbCFyVwzHZ8NFwhP.krodKd_55BOHRXZ0jvhw3UmFjXD5bQhEFeZpHZaYCEy",
+    "has_more": true
+  }
+}

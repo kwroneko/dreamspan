@@ -1,0 +1,17 @@
+{
+  "name": "image-missing",
+  "request": {
+    "path": "/t/1232515794896515347790895506399512325157948965153477908955063995.512.webp",
+    "query": {}
+  },
+  "status": 404,
+  "headers": {
+    "content-type": "text/plain",
+    "cache-control": "max-age=60",
+    "x-content-type-options": "nosniff"
+  },
+  "bodyInfo": {
+    "bytes": 10,
+    "magic": "6e6f7420"
+  }
+}

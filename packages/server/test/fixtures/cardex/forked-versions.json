@@ -1,0 +1,86 @@
+{
+  "name": "forked-versions",
+  "request": {
+    "path": "/api/v1/versions/chub/Northcan%2Fvelvet-feea3cf4dddc",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "no-store",
+    "ratelimit-limit": "60",
+    "ratelimit-remaining": "59",
+    "ratelimit-reset": "1",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "items": [
+      {
+        "id": "681017",
+        "version": {
+          "slug": "velvet-7da32bbd",
+          "content_hash": "7de903f86ec11fa0de562f78646f2ff3ab8c5f680ea661dd4b562a77ec961349",
+          "card_path": "/c/velvet-7da32bbd",
+          "origin_path": "/chub/characters/Northcan/velvet-feea3cf4dddc?v=4a1f86d86931a293",
+          "active_from": "2024-07-19T19:36:47.487507Z",
+          "active_to": null,
+          "is_current": true,
+          "is_viewing": false,
+          "meta": {
+            "character_version": "lant",
+            "created": null,
+            "modified": null,
+            "sources": [],
+            "creator": null
+          }
+        },
+        "compare": {
+          "fields": {
+            "description": "1d32dc04f9126707",
+            "greetings": "6236f0ed4e1c59c1",
+            "lorebook": "ea195e7e5038f761",
+            "lorebook_text": "c9b1ebf94102df46",
+            "name": "fd60b805bf5889a8",
+            "notes": "657d0b8a1fefdd78",
+            "tags": "merchant-3"
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 0,
+            "first_mes": 623,
+            "notes": 252,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "a32539a36ded324c",
+          "depth_prompt_key": null,
+          "tokens": 3416
+        },
+        "lorebook_entries": 7,
+        "lorebook_attached_by": null,
+        "cover_key": "300688",
+        "cover_thumb_url": "/t/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.512.webp?v=1",
+        "nsfw": false,
+        "cover_listing_fallback": false,
+        "texts": {
+          "tags": "sailor-3"
+        },
+        "key_hashes": {
+          "alternate_greetings": "409f46623ed3a2916aafd4c613174ebd",
+          "character_book": "4951e4805300eb4403de97e354f24ffd",
+          "creator_notes": "fdf22093583535dab807a95eb3a7f167",
+          "description": "3ad7eda70d69ea2d0952cd5e54d913a6",
+          "first_mes": "a4737fbd0d8651ca47396b1e18968988",
+          "name": "b990520075afa27e2a0526f8ad256cca"
+        },
+        "json_url": "/api/v1/download/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f?mode=json"
+      }
+    ],
+    "next": null
+  }
+}

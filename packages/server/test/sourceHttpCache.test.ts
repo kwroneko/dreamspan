@@ -7,7 +7,7 @@ import { makeSourceCache } from "../src/sources/cache.ts"
 import { withConditionalGets } from "../src/sources/httpCache.ts"
 import { makeSourceHttp } from "../src/sources/guard.ts"
 import { makeLimiter } from "../src/sources/limiter.ts"
-import { fakeCardexAdapter, startFakeArchive } from "./support/fakeArchive.ts"
+import { fakeCardexAdapter, startFakeCardex } from "./support/fakeCardex.ts"
 import { emptySourceQuery } from "@dreamspan/shared/cardSources.ts"
 
 it.effect(
@@ -16,7 +16,7 @@ it.effect(
     Effect.gen(function* () {
       const dataDir = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "rp-source-validators-")))
       yield* Effect.addFinalizer(() => Effect.promise(() => rm(dataDir, { recursive: true, force: true })))
-      const fake = yield* Effect.promise(() => startFakeArchive({ cards: 120 }))
+      const fake = yield* Effect.promise(() => startFakeCardex({ cards: 120 }))
       yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
       const adapter = fakeCardexAdapter(fake)
       const http = makeSourceHttp(adapter, null, {
@@ -40,12 +40,13 @@ it.effect(
       assert.deepStrictEqual(again, first)
       assert.deepStrictEqual(cardAgain, card)
       assert.deepStrictEqual(imageAgain, image)
-      assert.strictEqual(fake.conditionalHits(), 6)
-      assert.strictEqual(fake.notModified(), 6)
+      // cardex sends no validator with a mirrored download: that one is fetched again in full.
+      assert.strictEqual(fake.conditionalHits(), 5)
+      assert.strictEqual(fake.notModified(), 5)
       const restarted = makeSourceCache({ dataDir, now: () => now })
       yield* restarted.scan
       yield* adapter.card(withConditionalGets(http, restarted, "alice", adapter.id), first.items[0]!.remoteId)
-      assert.strictEqual(fake.notModified(), 9)
+      assert.strictEqual(fake.notModified(), 7)
       const before = fake.conditionalHits()
       yield* adapter.card(withConditionalGets(http, restarted, "bob", adapter.id), first.items[0]!.remoteId)
       assert.strictEqual(fake.conditionalHits(), before)
@@ -66,7 +67,7 @@ it.effect("an entry evicted during validation still owns the bytes for its 304",
   Effect.gen(function* () {
     const dataDir = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "rp-source-validation-eviction-")))
     yield* Effect.addFinalizer(() => Effect.promise(() => rm(dataDir, { recursive: true, force: true })))
-    const fake = yield* Effect.promise(() => startFakeArchive({ cards: 1 }))
+    const fake = yield* Effect.promise(() => startFakeCardex({ cards: 1 }))
     yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
     const adapter = fakeCardexAdapter(fake)
     const cache = makeSourceCache({ dataDir })

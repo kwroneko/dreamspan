@@ -1,0 +1,19 @@
+{
+  "name": "image-full",
+  "request": {
+    "path": "/i/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.png",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "image/png",
+    "cache-control": "public, max-age=31536000, immutable",
+    "etag": "\"e6c9a5b3-84d19\"",
+    "accept-ranges": "bytes",
+    "x-content-type-options": "nosniff"
+  },
+  "bodyInfo": {
+    "bytes": 348223,
+    "magic": "89504e47"
+  }
+}

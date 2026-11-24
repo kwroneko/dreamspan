@@ -1,0 +1,1154 @@
+{
+  "name": "card-forked",
+  "request": {
+    "path": "/api/v1/cards/velvet-7da32bbd",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=300",
+    "etag": "W/\"a9ae31e52017d9507e8350095ffab00c031ce3cdce32216b66de83ce48521396\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "card": {
+      "all_origins_removed": false,
+      "slug": "velvet-7da32bbd",
+      "content_hash": "7de903f86ec11fa0de562f78646f2ff3ab8c5f680ea661dd4b562a77ec961349",
+      "kind": "character",
+      "path": "/c/velvet-7da32bbd",
+      "hidden": false,
+      "nsfw": false,
+      "safety": {
+        "loli": false,
+        "loli_keyword": false
+      },
+      "license": null,
+      "content_warnings": [],
+      "token_counts": {
+        "fields": {
+          "creator_notes": 100,
+          "description": 1643
+        },
+        "greetings": [
+          129,
+          204,
+          157
+        ],
+        "lorebook_triggered_max": 0,
+        "lorebook_triggered_total": 0,
+        "mes_example": 0,
+        "model": "o200k_base",
+        "permanent": 3212,
+        "total_budget_estimate": 3416
+      },
+      "token_budget": 3416,
+      "fork_count": 1,
+      "first_seen_at": "2024-07-19T19:36:47.487507Z",
+      "tags": [
+        {
+          "slug": "sports-2",
+          "label": "Sports 2"
+        },
+        {
+          "slug": "winter-2",
+          "label": "Winter 2"
+        },
+        {
+          "slug": "village-2",
+          "label": "village 2"
+        },
+        {
+          "slug": "museum-2",
+          "label": "Museum 2"
+        },
+        {
+          "slug": "travel-2",
+          "label": "travel 2"
+        },
+        {
+          "slug": "library-2",
+          "label": "Library 2"
+        },
+        {
+          "slug": "fantasy",
+          "label": "fantasy"
+        },
+        {
+          "slug": "forest-2",
+          "label": "Forest 2"
+        },
+        {
+          "slug": "castle",
+          "label": "castle"
+        },
+        {
+          "slug": "ocean-2",
+          "label": "Ocean 2"
+        },
+        {
+          "slug": "mountains-2",
+          "label": "Mountains 2"
+        },
+        {
+          "slug": "desert-2",
+          "label": "Desert 2"
+        },
+        {
+          "slug": "summer-2",
+          "label": "summer 2"
+        },
+        {
+          "slug": "festival-2",
+          "label": "festival 2"
+        },
+        {
+          "slug": "astronomer-2",
+          "label": "astronomer 2"
+        }
+      ],
+      "unlisted": false
+    },
+    "estimated_creation": {
+      "at": "2024-06-05T08:24:03Z",
+      "kind": "site_created",
+      "source": "chub",
+      "board": null
+    },
+    "view": {
+      "arrival": "canonical",
+      "path": "/c/velvet-7da32bbd",
+      "canonical_path": "/c/velvet-7da32bbd",
+      "version": null,
+      "default_tab": "/chub/characters/Northcan/velvet-feea3cf4dddc"
+    },
+    "top": {
+      "name": {
+        "value": "Mistam",
+        "from": null
+      },
+      "tagline": {
+        "value": "Heron lagoon birch hazel dune anchor crystal lagoon c",
+        "from": "chub",
+        "origin_path": "/chub/characters/Northcan/velvet-feea3cf4dddc"
+      },
+      "description": {
+        "value": "Larch candle oc\nAutumn teal lantern breeze honey mellow olive )\n\nPetal amber drift copper laurel lagoon mist cedar teal ivy winte\n\nCove teal north trail breeze cide\n\nKite heron kite embe\n\nCider quiet nectar tulip cotton cabin teal badge rain cabin\n\nMist topaz grove fli\nLemon marble lark cricket plum crane breeze hollow autumn drift saffron mist frost willow saf\n\nFinch silver delta rose frost river harbor harbor jade sk\n\nLinen shell bramble beacon zephyr daisy glen elm echo river hollow ocean lagoon flint otter heron flint tide creek finch field robin mist field clover north apple beacon pepper crane pine blossom linen shell bramble beacon zephyr daisy glen.\n\nBrook field basin quiet sage marble\n\nLaurel pebble autumn orchard fjord oak raven blossom cider mist bramble sail moss honey teal boat elm island oak shell cricket wren sage cove finch cedar island pine field saffron poppy pond laurel pebble autumn orc.\n\nCedar slate spruce larc\nOrchard brook.\nLeaf ridge pond bramble dawn cedar fable frost hill pebble comet north raven copper sage pond beac)\nLinen robin lark autumn fern canyon mint jade fern linen saffron petal pepper swan boat petal pond brook lantern honey glen topaz flint harbor mist cotton glade sail field paper breeze arch linen robin lark autumn fern canyon mint jade fern linen saffron petal pepper swan boat petal pond.\nCider bamboo creek tide olive canyon hill leaf olive badge kite larch dune finch island chime clover amber leaf maple pond summer or.\nLinen thyme quiet laurel linen hollow clover crystal c.\nCoral cotton kite cricket lark olive topaz moss fable berry harbor laurel reed honey ridge saffron birch tide tide basin jade a.\nRain glade marble lotus brook reed crane dune arch pebble maple mint banner dawn arch glen mint fern boat.\nMarble harbor cabin glade chalk cider chime.\nField dawn harbor meadow river lotus ocean cricket moss plum silv.\nOlive breeze crane laurel cricket maple shell north glen crane l.\nLaurel paper finch bramble nectar hazel sand robin creek island poppy chalk h.\nDrift shell basin sorrel cabin petal hazel clover pepper cider linen daisy meadow apple.\nBell olive ocean comet brook brook pepper cotton ivy dune mellow finch slate drift la.\nCove blossom kite silver mint field.\n\nAtlas atlas mint maple fable boat blossom daisy mint rose wind dawn plum frost lantern finch cove autumn cider bramble ridge copper beacon oak quie.\n\nYarrow quill atlas snow field grove hill ocean north hill saffron poppy drift fjord robin lagoon)\n\nTide cedar cider saffron fable petal poppy banner lagoon mellow button glen juniper garden dune cabin star mist dune berry paper hill violet glade lag.\n\nRidge fern glen jade birch north poppy star garden chime daisy finch nectar cedar harbor daisy nectar hill river river candle ivy comet button violet spark button bell heron hazel ember ivy ridge fern glen jade birch north poppy star garden chime daisy finch nectar cedar harbor daisy nectar hill river river candle ivy comet button violet spark button bell heron hazel ember ivy ridge fern glen jade birch north poppy star garden chime daisy finch nec.\n\nHollow timber laurel\nCider fern breez\nViolet basin lark lotus banner violet apple nectar wind de.\nBramble lagoon thyme laurel quiet crystal fjord hollow spruce coral apple poppy hazel.\nAnchor crys\"\nMint frost quil\"\nLinen hazel willow\"\nThistle quill arch violet ocean larch chime atlas dri.\nBlossom pebble moss apple drift velvet cotton ar.\nHill boat kettle cove arch tulip lotus hollow ocean.\nLagoon heron bell autumn candle hill stone fern comet mellow timber .\nCotton river bamboo creek pine cricket willow island poppy reed quiet birch mist petal river maple bell cove ree.\nPetal shell mist amber candle bramble trail amber tide s.\nWind heron ember grove nectar candle garden maple orchard rain san.\nQuill field snow sky fable lemon leaf kite copper hill moss bo.\n\nPine maple chalk po\nAmber otte\"\nMeadow badge olive tulip chime\"\nPlum chime timber\"\nSlate cider f\"\nRose frost\"\nCanyon wren cric\"\n\nCanyon elm\nField cove lotus banner mellow candle daisy hill banner ridge.\nWillow garden ember paper linen echo bramble river glade bram.\nOak blossom fjord chalk star sorrel mint glen lark elm cabin button cob.\nHazel spark hollow crane lemon cider mist c.\n\nField yar\nBadge delta coral hill garden field island brook dune vel.\nReed copper copper cove amber dawn summer dune bamboo co.\nRidge boat blossom otter hollow flint sorrel sand brook.\nHeron robin amber arch frost hill paper lantern amber drift delta otter .\n\nBlossom crane.\nBasin valley lagoon cedar cobble blossom grove isl.\nOrchard jade oak mint coral lotus mist juniper winter star sky hazel grov.\nTopaz garden shell fable mint paper crystal cove anchor marble saffr.\n\nBlossom paper j\nOtter basin north dawn cider larch ridge wren copper cobble island mint breeze fern hazel grove cobble gr.\n\nMaple ember spru\nClover kettle anchor cove tide pine dawn hill flint pine pine leaf river pebble delta juniper fable mint juniper petal lantern anchor nectar banner thyme elm copper drift candle sage clover reed clover kettle anchor cove tide pine dawn hill flint pine pine le.\n\nMaple star finch fern ivy.\n\nAnchor sorrel moss sand chalk cove sorrel lark hazel hill maple mist atlas linen lemon hill co)\n\nArch kettle boat finch le\n\nSage oak raven island candle delta rain grove cotton juniper banner otter nectar olive cider pepper ivy petal sail otter dawn bramble ivy nectar lantern rain willow larch yarrow leaf ivy ocean sage oak raven island candle delta rain grove cotton juniper banner otter nectar olive cider pepper ivy petal sail .\n\nPlum lotus pepper rain shell crane autumn cedar quill robin sail crystal cricket poppy candle frost dawn cobble moss daisy larch crane elm olive yarrow mist cobble cove badge hill berry orchard plum lotus pepper rain shell crane autum.\n\nCrystal button mint shell harbor cedar wren ocean basin glade willow delta leaf winter delta ember crystal tulip mist shell copper river orchard bamboo elm field berry clover tide pebbl.\n\nSage chim\nHill blossom tide cabin fjord amber pine cobble bamboo crystal lagoon candle glen summer kettle raven maple comet kite cobble badge lagoon cabin elm olive mist drift juniper honey bo\"\nArch finch mint canyon bamboo pond pebble cider cabin bamboo dune echo lemon crystal harbor ember shell nectar linen harbor hazel breeze honey cricket finch crane lagoon beacon reed river anchor hazel arch finch\"\nPoppy boat topaz daisy willow poppy mellow beacon flint candle sum.\nHollow autumn coral basin petal fern banner anchor larch cedar clover cricket chime arch spruce grove chalk north banner basin cobble t.\nValley leaf thistle drift olive fern lotus arch echo ridge zephyr robin crystal rain copper oak hazel moss echo crane rose rose cobble qu.\nDawn chalk button ivy river velvet meadow dawn maple blossom kite crystal bell sail elm marble fl.\nOak clover beacon banner frost larch daisy glade topaz fjord clover .\nHazel saffron clover cider raven sky junip.\nReed laurel apple anchor bell berry hill dawn meadow mist nectar bell maple kite cabin ocean wren robin cha.",
+        "from": null,
+        "ai_summary": false
+      },
+      "creator": {
+        "value": "Northcan",
+        "from": "chub"
+      },
+      "cover": {
+        "image": {
+          "url": "/i/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.png",
+          "thumb_url": "/t/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.512.webp?v=1",
+          "width": 1152,
+          "height": 1536,
+          "animated": false
+        },
+        "from": null
+      },
+      "tags": [
+        {
+          "slug": "sports-2",
+          "label": "Sports 2"
+        },
+        {
+          "slug": "winter-2",
+          "label": "Winter 2"
+        },
+        {
+          "slug": "village-2",
+          "label": "village 2"
+        },
+        {
+          "slug": "museum-2",
+          "label": "Museum 2"
+        },
+        {
+          "slug": "travel-2",
+          "label": "travel 2"
+        },
+        {
+          "slug": "library-2",
+          "label": "Library 2"
+        },
+        {
+          "slug": "fantasy",
+          "label": "fantasy"
+        },
+        {
+          "slug": "forest-2",
+          "label": "Forest 2"
+        },
+        {
+          "slug": "castle",
+          "label": "castle"
+        },
+        {
+          "slug": "ocean-2",
+          "label": "Ocean 2"
+        },
+        {
+          "slug": "mountains-2",
+          "label": "Mountains 2"
+        },
+        {
+          "slug": "desert-2",
+          "label": "Desert 2"
+        },
+        {
+          "slug": "summer-2",
+          "label": "summer 2"
+        },
+        {
+          "slug": "festival-2",
+          "label": "festival 2"
+        },
+        {
+          "slug": "astronomer-2",
+          "label": "astronomer 2"
+        }
+      ]
+    },
+    "definition": {
+      "name": "Mistam",
+      "nickname": null,
+      "description": "Larch candle oc\nAutumn teal lantern breeze honey mellow olive )\n\nPetal amber drift copper laurel lagoon mist cedar teal ivy winte\n\nCove teal north trail breeze cide\n\nKite heron kite embe\n\nCider quiet nectar tulip cotton cabin teal badge rain cabin\n\nMist topaz grove fli\nLemon marble lark cricket plum crane breeze hollow autumn drift saffron mist frost willow saf\n\nFinch silver delta rose frost river harbor harbor jade sk\n\nLinen shell bramble beacon zephyr daisy glen elm echo river hollow ocean lagoon flint otter heron flint tide creek finch field robin mist field clover north apple beacon pepper crane pine blossom linen shell bramble beacon zephyr daisy glen.\n\nBrook field basin quiet sage marble\n\nLaurel pebble autumn orchard fjord oak raven blossom cider mist bramble sail moss honey teal boat elm island oak shell cricket wren sage cove finch cedar island pine field saffron poppy pond laurel pebble autumn orc.\n\nCedar slate spruce larc\nOrchard brook.\nLeaf ridge pond bramble dawn cedar fable frost hill pebble comet north raven copper sage pond beac)\nLinen robin lark autumn fern canyon mint jade fern linen saffron petal pepper swan boat petal pond brook lantern honey glen topaz flint harbor mist cotton glade sail field paper breeze arch linen robin lark autumn fern canyon mint jade fern linen saffron petal pepper swan boat petal pond.\nCider bamboo creek tide olive canyon hill leaf olive badge kite larch dune finch island chime clover amber leaf maple pond summer or.\nLinen thyme quiet laurel linen hollow clover crystal c.\nCoral cotton kite cricket lark olive topaz moss fable berry harbor laurel reed honey ridge saffron birch tide tide basin jade a.\nRain glade marble lotus brook reed crane dune arch pebble maple mint banner dawn arch glen mint fern boat.\nMarble harbor cabin glade chalk cider chime.\nField dawn harbor meadow river lotus ocean cricket moss plum silv.\nOlive breeze crane laurel cricket maple shell north glen crane l.\nLaurel paper finch bramble nectar hazel sand robin creek island poppy chalk h.\nDrift shell basin sorrel cabin petal hazel clover pepper cider linen daisy meadow apple.\nBell olive ocean comet brook brook pepper cotton ivy dune mellow finch slate drift la.\nCove blossom kite silver mint field.\n\nAtlas atlas mint maple fable boat blossom daisy mint rose wind dawn plum frost lantern finch cove autumn cider bramble ridge copper beacon oak quie.\n\nYarrow quill atlas snow field grove hill ocean north hill saffron poppy drift fjord robin lagoon)\n\nTide cedar cider saffron fable petal poppy banner lagoon mellow button glen juniper garden dune cabin star mist dune berry paper hill violet glade lag.\n\nRidge fern glen jade birch north poppy star garden chime daisy finch nectar cedar harbor daisy nectar hill river river candle ivy comet button violet spark button bell heron hazel ember ivy ridge fern glen jade birch north poppy star garden chime daisy finch nectar cedar harbor daisy nectar hill river river candle ivy comet button violet spark button bell heron hazel ember ivy ridge fern glen jade birch north poppy star garden chime daisy finch nec.\n\nHollow timber laurel\nCider fern breez\nViolet basin lark lotus banner violet apple nectar wind de.\nBramble lagoon thyme laurel quiet crystal fjord hollow spruce coral apple poppy hazel.\nAnchor crys\"\nMint frost quil\"\nLinen hazel willow\"\nThistle quill arch violet ocean larch chime atlas dri.\nBlossom pebble moss apple drift velvet cotton ar.\nHill boat kettle cove arch tulip lotus hollow ocean.\nLagoon heron bell autumn candle hill stone fern comet mellow timber .\nCotton river bamboo creek pine cricket willow island poppy reed quiet birch mist petal river maple bell cove ree.\nPetal shell mist amber candle bramble trail amber tide s.\nWind heron ember grove nectar candle garden maple orchard rain san.\nQuill field snow sky fable lemon leaf kite copper hill moss bo.\n\nPine maple chalk po\nAmber otte\"\nMeadow badge olive tulip chime\"\nPlum chime timber\"\nSlate cider f\"\nRose frost\"\nCanyon wren cric\"\n\nCanyon elm\nField cove lotus banner mellow candle daisy hill banner ridge.\nWillow garden ember paper linen echo bramble river glade bram.\nOak blossom fjord chalk star sorrel mint glen lark elm cabin button cob.\nHazel spark hollow crane lemon cider mist c.\n\nField yar\nBadge delta coral hill garden field island brook dune vel.\nReed copper copper cove amber dawn summer dune bamboo co.\nRidge boat blossom otter hollow flint sorrel sand brook.\nHeron robin amber arch frost hill paper lantern amber drift delta otter .\n\nBlossom crane.\nBasin valley lagoon cedar cobble blossom grove isl.\nOrchard jade oak mint coral lotus mist juniper winter star sky hazel grov.\nTopaz garden shell fable mint paper crystal cove anchor marble saffr.\n\nBlossom paper j\nOtter basin north dawn cider larch ridge wren copper cobble island mint breeze fern hazel grove cobble gr.\n\nMaple ember spru\nClover kettle anchor cove tide pine dawn hill flint pine pine leaf river pebble delta juniper fable mint juniper petal lantern anchor nectar banner thyme elm copper drift candle sage clover reed clover kettle anchor cove tide pine dawn hill flint pine pine le.\n\nMaple star finch fern ivy.\n\nAnchor sorrel moss sand chalk cove sorrel lark hazel hill maple mist atlas linen lemon hill co)\n\nArch kettle boat finch le\n\nSage oak raven island candle delta rain grove cotton juniper banner otter nectar olive cider pepper ivy petal sail otter dawn bramble ivy nectar lantern rain willow larch yarrow leaf ivy ocean sage oak raven island candle delta rain grove cotton juniper banner otter nectar olive cider pepper ivy petal sail .\n\nPlum lotus pepper rain shell crane autumn cedar quill robin sail crystal cricket poppy candle frost dawn cobble moss daisy larch crane elm olive yarrow mist cobble cove badge hill berry orchard plum lotus pepper rain shell crane autum.\n\nCrystal button mint shell harbor cedar wren ocean basin glade willow delta leaf winter delta ember crystal tulip mist shell copper river orchard bamboo elm field berry clover tide pebbl.\n\nSage chim\nHill blossom tide cabin fjord amber pine cobble bamboo crystal lagoon candle glen summer kettle raven maple comet kite cobble badge lagoon cabin elm olive mist drift juniper honey bo\"\nArch finch mint canyon bamboo pond pebble cider cabin bamboo dune echo lemon crystal harbor ember shell nectar linen harbor hazel breeze honey cricket finch crane lagoon beacon reed river anchor hazel arch finch\"\nPoppy boat topaz daisy willow poppy mellow beacon flint candle sum.\nHollow autumn coral basin petal fern banner anchor larch cedar clover cricket chime arch spruce grove chalk north banner basin cobble t.\nValley leaf thistle drift olive fern lotus arch echo ridge zephyr robin crystal rain copper oak hazel moss echo crane rose rose cobble qu.\nDawn chalk button ivy river velvet meadow dawn maple blossom kite crystal bell sail elm marble fl.\nOak clover beacon banner frost larch daisy glade topaz fjord clover .\nHazel saffron clover cider raven sky junip.\nReed laurel apple anchor bell berry hill dawn meadow mist nectar bell maple kite cabin ocean wren robin cha.\n",
+      "personality": null,
+      "scenario": null,
+      "first_mes": "Daisy plum delta tide boat cabin oak quiet river crystal boat beacon slate chime velvet violet quill cedar harbor otter atlas sand creek echo teal daisy marble saffron hazel tulip amber amber daisy plum delta tide boat cabin oak quiet river cry.\n\nTrail pond cobble orchard juniper tide hill lark brook frost robin frost field banner wind basin winter glen banner kite mist dawn chalk north mint drift banner finch lante.\n\nLagoon lantern chime blossom thistle laurel cedar raven fjord meadow spruce ocean fa.\n\nMeadow laurel beacon ember brook lark moss hazel daisy river otter canyon linen pebble bramble linen lark orchard.",
+      "alternate_greetings": [
+        "River maple lotus ocean lagoon amber glen marble harbor fable meadow crane ember coral marble paper autumn creek sorrel nectar bell plum ember rose maple bamboo raven sorrel mellow juniper larch ivy river maple lotus ocean lagoon amber glen marble harbor fable meadow crane ember cor.\n\nIvy autumn banner cider hollow brook flint yarrow delta paper cove harbor sail otter clover glade qu\"\n\nClover harbor cedar elm brook ember plum linen meadow fjord shell thyme topaz fable grove arch cricket spruce north juniper cider lagoon grove pl\n\nGlen hollow field bamboo fjord cider meadow banner island chime quill poppy plum ember spark button coral bramble pebble rain coral honey amber trail copper glade bramble e.\n\nCricket leaf marble cricket quill chalk breeze willow dawn honey poppy s.\n\nSail marble cricket glade cove garden basin boat creek topaz dune pebble thistle bell creek banner beacon island reed arch drift b",
+        "Daisy bramble heron lantern willow brook glade maple chime arch finch hazel saffron blossom fjord frost amber hill snow button nectar arch frost button ember sand crane island honey copper candle sorrel daisy bramble heron lantern willow brook glade maple chime arch finch hazel saffron blossom fjord frost amb.\n\nButton yarrow frost timber cabin finch leaf yarrow canyon berry island quill rain fern fjord lagoon otter north fjord brook fern sand nectar fern pet.\n\nBamboo finch cove flint hollow mellow quill kite pond ivy nectar fable hill honey clover slate flint topaz cedar grove juniper orchard star autumn ridge beacon ember heron boat nectar poppy tide bamboo finch cove flint hollow."
+      ],
+      "group_only_greetings": [],
+      "mes_example": null,
+      "creator_notes": "Otter sage banner bra\nEcho timber comet c\nBasin saffron beacon gle\nBadge coral .\n\nHazel linen arch crystal daisy petal drift petal kite echo blossom raven raven saffron )\nMaple elm candle poppy linen candle echo lotus field cove olive lotus comet trai)",
+      "creator_notes_multilingual": {},
+      "system_prompt": null,
+      "post_history_instructions": null,
+      "depth_prompt": null,
+      "book": {
+        "name": null,
+        "description": null,
+        "scan_depth": 5,
+        "token_budget": 1800,
+        "recursive_scanning": false,
+        "entry_count": 7
+      },
+      "declared_asset_count": 0,
+      "extension_keys": []
+    },
+    "lorebook": {
+      "total": 7,
+      "offset": 0,
+      "limit": 50,
+      "entries": [
+        {
+          "order_idx": 0,
+          "name": "Elm breeze cider.",
+          "keys": [
+            ""
+          ],
+          "secondary_keys": [],
+          "content": "Echo berry bamboo\nCotton birch harb\nCoral dawn timber nectar badge rain larch breeze basin reed bamboo brook boat lark maple pine orchard flint c\nGarden topaz pine pond glad",
+          "enabled": true,
+          "constant": true,
+          "selective": false,
+          "case_sensitive": false,
+          "use_regex": null,
+          "priority": 10,
+          "insertion_order": 1,
+          "position": "after_char",
+          "probability": 100,
+          "settings_summary": {
+            "depth": 4,
+            "useProbability": true
+          }
+        },
+        {
+          "order_idx": 1,
+          "name": "Cotton gar",
+          "keys": [
+            ""
+          ],
+          "secondary_keys": [],
+          "content": "Cricket hill p)\nHoney button cobble hazel fern glen petal daisy moss field fern plum kite tulip river daisy boat finch chime.\n\nBoat ember hazel tide summer crystal amber pebbl.\nLinen silver rain ocean creek wind brook quill cid.\n\nCrane amber grove star north echo sky laurel oak crane sage orchard willow amber bell plum apple north robin shell fjord dawn meadow cove heron sage grove poppy thistle autumn cryst.\n\nLantern topaz yarrow kettle drift maple reed arch kite cider arch lagoon pine reed creek orchard ivy dawn spruce crane mist delta larch sail delta thistle ivy coral quil.\n\nStone summer lantern canyon beacon raven boat larch finch shell arch meadow quill harbor valley rain cedar laurel harbor marble plum swan delta birc.\n\nFjord lark bamboo raven.\nHill plum button lantern larch creek harbor moss min.\nSnow ridge leaf ridge rose harbor summer lemon viole.\n\nAtlas fable fern ivy bramble thistle chalk crane topaz cove mellow ocean la.\n\nIvy shell basin laurel oak fr\nLinen candle plum robin quiet delta chime badge heron larch cabin fable bad.\n\nRobin heron raven r\nSage olive cider kite hazel bramble cobble creek kettle heron brook nectar thyme sail qu.\nHollow north apple echo ocean rain ocean otter pepper ocean quiet b.\nPaper cabin paper bell quill ember basin plum juniper raven thistle lark garden grove wren ceda.\nOrchard kite atlas autumn quill berry arch copper riv.",
+          "enabled": true,
+          "constant": true,
+          "selective": false,
+          "case_sensitive": false,
+          "use_regex": null,
+          "priority": 10,
+          "insertion_order": 2,
+          "position": "after_char",
+          "probability": 100,
+          "settings_summary": {
+            "depth": 4,
+            "useProbability": true
+          }
+        },
+        {
+          "order_idx": 2,
+          "name": "Field willo",
+          "keys": [
+            ""
+          ],
+          "secondary_keys": [],
+          "content": "Dawn delta.\nBrook quiet north sage fern bramble sail hazel chalk slate bell delta paper autumn grove quill juniper reed poppy shell reed dune larch atlas au.\n\nHollow raven da)\nFlint echo orchard bramble amber canyon reed wind badge juniper cider olive sage quiet blossom ember shell banner arch mint violet ivy yarrow ocean dawn crane leaf thyme cider .\n\nOcean sand snow)\nNorth glade petal cotton comet brook glade button flint pebble anchor apple finch badge larch garden chalk kite coral candle anchor honey flint f.\n\nDrift coral ba)\nCedar pond lantern mellow velvet moss laurel delta laurel orchard pebble honey dawn trail hazel pebble glade topaz swan saffron cove silver honey canyon lark rain juniper shell dawn summer sail candle cedar pond lantern mellow velvet moss laurel delt.",
+          "enabled": true,
+          "constant": true,
+          "selective": false,
+          "case_sensitive": false,
+          "use_regex": null,
+          "priority": 10,
+          "insertion_order": 3,
+          "position": "after_char",
+          "probability": 100,
+          "settings_summary": {
+            "depth": 4,
+            "useProbability": true
+          }
+        },
+        {
+          "order_idx": 3,
+          "name": "Cider summer garde",
+          "keys": [
+            ""
+          ],
+          "secondary_keys": [],
+          "content": "Pepper hazel pebbl\nShell ember l\nClover kite willow berry mellow mist river boat kettle clover arch raven lantern sage chime river moss star harbor dawn delta tide candle lantern yarrow autumn olive laurel summer lark pebble boat clover kite w.\n\nStone birch birch hol\nIvy ivy bell island dawn velvet sail badge moss copper leaf creek bell chime kite north glen delta reed willow rose orchard bramble fern cider otter orchard crystal candle flint coral badge ivy ivy bell island daw.\n\nSail lantern moss arch rose ro\nPine honey anchor autumn basin finch amber jade lantern blossom rose saffron autumn tulip chime flint velvet frost ivy river raven.\n\nHollow petal hollow summer r.\nIvy mist grove jade pepper hill ocean marble plum leaf crystal comet riv.\nKite laurel hazel nectar island plum wind spark comet leaf saffron jade sail atlas linen fern cedar fable mead.\nRidge hollow thistle rose basin crystal maple thistle trail fern echo.\nFlint fjord pond glen thyme fable autumn basin nectar glen quiet lotus crane rose harbor lotus cobble mint moss wind.\n\nWind honey orchard crane kettle cricket nectar saffron grove trail copper banner hill kite yarrow heron beacon otter quill qui.\n\nQuiet cabin river pe\nJuniper boat cove linen lotus cider pond dune trail clover kettle laurel quiet.\nWinter petal garden lark frost glen cedar lemon pepper badge button pine fable.\nTide summer quiet blossom yarrow breeze bell thyme cobble honey petal silver basin lemo.\nArch island cove badge dawn finch arch canyon berry trail daisy grove canyon re.\nMoss creek hazel field river pebble shell rose quill otter thistle sage fjord timber ki.\n\nKite elm poppy drift brook thistle finch delta raven timber cabin river breeze maple elm quiet pond quiet lagoon .\n",
+          "enabled": true,
+          "constant": true,
+          "selective": false,
+          "case_sensitive": false,
+          "use_regex": null,
+          "priority": 10,
+          "insertion_order": 4,
+          "position": "after_char",
+          "probability": 100,
+          "settings_summary": {
+            "depth": 4,
+            "useProbability": true
+          }
+        },
+        {
+          "order_idx": 4,
+          "name": "Olive plum clover b",
+          "keys": [
+            ""
+          ],
+          "secondary_keys": [],
+          "content": "Atlas otter dune qu\nArch sand boat hazel leaf moss oak delta mellow jade shell anchor lemon bell linen glen lark mellow honey delta winter dune otter nectar yarrow cricket fable silver atlas shell petal dune arch sand boat hazel leaf moss oak delta mellow jade shell anchor lemon bell linen glen lark mellow hon.\n\nRain cedar saffron berry ivy delta pepper coral bell berry drift arch glen trail honey drift oak wren cany.\n\nBrook fable grove glade beacon cricket bell plum winter canyon elm brook otter mint bamboo berry boat apple thyme quill sage finch atlas clover pebble mellow quill ivy la.\n\nCrane tulip badge chime crystal rose wren ocean hazel lemon moss pebble silver cotton nectar cobble otter thyme star banner olive echo maple mist rose reed north shell button kettle oak clover crane tulip badge chime crystal rose wren ocean hazel lemon moss pebble silver cotton nectar cobble otter.\n\nHarbor linen heron plum violet linen cove robin zephyr teal amber coral chime lagoon anchor comet flint cider lotus banner tide lagoon sage breeze glen lantern shell robin kite rain mellow atlas harbor linen heron plum violet linen cove robin zephyr teal amber coral chime lagoon anchor comet flint cider lotus banner tide lagoon sage breeze glen lantern shell robin kite rain mellow atlas harbor linen heron plum vio.\n",
+          "enabled": true,
+          "constant": true,
+          "selective": false,
+          "case_sensitive": false,
+          "use_regex": null,
+          "priority": 10,
+          "insertion_order": 5,
+          "position": "after_char",
+          "probability": 100,
+          "settings_summary": {
+            "depth": 4,
+            "useProbability": true
+          }
+        },
+        {
+          "order_idx": 5,
+          "name": "Beacon sail pine a",
+          "keys": [
+            ""
+          ],
+          "secondary_keys": [],
+          "content": "Delta glen meadow.\nPetal blossom paper fjord timber.\n\nNorth orchard bell orchard reed winter badge larch chalk quill copper sage ro.\n\nHarbor fern cove nectar kite wren comet fern sage fjord flint maple basi.\n\nRose ocean.\nJuniper berry dawn lagoon island frost marble jade.\n\nLaurel marble apple kettle cider jade olive autumn willow cricket jade elm quiet flint poppy ember stone creek oak bramble reed canyon petal hazel rose velvet crystal river me.",
+          "enabled": true,
+          "constant": true,
+          "selective": false,
+          "case_sensitive": false,
+          "use_regex": null,
+          "priority": 10,
+          "insertion_order": 6,
+          "position": "after_char",
+          "probability": 100,
+          "settings_summary": {
+            "depth": 4,
+            "useProbability": true
+          }
+        },
+        {
+          "order_idx": 6,
+          "name": "Fable crick",
+          "keys": [
+            ""
+          ],
+          "secondary_keys": [],
+          "content": "Daisy fern.\nJuniper frost marble north beacon spruce anchor button coral .\n\nFjord nectar petal glen pebble star .\n\nJade jade drift wren paper rain arch paper hollow cider spa.\n\nCopper valley ocean reed ocean marble canyon .\n\nBerry lemon quiet reed blossom brook maple bell sand topaz beacon .\n\nElm olive bramble arch lantern banner crystal lemon.\n\nMist ridge lemon slate oak mint candle island star valley meadow dawn spar.\n\nOak swan candle hil\nWillow heron pepper clover cedar saffron basin pebble kettle marble elm anchor c.\n\nStar laurel ridge summer dawn candle bamboo ember rain moss orchard north.\n",
+          "enabled": true,
+          "constant": true,
+          "selective": false,
+          "case_sensitive": false,
+          "use_regex": null,
+          "priority": 10,
+          "insertion_order": 7,
+          "position": "after_char",
+          "probability": 100,
+          "settings_summary": {
+            "depth": 4,
+            "useProbability": true
+          }
+        }
+      ],
+      "link_map": []
+    },
+    "assets": {
+      "total": 1,
+      "pending": 0,
+      "fetched": 1,
+      "failed": 0,
+      "dead": 0,
+      "expressions": 0
+    },
+    "image_map": [
+      {
+        "original_url": "https://site5.example/emberfj/raingro/images/gallery/file/a00b1fe7-6b66-5972-7b87-dc8bd0b0b574/2bbbf81b-101f-175a-oliv-e971a80b498c.jpeg",
+        "url": "/i/e32dd7beb29bdedd6301c0bd99d0bfc76eff238bfde48e1f3eb564e7fa00014c.jpg",
+        "display_url": null,
+        "width": 880,
+        "height": 1168
+      }
+    ],
+    "link_map": [
+      {
+        "url": "https://site6.example/character/7b1c5f12-6965-f6a7-de7a-16f196b05e2d",
+        "path": "/risuai/7b1c5f12-6965-f6a7-de7a-16f196b05e2d",
+        "kind": "card"
+      },
+      {
+        "url": "https://site6.example/character/702107c3-3867-6b0a-c693-833ed9045079",
+        "path": "/risuai/702107c3-3867-6b0a-c693-833ed9045079",
+        "kind": "card"
+      }
+    ],
+    "files": [
+      {
+        "sha256": "6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f",
+        "ext": "png",
+        "mime": "image/png",
+        "kind": "png_card",
+        "spec_version": "2.0",
+        "is_original": true,
+        "provenance": "original",
+        "censored": false,
+        "hidden": false,
+        "bytes": 1476528,
+        "width": 1152,
+        "height": 1536,
+        "first_seen_at": "2026-10-03T12:33:31.489349Z",
+        "url": "/i/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.png",
+        "thumb_url": "/t/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.512.webp?v=1",
+        "downloads": {
+          "original": "/api/v1/download/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f?mode=original",
+          "json": "/api/v1/download/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f?mode=json&tags=multiple-greetings-2",
+          "mirrored": "/api/v1/download/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f?mode=mirrored&tags=multiple-greetings-2",
+          "self_contained": "/api/v1/download/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f?mode=self-contained&tags=multiple-greetings-2"
+        },
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "self_contained_bytes_estimate": 1856198,
+        "current": true,
+        "role": null,
+        "meta": {
+          "character_version": "lant",
+          "created": null,
+          "modified": null,
+          "sources": [],
+          "creator": null
+        }
+      },
+      {
+        "sha256": "0c99aa87afc7800bc2db1f6f24363de264f516eab9315620867ca7786404a1f6",
+        "ext": "json",
+        "mime": "application/json",
+        "kind": "other",
+        "spec_version": "2.0",
+        "is_original": true,
+        "provenance": "original",
+        "censored": false,
+        "hidden": false,
+        "bytes": 20954,
+        "width": null,
+        "height": null,
+        "first_seen_at": "2026-10-03T12:33:31.489349Z",
+        "url": "/i/0c99aa87afc7800bc2db1f6f24363de264f516eab9315620867ca7786404a1f6.json",
+        "thumb_url": null,
+        "downloads": {
+          "original": "/api/v1/download/0c99aa87afc7800bc2db1f6f24363de264f516eab9315620867ca7786404a1f6?mode=original",
+          "json": "/api/v1/download/0c99aa87afc7800bc2db1f6f24363de264f516eab9315620867ca7786404a1f6?mode=json&tags=multiple-greetings-2",
+          "mirrored": "/api/v1/download/0c99aa87afc7800bc2db1f6f24363de264f516eab9315620867ca7786404a1f6?mode=mirrored&tags=multiple-greetings-2",
+          "self_contained": "/api/v1/download/0c99aa87afc7800bc2db1f6f24363de264f516eab9315620867ca7786404a1f6?mode=self-contained&tags=multiple-greetings-2"
+        },
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "self_contained_bytes_estimate": 144600,
+        "current": false,
+        "role": null,
+        "meta": {
+          "character_version": "lant",
+          "created": null,
+          "modified": null,
+          "sources": [],
+          "creator": null
+        }
+      },
+      {
+        "sha256": "eea05e4a11dc92ea56eb0165c69978095724ce532e801ff3cd865575bf98c60a",
+        "ext": "png",
+        "mime": "image/png",
+        "kind": "png_card",
+        "spec_version": "2.0",
+        "is_original": true,
+        "provenance": "original",
+        "censored": false,
+        "hidden": false,
+        "bytes": 1476552,
+        "width": 1152,
+        "height": 1536,
+        "first_seen_at": "2026-10-05T19:27:53.872114Z",
+        "url": "/i/eea05e4a11dc92ea56eb0165c69978095724ce532e801ff3cd865575bf98c60a.png",
+        "thumb_url": "/t/eea05e4a11dc92ea56eb0165c69978095724ce532e801ff3cd865575bf98c60a.512.webp?v=1",
+        "downloads": {
+          "original": "/api/v1/download/eea05e4a11dc92ea56eb0165c69978095724ce532e801ff3cd865575bf98c60a?mode=original",
+          "json": "/api/v1/download/eea05e4a11dc92ea56eb0165c69978095724ce532e801ff3cd865575bf98c60a?mode=json&tags=multiple-greetings-2",
+          "mirrored": "/api/v1/download/eea05e4a11dc92ea56eb0165c69978095724ce532e801ff3cd865575bf98c60a?mode=mirrored&tags=multiple-greetings-2",
+          "self_contained": "/api/v1/download/eea05e4a11dc92ea56eb0165c69978095724ce532e801ff3cd865575bf98c60a?mode=self-contained&tags=multiple-greetings-2"
+        },
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "self_contained_bytes_estimate": 1856222,
+        "current": false,
+        "role": null,
+        "meta": {
+          "character_version": "lant",
+          "created": null,
+          "modified": null,
+          "sources": [],
+          "creator": "Anchorbam"
+        }
+      },
+      {
+        "sha256": "3984a8a82691210497030771dd375b35c148069a9e20c60014a84bd3aa9def13",
+        "ext": "png",
+        "mime": "image/png",
+        "kind": "png_card",
+        "spec_version": "2.0",
+        "is_original": false,
+        "provenance": null,
+        "censored": false,
+        "hidden": false,
+        "bytes": 698670,
+        "width": 750,
+        "height": 1000,
+        "first_seen_at": "2024-07-19T19:36:47.487507Z",
+        "url": "/i/3984a8a82691210497030771dd375b35c148069a9e20c60014a84bd3aa9def13.png",
+        "thumb_url": "/t/3984a8a82691210497030771dd375b35c148069a9e20c60014a84bd3aa9def13.512.webp?v=1",
+        "downloads": {
+          "original": "/api/v1/download/3984a8a82691210497030771dd375b35c148069a9e20c60014a84bd3aa9def13?mode=original",
+          "json": "/api/v1/download/3984a8a82691210497030771dd375b35c148069a9e20c60014a84bd3aa9def13?mode=json&tags=multiple-greetings-2",
+          "mirrored": "/api/v1/download/3984a8a82691210497030771dd375b35c148069a9e20c60014a84bd3aa9def13?mode=mirrored&tags=multiple-greetings-2",
+          "self_contained": "/api/v1/download/3984a8a82691210497030771dd375b35c148069a9e20c60014a84bd3aa9def13?mode=self-contained&tags=multiple-greetings-2"
+        },
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "self_contained_bytes_estimate": 991745,
+        "current": false,
+        "role": null,
+        "meta": {
+          "character_version": "lant",
+          "created": null,
+          "modified": null,
+          "sources": [],
+          "creator": null
+        }
+      }
+    ],
+    "file_count": 4,
+    "origins": [
+      {
+        "removal": null,
+        "source": "chub",
+        "source_label": "Chub",
+        "external_id": "Northcan/velvet-feea3cf4dddc",
+        "path": "/chub/characters/Northcan/velvet-feea3cf4dddc",
+        "api_path": "/api/v1/origins/chub/Northcan/velvet-feea3cf4dddc",
+        "source_url": "https://site4.example/characters/Northcan/velvet-feea3cf4dddc",
+        "serves_card": true,
+        "card_slug": "velvet-7da32bbd",
+        "author": {
+          "source": "chub",
+          "handle": "Northcan",
+          "display_name": "Northcan",
+          "avatar": {
+            "url": "/i/d969107cff68c27c2b644eea0e59d8694fa0ac629f7b47b4d55d0351791f4c6b.png",
+            "thumb_url": "/t/d969107cff68c27c2b644eea0e59d8694fa0ac629f7b47b4d55d0351791f4c6b.512.webp?v=1",
+            "width": 200,
+            "height": 200,
+            "animated": false
+          },
+          "path": "/u/chub/Northcan"
+        },
+        "name": "Mistam",
+        "tagline": "Heron lagoon birch hazel dune anchor crystal lagoon c",
+        "description": "Otter sage banner bra\nEcho timber comet c\nBasin saffron beacon gle\nBadge coral .\n\nHazel linen arch crystal daisy petal drift petal kite echo blossom raven raven saffron )\nMaple elm candle poppy linen candle echo lotus field cove olive lotus comet trai)",
+        "tags": [
+          "painter-2",
+          "action-2",
+          "friendly-2",
+          "teacher-2",
+          "travel-2",
+          "poet-2",
+          "robots-2",
+          "calm-2",
+          "curious-2",
+          "wholesome-2",
+          "drama-2",
+          "cozy-2",
+          "strategy-2",
+          "worldbuilding-2"
+        ],
+        "content_warnings": [],
+        "nsfw_image_flag": null,
+        "cover": {
+          "url": "/i/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.png",
+          "thumb_url": "/t/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.512.webp?v=1",
+          "width": 1152,
+          "height": 1536,
+          "animated": false
+        },
+        "stats": {
+          "rating_avg": 0,
+          "rating_count": 0,
+          "star_count": 395,
+          "favorite_count": 85,
+          "fork_count": 8,
+          "chat_count": 330,
+          "message_count": 4024,
+          "view_count": null,
+          "download_count": null,
+          "token_count_source": 1680
+        },
+        "source_created_at": "2024-06-05T08:24:03Z",
+        "source_updated_at": "2024-06-05T08:26:33Z",
+        "first_seen_at": "2024-07-19T19:36:47.504497Z",
+        "fork": {
+          "parent_known": false,
+          "is_fork": false,
+          "forked_from_external_id": null,
+          "forked_from": null,
+          "child_count": 1,
+          "children": []
+        },
+        "versions": [
+          {
+            "slug": "velvet-7da32bbd",
+            "content_hash": "7de903f86ec11fa0de562f78646f2ff3ab8c5f680ea661dd4b562a77ec961349",
+            "card_path": "/c/velvet-7da32bbd",
+            "origin_path": "/chub/characters/Northcan/velvet-feea3cf4dddc",
+            "active_from": "2024-07-19T19:36:47.487507Z",
+            "active_to": null,
+            "is_current": true,
+            "is_viewing": true,
+            "meta": {
+              "character_version": "lant",
+              "created": null,
+              "modified": null,
+              "sources": [],
+              "creator": null
+            }
+          }
+        ],
+        "version_count": 1,
+        "has_dead_assets": false,
+        "fetch_status": "full",
+        "missing_fields": [],
+        "source_specific": {
+          "author": "Northcan",
+          "avatar_url": "https://site5.example/emberfj/Northcan/velvet-feea3cf4dddc/fieldn.webp",
+          "badges": [],
+          "bound_preset": null,
+          "creatorId": 96733629,
+          "expressions_meta": {
+            "compressed": null,
+            "version": null
+          },
+          "forks": [],
+          "hasGallery": false,
+          "id": 6303857,
+          "is_favorite": false,
+          "is_public": true,
+          "is_unlisted": false,
+          "labels": [
+            {
+              "description": "Berry quill amber maple willow river juniper robin basin plum cedar beacon rose creek badge pebble meadow autumn glen winter sage spruce thist",
+              "title": "ARCHB_COBBLE"
+            }
+          ],
+          "lang_id": 54,
+          "max_res_url": "https://site5.example/emberfj/Northcan/velvet-feea3cf4dddc/raven_card_a8.png",
+          "n_public_chats": 0,
+          "name": "Mistam",
+          "nsfw_image": null,
+          "permissions": "read",
+          "primaryFormat": "card_spec_v2",
+          "projectSpace": "characters",
+          "project_uuid": null,
+          "ratings_disabled": false,
+          "ratings_enabled": true,
+          "recommended": false,
+          "related_characters": [],
+          "related_extensions": [],
+          "related_lorebooks": [
+            -1
+          ],
+          "related_prompts": [],
+          "verified": false,
+          "voice_id": null
+        },
+        "sightings": [],
+        "sighting_count": 0,
+        "last_checked_at": "2026-10-08T05:10:04.820815Z",
+        "sourced_from_urls": [],
+        "related_lorebooks": []
+      }
+    ],
+    "earlier_origins": [],
+    "variants": [
+      {
+        "slug": "velvet-06e3957a",
+        "path": "/c/velvet-06e3957a",
+        "name": "Mistam",
+        "is_this": false,
+        "nsfw": false,
+        "origins": [
+          {
+            "removal": null,
+            "source": "risuai",
+            "external_id": "e04c3894-c521-e588-e85b-d14e7d24b240",
+            "path": "/risuai/e04c3894-c521-e588-e85b-d14e7d24b240",
+            "is_fork": false
+          }
+        ],
+        "earliest_known": "2024-06-05T07:56:31Z",
+        "estimated_creation": {
+          "at": "2024-06-05T07:56:31Z",
+          "kind": "site_created",
+          "source": "risuai",
+          "board": null
+        },
+        "has_lorebook": true,
+        "lorebook_entries": 7,
+        "lorebook_attached_by": null,
+        "differs_in": [
+          "greetings",
+          "notes",
+          "lorebook",
+          "extensions",
+          "assets"
+        ],
+        "is_main": true,
+        "thumb_url": "/t/62909af1e4a86f9b157990d241e7c8b4b4be97b35652d6ab4f332a32faf80134.512.webp?v=1",
+        "compare": {
+          "fields": {
+            "assets": "77d8ec86fd1fc8ba",
+            "description": "1d32dc04f9126707",
+            "extensions": "b92613d665a36fb6",
+            "greetings": "6183305e5174af73",
+            "lorebook": "3a2b152d4d1c19c8",
+            "lorebook_text": "c9b1ebf94102df46",
+            "name": "fd60b805bf5889a8",
+            "notes": "b42e5bda2034c315"
+          },
+          "similarity": {
+            "velvet-7da32bbd": {
+              "description": {
+                "equal": 14186,
+                "total": 14187,
+                "cosmetic": "Only whitespace",
+                "one_sided": false
+              },
+              "greetings": {
+                "equal": 4472,
+                "total": 4808,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "notes": {
+                "equal": 26,
+                "total": 329,
+                "cosmetic": null,
+                "one_sided": false
+              }
+            }
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 0,
+            "first_mes": 728,
+            "notes": 77,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "d5c82c1e08792aa2",
+          "depth_prompt_key": null,
+          "tokens": 3451
+        },
+        "creator": {
+          "kind": "account",
+          "name": "gladeri",
+          "path": "/u/risuai/gladeri",
+          "source": "risuai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "slug": "velvet-a5c8fb76",
+        "path": "/c/velvet-a5c8fb76",
+        "name": "Mistam",
+        "is_this": false,
+        "nsfw": false,
+        "origins": [
+          {
+            "removal": null,
+            "source": "risuai",
+            "external_id": "4403d856-22d7-25ff-9600-2a9eb7c4ed42",
+            "path": "/risuai/4403d856-22d7-25ff-9600-2a9eb7c4ed42",
+            "is_fork": false
+          }
+        ],
+        "earliest_known": "2024-06-05T07:54:31Z",
+        "estimated_creation": {
+          "at": "2024-06-05T07:54:31Z",
+          "kind": "site_created",
+          "source": "risuai",
+          "board": null
+        },
+        "has_lorebook": true,
+        "lorebook_entries": 7,
+        "lorebook_attached_by": null,
+        "differs_in": [
+          "notes",
+          "lorebook",
+          "extensions"
+        ],
+        "is_main": false,
+        "thumb_url": "/t/12edc8f76137b5400ca34dc1b37afb73e234f3ad710f08bea1093e3dd591f861.512.webp?v=1",
+        "compare": {
+          "fields": {
+            "description": "1d32dc04f9126707",
+            "extensions": "dd0a0b05c52ab6c1",
+            "greetings": "6236f0ed4e1c59c1",
+            "lorebook": "3a2b152d4d1c19c8",
+            "lorebook_text": "c9b1ebf94102df46",
+            "name": "fd60b805bf5889a8",
+            "notes": "590c635647b5b0be"
+          },
+          "similarity": {
+            "velvet-7da32bbd": {
+              "description": {
+                "equal": 14186,
+                "total": 14187,
+                "cosmetic": "Only whitespace",
+                "one_sided": false
+              },
+              "notes": {
+                "equal": 36,
+                "total": 363,
+                "cosmetic": null,
+                "one_sided": false
+              }
+            }
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 0,
+            "first_mes": 623,
+            "notes": 111,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "a32539a36ded324c",
+          "depth_prompt_key": null,
+          "tokens": 3416
+        },
+        "creator": {
+          "kind": "account",
+          "name": "gladeri",
+          "path": "/u/risuai/gladeri",
+          "source": "risuai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "slug": "velvet-7da32bbd",
+        "path": "/c/velvet-7da32bbd",
+        "name": "Mistam",
+        "is_this": true,
+        "nsfw": false,
+        "origins": [
+          {
+            "removal": null,
+            "source": "chub",
+            "external_id": "Northcan/velvet-feea3cf4dddc",
+            "path": "/chub/characters/Northcan/velvet-feea3cf4dddc",
+            "is_fork": false
+          }
+        ],
+        "earliest_known": "2024-06-05T08:24:03Z",
+        "estimated_creation": {
+          "at": "2024-06-05T08:24:03Z",
+          "kind": "site_created",
+          "source": "chub",
+          "board": null
+        },
+        "has_lorebook": true,
+        "lorebook_entries": 7,
+        "lorebook_attached_by": null,
+        "differs_in": [],
+        "is_main": false,
+        "thumb_url": "/t/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.512.webp?v=1",
+        "compare": {
+          "fields": {
+            "description": "1d32dc04f9126707",
+            "greetings": "6236f0ed4e1c59c1",
+            "lorebook": "ea195e7e5038f761",
+            "lorebook_text": "c9b1ebf94102df46",
+            "name": "fd60b805bf5889a8",
+            "notes": "657d0b8a1fefdd78"
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 0,
+            "first_mes": 623,
+            "notes": 252,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "a32539a36ded324c",
+          "depth_prompt_key": null,
+          "tokens": 3416
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Northcan",
+          "path": "/u/chub/Northcan",
+          "source": "chub",
+          "avatar_url": "/t/d969107cff68c27c2b644eea0e59d8694fa0ac629f7b47b4d55d0351791f4c6b.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "slug": "velvet-4f656fc8",
+        "path": "/c/velvet-4f656fc8",
+        "name": "Mistam",
+        "is_this": false,
+        "nsfw": true,
+        "origins": [
+          {
+            "removal": null,
+            "source": "caveduck",
+            "external_id": "86c23774-fc8d-2875-a0e4-1034ad22cdf5",
+            "path": "/caveduck/86c23774-fc8d-2875-a0e4-1034ad22cdf5",
+            "is_fork": false
+          }
+        ],
+        "earliest_known": "2025-05-23T19:16:11Z",
+        "estimated_creation": {
+          "at": "2025-05-23T19:16:11Z",
+          "kind": "site_created",
+          "source": "caveduck",
+          "board": null
+        },
+        "has_lorebook": false,
+        "lorebook_entries": 0,
+        "lorebook_attached_by": null,
+        "differs_in": [
+          "notes",
+          "lorebook",
+          "extensions",
+          "assets",
+          "other"
+        ],
+        "is_main": false,
+        "thumb_url": "/t/11251e4f8d7ee046b8e81059212bd6bdfe345ab8d0086f389aca5b280296ec45.512.webp?v=1",
+        "compare": {
+          "fields": {
+            "assets": "289c360dcb998a5a",
+            "description": "1d32dc04f9126707",
+            "extensions": "d47cba7b620d22ab",
+            "greetings": "6236f0ed4e1c59c1",
+            "lorebook_text": "c0ad86b8b27eeebe",
+            "name": "fd60b805bf5889a8",
+            "other": "84cad8545ff3f0d4"
+          },
+          "similarity": {
+            "velvet-7da32bbd": {
+              "description": {
+                "equal": 13776,
+                "total": 14035,
+                "cosmetic": "Only whitespace",
+                "one_sided": false
+              },
+              "greetings": {
+                "equal": 4452,
+                "total": 4462,
+                "cosmetic": "Only whitespace",
+                "one_sided": false
+              },
+              "lorebook": {
+                "equal": 36,
+                "total": 6931,
+                "cosmetic": null,
+                "one_sided": true
+              },
+              "notes": {
+                "equal": 0,
+                "total": 252,
+                "cosmetic": null,
+                "one_sided": true
+              }
+            }
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 0,
+            "first_mes": 620,
+            "notes": 0,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "62fab1a82e1bfdaa",
+          "depth_prompt_key": null,
+          "tokens": 1794
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Pepperfe",
+          "path": "/u/caveduck/1abc2fbb-34bc-35c1-5845-4304f379008c",
+          "source": "caveduck",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "gallery": [
+      {
+        "image": {
+          "url": "/i/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.png",
+          "thumb_url": "/t/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.512.webp?v=1",
+          "width": 1152,
+          "height": 1536,
+          "animated": false
+        },
+        "is_cover": true,
+        "sources": [
+          "chub"
+        ],
+        "copies": 3,
+        "sharing": {
+          "count": 2,
+          "search_path": "/search?picture=6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f"
+        }
+      },
+      {
+        "image": {
+          "url": "/i/e32dd7beb29bdedd6301c0bd99d0bfc76eff238bfde48e1f3eb564e7fa00014c.jpg",
+          "thumb_url": "/t/e32dd7beb29bdedd6301c0bd99d0bfc76eff238bfde48e1f3eb564e7fa00014c.512.webp?v=1",
+          "width": 880,
+          "height": 1168,
+          "animated": false
+        },
+        "is_cover": false,
+        "sources": [
+          "chub"
+        ],
+        "copies": 1,
+        "sharing": null
+      }
+    ],
+    "sharing": {
+      "count": 2,
+      "search_path": "/search?picture=6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f"
+    },
+    "related": [],
+    "og": {
+      "attribution": "Hill birch swan rav",
+      "title": "Spark canyon ne",
+      "description": "Heron lagoon birch hazel dune anchor crystal lagoon c",
+      "image_url": "https://archive.example/t/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.512.webp?v=1",
+      "twitter_card": "summary_large_image",
+      "canonical_url": "https://archive.example/c/velvet-7da32bbd"
+    },
+    "main_origin": {
+      "source": "chub",
+      "source_label": "Chub",
+      "path": "/chub/characters/Northcan/velvet-feea3cf4dddc",
+      "uploader": "Northcan"
+    },
+    "creator": {
+      "kind": "account",
+      "name": "Northcan",
+      "path": "/u/chub/Northcan",
+      "source": "chub",
+      "avatar_url": "/t/d969107cff68c27c2b644eea0e59d8694fa0ac629f7b47b4d55d0351791f4c6b.64.webp?v=1",
+      "avatar_nsfw": false,
+      "others": 0,
+      "others_list": []
+    },
+    "credited_in_card": null
+  }
+}
