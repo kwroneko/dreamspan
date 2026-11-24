@@ -4,6 +4,23 @@ import { readFileSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
 import { isMainThread, Worker, workerData } from "node:worker_threads"
 
+const normalizeSql = (sql: string) => {
+  // ALTER TABLE can quote the table name in its declaration and in foreign keys.
+  // Elsewhere double quotes can enclose a string, so keep all quoted tokens intact.
+  const declaration = sql.replace(/^(CREATE TABLE )"([a-z_][a-z0-9_]*)"(?!")/i, "$1$2")
+  const tokens =
+    /'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]*\]|--[^\n]*|\/\*[\s\S]*?\*\/|[ \t\r\n\f]*[(),][ \t\r\n\f]*|[ \t\r\n\f]+|[\w$\u0080-\uFFFF]+|./g
+  let tableReference = false
+  return declaration
+    .replace(tokens, (token) => {
+      if (/^[ \t\r\n\f]+$/.test(token)) return " "
+      const normalized = tableReference ? token.replace(/^"([a-z_][a-z0-9_]*)"$/i, "$1") : token
+      tableReference = token.toUpperCase() === "REFERENCES"
+      return /^[ \t\r\n\f]*[(),][ \t\r\n\f]*$/.test(token) ? token.trim() : normalized
+    })
+    .replace(/^[ \t\r\n\f]+|[ \t\r\n\f]+$/g, "")
+}
+
 if (isMainThread) {
   const files = process.argv.slice(2)
   if (files.length !== 2) throw new Error("Usage: node compare-baselines.ts old-statements.json folded-statements.json")
@@ -29,12 +46,7 @@ if (isMainThread) {
         .all()
         .map((row) => ({
           ...row,
-          // ALTER TABLE quotes its renamed identifier and formats added columns differently.
-          sql: String(row.sql)
-            .replaceAll('"', "")
-            .replace(/\s+/g, " ")
-            .replace(/\s*([(),])\s*/g, "$1")
-            .trim()
+          sql: normalizeSql(String(row.sql))
         }))
     } finally {
       db.close()
