@@ -1,4 +1,5 @@
 import { docHash } from "../src/db/documents.ts"
+import { DEFAULT_PERSONA } from "../src/db/generationSettings.ts"
 import type { Summary } from "@dreamspan/shared/lcm.ts"
 import { completeFixture, fixtureSql, summaryJob } from "./support/lcmFixtures.ts"
 // The isolation matrix (spec/WORKFLOW.md §3, DESIGN §11): every RPC in AppApi has an
@@ -5238,10 +5239,30 @@ const storage: Record<
         "ImportLeaseLost"
       )
       const mine = yield* actor.api.StartStImport({ unsupported: [] })
-      yield* refused(
-        writer.StImportDefaultPersona({ userId: actor.user.id, importId: mine.importId, entityId: owner.cardId }),
-        "NotFound"
-      )
+      const candidates = [
+        { entityId: owner.cardId, label: "foreign persona" },
+        { entityId: uuidv7() as EntityId, label: "nonexistent persona" }
+      ]
+      for (const { entityId, label } of candidates) {
+        const adopted = yield* writer.StImportDefaultPersona({
+          userId: actor.user.id,
+          importId: mine.importId,
+          entityId
+        })
+        assert.isFalse(adopted, label)
+        // GetGenerationDefaults would hide an invalid id even if the writer stored it.
+        const [stored] = yield* fixtureSql(
+          config.dataDir,
+          [
+            {
+              sql: "SELECT value_json FROM settings WHERE scope = 'user' AND scope_id = ? AND key = ?",
+              params: [actor.user.id, DEFAULT_PERSONA]
+            }
+          ],
+          { readOnly: true }
+        )
+        assert.deepStrictEqual(stored, [], label)
+      }
     }),
   StImportDefaultPreset: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
