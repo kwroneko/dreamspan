@@ -13,7 +13,7 @@ const liveRef = (sql: SqlClient.SqlClient, ownerId: string, item: MessageLibrary
     sql<{ head: string; label: string }>`
       SELECT r.head_revision_id AS head, r.label FROM entity_refs r JOIN entities e ON e.id = r.entity_id
       WHERE r.id = ${item.refId} AND e.owner_user_id = ${ownerId} AND e.kind = ${item.kind}
-        AND e.deleted_at IS NULL AND e.purged_at IS NULL`,
+        AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL`,
     ([ref]) => ref ?? null
   )
 
