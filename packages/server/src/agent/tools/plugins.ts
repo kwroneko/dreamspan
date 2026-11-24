@@ -17,7 +17,7 @@ import { checkPlugin } from "../../plugins/check.ts"
 import { appSource, pluginApiDocs } from "../../plugins/reference.ts"
 import { argsDigest, argumentRows } from "../approvals.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
-import { builtinCopy, builtinCopyListing } from "../../plugins/builtins.ts"
+import { builtinCopy, builtinCopyPage } from "../../plugins/builtins.ts"
 import type { PluginWorkingCopy } from "../pluginWorkingCopies.ts"
 
 export const PLUGIN_TOOLS = [
@@ -428,14 +428,16 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
       id: Type.Optional(str()),
       pluginId: Type.Optional(Type.String({ pattern: "^[a-z][a-z0-9-]{0,63}$" }))
     },
-    "Without arguments, list built-in parts and copy support. With registry and id, create, commit and check an editable copy. Nothing is enabled; plugin_enable still asks.",
+    "Without arguments, list built-in parts and copy support. Pass nextRegistry as registry to continue the list. With registry and id, create, commit and check an editable copy. The copy starts off; plugin_enable still asks.",
     (ctx, args, actor) =>
       Effect.gen(function* () {
-        if (args.registry === undefined && args.id === undefined)
-          return {
-            dataOnly: true as const,
-            text: data(JSON.stringify(builtinCopyListing(yield* host.builtinParts(actor, ctx))))
-          }
+        if (args.id === undefined) {
+          const registry = args.registry === undefined ? undefined : String(args.registry)
+          const text = builtinCopyPage(yield* host.builtinParts(actor, ctx), registry)
+          if (text === undefined)
+            return yield* refused("This registry is unavailable. List built-in parts to start again.")
+          return { dataOnly: true as const, text }
+        }
         const part = builtinCopy(String(args.registry), String(args.id))
         if (!part)
           return yield* refused("This part does not have a copy adapter yet. Read plugin_api for supported parts.")
@@ -498,7 +500,7 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
       describe: (ctx, args) =>
         Effect.gen(function* () {
           const actor = yield* proof(ctx, "plugins.write", false, true)
-          if (args.registry === undefined && args.id === undefined) return { title: "List built-in parts?", rows: [] }
+          if (args.id === undefined) return { title: "List built-in parts?", rows: [] }
           const part = builtinCopy(String(args.registry), String(args.id))
           if (!part)
             return yield* refused("This part does not have a copy adapter yet. Read plugin_api for supported parts.")

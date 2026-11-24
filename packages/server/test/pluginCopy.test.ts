@@ -6,7 +6,7 @@ import { readFile, writeFile } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import { join } from "node:path"
 import { builtinReplacement, builtinCopyStem } from "@dreamspan/shared/builtinParts.ts"
-import { builtinCopies, builtinCopyListing, missingBuiltinAdapter } from "../src/plugins/builtins.ts"
+import { builtinCopies, missingBuiltinAdapter, type BuiltinCopyCatalogPage } from "../src/plugins/builtins.ts"
 import { prepareBuiltinCopy, compareBuiltin, copyBuiltin } from "../src/plugins/copy.ts"
 import { rewriteImports } from "../src/plugins/importPolicy.ts"
 import { saveFiles, pluginFolder, commitFiles } from "../src/plugins/repo.ts"
@@ -26,7 +26,7 @@ import { pluginConsent, pluginAccessGrows } from "@dreamspan/shared/pluginConsen
 import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { PLUGIN_TOOLS } from "../src/agent/tools/plugins.ts"
 import { FILE_TOOLS } from "../src/agent/tools/files.ts"
-import { toolDataBody } from "../src/agent/toolData.ts"
+import { TOOL_RESULT_CHARS, toolDataBody } from "../src/agent/toolData.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
@@ -438,19 +438,21 @@ const catalogFixture = (config: ReturnType<typeof testConfig>) =>
       viewers: null,
       cache: new Map()
     }
-    const list = (ids?: ReadonlyArray<string>) => {
+    const list = (ids?: ReadonlyArray<string>, nextRegistry?: string) => {
       const offer = ids && {
         kind: chat.kind,
         tools: ids.map((id) => frozenTool(toolForKind(execution, chat.kind, id)!)),
         loaded: new Set(ids),
         cardSkills: []
       }
-      return tool.execute({ ...context, ...(offer ? { offer } : {}) }, {} as never).pipe(
-        Effect.map((result) => {
-          expect(result.isError, result.text).toBeUndefined()
-          return result.text
-        })
-      )
+      return tool
+        .execute({ ...context, ...(offer ? { offer } : {}) }, (nextRegistry ? { registry: nextRegistry } : {}) as never)
+        .pipe(
+          Effect.map((result) => {
+            expect(result.isError, result.text).toBeUndefined()
+            return result.text
+          })
+        )
     }
     return { api, chat, list }
   })
@@ -481,41 +483,42 @@ it("lists shipped operation tools and limits workshop rows to the run's offer an
   )
 })
 
-it("the assistant catalog keeps every new part within its unchanged result budget", async () => {
-  await Effect.runPromise(
+it("the assistant catalog keeps every part within its quoted result budget", () => {
+  const config = testConfig()
+  return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const registry = yield* installPluginToolDefinitions
-        const parts = [
-          ...builtinCopies.map((p) => ({
-            registry: p.registry,
-            id: p.id,
-            label: p.label,
-            copyable: true,
-            reason:
-              "An editable copy starts off. Copied macros can reduce prompt cache reuse: their text is treated as changing on every reply.",
-            replacedBy: []
-          })),
-          ...registry.rolloutTools
-            .list()
-            .filter((t) => !builtinCopies.some((p) => p.registry === "rolloutTools" && p.id === t.id))
-            .map((t) => ({
-              registry: "rolloutTools",
-              id: t.id,
-              label: t.label,
-              copyable: false,
-              reason: missingBuiltinAdapter(t.id),
-              replacedBy: []
-            }))
-        ]
-        const text = JSON.stringify(builtinCopyListing(parts))
-        expect(text.length).toBeLessThan(14500)
-        const listed = builtinCopyListing(parts)
-          .filter((g) => g.copyable)
-          .flatMap((g) => g.parts.map((p) => `${g.registry}:${p.id}`))
-        expect(listed.toSorted()).toEqual(builtinCopies.map((p) => `${p.registry}:${p.id}`).toSorted())
-        for (const part of parts.filter((p) => !p.copyable)) expect(text).toContain(JSON.stringify(part.id))
-      }).pipe(Effect.provide(ExecutionRegistry.layer))
+        const { api, list } = yield* catalogFixture(config)
+        const parts = yield* api.ListBuiltinParts()
+        const groups: BuiltinCopyCatalogPage["groups"] = []
+        const seen = new Set<string>()
+        let fromRegistry: string | null = null
+        do {
+          const quoted = yield* list(undefined, fromRegistry ?? undefined)
+          expect(quoted.length).toBeLessThanOrEqual(TOOL_RESULT_CHARS)
+          const page = JSON.parse(toolDataBody(quoted)) as BuiltinCopyCatalogPage
+          if (fromRegistry !== null) expect(page.groups[0]?.registry).toBe(fromRegistry)
+          for (const registry of new Set(page.groups.map((group) => group.registry))) {
+            expect(seen.has(registry)).toBe(false)
+            seen.add(registry)
+          }
+          groups.push(...page.groups)
+          fromRegistry = page.nextRegistry
+        } while (fromRegistry !== null)
+        const listed = groups.flatMap((group) =>
+          group.copyable
+            ? group.parts.map(({ id, label }) => ({ registry: group.registry, id, details: label, copyable: true }))
+            : group.ids.map((id) => ({ registry: group.registry, id, details: group.reason, copyable: false }))
+        )
+        const expected = parts.map(({ registry, id, label, reason, copyable }) => ({
+          registry,
+          id,
+          details: copyable ? label : reason,
+          copyable
+        }))
+        expect(listed).toHaveLength(expected.length)
+        expect(listed).toEqual(expect.arrayContaining(expected))
+      }).pipe(Effect.provide(serverLayer(config)))
     )
   )
 })
