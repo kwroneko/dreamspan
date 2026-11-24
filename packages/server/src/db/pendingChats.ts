@@ -32,7 +32,7 @@ const SWEPT_KEPT_MS = 7 * 24 * 60 * 60 * 1000
  * chat's, so no schema change: ids are never chat ids, and only `droppedReplyLabel` reads these.
  */
 const DROPPED_REPLY = "dropped-reply:"
-export const DROPPED_REPLY_LABEL = "Empty reply"
+const DROPPED_REPLY_LABEL = "Empty reply"
 export const noteDroppedReply = (sql: SqlClient.SqlClient, userId: UserId, ids: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const now = Date.now()
