@@ -50,8 +50,11 @@ import {
   libraryRefOfDrop,
   mayCarryLibrary,
   MessageLibraryTiles,
-  useComposerLibrary
+  useComposerLibrary,
+  useLiveLibraryComposer
 } from "./libraryAttachments.tsx"
+import { focusComposer } from "./composerFocus.ts"
+import { useWorkbenchTab } from "../workbench/tab.tsx"
 import type { ComposerSource } from "./composerDraft.ts"
 import { composerWorkspace } from "./composerWorkspace.ts"
 import type { ChatSession } from "./session.ts"
@@ -1008,11 +1011,23 @@ function DraftThumbnail({ entry }: { entry: ImageDraftEntry }) {
 }
 function ImageComposer(props: ComponentProps<typeof Composer>) {
   const state = useContext(ImagesContext)
+  const library = state?.library ?? null
+  const tab = useWorkbenchTab()
+  // Listed by "Work on in a workshop" while it's mounted (spec/WORKSHOP-CARDS.md §4.1 point 3).
+  const liveRef = useLiveLibraryComposer(
+    library ? { chatId: props.session.chatId, title: props.view.chat?.title ?? "", tabId: tab?.tabId ?? null } : null
+  )
+  useLayoutEffect(() => {
+    liveRef.current = {
+      add: (refIds) => library?.add(refIds),
+      // Once its tab is shown, the frame showing it is the focused one.
+      focus: () => requestAnimationFrame(() => focusComposer())
+    }
+  })
   if (!state) return <Composer {...props} />
   const vision = props.view.history?.model?.vision
   const maxImages = props.view.history?.model?.maxImages ?? 4
   const images = state.entries.some((entry) => entry.kind !== "file")
-  const library = state.library
   const items = library?.items.length ?? 0
   const filesHint = state.attacher
     ? `Attach files of any type. They're saved in ${state.attacher.folder}, where the assistant can open them. You can also paste or drop them here, or drag a file from the Files tab.`

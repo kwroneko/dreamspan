@@ -19,7 +19,9 @@ import { useTitle } from "../shell.tsx"
 import { PendingWorkshop } from "./PendingWorkshop.tsx"
 import { StartChoices, useWorkshopStart } from "./StartCard.tsx"
 import { workshopDefaultsAtom } from "./workshopPersona.tsx"
-import { NEW_WORKSHOP_COPY, NEW_WORKSHOP_TITLE } from "./workshopStart.ts"
+import { NEW_WORKSHOP_COPY, NEW_WORKSHOP_TITLE, WORKSHOP_ATTACH_KEY } from "./workshopStart.ts"
+import { usePlaceParam } from "../../usePlaceParam.ts"
+import { useLibraryItems } from "./workOnInWorkshop.tsx"
 
 const INTRO =
   "Ask an assistant about your cards, presets and lorebooks, outside any story. It can read and change your library and set up chats. Your first message starts the workshop."
@@ -31,6 +33,10 @@ export function StartWorkshopPage() {
   const defaults = useAtomValue(workshopDefaultsAtom)
   const stored = AsyncResult.isSuccess(defaults) ? defaults.value : null
   const titleDraft = useUserDraft(NEW_WORKSHOP_TITLE, "Title", "")
+  // What "Work on in a workshop" → A new workshop put in its first message, in the URL.
+  const [attachParam, setAttach] = usePlaceParam(WORKSHOP_ATTACH_KEY, "")
+  const attachIds = attachParam.split(",").filter((id) => id !== "")
+  const attached = useLibraryItems(attachIds)
   const title = titleDraft.text.trim() || "New workshop"
   useTitle(title)
   // The assistant's portrait where the saved workshop's header shows it, so the first send moves nothing.
@@ -81,6 +87,10 @@ export function StartWorkshopPage() {
         header={header}
         intro={intro}
         copyKey={NEW_WORKSHOP_COPY}
+        library={{
+          items: attached,
+          remove: (refId) => setAttach(attachIds.filter((id) => id !== refId).join(","), true)
+        }}
         portraitWidth={{ small: 48, default: 60, large: 72, largest: 84 }[prefs.portraitSize]}
         onTitleSent={() => titleDraft.commit(titleDraft.text, async () => true)}
         // Its own page opens in place: the same surface, now saved.
