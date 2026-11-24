@@ -11,6 +11,7 @@ import {
   type ReactNode,
   type RefObject,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore
@@ -72,8 +73,8 @@ export interface ComposerLibrary {
   readonly ready: boolean
   readonly busy: boolean
   readonly error: string | null
-  /** By id: the server knows each one's kind. True once the server has them. */
-  readonly add: (refIds: ReadonlyArray<string>) => Promise<boolean>
+  /** By id: the server knows each one's kind. True once the server has them. `hold`: as `LiveLibraryComposer`'s. */
+  readonly add: (refIds: ReadonlyArray<string>, hold?: boolean) => Promise<boolean>
   readonly remove: (refId: string) => void
   /** What a send carries: the items shown now. */
   readonly capture: () => MessageLibrary
@@ -82,6 +83,8 @@ export interface ComposerLibrary {
 }
 
 const MAX = 16
+/** How long a handover that didn't reach the server waits before it's tried again. */
+const HANDOVER_RETRY_MS = 2_000
 
 /**
  * A workshop composer mounted in this browser tab (every workbench tab's view stays mounted):
@@ -92,8 +95,12 @@ export interface LiveLibraryComposer {
   readonly title: string
   /** Its workbench tab, null outside a workbench. */
   readonly tabId: string | null
-  /** True once the server has them on the composer's draft. */
-  readonly add: (refIds: ReadonlyArray<string>) => Promise<boolean>
+  /**
+   * True once the server has them on the composer's draft. `hold`: a handover the message must
+   * carry (a new workshop's item): tried again until the server takes or refuses it, the send
+   * waiting meanwhile.
+   */
+  readonly add: (refIds: ReadonlyArray<string>, hold?: boolean) => Promise<boolean>
   readonly focus: () => void
 }
 
@@ -126,7 +133,7 @@ export function useLiveLibraryComposer(composer: Omit<LiveLibraryComposer, "add"
       chatId,
       title: title ?? "",
       tabId: tabId ?? null,
-      add: (refIds) => handle.current.add(refIds),
+      add: (refIds, hold) => handle.current.add(refIds, hold),
       focus: () => handle.current.focus()
     }
     live.add(entry)
@@ -152,6 +159,17 @@ export function useComposerLibrary(
   const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** Handovers not on the server yet: the send waits for them (rev-dfu1 #5). */
+  const [holding, setHolding] = useState(0)
+  /** The last call's failure: refused (the item can't be attached) or not (try again). */
+  const refused = useRef(false)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
   const queue = useRef(Promise.resolve())
   const shown = useRef(items)
   // Added before the draft was known (a new workshop's page handing over what it was opened
@@ -192,6 +210,7 @@ export function useComposerLibrary(
         : client("SetComposerLibrary", { ...key, add: change!.add, remove: change!.remove })
     )
     if (!outcome.ok) {
+      refused.current = outcome.error.tag === "NotFound"
       setError(
         outcome.error.tag === "NotFound" && change?.add.length
           ? "Only cards, lorebooks and presets in your library can be attached."
@@ -225,26 +244,43 @@ export function useComposerLibrary(
     // One read per draft: the queue and the calls read the newest state through refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [takes, draftId])
+  const addOnce = (added: ReadonlyArray<string>) => {
+    const fresh = [...new Set(added as ReadonlyArray<RefId>)].filter(
+      (refId) => !shown.current.some((there) => there.refId === refId)
+    )
+    if (fresh.length === 0) return Promise.resolve(true)
+    if (draftId === null) {
+      early.current = [...new Set([...early.current, ...fresh])]
+      return new Promise<boolean>((resolve) => earlyDone.current.push(resolve))
+    }
+    if (shown.current.length + fresh.length > MAX) {
+      setError(`A message can carry at most ${MAX} cards, lorebooks and presets.`)
+      return Promise.resolve(false)
+    }
+    return run(() => call("SetComposerLibrary", { add: fresh, remove: [] }))
+  }
+  // A handover tried again goes to the draft as it is then (known by now, when it wasn't).
+  const latestAdd = useRef(addOnce)
+  useLayoutEffect(() => {
+    latestAdd.current = addOnce
+  })
   if (!takes) return null
   return {
     items,
     ready,
-    busy,
+    busy: busy || holding > 0,
     error,
-    add: (added) => {
-      const fresh = [...new Set(added as ReadonlyArray<RefId>)].filter(
-        (refId) => !shown.current.some((there) => there.refId === refId)
-      )
-      if (fresh.length === 0) return Promise.resolve(true)
-      if (draftId === null) {
-        early.current = [...new Set([...early.current, ...fresh])]
-        return new Promise<boolean>((resolve) => earlyDone.current.push(resolve))
+    add: (added, hold = false) => {
+      if (!hold) return addOnce(added)
+      setHolding((n) => n + 1)
+      const attempt = async (): Promise<boolean> => {
+        refused.current = false
+        const ok = await latestAdd.current(added)
+        if (ok || refused.current || !mounted.current) return ok
+        await new Promise((resolve) => setTimeout(resolve, HANDOVER_RETRY_MS))
+        return mounted.current ? attempt() : false
       }
-      if (shown.current.length + fresh.length > MAX) {
-        setError(`A message can carry at most ${MAX} cards, lorebooks and presets.`)
-        return Promise.resolve(false)
-      }
-      return run(() => call("SetComposerLibrary", { add: fresh, remove: [] }))
+      return attempt().finally(() => setHolding((n) => n - 1))
     },
     remove: (refId) => void run(() => call("SetComposerLibrary", { add: [], remove: [refId as RefId] })),
     capture: () => shown.current.map(({ kind, refId }) => ({ kind, refId })),

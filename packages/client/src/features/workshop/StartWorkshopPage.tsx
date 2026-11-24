@@ -39,7 +39,7 @@ export function StartWorkshopPage() {
     const ids = attachParam.split(",").filter((id) => id !== "")
     if (ids.length === 0) return
     handed.current = true
-    void composer.add(ids).then((ok) => {
+    void composer.add(ids, true).then((ok) => {
       if (ok && shown.current) setAttach("", true)
     })
   }, [composer, attachParam, setAttach])
