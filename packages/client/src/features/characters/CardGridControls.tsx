@@ -123,9 +123,11 @@ export function CardGridControls({
           data-layout-audit-ignore="inset: Unbordered sort toolbar (its choices scrolling where they don't fit) aligns its controls with the segmented row, rather than enclosing them in a panel"
         >
           {/* The library's actions (Archive unused…) first, a row gap apart; then the sort, whose
-              choices alone scroll: the direction and the toggles stay in view, in place. */}
+              choices alone scroll: the direction and the toggles stay in view, in place. A card
+              source isn't the library, so they're left out there (owner, 2026-11-24): on the
+              sort's free side, so nothing else moves. */}
           <div className="flex max-w-full items-start gap-2">
-            <SlotOutlet slot={cardGridActions} props={{ place: "home" }} />
+            {!shown && <SlotOutlet slot={cardGridActions} props={{ place: "home" }} />}
             <div className="flex min-w-0 max-w-full items-start gap-1 [&>button]:mt-[3px]">
               {shown && sources ? (
                 <>
