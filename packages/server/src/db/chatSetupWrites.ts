@@ -44,6 +44,7 @@ import type { StoredRewrite } from "@dreamspan/shared/regexScripts.ts"
 import { transaction as runTransaction } from "./tx.ts"
 import { checkAutoTurn, claimAutoTurn } from "./autoGuard.ts"
 import { pinLibrary, type LibraryPin, type VersionWithLibraryPins } from "./libraryAttachments.ts"
+import { personaInStory } from "./workshopDefaults.ts"
 
 const userMessage = (
   content: string,
@@ -676,6 +677,12 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             WHERE id = ${chatId}`
           const forkOf = forkId ?? current?.fork ?? null
           if (forkOf === null) return yield* new NotFound({ entity: "fork", id: chatId })
+          // A workshop beside a story never plays the story's persona or one of its cards: their
+          // descriptions and books would bring the story's roleplay into it (workfix1). Its first
+          // send keeps the persona chosen here, so the choice is refused, as its making refuses it.
+          const story = (chat.draft_for ?? "").startsWith("side:") ? chat.draft_for!.split(":")[1]! : null
+          if (persona !== undefined && story !== null && (yield* personaInStory(sql, userId, story, persona)))
+            return { pending: true, changed: false, fellBack: false, refusedPersona: true }
           const fork = { id: forkOf, chatId }
           // The change is the chat's start's: nothing is said yet (DESIGN §2.1).
           for (const event of events) yield* graph.insertStateEvent(userId, chatId, null, null, null, event, forkOf)

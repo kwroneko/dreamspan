@@ -3015,7 +3015,17 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       persona: Schema.optionalKey(EntityId),
       candidates: StartChatFields.greeters
     },
-    success: Schema.Struct({ pending: Schema.Boolean, changed: Schema.Boolean, fellBack: Schema.Boolean }),
+    success: Schema.Struct({
+      pending: Schema.Boolean,
+      changed: Schema.Boolean,
+      fellBack: Schema.Boolean,
+      /**
+       * The persona asked for is the story's (the account's story persona, or a card of the story)
+       * and the chat is a workshop beside it, not started yet: nothing was written, as a workshop
+       * beside a story never plays one (workfix1).
+       */
+      refusedPersona: Schema.optionalKey(Schema.Boolean)
+    }),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("AgentStartChat", {
