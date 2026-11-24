@@ -64,6 +64,8 @@ import { readLayoutParam, withoutLayoutParams, writeLayoutParam } from "../../ta
 import { TabContext, useTabShown, useWorkbenchTab, WorkbenchContext } from "./tab.tsx"
 
 const TAB_MIME = "application/x-rp-workbench-tab"
+// During dragover, the browser exposes the types but protects their payloads.
+const TAB_SOURCE = `${TAB_MIME};source=`
 
 /** A drag a frame takes: a tab, or something of the app's that opens as one (ui/appDrags.ts). */
 const opensHere = (dataTransfer: DataTransfer | null) =>
@@ -629,7 +631,8 @@ function useFrameEvents(
       event.preventDefault()
       const zone = dropZone(element, event)
       // An edge too small to split shows as refused, and a drop there does nothing.
-      const blocked = !store.canDrop(frameId, zone)
+      const tabId = event.dataTransfer?.types.find((type) => type.startsWith(TAB_SOURCE))?.slice(TAB_SOURCE.length)
+      const blocked = !store.canDrop(frameId, zone, tabId)
       if (event.dataTransfer) event.dataTransfer.dropEffect = blocked ? "none" : "move"
       setOver((before) => (before?.zone === zone && before.blocked === blocked ? before : { zone, blocked }))
     }
@@ -640,14 +643,14 @@ function useFrameEvents(
       if (!isTab(event)) return
       event.preventDefault()
       setOver(null)
-      if (!store.canDrop(frameId, dropZone(element, event))) return
+      const zone = dropZone(element, event)
       const payload = dragPayloadOf(event.dataTransfer)
       if (payload) {
-        if (payload.href) store.dropOpen(payload.href, frameId, dropZone(element, event))
+        if (payload.href) store.dropOpen(payload.href, frameId, zone)
         return
       }
       const tabId = event.dataTransfer?.getData(TAB_MIME)
-      if (tabId) onDrop(tabId, dropZone(element, event))
+      if (tabId) onDrop(tabId, zone)
     }
     element.addEventListener("pointerdown", focus, true)
     element.addEventListener("focusin", focus)
@@ -975,6 +978,7 @@ function TabButton({
               draggable={draggable}
               onDragStart={(event) => {
                 event.dataTransfer.setData(TAB_MIME, tab.id)
+                event.dataTransfer.setData(`${TAB_SOURCE}${tab.id}`, "")
                 event.dataTransfer.effectAllowed = "move"
               }}
               onClick={() => store.focusTab(tab.id)}

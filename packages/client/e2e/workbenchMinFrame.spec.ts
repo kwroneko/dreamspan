@@ -140,9 +140,14 @@ test("repeated rightward splits stop where a frame would get too narrow", async 
     await shot(page, "header-split-disabled-1340-dark", true)
     await page.keyboard.press("Escape")
   }
-  // A tab dragged onto that frame's right edge shows the edge refused, and dropping does nothing.
+  // Leave a tab behind in the source so the drop would add a frame.
   const count = await frames(page).count()
-  const source = frames(page).first().locator("[data-tab] [role=tab]").first()
+  const left = frames(page).first()
+  await left.getByRole("tab", { name: /Harbour walk/ }).dblclick()
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Home", exact: true }).click()
+  const sourceTabs = left.locator("[data-tab-strip]")
+  await expect(sourceTabs.getByRole("tab")).toHaveCount(2)
+  const source = sourceTabs.getByRole("tab", { name: "Characters", exact: true })
   const body = (await frames(page).last().locator("[data-frame-body]").boundingBox())!
   const from = (await source.boundingBox())!
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
@@ -234,5 +239,30 @@ test("a divider stops where a frame would go below its least width", async ({ pa
   await page.mouse.move(0, box.y + box.height / 2, { steps: 10 })
   await page.mouse.up()
   expect((await frames(page).first().boundingBox())!.width).toBeGreaterThanOrEqual(MIN_FRAME - 1)
+  await expectWholeStrips(page)
+})
+
+test("an edge drop fits when moving the tab closes its source frame", async ({ page }) => {
+  await fresh(page, 1340)
+  await gotoWithLayout(page, server().url, "/", ["r", [0.5, 0.5], [0, "="], [0, "/library"]])
+  const left = frames(page).first()
+  const from = (await frames(page)
+    .last()
+    .getByRole("tab", { name: /Library/ })
+    .boundingBox())!
+  const target = (await left.locator("[data-frame-body]").boundingBox())!
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(target.x + 20, target.y + target.height / 2, { steps: 12 })
+  await expect(left.locator('[data-drop-zone="left"]')).toBeVisible()
+  await page.mouse.up()
+
+  await expect(frames(page)).toHaveCount(2)
+  await expect(
+    frames(page)
+      .first()
+      .getByRole("tab", { name: /Library/ })
+  ).toBeVisible()
+  await expect(frames(page).last().getByRole("tab", { name: "Characters", exact: true })).toBeVisible()
   await expectWholeStrips(page)
 })

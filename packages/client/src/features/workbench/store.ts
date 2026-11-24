@@ -202,9 +202,14 @@ export class WorkbenchStore {
   /** Whether a tab moved to a new frame beside one (its own by default) leaves room for both. */
   canMoveToSplit = (tabId: string, direction: Direction, frameId?: string, before = false) =>
     this.fits(moveToNewFrame(this.layout, tabId, direction, { ...(frameId ? { frameId } : {}), before }))
-  /** Whether a drop on a frame's zone fits: into it always, into a new frame on a side as `canSplit`. */
-  canDrop = (frameId: string, zone: DropZone) =>
-    zone === "center" || this.canSplit(frameId, zone === "left" || zone === "right" ? "row" : "column")
+  /** An edge drop must leave room after any empty source frame closes. */
+  canDrop = (frameId: string, zone: DropZone, tabId?: string) => {
+    if (zone === "center") return true
+    const direction = zone === "left" || zone === "right" ? "row" : "column"
+    return tabId
+      ? this.canMoveToSplit(tabId, direction, frameId, zone === "left" || zone === "top")
+      : this.canSplit(frameId, direction)
+  }
 
   private set(next: Layout, action: Action = "REPLACE", saveAfter = 0) {
     if (next === this.layout) return
