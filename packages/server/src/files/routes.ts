@@ -1169,11 +1169,9 @@ export const filesRoutes = Layer.unwrap(
       // shared folder, the owner's bin: they can restore it; the caller has no Undo.
       const user = yield* CurrentUser
       // Shares of it or of folders in it stop as it goes to the bin: their accounts' commands too.
-      const stopping = placed.share
-        ? []
-        : (yield* reader.SharedByMe({ userId: user.id }))
-            .filter((share) => isWithin(share.path, placed.ownerFull))
-            .map((share) => share.granteeUserId)
+      const stopping = (yield* reader.SharedByMe({ userId: userId as never }))
+        .filter((share) => isWithin(share.path, placed.ownerFull))
+        .map((share) => share.granteeUserId)
       const item = yield* bin.toBin(
         userId,
         root,
