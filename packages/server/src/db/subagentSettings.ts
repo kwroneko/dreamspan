@@ -6,6 +6,7 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { UserId } from "@dreamspan/shared/domain.ts"
+import { requestInputTokens } from "./requestInput.ts"
 import { foldState } from "@dreamspan/shared/state.ts"
 import { resolveLcm } from "@dreamspan/shared/lcmSettings.ts"
 import { supportedEfforts, type ReasoningEffort } from "@dreamspan/shared/modelSettings.ts"
@@ -179,7 +180,7 @@ export const makeSubagentSettingReadHandlers = Effect.gen(function* () {
         if (!child?.spawned_by_rollout_id) return yield* new NotFound({ entity: "subagent", id: rolloutId })
         const [own] = yield* sql<{ requests: number; tokens: number | null; cost: number | null; unpriced: number }>`
           SELECT count(*) AS requests,
-            sum(coalesce(input_uncached, 0) + coalesce(cache_read, 0) + coalesce(cache_write, 0) + coalesce(output, 0)) AS tokens,
+            sum(${requestInputTokens(sql)} + coalesce(output, 0)) AS tokens,
             sum(cost) AS cost, sum(CASE WHEN cost IS NULL THEN 1 ELSE 0 END) AS unpriced
           FROM llm_requests WHERE rollout_id = ${rolloutId} AND status <> 'running'`
         // The reply's subagents together, across its Stops and Resumes (§6.2).

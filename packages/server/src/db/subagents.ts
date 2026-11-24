@@ -561,6 +561,7 @@ export const makeSubagentReadHandlers = Effect.gen(function* () {
             endedAt: r.ended_at,
             usageSource: r.usage_source,
             counts: {
+              ...(r.input_total == null ? {} : { inputTotal: r.input_total }),
               inputUncached: r.input_uncached,
               cacheRead: r.cache_read,
               cacheWrite: r.cache_write,

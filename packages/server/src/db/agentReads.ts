@@ -35,6 +35,7 @@ import { pathSegments } from "./pathSegments.ts"
 import { makeLibraryQueries } from "./library.ts"
 import { REPLACEABLE_CARD_FIELDS } from "@dreamspan/shared/docs/note.ts"
 import { query } from "./tx.ts"
+import { recordedPromptTotalSql } from "./requestInput.ts"
 import { transcriptEntries } from "./transcriptEntries.ts"
 import { withSubagents } from "./subagents.ts"
 import { workshopDefaultsOf } from "./workshopDefaults.ts"
@@ -113,6 +114,7 @@ interface ActivitySqlRow {
   readonly requests: number
   readonly running: number
   readonly input: number | null
+  readonly input_total: number | null
   readonly cache_read: number | null
   readonly cache_write: number | null
   readonly output: number | null
@@ -139,6 +141,9 @@ const listActivity = (
         min(q.started_at) AS started, max(q.ended_at) AS ended, count(*) AS requests,
         sum(q.status = 'running') AS running,
         ${known("q.input_uncached")} AS input, ${known("q.cache_read")} AS cache_read,
+        CASE WHEN count(${recordedPromptTotalSql("q.")}) > 0 THEN
+          ${known(`coalesce(${recordedPromptTotalSql("q.")}, q.input_uncached + coalesce(q.cache_read, 0) + coalesce(q.cache_write, 0))`)}
+        END AS input_total,
         ${known("q.cache_write")} AS cache_write, ${known("q.output")} AS output,
         CASE WHEN count(q.cost) = count(*) AND count(DISTINCT q.cost_currency) <= 1 THEN sum(q.cost) END AS cost,
         max(q.cost_currency) AS currency, max(q.usage_source = 'estimated') AS estimated,
@@ -156,7 +161,7 @@ const listActivity = (
         ORDER BY q.started_at DESC, q.id DESC LIMIT 1
       ) AS last_id FROM g
     )
-    SELECT last.gid, last.kind, last.started, last.ended, last.requests, last.running, last.input,
+    SELECT last.gid, last.kind, last.started, last.ended, last.requests, last.running, last.input, last.input_total,
       last.cache_read, last.cache_write, last.output, last.cost, last.currency, last.estimated,
       q.status AS status, q.model_key AS model, c.name AS connection,
       CASE WHEN last.rollout_id IS NOT NULL AND last.kind IN ('summarize', 'condense') THEN coalesce(
@@ -173,7 +178,7 @@ const listActivity = (
     FROM last JOIN llm_requests q ON q.id = last.last_id LEFT JOIN connections c ON c.id = q.connection_id
     UNION ALL
     SELECT r.id AS gid,'edit' AS kind,coalesce(r.started_at,r.created_at) AS started,r.completed_at AS ended,
-      0 AS requests,0 AS running,0 AS input,0 AS cache_read,0 AS cache_write,0 AS output,0 AS cost,
+      0 AS requests,0 AS running,0 AS input,NULL AS input_total,0 AS cache_read,0 AS cache_write,0 AS output,0 AS cost,
       NULL AS currency,0 AS estimated,CASE WHEN r.status='completed' THEN 'complete' ELSE r.status END AS status,
       NULL AS model,NULL AS connection,NULL AS summary_id,NULL AS summary_revision_id,NULL AS slot_id
     FROM rollouts r JOIN chats c ON c.id=r.chat_id
@@ -206,6 +211,7 @@ const activityRow = (row: ActivitySqlRow): ActivityRow => ({
   startedAt: row.started,
   endedAt: row.running > 0 ? null : row.ended,
   requests: row.requests,
+  ...(row.input_total === null ? {} : { inputTotal: row.input_total }),
   input: row.input,
   cacheRead: row.cache_read,
   cacheWrite: row.cache_write,

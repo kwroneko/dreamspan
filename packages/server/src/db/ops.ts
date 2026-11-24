@@ -5329,6 +5329,7 @@ const ReadOpsOwn = RpcGroup.make(
         upstream: Schema.NullOr(Schema.String),
         startedAt: Schema.Number,
         formula: Schema.String,
+        inputTotal: Schema.optionalKey(Schema.Int),
         inputUncached: Schema.NullOr(Schema.Int),
         cacheRead: Schema.NullOr(Schema.Int),
         cacheWrite: Schema.NullOr(Schema.Int),

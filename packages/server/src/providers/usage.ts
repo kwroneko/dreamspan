@@ -179,8 +179,15 @@ export const finalCounts = (
       // tokens are the read ones, not more input, and the rest is uncached.
       const prompt = raw.prompt_tokens
       const write = counts.cacheWrite ?? 0
-      if (Predicate.isNumber(prompt) && write > 0 && prompt < hit + write)
-        counts = { ...counts, inputUncached: Math.max(0, prompt - Math.max(hit, write)) }
+      if (
+        Predicate.isNumber(prompt) &&
+        Number.isSafeInteger(prompt) &&
+        hit > 0 &&
+        write > 0 &&
+        prompt >= Math.max(hit, write) &&
+        prompt < hit + write
+      )
+        counts = { ...counts, inputTotal: prompt, inputUncached: prompt - Math.max(hit, write) }
     }
     if (finished) return { counts, source: "reported" }
     // A stopped or failed request may have reported only its start (Anthropic sends
@@ -301,12 +308,12 @@ export const pricedCost = (
   price: Price,
   cacheRates?: "explicit" | "table"
 ): { amount: number; rates: PricedRates } | null => {
-  const { inputUncached, cacheRead, cacheWrite, output } = counts
+  const { inputTotal, inputUncached, cacheRead, cacheWrite, output } = counts
   if (inputUncached === null || output === null) return null
   const read = cacheRead ?? 0
   const write = cacheWrite ?? 0
   const long = Math.min(counts.cacheWriteLong ?? 0, write)
-  const totalInput = inputUncached + read + write
+  const totalInput = inputTotal ?? inputUncached + read + write
   const tier = (price.tiers ?? [])
     .filter((t) => totalInput > t.inputTokensAbove)
     .reduce<(typeof price.tiers & object)[number] | null>(

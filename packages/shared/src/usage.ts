@@ -29,6 +29,8 @@ export type RequestStatus = typeof RequestStatus.Type
  * `reasoning` is the part of `output` spent thinking.
  */
 export const TokenCounts = Schema.Struct({
+  /** The provider's prompt total when cache reads and writes overlap. */
+  inputTotal: Schema.optionalKey(Schema.Int),
   inputUncached: Schema.NullOr(Schema.Int),
   cacheRead: Schema.NullOr(Schema.Int),
   cacheWrite: Schema.NullOr(Schema.Int),
@@ -37,6 +39,14 @@ export const TokenCounts = Schema.Struct({
   reasoning: Schema.NullOr(Schema.Int)
 })
 export type TokenCounts = typeof TokenCounts.Type
+
+export const totalInputTokens = ({
+  inputTotal,
+  inputUncached,
+  cacheRead,
+  cacheWrite
+}: Pick<TokenCounts, "inputTotal" | "inputUncached" | "cacheRead" | "cacheWrite">): number | null =>
+  inputTotal ?? (inputUncached === null ? null : inputUncached + (cacheRead ?? 0) + (cacheWrite ?? 0))
 
 export const unknownCounts: TokenCounts = {
   inputUncached: null,
