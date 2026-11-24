@@ -18,7 +18,7 @@ import { useEditorReadOnly } from "./readOnly.ts"
  * speaker prefixes. Everything else (description, personality, scenario, the prompts, the
  * creator's notes) is prompt or reference text and stays plain.
  */
-export function cardMessageField(kind: string | undefined, path: FieldPath): CodeEditorProps["messageField"] {
+function cardMessageField(kind: string | undefined, path: FieldPath): CodeEditorProps["messageField"] {
   if (kind !== "card") return undefined
   const [field, index] = path
   if (path.length === 1 && field === "first_mes") return "message"
