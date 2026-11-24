@@ -338,6 +338,25 @@ export const migrationDefinitions = {
           SELECT 1 FROM swept_pending_chats WHERE chat_id GLOB 'swept-library:*' AND swept_at < before_ms
         )`
     ]
+  },
+  "0031_swept_composer_library": {
+    statements: [
+      `CREATE TABLE swept_workshops (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        chat_id TEXT NOT NULL,
+        draft_for TEXT NOT NULL,
+        replacement_chat_id TEXT,
+        PRIMARY KEY (user_id, chat_id)
+      ) STRICT, WITHOUT ROWID`,
+      `CREATE TABLE swept_composer_library (
+        user_id TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        ref_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        PRIMARY KEY (user_id, chat_id, ref_id),
+        FOREIGN KEY (user_id, chat_id) REFERENCES swept_workshops(user_id, chat_id) ON DELETE CASCADE
+      ) STRICT, WITHOUT ROWID`
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

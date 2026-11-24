@@ -43,7 +43,7 @@ import { separateThreads } from "./threads.ts"
 import type { StoredRewrite } from "@dreamspan/shared/regexScripts.ts"
 import { transaction as runTransaction } from "./tx.ts"
 import { checkAutoTurn, claimAutoTurn } from "./autoGuard.ts"
-import { pinLibrary, type LibraryPin, type VersionWithLibraryPins } from "./libraryAttachments.ts"
+import type { LibraryPin, VersionWithLibraryPins } from "./libraryAttachments.ts"
 import { personaInStory } from "./workshopDefaults.ts"
 
 const userMessage = (
@@ -516,10 +516,11 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             : []
         for (const id of round ?? []) yield* graph.checkSpeaker(userId, id)
         yield* graph.checkImages(userId, images ?? [], chatId)
-        const libraryPins = kind === "message" ? yield* pinLibrary(sql, userId, chatId, library ?? []) : []
+        const libraryPins =
+          kind === "message"
+            ? yield* composerLibrary(sql).takeForSend(userId, chatId, draftForkId, commitDraft?.draftId, library ?? [])
+            : []
         yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
-        if (kind === "message")
-          yield* composerLibrary(sql).consume(userId, chatId, draftForkId, commitDraft?.draftId, library ?? [])
         yield* graph.checkSpeaker(userId, speakerEntityId)
         if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)
         if (parentSlotId !== null) {

@@ -67,6 +67,16 @@ describe("composer library items", () => {
           parentSlotId: chat.activeLeafSlotId,
           branch: false,
           content: "Tighten these.",
+          library: [{ kind: "card", refId: stale.id }],
+          reply: false
+        })
+      )
+      yield* notFound(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: chat.activeLeafSlotId,
+          branch: false,
+          content: "Tighten these.",
           library: cached.map(({ kind, refId }) => ({ kind, refId })),
           composer: { draftId: draft.id, session: draft.session },
           reply: false

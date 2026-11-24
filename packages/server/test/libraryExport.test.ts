@@ -169,12 +169,15 @@ describe("export_to_file", () => {
         assert.include(prompt.text, "Prose prompt main.txt")
 
         // An earlier revision, by number.
+        const composer = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
+        yield* api.SetComposerLibrary({ chatId: chat.id, draftId: composer.id, add: [card.id], remove: [] })
         const attached = yield* posted(
           api.SendMessage({
             chatId: chat.id,
             parentSlotId: chat.activeLeafSlotId,
             branch: false,
             content: "Keep a copy of this card.",
+            composer: { draftId: composer.id, session: composer.session },
             library: [{ kind: "card", refId: card.id }]
           })
         )
@@ -438,12 +441,15 @@ describe("export_to_file", () => {
       assert.include(short.text, "Read on with offset= is part of this greeting.")
       expect.soft(short.text).not.toContain("export_to_file")
 
+      const composer = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
+      yield* api.SetComposerLibrary({ chatId: chat.id, draftId: composer.id, add: [ref.id], remove: [] })
       const sent = yield* posted(
         api.SendMessage({
           chatId: chat.id,
           parentSlotId: chat.activeLeafSlotId,
           branch: false,
           content: "",
+          composer: { draftId: composer.id, session: composer.session },
           library: [{ kind: "card", refId: ref.id }]
         })
       )

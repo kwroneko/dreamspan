@@ -187,7 +187,8 @@ describe("0002_files", () => {
           "library_classes",
           "composer_library_carries",
           "composer_library_handovers",
-          "composer_library_carry_cutover"
+          "composer_library_carry_cutover",
+          "swept_composer_library"
         ]
       )
       // The existing row is kept, an image by default.
@@ -546,7 +547,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0027_library_classes",
       "0028_composer_library_carries",
       "0029_composer_library_handovers",
-      "0030_composer_library_carry_cutover"
+      "0030_composer_library_carry_cutover",
+      "0031_swept_composer_library"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -1044,9 +1046,42 @@ it.effect("a carry applied and removed at schema 0027 stays removed on a later r
     const afterUpgrade = Date.now()
     yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, field, content, created_at, updated_at)
       VALUES ('new-draft', ${userId}, 'composer', 'replacement', 'another-fork', '', ${afterUpgrade}, ${afterUpgrade})`
-    yield* sql`INSERT INTO swept_pending_chats (chat_id, user_id, label, swept_at)
-      VALUES ('swept-library:recent', ${userId}, '["ref"]', ${afterUpgrade})`
-    assert.deepStrictEqual(yield* library.set(userId, "replacement", "new-draft", ["ref"], [], "original"), [item])
+    yield* sql`INSERT INTO swept_workshops (user_id, chat_id, draft_for) VALUES (${userId}, 'recent', 'workshop::')`
+    yield* sql`INSERT INTO swept_composer_library (user_id, chat_id, ref_id, position)
+      VALUES (${userId}, 'recent', 'ref', 1)`
+    assert.deepStrictEqual(yield* library.set(userId, "replacement", "new-draft", ["ref"], [], "original"), [])
     assert.deepStrictEqual(yield* library.set(userId, "replacement", "draft", ["ref"], [], "recent"), [item])
+  }).pipe(Effect.provide(layer()))
+)
+
+it.effect("0031 leaves ownership empty even when legacy sweep and move receipts survive (rev-dd10 #1)", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* migrate(upTo(30))
+    yield* sql`INSERT INTO users (id, handle, display_name, role, created_at)
+      VALUES ('u', 'u', 'Owner', 'user', 0)`
+    yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at)
+      VALUES ('destination', 'u', 'workshop', 'pending', 0)`
+    yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, content, created_at, updated_at)
+      VALUES ('draft', 'u', 'composer', 'destination', '', 0, 0)`
+    const sweeps = [
+      ["origin", '["moved-by-url","stayed"]'],
+      ["other-source", '["moved-by-carry","kept"]'],
+      ["url-destination", '["moved-by-url"]']
+    ] as const
+    for (const [chatId, refs] of sweeps)
+      yield* sql`INSERT INTO swept_pending_chats (chat_id, user_id, label, swept_at)
+        VALUES (${chatId}, 'u', 'A workshop', 123), (${"swept-library:" + chatId}, 'u', ${refs}, 123)`
+    yield* sql`INSERT INTO composer_library_carries (draft_id, source_chat_id, ref_id)
+      VALUES ('draft', 'other-source', 'moved-by-carry')`
+    yield* sql`INSERT INTO composer_library_handovers (origin_chat_id, user_id, operation_id, ref_id, chat_id)
+      VALUES ('origin', 'u', 'url', 'moved-by-url', 'url-destination'),
+             ('origin', 'u', 'local-url', 'stayed', 'origin')`
+    yield* migrate(migrationDefinitions)
+    assert.deepStrictEqual(yield* sql`SELECT * FROM swept_workshops`, [])
+    assert.deepStrictEqual(yield* sql`SELECT chat_id, ref_id, position FROM swept_composer_library`, [])
+    assert.lengthOf(yield* sql`SELECT * FROM swept_pending_chats`, 6)
+    assert.lengthOf(yield* sql`SELECT * FROM composer_library_carries`, 1)
+    assert.lengthOf(yield* sql`SELECT * FROM composer_library_handovers`, 2)
   }).pipe(Effect.provide(layer()))
 )

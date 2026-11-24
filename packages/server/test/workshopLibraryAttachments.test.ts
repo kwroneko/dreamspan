@@ -7,8 +7,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit, Stream } from "effect"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
-import { NewVersion } from "@dreamspan/shared/chat.ts"
+import { type ChatId, NewVersion } from "@dreamspan/shared/chat.ts"
 import { textField } from "@dreamspan/shared/editing.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
@@ -20,6 +21,13 @@ import { completionChunks, sse, startMockProvider } from "./support/mockProvider
 import { eventually, finished, generateReply } from "./support/generation.ts"
 
 const text = (m: { content?: unknown }) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))
+
+const attach = (api: Effect.Success<ReturnType<typeof client>>, chatId: ChatId, ...refs: RefId[]) =>
+  Effect.gen(function* () {
+    const draft = yield* api.OpenComposer({ chatId, forkId: null })
+    yield* api.SetComposerLibrary({ chatId, draftId: draft.id, add: refs, remove: [] })
+    return { draftId: draft.id, session: draft.session }
+  })
 
 describe("workshop library attachments", () => {
   it.live(
@@ -65,12 +73,14 @@ describe("workshop library attachments", () => {
           Effect.forkScoped
         )
         yield* eventually(() => events.length > 0)
+        const composer = yield* attach(api, chat.id, small.id, large.id, book.id)
         const sent = yield* posted(
           api.SendMessage({
             chatId: chat.id,
             parentSlotId: chat.activeLeafSlotId,
             branch: false,
             content: "Tighten these.",
+            composer,
             library: [
               { kind: "card", refId: small.id },
               { kind: "card", refId: large.id },
@@ -145,12 +155,14 @@ describe("workshop library attachments", () => {
           })
         )
         assert.isTrue(Exit.isFailure(inStory))
+        const reattached = yield* attach(api, chat.id, small.id)
         const unknown = yield* Effect.exit(
           api.SendMessage({
             chatId: chat.id,
             parentSlotId: reply.entry.slotId,
             branch: false,
             content: "Here.",
+            composer: reattached,
             library: [{ kind: "lorebook", refId: small.id }]
           })
         )
@@ -199,11 +211,13 @@ describe("workshop library attachments", () => {
         { kind: "card" as const, refId: card.id },
         { kind: "lorebook" as const, refId: book.ref.id }
       ]
+      const composer = yield* attach(api, chat.id, card.id, book.ref.id)
       const queued = yield* api.SendMessage({
         chatId: chat.id,
         parentSlotId: placeholder.slotId,
         branch: false,
         content: "",
+        composer,
         library
       })
       if (queued._tag !== "Queued") return assert.fail("Expected the send to queue during generation.")
@@ -262,6 +276,7 @@ describe("workshop library attachments", () => {
       )
       assert.isTrue(Exit.isFailure(notYetSent))
 
+      const reattached = yield* attach(api, chat.id, card.id)
       yield* api.SetRefArchived({ refId: card.id, archived: true })
       const archived = yield* Effect.flip(
         api.SendMessage({
@@ -269,6 +284,7 @@ describe("workshop library attachments", () => {
           parentSlotId: sent.slotId,
           branch: false,
           content: "",
+          composer: reattached,
           library: library.slice(0, 1)
         })
       )
@@ -365,12 +381,14 @@ describe("workshop library attachments", () => {
         yield* writer.AddStateEvent({ userId, chatId: chat.id, slotId: null, versionId: null, scope: null, data })
       let parent = chat.activeLeafSlotId
       for (const content of ["This is <em>prose</em>.", ""]) {
+        const composer = yield* attach(api, chat.id, card.id)
         const sent = yield* posted(
           api.SendMessage({
             chatId: chat.id,
             parentSlotId: parent,
             branch: false,
             content,
+            composer,
             library: [{ kind: "card", refId: card.id }]
           })
         )

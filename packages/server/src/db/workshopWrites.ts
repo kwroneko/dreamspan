@@ -1,14 +1,18 @@
 import { startingFolder } from "./workingFolders.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 /** One writer transaction creates the seeds, their setting, the chat and its greeting. */
-import { type ChatId, type EntityId, type ForkId, NewVersion } from "@dreamspan/shared/chat.ts"
+import { type Chat, type ChatId, type EntityId, type ForkId, NewVersion } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { DraftKey } from "@dreamspan/shared/drafts.ts"
 import { newCardDoc } from "@dreamspan/shared/editing.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import type { Bin } from "./bin.ts"
+import { composerLibrary } from "./composerLibrary.ts"
 import type { LibrarySteps } from "./editorWrites.ts"
 import { newChatLcmSettings, ownedPersona, readDefaults } from "./generationSettings.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
+import type { VersionWithLibraryPins } from "./libraryAttachments.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { writeGrant } from "./workshopGrants.ts"
@@ -33,6 +37,13 @@ import { getWorkshopStart } from "./workshopAttach.ts"
 export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
   const { sql } = steps
   const graph = makeGraphWrites(sql, bin.drafts, true)
+  const library = composerLibrary(sql)
+  const openComposer = (userId: UserId, chat: Chat) =>
+    bin.drafts.openComposer(
+      userId,
+      new DraftKey({ targetKind: "composer", targetId: chat.id, field: chat.currentForkId! }),
+      null
+    )
   const stepsFor = {
     createWorkshop: ({
       userId,
@@ -267,10 +278,39 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
   }
   return {
     CreateWorkshop: (input) =>
-      stepsFor.createWorkshop(input).pipe(
-        Effect.map(({ chat }) => chat),
-        transaction(sql, "CreateWorkshop")
-      ),
+      Effect.gen(function* () {
+        const { userId, draftFor, replaceDraft } = input
+        let swept: ChatId | undefined
+        if (draftFor !== undefined && replaceDraft !== undefined) {
+          let source = replaceDraft
+          while (true) {
+            const [existing] = yield* sql<ChatRow>`SELECT * FROM chats /* chat:includes-pending: reopening a workshop */
+              WHERE id = ${source} AND owner_user_id = ${userId} AND kind = 'workshop' AND deleted_at IS NULL
+                AND (status <> 'pending' OR draft_for = ${draftFor})`
+            if (existing !== undefined) return toChat(existing)
+            const [receipt] = yield* sql<{ replacement_chat_id: ChatId | null }>`SELECT replacement_chat_id
+              FROM swept_workshops WHERE user_id = ${userId} AND chat_id = ${source} AND draft_for = ${draftFor}`
+            if (receipt === undefined) break
+            if (receipt.replacement_chat_id === null) {
+              swept = source
+              break
+            }
+            source = receipt.replacement_chat_id
+          }
+        }
+        const { chat } = yield* stepsFor.createWorkshop(input)
+        if (swept !== undefined && draftFor !== undefined) {
+          const refs = yield* library.sweptForReplacement(userId, swept)
+          if (refs.length > 0) {
+            const draft = yield* openComposer(userId, chat)
+            yield* library.set(userId, chat.id, draft.id, refs, [], swept)
+          }
+          // A retry can follow this link even after the replacement itself is swept.
+          yield* sql`UPDATE swept_workshops SET replacement_chat_id = ${chat.id}
+            WHERE user_id = ${userId} AND chat_id = ${swept} AND draft_for = ${draftFor}`
+        }
+        return chat
+      }).pipe(transaction(sql, "CreateWorkshop")),
     StartWorkshop: ({ requestId, first, speaker: picked, rewrite, ...input }) =>
       Effect.gen(function* () {
         const { userId } = input
@@ -278,26 +318,40 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         if (existing) return existing
         const { chat, assistant, persona } = yield* stepsFor.createWorkshop(input)
         const speaker = workshopSpeaker(picked, assistant, persona)
-        const version = new NewVersion({
-          speakerEntityId: speaker,
-          macroMode: "verbatim",
-          ...(first._tag === "Send"
-            ? {
-                writer: "human",
-                content: first.content,
-                status: "complete",
-                origin: "user_written",
-                ...(first.library?.length ? { library: first.library } : {}),
-                ...(rewrite === undefined ? {} : { rewrite })
-              }
-            : {
-                writer: "model",
-                content: "",
-                status: "generating",
-                origin: "generated",
-                ...(first.direction.trim() === "" ? {} : { direction: first.direction })
-              })
-        })
+        const items = first._tag === "Send" ? (first.library ?? []) : []
+        // The atomic start API explicitly attaches its selections to the new composer.
+        const draft = items.length === 0 ? null : yield* openComposer(userId, chat)
+        if (draft !== null)
+          yield* library.set(
+            userId,
+            chat.id,
+            draft.id,
+            items.map((item) => item.refId),
+            []
+          )
+        const libraryPins = yield* library.takeForSend(userId, chat.id, chat.currentForkId!, draft?.id, items)
+        const version: VersionWithLibraryPins = {
+          ...new NewVersion({
+            speakerEntityId: speaker,
+            macroMode: "verbatim",
+            ...(first._tag === "Send"
+              ? {
+                  writer: "human",
+                  content: first.content,
+                  status: "complete",
+                  origin: "user_written",
+                  ...(rewrite === undefined ? {} : { rewrite })
+                }
+              : {
+                  writer: "model",
+                  content: "",
+                  status: "generating",
+                  origin: "generated",
+                  ...(first.direction.trim() === "" ? {} : { direction: first.direction })
+                })
+          }),
+          ...(libraryPins.length === 0 ? {} : { libraryPins })
+        }
         const posted = yield* graph
           .appendMessage({
             userId,

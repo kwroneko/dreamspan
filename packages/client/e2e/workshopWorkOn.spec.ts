@@ -639,8 +639,7 @@ test.describe("work on in a workshop", () => {
     await expect(there).toHaveCount(0)
 
     offline = false
-    await expect.poll(() => new URL(page.url()).searchParams.get("draft"), { timeout: 30_000 }).not.toBe(first)
-    expect(new URL(page.url()).searchParams.get("draft")).not.toBe(second)
+    await expect.poll(() => new URL(page.url()).searchParams.get("draft"), { timeout: 30_000 }).toBe(second)
     const task = "Review the jetty."
     await page.getByLabel("Message", { exact: true }).fill(task)
     await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()

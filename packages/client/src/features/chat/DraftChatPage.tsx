@@ -53,7 +53,7 @@ function DraftChat({
   const [chat, setChat] = useState<Chat | null>(null)
   const [attempt, setAttempt] = useState(0)
   // The chat the URL named when the page opened: a later catch-up of the URL opens nothing.
-  // Null once the server swept it, so the next attempt opens a fresh one.
+  // After a sweep, a workshop names its predecessor so the writer can recover attachments.
   const [reopen, setReopen] = useState(named)
   const started = useRef(false)
   // Opening another after the shown one was deleted.
@@ -172,11 +172,12 @@ function DraftChat({
         // Swept while open (no tab had it for a while; a reconnect after a long sleep, say): a
         // fresh one for the same entry, with no notice. The chat shown stays until it's here.
         replacing.current = true
-        setReopen(null)
+        const workshop = draftFor.startsWith("workshop:") || draftFor.startsWith("side:")
+        setReopen(workshop ? shownId.current : null)
         setAttempt((n) => n + 1)
       }
     }),
-    [navigate, guidance]
+    [navigate, guidance, draftFor]
   )
   const fork = typeof search.fork === "string" && search.fork !== "" ? (search.fork as ForkId) : null
   const slot = typeof search.slot === "string" ? (search.slot as SlotId) : null
