@@ -343,7 +343,7 @@ test("token counts expand {{char}} and {{user}} first, as ST does", async ({ pag
   expect(await counts.nth(2).getAttribute("aria-busy")).toBeNull()
   await expect(counts.nth(2)).toHaveText(plain!)
   await counts.nth(2).hover()
-  await expect(page.getByText(/^Counted with macros as they become/).last()).toBeVisible()
+  await expect(page.getByText(/^~\d+ tokens\. Counted with macros as they become/).last()).toBeVisible()
 })
 
 test("the character tab's Export asks with the tab's own unsaved typing", async ({ page }) => {
