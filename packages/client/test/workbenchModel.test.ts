@@ -8,10 +8,15 @@ import {
   focusFrame,
   focusedFrame,
   focusedTab,
+  frameBoxes,
   frames,
+  hasRoom,
   initialLayout,
   type Layout,
   maximizeFrame,
+  MIN_FRAME_HEIGHT,
+  MIN_FRAME_WIDTH,
+  minSize,
   moveTab,
   neighbours,
   openTab,
@@ -402,5 +407,47 @@ describe("per-open affinity", () => {
     layout = pinTab(layout, focusedTab(layout)!.id)
     const plain = openTab(layout, "/library/mara", keyOf, { id: "t" })
     expect(openTab(layout, "/library/mara", keyOf, { id: "t", near: [editor] })).toEqual(plain)
+  })
+})
+
+// A frame keeps the room its strip needs (minframe1): repeated splits used to halve the
+// rightmost frame to a sliver.
+describe("workbench room", () => {
+  const rightmost = (layout: Layout) => frames(layout.root).at(-1)!.id
+
+  it("allows rightward splits only while both halves keep their least width", () => {
+    let layout = initialLayout("/chats/a")
+    let splits = 0
+    for (let i = 0; i < 6; i++) {
+      const next = splitFrame(layout, rightmost(layout), "row")
+      if (!hasRoom(layout, next, 1340, 900)) break
+      layout = next
+      splits++
+    }
+    // 1340 → 670 → 335: a third halving would leave 167 px.
+    expect(splits).toBe(2)
+    for (const box of frameBoxes(layout.root, 1340, 900).values())
+      expect(box.width).toBeGreaterThanOrEqual(MIN_FRAME_WIDTH - 1.5)
+    // Down still fits: 900 → 450.
+    expect(hasRoom(layout, splitFrame(layout, rightmost(layout), "column"), 1340, 900)).toBe(true)
+  })
+
+  it("counts only the frames a change adds or shrinks", () => {
+    let layout = initialLayout("/chats/a")
+    layout = splitFrame(layout, rightmost(layout), "row")
+    // A saved layout with a sliver on the right (134 px of 1340): the wide frame still splits.
+    const root = layout.root.type === "split" ? { ...layout.root, sizes: [0.9, 0.1] } : layout.root
+    const stale = { ...layout, root }
+    const [wide, sliver] = frames(stale.root)
+    expect(hasRoom(stale, splitFrame(stale, wide!.id, "row"), 1340, 900)).toBe(true)
+    expect(hasRoom(stale, splitFrame(stale, sliver!.id, "column"), 1340, 900)).toBe(false)
+  })
+
+  it("adds up a split's least size along its direction and takes the largest across", () => {
+    let layout = initialLayout("/chats/a")
+    layout = splitFrame(layout, rightmost(layout), "row")
+    layout = splitFrame(layout, rightmost(layout), "column")
+    expect(minSize(layout.root, "x")).toBe(2 * MIN_FRAME_WIDTH + 1)
+    expect(minSize(layout.root, "y")).toBe(2 * MIN_FRAME_HEIGHT + 1)
   })
 })

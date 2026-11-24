@@ -116,7 +116,11 @@ export function useOpenAsTab() {
   if (!tab) return null
   const { store, tabId } = tab
   return {
-    at: dropTargetAt,
+    // An edge too small to split takes nothing (`canDrop`): no shade, and a drop there does nothing.
+    at: (x: number, y: number) => {
+      const target = dropTargetAt(x, y)
+      return target && store.canDrop(target.frameId, target.zone) ? target : null
+    },
     drop: (target: DropTarget, href: string) => store.dropOpen(href, target.frameId, target.zone, target.index),
     open: (href: string) => store.dropOpen(href, store.frameOf(tabId) ?? store.frames()[0]!.id, "center")
   }

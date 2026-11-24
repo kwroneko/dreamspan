@@ -27,6 +27,7 @@ import { Away } from "../../ui/away.ts"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { ContextMenu, Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
+import { setMiddleMin } from "../../ui/columnLayout.ts"
 import { UnsavedScope, UnsavedTracker } from "../../ui/UnsavedChanges.tsx"
 import { Tooltip, IconButton, iconButtonClass } from "../../ui/Tooltip.tsx"
 import { SlotOutlet } from "../../slots.tsx"
@@ -43,6 +44,8 @@ import {
   isSplit,
   type Layout,
   type LayoutAction,
+  MIN_FRAME_WIDTH,
+  minSize,
   stripCorners,
   neighbours,
   type Node,
@@ -77,8 +80,8 @@ const refuseOther = (event: DragEvent | React.DragEvent) => {
   event.preventDefault()
   if (event.dataTransfer) event.dataTransfer.dropEffect = "none"
 }
-const MIN_WIDTH = 320
-const MIN_HEIGHT = 160
+/** Why a split is disabled where the frame is too small to halve (owner's wording, 2026-11-24). */
+const NO_ROOM = "Not enough room to split this pane"
 
 const WIDE = "(min-width: 1024px)"
 const subscribeWide = (listener: () => void) => {
@@ -144,6 +147,12 @@ function WorkbenchFor({ userId }: { userId: string }) {
   const side = useSideWidth(outer, center)
   const placeholder = usePanelPlaceholder(store, wide, side)
   useKeepDividers(store, outer, center, wide && !layout.maximized)
+  useRoom(store, center, wide)
+  // Frames side by side need their least widths together: the columns beside them give way
+  // first (columnLayout.ts), and what still doesn't fit scrolls (the center's overflow).
+  const framesMin = wide && !layout.maximized && isSplit(layout) ? minSize(layout.root, "x") : 0
+  useLayoutEffect(() => setMiddleMin(framesMin), [framesMin])
+  useLayoutEffect(() => () => setMiddleMin(0), [])
   // A maximized frame shows alone; the others keep their tabs (VS Code's Maximize Editor Group).
   const maximized = layout.maximized ? frames(layout.root).find((f) => f.id === layout.maximized) : undefined
   return (
@@ -151,7 +160,12 @@ function WorkbenchFor({ userId }: { userId: string }) {
       <PanelToggleHostRef value={setPanelToggleHost}>
         <div ref={setOuter} className="flex min-h-0 min-w-0 flex-1">
           <div ref={setPortraitHost} className="contents" data-portrait-host />
-          <div ref={setCenter} data-workbench className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div
+            ref={setCenter}
+            data-workbench
+            data-layout-audit-ignore="inset: the frames fill the center edge to edge, scrolling only when the window is too narrow for them"
+            className={`flex min-h-0 min-w-0 flex-1 flex-col ${wide ? "overflow-auto" : ""}`}
+          >
             {wide ? (
               <NodeView node={maximized ?? layout.root} layout={layout} store={store} slotRef={slotRef} />
             ) : (
@@ -362,6 +376,21 @@ function useSideWidth(outer: HTMLElement | null, center: HTMLElement | null) {
   return side
 }
 
+/** Tells the store the room the frames share, so splits that wouldn't fit are disabled. */
+function useRoom(store: WorkbenchStore, center: HTMLElement | null, wide: boolean) {
+  useLayoutEffect(() => {
+    if (!center || !wide) {
+      store.setRoom(0, 0)
+      return
+    }
+    const measure = () => store.setRoom(center.clientWidth, center.clientHeight)
+    const observer = new ResizeObserver(measure)
+    observer.observe(center)
+    measure()
+    return () => observer.disconnect()
+  }, [store, center, wide])
+}
+
 /**
  * The side panel's place while no chat is open to fill it (owner, 2026-11-07: "I don't want
  * unexpected layout shifts just because chats close"): the panel's width when its chat was
@@ -431,7 +460,7 @@ function keepRightEdge(node: Node, from: number, to: number): Array<[string, Rea
   const kept = shares.slice(0, last).map((share) => share * from)
   const keptWidth = kept.reduce((sum, px) => sum + px, 0)
   // Where room is short, the last frame keeps at least an equal share; the others give it that.
-  const floor = Math.min(MIN_WIDTH, to / shares.length)
+  const floor = Math.min(MIN_FRAME_WIDTH, to / shares.length)
   const lastWidth = Math.max(floor, to - keptWidth)
   const scale = keptWidth > 0 ? (to - lastWidth) / keptWidth : 1
   if (scale <= 0) return []
@@ -478,16 +507,27 @@ function SplitView({
     measure()
     return () => observer.disconnect()
   }, [element, row])
-  const min = row ? MIN_WIDTH : MIN_HEIGHT
+  const axis = row ? "x" : "y"
+  // Each child keeps the least its frames need (`minSize`): a frame never shows narrower than
+  // its strip, and a window too small for them all scrolls the center instead.
+  const least = (node: Node) => ({ minWidth: minSize(node, "x"), minHeight: minSize(node, "y") })
   return (
-    <div ref={setElement} className={`flex min-h-0 min-w-0 flex-1 ${row ? "flex-row" : "flex-col"}`}>
+    <div
+      ref={setElement}
+      style={least(split)}
+      className={`flex min-h-0 min-w-0 flex-1 ${row ? "flex-row" : "flex-col"}`}
+    >
       {split.children.map((child, index) => {
         const share = split.sizes[index] ?? 1 / split.children.length
         const next = split.sizes[index + 1] ?? 0
         const pair = (share + next) * size
+        // A divider stops where either side would go below its least size.
+        const min = minSize(child, axis)
+        const nextChild = split.children[index + 1]
+        const nextMin = nextChild ? minSize(nextChild, axis) : 0
         const resize = (px: number) => {
-          if (size <= 0) return
-          const clamped = Math.max(min, Math.min(pair - min, px))
+          if (size <= 0 || pair < min + nextMin) return
+          const clamped = Math.max(min, Math.min(pair - nextMin, px))
           const sizes = [...split.sizes]
           sizes[index] = clamped / size
           sizes[index + 1] = share + next - clamped / size
@@ -496,7 +536,7 @@ function SplitView({
         return (
           <div
             key={child.id}
-            style={{ flex: `${share} 1 0px` }}
+            style={{ flex: `${share} 1 0px`, ...least(child) }}
             className={`relative flex min-h-0 min-w-0 ${index > 0 ? (row ? "border-l border-border" : "border-t border-border") : ""}`}
           >
             <NodeView node={child} layout={layout} store={store} slotRef={slotRef} />
@@ -511,7 +551,7 @@ function SplitView({
                 axis={row ? "x" : "y"}
                 width={share * size}
                 min={min}
-                max={Math.max(min, pair - min)}
+                max={Math.max(min, pair - nextMin)}
                 direction={1}
                 onChange={resize}
                 onReset={() => resize(pair / 2)}
@@ -540,7 +580,7 @@ function useFrameEvents(
   store: WorkbenchStore,
   onDrop: (tabId: string, zone: DropZone) => void
 ) {
-  const [over, setOver] = useState<DropZone | null>(null)
+  const [over, setOver] = useState<{ zone: DropZone; blocked: boolean } | null>(null)
   useEffect(() => {
     if (!element) return
     const focus = () => store.focusFrame(frameId)
@@ -549,8 +589,11 @@ function useFrameEvents(
     const dragover = (event: DragEvent) => {
       if (!isTab(event)) return refuseOther(event)
       event.preventDefault()
-      if (event.dataTransfer) event.dataTransfer.dropEffect = "move"
-      setOver(dropZone(element, event))
+      const zone = dropZone(element, event)
+      // An edge too small to split shows as refused, and a drop there does nothing.
+      const blocked = !store.canDrop(frameId, zone)
+      if (event.dataTransfer) event.dataTransfer.dropEffect = blocked ? "none" : "move"
+      setOver((before) => (before?.zone === zone && before.blocked === blocked ? before : { zone, blocked }))
     }
     const dragleave = (event: DragEvent) => {
       if (!element.contains(event.relatedTarget as globalThis.Node | null)) setOver(null)
@@ -559,6 +602,7 @@ function useFrameEvents(
       if (!isTab(event)) return
       event.preventDefault()
       setOver(null)
+      if (!store.canDrop(frameId, dropZone(element, event))) return
       const payload = dragPayloadOf(event.dataTransfer)
       if (payload) {
         if (payload.href) store.dropOpen(payload.href, frameId, dropZone(element, event))
@@ -619,13 +663,23 @@ function FrameView({
       {strip && <TabStrip frame={frame} layout={layout} store={store} tabs={frame.tabs} />}
       <div ref={setBody} data-frame-body className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         {frame.tabs.length === 0 && <EmptyFrame frame={frame} store={store} layout={layout} />}
-        {over && (
+        {over && !over.blocked && (
           <div
             aria-hidden="true"
-            data-drop-zone={over}
+            data-drop-zone={over.zone}
             data-layout-overlay="Drop target covers the part of the frame a dragged tab will take"
-            className={`pointer-events-none absolute z-40 border-2 border-accent bg-accent/10 ${ZONE_OVERLAY[over]}`}
+            className={`pointer-events-none absolute z-40 border-2 border-accent bg-accent/10 ${ZONE_OVERLAY[over.zone]}`}
           />
+        )}
+        {over?.blocked && (
+          <div
+            data-drop-zone={over.zone}
+            data-drop-blocked
+            data-layout-overlay="A refused drop target covers the edge it would have split"
+            className={`pointer-events-none absolute z-40 flex items-center justify-center border-2 border-dashed border-border bg-surface/90 p-3 text-center text-sm text-muted ${ZONE_OVERLAY[over.zone]}`}
+          >
+            {NO_ROOM}
+          </div>
         )}
       </div>
     </section>
@@ -1021,16 +1075,28 @@ function TabActions({
         }))
       ]
     : []
-  // An item that wouldn't change the layout is disabled, saying why.
+  // Whether a split here leaves both frames room for their strips (the window changes it too).
+  const roomRight = useSyncExternalStore(store.subscribe, () => store.canSplit(frame.id, "row"))
+  const roomDown = useSyncExternalStore(store.subscribe, () => store.canSplit(frame.id, "column"))
+  // An item that wouldn't change the layout, or would leave a frame too narrow, is disabled, saying why.
   const why = (action: LayoutAction) => {
     const can = canApply(layout, action, itemKey)
-    if (can === "yes") return undefined
     if (can === "same") return "It's already there."
-    const alone = frames(layout.root).length === 1 && frame.tabs.length === 1
-    return action.type === "move" && !alone ? "No frame there." : "Needs another tab or pane."
+    if (can === "none") {
+      const alone = frames(layout.root).length === 1 && frame.tabs.length === 1
+      return action.type === "move" && !alone ? "No frame there." : "Needs another tab or pane."
+    }
+    if (
+      action.type === "moveToNewFrame" &&
+      !store.canMoveToSplit(action.tabId, action.direction, undefined, action.before ?? false)
+    )
+      return NO_ROOM
+    return undefined
   }
   const splittable = (direction: Direction) =>
     tab !== undefined && canApply(layout, { type: "split", frameId: frame.id, direction }) === "yes"
+  const splitWhy = (direction: Direction, can: string) =>
+    !splittable(direction) ? "Nothing shown to split." : !(direction === "row" ? roomRight : roomDown) ? NO_ROOM : can
   const splitWith = (direction: Direction) => {
     if (!tab) return
     store.focusTab(tab.id)
@@ -1061,18 +1127,16 @@ function TabActions({
       <MenuSeparator />
       <MenuItem
         icon="split-right"
-        disabled={!splittable("row")}
-        description={
-          splittable("row") ? "Shows this tab in a second frame on the right too." : "Nothing shown to split."
-        }
+        disabled={!splittable("row") || !roomRight}
+        description={splitWhy("row", "Shows this tab in a second frame on the right too.")}
         onClick={() => splitWith("row")}
       >
         Split right
       </MenuItem>
       <MenuItem
         icon="split-down"
-        disabled={!splittable("column")}
-        description={splittable("column") ? "Shows this tab in a second frame below too." : "Nothing shown to split."}
+        disabled={!splittable("column") || !roomDown}
+        description={splitWhy("column", "Shows this tab in a second frame below too.")}
         onClick={() => splitWith("column")}
       >
         Split down
@@ -1179,10 +1243,24 @@ function TabActions({
 
 // --- The header's split buttons (`centerHeaderEnd`).
 
+const noSubscribe = () => () => {}
+
+/** Whether the tab's frame has room to halve that way (the window and the frames decide). */
+const useRoomToSplit = (tab: ReturnType<typeof useWorkbenchTab>, direction: Direction) =>
+  useSyncExternalStore(tab?.store.subscribe ?? noSubscribe, () => {
+    const frame = tab ? frameOfTab(tab.store.layout, tab.tabId) : undefined
+    return frame !== undefined && tab !== null && tab.store.canSplit(frame.id, direction)
+  })
+
+/** A disabled split button keeps its look on hover: it only explains (owner: disabled with a reason, not hidden). */
+const DISABLED_HOVER = "data-disabled:hover:bg-transparent data-disabled:hover:text-muted"
+
 export function SplitButtons(): ReactNode {
   const tab = useWorkbenchTab()
   const wide = useWideScreen()
   const shown = useTabShown(wide)
+  const right = useRoomToSplit(tab, "row")
+  const down = useRoomToSplit(tab, "column")
   if (!tab || !wide || !shown) return null
   const split = (direction: "row" | "column") => {
     const frame = frameOfTab(tab.store.layout, tab.tabId)
@@ -1193,14 +1271,20 @@ export function SplitButtons(): ReactNode {
       <span className="contents @max-[40rem]/header:hidden">
         <IconButton
           label="Split right"
-          hint="Shows this in a second frame on the right too, to open something beside it."
+          hint={right ? "Shows this in a second frame on the right too, to open something beside it." : NO_ROOM}
           icon="split-right"
+          disabled={!right}
+          focusableWhenDisabled
+          className={DISABLED_HOVER}
           onClick={() => split("row")}
         />
         <IconButton
           label="Split down"
-          hint="Shows this in a second frame below too, to open something beside it."
+          hint={down ? "Shows this in a second frame below too, to open something beside it." : NO_ROOM}
           icon="split-down"
+          disabled={!down}
+          focusableWhenDisabled
+          className={DISABLED_HOVER}
           onClick={() => split("column")}
         />
       </span>
@@ -1220,14 +1304,16 @@ export function SplitButtons(): ReactNode {
         >
           <MenuItem
             icon="split-right"
-            description="Shows this in a second frame on the right too."
+            disabled={!right}
+            description={right ? "Shows this in a second frame on the right too." : NO_ROOM}
             onClick={() => split("row")}
           >
             Split right
           </MenuItem>
           <MenuItem
             icon="split-down"
-            description="Shows this in a second frame below too."
+            disabled={!down}
+            description={down ? "Shows this in a second frame below too." : NO_ROOM}
             onClick={() => split("column")}
           >
             Split down
