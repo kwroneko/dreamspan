@@ -552,7 +552,11 @@ const spawnOnce = async (spec: SpawnSpec): Promise<SandboxProcess> => {
   const runDir = await mkdtemp(join(runtimeRoot(), `${RUN_PREFIX}${process.pid}-`))
   let proxy: SandboxProxy | null = null
   let group: CommandCgroup | null = null
+  let filterFile: FileHandle | null = null
+  let args: FileHandle | null = null
+  const closeSetupFiles = () => Promise.allSettled([filterFile?.close(), args?.close()])
   const cleanUp = async () => {
+    await closeSetupFiles()
     await group?.finish().catch(() => undefined)
     await proxy?.close().catch(() => undefined)
     await rm(runDir, { recursive: true, force: true }).catch(() => undefined)
@@ -561,13 +565,12 @@ const spawnOnce = async (spec: SpawnSpec): Promise<SandboxProcess> => {
     proxy = await fillRunDir(runDir, spec.network)
     await writeFile(join(runDir, "rp", PROGRAM_ENV_FILE), programEnvFile(spec), { mode: 0o600 })
     const filter = seccompFilter()
-    let filterFile: FileHandle | null = null
     if (filter) {
       await writeFile(join(runDir, "seccomp.bpf"), filter)
       filterFile = await open(join(runDir, "seccomp.bpf"), "r")
     }
     const argsFd = filterFile ? 4 : 3
-    const args = await argsFile(runDir, [...(filterFile ? ["--seccomp", "3"] : []), ...bwrapArgs(spec, runDir)])
+    args = await argsFile(runDir, [...(filterFile ? ["--seccomp", "3"] : []), ...bwrapArgs(spec, runDir)])
     const argv = ["--args", String(argsFd), "/bin/bash", "-c", spawnPrelude(spec), "dreamspan-program", ...spec.argv]
     const limiter = await selectLimiter(bwrapLimiters)
     if (!("none" in limiter))
@@ -576,13 +579,13 @@ const spawnOnce = async (spec: SpawnSpec): Promise<SandboxProcess> => {
     const child = (() => {
       try {
         return spawn(start.file, start.args, {
-          stdio: ["pipe", "pipe", "pipe", ...(filterFile ? [filterFile.fd] : []), args.fd],
+          stdio: ["pipe", "pipe", "pipe", ...(filterFile ? [filterFile.fd] : []), args!.fd],
           detached: true,
           env: { ...group?.env }
         })
       } finally {
-        void filterFile?.close()
-        void args.close()
+        void closeSetupFiles()
+        filterFile = args = null
       }
     })()
     const pid = child.pid
@@ -654,13 +657,15 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
   const runDir = await mkdtemp(join(runtimeRoot(), `${RUN_PREFIX}${process.pid}-`))
   let proxy: SandboxProxy | null = null
   let group: CommandCgroup | null = null
+  let filterFile: FileHandle | null = null
+  let args: FileHandle | null = null
+  const closeSetupFiles = () => Promise.allSettled([filterFile?.close(), args?.close()])
   try {
     proxy = await fillRunDir(runDir, spec.network)
     const marker = `__rp_cwd_${randomBytes(12).toString("hex")}__`
     // The filter goes to bubblewrap as descriptor 3 and its arguments as the next one; it reads
     // and closes both before the command.
     const filter = seccompFilter()
-    let filterFile: FileHandle | null = null
     if (filter) {
       await writeFile(join(runDir, "seccomp.bpf"), filter)
       filterFile = await open(join(runDir, "seccomp.bpf"), "r")
@@ -675,7 +680,7 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
         passed.push(mount.fd)
       }
     // Options only: bubblewrap takes the command itself from its command line.
-    const args = await argsFile(runDir, [
+    args = await argsFile(runDir, [
       ...(filterFile ? ["--seccomp", "3"] : []),
       ...bwrapArgs(spec, runDir, mountFds),
       "--setenv",
@@ -692,13 +697,13 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
       try {
         if (signal.aborted) return null
         return spawn(start.file, start.args, {
-          stdio: ["ignore", "pipe", "pipe", ...(filterFile ? [filterFile.fd] : []), args.fd, ...passed],
+          stdio: ["ignore", "pipe", "pipe", ...(filterFile ? [filterFile.fd] : []), args!.fd, ...passed],
           detached: true,
           env: { ...group?.env }
         })
       } finally {
-        void filterFile?.close()
-        void args.close()
+        void closeSetupFiles()
+        filterFile = args = null
       }
     })()
     if (child === null)
@@ -815,6 +820,7 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
       durationMs: Date.now() - started
     }
   } finally {
+    await closeSetupFiles()
     await group?.finish().catch(() => undefined)
     await proxy?.close().catch(() => undefined)
     await rm(runDir, { recursive: true, force: true }).catch(() => undefined)
