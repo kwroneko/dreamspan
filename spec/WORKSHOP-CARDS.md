@@ -278,9 +278,9 @@ The built Undo restores the previous revision only while the head is still the a
 
 1. Take the change as the pair (B, A): the revision before the turn's first change to the item and the one after its last. Let H be the head now.
 2. For each field the change touched: if H equals A there, set it to B. If H differs from A there and from B, try to reverse the change's hunks on H's text (a three-way merge of B and H on base A, line-based for prose, by identity for greetings, lorebook entries and preset prompts). A field where that applies cleanly is reverted; one where it doesn't is a **conflict**.
-3. Without conflicts, one writer transaction writes one revision (origin `user`, message "Reverted the assistant's change of 14:02", `origin_ref` naming the effect), records the revert on the effect (`undo_result_json`, built: immutable, once), and the row says "Reverted". Open drafts stay drafts, as with every saved change (§14.2).
-4. With conflicts, nothing is written: the change view opens with the conflicting fields marked, each showing now and as it was before this change, and **Keep now** / **Take before** per field (the update resolver's pattern), then **Revert the rest** writes the revision.
-5. **Redo** reverts the revert the same way (it's a change like any other).
+3. Without conflicts, one writer transaction writes the new revision (origin `user`, message "Reverted the assistant's change of 14:02") and appends a reversal record linked to that revision, the previous head, and the original effects and fields it covers. For a row covering several effects, record the affected fields against each original effect. Per-field reverts record only the selected fields. The existing `undo_result_json` and `undone_at` stay reserved for one-shot Undo. Open drafts stay drafts, as with every saved change (§14.2).
+4. With conflicts, nothing is written: the change view opens with the conflicting fields marked, each showing now and as it was before this change, and **Keep now** / **Take before** per field (the update resolver's pattern), then **Revert the rest** records only the fields it reverts.
+5. **Redo** reverses the recorded revert using its before and after revisions as the merge inputs. Append a redo record for the original effects and fields it reapplies, linked to the revert it reverses. Derive each field's state from its latest successful reversal record and the row's state from its fields. The row says "Reverted" when all of its changed fields are reverted. A field can be reverted again after a redo.
 
 **Created items.** Undo bins the item, as built. If it was changed since, or a chat uses it, it asks first ("Ove Brekke was changed since and is in 1 chat. Move it to the bin anyway? You can restore it from the bin."), instead of refusing.
 
@@ -332,7 +332,7 @@ The same model, with their existing tools and diffs:
 | Allow always for [character] | Account setting `workshop.cardGrants` keyed by card entity, user-only, excluded from `change_setting` | A registered setting |
 | Allow always | Account setting `workshop.alwaysGrants`, user-only, excluded from `change_setting` | A registered setting |
 | The four classes | `workshopCapabilities`, `capabilityDefaults` (Ask first) | Registry entries; `library.read` becomes an alias that existing grants map onto `library.cards` |
-| A revert | A revision (origin `user`, `origin_ref` the effect) and the effect's `undo_result_json` | None |
+| A revert or redo | A revision (origin `user`) and an append-only reversal record with before and after revisions, original effects and affected fields | Additive migration |
 | A revision message from the agent | `entity_revisions.message` | None |
 
 ## 12. Build units
