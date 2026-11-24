@@ -5,6 +5,7 @@ import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { mediaPath } from "./media.ts"
+import { composerImages } from "./composerImages.ts"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
@@ -53,7 +54,7 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
         }
         return ids
       }).pipe(transaction(sql, "RecordFileVersions")),
-    RecordAttachmentCopy: ({ userId, path, inode, media }) =>
+    RecordAttachmentCopy: ({ userId, path, inode, media, composer }) =>
       Effect.gen(function* () {
         yield* sql`INSERT INTO media_assets ${sql.insert({
           id: uuidv7(),
@@ -84,6 +85,15 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
             tool_call_id: null,
             created_at: Date.now()
           })}`
+        if (composer) {
+          const name = path.slice(path.lastIndexOf("/") + 1)
+          const image = media.mime.startsWith("image/") && row!.mime === media.mime
+          yield* composerImages(sql).set(userId, composer.chatId, composer.draftId, composer.id, row!.id, name, {
+            name,
+            path,
+            ...(image ? {} : { kind: "file" as const })
+          })
+        }
         return { mediaId: row!.id, mime: row!.mime }
       }).pipe(transaction(sql, "RecordAttachmentCopy")),
     MoveFileReferences: ({ userId, from, to }) =>

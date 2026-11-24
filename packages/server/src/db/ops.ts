@@ -181,6 +181,7 @@ import {
   ComposerImage,
   ComposerImageIds,
   ComposerImageKey,
+  AttachmentComposer,
   SetComposerImageFields,
   ComposerChoice
 } from "@dreamspan/shared/composerApi.ts"
@@ -2987,6 +2988,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       userId: UserId,
       path: Schema.String.check(Schema.isMaxLength(4096)),
       inode: Schema.NullOr(Schema.Number),
+      composer: Schema.optionalKey(AttachmentComposer),
       media: Schema.Struct({
         sha256: Sha256,
         mime: Schema.String,
@@ -2996,7 +2998,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       })
     },
     success: Schema.Struct({ mediaId: Schema.String, mime: Schema.String }),
-    error: StorageError
+    error: Schema.Union([NotFound, StorageError])
   }),
   /**
    * A file or folder renamed or moved in the app (spec/FILES-AND-ENVIRONMENT.md §1.1): the stored

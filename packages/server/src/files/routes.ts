@@ -11,6 +11,7 @@ import { join } from "node:path"
 import { Transform, Writable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 import { CurrentUser } from "@dreamspan/shared/api.ts"
+import { AttachmentComposer } from "@dreamspan/shared/composerApi.ts"
 import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import {
   ATTACHMENT_MAX_BYTES,
@@ -299,6 +300,7 @@ const answering = <R>(effect: Effect.Effect<HttpServerResponse.HttpServerRespons
   )
 
 const PathBody = Schema.Struct({ path: Schema.String.check(Schema.isMaxLength(4096)) })
+const AttachBody = Schema.Struct({ ...PathBody.fields, composer: Schema.optionalKey(AttachmentComposer) })
 const RestoreBody = Schema.Struct({ binItemId: Schema.String.check(Schema.isMaxLength(64)) })
 const SHA256 = /^[0-9a-f]{64}$/
 
@@ -1201,7 +1203,7 @@ export const filesRoutes = Layer.unwrap(
      * whatever its name, is a plain file.
      */
     const attach = Effect.gen(function* () {
-      const body = yield* jsonBody(PathBody)
+      const body = yield* jsonBody(AttachBody)
       // The copy as sent is the caller's, whoever's tree the file is in.
       const { actorId: userId, root, full, segments } = yield* place(body.path, "read")
       if (segments.length === 0) return refuse(400, "Name a file.")
@@ -1241,18 +1243,25 @@ export const filesRoutes = Layer.unwrap(
             [copied.sha256],
             Effect.andThen(
               placeStreamedMedia(config.dataDir, copied.temporary, copied.sha256, copied.size),
-              writer.RecordAttachmentCopy({
-                userId: userId as never,
-                path: full,
-                inode: info.ino,
-                media: {
-                  sha256: copied.sha256,
-                  mime,
-                  byteSize: copied.size,
-                  width: image?.width ?? null,
-                  height: image?.height ?? null
-                }
-              })
+              writer
+                .RecordAttachmentCopy({
+                  userId: userId as never,
+                  path: full,
+                  inode: info.ino,
+                  ...(body.composer ? { composer: body.composer } : {}),
+                  media: {
+                    sha256: copied.sha256,
+                    mime,
+                    byteSize: copied.size,
+                    width: image?.width ?? null,
+                    height: image?.height ?? null
+                  }
+                })
+                .pipe(
+                  Effect.catchTag("NotFound", () =>
+                    Effect.fail(new Answer(404, "That composer draft isn't available."))
+                  )
+                )
             )
           )
           quota.wrote(userId, copied.size)

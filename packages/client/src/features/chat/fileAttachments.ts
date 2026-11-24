@@ -2,6 +2,7 @@
 // aren't images, a registered part says how. The files feature registers one for workshops,
 // which saves each file in the working folder's Attachments folder and attaches it by path;
 // without one (a story chat), the composer takes images only, as before. A plugin can replace it.
+import type { AttachmentComposer } from "@dreamspan/shared/composerApi.ts"
 import type { AttachedFile } from "@dreamspan/shared/files.ts"
 import { useSyncExternalStore, type ComponentType } from "react"
 import { makeRegistry } from "../../registry.ts"
@@ -11,9 +12,9 @@ export interface FileAttacher {
   /** The folder uploads are saved in, as the user reads it ("/files/thesis/Attachments"). */
   readonly folder: string
   /** Saves a file from this device there (keeping both on a taken name) and attaches it. */
-  readonly upload: (file: Blob, name: string) => Promise<AttachedFile>
+  readonly upload: (file: Blob, name: string, composer: AttachmentComposer) => Promise<AttachedFile>
   /** Attaches a file already in Files, with no copy in Files. */
-  readonly attach: (path: string) => Promise<AttachedFile>
+  readonly attach: (path: string, composer: AttachmentComposer) => Promise<AttachedFile>
   /** Where the copy sent with a message opens, or downloads from. */
   readonly copyUrl: (mediaId: string, name: string, download?: boolean) => string
   /** Where a file of Files is shown: its folder in the Files page, with it open. */
