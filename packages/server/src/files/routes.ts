@@ -807,6 +807,7 @@ export const filesRoutes = Layer.unwrap(
       async function* entries(): AsyncGenerator<ZipStreamEntry> {
         // Depth first, each folder opened by the no-follow walk; names sorted for a stable archive.
         const queue: Array<ReadonlyArray<string>> = [[]]
+        const topNames = new Set<string>()
         let count = 0
         /** Names an extractor could read as other paths: left out, and listed in a note. */
         const left: Array<string> = []
@@ -823,6 +824,7 @@ export const filesRoutes = Layer.unwrap(
               left.push(JSON.stringify([...below, entry.name].join("/")))
               continue
             }
+            if (below.length === 0) topNames.add(entry.name)
             if (entry.kind === "folder") folders.push([...below, entry.name])
             else yield { name, chunks: regularFileChunks(root, [...segments, ...below, entry.name]) }
           }
@@ -830,7 +832,7 @@ export const filesRoutes = Layer.unwrap(
         }
         if (left.length > 0)
           yield {
-            name: `${top}/${ZIP_LEFT_OUT}`,
+            name: `${top}/${topNames.has(ZIP_LEFT_OUT) ? keepBothName(ZIP_LEFT_OUT, topNames) : ZIP_LEFT_OUT}`,
             chunks: (async function* () {
               yield Buffer.from(
                 `These names have a backslash, a control character or a ".." part, which some unzip tools treat as a path elsewhere, so they aren't in this zip. Download them one at a time.\n\n${left.join("\n")}\n`
