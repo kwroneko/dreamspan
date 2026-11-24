@@ -294,6 +294,71 @@ test.describe("work on in a workshop", () => {
     await expect(sent).toHaveCount(1)
   })
 
+  test("a new workshop swept while its handover was retrying hands it to the one opened in its place (rev-dd3 #5)", async ({
+    page
+  }) => {
+    test.setTimeout(120_000)
+    await setUp(page, 1340, "dark")
+    const book = await admin((api) => api.CreateLorebook({ label: "Lighthouse logs" }))
+    // The adds fail while `failing`; while `offline`, the page can't connect at all.
+    let failing = true
+    let offline = false
+    let failures = 0
+    const sockets: Array<{ close: () => Promise<void> }> = []
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      if (offline) return void socket.close()
+      sockets.push(socket)
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: unknown }) : null
+        if (failing && request?.tag === "SetComposerLibrary") {
+          failures++
+          socket.send(
+            JSON.stringify({
+              _tag: "Exit",
+              requestId: request.id,
+              exit: {
+                _tag: "Failure",
+                cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Connection dropped" } }]
+              }
+            })
+          )
+          return
+        }
+        upstream.send(data)
+      })
+      upstream.onMessage((data) => socket.send(data))
+    })
+    await page.goto(`${server().url}/new/workshop?workshopAttach=${book.id}`)
+    await expect(page).toHaveURL(/[?&]draft=/)
+    const first = new URL(page.url()).searchParams.get("draft")!
+    await expect.poll(() => failures).toBeGreaterThan(0)
+    // The page goes offline; meanwhile its workshop is swept (another device's doing).
+    offline = true
+    for (const socket of sockets.splice(0)) await socket.close()
+    await admin((api) => api.LeaveDraftChat({ chatId: first as never }))
+    await expect
+      .poll(
+        () =>
+          admin((api) =>
+            Effect.match(api.GetChat({ chatId: first as never }), { onFailure: () => "gone", onSuccess: () => "there" })
+          ),
+        {
+          timeout: 20_000
+        }
+      )
+      .toBe("gone")
+    failing = false
+    offline = false
+    // Back online: a new workshop opens in its place, with the item still to hand over.
+    await expect.poll(() => new URL(page.url()).searchParams.get("draft"), { timeout: 30_000 }).not.toBe(first)
+    await page.getByLabel("Message", { exact: true }).fill("Log the lamp.")
+    await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+    await expect(page).toHaveURL(/\/chats\//, { timeout: 30_000 })
+    const message = page.getByRole("article").filter({ hasText: "Log the lamp." })
+    await expect(message.getByLabel("Attached from your library").locator("[data-library-tile]")).toHaveCount(1)
+  })
+
   test("a card's More menu has it as a submenu", async ({ page }) => {
     await setUp(page, 1340, "dark")
     const card = await admin((api) =>
