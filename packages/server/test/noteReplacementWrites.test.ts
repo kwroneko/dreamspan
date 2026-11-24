@@ -1,5 +1,6 @@
 // Replacement ownership is checked in the writer transaction, including off notes and stale tabs.
 import { assert, layer } from "@effect/vitest"
+import { type ForkId, NewVersion } from "@dreamspan/shared/chat.ts"
 import type { ChatNotePosition } from "@dreamspan/shared/editorApi.ts"
 import { valueField } from "@dreamspan/shared/editing.ts"
 import type { ReplaceTarget } from "@dreamspan/shared/docs/note.ts"
@@ -144,6 +145,43 @@ layer(serverLayer(testConfig()))("replacement writes", (it) => {
         "EditRefused"
       )
       assert.deepStrictEqual(yield* api.ListChatNotes(at), before)
+    })
+  )
+  it.effect("a save with only a slot checks the fork the editor inferred from that slot", () =>
+    Effect.gen(function* () {
+      const { create, draft, reader, writer, userId, chat, at } = yield* setup
+      const target = { kind: "preset_prompt", identifier: "main" } as const
+      const first = yield* create("Side replacement")
+      const second = yield* create("Another note")
+      const { fork: side } = yield* writer.CreateFork({
+        userId,
+        chatId: chat.id,
+        fromForkId: at.forkId!,
+        atSlotId: null
+      })
+      const append = (forkId: ForkId, content: string) =>
+        writer.AppendMessage({
+          userId,
+          chatId: chat.id,
+          forkId,
+          parentSlotId: null,
+          branch: false,
+          commitDraft: null,
+          version: new NewVersion({
+            speakerEntityId: null,
+            writer: "human",
+            content,
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "user_written"
+          })
+        })
+      const sideSlot = yield* append(side.id, "On the side branch.")
+      const sideAt = { chatId: chat.id, slotId: sideSlot.slotId }
+      yield* (yield* draft(first, target, { ...sideAt, forkId: side.id }))()
+      yield* append(at.forkId!, "On the main branch.")
+      assert.strictEqual((yield* reader.GetChat({ userId, chatId: chat.id })).currentForkId, at.forkId)
+      assert.strictEqual(yield* outcome((yield* draft(second, target, sideAt))()), "InvalidDocument")
     })
   )
   it.effect("serializes off card-note claims and checks them when creating a chat replacement", () =>

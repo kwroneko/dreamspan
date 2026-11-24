@@ -96,7 +96,7 @@ export const noteAt = Effect.fnUntraced(function* (
     selected = found?.revision ?? revision.id
   }
   // Its unsaved text is its branch's (the drafts' scope).
-  return { ref: { ...ref, head_revision_id: selected }, doc, fork, tip: end, scope: fork }
+  return { ref: { ...ref, head_revision_id: selected }, doc, fork: fork as ForkId, tip: end, scope: fork }
 })
 
 /** A chat's own note where it's edited: at its branch's latest message (`noteAt`). */
