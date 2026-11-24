@@ -39,6 +39,26 @@ const estimate = (events: ReadonlyArray<ChatEvent>, from: number, check: (w: Cac
   )
 
 describe("the request inspector", () => {
+  it.live("links a native prefill in the next and captured requests to its preset field", () =>
+    Effect.gen(function* () {
+      const mock = yield* mockProvider
+      const api = yield* client()
+      const { version, chat, preset } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: { prefill: "assistant" },
+        preset: { assistant_prefill: "Hm." }
+      })
+      const run = yield* api.GetRunContext({ versionId: version.id })
+      const next = yield* api.GetNextRequest({ chatId: chat.id, leafSlotId: null })
+      for (const request of [run, next]) {
+        const prefill = request?.messages.at(-1)
+        assert.strictEqual(prefill?.content, "Hm.")
+        assert.strictEqual(prefill?.sources[0]?.ref, preset.ref.id)
+        assert.deepStrictEqual(prefill?.sources[0]?.item, { kind: "prompt", identifier: "prefill.assistant" })
+      }
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
   it.live("shows a reply's context as sent, with its sources, breakpoints, usage and issues", () => {
     const config = testConfig()
     return Effect.gen(function* () {
