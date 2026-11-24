@@ -19,15 +19,20 @@ export function TokenCount({
 }) {
   const texts = useMemo(() => [text], [text])
   const { counts, tokenizer, pending } = useTokenCounts(texts, model)
+  const full = tokensText(counts[0] ?? null, tokenizer, pending)
+  // In a narrow box's strip (FieldFrame's container under 24rem) only the number shows, at
+  // every state, so it fits beside "edited" and the box's controls; the hover gives it whole.
+  const unit = full.endsWith(" tokens") ? " tokens" : ""
   return (
-    <Tooltip label={`${about} ${tokenizerText(tokenizer)}`}>
+    <Tooltip label={`${full}. ${about} ${tokenizerText(tokenizer)}`}>
       <span
         tabIndex={0}
         data-field-tokens
         aria-busy={pending || undefined}
-        className="rounded text-xs font-normal text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        className="rounded text-xs font-normal whitespace-nowrap text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
-        {tokensText(counts[0] ?? null, tokenizer, pending)}
+        {full.slice(0, full.length - unit.length)}
+        {unit && <span className="@max-sm/field-strip:sr-only">{unit}</span>}
       </span>
     </Tooltip>
   )
