@@ -4446,15 +4446,15 @@ A command stopped by the cap has `memoryCapped`, and its result says it used mor
   - A version made from another copies its source's rows: one `sourceVersionId` without its own `library`, an edit's fork copy (`writes.ts`), an insert copy, a history restore, a bulk restore, and an ST re-import's fork copy.
   - The message is frozen: later edits to the item never change what it carried.
 - **What the model reads** (`agent/libraryView.ts`, assembler stage `library-attachments` right after `attachments`). The history read (`assemblySources.ts`) gives `HistoryEntry.library`, with each item's document at its recorded revision. Each item becomes an `<attached_card|lorebook|preset name id revision tokens>` element after the message's text.
-  - **Whole** (the document as `read_card` returns it, the card without its skills) when it fits the inline limit. The limit is 8,000 tokens, or a fifth of a smaller window (reference-harness's adaptive share), counted in the model's own tokens.
-  - **Otherwise a reference** (`whole="no"`), reference-harness's "structure plus per-field counts":
+  - **One budget per message** (`attachedElements`, workshopcards-u2b): the inline limit, 8,000 tokens or a fifth of a smaller window (reference-harness's adaptive share), counted in the model's own tokens on the rendered elements. Each item first gets a **compact reference** (name, id, revision, "read it with read_card"); then, in attachment order, each is shown **whole** (the document as `read_card` returns it, the card without its skills) where that still fits, else with its **summary** where that fits, else stays compact. Past even the compact references (only a model with a window under about 5,000 tokens), they are all it carries. The choice is made at assembly, the same bytes for the same revisions and model; it isn't stored, and a send is never refused for it.
+  - **The summary** (`whole="no"`), reference-harness's "structure plus per-field counts":
     - a card: each text field's tokens and lines, its greetings, and its lorebook's entries;
     - a lorebook: its entries, each with title, uid, keys and tokens;
     - a preset: its prompts in order, each on or off.
     
     Indexes stop at 50 rows and count the rest. The reference tells the model to page the item with the read tool (the paged views are unit C2b).
   - A card's element says it is data, not a character to play. An item's own text can't close its element.
-- Tests: `test/workshopLibraryAttachments.test.ts` covers order and duplicates, whole vs reference, the message frozen after an edit, and the refusals (a story chat, a wrong kind). `test/libraryView.test.ts` covers the limit, skills left out, the summary, the escaping, and lorebook and preset indexes.
+- Tests: `test/workshopLibraryAttachments.test.ts` covers order and duplicates, whole vs reference, the message frozen after an edit, and the refusals (a story chat, a wrong kind). `test/libraryView.test.ts` covers the limit, three items over a shared budget (two whole and a summary; a whole and two compact; compact only), skills left out, the summary, the escaping, and lorebook and preset indexes.
 - **Paged reads** (workshopcards-u2b, unit C2b; §4.3 point 2). `read_card`, `read_lorebook` and `read_preset` read in reference-harness's views, counted in the run's model's own tokens.
   - **Counting.** The counter is `ToolContext.countTokens` (`CountRolloutContext`, the run's model). Outside a run the tools estimate at four characters a token.
   - **Default view.** The document whole, as before, when it fits the inline limit (`ToolContext.window`). Otherwise the item's summary with "Too long to read whole".

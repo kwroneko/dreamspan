@@ -352,7 +352,7 @@ The same model, with their existing tools and diffs:
 | Unit | What | Depends on |
 |---|---|---|
 | C1 | New workshop with this card in card menus | — |
-| C2 | **Built** (workshopcards-u2): `library` attachments: migration, writer validation (owned, live), assembly of the frozen element (whole or reference with summary). In-view derivation moved to C7, the "changed since" tail line to C8 | — |
+| C2 | **Built** (workshopcards-u2): `library` attachments: migration, writer validation (owned, live), assembly (whole or reference with summary); the shared turn budget (§4.3 point 1) built in workshopcards-u2b, chosen at assembly from the pinned revisions rather than stored at send, and without the send-time refusal. In-view derivation moved to C7, the "changed since" tail line to C8 | — |
 | C2b | **Built** (workshopcards-u2b): paged reads: `view`, `offset`, `max_tokens` and indexes on `read_card`, `read_lorebook`, `read_preset`. `to_file` moved to C2c | — |
 | C2c | `to_file` on the read tools, through the Files write path (quota, versions, undo) | C2b |
 | C3 | The paperclip menu in workshops, the multi-select card picker and the lorebook and preset pickers | C2 |

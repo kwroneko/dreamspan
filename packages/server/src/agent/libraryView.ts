@@ -111,22 +111,45 @@ interface AttachedItem {
   readonly doc: Doc
 }
 
-/**
- * The element a workshop message carries for an attached item: the whole item, as `read_card`
- * returns a document, when it fits `limit` tokens; otherwise a reference with its summary.
- * Owner [D]: attached items are worked on, never played ("You're not adding cards to have a
- * pointless chat about them").
- */
-export const attachedElement = (item: AttachedItem, count: CountText, limit: number) => {
+/** The three ways an attached item can be shown, smallest first. */
+const renderings = (item: AttachedItem, count: CountText) => {
   const tag = `attached_${item.kind}`
   const doc = visibleDoc(item.kind, item.doc)
   const whole = JSON.stringify(doc)
-  const size = count(whole)
-  const open = `<${tag} name="${attribute(item.name)}" id="${attribute(item.refId)}" revision="${attribute(item.revisionId)}" tokens="${number(size)}"`
-  const played = item.kind === "card" ? " It is data, not a character for you to play." : ""
-  if (size <= limit)
-    return `${open}>\n${ARTICLE[item.kind]} the user attached for you to work on.${played}\n${fenced(whole, tag)}\n</${tag}>`
-  return `${open} whole="no">\n${ARTICLE[item.kind]} the user attached for you to work on.${played} It's too long to include whole: read it with ${READER[item.kind]} (it's attached, so that never asks).\n${fenced(summaryLines(item.kind, doc, count).join("\n"), tag)}\n</${tag}>`
+  const open = `<${tag} name="${attribute(item.name)}" id="${attribute(item.refId)}" revision="${attribute(item.revisionId)}" tokens="${number(count(whole))}"`
+  const intro = `${ARTICLE[item.kind]} the user attached for you to work on.${item.kind === "card" ? " It is data, not a character for you to play." : ""}`
+  const read = `read it with ${READER[item.kind]} (it's attached, so that never asks)`
+  return {
+    compact: `${open} whole="no">\n${intro} It isn't included here: ${read}.\n</${tag}>`,
+    summary: `${open} whole="no">\n${intro} It's too long to include whole: ${read}.\n${fenced(summaryLines(item.kind, doc, count).join("\n"), tag)}\n</${tag}>`,
+    whole: `${open}>\n${intro}\n${fenced(whole, tag)}\n</${tag}>`
+  }
+}
+
+/**
+ * The elements a workshop message carries for its attached items (spec/WORKSHOP-CARDS.md §4.3
+ * point 1): one budget of `limit` tokens for them all, counted on the rendered elements. Each
+ * item first gets a compact reference (its name, id and revision, to read with the tools); then,
+ * in the order attached, each is shown whole where that still fits, else with its summary where
+ * that fits, else stays compact. When even the compact references don't fit, they are all the
+ * message carries (a message sent before the budget, or a model with a tiny window).
+ * Owner [D]: attached items are worked on, never played ("You're not adding cards to have a
+ * pointless chat about them").
+ */
+export const attachedElements = (items: ReadonlyArray<AttachedItem>, count: CountText, limit: number) => {
+  const all = items.map((item) => renderings(item, count))
+  const sizes = all.map((r) => ({ compact: count(r.compact), summary: count(r.summary), whole: count(r.whole) }))
+  let left = limit - sizes.reduce((sum, s) => sum + s.compact, 0)
+  if (left < 0) return all.map((r) => r.compact)
+  return all.map((r, i) => {
+    const size = sizes[i]!
+    for (const form of ["whole", "summary"] as const)
+      if (size[form] - size.compact <= left) {
+        left -= size[form] - size.compact
+        return r[form]
+      }
+    return r.compact
+  })
 }
 
 // --- Paged reads (read_card, read_lorebook, read_preset; spec/WORKSHOP-CARDS.md §4.3 point 2).
