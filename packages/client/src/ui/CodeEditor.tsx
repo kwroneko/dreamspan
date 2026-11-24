@@ -33,6 +33,11 @@ export interface CodeEditorProps {
   caretTop?: number | undefined
   /** After `caretTop` scrolled anything: a virtualized list catches up with its offset. */
   onCaretPlaced?: (() => void) | undefined
+  /**
+   * Once its text is drawn (its view mounted, its first frame's styles applied), before the
+   * browser paints: a host showing it in place of other text swaps then, never showing neither.
+   */
+  onReady?: (() => void) | undefined
   /** The snippet editor's own text: its text actions don't offer sending it to a snippet. */
   source?: "snippet" | undefined
   /** False: no text actions under it, for text that isn't prose (a pattern, a template's markers). */

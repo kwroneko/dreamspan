@@ -153,6 +153,7 @@ export function InPlaceText({
   onCaretTaken,
   onCaretPlaced,
   onFirstFocus,
+  onShown,
   selection
 }: {
   draft: MessageDraft
@@ -164,6 +165,8 @@ export function InPlaceText({
   onCaretPlaced: () => void
   /** The first focus of an edit opened without a caret (Edit): its controls come into view. */
   onFirstFocus: () => void
+  /** Its text is drawn, before the frame is painted: the rendered text it replaces can go. */
+  onShown: () => void
   selection: EditSelection
 }) {
   const { text, added } = useSyncExternalStore(draft.subscribe, draft.snapshot)
@@ -206,6 +209,8 @@ export function InPlaceText({
           caret: initialCaret?.offset,
           caretTop: initialCaret?.top,
           onCaretPlaced,
+          // Drawn: it takes the rendered text's place in this frame (Message.tsx `VersionBody`).
+          onReady: onShown,
           // Text just added to your version: marked and scrolled to, focus left where it is.
           flash: added,
           onSelectionChange: selection.set,

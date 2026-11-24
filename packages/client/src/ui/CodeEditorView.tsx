@@ -40,6 +40,8 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
   useLayoutEffect(() => {
     const mounted = mountEditor(host.current!, props, setSelected)
     controller.current = mounted
+    // Its text is in the page now, styled: a host swaps it in before this frame is painted.
+    props.onReady?.()
     return () => {
       mounted.destroy()
       controller.current = null
