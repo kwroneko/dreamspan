@@ -199,7 +199,8 @@ export function SearchReplaceButton({
       onClick={onClick}
     >
       <Icon name="replace" />
-      <span>Search and replace</span>
+      {/* A toolbar can hide it when its frame is narrow (`data-narrow-label`), leaving the icon. */}
+      <span data-narrow-label="">Search and replace</span>
     </Button>
   )
 }

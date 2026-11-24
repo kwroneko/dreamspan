@@ -383,7 +383,9 @@ export function Editor({
               {ref.kind === "preset" ? (
                 <div ref={setPresetToolbar} />
               ) : (
-                <div className="flex flex-wrap items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
+                // A container: in a narrow frame (a half frame at 1340) its longest actions show only their
+                // icons, so the row stays one row (Search and replace here, Work on in a workshop's own).
+                <div className="@container flex flex-wrap @max-[44rem]:[&_[data-narrow-label]]:hidden items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
                   <SearchReplaceButton
                     ref={searchButton}
                     open={searching}

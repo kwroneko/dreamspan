@@ -84,10 +84,25 @@ function WorkshopChoices({ refId }: { refId: string }) {
 }
 
 /**
- * Nested in a menu; elsewhere a button opening the same choices (`compact`: its icon only; in a
- * toolbar under 60rem too, as Convert to workshop is, so the toolbar keeps one row).
+ * The toolbar widths under which the button shows only its icon, so its toolbar keeps one row:
+ * the frame's, not the window's (each toolbar is a container). A preset's row needs 59rem with
+ * Convert to workshop's label, about 71rem with this one's too; a lorebook's about 42rem.
  */
-function WorkOnIn({ refId, compact = false }: { refId: string; compact?: boolean }) {
+const NARROW = {
+  preset: { button: "@max-[72rem]:w-8 @max-[72rem]:px-0!", label: "@max-[72rem]:hidden" },
+  lorebook: { button: "@max-[44rem]:w-8 @max-[44rem]:px-0!", label: "@max-[44rem]:hidden" }
+} as const
+
+/** Nested in a menu; elsewhere a button opening the same choices (`compact`: its icon only). */
+function WorkOnIn({
+  refId,
+  compact = false,
+  toolbar
+}: {
+  refId: string
+  compact?: boolean
+  toolbar?: keyof typeof NARROW
+}) {
   const inMenu = useMenuActions()
   if (inMenu)
     return (
@@ -95,18 +110,19 @@ function WorkOnIn({ refId, compact = false }: { refId: string; compact?: boolean
         <WorkshopChoices refId={refId} />
       </MenuSubmenu>
     )
+  const narrow = toolbar ? NARROW[toolbar] : null
   return (
     <Menu
       label={LABEL}
       hint={HINT}
       trigger={
         <Button
-          className={compact ? "h-8! w-8 px-0!" : "h-8! px-2! @max-[60rem]:w-8 @max-[60rem]:px-0!"}
+          className={compact ? "h-8! w-8 px-0!" : `h-8! px-2! ${narrow?.button ?? ""}`}
           aria-label={LABEL}
           hint={HINT}
         >
           <Icon name="tool" />
-          {!compact && <span className="@max-[60rem]:hidden">{LABEL}</span>}
+          {!compact && <span className={narrow?.label}>{LABEL}</span>}
         </Button>
       }
     >
@@ -137,7 +153,7 @@ const editorWorkOnIn = (compact: boolean) =>
   function EditorWorkOnIn({ store }: { store: EditorStore }) {
     const ref = useEditorState(store).snapshot?.ref
     if (ref?.kind !== "lorebook" && ref?.kind !== "preset") return null
-    return <WorkOnIn refId={ref.id} compact={compact} />
+    return <WorkOnIn refId={ref.id} compact={compact} toolbar={ref.kind} />
   }
 
 const KINDS = ["card", "lorebook", "preset"] as const
