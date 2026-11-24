@@ -1,6 +1,6 @@
 // A card's page beside (owner, 2026-11-24: reading card after card to find a good one): a card
-// tile's menu has Edit beside (a library card's editor) or View beside (a card source's read-only
-// page), which opens it as a preview tab in the pane on the right. The next card replaces that
+// tile's menu has Edit beside, which opens the editor as a preview tab in the pane on the right.
+// The next card replaces that
 // preview, so panes and tabs don't pile up; a kept tab makes the next one a new preview beside it,
 // in the same pane. The grid keeps its scroll. Synthetic cards and the fake archive only.
 import { createServer } from "node:net"
@@ -212,38 +212,6 @@ test("Library rows: the card menu's Edit beside replaces the side pane's preview
   }
 })
 
-test("cardex cards: View beside replaces the side pane's preview; a new browser tab opens the click's chat", async ({
-  page
-}) => {
-  const port = await freePort()
-  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: String(port) })
-  try {
-    await setup(page, server)
-    await page.goto(server.url)
-    const main = page.getByRole("main")
-    await main.getByRole("button", { name: "cardex", exact: true }).click()
-    const tiles = main.locator("[data-remote-card]")
-    await expect(tiles.nth(3)).toBeVisible()
-    const names = await tiles.evaluateAll((nodes) =>
-      nodes.map((n) => (n.querySelector("a")?.getAttribute("aria-label") ?? "").replace(/^Open /, ""))
-    )
-    const remoteId = await tiles.nth(0).getAttribute("data-remote-card")
-    await tiles.nth(0).getByRole("link").first().click({ button: "right" })
-    const texts = await page.getByRole("menuitem").allTextContents()
-    expect(texts[0]).toMatch(/^Open(?! beside| in)/)
-    expect(texts[1]).toMatch(/^Open beside/)
-    expect(texts[2]).toMatch(/^Open in a new browser tab/)
-    expect(texts[3]).toMatch(/^View beside/)
-    await page.getByRole("menuitem", { name: /^Open in a new browser tab/ }).click()
-    expect((await opened(page)).at(-1)).toBe(`/sources/cardex/cards/${encodeURIComponent(remoteId!)}/chat`)
-    await walk(page, tiles, names, /^View beside/, "cardex")
-    // The side pane shows the read-only card page.
-    await expect(frames(page).nth(1)).toContainText(names[3]!)
-  } finally {
-    await server.stop()
-  }
-})
-
 test("cardex cards: Edit beside opens the editor as the side pane's preview, as Open in the editor does", async ({
   page
 }) => {
@@ -259,13 +227,16 @@ test("cardex cards: Edit beside opens the editor as the side pane's preview, as 
     const names = await tiles.evaluateAll((nodes) =>
       nodes.map((n) => (n.querySelector("a")?.getAttribute("aria-label") ?? "").replace(/^Open /, ""))
     )
-    // Edit beside comes right after Open in the editor.
+    const remoteId = await tiles.first().getAttribute("data-remote-card")
+    // The chat destinations are followed by one action per editor destination.
     await tiles.nth(0).getByRole("link").first().click({ button: "right" })
     const texts = await page.getByRole("menuitem").allTextContents()
     const editor = texts.findIndex((t) => /^Open in the editor/.test(t))
-    expect(editor).toBeGreaterThan(0)
+    expect(editor).toBe(3)
     expect(texts[editor + 1]).toMatch(/^Edit beside/)
-    await page.keyboard.press("Escape")
+    await expect(page.getByRole("menuitem", { name: /^(View(?: beside)?|Inspect)$/ })).toHaveCount(0)
+    await page.getByRole("menuitem", { name: /^Open in a new browser tab/ }).click()
+    expect((await opened(page)).at(-1)).toBe(`/sources/cardex/cards/${encodeURIComponent(remoteId!)}/chat`)
     await walk(page, tiles, names, /^Edit beside/, "cardex-editor")
     // The side pane shows the card's full editor, at the editor's URL.
     const side = frames(page).nth(1)
@@ -276,7 +247,7 @@ test("cardex cards: Edit beside opens the editor as the side pane's preview, as 
   }
 })
 
-test("cardex cards you have and the card page: Edit beside opens the editor beside", async ({ page }) => {
+test("cardex cards you have: Edit beside opens the saved card editor", async ({ page }) => {
   const port = await freePort()
   const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: String(port) })
   try {
@@ -289,14 +260,15 @@ test("cardex cards you have and the card page: Edit beside opens the editor besi
     const names = await tiles.evaluateAll((nodes) =>
       nodes.map((n) => (n.querySelector("a")?.getAttribute("aria-label") ?? "").replace(/^Open /, ""))
     )
-    const second = await tiles.nth(1).getAttribute("data-remote-card")
-    // A card you have: Edit beside right after Open your card, opening your card's editor.
+    // A card you have opens its own editor.
     await choose(page, tiles.nth(0), /^Add to my cards/)
     await expect(tiles.nth(0)).toHaveAttribute("data-held", "true")
     await tiles.nth(0).getByRole("link").first().click({ button: "right" })
     const texts = await page.getByRole("menuitem").allTextContents()
     expect(texts[0]).toMatch(/^Open your card/)
-    expect(texts[1]).toMatch(/^Edit beside/)
+    expect(texts[3]).toMatch(/^Open in the editor/)
+    expect(texts[4]).toMatch(/^Edit beside/)
+    await expect(page.getByRole("menuitem", { name: /^(View(?: beside)?|Inspect)$/ })).toHaveCount(0)
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/held-menu.png` })
     await page.getByRole("menuitem", { name: /^Edit beside/ }).click()
     await expect(frames(page)).toHaveCount(2)
@@ -307,17 +279,6 @@ test("cardex cards you have and the card page: Edit beside opens the editor besi
     await side.locator("[data-tab]").first().getByRole("tab").click()
     // Your card's own editor (its id), not the source card's read-only one.
     await expect(page).toHaveURL(/\/library\/[0-9a-f-]{36}\?/)
-
-    // The card page's own Edit beside button: the card not added opens its read-only editor beside.
-    await page.goto(`${server.url}/sources/cardex/cards/${encodeURIComponent(second!)}`)
-    const button = page.getByRole("button", { name: "Edit beside", exact: true })
-    await expect(button).toBeVisible()
-    if (SHOTS) await page.screenshot({ path: `${SHOTS}/page-button.png` })
-    await button.click()
-    await expect(frames(page)).toHaveCount(2)
-    await expect(frames(page).nth(1).locator("[data-tab][data-preview]")).toHaveCount(1)
-    await expect(frames(page).nth(1).locator("[data-tab]").first()).toContainText(names[1]!)
-    if (SHOTS) await page.screenshot({ path: `${SHOTS}/page-split.png` })
   } finally {
     await server.stop()
   }

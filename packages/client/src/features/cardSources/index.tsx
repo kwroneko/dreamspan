@@ -1,17 +1,23 @@
 // Card sources: the built-in site recognizers (the card editor places `CardSources`), and the
 // archives the server can browse (spec/CARD-SOURCES.md): their Settings page here, and the
 // notice of a newer version of a card added from one (§3.8) under every card editor's actions.
+import { remoteEntityId } from "@dreamspan/shared/cardSources.ts"
+import { Navigate, useParams } from "@tanstack/react-router"
 import { routes } from "../../routes.tsx"
 import { editorNotices } from "../editor/editorSlots.ts"
 import { settingsGroups } from "../settings/groups.ts"
 import { tabKinds } from "../workbench/kinds.ts"
-import { RemoteCardPage } from "./RemoteCardPage.tsx"
 import { RemoteLorebookPage } from "./RemoteLorebookPage.tsx"
 import { SourcesSettingsPage } from "./SourcesSettings.tsx"
 import { builtinRecognizers, sourceRecognizers } from "./sources.ts"
 import { SourceUpdateNotice } from "./updates.tsx"
 
 export { CardSources } from "./CardSources.tsx"
+
+function RemoteCardRedirect() {
+  const { sourceId, remoteId } = useParams({ strict: false }) as { sourceId: string; remoteId: string }
+  return <Navigate to="/library/$refId" params={{ refId: remoteEntityId(sourceId, remoteId) }} replace />
+}
 
 export const register = () => [
   ...builtinRecognizers.map((recognizer) => sourceRecognizers.register(recognizer)),
@@ -24,12 +30,12 @@ export const register = () => [
     component: SourcesSettingsPage,
     nav: { label: "Card sources", order: 10, description: "Card archives you can browse from the home page." }
   }),
-  // A card on a source, shown without adding it.
+  // Bookmarks and saved workbench tabs from before the editor became the card's destination.
   routes.register({
-    id: "cardSources.card",
+    id: "cardSources.cardRedirect",
     parent: "app",
     path: "/sources/$sourceId/cards/$remoteId",
-    component: RemoteCardPage
+    component: RemoteCardRedirect
   }),
   // A standalone lorebook on a source: opening it adds it, then shows it in the lorebook editor (§3.9).
   routes.register({
@@ -44,12 +50,5 @@ export const register = () => [
     match: (url) => /^\/sources\/([^/]+\/lorebooks\/[^/]+)$/.exec(url.pathname)?.[1] ?? null,
     title: () => "Lorebook",
     icon: "book"
-  }),
-  tabKinds.register({
-    id: "remote-card",
-    order: 200,
-    match: (url) => /^\/sources\/([^/]+\/cards\/[^/]+)$/.exec(url.pathname)?.[1] ?? null,
-    title: () => "Card",
-    icon: "person"
   })
 ]

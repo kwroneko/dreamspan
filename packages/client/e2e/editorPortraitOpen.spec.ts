@@ -127,7 +127,6 @@ test("a card source's card, opened for reading, opens its whole picture the same
     await page.emulateMedia({ colorScheme: "dark" })
     await page.setViewportSize({ width: 1920, height: 1080 })
     await page.goto(`${own.url}/sources/cardex/cards/${encodeURIComponent(card.slug)}`)
-    await page.getByRole("link", { name: "Open in the editor", exact: true }).click()
     const editor = page.locator("[data-read-only-card]")
     const button = editor.getByRole("button", { name: `View ${card.name}'s portrait`, exact: true })
     await expect(button).toHaveAttribute("title", `View ${card.name}'s full portrait`)

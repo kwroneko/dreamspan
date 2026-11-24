@@ -234,14 +234,6 @@ for (const width of [1440, 390])
       await apiLogin(page.request, own, ADMIN.handle, ADMIN.password)
       await page.setViewportSize({ width, height: 900 })
       await page.goto(`${own.url}/sources/cardex/cards/${encodeURIComponent(card.slug)}`)
-      const open = page.getByRole("link", { name: "Open in the editor", exact: true })
-      await open.hover()
-      await expect(
-        page.getByText("Shows every field in the editor, for reading. Add it to your cards to edit it.", {
-          exact: true
-        })
-      ).toBeVisible()
-      await open.click()
       await expect(page).toHaveURL(/\/library\/src%3Acardex%3A/)
       const editor = page.locator("[data-read-only-card]")
       const frame = page.locator("[data-frame]").filter({ has: editor })

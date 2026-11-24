@@ -120,7 +120,7 @@ function ListingBody({
         </div>
       )}
       {metrics.some(([, value]) => value !== undefined) && (
-        <dl className="grid grid-cols-2 gap-3 rounded-md border border-border bg-surface-raised p-3">
+        <dl className="grid grid-cols-2 gap-3 rounded-md border border-border bg-surface-raised p-3 has-[>div:nth-child(3):last-child]:grid-cols-3">
           {metrics.map(([label, value]) =>
             value === undefined ? null : (
               <div key={label}>
@@ -154,7 +154,8 @@ function ListingBody({
                   rel="noopener noreferrer"
                   className="flex min-h-9 items-center justify-between gap-2 rounded-sm py-2 text-sm text-accent outline-none [overflow-wrap:anywhere] hover:underline focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:min-h-11"
                 >
-                  {label}
+                  {/* A cached listing can still carry the adapter's previous fallback label. */}
+                  {label.replace(/^Earlier listing on (?:Other|generic|archive)$/i, "Earlier listing")}
                   <Icon name="external" size={14} className="shrink-0" />
                 </a>
               </Tooltip>
@@ -222,7 +223,10 @@ export function CardexDetails({ remoteId, name, listing }: { remoteId: string; n
   return (
     <Popover
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={(next, trigger) => {
+        if (next) setTab(trigger === "alternate" ? "family" : "listing")
+        setOpen(next)
+      }}
       trigger={
         <>
           <Icon name="info" size={16} />
@@ -230,11 +234,20 @@ export function CardexDetails({ remoteId, name, listing }: { remoteId: string; n
         </>
       }
       triggerLabel="cardex details"
+      alternateTrigger={
+        listing
+          ? {
+              content: "Versions",
+              label: "Versions",
+              hint: "Shows the versions, earlier listings and forks on cardex."
+            }
+          : undefined
+      }
       title="cardex details"
       triggerClassName={`${buttonClass("secondary")} pointer-coarse:h-11`}
       hint={
         listing
-          ? "Shows listing tags, archive statistics, versions and forks."
+          ? "Shows listing tags, archive statistics and field token estimates."
           : "Shows the public listing’s creator, tags, statistics and earlier links."
       }
       hintSide="bottom"
@@ -247,7 +260,7 @@ export function CardexDetails({ remoteId, name, listing }: { remoteId: string; n
             label="Cardex details"
             value={tab}
             onValueChange={setTab}
-            panelClassName="overflow-y-auto px-1"
+            panelClassName="overflow-y-auto px-2"
             tabs={[
               {
                 value: "listing",
@@ -259,13 +272,13 @@ export function CardexDetails({ remoteId, name, listing }: { remoteId: string; n
                 value: "family",
                 label: "Versions and forks",
                 description: "Shows the cards that cardex links as versions, origins or forks.",
-                panel: <SourceFamily sourceId="cardex" sourceName="cardex" remoteId={remoteId} name={name} inEditor />
+                panel: <SourceFamily sourceId="cardex" sourceName="cardex" remoteId={remoteId} name={name} />
               }
             ]}
           />
         </div>
       ) : (
-        <div className="min-h-0 overflow-y-auto px-1">
+        <div className="min-h-0 overflow-y-auto px-2">
           <LoadListing key={remoteId} remoteId={remoteId} />
         </div>
       )}

@@ -3,16 +3,17 @@
 // tab, and nothing can be changed or saved (readOnly.ts, and the store keeps no change). Add to
 // my cards is there, as in the side panel's view of it: once added, the tab shows the user's own
 // card, which edits as any.
+import { RegistryContext } from "@effect/atom-react"
 import { remoteOf } from "@dreamspan/shared/cardSources.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { useEffect } from "react"
+import { useContext, useEffect } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { buttonClass } from "../../ui/Button.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CardexCreator, CardexDetails, OpenOnCardex } from "../cardSources/CardexDetails.tsx"
 import { AddRemoteCardButton, RemoteCardLine } from "../cardSources/RemoteBadge.tsx"
-import { remoteImageFullUrl, remoteImageUrl } from "../cardSources/remote.ts"
+import { recentAtom, remoteImageFullUrl, remoteImageUrl } from "../cardSources/remote.ts"
 import type { Caller } from "./caller.ts"
 import { CardEditor } from "./CardEditor.tsx"
 import { CardHeader } from "./CardNameHeader.tsx"
@@ -28,6 +29,11 @@ export function ReadOnlyCardEditor({ store, call }: { store: EditorStore; call: 
   const cardex = from?.sourceId === "cardex" ? remoteSummary : undefined
   const image = remoteSummary?.image
   const navigate = useNavigate()
+  const registry = useContext(RegistryContext)
+  const sourceId = from?.sourceId
+  useEffect(() => {
+    if (sourceId && remoteSummary) registry.refresh(recentAtom(sourceId))
+  }, [registry, sourceId, remoteSummary])
   const own = (refId: string) =>
     void navigate({ to: "/library/$refId", params: { refId }, replace: true, resetScroll: false })
   // The user has it already (the server answers with theirs): their card, editable, instead.
@@ -67,7 +73,7 @@ export function ReadOnlyCardEditor({ store, call }: { store: EditorStore; call: 
                   <h2 className="text-xl leading-tight font-semibold [overflow-wrap:anywhere] @min-[34rem]:text-2xl">
                     {name}
                   </h2>
-                  <CardexCreator summary={remoteSummary} />
+                  <CardexCreator summary={cardex} />
                   <p className="text-sm text-muted">From cardex · not in your cards</p>
                 </div>
                 <div className="col-span-2 flex min-w-0 flex-wrap items-center gap-2 @min-[34rem]:col-span-1">
@@ -86,8 +92,12 @@ export function ReadOnlyCardEditor({ store, call }: { store: EditorStore; call: 
                     className="pointer-coarse:h-11"
                     onAdded={(_entityId, refId) => own(refId)}
                   />
-                  <OpenOnCardex url={cardex.url} />
-                  <CardexDetails name={name} remoteId={from.remoteId} listing={{ summary: cardex, doc }} />
+                  <div className="flex max-w-full flex-wrap items-center gap-2 @max-[34rem]:[&_:is(a,button)]:gap-1.5 @max-[34rem]:[&_:is(a,button)]:px-2">
+                    <OpenOnCardex url={cardex.url} />
+                    <div className="flex items-center gap-2">
+                      <CardexDetails name={name} remoteId={from.remoteId} listing={{ summary: cardex, doc }} />
+                    </div>
+                  </div>
                 </div>
               </div>
             </header>

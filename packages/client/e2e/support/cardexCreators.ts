@@ -143,21 +143,21 @@ export function cardexCreatorTests() {
             if (place === "sidebar") await navigation(page)
             await expect(page).toHaveURL(excludedUrl)
             await expect(header).toHaveCount(0)
-            // From a card's page, its creator's name opens the same view on home.
+            // From a card's editor, its creator's name opens the same view on home.
             if (place === "home") {
               // A card whose creator has an account there: cardex links no other kind of creator.
               const slugs = await tiles.evaluateAll((nodes) =>
                 nodes.map((node) => node.getAttribute("data-remote-card"))
               )
-              const card = page.locator("[data-remote-card-page]")
-              const by = card.getByText(/^by /)
+              const card = page.locator("[data-cardex-editor-header]")
+              const by = card.getByText("By", { exact: true }).locator("..").getByRole("link")
               for (const slug of slugs) {
-                await page.goto(`${server.url}/sources/cardex/cards/${slug}`)
+                await page.goto(`${server.url}/library/${encodeURIComponent(`src:cardex:${slug}`)}`)
                 await expect(card.getByRole("heading").first()).toBeVisible()
-                if ((await by.getByRole("link").count()) > 0) break
+                if ((await by.count()) > 0) break
               }
-              const name = (await by.getByRole("link").innerText()).trim()
-              await by.getByRole("link").click()
+              const name = (await by.innerText()).trim()
+              await by.click()
               await expect(
                 page
                   .getByRole("main")
