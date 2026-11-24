@@ -129,6 +129,55 @@ for (const width of [1440, 390]) {
   })
 }
 
+test("the first send leaves out an image whose deletion is still queued", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const card = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.CreateCard({ label: "Dock clerk", name: "Dock clerk" })
+  )
+  await page.goto(`${server().url}/cards/${card.entityId}/chat`)
+  const send = page.getByRole("button", { name: /^Send/ })
+  await expect(page.getByRole("button", { name: "Attach images", exact: true })).toBeEnabled()
+  await page
+    .getByLabel("Choose images")
+    .setInputFiles({ name: "removed.png", mimeType: "image/png", buffer: await drawing(page) })
+  await expect(send).toBeEnabled()
+  await page.getByLabel("Message", { exact: true }).fill("Only the note goes.")
+  await attached(page).getByRole("img").hover()
+  // Hold a write transaction open so the app can't delete the queued image until after Send.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open("dreamspan.message-images")
+        open.onerror = () => reject(open.error)
+        open.onsuccess = () => {
+          const db = open.result
+          const lock = db.transaction("images", "readwrite")
+          const store = lock.objectStore("images")
+          let held = true
+          window.addEventListener("release-image-delete", () => (held = false), { once: true })
+          lock.oncomplete = () => db.close()
+          const hold = () => {
+            store.get("test-lock").onsuccess = () => {
+              if (held) hold()
+            }
+          }
+          hold()
+          resolve()
+        }
+      })
+  )
+  try {
+    await page.getByRole("button", { name: "Remove removed.png" }).click()
+    await send.click()
+  } finally {
+    await page.evaluate(() => window.dispatchEvent(new Event("release-image-delete")))
+  }
+  await expect(page).toHaveURL(/\/chats\/[^/?]+/)
+  const sent = page.getByRole("article").filter({ hasText: "Only the note goes." })
+  await expect(sent).toBeVisible()
+  await expect(sent.getByRole("button", { name: /^View image/ })).toHaveCount(0)
+})
+
 test("Generate leaves the attachments, and they move to the saved chat's composer", async ({ page }) => {
   test.setTimeout(120_000)
   await page.setViewportSize({ width: 1440, height: 900 })

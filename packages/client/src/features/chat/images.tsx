@@ -1063,6 +1063,11 @@ function PendingImageScope({ scope: key, children }: { scope: string; children: 
   const [error, setError] = useState<string | null>(null)
   // Taken by the first send that's out: shown as sending, not removable.
   const [sending, setSending] = useState<ReadonlySet<string>>(new Set())
+  const removing = useRef(new Set<string>())
+  useEffect(() => {
+    // Capture still sees the previous entries until React commits the new list.
+    for (const id of removing.current) if (!entries.some((entry) => entry.id === id)) removing.current.delete(id)
+  }, [entries])
   const queue = useRef(Promise.resolve())
   const enqueue = (run: () => Promise<void>) => {
     queue.current = queue.current.then(run).catch((error: unknown) => {
@@ -1138,16 +1143,25 @@ function PendingImageScope({ scope: key, children }: { scope: string; children: 
       }
     })
   }
-  const remove = (id: string) =>
+  const remove = (id: string) => {
+    if (removing.current.has(id)) return
+    removing.current.add(id)
     void enqueue(async () => {
-      await dropImage(id)
+      try {
+        await dropImage(id)
+      } catch (error) {
+        removing.current.delete(id)
+        throw error
+      }
+      setEntries((current) => current.filter((entry) => entry.id !== id))
       await refresh()
     })
+  }
   const uploaded = entries.filter((entry) => entry.mediaId && !sending.has(entry.id))
   const asSent = (list: readonly ImageDraftEntry[]): MessageImages =>
     list.map((entry) => ({ mediaId: entry.mediaId!, altText: entry.name.slice(0, 2000) }))
   const capture = () => {
-    const captured = uploaded
+    const captured = uploaded.filter((entry) => !removing.current.has(entry.id))
     const ids = new Set(captured.map((entry) => entry.id))
     setSending((current) => new Set([...current, ...ids]))
     return {
