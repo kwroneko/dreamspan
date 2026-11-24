@@ -182,10 +182,10 @@ test("Add characters: Include personas, off at first, marked when on, remembered
   )
   await expect(section2.locator("[data-persona-badge]")).toHaveCount(2)
 
-  // Under Personas there's no toggle, and nothing is marked: every card there is one.
+  // Personas keeps the toggle in place, disabled (03580791d), and the cards are unmarked.
   await section2.getByRole("combobox", { name: "Show" }).click()
   await page.getByRole("option", { name: /^Personas/ }).click()
-  await expect(section2.getByRole("button", { name: "Include personas", exact: true })).toHaveCount(0)
+  await expect(section2.getByRole("button", { name: "Include personas", exact: true })).toBeDisabled()
   await expect(section2.locator("[data-persona-badge]")).toHaveCount(0)
   await section2.getByRole("combobox", { name: "Show" }).click()
   await page.getByRole("option", { name: /^All/ }).click()
