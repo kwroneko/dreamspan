@@ -75,6 +75,42 @@ test("a popped-out workshop cannot send the side panel to a stale story branch",
   await expect(side.getByText("The bandits feel sudden.")).toHaveCount(0)
 })
 
+test("a standalone workshop's branch list has no deleted-story labels", async ({ page }) => {
+  const workshop = await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateWorkshop({ title: "Standalone branches" })
+      const sent = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: chat.activeLeafSlotId,
+        branch: false,
+        content: "A separate plan.",
+        reply: false
+      })
+      if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
+      yield* api.CreateFork({ chatId: chat.id, fromForkId: chat.currentForkId, atSlotId: sent.entry.slotId })
+      return chat
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  let branchRequest: string | undefined
+  let received = false
+  page.on("websocket", (socket) => {
+    socket.on("framesent", ({ payload }) => {
+      const message = JSON.parse(String(payload)) as { _tag: string; id: string; tag?: string }
+      if (message._tag === "Request" && message.tag === "ListWorkshopBranches") branchRequest = message.id
+    })
+    socket.on("framereceived", ({ payload }) => {
+      const message = JSON.parse(String(payload)) as { _tag: string; requestId?: string }
+      if (message._tag === "Exit" && branchRequest !== undefined && message.requestId === branchRequest) received = true
+    })
+  })
+  await page.goto(`${server().url}/chats/${workshop.id}`)
+  const trigger = page.getByRole("button", { name: /^Branch: .*switch branch$/ }).first()
+  await trigger.click()
+  await expect.poll(() => received).toBe(true)
+  await expect(page.getByText("Its story branch was deleted", { exact: true })).toHaveCount(0)
+})
+
 for (const width of [1440, 390])
   test(`branching the story offers its workshop then or now, and the panel follows the branch at ${width}`, async ({
     page

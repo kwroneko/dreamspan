@@ -5,7 +5,7 @@
 // story branch.
 import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
 import { forkLabel } from "@dreamspan/shared/branchNaming.ts"
-import type { WorkshopBranch } from "@dreamspan/shared/workshopApi.ts"
+import type { WorkshopBranch, WorkshopStory } from "@dreamspan/shared/workshopApi.ts"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { useEffect, useRef } from "react"
@@ -17,6 +17,15 @@ import { SIDE_CHATS_KEY } from "./sideChat.ts"
 const branchesOf = Atom.family((chatId: ChatId) =>
   AppClient.query("ListWorkshopBranches", { chatId }, { reactivityKeys: [SIDE_CHATS_KEY, chatId] })
 )
+const storyOf = Atom.family((chatId: ChatId) =>
+  AppClient.query("ListWorkshopStories", { chatIds: [chatId] }, { reactivityKeys: [SIDE_CHATS_KEY, "chats", chatId] })
+)
+
+/** The story a workshop is about: undefined while reading or for none, `title: null` once deleted. */
+export const useWorkshopStory = (chatId: ChatId): WorkshopStory | undefined => {
+  const result = useAtomValue(storyOf(chatId))
+  return AsyncResult.isSuccess(result) ? result.value[0] : undefined
+}
 
 /** The name of the story branch a workshop branch goes with, as the story's own list names it. */
 export const storyBranchName = (story: NonNullable<WorkshopBranch["story"]>) =>
@@ -58,9 +67,10 @@ export function WorkshopBranchNote({ view, fork }: BranchRowNoteProps) {
 }
 
 function StoryBranchLine({ chatId, forkId }: { chatId: ChatId; forkId: ForkId }) {
+  const attached = useWorkshopStory(chatId)
   const branches = useWorkshopBranches(chatId, forkId)
   const story = branches?.find((branch) => branch.forkId === forkId)?.story
-  if (story === undefined) return null
+  if (attached === undefined || story === undefined) return null
   return (
     <Tooltip label="Each branch of this workshop goes with one branch of the story.">
       <span
