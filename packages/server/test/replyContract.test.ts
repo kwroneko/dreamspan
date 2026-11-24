@@ -17,6 +17,7 @@ import { importStPreset } from "../src/formats/preset.ts"
 import { Reader } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 import { anthropicSse, completionChunks, json, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 
 const NUDGE = sendNudgeText(true)
@@ -127,6 +128,7 @@ describe("reply contract", () => {
       })
       assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
       assert.strictEqual(version.content, "Ansel waves.")
+      assert.strictEqual(version.steps?.count, 1)
       assert.isNull(version.mark)
       const sent = bodies(mock.requests())
       assert.lengthOf(sent, 1)
@@ -140,6 +142,15 @@ describe("reply contract", () => {
       assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: version.id }), [
         { kind: "text", text: "Let me think about the keeper." }
       ])
+      // A reply stored by the previous counter still exposes its progress on reload.
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: "UPDATE rollouts SET step_count = 0 WHERE id = (SELECT rollout_id FROM versions WHERE id = ?)",
+          params: [version.id]
+        }
+      ])
+      const stored = (yield* api.ListVersions({ slotId: version.slotId })).find((v) => v.id === version.id)
+      assert.strictEqual(stored?.steps?.count, 1)
       // The default instructions name both endings.
       assert.include(JSON.stringify(sent[0]!.messages.at(-1)), "call no_reply instead")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
@@ -623,6 +634,7 @@ describe("reply contract", () => {
       yield* api.StopGeneration({ versionId: version.id })
       yield* eventually(() => finished(events, version.id) !== undefined)
       assert.strictEqual(finished(events, version.id)!.content, "")
+      assert.strictEqual(finished(events, version.id)!.steps?.count, 1)
       assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: version.id }), [
         { kind: "text", text: "Three paragraphs of plain text" }
       ])
