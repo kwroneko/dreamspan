@@ -107,7 +107,8 @@ const readRevision: RolloutTool<Readonly<Record<string, unknown>>> = {
           ? Object.fromEntries(Object.entries(visible).filter(([key]) => fields.includes(key)))
           : visible
       const number = found.revision.number === undefined ? "" : ` number ${found.revision.number}`
-      const head = `${kind} "${resolved.ref.label}" (id ${resolved.ref.id}) at revision ${found.revision.id}${number}`
+      const message = found.revision.message ? `, message ${JSON.stringify(found.revision.message)}` : ""
+      const head = `${kind} "${resolved.ref.label}" (id ${resolved.ref.id}) at revision ${found.revision.id}${number}${message}`
       const frame = toolResultFrame({
         id: resolved.ref.id,
         entityId: resolved.ref.entityId,
