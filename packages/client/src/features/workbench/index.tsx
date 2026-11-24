@@ -5,6 +5,8 @@ import { centerHeaderEnd } from "../../ui/CenterHeader.tsx"
 import { centerColumn } from "../shell.tsx"
 import { tabKinds } from "./kinds.ts"
 import { SplitButtons, Workbench } from "./Workbench.tsx"
+import { tabStripStart } from "./stripParts.ts"
+import { TabHistoryArrows } from "./TabHistoryArrows.tsx"
 import { layoutParams } from "../../tabLayoutParams.ts"
 import { WORKBENCH_PARAM } from "./layoutParam.ts"
 
@@ -13,6 +15,8 @@ export const register = () => [
   layoutParams.register({ id: "workbench.frames", keys: [WORKBENCH_PARAM] }),
   centerColumn.register({ id: "workbench", order: 10, component: Workbench }),
   centerHeaderEnd.register({ id: "workbench.split", order: 10, component: SplitButtons }),
+  // Each tab's own back and forward, at the start of its frame's strip (owner, 2026-11-24).
+  tabStripStart.register({ id: "workbench.tab-history", order: 10, component: TabHistoryArrows }),
   // What a frame opens when it's dropped there (owner, 2026-11-07): a portrait's picture, a
   // character's full-size editor, a chat. A plugin registers its own kind beside them.
   dragPayloads.register(PICTURE_DRAG),

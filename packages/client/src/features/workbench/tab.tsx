@@ -1,7 +1,15 @@
 // What a view inside a workbench tab asks about its tab: whether it's focused or shown, the
 // side panel's place, and how to name the tab. Outside a workbench (tests, a feature that
 // replaced it) every answer is the single-view one: focused, shown, the panel inline.
-import { createContext, type ReactNode, useContext, useEffect, useLayoutEffect, useSyncExternalStore } from "react"
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useSyncExternalStore
+} from "react"
 import { type DropTarget, dropTargetAt } from "./dropOpen.ts"
 import { itemKey } from "./kinds.ts"
 import { findTab, focusedFrame, focusedTab, frameOfTab, showsStrips } from "./model.ts"
@@ -139,6 +147,21 @@ export function useTabMeta(title: string | undefined, decoration?: { key: string
     // The picture is described by its key.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, item, title, key])
+}
+
+/**
+ * Names the place the tab shows for its back and forward hovers (Home's "cardex search: elf"),
+ * where the tab's title alone wouldn't tell its places apart; undefined: the title.
+ */
+export function useTabPlace(label: string | undefined) {
+  const tab = useContext(TabContext)
+  const item = useTabItem(tab)
+  // The item this view shows: while the tab moves on to another (this view still on screen until
+  // the next is ready), what it names isn't that item's place.
+  const [own] = useState(item)
+  useEffect(() => {
+    if (tab && item === own) tab.store.setPlace(tab.tabId, label)
+  }, [tab, item, own, label])
 }
 
 /**

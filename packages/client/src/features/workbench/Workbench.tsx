@@ -8,7 +8,7 @@
 // Each tab renders its own router (TabHost) into an element of its own, which is put in its
 // frame while shown and taken out of the page while not: its state, scroll and drafts stay,
 // and nothing hidden is left in the page to find or to focus.
-import { createMemoryHistory, RouterProvider, useRouter } from "@tanstack/react-router"
+import { RouterProvider, useRouter } from "@tanstack/react-router"
 import {
   createContext,
   type ReactNode,
@@ -58,6 +58,8 @@ import { type DropZone, dropZone } from "./dropOpen.ts"
 import { dragPayloadOf, isAppDrag } from "../../ui/appDrags.ts"
 import { OPEN_BESIDE } from "./OpenBeside.tsx"
 import { WorkbenchStore } from "./store.ts"
+import { restoreScroll, scrollMarks } from "./scrollMarks.ts"
+import { DISABLED_HOVER, tabStripStart } from "./stripParts.ts"
 import { decodeLayout, encodeLayout, WORKBENCH_PARAM } from "./layoutParam.ts"
 import { persistHref } from "./kinds.ts"
 import { readLayoutParam, withoutLayoutParams, writeLayoutParam } from "../../tabLayoutParams.ts"
@@ -273,14 +275,30 @@ function TabHost({ tab, store, target }: { tab: Tab; store: WorkbenchStore; targ
     element.dataset["workbenchTab"] = tab.id
     return element
   })
-  const [history] = useState(() => {
-    const from = store.takeOpenedFrom(tab.id)
-    return createMemoryHistory(
-      from ? { initialEntries: [from, tab.href], initialIndex: 1 } : { initialEntries: [tab.href] }
-    )
-  })
+  // The tab's own back and forward (history.ts); an entry left takes the tab's scroll with it.
+  const [history] = useState(() => store.createHistory(tab.id, () => scrollMarks(container)))
   const [router] = useState(() => buildRouter({ history, layouts: { app: CenterPage } }))
   useLayoutEffect(() => store.attach(tab.id, history), [store, tab.id, history])
+  // Back or forward to an entry: its scroll comes back, unless its view keeps its own place in
+  // its history state (a chat's reading place).
+  useEffect(() => {
+    let stop = () => {}
+    const unsubscribe = history.subscribe(({ action }) => {
+      stop()
+      if (action.type !== "GO" && action.type !== "BACK" && action.type !== "FORWARD") return
+      const entry = store.shownEntry(tab.id)
+      // TanStack's own keys (`key`, `__TSR_…`, `__hashScrollIntoViewOptions`) aren't the view's.
+      const own = Object.keys(entry?.state ?? {}).some((key) => key !== "key" && !key.startsWith("__"))
+      const key = history.location.state.__TSR_key
+      // Once the router has rendered that entry's page, not the one that left.
+      const ready = () => router.state.status === "idle" && router.state.resolvedLocation?.state.__TSR_key === key
+      if (entry?.scroll && !own) stop = restoreScroll(container, entry.scroll, ready)
+    })
+    return () => {
+      unsubscribe()
+      stop()
+    }
+  }, [history, router, store, tab.id, container])
   useLayoutEffect(
     () =>
       history.block({
@@ -859,6 +877,8 @@ function TabStrip({
           <SlotOutlet slot={sidebarToggle} props={{ place: "strip" }} />
         </div>
       )}
+      {/* The shown tab's back and forward, and whatever else is registered there (stripParts.ts). */}
+      {!phone && <SlotOutlet slot={tabStripStart} props={{ frameId: frame.id, tabId: frame.active }} />}
       <div
         role="tablist"
         aria-label="Open tabs"
@@ -1320,9 +1340,6 @@ const useRoomToSplit = (tab: ReturnType<typeof useWorkbenchTab>, direction: Dire
     const frame = tab ? frameOfTab(tab.store.layout, tab.tabId) : undefined
     return frame !== undefined && tab !== null && tab.store.canSplit(frame.id, direction)
   })
-
-/** A disabled split button keeps its look on hover: it only explains (owner: disabled with a reason, not hidden). */
-const DISABLED_HOVER = "data-disabled:hover:bg-transparent data-disabled:hover:text-muted"
 
 export function SplitButtons(): ReactNode {
   const tab = useWorkbenchTab()

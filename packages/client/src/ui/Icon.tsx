@@ -113,6 +113,7 @@ const paths = {
   sortDown: ["m3 16 4 4 4-4", "M7 20V4", "M11 4h10", "M11 8h7", "M11 12h4"],
   sortUp: ["m3 8 4-4 4 4", "M7 4v16", "M11 12h4", "M11 16h7", "M11 20h10"],
   back: ["m12 19-7-7 7-7", "M19 12H5"],
+  forward: ["m12 5 7 7-7 7", "M5 12h14"],
   undo: ["M9 14 4 9l5-5", "M4 9h10.5a5.5 5.5 0 0 1 0 11H11"],
   check: ["M20 6 9 17l-5-5"],
   /** Picks several things to act on together: a ticked box beside two lines. */

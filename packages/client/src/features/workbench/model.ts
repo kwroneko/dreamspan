@@ -610,11 +610,14 @@ export const resizeSplit = (layout: Layout, splitId: string, sizes: ReadonlyArra
 // clipped its own buttons. A frame keeps at least the room its strip needs.
 
 /**
- * The least a frame keeps, in px: its strip's shown tab beside Maximize, the ⋯ menu, the side
- * panel's toggle and the hidden sidebar's Show, with the strip's padding, and room for the
- * tab's title; the least height shows its strip, a header and a few lines.
+ * The least a frame keeps, in px: its strip's shown tab beside the hidden sidebar's Show, the
+ * tab's back and forward (tabhistory1, 2026-11-24: 320 before them), Maximize, the ⋯ menu and
+ * the side panel's toggle (327 px measured), with the strip's padding, and room for the tab's title,
+ * kept low enough that two frames still fit side by side at 1440 px with the sidebar and the side
+ * panel open (704 px between them); the least
+ * height shows its strip, a header and a few lines.
  */
-export const MIN_FRAME_WIDTH = 320
+export const MIN_FRAME_WIDTH = 344
 export const MIN_FRAME_HEIGHT = 160
 
 export type Axis = "x" | "y"

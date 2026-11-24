@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react"
 import { AsyncView } from "../../actions.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { useTitle } from "../shell.tsx"
+import { useTabPlace } from "../workbench/tab.tsx"
 import { homeHeaderActions, homeHeaderTitleActions, homeIntro } from "./homeSlots.ts"
 import { browseCards, mixesPersonas, useGroupedFamilies } from "./cardBrowse.tsx"
 import { useHomeBrowse } from "./useHomeBrowse.ts"
@@ -29,6 +30,17 @@ function Home({ data }: { data: ShellLibrary }) {
     setBrowse({ remote }, options)
   )
   const source = sources.info
+  // What a tab's back and forward call this place (spec/TAB-HISTORY.md): a search, by its words.
+  const words = (source !== null ? sources.remote.text : search).trim()
+  useTabPlace(
+    source !== null
+      ? words
+        ? `${source.name} search: ${words}`
+        : source.name
+      : words
+        ? `Characters search: ${words}`
+        : undefined
+  )
   // With nothing imported, what the intro offers (first-run steps) stands in for the empty grid.
   const intro = useSyncExternalStore(homeIntro.subscribe, homeIntro.snapshot).entries.length > 0
   // The source choices also work with an empty library (spec/CARD-SOURCES D1).

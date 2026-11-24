@@ -27,8 +27,8 @@ const shot = async (page: Page, name: string, hovered = false) => {
   await page.screenshot({ path: join(shots, `${name}.png`) })
 }
 
-/** The least width a frame keeps (Workbench.tsx `MIN_WIDTH`). */
-const MIN_FRAME = 320
+/** The least width a frame keeps (model.ts `MIN_FRAME_WIDTH`; 320 before the strip's back and forward). */
+const MIN_FRAME = 344
 const NO_ROOM = "Not enough room to split this pane"
 
 let chat: string
@@ -69,7 +69,13 @@ const expectWholeStrips = async (page: Page) => {
     expect(box.width, `frame ${i} width`).toBeGreaterThanOrEqual(MIN_FRAME - 1)
     const strip = frame.locator("[data-tab-strip]")
     const stripBox = (await strip.boundingBox())!
-    for (const button of await strip.locator("[data-strip-actions] button").all()) {
+    // The strip's buttons: its back and forward at the start, its actions at the end.
+    const buttons = [
+      ...(await strip.locator("[data-strip-history] button").all()),
+      ...(await strip.locator("[data-strip-actions] button").all())
+    ]
+    expect(buttons.length, `frame ${i} buttons`).toBeGreaterThanOrEqual(3)
+    for (const button of buttons) {
       const b = (await button.boundingBox())!
       const label = (await button.getAttribute("aria-label")) ?? "button"
       expect(b.x, `frame ${i} ${label} left`).toBeGreaterThanOrEqual(stripBox.x - 0.5)
