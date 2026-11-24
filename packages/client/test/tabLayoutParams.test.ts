@@ -17,7 +17,17 @@ import { shownPlaceValue, spentOverride } from "../src/usePlaceParam.ts"
 import { decodeOpen, encodeOpen, OPEN_LIMIT } from "../src/features/editor/lorebookOpen.ts"
 import { decodeWeights, keptWeights, MAX_WEIGHTS } from "../src/features/chat/ChatPortraitProvider.tsx"
 import { decodeLayout, encodeLayout, WB_LIMIT } from "../src/features/workbench/layoutParam.ts"
-import { initialLayout, openTab, restoreLayout, splitFrame, allTabs, frames } from "../src/features/workbench/model.ts"
+import {
+  initialLayout,
+  openTab,
+  restoreLayout,
+  splitFrame,
+  allTabs,
+  closeTab,
+  frames,
+  pinTab,
+  stickTab
+} from "../src/features/workbench/model.ts"
 import { register as registerFiles } from "../src/features/files/index.tsx"
 import { filesHref } from "../src/features/files/href.ts"
 import { itemKey } from "../src/features/workbench/kinds.ts"
@@ -208,6 +218,19 @@ it("puts the workbench's frames in one compact param, the focused tab as the URL
     ["/x", true, false],
     ["/z", false, false]
   ])
+})
+
+it.each([true, false])("restores a lone kept tab after closing its neighbor (pinned: %s)", (sticky) => {
+  const key = (href: string) => href
+  const initial = initialLayout("/chats/a")
+  const id = focusedTab(initial)!.id
+  let layout = sticky ? stickTab(initial, id, true) : pinTab(initial, id)
+  layout = openTab(layout, "/chats/b", key)
+  layout = closeTab(layout, focusedTab(layout)!.id)
+  const restored = restoreLayout(decodeLayout(encodeLayout(layout, key), "/chats/a"))!
+  expect(focusedTab(restored)).toMatchObject({ href: "/chats/a", preview: false })
+  expect(focusedTab(restored)?.sticky ?? false).toBe(sticky)
+  expect(allTabs(openTab(restored, "/chats/c", key)).map((t) => t.href)).toEqual(["/chats/a", "/chats/c"])
 })
 
 it("keeps the workbench param under its budget, dropping the place params of the least recent other frames' tabs first", () => {

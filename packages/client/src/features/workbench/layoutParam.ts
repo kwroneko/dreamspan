@@ -1,13 +1,13 @@
 // A browser tab's frames and tabs in its URL (owner, 2026-11-18: layout "has to be in the URL"):
-// the layout param `wb`, absent while the column shows one tab alone (the URL is then the whole
-// layout). Compact JSON, so a reload, a copied link or a duplicated browser tab opens the same
+// the layout param `wb`, absent while the column shows a lone preview. Compact JSON, so a
+// reload, a copied link or a duplicated browser tab opens the same
 // frames, and nothing is kept in browser storage.
 //
 // A frame is `[active index, ...tabs]`; a split is `["r" | "c", [shares], ...children]` (`r`
 // side by side, `c` above each other). A tab is its URL, with `~` before it for a preview tab
 // and `^` for a pinned one; the focused tab is `=` (with the same marks): the browser's own URL,
 // so the focused tab's navigation never changes the param. Ids are made afresh on reading.
-import { allTabs, type Layout, newId, type Node } from "./model.ts"
+import { allTabs, focusedTab, type Layout, newId, type Node } from "./model.ts"
 import { compactHref } from "./kinds.ts"
 
 export const WORKBENCH_PARAM = "wb"
@@ -16,7 +16,7 @@ const mark = (tab: { readonly preview: boolean; readonly sticky?: boolean }) =>
   tab.sticky ? "^" : tab.preview ? "~" : ""
 
 /**
- * The param for `layout`, or null when it's one tab alone. `persist` gives what a tab's URL keeps
+ * The param for `layout`, or null for a lone preview. `persist` gives what a tab's URL keeps
  * (null: left out, a login page); `strip` takes the browser's own params off a tab's URL.
  */
 export const encodeLayout = (
@@ -25,8 +25,9 @@ export const encodeLayout = (
   strip: (href: string) => string = (href) => href,
   limit = WB_LIMIT
 ): string | null => {
-  if (allTabs(layout).length <= 1) return null
-  const focused = focusedId(layout)
+  const tabs = allTabs(layout)
+  if (tabs.length === 0 || (tabs.length === 1 && mark(tabs[0]!) === "~")) return null
+  const focused = focusedTab(layout)?.id
   // Tabs whose presentation params are left out, so the param fits `limit` encoded.
   const bare = new Set<string>()
   const text = () => JSON.stringify(node(layout.root))
@@ -86,18 +87,6 @@ const droppable = (layout: Layout) => {
   }
   const order = (ids: Array<string>) => ids.sort((a, b) => rank(b) - rank(a))
   return [...order(outside), ...order(inside)]
-}
-
-const focusedId = (layout: Layout) => {
-  const frame = (function find(n: Node): Node | undefined {
-    if (n.type === "frame") return n.id === layout.focused ? n : undefined
-    for (const child of n.children) {
-      const found = find(child)
-      if (found) return found
-    }
-    return undefined
-  })(layout.root)
-  return frame?.type === "frame" ? frame.active : null
 }
 
 /**
