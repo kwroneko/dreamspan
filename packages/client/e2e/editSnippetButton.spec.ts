@@ -54,7 +54,7 @@ test("the message editor's snippet button is always there, disabled without a se
 
   // Disabled, it still explains itself on hover.
   await button.hover()
-  await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(
+  await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"][data-open]')).toContainText(
     "Select text to add it to a snippet."
   )
 })
