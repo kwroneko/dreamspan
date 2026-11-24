@@ -207,6 +207,8 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   ListChatGroups: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListChatSummaries: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListSummaryStyles: "Not in W6's first exposures; use the bounded workshop read tools.",
+  ListSharedNoteRefs:
+    "The Library page's metadata read of shared notes; the assistant lists them with list_shared_notes.",
   ListConnections: "User-only security, consent, account, credential or network configuration.",
   ListCredentials: "User-only security, consent, account, credential or network configuration.",
   ListDecisionPoints: "User-only security, consent, account, credential or network configuration.",
