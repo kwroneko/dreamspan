@@ -142,14 +142,13 @@ it.live("keeps setup effects canonical across multi-message regeneration and mes
       )
     }
     const creation = effects.find((e) => e.toolCallId === "setup_1")!
-    yield* api.UndoRolloutEffect(effects.find((e) => e.toolCallId === "setup_3")!)
-    const retained = yield* api.ListRolloutEffects({ chatId: chat.id })
+    const laterEdit = effects.find((e) => e.toolCallId === "setup_3")!
     const middle = replies[1]!
     const regenerated = yield* api.Regenerate({ slotId: middle.slotId, expectedRowVersion: middle.rowVersion })
     yield* eventually(() => finished(events, regenerated.version.id) !== undefined)
     assert.deepStrictEqual(
       yield* api.ListRolloutEffects({ chatId: chat.id }),
-      retained,
+      effects,
       "regeneration retains all independent changes without duplicate undo records"
     )
     assert.isTrue((yield* path(api, chat)).some((e) => e.version.id === replies[0]!.version.id))
@@ -164,10 +163,22 @@ it.live("keeps setup effects canonical across multi-message regeneration and mes
     yield* eventually(() => finished(events, edited.version.id) !== undefined)
     assert.strictEqual(mock.requests().at(-1)!.body!.messages instanceof Array, true)
     assert.include(JSON.stringify(mock.requests().at(-1)!.body), "Confirmed Middle exists.")
-    assert.deepStrictEqual(yield* api.ListRolloutEffects({ chatId: chat.id }), retained)
+    assert.deepStrictEqual(yield* api.ListRolloutEffects({ chatId: chat.id }), effects)
+    const refId = creation.undo!.refId as RefId
+    const head = (yield* api.OpenEditor({ refId })).ref.headRevisionId
+    assert.strictEqual(head, laterEdit.undo!.head)
     yield* api.UndoRolloutEffect(creation)
+    const afterUndo = yield* api.ListRolloutEffects({ chatId: chat.id })
+    const binnedEdit = afterUndo.find((e) => e.toolCallId === laterEdit.toolCallId)!
+    assert.isNotNull(binnedEdit.undoneAt)
+    assert.deepStrictEqual(binnedEdit.undoResult, { binnedWithCreation: true })
     assert.isFalse((yield* api.ListLibrary({ kind: "card" })).some((c) => c.label === "Before"))
     assert.isTrue((yield* api.ListLibrary({ kind: "card" })).some((c) => c.label === "After"))
+    const bin = yield* api.ListBin({ limit: 50, before: null })
+    yield* api.RestoreBinItem({ itemId: bin.find((item) => item.title === "Before")!.id })
+    const restored = yield* api.OpenEditor({ refId })
+    assert.strictEqual(restored.ref.headRevisionId, head)
+    assert.strictEqual(restored.doc.description, "Changed before second post.")
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })
 
