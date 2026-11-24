@@ -348,6 +348,7 @@ export const makePermit =
 export const offeredByGrants = <
   T extends {
     readonly capability?: string | undefined
+    readonly requiredCapabilities?: ReadonlyArray<string> | undefined
     readonly gatedBy?: ReadonlyArray<string> | undefined
     readonly effect: string
   }
@@ -357,28 +358,28 @@ export const offeredByGrants = <
 ): Effect.Effect<{ readonly tools: ReadonlyArray<T>; readonly off: ReadonlyArray<string> }> =>
   Effect.gen(function* () {
     // Story tools carry no capability: nothing to read, and their definitions stay byte-identical.
-    if (!tools.some((tool) => tool.capability !== undefined || tool.gatedBy !== undefined)) return { tools, off: [] }
+    if (!tools.some((tool) => tool.capability !== undefined || tool.requiredCapabilities?.length || tool.gatedBy))
+      return { tools, off: [] }
     const grants = new Map<string, CapabilityMode>(
       (yield* deps.reader
         .WorkshopGrants({ userId: deps.userId as never, chatId: deps.chatId as never, now: Date.now() })
         .pipe(Effect.orElseSucceed(() => []))).map((g) => [g.capability, g.mode])
     )
-    const isOff = (tool: T) =>
-      tool.capability !== undefined && resolveMode(deps.registries, grants, tool.capability, tool.effect) === "off"
-    const off = [
-      ...new Set([
-        ...tools
-          .filter(isOff)
-          .map((tool) => deps.registries.workshopCapabilities.get(tool.capability!)?.label ?? tool.capability!),
-        // A library class turned off here keeps its tools (what's in view is read with them),
-        // but it's named, so the assistant asks for an attachment instead (WORKSHOP-CARDS §2.2).
-        ...tools
-          .flatMap((tool) => tool.gatedBy ?? [])
-          .filter((id) => grants.get(id) === "off")
-          .map((id) => deps.registries.workshopCapabilities.get(id)?.label ?? id)
-      ])
-    ]
-    return { tools: tools.filter((tool) => !isOff(tool)), off }
+    const off = new Set<string>()
+    const noteOff = (id: string) => off.add(deps.registries.workshopCapabilities.get(id)?.label ?? id)
+    const offered = tools.filter((tool) => {
+      const required =
+        tool.capability === undefined
+          ? tool.requiredCapabilities
+          : [tool.capability, ...(tool.requiredCapabilities ?? [])]
+      const blocked = required?.filter((id) => resolveMode(deps.registries, grants, id, tool.effect) === "off") ?? []
+      blocked.forEach(noteOff)
+      return blocked.length === 0
+    })
+    // A library class turned off here keeps its tools (what's in view is read with them),
+    // but it's named, so the assistant asks for an attachment instead (WORKSHOP-CARDS §2.2).
+    for (const tool of tools) for (const id of tool.gatedBy ?? []) if (grants.get(id) === "off") noteOff(id)
+    return { tools: offered, off: [...off] }
   })
 
 /**

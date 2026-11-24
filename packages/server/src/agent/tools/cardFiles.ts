@@ -239,6 +239,7 @@ export const makeCardFileTools = (deps: CardFileToolDeps) => {
     id: "import_card_file",
     label: "Imported a card file",
     capability: "library.write",
+    requiredCapabilities: ["files"],
     alwaysAsk: () => true,
     effect: "library",
     replyTool: false,
