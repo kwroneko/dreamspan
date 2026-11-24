@@ -560,7 +560,9 @@ it("review: an edit between two thinking blocks drops only the later block", () 
     }
   ] as unknown as Array<Message>
   const payload = { ...before, messages: [...c.wire, wire] }
-  expect(bindThinking(anthropicBinding, payload, { ...written, context, mode: "check" }).payload).toBe(payload)
+  expect(bindThinking(anthropicBinding, payload, { ...written, context, mode: "check", run: true }).payload).toBe(
+    payload
+  )
   wire.content[1]!.text = "Edited progress"
   const bound = bindThinking(anthropicBinding, payload, { ...written, context, mode: "check" })
   expect(verify(payload as unknown as AnthropicBody, c.issued).ok).toBe(false)
