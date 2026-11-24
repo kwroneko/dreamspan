@@ -803,13 +803,18 @@ export const makeFileTools = (deps: FileToolDeps) => {
         }
         // Without ripgrep: a bounded literal search in the app.
         const needle = args.case === false ? pattern.toLowerCase() : pattern
+        const glob = typeof args.glob === "string" ? args.glob.replace(/^!/, "") : null
+        const exclude = typeof args.glob === "string" && args.glob.startsWith("!")
+        const matchesGlob = (below: ReadonlyArray<string>, name: string) =>
+          glob === null ||
+          posix.matchesGlob(glob.includes("/") ? [...below, name].join("/") : name, glob.replace(/^\//, "")) !== exclude
         const matches: Array<string> = []
         const visit = async (below: ReadonlyArray<string>, budget: { files: number }): Promise<void> => {
           const listed = await listFolder(root.hostRoot, [...segments, ...below], 2000).catch(() => null)
           for (const entry of listed?.entries ?? []) {
             if (matches.length >= 30 || budget.files <= 0) return
             if (entry.kind === "folder") await visit([...below, entry.name], budget)
-            else if (entry.kind === "file" && entry.size <= 2 ** 20) {
+            else if (entry.kind === "file" && entry.size <= 2 ** 20 && matchesGlob(below, entry.name)) {
               budget.files--
               const read = await readRegularFile(root.hostRoot, [...segments, ...below, entry.name], 2 ** 20).catch(
                 () => null
