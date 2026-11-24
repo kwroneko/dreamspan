@@ -82,8 +82,10 @@ export function AffectedBranches({ branches }: { branches: ReadonlyArray<BinBran
   const forks = new Set(branches.map((branch) => branch.forkId)).size
   const showing = new Set(branches.filter((branch) => branch.state === "shown").map((branch) => branch.forkId))
   const held = forks - showing.size
-  // Several items (emptying the bin): each entry says which chat.
-  const withChat = new Set(branches.map((branch) => branch.itemId)).size > 1
+  // Several items or a story with workshop companions: each entry says which chat.
+  const withChat =
+    new Set(branches.map((branch) => branch.itemId)).size > 1 ||
+    new Set(branches.map((branch) => branch.chatId)).size > 1
   const linked = branches.some((branch) => branch.link !== null)
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
   return (

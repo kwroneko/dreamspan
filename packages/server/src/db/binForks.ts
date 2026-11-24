@@ -62,12 +62,28 @@ const NEAR = 200
 export const binItemBranches = (sql: SqlClient.SqlClient, userId: UserId, itemIds: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     if (itemIds.length === 0) return []
-    const items = yield* sql<{ id: string; kind: string; target_id: string; chat_id: string; origin_json: string }>`
-      SELECT id, kind, target_id, chat_id, origin_json FROM bin_items
-      WHERE user_id = ${userId} AND kind IN ('message', 'version', 'branch', 'chat') AND chat_id IS NOT NULL
-        AND ${sql.in("id", itemIds)}
-      ORDER BY deleted_at DESC, id DESC`
-    const showing = yield* binItemForks(sql, userId, itemIds)
+    const items = yield* sql<{
+      id: string
+      root_id: string
+      kind: string
+      target_id: string
+      chat_id: string
+      origin_json: string
+    }>`WITH RECURSIVE affected(id, root_id, depth) AS (
+        SELECT id, id, 0 FROM bin_items WHERE user_id = ${userId} AND ${sql.in("id", itemIds)}
+        UNION ALL
+        SELECT b.id, a.root_id, a.depth + 1 FROM affected a
+          JOIN bin_items b ON b.origin_json ->> '$.companionOf' = a.id AND b.user_id = ${userId}
+      )
+      SELECT b.id, a.root_id, b.kind, b.target_id, b.chat_id, b.origin_json FROM affected a
+        JOIN bin_items b ON b.id = a.id JOIN bin_items root ON root.id = a.root_id
+      WHERE b.kind IN ('message', 'version', 'branch', 'threads', 'chat') AND b.chat_id IS NOT NULL
+      ORDER BY root.deleted_at DESC, a.root_id DESC, a.depth, b.deleted_at DESC, b.id DESC`
+    const showing = yield* binItemForks(
+      sql,
+      userId,
+      items.map((item) => item.id)
+    )
     const titles = new Map<string, string>()
     for (const chatId of new Set(items.map((item) => item.chat_id))) {
       const [chat] = yield* sql<{ title: string }>`SELECT title FROM chats WHERE id = ${chatId}`
@@ -171,7 +187,7 @@ export const binItemBranches = (sql: SqlClient.SqlClient, userId: UserId, itemId
           tipOf(chatId, fork),
           (tipExcerpt) =>
             new BinBranch({
-              itemId: item.id,
+              itemId: item.root_id,
               chatId,
               chatTitle,
               forkId: fork.id,

@@ -332,6 +332,15 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
       assert.strictEqual((yield* h.api.ListBin({ limit: 100, before: null })).length, before)
       // Deleted for good: so are they.
       const again = yield* h.api.DeleteFork({ forkId: b.fork })
+      const affected = yield* h.api.BinItemBranches({ itemIds: [again.id] })
+      assert.deepStrictEqual(
+        affected.map(({ itemId, forkId, state }) => [itemId, forkId, state]).sort(),
+        [
+          [again.id, b.fork, "branchInBin"],
+          [again.id, onB!, "branchInBin"],
+          [again.id, onlyB.currentForkId!, "chatInBin"]
+        ].sort()
+      )
       yield* h.api.PurgeBinItem({ itemId: again.id })
       assert.deepStrictEqual(yield* h.pairedIn(h.workshop, b.fork), [])
       assert.strictEqual(yield* outcome(h.api.GetChat({ chatId: onlyB.id })), "NotFound")
