@@ -290,6 +290,34 @@ describe("pending chats", () => {
   )
 })
 
+describe("what a pending chat can't own", () => {
+  it.live("no note or snippet of its own: the library would list it and the sweep would strand it", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, mira } = yield* setup
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const refused = <A, E extends { readonly _tag: string }, R>(effect: Effect.Effect<A, E, R>) =>
+          Effect.map(Effect.flip(effect), (error) => error._tag)
+        assert.strictEqual(yield* refused(api.CreateChatNote({ chatId: draft.id, title: "Tides" })), "NotFound")
+        assert.strictEqual(
+          yield* refused(api.CreateSnippet({ chatId: draft.id, title: "Only here", content: "Synthetic." })),
+          "NotFound"
+        )
+        // A snippet for all chats is made from a draft as from anywhere, but can't become the draft's.
+        const global = yield* api.CreateSnippet({ chatId: null, title: "Everywhere", content: "Synthetic." })
+        assert.strictEqual(
+          yield* refused(api.SetSnippetScope({ chatId: draft.id, refId: global.ref.id, global: false })),
+          "NotFound"
+        )
+        assert.deepStrictEqual(
+          (yield* api.ListLibrary({ kind: "note", archived: false })).map((ref) => ref.label),
+          ["Everywhere"]
+        )
+      })
+    )
+  )
+})
+
 describe("pending chats and the tabs that have them", () => {
   it.live("a draft just opened is kept until its tab subscribes, long after the server started", () => {
     let offset = 0

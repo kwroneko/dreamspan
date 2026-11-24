@@ -1,3 +1,4 @@
+import { refusePending } from "./chatKindPolicy.ts"
 import { listed } from "./listedChats.ts"
 // Snippets' writes: making one, and moving it between "This chat" and "All chats". Its text is
 // edited as any library field is (drafts, `CommitEditorDrafts`), not here.
@@ -33,6 +34,8 @@ export const makeSnippetWrites = (steps: LibrarySteps) => {
     CreateSnippet: ({ userId, chatId, title, content }) =>
       Effect.gen(function* () {
         yield* chatFork(sql, userId, chatId, null)
+        // A pending chat has no snippets of its own until it is committed (as for its notes).
+        if (chatId !== null) yield* refusePending(sql, chatId)
         const doc = {
           ...newSharedNote(title.trim() || "Untitled snippet", content),
           owner: { shared: chatId ?? "global" }
@@ -62,6 +65,7 @@ export const makeSnippetWrites = (steps: LibrarySteps) => {
             if (chatId === null)
               return yield* new RefOperationRefused({ refId, reason: "Only a chat can have a snippet of its own." })
             yield* chatFork(sql, userId, chatId, null)
+            yield* refusePending(sql, chatId)
             if (yield* shownOutside(userId, ref.entity_id, chatId))
               return yield* new RefOperationRefused({
                 refId,
