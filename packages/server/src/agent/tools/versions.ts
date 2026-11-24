@@ -12,7 +12,15 @@ import { type CountEffect, estimateCount, pageEnd, pageTokens, visibleDoc } from
 import { toolResultFrame } from "../toolData.ts"
 import type { RolloutTool, ToolContext } from "../tools.ts"
 import { libraryClassIds } from "../capabilities.ts"
-import { mayReadCardBook, pagedView, resolveLibrary, VIEWS, viewHelp, withExportHint } from "./library.ts"
+import {
+  cardSightRefusal,
+  mayReadCardBook,
+  pagedView,
+  resolveLibrary,
+  VIEWS,
+  viewHelp,
+  withExportHint
+} from "./library.ts"
 
 type Kind = "card" | "preset" | "lorebook"
 const KINDS = Type.Union([Type.Literal("card"), Type.Literal("preset"), Type.Literal("lorebook")])
@@ -102,6 +110,8 @@ const readRevision: RolloutTool<Readonly<Record<string, unknown>>> = {
         revisionId: found.revision.id
       })
       const showBook = yield* mayReadCardBook(ctx, resolved.ref, doc)
+      const refusal = yield* cardSightRefusal(ctx, resolved.ref)
+      if (refusal !== null) return { text: refusal, isError: true }
       const visible = visibleDoc(kind, doc, showBook)
       const fields = args.fields as ReadonlyArray<string> | undefined
       const shown =
@@ -186,6 +196,8 @@ const diffRevisions: RolloutTool<{
       const beforeDoc = yield* read(from.revision.id)
       const afterDoc = yield* read(toId)
       const showBook = yield* mayReadCardBook(ctx, ref, beforeDoc, afterDoc)
+      const refusal = yield* cardSightRefusal(ctx, ref)
+      if (refusal !== null) return { text: refusal, isError: true }
       const before = visibleDoc(args.kind, beforeDoc, showBook)
       const after = visibleDoc(args.kind, afterDoc, showBook)
       const changes = documentDiff(before, after).filter(

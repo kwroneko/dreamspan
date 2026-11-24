@@ -56,6 +56,14 @@ export const mayReadCardBook = Effect.fnUntraced(function* (
   return allowed.ok
 })
 
+/** Recheck the pinned card after a separate lorebook question may have paused the call. */
+export const cardSightRefusal = Effect.fnUntraced(function* (context: ToolContext, ref: LibraryRef) {
+  const sight = context.sight
+  if (ref.kind !== "card" || !sight || (yield* sight.inView(ref.entityId))) return null
+  const allowed = yield* sight.gate("library.cards", `It wants to open the card “${ref.label}”.`, "current")
+  return allowed.ok ? null : allowed.text
+})
+
 /**
  * A library item by name, library id or entity id, through what the reply may see
  * (spec/WORKSHOP-CARDS.md §2): an item in view resolves without asking; anything else, a miss or

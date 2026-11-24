@@ -18,6 +18,7 @@ import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
+import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { ALWAYS_GRANTS, CARD_GRANTS, settingsRegistry, USER_ONLY_SETTINGS } from "../src/db/settings.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -305,6 +306,45 @@ describe("library sight", () => {
       assert.include(result!.text, "turned off in this workshop")
       assert.strictEqual((yield* api.OpenEditor({ refId: before.id })).ref.headRevisionId, before.headRevisionId)
       assert.isEmpty(yield* api.ListRolloutEffects({ chatId: chat.id }))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("turning Cards off during a Lorebooks question refuses the pending revision read or diff", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const item = { kind: "card", item: "Mara Quill" }
+      const versions: Step = ["load_skill", { name: "versions" }, "versions"]
+      const { api, open } = yield* setup({
+        read: [versions, ["read_revision", { ...item, revision: "2" }, "revision"]],
+        diff: [versions, ["diff_revisions", { ...item, from: "1", to: "2" }, "revision"]]
+      })
+      const card = (yield* api.ListLibrary({ kind: "card" })).find((r) => r.label === item.item)!
+      const { ref, doc } = yield* api.OpenEditor({ refId: card.id })
+      const description = "Mara hides the lighthouse key."
+      yield* (yield* Writer).EditRef({
+        userId: (yield* api.Whoami()).id,
+        refId: ref.id,
+        expectedRowVersion: ref.rowVersion,
+        doc: { ...doc, description, character_book: loreBook([loreEntry({ content: "Tide chart." })]).document },
+        message: null,
+        commitDraft: null
+      })
+      for (const mode of ["read", "diff"]) {
+        const { chat, events } = yield* open([
+          { capability: "library.cards", mode: "allow" },
+          { capability: "library.lorebooks", mode: "ask" }
+        ])
+        const pending = yield* task(api, chat, mode)
+        const prompt = yield* awaitApproval(events, pending, "revision")
+        assert.strictEqual(prompt.capability, "library.lorebooks")
+        yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.cards", mode: "off" })
+        yield* answer(api, prompt, "deny")
+        yield* done(events, pending)
+        const [refused] = yield* results(api, pending, 1)
+        assert.isTrue(refused!.isError)
+        assert.include(refused!.text, "“Look through your cards” is turned off")
+        assert.notInclude(refused!.text, description)
+      }
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
