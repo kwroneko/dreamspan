@@ -8,7 +8,7 @@ import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
-import { asUser, type Client } from "./support/rpc.ts"
+import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { startWorkshopProvider } from "./support/workshopProvider.ts"
 
@@ -17,8 +17,10 @@ const shots = process.env.SCREENSHOT_DIR
 test.describe("work on in a workshop", () => {
   const server = serverPerFile(withAdmin)
   let provider: Awaited<ReturnType<typeof startWorkshopProvider>>
-  const admin = <A>(use: (client: Client) => Effect.Effect<A, unknown>) =>
-    asUser(server(), ADMIN.handle, ADMIN.password, use)
+  // One login per file and worker: the server throttles logins.
+  let cookie: Promise<string> | null = null
+  const admin = async <A>(use: (client: Client) => Effect.Effect<A, unknown>) =>
+    withCookie(server(), await (cookie ??= loginCookie(server(), ADMIN.handle, ADMIN.password)), use)
   test.beforeAll(async () => {
     provider = await startWorkshopProvider({ perTask: true, calls: [], answer: () => "Noted." })
     await admin((api) =>
@@ -421,6 +423,67 @@ test.describe("work on in a workshop", () => {
         removed ? 0 : 1
       )
     })
+
+  test("an item another tab removed before the sweep isn't carried on to the replacement (rev-dd5 #2)", async ({
+    page,
+    context
+  }) => {
+    test.setTimeout(120_000)
+    await setUp(page, 1340, "dark")
+    const book = await admin((api) => api.CreateLorebook({ label: "Harbour notices" }))
+    let offline = false
+    const sockets: Array<{ close: () => Promise<void> }> = []
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      if (offline) return void socket.close()
+      sockets.push(socket)
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => upstream.send(data))
+      upstream.onMessage((data) => socket.send(data))
+    })
+    await page.goto(`${server().url}/new/workshop?workshopAttach=${book.id}`)
+    await expect(page).toHaveURL(/[?&]draft=/)
+    const first = new URL(page.url()).searchParams.get("draft")!
+    const tiles = page.getByLabel("Attachments", { exact: true }).locator("[data-library-tile]")
+    await expect(tiles).toHaveCount(1)
+    await expect(page).not.toHaveURL(/workshopAttach=/, { timeout: 15_000 })
+    // This tab goes offline; another opens the same workshop and removes the item there.
+    offline = true
+    for (const socket of sockets.splice(0)) await socket.close()
+    const other = await context.newPage()
+    await other.setViewportSize({ width: 1340, height: 900 })
+    await other.goto(page.url())
+    const there = other.getByLabel("Attachments", { exact: true }).locator("[data-library-tile]")
+    await expect(there).toHaveCount(1)
+    await other.getByRole("button", { name: "Remove Harbour notices" }).focus()
+    await other.keyboard.press("Enter")
+    await expect(there).toHaveCount(0)
+    await other.waitForTimeout(500)
+    await other.close()
+    // Then the workshop is swept; one login for the leave and the wait (logins are throttled).
+    const swept = await admin((api) =>
+      Effect.gen(function* () {
+        yield* api.LeaveDraftChat({ chatId: first as never })
+        for (let i = 0; i < 80; i++) {
+          const gone = yield* Effect.match(api.GetChat({ chatId: first as never }), {
+            onFailure: () => true,
+            onSuccess: () => false
+          })
+          if (gone) return true
+          yield* Effect.sleep(250)
+        }
+        return false
+      })
+    )
+    expect(swept).toBe(true)
+    offline = false
+    await expect.poll(() => new URL(page.url()).searchParams.get("draft"), { timeout: 30_000 }).not.toBe(first)
+    await page.getByLabel("Message", { exact: true }).fill("Post the notices.")
+    await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+    await expect(page).toHaveURL(/\/chats\//, { timeout: 30_000 })
+    const message = page.getByRole("article").filter({ hasText: "Post the notices." })
+    await expect(message).toBeVisible()
+    await expect(message.getByLabel("Attached from your library").locator("[data-library-tile]")).toHaveCount(0)
+  })
 
   test("a card's More menu has it as a submenu", async ({ page }) => {
     await setUp(page, 1340, "dark")

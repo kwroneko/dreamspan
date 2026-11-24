@@ -226,14 +226,19 @@ export function useComposerLibrary(
   }
   const call = async (
     rpc: "GetComposerLibrary" | "SetComposerLibrary",
-    change?: { add: ReadonlyArray<RefId>; remove: ReadonlyArray<RefId> }
+    change?: { add: ReadonlyArray<RefId>; remove: ReadonlyArray<RefId>; carriedFrom?: string }
   ) => {
     if (draftId === null) return null
     const key = { chatId: session.chatId, draftId }
     const outcome = await session.call((client) =>
       rpc === "GetComposerLibrary"
         ? client("GetComposerLibrary", key)
-        : client("SetComposerLibrary", { ...key, add: change!.add, remove: change!.remove })
+        : client("SetComposerLibrary", {
+            ...key,
+            add: change!.add,
+            remove: change!.remove,
+            ...(change!.carriedFrom === undefined ? {} : { carriedFrom: change!.carriedFrom })
+          })
     )
     if (!outcome.ok) {
       refused.current = outcome.error.tag === "NotFound"
@@ -259,14 +264,15 @@ export function useComposerLibrary(
       if (items === null) setTimeout(() => live && void run(read), HANDOVER_RETRY_MS)
       else {
         setLoaded(draftId)
-        // Opened in place of a new chat swept with what was handed over to it: those come here.
+        // Opened in place of a new chat swept with what was handed over to it: those come here,
+        // as far as its composer still held them when swept (the server knows, rev-dd5 #2).
         const replaced = replacedDraftOf(session.chatId)
         const carried = replaced === null ? [] : handedOver(replaced)
         if (replaced !== null && carried.length > 0) {
           handedOver(session.chatId, [...new Set([...handedOver(session.chatId), ...carried])])
           handedOver(replaced, [])
           const missing = carried.filter((refId) => !items.some((there) => there.refId === refId))
-          if (missing.length > 0) void addHeld(missing)
+          if (missing.length > 0) void addHeld(missing, replaced)
         }
       }
       return items
@@ -287,7 +293,7 @@ export function useComposerLibrary(
     // One read per draft: the queue and the calls read the newest state through refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [takes, draftId])
-  const addOnce = (added: ReadonlyArray<string>) => {
+  const addOnce = (added: ReadonlyArray<string>, carriedFrom?: string) => {
     const fresh = [...new Set(added as ReadonlyArray<RefId>)].filter(
       (refId) => !shown.current.some((there) => there.refId === refId)
     )
@@ -302,7 +308,9 @@ export function useComposerLibrary(
       setError(`A message can carry at most ${MAX} cards, lorebooks and presets.`)
       return Promise.resolve(false)
     }
-    return run(() => call("SetComposerLibrary", { add: fresh, remove: [] }))
+    return run(() =>
+      call("SetComposerLibrary", { add: fresh, remove: [], ...(carriedFrom === undefined ? {} : { carriedFrom }) })
+    )
   }
   // A handover tried again goes to the draft as it is then (known by now, when it wasn't).
   const latestAdd = useRef(addOnce)
@@ -310,11 +318,11 @@ export function useComposerLibrary(
     latestAdd.current = addOnce
   })
   /** A handover the message must carry: tried again until the server takes or refuses it. */
-  const addHeld = (added: ReadonlyArray<string>) => {
+  const addHeld = (added: ReadonlyArray<string>, carriedFrom?: string) => {
     setHolding((n) => n + 1)
     const attempt = async (): Promise<boolean> => {
       refused.current = false
-      const ok = await latestAdd.current(added)
+      const ok = await latestAdd.current(added, carriedFrom)
       if (ok || refused.current || !mounted.current) return ok
       await new Promise((resolve) => setTimeout(resolve, HANDOVER_RETRY_MS))
       return mounted.current ? attempt() : false
