@@ -582,8 +582,10 @@ export class EditorStore {
     await this.flush()
     if (this.unsavedFields().length > 0) return this.notSaved()
     const chatNote = this.chatNote
-    const result = await this.call((client) =>
-      client("RevertEditorDrafts", { refId: this.refId, ...(chatNote ? { chatNote } : {}) })
+    // Another store or tab on this entry hears of it (`recheck`), so its markers clear too.
+    const result = await this.call(
+      (client) => client("RevertEditorDrafts", { refId: this.refId, ...(chatNote ? { chatNote } : {}) }),
+      ["drafts"]
     )
     if (result.ok) await this.refresh()
     return result
@@ -591,12 +593,14 @@ export class EditorStore {
 
   /** An earlier revision as a new one (`RestoreRevision`): the fields changed since take it too. */
   async restoreRevision(revisionId: RevisionId) {
-    const result = await this.call((client) =>
-      client("RestoreRevision", {
-        refId: this.refId,
-        revisionId,
-        expectedRowVersion: this.snapshot!.ref.rowVersion
-      })
+    const result = await this.call(
+      (client) =>
+        client("RestoreRevision", {
+          refId: this.refId,
+          revisionId,
+          expectedRowVersion: this.snapshot!.ref.rowVersion
+        }),
+      ["library"]
     )
     if (result.ok || result.error.tag === "StaleWrite") await this.refresh()
     return result
@@ -980,8 +984,9 @@ export class EditorStore {
     if (this.current(key) !== picked) return changed()
     if (field.saved === null || field.rowVersion === null || field.draftId === null) return
     const { draftId, rowVersion } = field
-    const result = await this.call((client) =>
-      client("DiscardEditorDraft", { ...this.target, field: key, draftId, expectedRowVersion: rowVersion })
+    const result = await this.call(
+      (client) => client("DiscardEditorDraft", { ...this.target, field: key, draftId, expectedRowVersion: rowVersion }),
+      ["drafts"]
     )
     if (result.ok) await this.settle(key, result.value)
     return result

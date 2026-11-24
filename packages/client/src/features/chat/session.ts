@@ -52,6 +52,7 @@ import { type Copy, copiesOf, pendingOf } from "../editor/backup.ts"
 import { editorKey, MessageDraft, messageCopies, type MessageEditorKey, targetOf } from "./messageDraft.ts"
 import { beforeReply, chatStateChanged } from "./replyHooks.ts"
 import { guardReply } from "./replyGuards.ts"
+import { notifyEntriesChanged } from "../../libraryChanges.ts"
 import { postedSteps, storedStepReads } from "./agent/steps.ts"
 
 /** How many slots one read asks for. */
@@ -697,6 +698,9 @@ export class ChatSession {
                 services as unknown as Context.Context<Reactivity.Reactivity>,
                 Reactivity.Reactivity
               ).invalidateUnsafe([`chat-notes:${this.chatId}`])
+              // A state change (a workshop's tool deleting or restoring an entry, say): editors
+              // with changes read their entries again, so their unsaved markers follow.
+              if (batch.some((event) => event._tag === "State")) notifyEntriesChanged()
             }
             // The legacy paged chat list reads again after a change, at most once a second, not for the Hello
             // that opens it: the lists were just read, and opening a chat changes none of them.
