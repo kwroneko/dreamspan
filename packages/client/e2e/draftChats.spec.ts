@@ -267,6 +267,79 @@ test("a new chat the server swept while it was open gives way to a fresh one, qu
   expect(await listed(fresh)).toBe(false)
 })
 
+test("what's typed after a swept new chat stopped saving survives a reload, in recovered texts", async ({ page }) => {
+  await start(page)
+  // The page's subscription ends on the server without the page knowing (a tab that slept, say),
+  // so the server sweeps the chat when it's left, and the page isn't told: its next save finds
+  // it swept.
+  // Each subscription by chat, with the connection it runs on (the page may open several).
+  const subscriptions = new Map<string, Array<{ readonly id: string; readonly interrupt: () => void }>>()
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    const cut = new Set<string>()
+    socket.onMessage((data) => {
+      upstream.send(data)
+      if (typeof data !== "string") return
+      const parsed = JSON.parse(data) as unknown
+      for (const message of (Array.isArray(parsed) ? parsed : [parsed]) as Array<Record<string, unknown>>)
+        if (message["_tag"] === "Request" && message["tag"] === "SubscribeChat") {
+          const chatId = (message["payload"] as { chatId: string }).chatId
+          const id = String(message["id"])
+          const interrupt = () => {
+            cut.add(id)
+            upstream.send(JSON.stringify({ _tag: "Interrupt", requestId: message["id"] }))
+          }
+          subscriptions.set(chatId, [...(subscriptions.get(chatId) ?? []), { id, interrupt }])
+        }
+    })
+    upstream.onMessage((data) => {
+      if (typeof data === "string" && cut.size > 0) {
+        const parsed = JSON.parse(data) as unknown
+        const messages = ((Array.isArray(parsed) ? parsed : [parsed]) as Array<Record<string, unknown>>).filter(
+          (message) => !cut.has(String(message["requestId"]))
+        )
+        if (messages.length === 0) return
+        return socket.send(JSON.stringify(Array.isArray(parsed) ? messages : messages[0]))
+      }
+      socket.send(data)
+    })
+  })
+  const card = await importCard(page, { name: "Mira Reload", first_mes: "Mira opens the door." })
+  const draft = (await openDraft(page, `/cards/${card.entityId}/chat`)) as ChatId
+  await expect.poll(() => subscriptions.has(draft)).toBe(true)
+  for (const subscription of subscriptions.get(draft)!) subscription.interrupt()
+  const savedAs = () => admin((api) => Effect.map(api.OpenComposer({ chatId: draft, forkId: null }), (d) => d.content))
+  await composer(page).fill("Typed before the sweep.")
+  await expect.poll(savedAs).toBe("Typed before the sweep.")
+  await admin((api) => api.LeaveDraftChat({ chatId: draft }))
+  await expect
+    .poll(
+      () =>
+        admin((api) =>
+          api.GetChat({ chatId: draft }).pipe(
+            Effect.as("there"),
+            Effect.orElseSucceed(() => "gone")
+          )
+        ),
+      {
+        timeout: 15_000
+      }
+    )
+    .toBe("gone")
+  const recovered = () =>
+    admin((api) =>
+      Effect.map(api.ListRecoveredTexts({ limit: 50, before: null }), (texts) => texts.map((text) => text.content))
+    )
+  // The next save is filed (the server has no draft for it any more), and saving stops.
+  await composer(page).fill("Typed before the sweep. Typed after it.")
+  await expect.poll(recovered, { timeout: 15_000 }).toContain("Typed before the sweep. Typed after it.")
+  // Typed after saving stopped, then the page reloads at once.
+  const last = "Typed before the sweep. Typed after it. And after saving stopped."
+  await composer(page).fill(last)
+  await page.reload()
+  await expect.poll(recovered, { timeout: 15_000 }).toContain(last)
+})
+
 test("a new chat's own notes and snippets wait, disabled, saying why", async ({ page }) => {
   await start(page)
   const card = await importCard(page, { name: "Mira Notes", first_mes: "Mira opens the door." })

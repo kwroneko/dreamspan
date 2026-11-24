@@ -1,6 +1,8 @@
 import { assert, it } from "@effect/vitest"
+import { NewVersion } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
+import { Writer } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 it.live("a deletion barrier must remain at the source when a saved edit moves history", () =>
   Effect.gen(function* () {
@@ -227,6 +229,61 @@ it.live("replaying a form initialization cannot delete the keystrokes already sa
       oldSeed.content,
       content,
       "initialization cannot overwrite protected fields even on a newer base"
+    )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
+it.live("an empty reply of several dropped files what was typed into its own swipe", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const writer = yield* Writer
+    const userId = (yield* api.Whoami()).id
+    const chat = yield* api.CreateChat({ title: "Synthetic empty reply" })
+    const running = yield* writer.AppendMessage({
+      userId,
+      chatId: chat.id,
+      parentSlotId: null,
+      branch: false,
+      version: new NewVersion({
+        content: "",
+        speakerEntityId: null,
+        writer: "model",
+        status: "generating",
+        origin: "generated",
+        macroMode: "verbatim"
+      }),
+      commitDraft: null
+    })
+    // "Write your own swipe" on the reply while it's being written, then cleared: the text is
+    // only in its draft's history.
+    const target = { _tag: "Write", slotId: running.slotId } as const
+    const typed = "A swipe of my own, typed while the reply was still coming."
+    const first = yield* api.SaveMessageDraft({
+      target,
+      draftId: null,
+      expectedRowVersion: null,
+      expectedSession: null,
+      content: typed
+    })
+    yield* api.SaveMessageDraft({
+      target,
+      draftId: first.id,
+      expectedRowVersion: first.rowVersion,
+      expectedSession: first.session,
+      content: ""
+    })
+    yield* writer.FinishGeneration({
+      userId,
+      versionId: running.version.id,
+      content: "",
+      status: "complete",
+      error: null,
+      discardEmpty: true
+    })
+    const recovered = yield* api.ListRecoveredTexts({ limit: 10, before: null })
+    assert.include(
+      recovered.map((text) => text.content),
+      typed
     )
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )

@@ -43,7 +43,7 @@ import { placeAsShown } from "./forkOrder.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { sweepPendingChat } from "./pendingChats.ts"
 import { NotFound } from "./ops.ts"
-import { pairedWorkshopForks } from "./workshopPairing.ts"
+import { pairedWorkshopForks, pendingWorkshopsBeside } from "./workshopPairing.ts"
 import { setSplitApplied } from "./threads.ts"
 import type { QueuedRow } from "./queueRows.ts"
 
@@ -736,18 +736,43 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       (rows) => rows.map((row) => row.id)
     )
 
-  /** Workshop chats or branch groups binned by this deletion, before eviction can remove them. */
+  /**
+   * The pending side workshops a deletion swept (main item id → chats), for `deletedWorkshops` to
+   * report in the same transaction, so their tabs learn they are gone.
+   */
+  const sweptBeside = new Map<string, Array<ChatId>>()
+
+  /**
+   * Sweeps the pending workshops beside story `storyId` (with `forkId`, those paired with that
+   * branch) as `main` deletes it: their typing goes to recovered texts as any sweep files it, its
+   * history's protected texts included, and they never reach the bin, so no purge can drop it.
+   */
+  const sweepPendingBeside = (userId: UserId, storyId: string, forkId: string | null, main: string) =>
+    Effect.gen(function* () {
+      for (const pending of yield* pendingWorkshopsBeside(sql, storyId, forkId)) {
+        if (pending.owner_user_id !== userId) continue
+        if (yield* sweepPendingChat(sql, { drafts, recover }, userId, pending.id))
+          sweptBeside.set(main, [...(sweptBeside.get(main) ?? []), pending.id as ChatId])
+      }
+    })
+
+  /** Workshop chats or branch groups binned (or swept) by this deletion, before eviction can remove them. */
   const deletedWorkshops = (main: string) =>
     Effect.gen(function* () {
+      const swept = (sweptBeside.get(main) ?? []).map((chatId) => ({ chatId, forkIds: null }))
+      sweptBeside.clear()
       const ids = yield* companionsOf(main)
-      if (ids.length === 0) return []
+      if (ids.length === 0) return swept
       const rows = yield* sql<{ chat_id: ChatId; forks: string | null }>`
         SELECT chat_id, CASE WHEN kind = 'branch' THEN origin_json -> '$.forkIds' END AS forks
         FROM bin_items WHERE id IN ${sql.in(ids)} AND chat_id IS NOT NULL AND kind IN ('chat', 'branch')`
-      return rows.map((row) => ({
-        chatId: row.chat_id,
-        forkIds: row.forks === null ? null : (JSON.parse(row.forks) as ReadonlyArray<ForkId>)
-      }))
+      return [
+        ...swept,
+        ...rows.map((row) => ({
+          chatId: row.chat_id,
+          forkIds: row.forks === null ? null : (JSON.parse(row.forks) as ReadonlyArray<ForkId>)
+        }))
+      ]
     })
 
   /**
@@ -762,6 +787,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
     main: string
   ): Effect.Effect<void, NotFound | SqlError.SqlError> =>
     Effect.gen(function* () {
+      yield* sweepPendingBeside(userId, storyId, forkId, main)
       const paired = yield* pairedWorkshopForks(sql, storyId, forkId)
       const byWorkshop = new Map<string, Array<string>>()
       for (const fork of paired) byWorkshop.set(fork.chat_id, [...(byWorkshop.get(fork.chat_id) ?? []), fork.id])
@@ -1020,11 +1046,13 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       })
       yield* sql`UPDATE chats SET deleted_at = ${Date.now()}, bin_item_id = ${itemId}, row_version = row_version + 1 WHERE id = ${chatId}`
       // A story's workshops are part of its branches: they go with it (spec/WORKSHOP-BRANCHES.md §6.4).
+      // One not started yet is swept instead, its typing filed.
+      yield* sweepPendingBeside(userId, chatId, null, itemId)
       const beside = yield* sql<{
         id: string
       }>`SELECT DISTINCT c.id FROM state_events a JOIN chats c ON c.id = a.chat_id
         WHERE json_extract(a.value_json, '$.chat') = ${chatId} AND a.key = 'workshop.attached' AND a.slot_id IS NULL
-          AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+          AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND c.status = 'active'`
       for (const workshop of beside) yield* markCompanion(yield* deleteChat(userId, workshop.id), itemId)
       return itemId
     })
@@ -1428,8 +1456,16 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
            AND ev.value_json ->> '$.entity' IN (SELECT target_id FROM bin_items WHERE kind = 'entity' AND (${where}))`,
         params
       )
+      // So is a pending chat a purge would delete: a side workshop binned with its story before
+      // pending ones were swept instead (sweepPendingBeside). Its drafts go with the chat by
+      // trigger, so their typing is filed first.
+      const binned = yield* sql.unsafe<{ id: string; owner_user_id: UserId }>(
+        `SELECT c.id, c.owner_user_id FROM chats c /* chat:includes-pending: sweeps them before a purge */
+         WHERE c.status = 'pending' AND c.id IN (SELECT target_id FROM bin_items WHERE kind = 'chat' AND (${where}))`,
+        params
+      )
       const swept: Array<string> = []
-      for (const draft of pending)
+      for (const draft of [...pending, ...binned])
         if (yield* sweepPendingChat(sql, { drafts, recover }, draft.owner_user_id, draft.id)) swept.push(draft.id)
       const chats = yield* sql.unsafe<{ chat_id: string }>(
         `SELECT DISTINCT chat_id FROM bin_items WHERE chat_id IS NOT NULL AND (${where})`,

@@ -45,12 +45,16 @@ export const workshopForkPairs = (sql: SqlClient.SqlClient, workshopId: string) 
     SELECT f.*, one.story AS story_fork_id
     FROM forks f LEFT JOIN one ON one.id = f.id WHERE f.chat_id = ${workshopId}`
 
-/** The pairing writers and their descendants that inherit the same pairing. */
+/**
+ * The pairing writers and their descendants that inherit the same pairing, in started workshops
+ * only: a pending one (a side workshop not sent to yet, db/pendingChats.ts) isn't branched or
+ * binned with the story; deleting its story branch sweeps it (`pendingWorkshopsBeside`).
+ */
 export const pairedWorkshopTree = (sql: SqlClient.SqlClient, storyId: string, forkId: string) =>
   sql`WITH RECURSIVE w(id) AS (
       SELECT e.fork_id FROM state_events e JOIN chats c ON c.id = e.chat_id
         WHERE json_extract(e.value_json, '$.fork') = ${forkId} AND e.key = 'workshop.paired'
-          AND c.kind = 'workshop' AND c.deleted_at IS NULL
+          AND c.kind = 'workshop' AND c.deleted_at IS NULL AND c.status = 'active' 
           AND EXISTS (SELECT 1 FROM state_events a WHERE a.chat_id = c.id AND a.key = 'workshop.attached'
             AND a.slot_id IS NULL AND json_extract(a.value_json, '$.chat') = ${storyId})
       UNION ALL SELECT c.id FROM w JOIN forks c ON c.parent_fork_id = w.id
@@ -65,6 +69,21 @@ export const pairedWorkshopForks = (sql: SqlClient.SqlClient, storyId: string, f
   sql<ForkRow>`${pairedWorkshopTree(sql, storyId, forkId)}
     SELECT f.* FROM w JOIN forks f ON f.id = w.id WHERE f.deleted_at IS NULL AND f.purged_at IS NULL
     ORDER BY f.chat_id, f.last_chatted_at IS NULL, f.last_chatted_at DESC, f.created_at DESC, f.id DESC`
+
+/**
+ * The pending workshops beside story `storyId` (side workshops not sent to yet), of any owner:
+ * with `forkId`, those paired with that story branch. Its deletion sweeps them, typing filed.
+ */
+export const pendingWorkshopsBeside = (sql: SqlClient.SqlClient, storyId: string, forkId: string | null) =>
+  Effect.map(
+    sql<{ id: string; owner_user_id: string }>`SELECT DISTINCT c.id, c.owner_user_id FROM state_events a
+        JOIN chats c ON c.id = a.chat_id /* chat:includes-pending: sweeps them with their story */
+      WHERE json_extract(a.value_json, '$.chat') = ${storyId} AND a.key = 'workshop.attached' AND a.slot_id IS NULL
+        AND c.kind = 'workshop' AND c.status = 'pending'
+        AND (${forkId} IS NULL OR EXISTS (SELECT 1 FROM state_events p WHERE p.chat_id = c.id
+          AND p.key = 'workshop.paired' AND json_extract(p.value_json, '$.fork') = ${forkId}))`,
+    (rows) => rows
+  )
 
 /** The story a workshop is beside, when it's a live workshop of the user's: its `workshop.attached`. */
 export const attachedStory = (sql: SqlClient.SqlClient, userId: string, workshopId: string) =>
