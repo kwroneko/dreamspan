@@ -135,8 +135,8 @@ export function CharactersPage() {
     <div className="flex flex-col gap-4">
       <CenterHeaderContent>
         <h1 className="text-xl font-semibold">Characters</h1>
-        {/* Right after the title at the header's gap; hidden with nothing registered. */}
-        <div className="flex shrink-0 items-center gap-2 empty:hidden">
+        {/* 14 px after the title (the header's gap plus 6); hidden with nothing registered. */}
+        <div className="ml-1.5 flex shrink-0 items-center gap-2 empty:hidden">
           <SlotOutlet slot={homeHeaderTitleActions} props={{}} />
         </div>
         {/* Right-aligned, just before the header's end controls; hidden with nothing registered. */}
