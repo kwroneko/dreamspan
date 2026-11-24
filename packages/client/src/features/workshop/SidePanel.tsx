@@ -396,7 +396,7 @@ function SideChatSurface({
 }) {
   const view: ChatView = useSyncExternalStore(session.subscribe, session.snapshot)
   const open = useOpenOwn()
-  const flashes = useRef<Flashes>({ opened: 0, again: false })
+  const flashes = useRef<Flashes>({ opened: 0, repeat: null })
   const cast = useMemo(() => castView(view.cast), [view.cast])
   const kindRoot = kindRootProps(useChatKindLook(view.chat?.kind))
   // Back and Forward move the branch shown; a switch made here has moved it already.
