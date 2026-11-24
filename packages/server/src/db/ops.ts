@@ -4184,6 +4184,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       revisionId: RevisionId,
       expectedRowVersion: Schema.Int,
       chatNote: Schema.optionalKey(ChatNotePosition),
+      /** Exact workshop Undo restores only the saved revision. */
+      preserveDrafts: Schema.optionalKey(Schema.Boolean),
       /** The new revision's message, for the default "Restored the revision of …". */
       message: Schema.optionalKey(AgentMessage)
     },

@@ -33,6 +33,7 @@ export interface AppError {
   readonly problems: ReadonlyArray<string>
   /** The provider error's or account rejection's reason, when there is one. */
   readonly reason: string | null
+  readonly binConfirmation?: EffectUndoRefused["binConfirmation"]
 }
 
 /** "wrong handle or password" → "Wrong handle or password." */
@@ -135,7 +136,8 @@ const describeError = (error: unknown): AppError => {
   if (error instanceof MergeChanged)
     return make("MergeChanged", "One of the chats changed while this was open. Check what merging brings now.")
   // Workshops: the server's reason, said for the user.
-  if (error instanceof EffectUndoRefused) return make("EffectUndoRefused", sentence(error.message))
+  if (error instanceof EffectUndoRefused)
+    return { ...make("EffectUndoRefused", sentence(error.message)), binConfirmation: error.binConfirmation }
   if (error instanceof ApprovalRefused) return make("ApprovalRefused", sentence(error.message))
   if (error instanceof GrantRefused) return make("GrantRefused", sentence(error.message))
   // MCP servers: what to fix, in the server's words for the user.

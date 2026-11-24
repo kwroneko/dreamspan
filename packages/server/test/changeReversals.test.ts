@@ -110,6 +110,64 @@ const userEdit = (api: Api, refId: RefId, key: string, content: string) =>
 const agentEdit = (f: Effect.Success<ReturnType<typeof fixture>>, changes: unknown, id: string) =>
   f.run("edit_card", { card: f.card, changes }, id)
 
+describe("exact Undo of a workshop edit", () => {
+  it.live("restores the saved card while leaving its active field draft intact", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const before = yield* f.doc()
+      yield* agentEdit(f, [{ field: "description", text: "Assistant edit." }], "c1")
+      const field = textField(["personality"])
+      const opened = yield* api.OpenEditor({ refId: f.card })
+      const draft = yield* api.SaveEditorDraft({
+        refId: f.card,
+        field,
+        content: "Unsaved human text.",
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+      const [key] = yield* f.editKeys(["c1"])
+      yield* api.UndoRolloutEffect(key!)
+      const restored = yield* api.OpenEditor({ refId: f.card })
+      assert.strictEqual(restored.doc.description, before.description)
+      assert.deepStrictEqual(
+        restored.drafts.find((d) => d.key.field === field),
+        draft
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+})
+
+describe("exact Undo of a workshop creation", () => {
+  it.live("follows an edit made after a recorded Undo in the same reply", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const out = yield* f.run("create_card", { name: "Synthetic keeper" }, "c1")
+      const refId = JSON.parse(out.text).id as RefId
+      yield* f.run("edit_card", { card: refId, changes: [{ field: "description", text: "First edit." }] }, "c2")
+      const [edit] = yield* f.editKeys(["c2"])
+      yield* api.UndoRolloutEffect(edit!)
+      yield* f.run("edit_card", { card: refId, changes: [{ field: "description", text: "Second edit." }] }, "c3")
+      const head = (yield* api.OpenEditor({ refId })).ref.headRevisionId
+      const [creation] = yield* f.editKeys(["c1"])
+      yield* api.UndoRolloutEffect(creation!)
+      const effects = yield* f.effects()
+      assert.deepStrictEqual(effects.find((e) => e.toolCallId === "c3")?.undoResult, { binnedWithCreation: true })
+      assert.isString(effects.find((e) => e.toolCallId === "c2")?.undoResult?.restoredHead)
+      const bin = yield* api.ListBin({ limit: 50, before: null })
+      yield* api.RestoreBinItem({ itemId: bin.find((e) => e.title === "Synthetic keeper")!.id })
+      const restored = yield* api.OpenEditor({ refId })
+      assert.strictEqual(restored.ref.headRevisionId, head)
+      assert.strictEqual(restored.doc.description, "Second edit.")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+})
+
 describe("revert a change", () => {
   it.live("puts the fields back as a new revision of the user's, and the change says it's reverted", () => {
     const config = testConfig()
@@ -422,6 +480,35 @@ describe("redo", () => {
 })
 
 describe("revert all of this reply", () => {
+  for (const threeWay of [false, true]) {
+    it.live(`tries a made item at its newest edit before older items (three-way: ${threeWay})`, () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const api = yield* client()
+        const f = yield* fixture(config.dataDir, api)
+        if (threeWay) yield* agentEdit(f, [{ field: "description", text: "An older edit." }], "c0")
+        const first = yield* f.run("create_card", { name: "Keeper A" }, "c1")
+        yield* f.run("create_card", { name: "Keeper B" }, "c2")
+        const refId = JSON.parse(first.text).id as RefId
+        yield* f.run("edit_card", { card: refId, changes: [{ field: "description", text: "Expanded." }] }, "c3")
+        yield* userEdit(api, refId, "personality", "Changed by hand.")
+        const report = yield* api.UndoRolloutEffects({ chatId: f.chat.id, rolloutId: f.rolloutId })
+        assert.strictEqual(report.refused?.effect.toolCallId, "c1")
+        assert.deepStrictEqual(
+          report.left.map((e) => e.toolCallId),
+          threeWay ? ["c2", "c0"] : ["c2"]
+        )
+        assert.isEmpty(report.undone)
+        const library = yield* api.ListLibrary({ kind: "card" })
+        assert.include(
+          library.map((r) => r.label),
+          "Keeper B"
+        )
+        if (threeWay) assert.strictEqual((yield* f.doc()).description, "An older edit.")
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    })
+  }
+
   it.live("reverts an edited item three-way, keeping the user's later edit, and bins what the reply made", () => {
     const config = testConfig()
     return Effect.gen(function* () {

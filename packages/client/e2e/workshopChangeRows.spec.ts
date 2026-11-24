@@ -17,6 +17,7 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser, type Client } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { startWorkshopProvider } from "./support/workshopProvider.ts"
+import { useSideChatProvider } from "./support/workshopSideChat.ts"
 
 const shots = process.env.SCREENSHOT_DIR
 const ANSWER = "I tightened Mara and made Ove to go with her."
@@ -290,4 +291,75 @@ test.describe("workshop change rows", () => {
         await dialog.getByRole("button", { name: "Move to the bin" }).click()
         await expect(oveRow.locator("[data-change-state]")).toHaveText("Undone", { timeout: 15_000 })
       })
+})
+
+test.describe("creation Undo across messages", () => {
+  const server = serverPerFile(withAdmin)
+  const name = "Synthetic keeper"
+  const answer = "The keeper is ready."
+  const provider = useSideChatProvider(server, {
+    answer,
+    calls: [
+      { name: "create_card", arguments: { name } },
+      { name: "send_message", arguments: { message: "I made the keeper." } },
+      { name: "edit_card", arguments: { card: name, changes: [{ field: "description", text: "Keeps watch." }] } }
+    ]
+  })
+  const admin = <A>(use: (client: Client) => Effect.Effect<A, unknown>) =>
+    asUser(server(), ADMIN.handle, ADMIN.password, use)
+
+  test("offers bin confirmation for a human save between assistant messages", async ({ page }) => {
+    const workshop = await admin((api) => api.CreateWorkshop({}))
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    provider().hold(2)
+    await page.goto(`${server().url}/chats/${workshop.id}`)
+    await page.getByLabel("Message", { exact: true }).fill("Make and edit a keeper.")
+    await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+    await expect.poll(() => provider().heldCount(), { timeout: 30_000 }).toBe(1)
+    const refId = await admin((api) =>
+      Effect.gen(function* () {
+        const [creation] = yield* api.ListRolloutEffects({ chatId: workshop.id })
+        const refId = creation!.undo!.refId as RefId
+        const field = textField(["personality"])
+        const opened = yield* api.OpenEditor({ refId })
+        const draft = yield* api.SaveEditorDraft({
+          refId,
+          field,
+          content: "Written by hand.",
+          draftId: null,
+          expectedRowVersion: null,
+          expectedSession: null,
+          baseRevisionId: opened.ref.headRevisionId
+        })
+        yield* api.CommitEditorDrafts({
+          refId,
+          expectedRowVersion: opened.ref.rowVersion,
+          fields: [{ field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
+          message: null
+        })
+        return refId
+      })
+    )
+    provider().release()
+    await expect(page.getByRole("article").filter({ hasText: answer })).toBeVisible({ timeout: 30_000 })
+    const row = page.locator(`[data-change-row="${refId}"]`)
+    await row.getByRole("button", { name: "Undo", exact: true }).click()
+    const dialog = page.getByRole("alertdialog", { name: `Move ${name} to the bin?` })
+    await expect(dialog).toContainText(`${name} was changed since.`)
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+    const before = await admin((api) => api.OpenEditor({ refId }))
+    await row.getByRole("button", { name: "Undo", exact: true }).click()
+    await dialog.getByRole("button", { name: "Move to the bin", exact: true }).click()
+    await expect(row.locator("[data-change-state]")).toHaveText("Undone")
+    const restored = await admin((api) =>
+      Effect.gen(function* () {
+        const bin = yield* api.ListBin({ limit: 50, before: null })
+        yield* api.RestoreBinItem({ itemId: bin.find((item) => item.title === name)!.id })
+        return yield* api.OpenEditor({ refId })
+      })
+    )
+    expect(restored.ref.headRevisionId).toBe(before.ref.headRevisionId)
+    expect(restored.doc.personality).toBe("Written by hand.")
+    expect(restored.doc.description).toBe("Keeps watch.")
+  })
 })
