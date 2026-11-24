@@ -68,6 +68,7 @@ export const makeDraftChatHandlers = Effect.gen(function* () {
             yield* writer.CreateWorkshop({
               userId: id,
               draftFor,
+              ...(reopen === undefined ? {} : { replaceDraft: reopen }),
               attachTo: story as ChatId,
               ...(fork === "" ? {} : { attachFork: fork as ForkId })
             })
@@ -80,6 +81,7 @@ export const makeDraftChatHandlers = Effect.gen(function* () {
             yield* writer.CreateWorkshop({
               userId: id,
               draftFor,
+              ...(reopen === undefined ? {} : { replaceDraft: reopen }),
               ...(card === "" ? {} : { card }),
               ...(persona === "" ? {} : { persona: persona === "none" ? null : persona })
             })

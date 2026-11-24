@@ -155,12 +155,15 @@ for (const mode of ["native", "dispatcher", "every"] as const)
           Effect.forkScoped
         )
         yield* eventually(() => events.length > 0)
+        const composer = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
+        yield* api.SetComposerLibrary({ chatId: chat.id, draftId: composer.id, add: [attached.id], remove: [] })
         const attachmentOnly = yield* posted(
           api.SendMessage({
             chatId: chat.id,
             parentSlotId: chat.activeLeafSlotId,
             branch: false,
             content: "",
+            composer: { draftId: composer.id, session: composer.session },
             library: [{ kind: "card", refId: attached.id }]
           })
         )

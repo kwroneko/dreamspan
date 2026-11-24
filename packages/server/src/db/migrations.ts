@@ -338,6 +338,33 @@ export const migrationDefinitions = {
           SELECT 1 FROM swept_pending_chats WHERE chat_id GLOB 'swept-library:*' AND swept_at < before_ms
         )`
     ]
+  },
+  "0031_swept_composer_library": {
+    statements: [
+      `CREATE TABLE swept_composer_library (
+        chat_id TEXT NOT NULL,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        ref_id TEXT NOT NULL,
+        draft_for TEXT,
+        position INTEGER NOT NULL,
+        swept_at INTEGER NOT NULL,
+        PRIMARY KEY (chat_id, user_id, ref_id)
+      ) STRICT, WITHOUT ROWID`,
+      // A legacy sweep is still available unless an existing receipt proves its item moved.
+      `WITH moved(chat_id, user_id, ref_id) AS (
+        SELECT c.source_chat_id, d.user_id, c.ref_id
+        FROM composer_library_carries c JOIN drafts d ON d.id = c.draft_id
+        WHERE d.target_id <> c.source_chat_id
+        UNION
+        SELECT origin_chat_id, user_id, ref_id FROM composer_library_handovers WHERE origin_chat_id <> chat_id
+      )
+      INSERT OR IGNORE INTO swept_composer_library (chat_id, user_id, ref_id, draft_for, position, swept_at)
+      SELECT substr(s.chat_id, length('swept-library:') + 1), s.user_id, item.value, NULL, item.key, s.swept_at
+      FROM swept_pending_chats s JOIN json_each(s.label) item
+      WHERE s.chat_id GLOB 'swept-library:*' AND item.type = 'text'
+        AND (substr(s.chat_id, length('swept-library:') + 1), s.user_id, item.value)
+          NOT IN (SELECT chat_id, user_id, ref_id FROM moved)`
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

@@ -99,10 +99,8 @@ const MAX = 16
 const HANDOVER_RETRY_MS = 2_000
 
 /**
- * What was handed over to new chat `chatId`'s composer in this browser tab and not sent
- * or removed since, kept for a reload: a chat opened in its place after a sweep (its composer
- * and attachments gone with it) gets them too, though the URL no longer names them (rev-dd4a #2).
- * Keep the URL operation so both replays honor the same last destination (rev-dd8 #1).
+ * The tab's handover history for replaying with servers that recover attachments through
+ * SetComposerLibrary. The current server can also restore them while opening a replacement.
  * Read (`next` undefined) or kept (empty: none).
  */
 const handedOver = (chatId: string, next?: ReadonlyArray<RetainedAttachment>): ReadonlyArray<RetainedAttachment> => {
@@ -332,8 +330,8 @@ export function useComposerLibrary(
       if (items === null) setTimeout(() => live && void run(read), HANDOVER_RETRY_MS)
       else {
         setLoaded(draftId)
-        // Opened in place of a new chat swept with what was handed over to it: those come here,
-        // as far as its composer still held them when swept (the server knows, rev-dd5 #2).
+        // Replay retained refs for compatibility. The server reads the swept workshop's
+        // remaining attachments, and a replay after recovery returns this draft's list.
         const replaced = replacedDraftOf(session.chatId)
         const carried = replaced === null ? [] : handedOver(replaced)
         if (replaced !== null && carried.length > 0) {

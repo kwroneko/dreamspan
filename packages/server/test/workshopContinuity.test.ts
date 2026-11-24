@@ -47,13 +47,22 @@ const watch = (api: Api, chat: Chat) =>
 const send = (api: Api, chat: Chat, content: string, library?: MessageLibrary) =>
   Effect.gen(function* () {
     const current = yield* api.GetChat({ chatId: chat.id })
+    const draft = library?.length ? yield* api.OpenComposer({ chatId: chat.id, forkId: null }) : null
+    if (draft !== null && library !== undefined)
+      yield* api.SetComposerLibrary({
+        chatId: chat.id,
+        draftId: draft.id,
+        add: library.map((item) => item.refId),
+        remove: []
+      })
     const sent = yield* posted(
       api.SendMessage({
         chatId: chat.id,
         parentSlotId: current.activeLeafSlotId,
         branch: false,
         content,
-        ...(library ? { library } : {})
+        ...(draft === null ? {} : { composer: { draftId: draft.id, session: draft.session } }),
+        ...(library === undefined ? {} : { library })
       })
     )
     return yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))

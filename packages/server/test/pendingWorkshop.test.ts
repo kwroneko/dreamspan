@@ -10,6 +10,7 @@ import { Generator } from "../src/chat/Generator.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { cardDoc } from "./support/docs.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
@@ -223,6 +224,77 @@ describe("a new workshop's pending chat", () => {
       })
     )
   )
+
+  it.live("a legacy tab cannot carry the same swept item after a bound carry moved it (rev-dd9 #1)", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, quill } = yield* setup
+        const writer = yield* Writer
+        const book = yield* api.CreateLorebook({ label: "Channel markers" })
+        const open = () =>
+          Effect.gen(function* () {
+            const chat = yield* api.OpenDraftChat({ draftFor: `workshop:${quill}:` })
+            const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
+            return { chatId: chat.id, draftId: draft.id }
+          })
+        const origin = yield* open()
+        const handover = { originChatId: origin.chatId, operationId: "markers" }
+        const add = { add: [book.id], remove: [] }
+        yield* api.SetComposerLibrary({ ...origin, ...add, handover })
+        yield* writer.SweepPendingChat({ userId, chatId: origin.chatId })
+        const source = yield* open()
+        yield* api.SetComposerLibrary({ ...source, ...add, handover })
+        yield* writer.SweepPendingChat({ userId, chatId: source.chatId })
+        const kept = yield* open()
+        const carriedFrom = source.chatId
+        assert.lengthOf(yield* api.SetComposerLibrary({ ...kept, ...add, carriedFrom, handover }), 1)
+        yield* api.SetComposerLibrary({ ...kept, add: [], remove: [book.id] })
+        const stale = yield* open()
+        assert.deepStrictEqual(yield* api.SetComposerLibrary({ ...stale, ...add, carriedFrom }), [])
+      })
+    )
+  )
+
+  it.live("a swept workshop's retained item survives expiry of its handover and sweep receipts (rev-dd9 #2)", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const { api, userId, quill } = yield* setup
+      const writer = yield* Writer
+      const book = yield* api.CreateLorebook({ label: "Tide tables" })
+      const open = (reopen?: Parameters<typeof api.OpenDraftChat>[0]["reopen"]) =>
+        Effect.gen(function* () {
+          const chat = yield* api.OpenDraftChat({
+            draftFor: `workshop:${quill}:`,
+            ...(reopen === undefined ? {} : { reopen })
+          })
+          const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
+          return { chatId: chat.id, draftId: draft.id }
+        })
+      const expireSweeps = () => fixtureSql(config.dataDir, [{ sql: "UPDATE swept_pending_chats SET swept_at = 1" }])
+      const origin = yield* open()
+      const handover = { originChatId: origin.chatId, operationId: "tides" }
+      const add = { add: [book.id], remove: [] }
+      yield* api.SetComposerLibrary({ ...origin, ...add, handover })
+      yield* writer.SweepPendingChat({ userId, chatId: origin.chatId })
+      const source = yield* open()
+      assert.lengthOf(yield* api.SetComposerLibrary({ ...source, ...add, handover }), 1)
+      yield* expireSweeps()
+      yield* writer.SweepPendingChat({ userId, chatId: source.chatId })
+      // Older servers could already have pruned this alias. It is only needed for a URL
+      // replay that has no source workshop to name.
+      yield* fixtureSql(config.dataDir, [
+        { sql: "DELETE FROM composer_library_handovers WHERE origin_chat_id = ?", params: [origin.chatId] }
+      ])
+      const owner = yield* open()
+      assert.lengthOf(yield* api.SetComposerLibrary({ ...owner, ...add, carriedFrom: source.chatId, handover }), 1)
+      // Even after the replacement itself is swept and its receipt is pruned, it owns the item.
+      yield* writer.SweepPendingChat({ userId, chatId: owner.chatId })
+      yield* expireSweeps()
+      const prune = yield* open()
+      yield* writer.SweepPendingChat({ userId, chatId: prune.chatId })
+      assert.lengthOf(yield* api.GetComposerLibrary(yield* open(owner.chatId)), 1)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
 
   it.live("ten new workshops opened and left make the seeds once, and nothing more in the library", () =>
     run(

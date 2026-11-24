@@ -122,10 +122,10 @@ export const SetComposerLibraryFields = {
   remove: Schema.Array(RefId).check(Schema.isMaxLength(16)),
   /**
    * A new chat swept (`chatId` opened in its place) whose handed-over items `add` carries on:
-   * only those its composer still held when it was swept are attached (rev-dd5 #2).
+   * only those its composer still held and that another replacement hasn't taken are attached.
    */
   carriedFrom: Schema.optionalKey(Schema.String),
-  /** A pending workshop URL's attachment operation, unchanged across retries and replacements. */
+  /** A pending URL's operation, used to find the source when no swept workshop is named. */
   handover: Schema.optionalKey(ComposerLibraryHandover)
 }
 
