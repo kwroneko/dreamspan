@@ -20,6 +20,12 @@ export const SIDEBAR_BROWSE_PARAMS = {
 } as const
 const layout = new Set<string>(Object.values(SIDEBAR_BROWSE_PARAMS))
 
+/** Older sidebar links used the router's boolean query format. */
+const useBrowseSwitch = (key: string) => {
+  const value = useLayoutParam(key)
+  return value === "on" || value === "true"
+}
+
 const read = (search: Record<string, unknown>) =>
   readHomeSearch(Object.fromEntries(homeSearch.map((k) => [k, search[key(k)]])))
 const write = (state: HomeBrowse) =>
@@ -36,9 +42,9 @@ export function useSidebarBrowse() {
       JSON.stringify(Object.fromEntries(homeSearch.map((k) => [key(k), s[key(k)]])))
   })
   const sort = readCardSort(useLayoutParam(SIDEBAR_BROWSE_PARAMS.sort))
-  const reversed = useLayoutParam(SIDEBAR_BROWSE_PARAMS.reversed) === "on"
-  const withPersonas = useLayoutParam(SIDEBAR_BROWSE_PARAMS.withPersonas) === "on"
-  const grouped = useLayoutParam(SIDEBAR_BROWSE_PARAMS.grouped) === "on"
+  const reversed = useBrowseSwitch(SIDEBAR_BROWSE_PARAMS.reversed)
+  const withPersonas = useBrowseSwitch(SIDEBAR_BROWSE_PARAMS.withPersonas)
+  const grouped = useBrowseSwitch(SIDEBAR_BROWSE_PARAMS.grouped)
   const navigate = useNavigate()
   const state = useMemo(
     () => ({ ...read(JSON.parse(encoded) as Record<string, unknown>), sort, reversed, withPersonas, grouped }),
