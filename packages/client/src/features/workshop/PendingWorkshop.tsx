@@ -11,6 +11,7 @@
 // loading in between. What's typed is kept as a pending chat's first message is (`useUserDraft`).
 // Used beside a story (`PendingSideChat`, the Workshop tab) and on its own page (StartWorkshopPage.tsx).
 import type { CastCard, Chat, ChatId, EntityId, ForkId } from "@dreamspan/shared/chat.ts"
+import type { CardForChat } from "@dreamspan/shared/chatSetupApi.ts"
 import type { Draft } from "@dreamspan/shared/drafts.ts"
 import { BUILTIN_PRESET_LABEL } from "@dreamspan/shared/generation.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
@@ -28,6 +29,8 @@ import { keepCopy } from "../editor/backup.ts"
 import { useCaller } from "../editor/caller.ts"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { CastContext, castView } from "../chat/cast.ts"
+import { Greeting } from "../chat/GreetingPreview.tsx"
+import { expandForDisplay } from "../chat/macros.ts"
 import { ComposerBox, useCompactComposer } from "../chat/Composer.tsx"
 import { composerCarryCopy } from "../chat/composerCarry.ts"
 import { composerSubmitKey } from "../chat/composerKeys.ts"
@@ -157,6 +160,23 @@ function useCards() {
   return { cards, list }
 }
 
+/** The card a pending workshop's assistant is, for its greeting; null until read, or without one. */
+function useAssistantGreeting(entityId: EntityId | null) {
+  const call = useCaller()
+  const [read, setRead] = useState<CardForChat | null>(null)
+  useEffect(() => {
+    if (entityId === null) return
+    let live = true
+    void call((client) => client("GetCardForChat", { entityId })).then((result) => {
+      if (live) setRead(result.ok ? result.value : null)
+    })
+    return () => {
+      live = false
+    }
+  }, [call, entityId])
+  return read !== null && read.card.entityId === entityId ? read : null
+}
+
 export function PendingWorkshop({
   attachTo = null,
   attachFork = null,
@@ -179,7 +199,8 @@ export function PendingWorkshop({
   start: WorkshopStart
   /** The persona picked at the speaker chip's Your persona: this workshop's only. */
   onPersona: (persona: string) => void
-  header: ReactNode
+  /** Its header; a function is given the characters the saved workshop's header will show. */
+  header: ReactNode | ((characters: ReadonlyArray<CastCard>) => ReactNode)
   /** What stands where its messages will be until the first send. */
   intro: ReactNode
   /** Where the first message typed is kept. */
@@ -227,6 +248,21 @@ export function PendingWorkshop({
   const castCards = view.cast?.cards ?? []
   const speakerId = castCards.some((card) => card.entityId === picked) ? picked : (playing?.entityId ?? null)
   const speakerName = castCards.find((card) => card.entityId === speakerId)?.name ?? "You"
+  // The assistant's card as a story's character (spec/WORKSHOP-CARDS.md §3): its portrait and
+  // greeting where the messages will be, the first message the workshop is made with.
+  const greeter = useAssistantGreeting(assistant?.entityId ?? null)
+  const greeting =
+    greeter === null || greeter.greetings.length === 0
+      ? null
+      : expandForDisplay(
+          greeter.greetings[0]!,
+          "template",
+          {
+            user: playing?.modelName ?? playing?.name ?? "User",
+            char: greeter.card.modelName ?? greeter.card.name
+          },
+          { description: greeter.description, personality: greeter.personality, scenario: greeter.scenario }
+        ).text
 
   const busy = action.pending
   const ready = viewPrefs.ready && durable.ready
@@ -411,10 +447,17 @@ export function PendingWorkshop({
         className="@container/chat flex min-h-0 flex-1 flex-col"
         style={{ ...kindRoot.style, "--chat-portrait-width": `${portraitWidth}px` } as CSSProperties}
       >
-        {header}
+        {typeof header === "function"
+          ? header(castCards.filter((card) => !view.cast?.playedByMe.includes(card.entityId)))
+          : header}
         {/* Where its messages will be: what this is, until the first message starts it. */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          <div className="chat-column flex flex-col gap-1.5 py-4">{intro}</div>
+          <div className="chat-column flex flex-col gap-1.5 py-4">
+            {greeter !== null && greeting !== null && (
+              <Greeting card={greeter} index={0} count={1} onIndex={() => {}} groupOnly={false} text={greeting} />
+            )}
+            {intro}
+          </div>
         </div>
         {/* What to know before sending, above the composer as the saved chat's notes are. */}
         <PendingComposerControls placement="notes" context={controls} />

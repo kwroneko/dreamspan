@@ -225,7 +225,17 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
                   : { ref: presetRef as RefId }
           })
         const doc = yield* steps.lib.loadDoc((yield* steps.reload(card.id)).head_revision_id)
-        const greeting = typeof doc.first_mes === "string" ? doc.first_mes : ""
+        // Its first greeting, as a story with the card starts and the new workshop's page shows it
+        // (GetCardForChat's first: `first_mes`, else the first alternate with text).
+        const ordinary = [
+          doc.first_mes,
+          ...(Array.isArray(doc.alternate_greetings) ? doc.alternate_greetings : [])
+        ].map((text) => (typeof text === "string" ? text : ""))
+        const shown = Math.max(
+          0,
+          ordinary.findIndex((text) => text.trim() !== "")
+        )
+        const greeting = ordinary[shown] ?? ""
         const { slotId } = yield* graph.insertSlot(
           chatId,
           null,
@@ -236,7 +246,7 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
             status: "complete",
             macroMode: "template",
             origin: "greeting",
-            greetingRef: { entity: card.entity_id as EntityId, index: 0 }
+            greetingRef: { entity: card.entity_id as EntityId, index: shown }
           }),
           at
         )

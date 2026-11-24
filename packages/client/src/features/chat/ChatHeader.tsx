@@ -335,7 +335,7 @@ export interface PendingHeaderActionProps {
 }
 
 /** Under the name: who else is in it, by name only (versions are on their cards). */
-const aboutLine = (characters: ReadonlyArray<CastCard>, name: string | undefined, started: Date | null) => {
+export const aboutLine = (characters: ReadonlyArray<CastCard>, name: string | undefined, started: Date | null) => {
   const others = characters.map((card) => card.name).filter((n) => n !== name)
   // With no one else, the day ST started it, which tells same-named chats apart.
   return others.length > 0
@@ -467,9 +467,12 @@ export function ChatHeaderFrame({
   title,
   about,
   actions,
-  renaming = false
+  renaming = false,
+  portraitsOpen = true
 }: {
   characters: ReadonlyArray<CastCard>
+  /** Its portraits open their cards in the side panel; false where the page has none (a workshop not made yet). */
+  portraitsOpen?: boolean
   /** The chat's own cover image, shown in place of its characters' portraits. */
   picture?: { readonly id: string; readonly name: string; readonly mediaId: string } | null
   loading: boolean
@@ -531,23 +534,33 @@ export function ChatHeaderFrame({
               data-layout-audit-ignore="overlap: Header portraits intentionally form a stack"
               className="flex shrink-0 items-center -space-x-2 @max-[40rem]/header:hidden"
             >
-              {characters.slice(0, 4).map((c) => (
-                <Tooltip key={c.entityId} label={`Opens ${cardChoiceLabel(c)}'s card in the side panel.`} side="bottom">
-                  <button
-                    type="button"
-                    aria-label={`Show ${cardChoiceLabel(c)}'s card`}
-                    className="inline-flex rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                    onClick={() =>
-                      void navigate({
-                        to: ".",
-                        search: (prev: Record<string, unknown>) => ({ ...prev, panel: `card:${c.entityId}` })
-                      })
-                    }
-                  >
+              {characters.slice(0, 4).map((c) =>
+                !portraitsOpen ? (
+                  <span key={c.entityId} className="inline-flex rounded-sm">
                     <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} crop={c.avatarCrop} size="md" />
-                  </button>
-                </Tooltip>
-              ))}
+                  </span>
+                ) : (
+                  <Tooltip
+                    key={c.entityId}
+                    label={`Opens ${cardChoiceLabel(c)}'s card in the side panel.`}
+                    side="bottom"
+                  >
+                    <button
+                      type="button"
+                      aria-label={`Show ${cardChoiceLabel(c)}'s card`}
+                      className="inline-flex rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                      onClick={() =>
+                        void navigate({
+                          to: ".",
+                          search: (prev: Record<string, unknown>) => ({ ...prev, panel: `card:${c.entityId}` })
+                        })
+                      }
+                    >
+                      <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} crop={c.avatarCrop} size="md" />
+                    </button>
+                  </Tooltip>
+                )
+              )}
               {characters.length > 4 && (
                 <Tooltip
                   label={characters
