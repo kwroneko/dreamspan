@@ -42,7 +42,7 @@ import { CardBrowseBar } from "./CardBrowseBar.tsx"
 import { SourceResults, useSourceBrowse } from "../cardSources/browse.tsx"
 import { SourceChips, SourceFiltersPanel } from "../cardSources/filters.tsx"
 import { NewCardButton } from "../editor/NewCard.tsx"
-import { GroupGrid } from "./GroupGrid.tsx"
+import { GroupGrid, useGroupsSwitch } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
 import { characterChatActions, sidebarFoot } from "./homeSlots.ts"
 import { SlotOutlet } from "../../slots.tsx"
@@ -1098,7 +1098,9 @@ function Browser() {
   const [browse, setBrowse] = useSidebarBrowse()
   const [chatBrowse, setChatBrowse] = useChatBrowse()
   const search = browse.search
-  const grouped = useGroupedFamilies(browse, search)
+  // Switching to Groups, the tab before stays until the groups are read (useGroupsSwitch).
+  const tabs = useGroupsSwitch(browse)
+  const grouped = useGroupedFamilies(tabs.shown, search)
   const setSearch = (search: string) => setBrowse({ search })
   // A card source shown in the character grid; asked nothing unless it's shown (§5.1).
   const sources = useSourceBrowse(grid ? browse.source : null, browse.remote, (remote, options) =>
@@ -1271,12 +1273,12 @@ function Browser() {
           filtersId="side-source-filters"
         />
       )}
-      {grid && !source && browse.filter === "personas" && (
+      {grid && !source && tabs.shown.filter === "personas" && (
         <div>
           <NewCardButton persona />
         </div>
       )}
-      {grid && !source && browse.filter === "archived" && (
+      {grid && !source && tabs.shown.filter === "archived" && (
         <SlotOutlet slot={archivedCardActions} props={{ place: "sidebar" }} />
       )}
       {/* Below every filter row, directly above the list it navigates: coming or going, it moves only the list. */}
@@ -1358,30 +1360,34 @@ function Browser() {
           </div>
         ) : grid && data ? (
           // Two tiles a row at the sidebar's usual width, more as it widens (8.5rem each at least).
-          browse.filter === "groups" ? (
-            <GroupGrid
-              needle={needle}
-              sort={browse.sort}
-              reversed={browse.reversed}
-              className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
-            />
-          ) : (
-            <>
-              <CharacterGrid
-                cards={browseCards(browsable(data), browse, needle)}
+          <>
+            {tabs.groups && (
+              <GroupGrid
+                needle={needle}
                 sort={browse.sort}
-                markPersonas={mixesPersonas(browse)}
-                families={
-                  grouped ? { expanded: browse.family, onToggle: (family) => setBrowse({ family }) } : undefined
-                }
+                reversed={browse.reversed}
                 className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
+                {...tabs.groups}
               />
-              <SlotOutlet
-                slot={cardSearchExtras}
-                props={{ data, browse, search: needle, className: "grid grid-cols-2 gap-2" }}
-              />
-            </>
-          )
+            )}
+            {tabs.characters && (
+              <>
+                <CharacterGrid
+                  cards={browseCards(browsable(data), tabs.shown, needle)}
+                  sort={tabs.shown.sort}
+                  markPersonas={mixesPersonas(tabs.shown)}
+                  families={
+                    grouped ? { expanded: tabs.shown.family, onToggle: (family) => setBrowse({ family }) } : undefined
+                  }
+                  className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
+                />
+                <SlotOutlet
+                  slot={cardSearchExtras}
+                  props={{ data, browse: tabs.shown, search: needle, className: "grid grid-cols-2 gap-2" }}
+                />
+              </>
+            )}
+          </>
         ) : messages ? (
           <div className="max-w-controls pt-2 pb-2">
             <SlotOutlet
