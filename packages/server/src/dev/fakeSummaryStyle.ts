@@ -5,7 +5,7 @@ import { Effect, Layer } from "effect"
 import { ExecutionRegistry } from "../execution.ts"
 import { directSummary } from "../lcm/strategies.ts"
 
-export const FAKE_SUMMARY_STYLE_ID = "synthetic/notes"
+const FAKE_SUMMARY_STYLE_ID = "synthetic/notes"
 
 /** Whether a `FAKE_SUMMARY_STYLE` value asks for it. */
 export const fakeSummaryStyleWanted = (value: string | undefined) => value === "on"

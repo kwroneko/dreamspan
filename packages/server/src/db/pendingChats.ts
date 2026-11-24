@@ -22,7 +22,7 @@ export const titleFor = (names: ReadonlyArray<string>, at: number) =>
     : `${names[0] ?? "Chat"}, ${new Date(at).toLocaleDateString("en", { day: "numeric", month: "short" })}`
 
 /** How long a swept pending chat's late saves are still filed. */
-export const SWEPT_KEPT_MS = 7 * 24 * 60 * 60 * 1000
+const SWEPT_KEPT_MS = 7 * 24 * 60 * 60 * 1000
 
 export interface PendingRow {
   readonly id: ChatId

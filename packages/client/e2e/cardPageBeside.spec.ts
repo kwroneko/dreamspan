@@ -159,9 +159,9 @@ test("library cards: Edit beside replaces the side pane's preview", async ({ pag
     const grid = page.getByRole("main").getByLabel("Characters", { exact: true })
     const tiles = grid.locator(":scope > div")
     await expect(tiles).toHaveCount(4)
-    const shown = await grid.getByRole("link").evaluateAll((links) =>
-      links.map((l) => (l.getAttribute("aria-label") ?? "").replace(/^Open /, ""))
-    )
+    const shown = await grid
+      .getByRole("link")
+      .evaluateAll((links) => links.map((l) => (l.getAttribute("aria-label") ?? "").replace(/^Open /, "")))
     // The menu: the open items first, then the card's page beside.
     await tiles.nth(0).getByRole("link").first().click({ button: "right" })
     const items = await page.getByRole("menuitem").allTextContents()
