@@ -267,10 +267,11 @@ for (const width of [1440, 390])
             `${page.url().split("?")[0]}?panel=${encodeURIComponent(`card:src:cardex:${/\/cards\/([^/]+)\/chat/.exec(page.url())![1]}`)}`
           )
         await expect(page).toHaveURL(/panel=card(:|%3A)src/)
-        const tab = page.getByRole("tabpanel", { name: `${edited} · 1.0`, exact: true })
+        const tab = page.getByRole("tabpanel", { name: edited, exact: true })
         await expect(tab.getByText("From cardex · not in your cards", { exact: true })).toBeVisible({
           timeout: 30_000
         })
+        await expect(tab.locator("[data-card-version]")).toHaveText("1.0")
         const description = tab.getByRole("textbox", { name: "Description", exact: true })
         await expect(description).toBeVisible()
         await description.click()
