@@ -63,7 +63,7 @@ import { castCharacters, chatDisplayName } from "./chatTitle.ts"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { LANE_PX, useCoverage } from "./CoverageRail.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
-import { ANCHORED_POPUP } from "../../ui/anchorScroll.ts"
+import { ANCHORED_POPUP, AnchoredPopupEvent } from "../../ui/anchorScroll.ts"
 import type { CSSProperties } from "react"
 import { type ContextMark, Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
@@ -96,8 +96,6 @@ export interface Flashes {
 const EDGE = 5
 /** Within this many pixels of the end counts as at the end. */
 const END_PX = 48
-/** Whether `offset` is where the list stood at `at` (null: nowhere yet). */
-const atOffset = (at: number | null, offset: number) => at !== null && Math.abs(offset - at) < 1
 
 const SUMMARIZED: ContextMark = {
   kind: "summarized",
@@ -244,72 +242,17 @@ export function MessageList({
     },
     [follow]
   )
-  const scrollPosition = useRef<{ offset: number; maximum: number } | null>(null)
-  const pendingOffset = useRef<number | null>(null)
-  const readScrollPosition = useCallback(
-    (list: HTMLDivElement) => {
-      const offset = list.scrollTop
-      const maximum = list.scrollHeight - list.clientHeight
-      const previous = scrollPosition.current
-      // When rows shrink, the browser clamps the old offset to the new end. Its scroll event
-      // can arrive after rows grew back, so remember that movement until the event arrives.
-      if (
-        follow.stuck &&
-        previous !== null &&
-        maximum < previous.maximum &&
-        previous.offset > maximum &&
-        atOffset(maximum, offset)
-      )
-        pendingOffset.current = offset
-      else if (!atOffset(pendingOffset.current, offset)) pendingOffset.current = null
-      return (scrollPosition.current = { offset, maximum })
-    },
-    [follow]
-  )
-  const scrollToFn = useCallback(
-    (
-      offset: number,
-      options: { adjustments?: number; behavior?: ScrollBehavior },
-      instance: Virtualizer<HTMLDivElement, Element>
-    ) => {
-      const list = instance.scrollElement
-      if (list === null) return
-      const before = readScrollPosition(list)
-      elementScroll(offset, options, instance)
-      const actual = list.scrollTop
-      if (actual !== before.offset) {
-        scrollPosition.current = { offset: actual, maximum: before.maximum }
-        pendingOffset.current = actual
-      }
-    },
-    [readScrollPosition]
-  )
   const offsetChanged = useRef<((offset: number, isScrolling: boolean) => void) | null>(null)
   const observeOffset = useCallback(
     (instance: Virtualizer<HTMLDivElement, Element>, changed: (offset: number, isScrolling: boolean) => void) => {
-      const report = (offset: number, isScrolling: boolean) => {
-        const list = instance.scrollElement
-        // The observer's idle callback can see a native jump before its scroll event.
-        // Release bottom-follow before the observer replaces the previous offset.
-        if (
-          !isScrolling &&
-          follow.stuck &&
-          list !== null &&
-          offset < (instance.scrollOffset ?? 0) &&
-          list.scrollHeight - offset - list.clientHeight > END_PX &&
-          !atOffset(pendingOffset.current, offset)
-        )
-          setFollow(instance, false)
-        changed(offset, isScrolling)
-      }
-      offsetChanged.current = report
-      const stop = observeElementOffset(instance, report)
+      offsetChanged.current = changed
+      const stop = observeElementOffset(instance, changed)
       return () => {
         offsetChanged.current = null
         stop?.()
       }
     },
-    [follow, setFollow]
+    []
   )
   // While the list scrolls, TanStack Virtual measures newly mounted rows only in its resize
   // observer, before the browser paints, but re-renders for a size that moves nothing above the
@@ -342,7 +285,6 @@ export function MessageList({
     estimateSize,
     getItemKey,
     observeElementOffset: observeOffset,
-    scrollToFn,
     // Start near the destination. Mounting the first window's first rows only to replace
     // them with its last rows in the layout effect also mounted their controls and reads.
     initialOffset: () => {
@@ -375,11 +317,11 @@ export function MessageList({
   const syncOffset = useCallback(() => {
     const list = parent.current
     if (list === null) return
-    const { offset: actual } = readScrollPosition(list)
+    const actual = list.scrollTop
     const expected = virtualizer.scrollOffset ?? 0
     if (Math.abs(expected - actual) < 1) return
     offsetChanged.current?.(actual, false)
-  }, [virtualizer, readScrollPosition])
+  }, [virtualizer])
   useLayoutEffect(syncOffset)
 
   // Contributions can grow below a partly visible earlier row whose text is already
@@ -648,8 +590,7 @@ export function MessageList({
 
   // An end scroll remains pending by row index while the virtualizer measures it.
   // Appending or inserting the summary divider can move the last message to another
-  // index. Retarget before the next frame, even if we're still exactly at the end:
-  // otherwise reconciliation scrolls to the old row and the scroll listener lets go.
+  // index. Retarget before the next frame so reconciliation scrolls to the new last row.
   const lastSlot = entries.at(-1)?.slotId
   useLayoutEffect(() => {
     if (view.follow && follow.stuck && rowCount > 0) virtualizer.scrollToEnd()
@@ -664,21 +605,16 @@ export function MessageList({
   //
   // The user scrolling up lets go at once, before the first scroll event: a smooth scroll
   // starts with steps small enough to still look like the end. So does grabbing the
-  // scrollbar or a middle-button autoscroll. Reaching the end again holds on once the user
-  // has stopped for a moment. (A scroll up with none of these, like find in page, lets go
-  // only once it's 48 px from the end.)
+  // scrollbar or a middle-button autoscroll. A change in scroll position can be a browser
+  // layout clamp, even after the list's previous height has returned, so it cannot let go.
+  // Reaching the end again holds on after a pause, or on release of the thumb there.
   //
   // A menu open on a message pauses the hold until it closes (anchorScroll.ts): following a
   // streaming reply carried the menu up with its row, then closed it as the row left the view.
   // It holds on again after, unless the user scrolled away meanwhile.
   const intent = useRef(0)
-  const menus = useRef({ open: new Set<EventTarget>(), resume: false, since: 0 })
-  /** Whether a menu opened from a row in the list is open (a row gone takes its menu with it). */
-  const menuOpen = () => {
-    for (const anchor of menus.current.open)
-      if (anchor instanceof Node && !anchor.isConnected) menus.current.open.delete(anchor)
-    return menus.current.open.size > 0
-  }
+  const scrollbarPointer = useRef<number | null>(null)
+  const menus = useRef({ open: 0, resume: false, since: 0 })
   useEffect(() => {
     const list = parent.current
     if (list === null) return
@@ -687,48 +623,69 @@ export function MessageList({
       hold(false)
     }
     const onMenu = (event: Event) => {
-      const anchor = event.target
-      if (!(event instanceof CustomEvent) || anchor === null) return
+      if (!(event instanceof AnchoredPopupEvent)) return
       const state = menus.current
-      if (event.detail === true) {
-        if (state.open.size === 0) {
-          state.resume = follow.stuck
-          state.since = performance.now()
-          hold(false)
-        }
-        state.open.add(anchor)
-        return
+      if (state.open === 0) {
+        state.resume = follow.stuck
+        state.since = performance.now()
+        hold(false)
       }
-      state.open.delete(anchor)
-      if (menuOpen() || !state.resume) return
-      state.resume = false
-      if (intent.current >= state.since) return
-      hold(true)
-      virtualizer.scrollToEnd()
+      state.open++
+      event.detail(() => {
+        state.open--
+        if (state.open > 0 || !state.resume) return
+        state.resume = false
+        if (parent.current !== list || intent.current >= state.since) return
+        hold(true)
+        virtualizer.scrollToEnd()
+      })
     }
     const onWheel = (event: WheelEvent) => {
       if (event.deltaY < 0) letGo()
     }
     const onKey = (event: KeyboardEvent) => {
-      if (["ArrowUp", "PageUp", "Home"].includes(event.key)) letGo()
+      if (["ArrowUp", "PageUp", "Home"].includes(event.key) || (event.shiftKey && [" ", "Tab"].includes(event.key)))
+        letGo()
     }
     const onPointerDown = (event: PointerEvent) => {
       const onScrollbar = event.target === list && event.offsetX >= list.clientWidth
+      if (onScrollbar && event.button === 0) scrollbarPointer.current = event.pointerId
       if (onScrollbar || event.button === 1) letGo()
+    }
+    const onPointerEnd = (event: PointerEvent) => {
+      if (scrollbarPointer.current !== event.pointerId) return
+      scrollbarPointer.current = null
+      intent.current = performance.now()
+      // Read the native position before stream growth or virtualizer measurements move the end.
+      if (
+        event.type === "pointerup" &&
+        list.scrollHeight - list.scrollTop - list.clientHeight <= END_PX &&
+        !revealing.current &&
+        menus.current.open === 0 &&
+        session.snapshot().newer === null
+      ) {
+        hold(true)
+        virtualizer.scrollToEnd()
+        session.followAtBottom()
+      }
     }
     // Capture runs before the virtualizer's own listener, whose render may follow at once.
     const onScroll = () => {
-      const { offset, maximum } = readScrollPosition(list)
-      const placed = atOffset(pendingOffset.current, offset)
-      pendingOffset.current = null
-      if (maximum - offset > END_PX) {
-        // Rows grew after the list was put somewhere without the user (above): still held.
-        if (follow.stuck && placed) virtualizer.scrollToEnd()
-        else hold(false)
+      const fromEnd = list.scrollHeight - list.scrollTop - list.clientHeight
+      if (fromEnd > END_PX) {
+        if (follow.stuck && virtualizer.options.followOnAppend) virtualizer.scrollToEnd()
+        return
       }
       // Capture reaching the end before the virtualizer measures its newly mounted rows.
       // Their corrected estimates can grow the list beyond END_PX in that same commit.
-      else if (spacing === "compact" && !revealing.current && !menuOpen() && performance.now() - intent.current > 300)
+      if (
+        spacing === "compact" &&
+        !revealing.current &&
+        menus.current.open === 0 &&
+        // The thumb can pass through the end before the same drag takes it away again.
+        scrollbarPointer.current === null &&
+        performance.now() - intent.current > 300
+      )
         hold(true)
     }
     list.addEventListener(ANCHORED_POPUP, onMenu)
@@ -738,6 +695,8 @@ export function MessageList({
     list.addEventListener(LET_GO, letGo)
     list.addEventListener("keydown", onKey)
     list.addEventListener("pointerdown", onPointerDown)
+    window.addEventListener("pointerup", onPointerEnd, true)
+    window.addEventListener("pointercancel", onPointerEnd, true)
     list.addEventListener("scroll", onScroll, { passive: true, capture: true })
     return () => {
       list.removeEventListener(ANCHORED_POPUP, onMenu)
@@ -746,9 +705,11 @@ export function MessageList({
       list.removeEventListener(LET_GO, letGo)
       list.removeEventListener("keydown", onKey)
       list.removeEventListener("pointerdown", onPointerDown)
+      window.removeEventListener("pointerup", onPointerEnd, true)
+      window.removeEventListener("pointercancel", onPointerEnd, true)
       list.removeEventListener("scroll", onScroll, { capture: true })
     }
-  }, [hold, spacing, follow, virtualizer, readScrollPosition])
+  }, [hold, spacing, follow, virtualizer, session])
   // The list held at the end stays there when it gets shorter: the composer below growing with
   // a line of text, or a note above it appearing. The browser keeps the scroll position, which
   // left the last message behind the list's edge until something else rendered the list.
@@ -763,15 +724,14 @@ export function MessageList({
     const observer = new ResizeObserver(() => {
       const shorter = list.clientHeight < height
       height = list.clientHeight
-      const { maximum } = readScrollPosition(list)
       if (!shorter || !follow.stuck || !following.current) return
       // Before this frame paints (the virtualizer's own scroll lands a frame later), then theirs.
-      scrollToFn(maximum, {}, virtualizer)
+      elementScroll(list.scrollHeight - height, {}, virtualizer)
       virtualizer.scrollToEnd()
     })
     observer.observe(list)
     return () => observer.disconnect()
-  }, [follow, virtualizer, readScrollPosition, scrollToFn])
+  }, [follow, virtualizer])
   useEffect(() => {
     const list = parent.current
     if (list === null || entries.length === 0 || !view.follow) return
@@ -779,7 +739,8 @@ export function MessageList({
     if (
       !follow.stuck &&
       !revealing.current &&
-      !menuOpen() &&
+      menus.current.open === 0 &&
+      scrollbarPointer.current === null &&
       fromEnd <= END_PX &&
       performance.now() - intent.current > 300
     )

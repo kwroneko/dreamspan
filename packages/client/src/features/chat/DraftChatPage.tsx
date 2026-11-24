@@ -32,13 +32,17 @@ export const DRAFT_PARAM = "draft"
 /** One open per page and attempt, even when React runs the effect twice. */
 const opening = new Map<string, Promise<ActionResult<Chat>>>()
 
+type DraftSearch = (search: Record<string, unknown>, chatId: ChatId) => Record<string, unknown>
+
 function DraftChat({
   draftFor,
-  onOpened
+  onOpened,
+  prepareSearch
 }: {
   draftFor: DraftFor
   /** A pending chat was opened for the page: a fresh one, or (`reopened`) the one its URL named. */
   onOpened?: ((chat: Chat, reopened: boolean) => void) | undefined
+  prepareSearch?: DraftSearch | undefined
 }) {
   const search = useSearch({ strict: false }) as Record<string, unknown>
   const named =
@@ -101,7 +105,10 @@ function DraftChat({
       if (value.id !== reopen)
         void navigate({
           to: ".",
-          search: (prev: Record<string, unknown>) => ({ ...prev, [DRAFT_PARAM]: value.id }),
+          search: (prev: Record<string, unknown>) => ({
+            ...(prepareSearch?.(prev, value.id) ?? prev),
+            [DRAFT_PARAM]: value.id
+          }),
           replace: true,
           resetScroll: false
         })
@@ -203,17 +210,19 @@ function DraftChat({
 function DraftChatPage({
   draftFor,
   onOpened,
+  prepareSearch,
   pageTitle = "New chat"
 }: {
   draftFor: DraftFor
   onOpened?: (chat: Chat, reopened: boolean) => void
+  prepareSearch?: DraftSearch | undefined
   pageTitle?: string
 }) {
   useTitle(pageTitle)
   return (
     <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Another entry is another chat. */}
-      <DraftChat key={draftFor} draftFor={draftFor} onOpened={onOpened} />
+      <DraftChat key={draftFor} draftFor={draftFor} onOpened={onOpened} prepareSearch={prepareSearch} />
     </div>
   )
 }
@@ -248,11 +257,13 @@ export function EmptyDraftChatPage() {
 export function TitledDraftChatPage({
   draftFor,
   titleKey,
-  pageTitle
+  pageTitle,
+  prepareSearch
 }: {
   draftFor: DraftFor
   titleKey: string
   pageTitle?: string
+  prepareSearch?: DraftSearch
 }) {
   const [opened, setOpened] = useState<ChatId | null>(null)
   // The name given, once read: a fresh chat opened after a sweep gets it too.
@@ -274,7 +285,12 @@ export function TitledDraftChatPage({
   return (
     <>
       <FinishMeantTitle chatId={opened} titleKey={titleKey} onNamed={onNamed} />
-      <DraftChatPage draftFor={draftFor} onOpened={onOpened} {...(pageTitle === undefined ? {} : { pageTitle })} />
+      <DraftChatPage
+        draftFor={draftFor}
+        onOpened={onOpened}
+        prepareSearch={prepareSearch}
+        {...(pageTitle === undefined ? {} : { pageTitle })}
+      />
     </>
   )
 }

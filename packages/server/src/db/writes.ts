@@ -20,7 +20,7 @@ import { remoteOf } from "@dreamspan/shared/cardSources.ts"
 import { composerKey, Draft, DraftHistoryPolicy, DraftKey, parseDraftTarget } from "@dreamspan/shared/drafts.ts"
 import { heldRemoteCards } from "./cardOrigins.ts"
 import { legacyPendingDraft } from "./migrationPendingChats.ts"
-import { droppedReplyLabel, legacyWorkshopDraft, legacyWorkshopLabel, sweptComposerLibrary } from "./pendingChats.ts"
+import { droppedReplyLabel, legacyWorkshopDraft, legacyWorkshopLabel } from "./pendingChats.ts"
 import type { Bin } from "./bin.ts"
 import { EDIT_THINKING_FIELD, NotAmendable } from "@dreamspan/shared/chatApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
@@ -460,14 +460,10 @@ export const makeWriteHandlers = (bin: Bin) =>
             ...(path !== undefined ? { path } : {})
           })
           .pipe(transaction("SetComposerImage")),
-      SetComposerLibrary: ({ userId, chatId, draftId, add, remove, carriedFrom }) =>
-        Effect.gen(function* () {
-          // Carried from a swept new chat: only what its composer still held then, so an item
-          // removed there (in another tab, say) never comes back to be sent (rev-dd5 #2).
-          const held = carriedFrom === undefined ? null : yield* sweptComposerLibrary(sql, userId, carriedFrom)
-          const adding = held === null ? add : add.filter((refId) => held.includes(refId))
-          return yield* composerLibrary(sql).set(userId, chatId, draftId, adding, remove)
-        }).pipe(transaction("SetComposerLibrary")),
+      SetComposerLibrary: ({ userId, chatId, draftId, add, remove, carriedFrom, handover }) =>
+        composerLibrary(sql)
+          .set(userId, chatId, draftId, add, remove, carriedFrom, handover)
+          .pipe(transaction("SetComposerLibrary")),
       SetComposerChoice: ({
         userId,
         chatId,

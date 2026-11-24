@@ -110,6 +110,11 @@ export const ComposerLibraryItem = Schema.Struct({
   name: Schema.String
 })
 export type ComposerLibraryItem = typeof ComposerLibraryItem.Type
+const ComposerLibraryHandover = Schema.Struct({
+  originChatId: ChatId,
+  operationId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))
+})
+export type ComposerLibraryHandover = typeof ComposerLibraryHandover.Type
 export const SetComposerLibraryFields = {
   ...ComposerImageKey,
   /** Attached after those there, by id (the server knows each one's kind); one already there stays where it is. */
@@ -119,7 +124,9 @@ export const SetComposerLibraryFields = {
    * A new chat swept (`chatId` opened in its place) whose handed-over items `add` carries on:
    * only those its composer still held when it was swept are attached (rev-dd5 #2).
    */
-  carriedFrom: Schema.optionalKey(Schema.String)
+  carriedFrom: Schema.optionalKey(Schema.String),
+  /** A pending workshop URL's attachment operation, unchanged across retries and replacements. */
+  handover: Schema.optionalKey(ComposerLibraryHandover)
 }
 
 export class ComposerApi extends RpcGroup.make(

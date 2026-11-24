@@ -108,11 +108,11 @@ test("expanded pages refresh originals outside the main window without losing ea
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chat.id}`)
   const summary = page.locator(`[data-timeline-summary="${chat.summary.id}"]`)
+  const list = page.getByTestId("messages")
   // The selected layer arrives after the message window and can replace its rows.
   await expect(async () => {
-    await page.getByTestId("messages").evaluate((node) => {
-      node.scrollTop = 0
-    })
+    await list.hover()
+    await page.mouse.wheel(0, -100_000)
     await expect(summary).toBeVisible({ timeout: 1000 })
   }).toPass({ timeout: 10_000 })
   await summary.getByRole("button", { name: /^Expand messages/ }).click()

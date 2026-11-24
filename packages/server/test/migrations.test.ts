@@ -3,8 +3,11 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { Cause, Context, Effect, Exit, Layer, Logger } from "effect"
 import { SqlClient } from "effect/sql"
+import { composerLibrary } from "../src/db/composerLibrary.ts"
 import { writerConnection } from "../src/db/connection.ts"
 import { DatabaseStartup, migrate, migrationDefinitions, Migrations, migrations } from "../src/db/migrations.ts"
 import { FORK_SUMMARY_FORMAT, summaryValidSql } from "../src/db/summaryValidity.ts"
@@ -181,7 +184,10 @@ describe("0002_files", () => {
           "workshop_import_media_quota",
           "change_reversals",
           "bin_reply_edits",
-          "library_classes"
+          "library_classes",
+          "composer_library_carries",
+          "composer_library_handovers",
+          "composer_library_carry_cutover"
         ]
       )
       // The existing row is kept, an image by default.
@@ -537,7 +543,10 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0024_workshop_import_media_quota",
       "0025_change_reversals",
       "0026_bin_reply_edits",
-      "0027_library_classes"
+      "0027_library_classes",
+      "0028_composer_library_carries",
+      "0029_composer_library_handovers",
+      "0030_composer_library_carry_cutover"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -1000,3 +1009,44 @@ describe("0027_library_classes", () => {
     }).pipe(Effect.provide(layer()))
   )
 })
+
+it.effect("a carry applied and removed at schema 0027 stays removed on a later retry (rev-dd8 #2)", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const beforeUpgrade = Date.now() - 60_000
+    const userId = "u" as UserId
+    yield* migrate(upTo(27))
+    yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES (${userId}, 'u', 'Owner', 'user', 0)`
+    yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at)
+      VALUES ('replacement', ${userId}, 'workshop', 'pending', ${beforeUpgrade})`
+    yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, content, created_at, updated_at)
+      VALUES ('draft', ${userId}, 'composer', 'replacement', '', ${beforeUpgrade}, ${beforeUpgrade})`
+    yield* sql`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('book', ${userId}, 'lorebook', 0)`
+    yield* sql`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
+      VALUES ('rev', 'book', '{}', 'h', 1, 'user', 0)`
+    yield* sql`INSERT INTO entity_refs (id, entity_id, head_revision_id, label, created_at, updated_at)
+      VALUES ('ref', 'book', 'rev', 'Synthetic book', 0, 0)`
+    yield* sql`INSERT INTO swept_pending_chats (chat_id, user_id, label, swept_at)
+      VALUES ('swept-library:original', ${userId}, '["ref"]', ${beforeUpgrade})`
+    // Schema 0027 stored the carried attachment itself. Removing it left only the source's snapshot.
+    yield* sql`INSERT INTO composer_library (draft_id, ref_id, kind, position) VALUES ('draft', 'ref', 'lorebook', 1)`
+    yield* sql`DELETE FROM composer_library WHERE draft_id = 'draft' AND ref_id = 'ref'`
+    yield* migrate(upTo(29))
+    yield* migrate(migrationDefinitions)
+
+    const library = composerLibrary(sql)
+    assert.deepStrictEqual(yield* library.set(userId, "replacement", "draft", ["ref"], [], "original"), [])
+    assert.deepStrictEqual(yield* library.read(userId, "replacement", "draft"), [])
+    const item = { kind: "lorebook", refId: "ref" as RefId, name: "Synthetic book" } as const
+    assert.deepStrictEqual(yield* library.set(userId, "replacement", "draft", ["ref"], []), [item])
+    yield* library.set(userId, "replacement", "draft", [], ["ref"])
+
+    const afterUpgrade = Date.now()
+    yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, field, content, created_at, updated_at)
+      VALUES ('new-draft', ${userId}, 'composer', 'replacement', 'another-fork', '', ${afterUpgrade}, ${afterUpgrade})`
+    yield* sql`INSERT INTO swept_pending_chats (chat_id, user_id, label, swept_at)
+      VALUES ('swept-library:recent', ${userId}, '["ref"]', ${afterUpgrade})`
+    assert.deepStrictEqual(yield* library.set(userId, "replacement", "new-draft", ["ref"], [], "original"), [item])
+    assert.deepStrictEqual(yield* library.set(userId, "replacement", "draft", ["ref"], [], "recent"), [item])
+  }).pipe(Effect.provide(layer()))
+)

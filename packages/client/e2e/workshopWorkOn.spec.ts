@@ -501,4 +501,155 @@ test.describe("work on in a workshop", () => {
       page.getByLabel("Attachments", { exact: true }).locator("[data-library-tile] span.truncate")
     ).toHaveText("Gull Keeper")
   })
+
+  test("an unacknowledged URL handover cannot send an item removed before the sweep (rev-dd7 #1)", async ({
+    page,
+    context
+  }) => {
+    test.setTimeout(120_000)
+    await setUp(page, 1340, "dark")
+    const book = await admin((api) => api.CreateLorebook({ label: "Breakwater register" }))
+    const kept = await admin((api) => api.CreateLorebook({ label: "Breakwater plans" }))
+    let offline = false
+    let lostAck = false
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      if (offline) return void socket.close()
+      const upstream = socket.connectToServer()
+      let handoverId: string | undefined
+      socket.onMessage((data) => {
+        const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string }) : null
+        if (!lostAck && request?.tag === "SetComposerLibrary") handoverId = request.id
+        upstream.send(data)
+      })
+      upstream.onMessage((data) => {
+        const response = typeof data === "string" ? (JSON.parse(data) as { _tag?: string; requestId?: string }) : null
+        if (handoverId !== undefined && response?._tag === "Exit" && response.requestId === handoverId) {
+          lostAck = true
+          offline = true
+          void socket.close()
+          return
+        }
+        socket.send(data)
+      })
+    })
+    await page.goto(`${server().url}/new/workshop?workshopAttach=${book.id},${kept.id}`)
+    await expect.poll(() => lostAck).toBe(true)
+    await expect(page).toHaveURL(/workshopAttach=/)
+    const first = new URL(page.url()).searchParams.get("draft")!
+
+    const other = await context.newPage()
+    await other.goto(`${server().url}/new/workshop?draft=${first}`)
+    const there = other.getByLabel("Attachments", { exact: true }).locator("[data-library-tile]")
+    await expect(there).toHaveCount(2)
+    await other.getByRole("button", { name: "Remove Breakwater register" }).focus()
+    await other.keyboard.press("Enter")
+    await expect(there).toHaveCount(1)
+    await other.close()
+    await admin((api) => api.LeaveDraftChat({ chatId: first as never }))
+    await expect
+      .poll(
+        () =>
+          admin((api) =>
+            Effect.match(api.GetChat({ chatId: first as never }), {
+              onFailure: () => "gone",
+              onSuccess: () => "there"
+            })
+          ),
+        { timeout: 20_000 }
+      )
+      .toBe("gone")
+
+    offline = false
+    await expect.poll(() => new URL(page.url()).searchParams.get("draft"), { timeout: 30_000 }).not.toBe(first)
+    const task = "Review the breakwater."
+    await page.getByLabel("Message", { exact: true }).fill(task)
+    await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+    const request = () =>
+      provider.bodies
+        .find((body) => body.messages.some((message) => String(message.content).includes(task)))
+        ?.messages.map((message) => message.content)
+    await expect.poll(() => request(), { timeout: 30_000 }).toBeDefined()
+    expect(JSON.stringify(request())).toContain(kept.label)
+    expect(JSON.stringify(request())).not.toContain(book.label)
+    const message = page.getByRole("article").filter({ hasText: task })
+    const sent = message.getByLabel("Attached from your library").locator("[data-library-tile]")
+    await expect(sent).toHaveCount(1)
+    await expect(sent.first()).toHaveAttribute("data-library-tile", kept.id)
+  })
+
+  test("a retained handover respects removal from the URL's replacement (rev-dd8 #1)", async ({ page, context }) => {
+    test.setTimeout(120_000)
+    await setUp(page, 1340, "dark")
+    const book = await admin((api) => api.CreateLorebook({ label: "Jetty register" }))
+    let pendingUrl = ""
+    let releaseAttach: (() => void) | undefined
+    let replay: unknown
+    let offline = false
+    const sockets: Array<{ close: () => Promise<void> }> = []
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      if (offline) return void socket.close()
+      sockets.push(socket)
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        if (typeof data === "string" && data.includes('"SetComposerLibrary"')) {
+          if (pendingUrl === "") {
+            pendingUrl = page.url()
+            releaseAttach = () => upstream.send(data)
+            return
+          }
+          replay = (JSON.parse(data) as { payload?: unknown }).payload
+        }
+        upstream.send(data)
+      })
+      upstream.onMessage((data) => socket.send(data))
+    })
+    await page.goto(`${server().url}/new/workshop?workshopAttach=${book.id}`)
+    await expect.poll(() => pendingUrl).not.toBe("")
+    expect(new URL(pendingUrl).searchParams.get("workshopAttach")).toContain(":")
+    const first = new URL(pendingUrl).searchParams.get("draft")!
+    releaseAttach!()
+    await expect(page).not.toHaveURL(/workshopAttach=/)
+
+    offline = true
+    for (const socket of sockets.splice(0)) await socket.close()
+    await admin((api) => api.LeaveDraftChat({ chatId: first as never }))
+    await expect
+      .poll(
+        () =>
+          admin((api) =>
+            Effect.match(api.GetChat({ chatId: first as never }), {
+              onFailure: () => "gone",
+              onSuccess: () => "there"
+            })
+          ),
+        { timeout: 20_000 }
+      )
+      .toBe("gone")
+
+    const other = await context.newPage()
+    await other.goto(pendingUrl)
+    await expect(other).not.toHaveURL(/workshopAttach=/)
+    const second = new URL(other.url()).searchParams.get("draft")
+    expect(second).toBeTruthy()
+    expect(second).not.toBe(first)
+    const there = other.getByLabel("Attachments", { exact: true }).locator("[data-library-tile]")
+    await expect(there).toHaveCount(1)
+    await other.getByRole("button", { name: "Remove Jetty register" }).focus()
+    await other.keyboard.press("Enter")
+    await expect(there).toHaveCount(0)
+
+    offline = false
+    await expect.poll(() => new URL(page.url()).searchParams.get("draft"), { timeout: 30_000 }).not.toBe(first)
+    expect(new URL(page.url()).searchParams.get("draft")).not.toBe(second)
+    const task = "Review the jetty."
+    await page.getByLabel("Message", { exact: true }).fill(task)
+    await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+    const request = () => provider.bodies.find((body) => body.messages.some((m) => String(m.content).includes(task)))
+    await expect.poll(() => request(), { timeout: 30_000 }).toBeDefined()
+    expect(JSON.stringify(request()?.messages)).not.toContain(book.label)
+    await expect(page.getByRole("article").filter({ hasText: task })).toBeVisible()
+    await expect(page.getByLabel("Attached from your library")).toHaveCount(0)
+    const [originChatId, operationId] = new URL(pendingUrl).searchParams.get("workshopAttach")!.split(":")
+    expect(replay).toMatchObject({ carriedFrom: first, handover: { originChatId, operationId } })
+  })
 })

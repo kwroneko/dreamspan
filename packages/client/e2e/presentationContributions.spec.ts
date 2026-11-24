@@ -161,10 +161,11 @@ test("remaining presentation seams update mounted hosts and restore scoped defau
   // The originals mount after "hide" returns, and the list keeps its place as they grow above it,
   // so scroll to the top again until the first is in view.
   await expect(async () => {
-    await list.evaluate((list) => list.scrollTo({ top: 0 }))
+    await list.hover()
+    await page.mouse.wheel(0, -100_000)
     await expect(page.getByText("Original 1", { exact: true })).toBeVisible({ timeout: 1_000 })
   }).toPass()
-  await list.evaluate((list) => list.scrollTo({ top: list.scrollHeight }))
+  await page.mouse.wheel(0, 100_000)
   await expect(article).toBeVisible()
   await expect(page.getByRole("group", { name: "Swipes", exact: true })).toHaveCount(0)
   await expect(page.getByTestId("lcm-boundary")).toHaveCount(0)

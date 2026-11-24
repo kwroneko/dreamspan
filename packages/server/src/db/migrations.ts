@@ -300,6 +300,44 @@ export const migrationDefinitions = {
         WHERE g.capability = 'library.read'`,
       "DELETE FROM workshop_grants WHERE capability = 'library.read'"
     ]
+  },
+  "0028_composer_library_carries": {
+    statements: [
+      `CREATE TABLE composer_library_carries (
+        draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
+        source_chat_id TEXT NOT NULL,
+        ref_id TEXT NOT NULL,
+        PRIMARY KEY (draft_id, source_chat_id, ref_id)
+      ) STRICT, WITHOUT ROWID`
+    ]
+  },
+  "0029_composer_library_handovers": {
+    statements: [
+      `CREATE TABLE composer_library_handovers (
+        origin_chat_id TEXT NOT NULL,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        operation_id TEXT NOT NULL,
+        ref_id TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        PRIMARY KEY (origin_chat_id, user_id, operation_id, ref_id)
+      ) STRICT, WITHOUT ROWID`,
+      "CREATE INDEX composer_library_handovers_chat ON composer_library_handovers(chat_id, ref_id)"
+    ]
+  },
+  "0030_composer_library_carry_cutover": {
+    statements: [
+      `CREATE TABLE composer_library_carry_cutover (before_ms INTEGER PRIMARY KEY) STRICT`,
+      // 0028's ledger time has second precision. Include its final partial second, bounded
+      // by this migration's actual time when both run in the same second. Only databases with
+      // pre-cutover sweep receipts need the bound.
+      `INSERT INTO composer_library_carry_cutover (before_ms)
+        SELECT before_ms FROM (
+          SELECT min((unixepoch(created_at) + 1) * 1000, CAST(unixepoch('subsec') * 1000 AS INTEGER)) AS before_ms
+          FROM effect_sql_migrations WHERE migration_id = 28
+        ) WHERE EXISTS (
+          SELECT 1 FROM swept_pending_chats WHERE chat_id GLOB 'swept-library:*' AND swept_at < before_ms
+        )`
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

@@ -10,11 +10,14 @@
 // menu neither rides along with its row nor closes as the row leaves the view.
 import { type RefObject, useEffect, useRef } from "react"
 
-/** Dispatched, bubbling, on a menu's trigger as the menu opens (`detail` true) and closes (false). */
+/** Dispatched on a menu's trigger when it opens so ancestors can listen for its close. */
 export const ANCHORED_POPUP = "rp-anchored-popup"
 
-const announce = (anchor: HTMLElement, open: boolean) =>
-  anchor.dispatchEvent(new CustomEvent<boolean>(ANCHORED_POPUP, { bubbles: true, detail: open }))
+export class AnchoredPopupEvent extends CustomEvent<(listener: () => void) => void> {
+  constructor(onClose: (listener: () => void) => void) {
+    super(ANCHORED_POPUP, { bubbles: true, detail: onClose })
+  }
+}
 
 /** How much of `row` lies outside the part of `scroller` its content shows in, in pixels. */
 const clipped = (row: DOMRect, scroller: Element) => {
@@ -36,7 +39,8 @@ export function useCloseOnAnchorScroll(open: boolean, trigger: RefObject<HTMLEle
   useEffect(() => {
     const anchor = trigger.current
     if (!open || anchor === null) return
-    announce(anchor, true)
+    const closeListeners: Array<() => void> = []
+    anchor.dispatchEvent(new AnchoredPopupEvent((listener) => closeListeners.push(listener)))
     // The least clipping seen in each scroller since the menu opened.
     const hidden = new Map<Element, number>()
     const row = anchor.getBoundingClientRect()
@@ -57,7 +61,8 @@ export function useCloseOnAnchorScroll(open: boolean, trigger: RefObject<HTMLEle
     document.addEventListener("scroll", onScroll, { capture: true, passive: true })
     return () => {
       document.removeEventListener("scroll", onScroll, { capture: true })
-      announce(anchor, false)
+      // The trigger may already be detached when a row disappears.
+      for (const listener of closeListeners) listener()
     }
   }, [open, trigger])
 }
