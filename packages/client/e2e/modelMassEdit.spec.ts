@@ -3,7 +3,6 @@
 // models, in one change, with Undo. Copy settings from a model fills and ticks what that model
 // sets. At 1440 and 390 px in both themes, with the layout audit. The provider is a fake one
 // listing 300 synthetic models.
-import { mkdirSync } from "node:fs"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -13,7 +12,6 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
-const SHOTS = "/tmp/dreamspan-shots/modelmassedit"
 
 const FAMILIES = [
   ["gemini", "Synth Gemini"],
@@ -30,7 +28,6 @@ const MODELS = FAMILIES.flatMap(([id, name]) =>
 
 test.beforeAll(async () => {
   provider = await startProvider({ models: MODELS })
-  mkdirSync(SHOTS, { recursive: true })
 })
 test.afterAll(async () => {
   await provider.stop()
@@ -302,7 +299,7 @@ for (const [width, height] of [
         expect(box.x + box.width).toBeLessThanOrEqual(width)
       }
       await expectLayout(page, info, `model-mass-bar-${width}-${theme}`, { scope: "main" })
-      await page.screenshot({ path: `${SHOTS}/table-${width}-${theme}.png` })
+      await page.screenshot({ path: info.outputPath(`table-${width}-${theme}.png`) })
       await page.getByRole("button", { name: "Edit 100…", exact: true }).click()
       const dialog = page.getByRole("dialog", { name: "Edit 100 models", exact: true })
       await dialog.getByRole("textbox", { name: "Temperature", exact: true }).fill("0.7")
@@ -329,9 +326,9 @@ for (const [width, height] of [
         expect(Math.abs(heading.y - left.y)).toBeLessThanOrEqual(4)
       }
       await expectLayout(page, info, `model-mass-edit-${width}-${theme}`, { scope: "[role=dialog]" })
-      await page.screenshot({ path: `${SHOTS}/dialog-${width}-${theme}.png` })
+      await page.screenshot({ path: info.outputPath(`dialog-${width}-${theme}.png`) })
       await dialog.getByText("Advanced", { exact: true }).click()
       await expectLayout(page, info, `model-mass-edit-advanced-${width}-${theme}`, { scope: "[role=dialog]" })
       await dialog.locator('[data-mass-field="cacheRetention"]').scrollIntoViewIfNeeded()
-      await page.screenshot({ path: `${SHOTS}/dialog-advanced-${width}-${theme}.png` })
+      await page.screenshot({ path: info.outputPath(`dialog-advanced-${width}-${theme}.png`) })
     })
