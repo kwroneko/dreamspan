@@ -580,6 +580,44 @@ describe("merging another chat", () => {
     )
   )
 
+  it.live("excludes a source summary spanning a nested join", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* setup(dataDir)
+        const home = yield* t.chat("Harbor", [t.mira])
+        const away = yield* t.chat("Docks", [t.kai])
+        const nested = yield* t.chat("Workshop", [t.kai])
+        yield* t.many(home, t.mira, ["Home message."])
+        yield* t.many(away, t.kai, ["Early source message."])
+        yield* t.many(nested, t.kai, ["The nested transcript."])
+        yield* t.merge({ ...away, at: null, source: nested })
+        yield* t.many(away, t.kai, ["x".repeat(8_000), "y".repeat(8_000)])
+        const path = yield* t.reader.GetPath({ userId: t.userId, ...away, leafSlotId: null, limit: 10 })
+        const inputs = path.entries
+          .slice(0, 2)
+          .map((e) => ({ slotId: e.slotId, versionId: e.version.id, amendCount: 0 }))
+        yield* completeFixture(
+          dataDir,
+          t.writer,
+          t.userId,
+          away.chatId,
+          inputs,
+          [],
+          "Summary of the nested transcript."
+        )
+        const request = { ...home, at: null, source: away }
+        const seen = yield* t.preview(request)
+        assert.include(seen.section, "1 chat merged into “Docks” not included.")
+        assert.strictEqual(seen.summaries, 0)
+        assert.isAtLeast(seen.leftOut, 1)
+        assert.notInclude(seen.section, "nested transcript")
+        const included = yield* t.preview({ ...request, includeLeftOut: true })
+        assert.include(included.section, "Early source message.")
+        assert.notInclude(included.section, "nested transcript")
+      })
+    )
+  )
+
   for (const summarizedMessages of [2, 3])
     it.live(`uses the requested source fork summary over ${summarizedMessages} messages`, () =>
       run((dataDir) =>

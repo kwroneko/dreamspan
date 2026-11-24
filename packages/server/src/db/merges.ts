@@ -381,7 +381,8 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
 
     // The post-base part, newest first into the budget; the rest from the source's summaries.
     const read = yield* readStretch(sql, source, sourcePieces, first, sourceLength - 1)
-    const nested = read.filter((row) => row.first_origin === "merge" && usable(row)).length
+    const nestedJoins = read.filter((row) => row.first_origin === "merge")
+    const nested = nestedJoins.filter(usable).length
     const messages = read.filter((row) => usable(row) && row.first_origin !== "merge")
     const sourceCast = yield* castAt(sql, source.chat_id, sourceEnd, source.id)
     // Freeze what this source branch knew, including its played-stretch corrections.
@@ -426,7 +427,13 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
     const summaries = (layer?.summaries ?? [])
       // Summary ranges are one-based; all merge positions are zero-based.
       .map((s) => ({ ...s, from: s.from - 1, to: s.to - 1 }))
-      .filter((s) => s.from > basePos && s.to < verbatimPos && s.content.trim() !== "")
+      .filter(
+        (s) =>
+          s.from > basePos &&
+          s.to < verbatimPos &&
+          s.content.trim() !== "" &&
+          !nestedJoins.some((join) => s.from <= join.position && join.position <= s.to)
+      )
       .toSorted((a, b) => a.from - b.from)
     const covered = (position: number) => summaries.some((s) => s.from <= position && position <= s.to)
     const rows: Array<MergedRow> = []
@@ -448,15 +455,14 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
           speaker: null,
           // A frozen summary must retain who knew all its inputs, even after its source is gone.
           // Stale inputs cannot be verified against the current source path.
-          knowers:
-            s.fresh && !read.some((m) => m.first_origin === "merge" && s.from <= m.position && m.position <= s.to)
-              ? messages
-                  .filter((m) => s.from <= m.position && m.position <= s.to)
-                  .reduce<ReadonlyArray<string> | null>((all, m) => {
-                    const known = knownBy(m)
-                    return known === null ? all : all === null ? known : all.filter((id) => known.includes(id))
-                  }, null)
-              : [],
+          knowers: s.fresh
+            ? messages
+                .filter((m) => s.from <= m.position && m.position <= s.to)
+                .reduce<ReadonlyArray<string> | null>((all, m) => {
+                  const known = knownBy(m)
+                  return known === null ? all : all === null ? known : all.filter((id) => known.includes(id))
+                }, null)
+            : [],
           name,
           side: "assistant",
           content: s.content.trim(),
