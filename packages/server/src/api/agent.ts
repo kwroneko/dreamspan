@@ -97,6 +97,13 @@ const agentVersionResumer = Effect.gen(function* () {
   const generator = yield* Generator
   const providerRegistry = yield* Effect.serviceOption(ProviderRegistry)
   const execution = yield* ExecutionRegistry
+  const requiresSignedToolThinking = (model: ModelInput | null) =>
+    !!model &&
+    Option.isSome(providerRegistry) &&
+    providerRegistry.value.thinkingBindings
+      .list()
+      .find((b) => b.appliesTo({ kind: model.kind, api: model.api, model: model.key }))
+      ?.deferHiddenThinking?.(model.key) === true
   /**
    * The tools the chat offers now (spec/AGENTIC.md §12.4), or undefined when that's what the run
    * froze. Only a change of the chat's settings since the run counts: the planner sees the state
@@ -154,7 +161,8 @@ const agentVersionResumer = Effect.gen(function* () {
       material: { readonly status: string; readonly transcript: string | null },
       frozen: Frozen,
       /** The model the run goes on with: the chat's now (spec/AGENTIC.md §12.3). */
-      model: ModelInput
+      model: ModelInput,
+      requiresSignedToolThinking: boolean
     ) => ResumePlan | StepNotResumable,
     reason: "resume" | "edit",
     options?: {
@@ -202,7 +210,7 @@ const agentVersionResumer = Effect.gen(function* () {
         // The stored request as it was, with its model and tools: only on the user's word.
         const model = frozen.inputs.model
         if (!model) return yield* refuse("Its saved request names no model.")
-        planned = plan(material, frozen as Frozen, model)
+        planned = plan(material, frozen as Frozen, model, requiresSignedToolThinking(model))
       } else {
         // The chat's settings as they are now decide the model and the tools: the model "Retry
         // with…" names, or the one the composer shows under this reply, which takes a choice
@@ -243,7 +251,6 @@ const agentVersionResumer = Effect.gen(function* () {
               ? "The chosen model is unavailable."
               : "No model is chosen for this chat. Choose one, then resume."
           )
-        planned = plan(material, frozen as Frozen, model)
         // The same model (connection and model, the connection unedited) sends the frozen request
         // byte for byte, so the provider's cache still holds, the model's settings edited since
         // included: its samplers and its provider route, which the run's tool loading froze with
@@ -252,6 +259,13 @@ const agentVersionResumer = Effect.gen(function* () {
           frozen.inputs.model?.connectionId !== model.connectionId ||
           frozen.inputs.model?.modelId !== model.modelId ||
           frozen.inputs.model?.connectionRevision !== model.connectionRevision
+        planned = plan(
+          material,
+          frozen as Frozen,
+          model,
+          requiresSignedToolThinking(modelChanged ? model : frozen.inputs.model)
+        )
+        if (planned instanceof StepNotResumable) return yield* refuse(planned.message)
         checkBudget = modelChanged
         let rebuilt: ContextSnapshot = modelChanged
           ? forModel(frozen, {
@@ -305,18 +319,12 @@ const agentVersionResumer = Effect.gen(function* () {
       // Reasoning the user hid on this reply isn't sent again by the run that carries it on.
       if ((yield* reader.GetThinkingHidden({ userId, versionId, forkId })).includes("reasoning")) {
         const model = (JSON.parse(snapshot) as ContextSnapshot).inputs.model
-        const binding =
-          model && Option.isSome(providerRegistry)
-            ? providerRegistry.value.thinkingBindings
-                .list()
-                .find((b) => b.appliesTo({ kind: model.kind, api: model.api, model: model.key }))
-            : undefined
         planned = {
           ...planned,
           transcript: withoutThinking(
             planned.transcript,
             (frozen as Frozen).continuity?.historical ?? 0,
-            !!model && !!binding?.deferHiddenThinking?.(model.key)
+            requiresSignedToolThinking(model)
           )
         }
       }
@@ -446,7 +454,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
         versionId,
         forkId ?? null,
         expectedRowVersion,
-        (material, frozen) =>
+        (material, frozen, _model, needsSignedToolThinking) =>
           planStepResume(
             material.transcript,
             frozen.agent?.tools ?? [],
@@ -454,7 +462,8 @@ export const makeAgentHandlers = Effect.gen(function* () {
             edit as StepEdit | undefined,
             uuidv7(),
             versionId,
-            frozen.continuity?.historical ?? 0
+            frozen.continuity?.historical ?? 0,
+            needsSignedToolThinking
           ),
         "edit"
       ).pipe(internal("ResumeFromStep")),

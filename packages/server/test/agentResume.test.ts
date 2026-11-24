@@ -5,7 +5,7 @@
 // come with it, and those of a cut tail don't.
 import { assert, describe, it } from "@effect/vitest"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import { Type } from "@earendil-works/pi-ai"
+import { Type, type ToolCall } from "@earendil-works/pi-ai"
 import type { VersionId } from "@dreamspan/shared/chat.ts"
 import { foldState } from "@dreamspan/shared/state.ts"
 import { Deferred, Effect } from "effect"
@@ -43,7 +43,7 @@ const turn = (content: Array<unknown>, stopReason = "toolUse"): AgentMessage =>
     stopReason,
     timestamp: 0
   }) as AgentMessage
-const call = (id: string, args: unknown = { topic: "lighthouse" }) => ({
+const call = (id: string, args: ToolCall["arguments"] = { topic: "lighthouse" }): ToolCall => ({
   type: "toolCall",
   id,
   name: "look_up",
@@ -128,6 +128,23 @@ describe("resume policies", () => {
     assert.deepInclude((plan.transcript[1] as { content: Array<unknown> }).content[0], { text: "Looking." })
     assert.strictEqual(plan.policy, "continue")
     assert.strictEqual(plan.cut.length, 4)
+  })
+
+  it("turns changed signed thinking into unsigned transcript text", () => {
+    const thinking = { type: "thinking", thinking: "Original", thinkingSignature: "original-signature" }
+    const signed = json([kickoff, turn([thinking, call("c1")]), result("c1")])
+    const edited = planStepResume(signed, tools, 0, { kind: "text", text: "Revised" }, "new")
+    if (edited instanceof StepNotResumable) return assert.fail(edited.message)
+    const assistant = edited.transcript[1]
+    assert.strictEqual(assistant?.role, "assistant")
+    if (assistant?.role !== "assistant") return
+    assert.deepEqual(assistant.content, [{ type: "text", text: "Edited thinking:\nRevised" }, call("c1")])
+    assert.deepEqual(edited.keptCalls, ["c1"])
+    const unchanged = planStepResume(signed, tools, 0, { kind: "text", text: "Original" }, "new")
+    if (unchanged instanceof StepNotResumable) return assert.fail(unchanged.message)
+    assert.deepEqual(unchanged.transcript[1], turn([thinking, call("c1")]))
+    const refused = planStepResume(signed, tools, 0, { kind: "text", text: "Revised" }, "new", undefined, 0, true)
+    assert.instanceOf(refused, StepNotResumable)
   })
 
   it("editing a call's arguments runs it again under a new id, without the calls after it", () => {
