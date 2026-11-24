@@ -166,6 +166,11 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
         versionId: last.version.id
       })
       assert.strictEqual(atA?.leafSlotId, h.s3.slotId)
+      // The copied messages also come along when branching again from the new story's end.
+      const next = yield* h.branchStory(h.s1.slotId, undefined, now.fork)
+      assert.lengthOf(next.preview.workshops, 0)
+      const [onNext] = yield* h.pairedIn(h.workshop, next.fork)
+      assert.deepStrictEqual(yield* h.texts(h.workshop.id, onNext!), yield* h.texts(h.workshop.id, onNow!))
       // At the story's end nothing is left out: no row.
       const atEnd = yield* h.reader.PreviewForkNotes({
         userId: h.userId,
