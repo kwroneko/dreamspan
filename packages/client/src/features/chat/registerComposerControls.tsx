@@ -221,7 +221,8 @@ export const registerComposerControls = () => [
   }),
   composerControls.register({
     id: "composer.cache",
-    order: 90,
+    // Last, after the workshop's folder, so it can appear without moving earlier chips.
+    order: 130,
     placement: "strip",
     component: ({ session, view }) => <CacheChip session={session} view={view} />
   }),

@@ -150,8 +150,7 @@ export const register = () => [
       view.cast.agentTools != null,
     component: ({ session }) => <StorySubagentModelsChip session={session} />
   }),
-  // What the reply may do: the first of a workshop's own chips, after the ones every chat has
-  // (model, preset, the request's size and cache), so those stand where they do in a story.
+  // What the reply may do: after the request's size and before the workshop's working folder.
   composerControls.register({
     id: CAPABILITY_CHIP,
     order: 100,
