@@ -3,6 +3,7 @@
 // text never closing its element. Synthetic documents only.
 import { describe, expect, it } from "vitest"
 import { attachedElement, inlineLimit, summaryLines } from "../src/agent/libraryView.ts"
+import { prepareTokenizer } from "../src/importer/tokenizer.ts"
 
 const count = (text: string) => Math.ceil(text.length / 4)
 const card = (description: string) => ({
@@ -64,6 +65,20 @@ describe("libraryView", () => {
   it("lists the group-only greetings in a large card reference", () => {
     const doc = { ...card(""), group_only_greetings: ["Hello everyone. ".repeat(3_000)] }
     expect(attachedElement(item(doc), count, 8_000)).toContain("group_only_greetings: 1 (12,000 tokens)")
+  })
+
+  it("keeps a giant index row and label within the attachment budget", async () => {
+    const book = { entries: [{ uid: 3, comment: "Harbor", keys: Array(2_500).fill("ship at dock") }] }
+    const countTokens = await prepareTokenizer("o200k_base")
+    const limit = inlineLimit(8_192)
+    const element = attachedElement(
+      { ...item(book, "lorebook"), name: "Long label ".repeat(3_000) },
+      countTokens,
+      limit
+    )
+    expect(countTokens(element)).toBeLessThanOrEqual(limit)
+    expect(element).toContain('id="ref-1" revision="rev-1"')
+    expect(element).toContain("More details are available")
   })
 
   it("summarizes lorebook entries and preset prompts in order", () => {
