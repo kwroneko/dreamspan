@@ -210,7 +210,14 @@ export const reconcileForm = (
     }
     if (empty(right) && !cleared) {
       if (typeof left === "string" && left !== "") return left
-      if (object(left) && !clears.some((clear) => prefix(path, clear.path))) return left
+      // A group gone from the incoming form keeps only what it would keep as an empty group:
+      // its text (and lists) no clear proved removed. A number or a choice in it goes, as it
+      // would on its own: a form that drops an emptied group (a slider back at its default
+      // leaving `samplers` empty) must not get the old value back.
+      if (object(left) && !clears.some((clear) => prefix(path, clear.path))) {
+        const kept = merge(left, {}, path)
+        return object(kept) && Object.keys(kept).length === 0 ? right : kept
+      }
     }
     return right
   }

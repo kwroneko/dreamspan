@@ -124,3 +124,16 @@ it("a new whole-field clear replaces old form values, while its later continuati
     note: "Typed after clearing"
   })
 })
+
+it("a group the form dropped loses its numbers, and keeps text no clear removed", () => {
+  // A model's settings: a slider back at its default removes the only sampler, and the emptied
+  // `samplers` group with it. The draft must not get the old number back.
+  const typed = JSON.stringify({ settings: { samplers: { openai_max_context: 1100 } } })
+  const draft = { id: "draft", rowVersion: 3, content: typed }
+  const back = JSON.stringify({ settings: {} })
+  expect(reconcileForm(draft, { draftId: "draft", expectedRowVersion: 3 }, back, typed).content).toBe(back)
+  // Text in a dropped group that no edit here was seen to clear (an older snapshot) stays.
+  const withText = JSON.stringify({ settings: { samplers: { openai_max_context: 1100 }, note: { text: "Kept" } } })
+  const stale = reconcileForm({ ...draft, content: withText }, { draftId: "draft", expectedRowVersion: 2 }, back)
+  expect(JSON.parse(stale.content)).toEqual({ settings: { note: { text: "Kept" } } })
+})
