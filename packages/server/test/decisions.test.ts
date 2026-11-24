@@ -371,7 +371,14 @@ describe("decision models", () => {
       const { version, chat } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        lorebook: book
+        lorebook: {
+          ...book,
+          entries: [
+            { ...book.entries[0]!, exclude_recursion: true },
+            book.entries[1]!,
+            loreEntry({ constant: true, content: "An unrelated constant starts recursion." }, 2)
+          ]
+        }
       })
       assert.strictEqual(version.status, "complete")
       const decided = mock.requests().filter((r) => r.path === "/decide")

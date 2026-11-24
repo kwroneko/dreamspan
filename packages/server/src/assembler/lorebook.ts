@@ -108,6 +108,8 @@ type SkipReason =
 interface Skipped extends Source {
   readonly step: number
   readonly reason: SkipReason
+  /** A pass that reached matching missed, even if a later pass excluded recursion. */
+  readonly keywordMiss?: true
 }
 
 interface Issue {
@@ -459,8 +461,18 @@ export const matchLorebooks = (
   let overflow = false
   const exhaustedBooks = new Set<string>()
   let step = 0
-  const skip = (source: (typeof sources)[number], reason: SkipReason) =>
-    skipped.set(source, { book: source.book, entry: source.entry, step, reason })
+  const skip = (source: (typeof sources)[number], reason: SkipReason) => {
+    const prior = skipped.get(source)
+    const keywordMiss =
+      reason === "recursion" && (prior?.keywordMiss || prior?.reason === "no_primary" || prior?.reason === "secondary")
+    skipped.set(source, {
+      book: source.book,
+      entry: source.entry,
+      step,
+      reason,
+      ...(keywordMiss ? { keywordMiss } : {})
+    })
+  }
   const activate = () => {
     for (const source of sources) {
       currentSource = source
