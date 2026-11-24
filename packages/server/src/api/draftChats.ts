@@ -86,16 +86,19 @@ export const makeDraftChatHandlers = Effect.gen(function* () {
             : group !== null
               ? group.group.members.map((m) => m.entityId)
               : own !== null
-                ? (own.participants.filter((entity) => !own.playedByMe.includes(entity)) as unknown as ReadonlyArray<EntityId>)
+                ? (own.participants.filter(
+                    (entity) => !own.playedByMe.includes(entity)
+                  ) as unknown as ReadonlyArray<EntityId>)
                 : []
         // Who the user plays, once, as the page started it: the persona locked to a single card,
-        // else the account default, either only while it is still a live persona (DESIGN §2.2).
+        // else the account default outside the chosen cast, while the persona is still live (DESIGN §2.2).
         const defaults = yield* reader.GetGenerationDefaults({ userId: id })
         const lock = kind === "card" ? yield* reader.GetPersonaLock({ userId: id, entityId: of as EntityId }) : null
         const candidates = [lock?.entityId, defaults.persona].filter((p): p is EntityId => typeof p === "string")
         const known = candidates.length === 0 ? [] : yield* reader.CastCards({ userId: id, entityIds: candidates })
         const persona = startingPersona({
           single: kind === "card",
+          characters: cards,
           lock: lock?.entityId ?? null,
           defaultPersona: defaults.persona ?? null,
           live: (entity) => known.some((card) => card.entityId === entity && card.persona && !card.inBin)

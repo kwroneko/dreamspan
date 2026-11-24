@@ -17,6 +17,28 @@ const setup = Effect.gen(function* () {
 })
 
 describe("default persona", () => {
+  it.live("keeps the chosen characters in the starting cast even if one is the default persona", () =>
+    Effect.gen(function* () {
+      const { api, a, b } = yield* setup
+      yield* api.ChangeGenerationDefaults({ change: { persona: a.entityId } })
+      const single = yield* api.OpenDraftChat({ draftFor: `card:${a.entityId}` })
+      const singleCast = yield* api.GetCast({ chatId: single.id, slotId: null })
+      assert.deepStrictEqual(singleCast.participants, [a.entityId])
+      assert.deepStrictEqual(singleCast.playedByMe, [])
+
+      const { chat } = yield* api.StartChat({
+        cards: [a.entityId, b.entityId],
+        persona: null,
+        greeting: null,
+        first: { _tag: "Send", content: "Hello both.", speakerEntityId: null }
+      })
+      const group = yield* api.OpenDraftChat({ draftFor: `group:${chat.id}` })
+      const groupCast = yield* api.GetCast({ chatId: group.id, slotId: null })
+      assert.deepStrictEqual(groupCast.participants, [a.entityId, b.entityId])
+      assert.deepStrictEqual(groupCast.playedByMe, [])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
   it.live("sets, reads and clears one account setting while preserving the other settings and existing chats", () =>
     Effect.gen(function* () {
       const { api, a, b } = yield* setup
