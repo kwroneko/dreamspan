@@ -98,15 +98,25 @@ const toBin = (row: { readonly target_kind: DraftKey["targetKind"]; readonly fie
   )
 
 /**
- * What of a draft's lost states goes to the bin: text as it is; of a value, only a list of
- * text (a lorebook entry's keys), one per line, as typed. Other values (settings) never do.
+ * Recover text as typed. Recover a lorebook entry's primary and secondary keys one per line.
  */
 const binTexts = (
   row: { readonly target_kind: DraftKey["targetKind"]; readonly field: string },
   states: ReadonlyArray<string>
 ): ReadonlyArray<string> => {
   if (toBin(row)) return states
-  if (isHeldField(row.field)) return []
+  const field = parseField(row.field)
+  if (field?.kind !== "value") return []
+  const path = field.path[0] === "character_book" ? field.path.slice(1) : field.path
+  const [entries, entry, key] = path
+  if (
+    path.length !== 3 ||
+    entries !== "entries" ||
+    typeof entry !== "string" ||
+    !/^uid=-?\d+$/.test(entry) ||
+    (key !== "keys" && key !== "secondary_keys")
+  )
+    return []
   return states.flatMap((state) => {
     try {
       const value: unknown = JSON.parse(state)
