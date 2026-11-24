@@ -16,7 +16,7 @@ interface TurnNoteInput {
 }
 
 /** A note listing one-time events, which are acknowledged by a dispatched rollout. */
-export interface TurnEvents {
+interface TurnEvents {
   readonly text: string
   readonly events: ReadonlyArray<string>
 }
