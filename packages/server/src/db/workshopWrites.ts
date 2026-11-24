@@ -300,10 +300,10 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         }
         const { chat } = yield* stepsFor.createWorkshop(input)
         if (swept !== undefined && draftFor !== undefined) {
-          const refs = yield* library.sweptForReplacement(userId, swept)
+          const refs = yield* library.sweptRefs(userId, swept)
           if (refs.length > 0) {
             const draft = yield* openComposer(userId, chat)
-            yield* library.set(userId, chat.id, draft.id, refs, [], swept)
+            for (const { refId } of refs) yield* library.move(userId, swept, chat.id, draft.id, refId)
           }
           // A retry can follow this link even after the replacement itself is swept.
           yield* sql`UPDATE swept_workshops SET replacement_chat_id = ${chat.id}

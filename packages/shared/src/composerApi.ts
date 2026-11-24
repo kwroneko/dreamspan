@@ -218,8 +218,9 @@ export class ComposerLibraryApi extends RpcGroup.make(
     error: Schema.Union([...Errors])
   }),
   /**
-   * Removes, then attaches (a story's composer refuses: NotFound), and gives the list after. At
-   * most 16, as a message carries.
+   * Removes, then attaches (a story's composer refuses: NotFound), and gives the list after.
+   * Adding is capped at 16 visible items, as a message carries. Restored items may reappear
+   * above that limit, and can still be removed.
    */
   Rpc.make("SetComposerLibrary", {
     payload: SetComposerLibraryFields,

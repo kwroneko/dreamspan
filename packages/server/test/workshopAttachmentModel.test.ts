@@ -1,10 +1,13 @@
 import { assert, it } from "@effect/vitest"
-import type { Chat } from "@dreamspan/shared/chat.ts"
+import type { BinItem } from "@dreamspan/shared/bin.ts"
+import type { Chat, EntityId } from "@dreamspan/shared/chat.ts"
 import type { ComposerLibraryHandover } from "@dreamspan/shared/composerApi.ts"
+import type { DraftFor } from "@dreamspan/shared/draftChatApi.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { mulberry32 } from "@dreamspan/shared/naturalOrder.ts"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
+import { reopenSweptDraft } from "../../client/src/features/chat/chatStarted.ts"
 import { Generator } from "../src/chat/Generator.ts"
 import { Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
@@ -14,6 +17,7 @@ import { slowIt } from "./support/slow.ts"
 interface Workshop {
   readonly chatId: Chat["id"]
   readonly draftId: string
+  readonly draftFor: DraftFor
   readonly refs: Set<RefId>
   status: "pending" | "started" | "swept"
   recentSweep: boolean
@@ -51,6 +55,9 @@ const actions = [
   "handover",
   "expiry",
   "reload",
+  "side reconnect",
+  "bin",
+  "restore",
   "drop reopen reply",
   "retry reopen",
   "legacy replay",
@@ -63,9 +70,17 @@ const model = (seed: number, rounds: number) => {
     const api = yield* client()
     const writer = yield* Writer
     const { id: userId } = yield* api.Whoami()
-    const refs: RefId[] = []
-    for (const label of ["Channel markers", "Tide tables", "Harbour notices"])
-      refs.push((yield* api.CreateLorebook({ label })).id)
+    const books = new Map<RefId, EntityId>()
+    const createBook = (label: string) =>
+      Effect.gen(function* () {
+        const book = yield* api.CreateLorebook({ label })
+        books.set(book.id, book.entityId)
+        return book.id
+      })
+    const refs = yield* Effect.forEach(["Channel markers", "Tide tables", "Harbour notices"], createBook)
+    const binned = new Map<RefId, BinItem["id"]>()
+    const story = yield* api.CreateChat({ title: "The lighthouse" })
+    const sideEntry = `side:${story.id}:${story.currentForkId ?? ""}` as const
     const legacyOrigin = uuidv7() as Chat["id"]
     const random = mulberry32(seed)
     const pick = <A>(choices: ReadonlyArray<A>) => choices[Math.floor(random() * choices.length)]!
@@ -76,22 +91,31 @@ const model = (seed: number, rounds: number) => {
     const context = () => `seed ${seed}: ${history.join(", ")}`
     const key = ({ chatId, draftId }: Workshop) => ({ chatId, draftId })
     const checkList = (refs: ReadonlyArray<RefId>, workshop: Workshop) =>
-      assert.deepStrictEqual([...refs].sort(), [...workshop.refs].sort(), context())
+      assert.deepStrictEqual(
+        [...refs].sort(),
+        [...workshop.refs].filter((refId) => !binned.has(refId)).sort(),
+        context()
+      )
 
     // The model moves ownership between workshops. Every copy of a URL follows the item
     // it applied, while a carry names a specific predecessor.
     const move = (source: Workshop, destination: Workshop, refId: RefId) => {
-      if (source.status !== "swept" || !source.refs.delete(refId)) return
+      if (source.status !== "swept" || !source.refs.delete(refId)) return false
       destination.refs.add(refId)
       for (const url of urls) if (url.at === source && url.refId === refId) url.at = destination
+      return true
     }
-    const open = (reopen?: Workshop) =>
+    const open = (
+      reopen?: Workshop,
+      draftFor: DraftFor = reopen?.draftFor ?? "workshop::",
+      requestReopen = reopen?.chatId ?? null
+    ) =>
       Effect.gen(function* () {
         let source = reopen
         while (source?.status === "swept" && source.replacement !== undefined) source = source.replacement
         const chat = yield* api.OpenDraftChat({
-          draftFor: "workshop::",
-          ...(reopen === undefined ? {} : { reopen: reopen.chatId })
+          draftFor,
+          ...(requestReopen === null ? {} : { reopen: requestReopen })
         })
         if (source?.status === "swept") assert.notInclude([...workshops.keys()], chat.id, context())
         else if (source !== undefined) assert.strictEqual(chat.id, source.chatId, context())
@@ -100,6 +124,7 @@ const model = (seed: number, rounds: number) => {
         const workshop = workshops.get(chat.id) ?? {
           chatId: chat.id,
           draftId: draft.id,
+          draftFor,
           refs: new Set<RefId>(),
           status: "pending",
           recentSweep: false,
@@ -115,13 +140,37 @@ const model = (seed: number, rounds: number) => {
         const tab: Tab = { workshop, session: draft.session, shown }
         return tab
       })
+    const reconnect = (workshop: Workshop) =>
+      Effect.gen(function* () {
+        const gone = yield* api.SubscribeChat({ chatId: workshop.chatId }).pipe(Stream.runDrain, Effect.flip)
+        assert.strictEqual(gone._tag, "NotFound", context())
+        return yield* open(workshop, workshop.draftFor, reopenSweptDraft(workshop.draftFor, workshop.chatId))
+      })
+
+    const bin = (refId: RefId) =>
+      Effect.gen(function* () {
+        const item = yield* writer.DeleteEntity({ userId, entityId: books.get(refId)! })
+        binned.set(refId, item.id)
+      })
+    const restore = (refId: RefId, itemId: BinItem["id"]) =>
+      Effect.gen(function* () {
+        yield* api.RestoreBinItem({ itemId })
+        binned.delete(refId)
+      })
 
     const change = (tab: Tab, add: ReadonlyArray<RefId>, remove: ReadonlyArray<RefId>) =>
       Effect.gen(function* () {
         if (tab.workshop.status === "swept") return
+        const result = yield* api.SetComposerLibrary({ ...key(tab.workshop), add, remove }).pipe(Effect.result)
+        if (add.some((refId) => binned.has(refId))) {
+          if (result._tag === "Failure") assert.strictEqual(result.failure._tag, "NotFound", context())
+          else assert.fail(context())
+          return
+        }
+        if (result._tag === "Failure") return assert.fail(`${context()}: ${result.failure._tag}`)
         for (const refId of remove) tab.workshop.refs.delete(refId)
         for (const refId of add) tab.workshop.refs.add(refId)
-        tab.shown = (yield* api.SetComposerLibrary({ ...key(tab.workshop), add, remove })).map((item) => item.refId)
+        tab.shown = result.success.map((item) => item.refId)
         checkList(tab.shown, tab.workshop)
       })
     const sweep = (workshop: Workshop) =>
@@ -167,21 +216,31 @@ const model = (seed: number, rounds: number) => {
         const { workshop } = tab
         if (workshop.status === "swept") return
         const { originChatId, operationId, refId } = url
+        let refused = false
         if (workshop.status === "pending") {
           const origin = workshops.get(originChatId)!
           if (url.at !== undefined) move(url.at, workshop, refId)
-          else if (origin === workshop || origin.recentSweep || (origin.status === "swept" && origin.refs.has(refId))) {
-            move(origin, workshop, refId)
-            workshop.refs.add(refId)
-            url.at = workshop
+          else {
+            const moved = move(origin, workshop, refId)
+            if (moved || origin === workshop || origin.recentSweep) {
+              refused = !moved && binned.has(refId)
+              if (!refused) {
+                workshop.refs.add(refId)
+                url.at = workshop
+              }
+            }
           }
         }
-        tab.shown = (yield* api.SetComposerLibrary({
-          ...key(workshop),
-          add: [refId],
-          remove: [],
-          handover: { originChatId, operationId }
-        })).map((item) => item.refId)
+        const result = yield* api
+          .SetComposerLibrary({ ...key(workshop), add: [refId], remove: [], handover: { originChatId, operationId } })
+          .pipe(Effect.result)
+        if (refused) {
+          if (result._tag === "Failure") assert.strictEqual(result.failure._tag, "NotFound", context())
+          else assert.fail(context())
+          return
+        }
+        if (result._tag === "Failure") return assert.fail(`${context()}: ${result.failure._tag}`)
+        tab.shown = result.success.map((item) => item.refId)
         checkList(tab.shown, workshop)
       })
     const carry = (tab: Tab, { destination, source, refId, url }: Carry) =>
@@ -229,13 +288,13 @@ const model = (seed: number, rounds: number) => {
         assert.deepStrictEqual(
           posted!.map((row) => `${row.versionId}/${row.refId}`).sort(),
           [...sent].map(([versionId, refId]) => `${versionId}/${refId}`).sort(),
-          context()
+          `invariant A, ${context()}`
         )
         // B includes swept workshops that neither tab has reopened yet.
         assert.deepStrictEqual(
           actual!.map((row) => `${row.chatId}/${row.refId}/${row.location}`).sort(),
           expected.sort(),
-          context()
+          `invariant B, ${context()}`
         )
       })
 
@@ -276,6 +335,79 @@ const model = (seed: number, rounds: number) => {
     yield* legacyReplay(first)
     yield* checkInvariants()
     if (seed !== 9) yield* lostReopen
+    const sideReconnect = Effect.gen(function* () {
+      history.push("B opens a side workshop")
+      second = yield* open(undefined, sideEntry)
+      yield* checkInvariants()
+      history.push("B attaches to its side workshop")
+      yield* change(second, [refs[1]!], [])
+      yield* checkInvariants()
+      history.push("A sweeps B's side workshop")
+      yield* sweep(second.workshop)
+      yield* checkInvariants()
+      history.push("B reconnects with its side workshop still open")
+      second = yield* reconnect(second.workshop)
+      yield* checkInvariants()
+    })
+    const reopenBinned = Effect.gen(function* () {
+      const predecessor = first.workshop
+      history.push("B sweeps A's workshop")
+      yield* sweep(predecessor)
+      yield* checkInvariants()
+      history.push("B bins the item kept in A's swept workshop")
+      yield* bin(refs[2]!)
+      yield* checkInvariants()
+      history.push("A reopens while its item is in the bin")
+      first = yield* open(predecessor)
+      yield* checkInvariants()
+      history.push("B restores the item")
+      yield* restore(refs[2]!, binned.get(refs[2]!)!)
+      yield* checkInvariants()
+      history.push("A reloads and sees the restored item")
+      first = yield* open(first.workshop)
+      yield* checkInvariants()
+      history.push("A retries the original URL after restoration")
+      first = yield* open(predecessor)
+      yield* checkInvariants()
+    })
+    if (seed % 2 === 0 || seed === 9) yield* sideReconnect
+    yield* reopenBinned
+    if (seed % 2 !== 0 && seed !== 9) yield* sideReconnect
+    if (seed === 100) {
+      history.push("B fills another workshop to the attachment limit")
+      let full = yield* open()
+      const extras = yield* Effect.forEach(
+        Array.from({ length: 16 }, (_, i) => `Chart ${i + 1}`),
+        createBook
+      )
+      const hidden = refs.slice(0, 2)
+      yield* change(full, [...hidden, ...extras.slice(0, 14)], [])
+      yield* checkInvariants()
+      history.push("A bins two of B's attachments, B uses the two available places")
+      for (const refId of hidden) {
+        yield* bin(refId)
+        yield* checkInvariants()
+      }
+      yield* change(full, extras.slice(14), [])
+      yield* checkInvariants()
+      history.push("A sweeps the full workshop, B reopens it")
+      yield* sweep(full.workshop)
+      yield* checkInvariants()
+      full = yield* open(full.workshop)
+      yield* checkInvariants()
+      history.push("A restores the two items and B reloads")
+      for (const refId of hidden) {
+        yield* restore(refId, binned.get(refId)!)
+        yield* checkInvariants()
+      }
+      full = yield* open(full.workshop)
+      yield* checkInvariants()
+      history.push("B removes the two restored attachments one at a time")
+      for (const refId of hidden) {
+        yield* change(full, [], [refId])
+        yield* checkInvariants()
+      }
+    }
     const initial = { originChatId: first.workshop.chatId, operationId: "initial", refId: refs[0]! }
     urls.push(initial, { ...initial, operationId: "lost-before-apply", refId: refs[1]! })
     yield* follow(first, initial)
@@ -326,7 +458,7 @@ const model = (seed: number, rounds: number) => {
             break
           }
           case "handover":
-            if (here.status === "pending") {
+            if (here.status === "pending" && !binned.has(refId)) {
               const url = { originChatId: here.chatId, operationId: `handover-${round}`, refId }
               urls.push(url)
               yield* follow(tab, url)
@@ -341,6 +473,17 @@ const model = (seed: number, rounds: number) => {
           }
           case "reload":
             visit(yield* open(random() < 0.7 ? here : other.workshop))
+            break
+          case "side reconnect":
+            if (here.draftFor === sideEntry && here.status === "swept") visit(yield* reconnect(here))
+            break
+          case "bin": {
+            const attached = [...here.refs].filter((item) => !binned.has(item))
+            if (attached.length > 0) yield* bin(pick(attached))
+            break
+          }
+          case "restore":
+            if (binned.size > 0) yield* restore(...pick([...binned]))
             break
           case "drop reopen reply": {
             const swept = [here, other.workshop].filter((workshop) => workshop.status === "swept")
@@ -358,7 +501,8 @@ const model = (seed: number, rounds: number) => {
           case "send": {
             const chosen = tab.shown.length > 0 && random() < 0.6 ? pick(tab.shown) : refId
             const credential = pick([tab, tab, tab, other, undefined])
-            const allowed = here.status !== "swept" && here.refs.has(chosen) && credential?.workshop === here
+            const allowed =
+              here.status !== "swept" && here.refs.has(chosen) && !binned.has(chosen) && credential?.workshop === here
             const result = yield* api
               .SendMessage({
                 chatId: here.chatId,
