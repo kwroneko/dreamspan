@@ -235,11 +235,15 @@ const createUndoer: Undoer = {
   unchanged: libraryUnchanged,
   run: (ctx, effect) =>
     Effect.gen(function* () {
-      const ref = ctx.binAnyway
-        ? yield* makeLibraryQueries(ctx.sql).ownedRef(ctx.userId, String(effect.undo!.refId))
-        : yield* checkedCreation(ctx, effect)
-      if (ref.entity_id !== effect.targetId) return yield* refuse()
+      const lib = makeLibraryQueries(ctx.sql)
       const undo = effect.undo!
+      const ref = yield* lib.ownedRef(ctx.userId, String(undo.refId))
+      if (ref.entity_id !== effect.targetId) return yield* refuse()
+      if (!ctx.binAnyway) {
+        if ((yield* lib.usedByChats(ctx.userId, ref)) > 0)
+          return yield* refuse("A chat uses this item. Use this item's Undo to confirm moving it to the bin.")
+        yield* checkedCreation(ctx, effect)
+      }
       if (ref.kind === "card") {
         const live = yield* ctx.sql<{ id: string }>`SELECT e.id FROM entities e
           JOIN entity_refs r ON r.entity_id = e.id JOIN entity_revisions h ON h.id = r.head_revision_id

@@ -5,7 +5,7 @@
 // asked; the next turn is told once (§8.2).
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import type { EntityId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { unitKey } from "@dreamspan/shared/changeReversal.ts"
 import { newCardDoc, textField } from "@dreamspan/shared/editing.ts"
 import type { Doc, RefId } from "@dreamspan/shared/library.ts"
@@ -425,6 +425,32 @@ describe("revert all of this reply", () => {
 })
 
 describe("a made item changed since", () => {
+  it.live("requires confirmation in both Changes actions when a story uses the card", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const out = yield* f.run("create_card", { name: "Ove Brekke", description: "Synthetic." }, "c1")
+      const { id, entityId } = JSON.parse(out.text) as { id: RefId; entityId: EntityId }
+      const story = yield* api.CreateChat({ title: "Story" })
+      yield* api.ChangeCast({ chatId: story.id, slotId: null, change: { _tag: "Join", entityId } })
+      yield* api.SendMessage({
+        chatId: story.id,
+        parentSlotId: null,
+        branch: false,
+        content: "The keeper arrives.",
+        reply: false
+      })
+      assert.strictEqual((yield* api.OpenEditor({ refId: id })).usedByChats, 1)
+      const [key] = yield* f.editKeys(["c1"])
+      assert.strictEqual(yield* outcome(api.UndoRolloutEffect(key!)), "EffectUndoRefused")
+      const report = yield* api.UndoRolloutEffects({ chatId: f.chat.id, rolloutId: f.rolloutId })
+      assert.include(report.refused?.reason, "A chat uses this item")
+      assert.isEmpty(report.undone)
+      assert.isNotNull((yield* api.UndoRolloutEffect({ ...key!, binAnyway: true })).undoneAt)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("is binned only when asked", () => {
     const config = testConfig()
     return Effect.gen(function* () {

@@ -17,7 +17,7 @@ import {
   type WorkshopCapability,
   type WorkshopGrantChoice
 } from "@dreamspan/shared/workshopApi.ts"
-import { Effect, Option } from "effect"
+import { Cause, Effect, Option } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"
 import { ExecutionRegistry, toolForKind } from "../execution.ts"
@@ -517,12 +517,20 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
               continue
             }
             const result = yield* undo(user, row).pipe(Effect.exit)
-            if (result._tag === "Failure")
+            if (result._tag === "Failure") {
+              const error = Option.getOrUndefined(Cause.findErrorOption(result.cause))
               return {
                 undone,
-                refused: { effect: row, reason: "This change couldn't be undone. Undo newer changes first." },
+                refused: {
+                  effect: row,
+                  reason:
+                    error instanceof EffectUndoRefused
+                      ? error.message
+                      : "This change couldn't be undone. Undo newer changes first."
+                },
                 left: rows.slice(at + 1)
               }
+            }
             undone.push(result.value)
           }
           return { undone, refused: null, left: [] }
