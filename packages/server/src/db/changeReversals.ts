@@ -30,6 +30,7 @@ import type { OpsOf } from "./opsOf.ts"
 import { query, transaction } from "./tx.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
 import { guarded } from "./agentDocuments.ts"
+import { previousRevisionSql, revisionOnLine } from "./revisionNumbers.ts"
 
 type Handlers = Parameters<typeof WriteOps.of>[0]
 type ReadHandlers = Parameters<typeof ReadOps.of>[0]
@@ -288,11 +289,14 @@ export const revisionReversal = (
   names: ReadonlyArray<string> | undefined
 ) =>
   Effect.gen(function* () {
-    const [revision] = yield* sql<{ parents: string; doc_json: string }>`SELECT parents, doc_json
-      FROM entity_revisions WHERE id = ${revisionId} AND entity_id = ${ref.entity_id}`
+    if (!(yield* revisionOnLine(sql, ref.head_revision_id, revisionId)))
+      return yield* new NotFound({ entity: "revision", id: revisionId })
+    const [revision] = yield* sql<{ previous: string | null; doc_json: string }>`
+      SELECT ${sql.literal(previousRevisionSql("r"))} AS previous, r.doc_json
+      FROM entity_revisions r WHERE r.id = ${revisionId}`
     if (!revision) return yield* new NotFound({ entity: "revision", id: revisionId })
-    const parent = (JSON.parse(revision.parents) as Array<string>)[0]
-    if (parent === undefined) return yield* refuse("That's the item's first revision: it has no change to take back.")
+    const parent = revision.previous
+    if (parent === null) return yield* refuse("That's the item's first revision: it has no change to take back.")
     const [before] = yield* sql<{ doc_json: string }>`SELECT doc_json FROM entity_revisions WHERE id = ${parent}`
     if (!before) return yield* refuse("Its earlier revision is gone.")
     const [head] = yield* sql<{ doc_json: string; chat_id: string }>`SELECT h.doc_json, r.chat_id

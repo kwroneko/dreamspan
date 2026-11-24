@@ -705,7 +705,7 @@ const prepareRevert = (ctx: ToolContext, args: RevertArgs) =>
     remember(ctx, args.kind, args.item, ref)
     const found = yield* findRevision(ctx, ref, args.revision)
     if ("error" in found) return yield* Effect.fail(new ToolInputRefused(found.error))
-    const parent = found.revision.parents[0]
+    const parent = found.revision.parents[0] ?? found.revision.forkedFrom?.revisionId
     if (parent === undefined)
       return yield* Effect.fail(
         new ToolInputRefused("That's the item's first revision: it has no change to take back.")
