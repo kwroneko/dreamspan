@@ -2293,6 +2293,7 @@ const composeStage = sync("compose", (assembly) => {
     if (prompt.piece !== null) assembly.pieces[prompt.piece]!.marker = prompt.identifier
   }
   const baseCollection = collection
+  const historyRequested = baseCollection.some((prompt) => prompt.identifier === "chatHistory")
   let actualPlacement = placement(notes)
   let reservedPlacement = actualPlacement
   const lines = projected.map((p, i) => chatLine(assembly, p, groupNames, scripted[i]!))
@@ -2700,6 +2701,8 @@ const composeStage = sync("compose", (assembly) => {
     // Examples only count as cut when the order sends them: with the marker off, none were meant to go.
     examplesTotal: actualPlacement.collection.some((p) => p.identifier === "dialogueExamples") ? examples.length : 0
   }
+  const truncated =
+    start > 0 || composition.historySent < composition.historyTotal || (assembly.historyOmitted ?? 0) > 0
   assembly.postNames = postNames
   assembly.composition = composition
   if (recentPair && layerPair)
@@ -2724,8 +2727,6 @@ const composeStage = sync("compose", (assembly) => {
       })
     const sentPieces = new Set(composition.messages.flatMap((m) => m.pieces))
     const retained = projected.filter((p) => sentPieces.has(p.piece))
-    const truncated =
-      start > 0 || composition.historySent < composition.historyTotal || (assembly.historyOmitted ?? 0) > 0
     const first = truncated
       ? Math.min(need(assembly, "target").depth, ...retained.map((p) => p.entry.depth))
       : assembly.lcm.cursorDepth + 1
@@ -2734,7 +2735,7 @@ const composeStage = sync("compose", (assembly) => {
     assembly.lcmVerbatim =
       first < need(assembly, "target").depth ? { from: first + 1, to: need(assembly, "target").depth } : null
   }
-  if (start > 0 || composition.historySent < composition.historyTotal || (assembly.historyOmitted ?? 0) > 0) {
+  if (historyRequested && truncated) {
     assembly.issues.push({
       kind: "history_truncated",
       message: assembly.lcmOmitted?.length
