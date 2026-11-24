@@ -16,13 +16,17 @@ interface Row {
   readonly kind: string
   readonly name: string | null
   readonly path: string | null
+  readonly card_json: string | null
 }
-const columns = "rowid AS position, id, media_id AS mediaId, alt_text AS altText, status, kind, name, path"
-const toImage = ({ kind, name, path, ...row }: Row): ComposerImage => ({
+const columns = `rowid AS position, id, media_id AS mediaId, alt_text AS altText, status, kind, name, path,
+  (SELECT json_object('name', c.name, 'format', c.format) FROM media_card_files c
+    WHERE c.media_id = composer_images.media_id) AS card_json`
+const toImage = ({ kind, name, path, card_json, ...row }: Row): ComposerImage => ({
   ...row,
   ...(kind === "file" ? { kind: "file" as const } : {}),
   ...(name !== null ? { name } : {}),
-  ...(path !== null ? { path } : {})
+  ...(path !== null ? { path } : {}),
+  ...(card_json !== null ? { card: JSON.parse(card_json) as NonNullable<ComposerImage["card"]> } : {})
 })
 
 /** What an attachment's file may be: any type for a file, else a PNG, JPEG, GIF or WebP image. */

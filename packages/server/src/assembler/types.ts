@@ -711,6 +711,14 @@ export interface HistoryAttachment {
   readonly size: number
   readonly image: boolean
   readonly excluded: boolean
+  /** A character card file (spec/WORKSHOP-CARDS.md §4.5): what was read from it when attached. */
+  readonly card?: {
+    readonly name: string
+    readonly format: string
+    readonly spec: string
+    readonly specVersion: string
+    readonly doc: Readonly<Record<string, unknown>>
+  } | null
 }
 
 /**

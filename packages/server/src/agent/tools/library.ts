@@ -90,9 +90,9 @@ const listLibrary: RolloutTool<{
     )
 }
 
-const VIEWS = ["whole", "summary", "field", "index", "entry", "prompt"] as const
+export const VIEWS = ["whole", "summary", "field", "index", "entry", "prompt"] as const
 
-const viewHelp: Record<"card" | "preset" | "lorebook", string> = {
+export const viewHelp: Record<"card" | "preset" | "lorebook", string> = {
   card: 'Views: "whole" (the default when it fits), "summary" (each field\'s size, the default when it\'s too long), "field" (one page of one field: field, and greeting for an alternate greeting, from 1), "index" (its lorebook\'s entries, 50 a page, after a uid), "entry" (one entry of its lorebook by uid, paged).',
   lorebook:
     'Views: "whole" (the default when it fits), "summary" (its entries\' sizes, the default when it\'s too long), "index" (its entries, 50 a page, after a uid), "entry" (one entry by uid, its content paged).',
@@ -153,6 +153,85 @@ const readAttached = (
               nextOffset: end < data.length ? end : null
             })
     }
+  })
+
+/**
+ * The paged views read_card, read_lorebook, read_preset and read_card_file share (§4.3 point 2,
+ * spec/WORKSHOP-CARDS.md §4.5): the answer, or null when the item is to be read whole.
+ */
+export const pagedView = (
+  kind: "card" | "preset" | "lorebook",
+  visible: Readonly<Record<string, unknown>>,
+  doc: Readonly<Record<string, unknown>>,
+  head: string,
+  args: Readonly<Record<string, unknown>>,
+  count: CountEffect,
+  window: number | undefined
+) =>
+  Effect.gen(function* () {
+    const answer = (text: string, isError = false): { readonly text: string; readonly isError?: boolean } => ({
+      text,
+      ...(isError ? { isError } : {})
+    })
+    const view = args.view as (typeof VIEWS)[number] | undefined
+    const maxTokens = pageTokens(args.max_tokens)
+    const summary = () =>
+      Effect.map(
+        withCounts(count, (c) => summaryLines(kind, visible, c)),
+        (lines) => [head, ...lines].join("\n")
+      )
+    if (view === undefined || view === "whole") {
+      const fits = (yield* count(JSON.stringify(doc))) <= inlineLimit(window)
+      if (!fits)
+        return answer(
+          `${yield* summary()}\n${view === "whole" ? "Too long to read whole: read it by field." : "Too long to read whole: this is its summary. Read it with view field, index or entry."}`
+        )
+      return null
+    }
+    if (view === "summary") return answer(yield* summary())
+    if (view === "index") {
+      if (kind === "card" && visible.character_book === undefined) return answer("This card has no lorebook.", true)
+      const after = args.after === undefined ? undefined : String(args.after)
+      const lines = yield* withCounts(count, (c) => indexLines(kind, visible, after, c))
+      return lines === null
+        ? answer(`No ${kind === "preset" ? "prompt" : "entry"} ${after} to read after.`, true)
+        : answer([head, ...lines].join("\n"))
+    }
+    if (view === "field") {
+      if (kind !== "card")
+        return answer(
+          `A ${kind} is read by ${kind === "preset" ? "prompt" : "entry"}: use view index, then view ${kind === "preset" ? "prompt" : "entry"}.`,
+          true
+        )
+      const field = String(args.field ?? "")
+      if (field === "alternate_greetings") {
+        const greetings = Array.isArray(visible.alternate_greetings) ? visible.alternate_greetings : []
+        const n = typeof args.greeting === "number" ? args.greeting : 0
+        const greeting = greetings[n - 1]
+        if (typeof greeting !== "string") return answer(`Give greeting, from 1 to ${greetings.length}.`, true)
+        return answer(
+          `${head}, alternate greeting ${n}:\n${yield* pageOf(greeting, `alternate greeting ${n}`, args.offset, maxTokens, count)}`
+        )
+      }
+      const value = visible[field]
+      if (!CARD_TEXT_FIELDS.includes(field as (typeof CARD_TEXT_FIELDS)[number]) || typeof value !== "string")
+        return answer(`Give field, one of ${[...CARD_TEXT_FIELDS, "alternate_greetings"].join(", ")}.`, true)
+      return answer(`${head}, ${field}:\n${yield* pageOf(value, field, args.offset, maxTokens, count)}`)
+    }
+    // entry or prompt: its settings, then a page of its text.
+    const wanted = view === "prompt" ? args.prompt : args.entry
+    if ((view === "prompt") !== (kind === "preset") || wanted === undefined)
+      return answer(
+        kind === "preset" ? "Give prompt, an identifier from view index." : "Give entry, a uid from view index.",
+        true
+      )
+    const part = findPart(kind, visible, String(wanted))
+    if (part === null) return answer(`No ${view} ${String(wanted)}: see view index.`, true)
+    const { content, ...settings } = part
+    const what = view === "prompt" ? `prompt ${String(wanted)}` : `entry ${String(wanted)}`
+    return answer(
+      `${head}, ${what}: ${JSON.stringify(settings)}\ncontent:\n${yield* pageOf(typeof content === "string" ? content : "", `the content of ${what}`, args.offset, maxTokens, count)}`
+    )
   })
 
 const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Record<string, unknown>>> => ({
@@ -255,77 +334,21 @@ const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Re
               )
             )
           : visible
-      const view = args.view as (typeof VIEWS)[number] | undefined
-      const maxTokens = pageTokens(args.max_tokens)
-      const summary = () =>
-        Effect.map(
-          withCounts(count, (c) => summaryLines(kind, visible, c)),
-          (lines) => [head, ...lines].join("\n")
-        )
-      if (view === undefined || view === "whole") {
-        const fits = (yield* count(JSON.stringify(doc))) <= inlineLimit(context.window)
-        if (!fits)
-          return answer(
-            `${yield* summary()}\n${view === "whole" ? "Too long to read whole: read it by field." : "Too long to read whole: this is its summary. Read it with view field, index or entry."}`
-          )
-        const notes =
-          kind === "card" && source.ref
-            ? yield* context.reader.ListCardNotes({ userId: context.userId, cardRefId: source.ref.id })
-            : undefined
-        return answer(
-          JSON.stringify({
-            ...(source.ref ? identity(source.ref) : { id: source.id, name: source.label }),
-            revision: source.revision,
-            doc,
-            ...(notes
-              ? { notes: notes.map((note) => ({ id: note.ref.id, revision: note.ref.headRevisionId, doc: note.doc })) }
-              : {})
-          })
-        )
-      }
-      if (view === "summary") return answer(yield* summary())
-      if (view === "index") {
-        if (kind === "card" && visible.character_book === undefined) return answer("This card has no lorebook.", true)
-        const after = args.after === undefined ? undefined : String(args.after)
-        const lines = yield* withCounts(count, (c) => indexLines(kind, visible, after, c))
-        return lines === null
-          ? answer(`No ${kind === "preset" ? "prompt" : "entry"} ${after} to read after.`, true)
-          : answer([head, ...lines].join("\n"))
-      }
-      if (view === "field") {
-        if (kind !== "card")
-          return answer(
-            `A ${kind} is read by ${kind === "preset" ? "prompt" : "entry"}: use view index, then view ${kind === "preset" ? "prompt" : "entry"}.`,
-            true
-          )
-        const field = String(args.field ?? "")
-        if (field === "alternate_greetings") {
-          const greetings = Array.isArray(visible.alternate_greetings) ? visible.alternate_greetings : []
-          const n = typeof args.greeting === "number" ? args.greeting : 0
-          const greeting = greetings[n - 1]
-          if (typeof greeting !== "string") return answer(`Give greeting, from 1 to ${greetings.length}.`, true)
-          return answer(
-            `${head}, alternate greeting ${n}:\n${yield* pageOf(greeting, `alternate greeting ${n}`, args.offset, maxTokens, count)}`
-          )
-        }
-        const value = visible[field]
-        if (!CARD_TEXT_FIELDS.includes(field as (typeof CARD_TEXT_FIELDS)[number]) || typeof value !== "string")
-          return answer(`Give field, one of ${[...CARD_TEXT_FIELDS, "alternate_greetings"].join(", ")}.`, true)
-        return answer(`${head}, ${field}:\n${yield* pageOf(value, field, args.offset, maxTokens, count)}`)
-      }
-      // entry or prompt: its settings, then a page of its text.
-      const wanted = view === "prompt" ? args.prompt : args.entry
-      if ((view === "prompt") !== (kind === "preset") || wanted === undefined)
-        return answer(
-          kind === "preset" ? "Give prompt, an identifier from view index." : "Give entry, a uid from view index.",
-          true
-        )
-      const part = findPart(kind, visible, String(wanted))
-      if (part === null) return answer(`No ${view} ${String(wanted)}: see view index.`, true)
-      const { content, ...settings } = part
-      const what = view === "prompt" ? `prompt ${String(wanted)}` : `entry ${String(wanted)}`
+      const viewed = yield* pagedView(kind, visible, doc, head, args, count, context.window)
+      if (viewed !== null) return { frame, ...viewed }
+      const notes =
+        kind === "card" && source.ref
+          ? yield* context.reader.ListCardNotes({ userId: context.userId, cardRefId: source.ref.id })
+          : undefined
       return answer(
-        `${head}, ${what}: ${JSON.stringify(settings)}\ncontent:\n${yield* pageOf(typeof content === "string" ? content : "", `the content of ${what}`, args.offset, maxTokens, count)}`
+        JSON.stringify({
+          ...(source.ref ? identity(source.ref) : { id: source.id, name: source.label }),
+          revision: source.revision,
+          doc,
+          ...(notes
+            ? { notes: notes.map((note) => ({ id: note.ref.id, revision: note.ref.headRevisionId, doc: note.doc })) }
+            : {})
+        })
       )
     }).pipe(Effect.catch(failRead))
 })

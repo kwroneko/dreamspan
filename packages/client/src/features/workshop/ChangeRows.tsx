@@ -16,7 +16,9 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 import { browsable, shellAtom } from "../characters/shellData.tsx"
 import { kindShows } from "../chat/kindLooks.ts"
 import type { ChatSession } from "../chat/session.ts"
-import { fieldLabel } from "../editor/fields.ts"
+import { changedFields, fieldLabel } from "../editor/fields.ts"
+import { filesHref } from "../files/href.ts"
+import { nameOf, parentOf } from "@dreamspan/shared/files.ts"
 import { openNearProps } from "../workbench/kinds.ts"
 import {
   type ChangeReply,
@@ -37,15 +39,17 @@ import { itemChangeAtom, itemChangeKey } from "./itemChange.ts"
 
 /** The change view's tab kind (index.tsx). */
 export const CHANGE_KIND = "library.change"
+/** A card file's change view's tab kind (index.tsx). */
+export const CARD_FILE_CHANGE_KIND = "files.card-change"
 const EDITOR_KIND = "library.editor"
 
 const link =
   "rounded-sm outline-none [overflow-wrap:anywhere] underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-focus"
 
-/** The item's face: a card's portrait, a lorebook's or preset's icon in a box the same size. */
-export function ItemPicture({ item }: { item: Pick<ItemChange, "entityId" | "kind" | "label"> }) {
+/** The item's face: a card's portrait, a lorebook's or preset's icon (a card file's) in a box the same size. */
+export function ItemPicture({ item }: { item: Pick<ItemChange, "entityId" | "kind" | "label" | "file"> }) {
   const card = useShellCard(item)
-  if (item.kind === "card")
+  if (item.kind === "card" && !item.file)
     return (
       <Avatar
         id={item.entityId}
@@ -60,7 +64,7 @@ export function ItemPicture({ item }: { item: Pick<ItemChange, "entityId" | "kin
       aria-hidden="true"
       className="inline-flex h-9 w-6 shrink-0 items-center justify-center rounded-sm bg-surface-raised text-muted"
     >
-      <Icon name={item.kind === "lorebook" ? "book" : "sliders"} size={16} />
+      <Icon name={item.file ? "user" : item.kind === "lorebook" ? "book" : "sliders"} size={16} />
     </span>
   )
 }
@@ -74,6 +78,56 @@ const useShellCard = (item: Pick<ItemChange, "entityId" | "kind">) => {
 
 /** The item's name now: a card's from the shell, else as the change named it. */
 const useItemName = (item: Pick<ItemChange, "entityId" | "kind" | "label">) => useShellCard(item)?.name ?? item.label
+
+/** Where a card file opens: its folder in Files, the file picked. */
+export const cardFileHref = (path: string) => filesHref(parentOf(path), nameOf(path))
+
+/**
+ * A card file's row (spec/WORKSHOP-CARDS.md §4.5): its name opens the file in Files; the count, the
+ * fields the reply changed, kept with its edits.
+ */
+function FileRow({
+  item,
+  reply
+}: {
+  item: ItemChange & { file: NonNullable<ItemChange["file"]> }
+  reply: ChangeReply
+}) {
+  const changes = changedFields(item.file.before, item.file.after)
+  const names = changedNames(changes.map((c) => fieldLabel("card", item.file.after, [c.path[0]!], item.file.before)))
+  const undone = itemUndone(item)
+  return (
+    <div data-change-row={item.refId} className="flex items-center gap-2 text-xs">
+      <ItemPicture item={item} />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <Tooltip label={`Opens the card file ${nameOf(item.file.path)} in Files, as it is now.`}>
+            <a
+              href={cardFileHref(item.file.path)}
+              data-change-name
+              className={`${link} min-w-0 text-sm font-medium ${undone ? "text-muted" : "text-text"}`}
+              {...linkMenuProps}
+            >
+              {item.label}
+            </a>
+          </Tooltip>
+          <Tooltip label={names ? `Shows what the assistant changed: ${names}.` : "Shows what the assistant changed."}>
+            <a
+              href={changeViewHref(item, reply)}
+              data-change-count
+              className={`${link} text-muted hover:text-text`}
+              {...openNearProps(CARD_FILE_CHANGE_KIND)}
+              {...linkMenuProps}
+            >
+              Card file edited · {changeCount("card", changes)}
+            </a>
+          </Tooltip>
+        </div>
+      </div>
+      <ItemChangeAction item={item} />
+    </div>
+  )
+}
 
 function Row({ item, reply }: { item: ItemChange; reply: ChangeReply }) {
   const name = useItemName(item)
@@ -161,7 +215,13 @@ function Rows({ reply }: { reply: ChangeReply }) {
           </Button>
         </div>
       ) : (
-        items.map((item) => <Row key={item.entityId} item={item} reply={reply} />)
+        items.map((item) =>
+          item.file ? (
+            <FileRow key={item.entityId} item={{ ...item, file: item.file }} reply={reply} />
+          ) : (
+            <Row key={item.entityId} item={item} reply={reply} />
+          )
+        )
       )}
     </div>
   )

@@ -8,6 +8,7 @@ import {
   changeCount,
   changedNames,
   changedSince,
+  cardFileChangeTarget,
   changeViewHref,
   changeViewTarget,
   itemChanges,
@@ -131,6 +132,57 @@ describe("change rows", () => {
     const made = changeViewHref({ refId: "ref1", from: null, to: "r1" }, reply)
     expect(changeViewTarget(new URL(made, "http://x.invalid"))?.from).toBe(null)
     expect(changeViewTarget(new URL("/library/ref1", "http://x.invalid"))).toBe(null)
+  })
+
+  it("makes one row per card file a turn edited, with its fields before the first edit and after the last", () => {
+    const edit = (before: string | null, after: string, card: object) =>
+      effect({
+        kind: "file.edit",
+        targetKind: "file",
+        targetId: "/files/w/wren.png",
+        title: "Edited the card file /files/w/wren.png",
+        undo: { path: "/files/w/wren.png", before, after, inode: 1, card }
+      })
+    const rows = itemChanges(
+      listed(
+        edit("v1", "h2", { name: "Wren", format: "png", before: { description: "A" }, after: { description: "B" } }),
+        // A plain file edit isn't a row.
+        effect({
+          kind: "file.edit",
+          targetKind: "file",
+          targetId: "/files/w/notes.txt",
+          title: "Edited /files/w/notes.txt"
+        }),
+        edit("v2", "h3", {
+          name: "Wren Hollow",
+          format: "png",
+          before: { description: "B", name: "Wren" },
+          after: { description: "C", name: "Wren Hollow" }
+        })
+      )
+    )
+    expect(rows).toHaveLength(1)
+    const [row] = rows
+    expect([row!.label, row!.kind, row!.from, row!.to, row!.effects.length]).toEqual([
+      "Wren Hollow",
+      "card",
+      "v1",
+      "h3",
+      2
+    ])
+    expect(row!.file).toEqual({
+      path: "/files/w/wren.png",
+      before: { description: "A", name: "Wren" },
+      after: { description: "C", name: "Wren Hollow" }
+    })
+    const reply = { chatId: "c1", slotId: "s9", versionId: "v4" }
+    const href = changeViewHref(row!, reply)
+    expect(cardFileChangeTarget(new URL(href, "http://x.invalid"))).toEqual({
+      path: "/files/w/wren.png",
+      to: "h3",
+      reply
+    })
+    expect(changeViewTarget(new URL(href, "http://x.invalid"))).toBe(null)
   })
 })
 

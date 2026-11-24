@@ -77,15 +77,15 @@ for (const width of [1440, 390])
     const composer = page.getByTestId("composer")
     await expect(composer).toBeVisible()
 
-    // The paperclip takes any type in a workshop; the file lands in Attachments.
-    const clip = page.getByRole("button", { name: "Attach files" })
+    // The paperclip (Attach) takes any type in a workshop; the file lands in Attachments.
+    const clip = page.getByRole("button", { name: "Attach", exact: true })
     await expect(clip).toBeEnabled()
     await page.getByLabel("Choose files").setInputFiles({
       name: "notes.txt",
       mimeType: "text/plain",
       buffer: Buffer.from("Synthetic notes for the assistant.")
     })
-    const attached = page.getByRole("list", { name: "Attached files" })
+    const attached = page.getByRole("list", { name: "Attachments" })
     await expect(attached.getByRole("button", { name: "Open notes.txt" })).toBeVisible()
     await expect(page.getByText("Saved in /files/Attachments.")).toBeVisible()
     await expect.poll(() => files.has("/files/Attachments/notes.txt")).toBe(true)

@@ -20,7 +20,7 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     id: "cards",
     label: "Cards",
     kinds: workshop,
-    description: "Read, create, edit and copy character cards, and mark favourites.",
+    description: "Read, create, edit and copy character cards, and mark favourites; read and edit card files.",
     instructions:
       "Find a card with list_library first and use its id when names repeat. Read a card before editing it, and change only the fields asked for. To keep the original, copy it with clone_card and edit the copy.",
     tools: [
@@ -30,7 +30,11 @@ export const builtinSkills: ReadonlyArray<Skill> = [
       "move_card_text",
       "edit_card_note",
       "clone_card",
-      "set_card_favourite"
+      "set_card_favourite",
+      // A card attached as a file (spec/WORKSHOP-CARDS.md §4.5): its message's note names these.
+      "read_card_file",
+      "edit_card_file",
+      "import_card_file"
     ]
   },
   {

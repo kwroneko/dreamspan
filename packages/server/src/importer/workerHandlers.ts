@@ -5,6 +5,8 @@ import * as Exporters from "./exporters.ts"
 import { FormatOps, ownBuffer, type StParserSource } from "./ops.ts"
 import * as StParse from "./stParse.ts"
 import { prepareThumbnails, thumbnail, validateImage } from "./thumbnail.ts"
+import { type CardFileEdit as CardFileEditOf, editCardFile, readCardFile } from "../formats/cardFile.ts"
+import type { CardFileInfo } from "./ops.ts"
 import { countTokens } from "./tokenizer.ts"
 
 /** Resolve trusted code references inside the worker, including the bundled built-in module. */
@@ -31,6 +33,12 @@ export const handlers = FormatOps.toLayer(
     const exporters = yield* Exporters.Exporters
     return FormatOps.of({
       ValidateImage: ({ bytes }) => Effect.promise(() => validateImage(bytes)),
+      ReadCardFile: ({ bytes }) => Effect.sync(() => readCardFile(bytes) as CardFileInfo | null),
+      EditCardFile: ({ bytes, changes }) =>
+        Effect.sync(() => {
+          const edited = editCardFile(bytes, changes)
+          return "error" in edited ? edited : { ...(edited as CardFileEditOf), bytes: ownBuffer(edited.bytes) }
+        }),
       Thumbnail: thumbnail,
       PrepareThumbnails: prepareThumbnails,
       CountTokens: ({ encoding, texts }) => Effect.promise(() => countTokens(encoding, texts)),

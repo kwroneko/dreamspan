@@ -2833,7 +2833,12 @@ const attachmentsStage = sync("attachments", (assembly) => {
   let changed = false
   assembly.resolved = need(assembly, "resolved").map(({ entry, piece }) => {
     if (!entry.attachments?.length) return { entry, piece }
-    const lines = attachmentLines(entry.attachments, assembly.model?.vision).join("\n")
+    const lines = attachmentLines(
+      entry.attachments,
+      assembly.model?.vision,
+      assembly.countText ?? estimateTokens,
+      inlineLimit(contextBudget(assembly) + need(assembly, "preset").doc.samplers.openai_max_tokens)
+    ).join("\n")
     const previous = scripted.get(entry.versionId)
     if (previous)
       scripted.set(entry.versionId, { ...previous, text: previous.text ? `${previous.text}\n${lines}` : lines })

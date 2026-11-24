@@ -683,6 +683,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
               (SELECT va.media_id, m.sha256, m.width, m.height FROM version_attachments va
                 JOIN media_assets m ON m.id = va.media_id WHERE va.version_id=v.id AND va.kind <> 'file' ORDER BY va.ordinal) a) AS images_json,
             (SELECT json_group_array(json_object('mediaId', a.media_id, 'name', a.name, 'path', a.path, 'mime', a.mime, 'size', a.byte_size,
+                'card', json((SELECT json_object('name', c.name, 'format', c.format, 'spec', c.spec, 'specVersion', c.spec_version,
+                  'doc', json(c.doc_json)) FROM media_card_files c WHERE c.media_id = a.media_id)),
                 'image', json(CASE WHEN a.kind = 'file' THEN 'false' ELSE 'true' END),
                 'excluded', json(CASE WHEN a.kind <> 'file' AND ${imageExcludedIn(sql, fork, "o.id", "a.media_id")} THEN 'true' ELSE 'false' END))) FROM
               (SELECT va.media_id, va.kind, va.name, va.path, m.mime, m.byte_size FROM version_attachments va

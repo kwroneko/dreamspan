@@ -171,7 +171,12 @@ export const MessageImages = Schema.Array(
     altText: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000))),
     kind: Schema.optionalKey(Schema.Literals(["file"])),
     name: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(255))),
-    path: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096)))
+    path: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
+    /**
+     * A character card attached as a file (spec/WORKSHOP-CARDS.md §4.5): its name and format, as
+     * the server read them when it was attached. Read only: what a client sends here is ignored.
+     */
+    card: Schema.optionalKey(Schema.Struct({ name: Schema.String, format: Schema.Literals(["png", "json", "charx"]) }))
   })
 ).check(Schema.isMaxLength(32))
 export type MessageImages = typeof MessageImages.Type

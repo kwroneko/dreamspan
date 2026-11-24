@@ -137,7 +137,9 @@ export const AttachedFile = Schema.Struct({
   name: Schema.String,
   path: Schema.String,
   mime: Schema.String,
-  size: Schema.Number
+  size: Schema.Number,
+  /** A character card file (spec/WORKSHOP-CARDS.md §4.5): its name and format. */
+  card: Schema.optionalKey(Schema.Struct({ name: Schema.String, format: Schema.Literals(["png", "json", "charx"]) }))
 })
 export type AttachedFile = typeof AttachedFile.Type
 

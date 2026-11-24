@@ -176,7 +176,8 @@ describe("0002_files", () => {
           "queue_library_revisions",
           "retained_library_attachments",
           "composer_library",
-          "recovered_label_owner"
+          "recovered_label_owner",
+          "card_files"
         ]
       )
       // The existing row is kept, an image by default.
@@ -527,7 +528,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0019_queue_library_revisions",
       "0020_retained_library_attachments",
       "0021_composer_library",
-      "0022_recovered_label_owner"
+      "0022_recovered_label_owner",
+      "0023_card_files"
     ])
   }).pipe(Effect.provide(layer()))
 )

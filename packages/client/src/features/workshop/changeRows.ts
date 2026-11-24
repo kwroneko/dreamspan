@@ -2,6 +2,7 @@
 // turn made or edited, one row per item however many calls changed it, with the revision pair
 // its change view compares. Apart from React, so it's tested on its own.
 import type { PathEntry } from "@dreamspan/shared/chat.ts"
+import type { Doc } from "@dreamspan/shared/library.ts"
 import type { FieldChange } from "../editor/fields.ts"
 import type { RolloutEffect } from "./effects.ts"
 
@@ -22,9 +23,45 @@ export interface ItemChange {
   readonly to: string
   /** Its changes, newest first, as listed. */
   readonly effects: ReadonlyArray<RolloutEffect>
+  /**
+   * A card file in Files the turn edited (spec/WORKSHOP-CARDS.md §4.5): its path, and the fields
+   * it changed as they were before the turn's first edit and after its last. `refId` is the path,
+   * `from` and `to` the file's versions.
+   */
+  readonly file?: { readonly path: string; readonly before: Doc; readonly after: Doc }
 }
 
 const TITLE = /^(?:Edited|Created) the (card|lorebook|preset) (.*)$/s
+
+/** What `edit_card_file` keeps with its change: the card's name and the fields it changed. */
+interface CardFileEdit {
+  readonly name: string
+  readonly before: Readonly<Record<string, unknown>>
+  readonly after: Readonly<Record<string, unknown>>
+}
+
+const cardFileEdit = (effect: RolloutEffect): CardFileEdit | null => {
+  if (effect.kind !== "file.edit" || effect.targetKind !== "file") return null
+  const card = effect.undo?.card as Partial<CardFileEdit> | undefined
+  return card && typeof card.name === "string" && card.before && card.after ? (card as CardFileEdit) : null
+}
+
+/** The fields the edits changed (oldest first): each as before the first that changed it, after the last. */
+const cardFileFields = (edits: ReadonlyArray<CardFileEdit>) => {
+  const before: Record<string, unknown> = {}
+  const after: Record<string, unknown> = {}
+  const seen = new Set<string>()
+  for (const edit of edits)
+    for (const key of new Set([...Object.keys(edit.before), ...Object.keys(edit.after)])) {
+      if (!seen.has(key)) {
+        seen.add(key)
+        if (key in edit.before) before[key] = edit.before[key]
+      }
+      delete after[key]
+      if (key in edit.after) after[key] = edit.after[key]
+    }
+  return { before: before as Doc, after: after as Doc }
+}
 
 /**
  * The items a turn's changes made or edited, in the order they were first changed. A note made
@@ -34,15 +71,30 @@ export const itemChanges = (effects: ReadonlyArray<RolloutEffect>): ReadonlyArra
   const items = new Map<string, Array<RolloutEffect>>()
   // Oldest first, so the rows read in the order the turn made them.
   for (const effect of [...effects].reverse()) {
-    if (effect.kind !== "library.create" && effect.kind !== "library.revise") continue
-    if (!TITLE.test(effect.title) || typeof effect.undo?.refId !== "string") continue
-    const list = items.get(effect.targetId)
+    const file = cardFileEdit(effect) !== null
+    if (!file && effect.kind !== "library.create" && effect.kind !== "library.revise") continue
+    if (!file && (!TITLE.test(effect.title) || typeof effect.undo?.refId !== "string")) continue
+    const key = file ? `file:${effect.targetId}` : effect.targetId
+    const list = items.get(key)
     if (list) list.push(effect)
-    else items.set(effect.targetId, [effect])
+    else items.set(key, [effect])
   }
-  return [...items].map(([entityId, oldestFirst]) => {
+  return [...items].map(([entityId, oldestFirst]): ItemChange => {
     const first = oldestFirst[0]!
     const last = oldestFirst[oldestFirst.length - 1]!
+    const edits = oldestFirst.map(cardFileEdit)
+    if (edits[0])
+      return {
+        entityId,
+        refId: first.targetId,
+        kind: "card",
+        label: edits.at(-1)!.name,
+        created: false,
+        from: typeof first.undo?.before === "string" ? first.undo.before : null,
+        to: String(last.undo?.after),
+        effects: [...oldestFirst].reverse(),
+        file: { path: first.targetId, ...cardFileFields(edits as ReadonlyArray<CardFileEdit>) }
+      }
     const [, kind, label] = TITLE.exec(first.title)!
     const created = oldestFirst.some((e) => e.kind === "library.create")
     return {
@@ -68,16 +120,26 @@ export interface ChangeReply {
 }
 
 export const CHANGE_PATH = /^\/library\/([^/]+)\/change$/
+/** A card file's change view (§4.5): the reply's edits of the file at `path`, its last version `to`. */
+export const CARD_FILE_CHANGE_PAGE = "/files/card-change"
 
-/** The change view of one item and revision pair (§7.4). */
-export const changeViewHref = (item: Pick<ItemChange, "refId" | "from" | "to">, reply: ChangeReply) =>
-  `/library/${encodeURIComponent(item.refId)}/change?${new URLSearchParams({
-    from: item.from ?? "",
-    to: item.to,
-    reply: reply.versionId,
-    chat: reply.chatId,
-    slot: reply.slotId
-  }).toString()}`
+/** The change view of one item and revision pair (§7.4), or of a card file's edits (§4.5). */
+export const changeViewHref = (item: Pick<ItemChange, "refId" | "from" | "to" | "file">, reply: ChangeReply) =>
+  item.file
+    ? `${CARD_FILE_CHANGE_PAGE}?${new URLSearchParams({
+        path: item.file.path,
+        to: item.to,
+        reply: reply.versionId,
+        chat: reply.chatId,
+        slot: reply.slotId
+      }).toString()}`
+    : `/library/${encodeURIComponent(item.refId)}/change?${new URLSearchParams({
+        from: item.from ?? "",
+        to: item.to,
+        reply: reply.versionId,
+        chat: reply.chatId,
+        slot: reply.slotId
+      }).toString()}`
 
 /** What a change view's URL names; null when it isn't one. */
 export const changeViewTarget = (url: URL) => {
@@ -95,6 +157,16 @@ export const changeViewTarget = (url: URL) => {
     to,
     reply: reply.chatId && reply.versionId ? reply : null
   }
+}
+
+/** What a card file's change view's URL names; null when it isn't one, or names no reply. */
+export const cardFileChangeTarget = (url: URL) => {
+  const path = url.searchParams.get("path")
+  const to = url.searchParams.get("to")
+  const chatId = url.searchParams.get("chat")
+  const versionId = url.searchParams.get("reply")
+  if (url.pathname !== CARD_FILE_CHANGE_PAGE || !path || !to || !chatId || !versionId) return null
+  return { path, to, reply: { chatId, slotId: url.searchParams.get("slot") ?? "", versionId } }
 }
 
 /** Every change of the item is undone: the row says so, muted. */

@@ -73,7 +73,7 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
         if (addedBytes > maxAddedBytes) return null
         return { id: yield* record(userId, version, actorUserId, Date.now()), addedBytes }
       }).pipe(transaction(sql, "RecordReplacementVersion")),
-    RecordAttachmentCopy: ({ userId, path, inode, media, composer, maxAddedBytes }) =>
+    RecordAttachmentCopy: ({ userId, path, inode, media, composer, maxAddedBytes, card }) =>
       Effect.gen(function* () {
         const addedBytes = (yield* versionBytes(sql, userId, media.sha256)) > 0 ? 0 : media.byteSize
         // A prune can drop a duplicate after the route checked it. Ask for a reservation
@@ -91,6 +91,16 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
         })} ON CONFLICT (sha256) DO NOTHING`
         const [row] = yield* sql<{ id: string; mime: string }>`
           SELECT id, mime FROM media_assets WHERE sha256 = ${media.sha256}`
+        // A card file's reading, once per content (§4.5 of spec/WORKSHOP-CARDS.md).
+        if (card)
+          yield* sql`INSERT INTO media_card_files ${sql.insert({
+            media_id: row!.id,
+            format: card.format,
+            spec: card.spec,
+            spec_version: card.specVersion,
+            name: card.name,
+            doc_json: card.docJson
+          })} ON CONFLICT (media_id) DO NOTHING`
         // One copy per path and content: attaching it again names the same one.
         const [held] = yield* sql`SELECT 1 FROM file_versions
           WHERE owner_user_id = ${userId} AND media_id = ${row!.id} AND origin = 'attachment' AND path = ${path}`

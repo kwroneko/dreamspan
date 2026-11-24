@@ -76,7 +76,9 @@ export const ComposerImage = Schema.Struct({
   /** A workshop's attachment saved in Files (§6.1): `file` for one that isn't an image, its name and path. */
   kind: Schema.optionalKey(Schema.Literals(["file"])),
   name: Schema.optionalKey(Schema.String),
-  path: Schema.optionalKey(Schema.String)
+  path: Schema.optionalKey(Schema.String),
+  /** A character card file (spec/WORKSHOP-CARDS.md §4.5): its name and format. */
+  card: Schema.optionalKey(Schema.Struct({ name: Schema.String, format: Schema.Literals(["png", "json", "charx"]) }))
 })
 export type ComposerImage = typeof ComposerImage.Type
 export const ComposerImageKey = { chatId: ChatId, draftId: Schema.String }

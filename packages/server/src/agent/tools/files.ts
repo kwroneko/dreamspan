@@ -76,6 +76,8 @@ import {
 } from "../capabilities.ts"
 import { forkStart } from "../messages.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
+import type { Formats } from "../../importer/Formats.ts"
+import { makeCardFileTools } from "./cardFiles.ts"
 
 /** Where subagents' isolated copies go, under /files (spec/SUBAGENTS.md §3.3). */
 const COPIES = ".subagents"
@@ -120,6 +122,10 @@ export const FILE_TOOLS = [
   "search_files",
   "write_file",
   "edit_file",
+  // A character card attached as a file (spec/WORKSHOP-CARDS.md §4.5, cardFiles.ts).
+  "read_card_file",
+  "edit_card_file",
+  "import_card_file",
   "bash",
   "bash_output",
   "bash_stop"
@@ -190,6 +196,8 @@ export interface FileToolDeps {
   readonly outputs?: CommandOutputs
   /** Bytes a command moved over the internet, for the account's usage display. */
   readonly onNetwork?: (userId: string, bytes: number) => void
+  /** The format worker, for the card file tools; absent: they refuse. */
+  readonly formats?: Formats["Service"]
 }
 
 const READ_MAX_BYTES = 10 * 2 ** 20
@@ -1080,6 +1088,26 @@ export const makeFileTools = (deps: FileToolDeps) => {
       })
     )
   }
+
+  // --- read_card_file, edit_card_file, import_card_file
+  const cardFileTools = makeCardFileTools({
+    formats: () => deps.formats,
+    dataDir: deps.dataDir,
+    writer: () => deps.writer,
+    holding: deps.holding,
+    wrap: (capability, run) => wrap(capability, (ctx, args, env) => run(ctx, args, env as never)),
+    readPlace: (ctx, env, path) => readPlace(ctx, env as AccountEnv, path),
+    markRead: (ctx, full, bytes) => ctx.cache.set(readKey(full), sha256(Buffer.from(bytes))),
+    wasRead: (ctx, full) => ctx.cache.get(readKey(full)) !== undefined,
+    replace: (ctx, env, path, next) =>
+      Effect.gen(function* () {
+        const account = env as AccountEnv
+        const cwd = yield* currentDir(ctx, account)
+        const { full, root, segments } = resolveIn(ctx, path, cwd, yield* rootsOf(account, ctx), true)
+        const done = yield* replaceFile(ctx, account, full, root, segments, next, "edit")
+        return { full, effects: done.effects }
+      })
+  })
 
   /**
    * A tree whose changes a command's scan lists (§7.2): the account's Files, a host folder, or a
@@ -2504,6 +2532,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
       searchTool,
       writeTool,
       editTool,
+      ...cardFileTools,
       bashTool,
       outputTool,
       stopTool

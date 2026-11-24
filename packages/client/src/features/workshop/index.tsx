@@ -11,8 +11,8 @@ import { chatCommands } from "../chat/commands.tsx"
 import { chatKindLooks, kindShows, takesSideChat } from "../chat/kindLooks.ts"
 import { chatPanels, lazyPanel, type PanelProps } from "../chat/panels.tsx"
 import { chatHeaderAbout, chatRowAbout, messageStream } from "../chat/presentation.tsx"
-import { CHANGE_KIND, ChangeRows } from "./ChangeRows.tsx"
-import { CHANGE_PATH } from "./changeRows.ts"
+import { CARD_FILE_CHANGE_KIND, CHANGE_KIND, ChangeRows } from "./ChangeRows.tsx"
+import { CARD_FILE_CHANGE_PAGE, CHANGE_PATH } from "./changeRows.ts"
 import { WorkshopStoryLink, WorkshopStoryName } from "./storyLink.tsx"
 import { WorkshopBranchNote } from "./workshopBranches.tsx"
 import { branchControlParts } from "../chat/branchParts.ts"
@@ -75,6 +75,14 @@ function LazyChangePage() {
   return (
     <Suspense fallback={<Loading label="Loading…" onRetry={reloadPage} />}>
       <ChangePage />
+    </Suspense>
+  )
+}
+const CardFileChangePage = lazy(() => import("./ChangePage.tsx").then((m) => ({ default: m.CardFileChangePage })))
+function LazyCardFileChangePage() {
+  return (
+    <Suspense fallback={<Loading label="Loading…" onRetry={reloadPage} />}>
+      <CardFileChangePage />
     </Suspense>
   )
 }
@@ -213,6 +221,25 @@ export const register = () => [
         ? null
         : `${ref}:${url.searchParams.get("from") ?? ""}:${url.searchParams.get("to") ?? ""}`
     },
+    title: () => "Changes",
+    icon: "compare",
+    document: true
+  }),
+  // A card file's edits (spec/WORKSHOP-CARDS.md §4.5), one tab per file and reply.
+  routes.register({
+    id: CARD_FILE_CHANGE_KIND,
+    parent: "app",
+    path: CARD_FILE_CHANGE_PAGE,
+    component: LazyCardFileChangePage,
+    fillBelowHeader: true
+  }),
+  tabKinds.register({
+    id: CARD_FILE_CHANGE_KIND,
+    order: 191,
+    match: (url) =>
+      url.pathname === CARD_FILE_CHANGE_PAGE
+        ? `${url.searchParams.get("path") ?? ""}:${url.searchParams.get("to") ?? ""}`
+        : null,
     title: () => "Changes",
     icon: "compare",
     document: true
