@@ -2,7 +2,7 @@ import type { StoredStateEventData } from "@dreamspan/shared/state.ts"
 import { refusePending } from "./chatKindPolicy.ts"
 import { fileTyped, pendingRow, type SweptDraft, sweepPendingChat, titleFor } from "./pendingChats.ts"
 import { presenceAt, presenceJson } from "./participation.ts"
-import { composerKey, Draft } from "@dreamspan/shared/drafts.ts"
+import { composerKey, Draft, DraftKey } from "@dreamspan/shared/drafts.ts"
 import { composerImages } from "./composerImages.ts"
 import { composerLibrary } from "./composerLibrary.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
@@ -1277,6 +1277,28 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               yield* sql`UPDATE forks SET tip_slot_id = ${safe.parent_slot_id}, row_version = row_version + 1 WHERE tip_slot_id = ${row.slot_id}`
               yield* sql`UPDATE rollouts SET slot_id = ${safe.parent_slot_id} WHERE slot_id = ${row.slot_id}`
               yield* sql`UPDATE queued_messages SET reply_slot_id = ${safe.parent_slot_id} WHERE reply_slot_id = ${row.slot_id}`
+              // Its drafts go with it (a swipe of one's own typed while it was written, an edit
+              // of it): what each holds and its history protects goes to recovered texts first.
+              const typed = yield* sql<{
+                id: string
+                target_kind: DraftKey["targetKind"]
+                target_id: string
+                field: string
+                content: string
+              }>`SELECT id, target_kind, target_id, field, content FROM drafts
+                WHERE user_id = ${userId} AND status IN ('active', 'discarded') AND (
+                  (target_kind = 'scratchpad' AND target_id = ${row.slot_id})
+                  OR (target_kind = 'version_edit' AND target_id = ${versionId}))`
+              for (const draft of typed) {
+                const lost = yield* bin.drafts.unsaved(draft.id, draft.content, [])
+                if (lost.length > 0)
+                  yield* bin.recover(
+                    userId,
+                    new DraftKey({ targetKind: draft.target_kind, targetId: draft.target_id, field: draft.field }),
+                    lost,
+                    "discard"
+                  )
+              }
               yield* sql`DELETE FROM slots WHERE id = ${row.slot_id}`
               const queue = safe.parent_slot_id ? yield* afterReply(safe.parent_slot_id, "reply") : nothing
               const [parent] = safe.parent_slot_id
