@@ -246,9 +246,11 @@ export const pageOf = (text: string, what: string, offset: unknown, maxTokens: n
     const start = Math.max(0, Math.min(text.length, asked))
     const end = yield* pageEnd(text, start, maxTokens, count)
     const body = text.slice(start, end)
-    if (start === 0 && end === text.length) return body
+    const nextOffset = end < text.length ? end : null
+    if (start === 0 && end === text.length) return { text: body, nextOffset }
     const shown = `[Showing characters ${number(Math.min(start + 1, end))}–${number(end)} of ${number(text.length)} in ${what}.`
-    return `${body}\n${end < text.length ? `${shown} Read on with offset=${end}.]` : `${shown} That's the end.]`}`
+    const note = nextOffset === null ? "That's the end.]" : `Read on with offset=${nextOffset}.]`
+    return { text: `${body}\n${shown} ${note}`, nextOffset }
   })
 
 /** A lorebook's entries, or a card's embedded book's. */

@@ -78,7 +78,7 @@ import { forkStart } from "../messages.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
 import type { Formats } from "../../importer/Formats.ts"
 import { CARD_FILE_BYTES, makeCardFileTools } from "./cardFiles.ts"
-import { makeLibraryExportTool } from "./libraryExport.ts"
+import { EXPORT_LAST_FILE_NUMBER, makeLibraryExportTool } from "./libraryExport.ts"
 import { visibleDoc } from "../libraryView.ts"
 import {
   type ConflictChoice,
@@ -433,18 +433,21 @@ export const makeFileTools = (deps: FileToolDeps) => {
     return resolved
   }
 
+  const authorize = (ctx: ToolContext, capability: string, cardFileImport?: true) =>
+    deps.reader.AuthorizePluginTool({
+      userId: ctx.userId,
+      rolloutId: ctx.rolloutId,
+      toolCallId: ctx.toolCallId,
+      capability,
+      requireApproval: cardFileImport === true,
+      ...(cardFileImport ? { requireFiles: true as const } : {}),
+      ...(ctx.approvalDigest ? { digest: ctx.approvalDigest } : {})
+    })
+
   /** The capability's standing, checked again at the call; the account; its folders made. */
   const proof = (ctx: ToolContext, capability: string, cardFileImport?: true) =>
     Effect.gen(function* () {
-      const actor = yield* deps.reader.AuthorizePluginTool({
-        userId: ctx.userId,
-        rolloutId: ctx.rolloutId,
-        toolCallId: ctx.toolCallId,
-        capability,
-        requireApproval: cardFileImport === true,
-        ...(cardFileImport ? { requireFiles: true as const } : {}),
-        ...(ctx.approvalDigest ? { digest: ctx.approvalDigest } : {})
-      })
+      const actor = yield* authorize(ctx, capability, cardFileImport)
       const env = accountEnv(deps, actor.id)
       yield* attempt(() => prepareAccount(env))
       return { actor, env }
@@ -1004,6 +1007,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
           before = { bytes: read.bytes, info: read.info, sha256: hash, byteSize: read.bytes.byteLength }
         } else if (kind === "edit") throw new FilePathRefused(`${full} doesn't exist. Create it with write_file.`)
         const content = next(before?.bytes ?? null)
+        // An export may have waited for a separate library approval after its initial Files check.
+        if (kind === "create") yield* authorize(ctx, "files")
         const { written, versionId } = yield* writeWithVersion(
           env.userId,
           full,
@@ -1179,14 +1184,18 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const account = env as AccountEnv
         const cwd = yield* currentDir(ctx, account)
         const roots = yield* rootsOf(account, ctx)
-        const asked = resolveIn(ctx, path ?? name, cwd, roots, true)
+        const hostCwd = roots.some((root) => root.host && (cwd === root.mount || cwd.startsWith(`${root.mount}/`)))
+        const start = path === undefined && hostCwd ? FILES_MOUNT : cwd
+        const asked = resolveIn(ctx, path ?? name, start, roots, true)
+        if (asked.root.host) throw new FilePathRefused("Export to a path in your files (/files).")
         // A taken name gets " (2)", " (3)"… beside it, never replaced (reference-harness's uniquifyPath).
         const ext = posix.extname(asked.full)
         const stem = asked.full.slice(0, asked.full.length - ext.length)
         let place = asked
         for (let n = 2; yield* attempt(() => statPath(place.root.hostRoot, place.segments)); n++) {
-          if (n > 100) throw new FilePathRefused(`${asked.full} and its numbered names are taken. Give another path.`)
-          place = resolveIn(ctx, `${stem} (${n})${ext}`, cwd, roots, true)
+          if (n > EXPORT_LAST_FILE_NUMBER)
+            throw new FilePathRefused(`${asked.full} and its numbered names are taken. Give another path.`)
+          place = resolveIn(ctx, `${stem} (${n})${ext}`, start, roots, true)
         }
         const done = yield* replaceFile(ctx, account, place.full, place.root, place.segments, () => content, "create")
         return { full: place.full, effects: done.effects }

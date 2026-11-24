@@ -2,23 +2,30 @@
 // entry, a preset prompt or a whole item written to the working folder through the file tools'
 // own path: the folder, never replacing a file, quota, an undoable change, the Files capability,
 // and the library classes for what's outside view. Synthetic items only.
-import { assert, describe, it } from "@effect/vitest"
+import { assert, describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
-import type { FrozenTool, ToolContext } from "../src/agent/tools.ts"
+import { frozenTool, type FrozenTool, type ToolContext } from "../src/agent/tools.ts"
+import { offeredByGrants } from "../src/agent/approvals.ts"
+import { skillsFor } from "../src/agent/toolLoading.ts"
 import { FILE_TOOLS } from "../src/agent/tools/files.ts"
+import { makeLoadSkill } from "../src/agent/tools/loading.ts"
 import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { cardDoc, presetDoc } from "./support/docs.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
+import { tempDir } from "./support/tempDir.ts"
+import { readdir } from "node:fs/promises"
+import { join } from "node:path"
 
 describe("export_to_file", () => {
   it.live(
     "writes a field, an entry, a prompt or a whole item to the working folder, undoably",
     () => {
-      const config = testConfig()
+      const hostFolder = tempDir("export-host")
+      const config = testConfig({ hostFolders: [hostFolder] })
       return Effect.gen(function* () {
         const api = yield* client()
         const me = yield* api.Whoami()
@@ -116,6 +123,17 @@ describe("export_to_file", () => {
         // The same again never replaces it: a taken name gets (2).
         const again = yield* run("export_to_file", { kind: "card", item: "Mara Quill", field: "description" })
         assert.include(again.text, "/files/notes/Mara Quill description (2).txt")
+
+        const longLabel = "界".repeat(100)
+        const long = yield* create("card", longLabel, cardDoc(longLabel, { description: "Exact export." }))
+        const longTarget = { kind: "card", item: long.id, field: "description" }
+        for (const suffix of ["", " (2)"]) {
+          const exported = yield* run("export_to_file", longTarget)
+          assert.isUndefined(exported.isError, exported.text)
+          const path = `/files/notes/${"界".repeat(81)}${suffix}.txt`
+          assert.strictEqual(exported.effects?.[0]?.targetId, path)
+          assert.include((yield* run("read_file", { path })).text, "Exact export.")
+        }
 
         // A greeting, and the whole card as JSON (without its skills), at a path given.
         const greeting = yield* run("export_to_file", {
@@ -215,6 +233,15 @@ describe("export_to_file", () => {
         assert.include((yield* run("read_file", { path: "/files/notes/attached.txt" })).text, embedded)
 
         // Wrong targets name the choices; nothing is written.
+        for (const selectors of [{ greeting: 1 }, { field: "description", greeting: 1 }]) {
+          const incomplete = yield* run("export_to_file", { kind: "card", item: card.id, ...selectors })
+          assert.isTrue(incomplete.isError, incomplete.text)
+          assert.include(incomplete.text, "alternate_greetings")
+          assert.isUndefined(incomplete.effects)
+        }
+        const ambiguous = yield* run("export_to_file", { kind: "card", item: card.id, field: "description", entry: 7 })
+        assert.isTrue(ambiguous.isError, ambiguous.text)
+        assert.isUndefined(ambiguous.effects)
         assert.include(
           (yield* run("export_to_file", { kind: "card", item: card.id, field: "nope" })).text,
           "Give field, one of"
@@ -262,8 +289,51 @@ describe("export_to_file", () => {
         yield* api.UndoRolloutEffect({ rolloutId, toolCallId: "export", seq: effect.seq })
         assert.isTrue((yield* run("read_file", { path: "/files/notes/Mara Quill description.txt" })).isError)
 
-        const setFiles = (mode: "allow" | "off") => api.SetWorkshopGrant({ chatId: chat.id, capability: "files", mode })
+        yield* api.ChangeCast({
+          chatId: chat.id,
+          slotId: null,
+          change: { _tag: "WorkshopFolder", path: hostFolder, host: true }
+        })
+        const fromHost = { cache: new Map() }
+        const target = { kind: "card", item: card.id, field: "description" }
+        yield* api.SetFilesQuota({ userId: me.id, quotaBytes: 0 })
+        const noRoom = yield* run("export_to_file", target, fromHost)
+        assert.isTrue(noRoom.isError, noRoom.text)
+        assert.include(noRoom.text, "of 0 B")
+        yield* api.SetFilesQuota({ userId: me.id, quotaBytes: null })
+        const explicitHost = yield* run(
+          "export_to_file",
+          { ...target, path: join(hostFolder, "explicit.txt") },
+          fromHost
+        )
+        assert.isTrue(explicitHost.isError, explicitHost.text)
+        assert.include(explicitHost.text, "/files")
+        const defaultFromHost = yield* run("export_to_file", target, fromHost)
+        assert.isUndefined(defaultFromHost.isError, defaultFromHost.text)
+        assert.include(defaultFromHost.text, "/files/Mara Quill description.txt")
+        assert.deepEqual(yield* Effect.promise(() => readdir(hostFolder)), [])
+
         const revoked = yield* run(
+          "export_to_file",
+          { ...target, path: "/files/revoked.txt" },
+          {
+            sight: {
+              inView: () => Effect.succeed(false),
+              gate: () =>
+                api
+                  .SetWorkshopGrant({ chatId: chat.id, capability: "files", mode: "off" })
+                  .pipe(Effect.orDie, Effect.as({ ok: true as const }))
+            }
+          }
+        )
+        assert.isTrue(revoked.isError, revoked.text)
+        assert.include(revoked.text, "off in this workshop")
+        assert.isUndefined(revoked.effects)
+        yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "files", mode: "allow" })
+        assert.isTrue((yield* run("read_file", { path: "/files/revoked.txt" })).isError)
+
+        const setFiles = (mode: "allow" | "off") => api.SetWorkshopGrant({ chatId: chat.id, capability: "files", mode })
+        const revokedBook = yield* run(
           "export_to_file",
           { ...revision, path: "revoked.json" },
           {
@@ -276,11 +346,33 @@ describe("export_to_file", () => {
             }
           }
         )
-        assert.isTrue(revoked.isError)
-        assert.include(revoked.text, "off in this workshop")
+        assert.isTrue(revokedBook.isError)
+        assert.include(revokedBook.text, "off in this workshop")
+
         // Files turned off in this workshop: refused like every file tool.
         const off = yield* run("export_to_file", { kind: "card", item: card.id, path: "off.txt" })
         assert.include(off.text, "off in this workshop")
+
+        const offered = yield* offeredByGrants(
+          { registries: registry, reader: base.reader, userId: me.id, chatId: chat.id },
+          [toolForKind(registry, "workshop", "read_card")!, tool]
+        )
+        const names = offered.tools.map((tool) => tool.id)
+        assert.deepEqual(names, ["read_card"])
+        const cards = yield* makeLoadSkill().execute(
+          {
+            ...base,
+            offer: {
+              kind: "workshop",
+              tools: offered.tools.map((tool) => ({ ...frozenTool(tool), deferred: true })),
+              loaded: new Set(),
+              cardSkills: skillsFor(registry.skills.list(), names)
+            }
+          },
+          { name: "cards" }
+        )
+        assert.deepEqual(cards.loaded, ["read_card"])
+        assert.notInclude(cards.text, "export_to_file")
         yield* setFiles("allow")
         assert.isTrue((yield* run("read_file", { path: "/files/notes/revoked.json" })).isError)
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
@@ -316,36 +408,55 @@ describe("export_to_file", () => {
         label: "Archive",
         subtitle: "",
         doc: cardDoc("Archive", {
-          description: Array.from({ length: 3000 }, (_, i) => `Shelf ${i + 1}.`).join("\n")
+          description: Array.from({ length: 3000 }, (_, i) => `Shelf ${i + 1}.`).join("\n"),
+          first_mes: "Read on with offset= is part of this greeting."
         }) as never,
         schemaVersion: cardDoc("Archive").schema_version,
         origin: "user",
         sourcePath: null
       })
-      const offer = (names: ReadonlyArray<string>) => ({
+      const offer = (names: ReadonlyArray<string>): NonNullable<ToolContext["offer"]> => ({
         kind: "workshop",
         tools: names.map((name) => ({ name }) as FrozenTool),
-        loaded: new Set<string>()
+        loaded: new Set(),
+        cardSkills: []
       })
       const read = (context: Partial<ToolContext>, args: unknown) =>
         toolForKind(registry, "workshop", "read_card")!.execute({ ...base, ...context } as ToolContext, args as never)
       const page = { card: ref.id, view: "field", field: "description", max_tokens: 200 }
-      const offered = yield* read({ offer: offer(["read_card", "export_to_file"]) as never }, page)
+      const withExport = offer(["read_card", "export_to_file"])
+      const withoutExport = offer(["read_card"])
+      const offered = yield* read({ offer: withExport }, page)
       assert.include(offered.text, "save it to a file with export_to_file")
-      const summary = yield* read({ offer: offer(["read_card", "export_to_file"]) as never }, { card: ref.id })
+      const summary = yield* read({ offer: withExport }, { card: ref.id })
       assert.include(summary.text, "export_to_file")
-      const without = yield* read({ offer: offer(["read_card"]) as never }, page)
+      const without = yield* read({ offer: withoutExport }, page)
       assert.notInclude(without.text, "export_to_file")
-      // A page that is the whole field says nothing.
-      const short = yield* read(
-        { offer: offer(["read_card", "export_to_file"]) as never },
-        {
-          ...page,
-          max_tokens: 8000,
-          offset: 30_000
-        }
+      const last = yield* read({ offer: withExport }, { ...page, offset: 30_000, max_tokens: 8000 })
+      assert.notInclude(last.text, "export_to_file")
+      const short = yield* read({ offer: withExport }, { ...page, field: "first_mes" })
+      assert.include(short.text, "Read on with offset= is part of this greeting.")
+      expect.soft(short.text).not.toContain("export_to_file")
+
+      const sent = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: chat.activeLeafSlotId,
+          branch: false,
+          content: "",
+          library: [{ kind: "card", refId: ref.id }]
+        })
       )
-      assert.notInclude(short.text, "export_to_file")
+      const pinned = { card: ref.id, revision: ref.headRevisionId }
+      const attached = { leafSlotId: sent.entry.slotId, forkId: sent.chat.currentForkId }
+      const cut = yield* read({ ...attached, offer: withExport }, pinned)
+      assert.strictEqual(JSON.parse(cut.text).nextOffset, 4000)
+      expect.soft(cut.text).toContain("save it to a file with export_to_file")
+      const noTool = yield* read({ ...attached, offer: withoutExport }, pinned)
+      assert.notInclude(noTool.text, "export_to_file")
+      const complete = yield* read({ ...attached, offer: withExport }, { ...pinned, field: "first_mes" })
+      assert.strictEqual(JSON.parse(complete.text).doc, "Read on with offset= is part of this greeting.")
+      assert.notInclude(complete.text, "export_to_file")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

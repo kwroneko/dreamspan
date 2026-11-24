@@ -175,6 +175,9 @@ export const viewHelp: Record<"card" | "preset" | "lorebook", string> = {
     'Views: "whole" (the default when it fits), "summary" (its prompts\' sizes, the default when it\'s too long), "index" (its prompts in order, 50 a page, after an identifier), "prompt" (one prompt by identifier, its content paged).'
 }
 
+const EXPORT_HINT = "To search or work on all of it, save it to a file with export_to_file."
+const offersExport = (context: ToolContext) => context.offer?.tools.some((tool) => tool.name === "export_to_file")
+
 /** A pinned read pages one selected value or the full JSON, by exact character offset. */
 const readAttached = (
   context: ToolContext,
@@ -216,6 +219,7 @@ const readAttached = (
     const data = typeof value === "string" ? value : JSON.stringify(value)
     const offset = Math.min(typeof args.offset === "number" ? args.offset : 0, data.length)
     const end = Math.min(offset + 4_000, data.length)
+    const nextOffset = end < data.length ? end : null
     return {
       frame: toolResultFrame(identity),
       text:
@@ -225,10 +229,16 @@ const readAttached = (
               ...identity,
               excerpt: data.slice(offset, end),
               offset,
-              nextOffset: end < data.length ? end : null
+              nextOffset,
+              ...(nextOffset !== null && offersExport(context) ? { hint: EXPORT_HINT } : {})
             })
     }
   })
+
+interface PagedView {
+  readonly result: { readonly text: string; readonly isError?: boolean }
+  readonly hasMore: boolean
+}
 
 /**
  * The paged views read_card, read_lorebook, read_preset and read_card_file share (§4.3 point 2,
@@ -244,12 +254,16 @@ export const pagedView = (
   window: number | undefined
 ) =>
   Effect.gen(function* () {
-    const answer = (text: string, isError = false): { readonly text: string; readonly isError?: boolean } => ({
-      text,
-      ...(isError ? { isError } : {})
+    const answer = (text: string, isError = false, hasMore = false): PagedView => ({
+      result: { text, ...(isError ? { isError } : {}) },
+      hasMore
     })
     const view = args.view as (typeof VIEWS)[number] | undefined
     const maxTokens = pageTokens(args.max_tokens)
+    const page = (prefix: string, value: string, what: string) =>
+      pageOf(value, what, args.offset, maxTokens, count).pipe(
+        Effect.map(({ text, nextOffset }) => answer(prefix + text, false, nextOffset !== null))
+      )
     const summary = () =>
       Effect.map(
         withCounts(count, (c) => summaryLines(kind, visible, c)),
@@ -259,7 +273,9 @@ export const pagedView = (
       const fits = (yield* count(JSON.stringify(doc))) <= inlineLimit(window)
       if (!fits)
         return answer(
-          `${yield* summary()}\n${view === "whole" ? "Too long to read whole: read it by field." : "Too long to read whole: this is its summary. Read it with view field, index or entry."}`
+          `${yield* summary()}\n${view === "whole" ? "Too long to read whole: read it by field." : "Too long to read whole: this is its summary. Read it with view field, index or entry."}`,
+          false,
+          true
         )
       return null
     }
@@ -284,14 +300,12 @@ export const pagedView = (
         const n = typeof args.greeting === "number" ? args.greeting : 0
         const greeting = greetings[n - 1]
         if (typeof greeting !== "string") return answer(`Give greeting, from 1 to ${greetings.length}.`, true)
-        return answer(
-          `${head}, alternate greeting ${n}:\n${yield* pageOf(greeting, `alternate greeting ${n}`, args.offset, maxTokens, count)}`
-        )
+        return yield* page(`${head}, alternate greeting ${n}:\n`, greeting, `alternate greeting ${n}`)
       }
       const value = visible[field]
       if (!CARD_TEXT_FIELDS.includes(field as (typeof CARD_TEXT_FIELDS)[number]) || typeof value !== "string")
         return answer(`Give field, one of ${[...CARD_TEXT_FIELDS, "alternate_greetings"].join(", ")}.`, true)
-      return answer(`${head}, ${field}:\n${yield* pageOf(value, field, args.offset, maxTokens, count)}`)
+      return yield* page(`${head}, ${field}:\n`, value, field)
     }
     // entry or prompt: its settings, then a page of its text.
     const wanted = view === "prompt" ? args.prompt : args.entry
@@ -304,8 +318,10 @@ export const pagedView = (
     if (part === null) return answer(`No ${view} ${String(wanted)}: see view index.`, true)
     const { content, ...settings } = part
     const what = view === "prompt" ? `prompt ${String(wanted)}` : `entry ${String(wanted)}`
-    return answer(
-      `${head}, ${what}: ${JSON.stringify(settings)}\ncontent:\n${yield* pageOf(typeof content === "string" ? content : "", `the content of ${what}`, args.offset, maxTokens, count)}`
+    return yield* page(
+      `${head}, ${what}: ${JSON.stringify(settings)}\ncontent:\n`,
+      typeof content === "string" ? content : "",
+      `the content of ${what}`
     )
   })
 
@@ -314,15 +330,8 @@ export const pagedView = (
  * run offers export_to_file (§4.3 point 2): in the result, so the read tools' definitions stay
  * the same bytes whether files are offered or not.
  */
-export const withExportHint = <T extends { readonly text: string; readonly isError?: boolean }>(
-  context: ToolContext,
-  viewed: T
-): T =>
-  viewed.isError !== true &&
-  /Read on with offset=|Too long to read whole/.test(viewed.text) &&
-  context.offer?.tools.some((tool) => tool.name === "export_to_file") === true
-    ? { ...viewed, text: `${viewed.text}\nTo search or work on all of it, save it to a file with export_to_file.` }
-    : viewed
+export const withExportHint = (context: ToolContext, { result, hasMore }: PagedView) =>
+  hasMore && offersExport(context) ? { ...result, text: `${result.text}\n${EXPORT_HINT}` } : result
 
 const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Record<string, unknown>>> => ({
   source: import.meta.url,

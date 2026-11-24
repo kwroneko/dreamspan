@@ -12,6 +12,7 @@ import { Type } from "@earendil-works/pi-ai"
 import type { LibraryRef, RefId, RevisionId } from "@dreamspan/shared/library.ts"
 import type { RolloutEffectRecord } from "@dreamspan/shared/workshopApi.ts"
 import { Effect } from "effect"
+import { NAME_MAX } from "../../files/safePath.ts"
 import { libraryClassIds } from "../capabilities.ts"
 import { CARD_TEXT_FIELDS, findPart, visibleDoc } from "../libraryView.ts"
 import { toolResultFrame } from "../toolData.ts"
@@ -23,6 +24,7 @@ const EXPORT_TOOL = "export_to_file"
 
 /** The largest text written, as write_file's content. */
 const EXPORT_MAX_BYTES = 8 * 2 ** 20
+export const EXPORT_LAST_FILE_NUMBER = 100
 
 type Kind = "card" | "preset" | "lorebook"
 type Doc = Readonly<Record<string, unknown>>
@@ -36,8 +38,8 @@ export interface LibraryExportDeps {
     run: (ctx: ToolContext, args: Record<string, unknown>, env: Env) => Effect.Effect<ToolOutput, unknown>
   ) => (ctx: ToolContext, args: Record<string, unknown>) => Effect.Effect<ToolOutput>
   /**
-   * Creates a new file as write_file does (the working folder, the writable roots, quota, an
-   * undoable change), at `path` or, without one, `name` in the working directory; a taken name
+   * Creates a new file with the Files quota and Undo. The default path uses `name` in the
+   * working directory, or in /files when the working directory is a host folder. A taken name
    * gets " (2)", never replaced.
    */
   readonly create: (
@@ -106,30 +108,37 @@ const targetOf = (
   visible: Doc,
   args: Readonly<Record<string, unknown>>
 ): { readonly text: string; readonly what: string; readonly stem: string; readonly ext: string } => {
-  const field = typeof args.field === "string" ? args.field : undefined
-  if (field !== undefined) {
+  const { greeting, entry, prompt } = args
+  if (greeting !== undefined && args.field !== "alternate_greetings")
+    throw new ToolInputRefused('Give field "alternate_greetings" with greeting.')
+  if (args.field !== undefined) {
+    if (entry !== undefined || prompt !== undefined)
+      throw new ToolInputRefused("Choose a field, entry or prompt to export.")
     if (kind !== "card")
       throw new ToolInputRefused(
         `A ${kind} is written by ${kind === "preset" ? "prompt" : "entry"}, or whole: give ${kind === "preset" ? "prompt" : "entry"}, or nothing.`
       )
+    const field = String(args.field)
     if (field === "alternate_greetings") {
       const greetings = Array.isArray(visible.alternate_greetings) ? visible.alternate_greetings : []
-      const n = typeof args.greeting === "number" ? args.greeting : 0
-      const greeting = greetings[n - 1]
-      if (typeof greeting !== "string")
+      const n = typeof greeting === "number" ? greeting : 0
+      const text = greetings[n - 1]
+      if (typeof text !== "string")
         throw new ToolInputRefused(
           greetings.length === 0
             ? "This card has no alternate greetings."
             : `Give greeting, from 1 to ${greetings.length}.`
         )
-      return { text: greeting, what: `alternate greeting ${n}`, stem: `alternate greeting ${n}`, ext: ".txt" }
+      return { text, what: `alternate greeting ${n}`, stem: `alternate greeting ${n}`, ext: ".txt" }
     }
     const value = visible[field]
     if (!CARD_TEXT_FIELDS.includes(field as (typeof CARD_TEXT_FIELDS)[number]) || typeof value !== "string")
       throw new ToolInputRefused(`Give field, one of ${[...CARD_TEXT_FIELDS, "alternate_greetings"].join(", ")}.`)
     return { text: value, what: field, stem: field, ext: ".txt" }
   }
-  const wanted = kind === "preset" ? args.prompt : args.entry
+  if (kind === "preset" ? entry !== undefined : prompt !== undefined)
+    throw new ToolInputRefused(kind === "preset" ? "A preset has prompts: give prompt." : "Give entry, a uid.")
+  const wanted = kind === "preset" ? prompt : entry
   if (wanted !== undefined) {
     if (kind === "card" && visible.character_book === undefined)
       throw new ToolInputRefused("This card has no lorebook.")
@@ -146,22 +155,26 @@ const targetOf = (
       ext: ".txt"
     }
   }
-  if (kind === "preset" ? args.entry !== undefined : args.prompt !== undefined)
-    throw new ToolInputRefused(kind === "preset" ? "A preset has prompts: give prompt." : "Give entry, a uid.")
   return { text: `${JSON.stringify(visible, null, 2)}\n`, what: `the whole ${kind}`, stem: "", ext: ".json" }
 }
 
-/** A name for a file: no slashes or control characters, no leading dots, at most 120 characters. */
+/** A safe default name with space for its extension and largest collision suffix. */
 const fileNameOf = (label: string, stem: string, ext: string, kind: Kind) => {
-  const base = [label, stem]
+  const candidate = [label, stem]
     .join(" ")
     .replace(/[\u0000-\u001f\u007f/\\]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^\.+/, "")
-    .slice(0, 120)
-    .trim()
-  return `${base === "" ? kind : base}${ext}`
+  let base = ""
+  let remainingBytes = NAME_MAX - Buffer.byteLength(` (${EXPORT_LAST_FILE_NUMBER})${ext}`)
+  for (const character of candidate) {
+    const bytes = Buffer.byteLength(character)
+    if (base.length + character.length > 120 || bytes > remainingBytes) break
+    base += character
+    remainingBytes -= bytes
+  }
+  return `${base.trim() || kind}${ext}`
 }
 
 const number = (n: number) => n.toLocaleString("en-US")
@@ -178,7 +191,7 @@ export const makeLibraryExportTool = (deps: LibraryExportDeps): RolloutTool<Reco
   storyRead: "library",
   titleField: "item",
   description:
-    "Writes a card's field, a lorebook entry, a preset prompt or a whole card, lorebook or preset as text to a new file in your files, so search_files and bash can work on all of it when it's too long to read in pages. Give field (and greeting) for a card's field, entry (a uid, also for a card's lorebook) or prompt (an identifier), or none of them for the whole item as JSON. revision reads an earlier revision (a number from list_revisions, an id, or the revision an attachment shows). path: where, absolute or relative to the working directory (default: a file named after the item there); an existing file is never replaced, a taken name gets (2). The file is a copy: changing it changes nothing in the library; change the item with its edit tools. The user can undo the new file.",
+    "Writes a card's field, a lorebook entry, a preset prompt or a whole card, lorebook or preset as text to a new file in your files, so search_files and bash can work on all of it when it's too long to read in pages. Give field (and greeting) for a card's field, entry (a uid, also for a card's lorebook) or prompt (an identifier), or none of them for the whole item as JSON. revision reads an earlier revision (a number from list_revisions, an id, or the revision an attachment shows). path: where in /files, absolute or relative to the working directory (default: a file named after the item there, or at /files when working in a host folder); an existing file is never replaced, a taken name gets (2). The file is a copy: changing it changes nothing in the library; change the item with its edit tools. The user can undo the new file.",
   parameters: Type.Object(
     {
       kind: Type.Union([Type.Literal("card"), Type.Literal("preset"), Type.Literal("lorebook")]),
