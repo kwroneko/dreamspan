@@ -186,6 +186,34 @@ describe("reply contract", () => {
     }
   )
 
+  it.live("a live reply awaiting its nudge has no recorded outcome", () =>
+    Effect.gen(function* () {
+      let next: ServerResponse | undefined
+      const mock = yield* scriptedMock((n, _body, res) => {
+        if (n === 0) plain(res)
+        else next = res
+      })
+      const api = yield* client()
+      const events: Array<ChatEvent> = []
+      yield* Effect.forkScoped(
+        generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: {},
+          state: TOOLS_ON,
+          events
+        })
+      )
+      yield* eventually(() => next !== undefined)
+      const versionId = generating(events)!.id
+      const live = yield* api.GetRunTranscript({ versionId })
+      assert.exists(live.contract)
+      assert.isNull(live.contract?.outcome)
+      sse(next!, toolCall("send_message", { message: "Sent words." }))
+      yield* eventually(() => finished(events, versionId) !== undefined)
+      assert.strictEqual((yield* api.GetRunTranscript({ versionId })).contract?.outcome, "recovered")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
   it.live("the preset's own nudge is sent instead of the default, its macros filled in", () => {
     const config = testConfig()
     return Effect.gen(function* () {

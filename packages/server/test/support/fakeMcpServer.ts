@@ -32,11 +32,15 @@ export interface FakeMcpState {
   auth: FakeAuthServer | null
   /** Which transports answer; the other paths answer 404. */
   streamable: boolean
+  /** Streamable HTTP served without session IDs. */
+  stateless: boolean
   sse: boolean
   /** `tools/list` never answers. */
   hangList: boolean
   /** Every request gets this status, its body naming the request's Authorization header. */
   failStatus: number | null
+  /** A transport failure for a tools/call POST, if the callback returns one. */
+  failCall: (() => { status: number; body: string } | "disconnect" | null) | null
   /** Every request is redirected here. */
   redirect: string | null
   /** The instructions `initialize` answers with. */
@@ -94,9 +98,11 @@ export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): P
     key: null,
     auth: null,
     streamable: true,
+    stateless: false,
     sse: true,
     hangList: false,
     failStatus: null,
+    failCall: null,
     redirect: null,
     instructions: null,
     call: null,
@@ -207,6 +213,19 @@ export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): P
       return
     }
     if (url.pathname === "/mcp" && state.streamable) {
+      if (state.stateless && request.method === "GET") {
+        response.writeHead(405).end()
+        return
+      }
+      const failure = methodsOf(body).includes("tools/call") ? state.failCall?.() : null
+      if (failure === "disconnect") {
+        response.destroy()
+        return
+      }
+      if (failure) {
+        response.writeHead(failure.status).end(failure.body)
+        return
+      }
       const id = request.headers["mcp-session-id"]
       let transport = typeof id === "string" ? streamable.get(id) : undefined
       if (!transport) {
@@ -215,7 +234,7 @@ export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): P
           return
         }
         const fresh = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID(),
+          ...(state.stateless ? {} : { sessionIdGenerator: () => randomUUID() }),
           onsessioninitialized: (session) => void streamable.set(session, fresh)
         })
         await mcpServer().connect(fresh)

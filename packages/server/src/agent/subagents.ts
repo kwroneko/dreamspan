@@ -1583,7 +1583,8 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
             // A model with no known price is held to its token limit alone.
             s.unpriced === 0 && caps.cost > 0 ? s.cost / caps.cost : 0,
             clock.elapsed() / limitMs,
-            s.runUnpriced === 0 && runCost > 0 ? s.runCost / runCost : 0
+            // Known charges still count toward the combined limit.
+            runCost > 0 ? s.runCost / runCost : 0
           ]
           if (shares.some((share) => share >= 1)) {
             stopAtLimit()

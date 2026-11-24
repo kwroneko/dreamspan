@@ -4,9 +4,8 @@
 // the reader's path, state and card reads: nothing here writes.
 import { CurrentUser } from "@dreamspan/shared/api.ts"
 import type { EntityId, PathEntry } from "@dreamspan/shared/chat.ts"
-import { PANEL_MESSAGES, PANEL_TEXT, type PanelDataApi, type PanelMessage } from "@dreamspan/shared/panelDataApi.ts"
+import { PANEL_TEXT, type PanelDataApi, type PanelMessage } from "@dreamspan/shared/panelDataApi.ts"
 import { foldState } from "@dreamspan/shared/state.ts"
-import { NotFound } from "@dreamspan/shared/errors.ts"
 import { Effect } from "effect"
 import { Reader } from "../db/Database.ts"
 import { internal } from "./internal.ts"
@@ -37,14 +36,12 @@ export const makePanelDataHandlers = Effect.gen(function* () {
     GetPanelData: ({ chatId, forkId, slotId }) =>
       Effect.gen(function* () {
         const userId = (yield* CurrentUser).id
-        const path = yield* reader.GetPath({ userId, chatId, forkId, leafSlotId: slotId, limit: PANEL_MESSAGES })
-        const own = path.entries.at(-1)
-        // A deleted message's panel doesn't show.
-        if (own === undefined || own.slotId !== slotId) return yield* new NotFound({ entity: "slot", id: slotId })
-        const state = foldState(yield* reader.StateEventsAt({ userId, chatId, slotId, forkId }))
+        const { entries, events } = yield* reader.PanelContext({ userId, chatId, forkId, slotId })
+        const own = entries.at(-1)!
+        const state = foldState(events)
         const speakerOf = (entry: PathEntry) => entry.version.speakerEntityId ?? entry.firstSpeakerEntityId
         const ids = new Set<EntityId>(state.playedByMe as Array<EntityId>)
-        for (const entry of path.entries) {
+        for (const entry of entries) {
           const id = speakerOf(entry)
           if (id !== null) ids.add(id)
         }
@@ -64,7 +61,7 @@ export const makePanelDataHandlers = Effect.gen(function* () {
             .map((id) => cards.get(id)?.name)
             .find((name) => name) ??
           ""
-        const messages = path.entries.map((entry): PanelMessage => {
+        const messages = entries.map((entry): PanelMessage => {
           const id = speakerOf(entry)
           const card = id === null ? undefined : cards.get(id)
           const isUser =

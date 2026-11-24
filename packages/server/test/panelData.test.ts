@@ -9,7 +9,7 @@ import { Effect } from "effect"
 import { fitText } from "../src/api/panelData.ts"
 import { Generator } from "../src/chat/Generator.ts"
 import { Writer } from "../src/db/Database.ts"
-import { client, serverLayer, testConfig } from "./support/config.ts"
+import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 
 describe("GetPanelData", () => {
   it.live("reads the path up to the panel's message, its variables and names, nothing after", () =>
@@ -90,4 +90,26 @@ describe("GetPanelData", () => {
       [1]
     )
   })
+
+  it.live("reads a shared slot on either fork and refuses a slot exclusive to another fork", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateChat({ title: "Forked panels" })
+      const send = (parentSlotId: SlotId | null, content: string) =>
+        posted(api.SendMessage({ chatId: chat.id, parentSlotId, branch: false, content }))
+      const root = (yield* send(null, "Root")).entry.slotId
+      const first = (yield* send(root, "First")).entry.slotId
+      const forkId = (yield* api.GetChat({ chatId: chat.id })).currentForkId!
+      const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: forkId, atSlotId: root })
+      const second = (yield* send(root, "Second")).entry.slotId
+      const read = (forkId: typeof fork.id | null, slotId: SlotId) =>
+        api.GetPanelData({ chatId: chat.id, forkId, slotId })
+      assert.strictEqual((yield* read(forkId, first)).messages.at(-1)?.message, "First")
+      assert.strictEqual((yield* read(fork.id, root)).messages.at(-1)?.message, "Root")
+      assert.strictEqual((yield* read(null, second)).messages.at(-1)?.message, "Second")
+      for (const rejected of [read(forkId, second), read(fork.id, first), read(null, first)]) {
+        assert.strictEqual((yield* rejected.pipe(Effect.flip))._tag, "NotFound")
+      }
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
 })

@@ -52,14 +52,14 @@ import type { McpCallRow } from "./mcpRows.ts"
 
 /**
  * The outcome the run's end recorded, over the transcript's own: only the run knows it was
- * stopped, failed or capped. A run Resume carried on has its record cleared; stopped, it says so.
+ * stopped, failed or capped. While it runs, its outcome stays open until the ending is recorded.
  */
 const recordedOutcome = (
   record: ContractRecord,
   row: { readonly status: string; readonly outcome: ContractOutcome | null }
 ): ContractRecord => ({
   ...record,
-  outcome: row.outcome ?? (row.status === "stopped" ? "stopped" : record.outcome)
+  outcome: row.outcome ?? (row.status === "running" ? null : row.status === "stopped" ? "stopped" : record.outcome)
 })
 
 /** The names a request's context used (`AssembledRequest.names`), for the contract's records. */

@@ -34,7 +34,8 @@ import { SqlClient } from "effect/sql"
 import { toBinItem, toRecoveredText } from "./bin.ts"
 import { binItemBranches, binItemForks } from "./binForks.ts"
 import { reachableSlot } from "./graphReachability.ts"
-import { branchStart, forkColumns, forkRecency, forkThrough } from "./forks.ts"
+import { branchStart, forkColumns, forkRecency, forkThrough, onForkPath } from "./forks.ts"
+import { PANEL_MESSAGES } from "@dreamspan/shared/panelDataApi.ts"
 import {
   displayEndOf,
   displayLength,
@@ -460,6 +461,44 @@ export const makeReadHandlers = Effect.gen(function* () {
       }
     })
 
+  const pathAt = (chatId: ChatId, fork: ForkRow, leafSlotId: SlotId | null, limit: number) =>
+    Effect.gen(function* () {
+      const leaf = (leafSlotId ?? fork.tip_slot_id) as SlotId | null
+      if (!(yield* rearranges(sql, chatId, fork.id))) {
+        // No insertions: the display path is the structural one, read as before.
+        if (leaf === null) return { entries: [], olderLeafSlotId: null, tipSlotId: fork.tip_slot_id as SlotId | null }
+        const rows = byDepth(yield* pathWindow(sql, chatId, leaf, limit, fork.id))
+        if (rows.length === 0) return yield* new NotFound({ entity: "slot", id: leaf })
+        // Deleted messages are walked through but not shown; their replies stay in place.
+        return {
+          entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
+          olderLeafSlotId: rows[0]!.parent_slot_id as SlotId | null,
+          tipSlotId: fork.tip_slot_id as SlotId | null
+        }
+      }
+      // The last `limit` positions up to the leaf, or up to the display end.
+      const shown = yield* displayTo(chatId, fork, leafSlotId)
+      if (shown.end < 0) return { entries: [], olderLeafSlotId: null, tipSlotId: fork.tip_slot_id as SlotId | null }
+      const first = Math.max(0, shown.end - limit + 1)
+      const rows = yield* displayWindow(sql, shown.pieces, first, shown.end, fork.id)
+      return {
+        entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
+        olderLeafSlotId: (yield* slotAtPosition(sql, shown.pieces, first - 1)) as SlotId | null,
+        tipSlotId: fork.tip_slot_id as SlotId | null
+      }
+    })
+
+  const decodedState = (chatId: ChatId, slotId: SlotId | null, fork: string | null, operation: string) =>
+    Effect.gen(function* () {
+      const rows = yield* stateEventsThrough(sql, chatId, slotId, fork)
+      const events = yield* Effect.forEach(rows, (row) =>
+        decodeStateEvent({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }).pipe(
+          Effect.mapError((error) => new StorageError({ reason: "corrupt", operation, message: error.message }))
+        )
+      )
+      return yield* withoutPurged(sql, events)
+    })
+
   const handlers = {
     WorkshopOperationInfo: (input) => operationInfo(sql, input).pipe(query("WorkshopOperationInfo")),
     // --- Parallel threads (spec/THREADS.md §4.3)
@@ -477,30 +516,19 @@ export const makeReadHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const chat = yield* ownedChat(userId, chatId)
         const fork = yield* liveFork(chat, forkId ?? null)
-        const leaf = (leafSlotId ?? fork.tip_slot_id) as SlotId | null
-        if (!(yield* rearranges(sql, chatId, fork.id))) {
-          // No insertions: the display path is the structural one, read as before.
-          if (leaf === null) return { entries: [], olderLeafSlotId: null, tipSlotId: fork.tip_slot_id as SlotId | null }
-          const rows = byDepth(yield* pathWindow(sql, chatId, leaf, limit, fork.id))
-          if (rows.length === 0) return yield* new NotFound({ entity: "slot", id: leaf })
-          // Deleted messages are walked through but not shown; their replies stay in place.
-          return {
-            entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
-            olderLeafSlotId: rows[0]!.parent_slot_id as SlotId | null,
-            tipSlotId: fork.tip_slot_id as SlotId | null
-          }
-        }
-        // The last `limit` positions up to the leaf, or up to the display end.
-        const shown = yield* displayTo(chatId, fork, leafSlotId)
-        if (shown.end < 0) return { entries: [], olderLeafSlotId: null, tipSlotId: fork.tip_slot_id as SlotId | null }
-        const first = Math.max(0, shown.end - limit + 1)
-        const rows = yield* displayWindow(sql, shown.pieces, first, shown.end, fork.id)
-        return {
-          entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
-          olderLeafSlotId: (yield* slotAtPosition(sql, shown.pieces, first - 1)) as SlotId | null,
-          tipSlotId: fork.tip_slot_id as SlotId | null
-        }
+        return yield* pathAt(chatId, fork, leafSlotId, limit)
       }).pipe(query("GetPath")),
+
+    PanelContext: ({ userId, chatId, forkId, slotId }) =>
+      Effect.gen(function* () {
+        const chat = yield* ownedChat(userId, chatId)
+        const fork = yield* liveFork(chat, forkId)
+        if (!(yield* onForkPath(sql, chatId, fork, slotId))) return yield* new NotFound({ entity: "slot", id: slotId })
+        const { entries } = yield* pathAt(chatId, fork, slotId, PANEL_MESSAGES)
+        // A deleted message's panel doesn't show.
+        if (entries.at(-1)?.slotId !== slotId) return yield* new NotFound({ entity: "slot", id: slotId })
+        return { entries, events: yield* decodedState(chatId, slotId, fork.id, "PanelContext") }
+      }).pipe(query("PanelContext")),
 
     // The message's own versions, each as the fork shows it: a copy it amended in its
     // original's place, with the fork's flags.
@@ -550,15 +578,7 @@ export const makeReadHandlers = Effect.gen(function* () {
           const viewed = yield* liveFork(chat, fork as ForkId)
           if (viewed.tip_slot_id === slotId) at = (yield* displayEndOf(sql, chatId, viewed)) as SlotId | null
         }
-        const rows = yield* stateEventsThrough(sql, chatId, at, fork)
-        const events = yield* Effect.forEach(rows, (row) =>
-          decodeStateEvent({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }).pipe(
-            Effect.mapError(
-              (error) => new StorageError({ reason: "corrupt", operation: "StateEventsAt", message: error.message })
-            )
-          )
-        )
-        return yield* withoutPurged(sql, events)
+        return yield* decodedState(chatId, at, fork, "StateEventsAt")
       }).pipe(query("StateEventsAt")),
 
     ListBin: ({ userId, limit, before }) =>
