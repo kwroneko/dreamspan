@@ -72,7 +72,8 @@ describe("libraryView", () => {
     const preset = {
       prompts: [
         { identifier: "main", name: "Main", content: "Be brief." },
-        { identifier: "nsfw", name: "Aux", content: "" }
+        { identifier: "nsfw", name: "Aux", content: "" },
+        { identifier: "legacy", name: "Legacy custom", content: "End." }
       ],
       order: [
         { identifier: "main", enabled: true },
@@ -80,9 +81,10 @@ describe("libraryView", () => {
       ]
     }
     expect(summaryLines("preset", preset, count)).toEqual([
-      "2 prompts, 2 in order",
+      "3 prompts, 2 in order",
       "- Main (main; on): 3 tokens",
-      "- Aux (nsfw; off): 0 tokens"
+      "- Aux (nsfw; off): 0 tokens",
+      "- Legacy custom (legacy; off): 1 tokens"
     ])
   })
 })

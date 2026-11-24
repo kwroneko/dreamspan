@@ -4,6 +4,8 @@
 // text), to be read in pages. Pure: the caller passes the model's local token counter, so the
 // same revision and model always render the same bytes.
 import { withoutCardSkills } from "./toolLoading.ts"
+import type { PresetPrompt, PromptOrderEntry } from "@dreamspan/shared/docs/preset.ts"
+import { presetOrder } from "@dreamspan/shared/presetOrder.ts"
 
 type LibraryKind = "card" | "lorebook" | "preset"
 type Doc = Readonly<Record<string, unknown>>
@@ -88,14 +90,20 @@ export const summaryLines = (kind: LibraryKind, doc: Doc, count: CountText): Rea
     ]
   }
   if (kind === "lorebook") return [`${list(doc.entries).length} entries`, ...bookLines(doc, count)]
-  const prompts = new Map(list(doc.prompts).map((p) => [text(record(p).identifier), record(p)]))
-  const order = list(doc.order).map(record)
-  const shown = order.slice(0, INDEX_PAGE).map((entry) => {
-    const prompt = prompts.get(text(entry.identifier)) ?? {}
-    const name = text(prompt.name) || text(entry.identifier)
-    return `- ${name} (${text(entry.identifier)}; ${entry.enabled === false ? "off" : "on"}): ${number(tokens(count, text(prompt.content)))} tokens`
+  const saved = list(doc.prompts) as ReadonlyArray<PresetPrompt>
+  const order = list(doc.order) as ReadonlyArray<PromptOrderEntry>
+  const prompts = new Map(saved.map((prompt) => [prompt.identifier, prompt]))
+  const ordered = new Set(order.map((entry) => entry.identifier))
+  const indexed = [
+    ...order,
+    ...presetOrder(saved, order).filter((entry) => prompts.has(entry.identifier) && !ordered.has(entry.identifier))
+  ]
+  const shown = indexed.slice(0, INDEX_PAGE).map((entry) => {
+    const prompt = prompts.get(entry.identifier)
+    const name = prompt?.name || entry.identifier
+    return `- ${name} (${entry.identifier}; ${entry.enabled === false ? "off" : "on"}): ${number(tokens(count, text(prompt?.content)))} tokens`
   })
-  const more = order.length - shown.length
+  const more = indexed.length - shown.length
   return [
     `${prompts.size} prompts, ${order.length} in order`,
     ...shown,
