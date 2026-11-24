@@ -208,7 +208,11 @@ function useLinkGestures(store: WorkbenchStore) {
       else store.openIn(anchor.closest<HTMLElement>("[data-frame]")?.dataset["frame"], href, { whole: true })
     }
     const beside = (event: Event) => {
-      if (event instanceof CustomEvent && typeof event.detail === "string") store.openBeside(event.detail)
+      if (!(event instanceof CustomEvent)) return
+      const detail: unknown = event.detail
+      if (typeof detail === "string") store.openBeside(detail)
+      else if (typeof detail === "object" && detail !== null && "href" in detail && typeof detail.href === "string")
+        store.openBeside(detail.href, { preview: "preview" in detail && detail.preview === true })
     }
     window.addEventListener(OPEN_BESIDE, beside)
     const dblclick = (event: MouseEvent) => {

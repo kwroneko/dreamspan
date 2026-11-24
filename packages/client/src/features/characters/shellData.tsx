@@ -14,6 +14,7 @@ import type {
 import { Link, useNavigate, useRouter, useSearch } from "@tanstack/react-router"
 import { openOnPlainClick } from "../../ui/links.ts"
 import { OPEN_BESIDE_HINT, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
+import { openPageBeside, PAGE_BESIDE_HINT } from "../../ui/openBeside.ts"
 import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { Effect, Schedule, Stream } from "effect"
@@ -595,6 +596,12 @@ function CharacterTile({
           >
             Open in a new browser tab
           </MenuItem>
+          {/* The card's full-page editor beside (owner, 2026-11-24), as a drop on a frame opens it. */}
+          {canBeside && (
+            <MenuItem icon="edit" description={PAGE_BESIDE_HINT} onClick={() => openPageBeside(editor)}>
+              Edit beside
+            </MenuItem>
+          )}
           <CardSurface placement="tile-menu" entityId={c.entityId} />
         </ContextMenu>
       )}
