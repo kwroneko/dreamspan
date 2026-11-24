@@ -241,3 +241,22 @@ export const copyInto = (
     clamped
   }
 }
+
+/**
+ * A draft's text once `submitted` was saved, at the saved `rowVersion`: the typed text and rows
+ * the Save carried go, as they're saved now; what was typed while it was on its way stays.
+ */
+export const afterSave = (submitted: Draft, rowVersion: number) => (text: string) => {
+  const draft = JSON.parse(text) as Draft
+  const since = <T>(now: Readonly<Record<string, T>> = {}, then: Readonly<Record<string, T>> = {}) =>
+    Object.fromEntries(
+      Object.entries(now).filter(([key, value]) => JSON.stringify(then[key]) !== JSON.stringify(value))
+    )
+  return JSON.stringify({
+    ...draft,
+    rowVersion,
+    drafts: since(draft.drafts, submitted.drafts),
+    rows: since(draft.rows, submitted.rows),
+    clamped: since(draft.clamped, submitted.clamped)
+  })
+}

@@ -181,12 +181,22 @@ export const reconcileForm = (
   if (incoming === null || current === null) return { content, changed: false, intent: before }
   const clears = intendedClears(before, initial, incoming)
   // What the edit started from at `path`: what it changed there, and what it left alone.
+  // A group kept as its JSON text before it was kept as an object reads as that object.
+  const asGroup = (value: unknown) => (typeof value === "string" ? (form(value) ?? value) : value)
   const origin = (path: ReadonlyArray<string>): Value | null => {
     if (initial === null) return null
-    const found = at(initial, path)
-    return found.unsafe ? null : found
+    let found: Value = { present: true, value: initial }
+    for (const segment of path) {
+      found = at(asGroup(found.value), [segment])
+      if (found.unsafe) return null
+      if (!found.present) return found
+    }
+    return found
   }
   const merge = (left: unknown, right: unknown, path: ReadonlyArray<string>): unknown => {
+    // One side still the group's JSON text (a save from before it was kept as an object).
+    if (object(left) && !Array.isArray(left)) right = asGroup(right)
+    if (object(right) && !Array.isArray(right)) left = asGroup(left)
     if (equal(left, right)) return right
     // Three ways, where the edit's start is known: what this edit didn't change keeps the
     // current value (another tab's later typing, or its clear), and what only this edit
@@ -214,14 +224,17 @@ export const reconcileForm = (
         }
         return initial !== null && !equal(at(initial, path).value, right) ? right : left
       }
-      const merged = right.map((item) => {
-        const segment = `${key}=${String(own(item, key))}`
-        return merge(
-          left.find((candidate) => String(own(candidate, key)) === String(own(item, key))),
-          item,
-          [...path, segment]
-        )
-      })
+      // An item another tab deleted, which this edit left as it was, stays deleted: no hole.
+      const merged = right
+        .map((item) => {
+          const segment = `${key}=${String(own(item, key))}`
+          return merge(
+            left.find((candidate) => String(own(candidate, key)) === String(own(item, key))),
+            item,
+            [...path, segment]
+          )
+        })
+        .filter((item) => item !== undefined)
       for (const item of left)
         if (
           !right.some((candidate) => String(own(candidate, key)) === String(own(item, key))) &&
