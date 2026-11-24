@@ -78,6 +78,7 @@ import { forkStart } from "../messages.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
 import type { Formats } from "../../importer/Formats.ts"
 import { CARD_FILE_BYTES, makeCardFileTools } from "./cardFiles.ts"
+import { makeLibraryExportTool } from "./libraryExport.ts"
 import { visibleDoc } from "../libraryView.ts"
 import {
   type ConflictChoice,
@@ -147,6 +148,8 @@ export const FILE_TOOLS = [
   "read_card_file",
   "edit_card_file",
   "import_card_file",
+  // A card's field, an entry, a prompt or a whole item as a new file (spec/WORKSHOP-CARDS.md §4.3).
+  "export_to_file",
   "bash",
   "bash_output",
   "bash_stop"
@@ -979,7 +982,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
     root: ToolRoot,
     segments: ReadonlyArray<string>,
     next: (before: Buffer | null) => Buffer,
-    kind: "write" | "edit"
+    /** `create`: a new file only, refused when one is there. */
+    kind: "write" | "edit" | "create"
   ) =>
     withFileTree(
       env.userId,
@@ -987,6 +991,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const top = root.hostRoot
         const info = yield* attempt(() => statPath(top, segments))
         if (info && !info.isFile()) throw new FilePathRefused(`${full} isn't a regular file.`)
+        if (info && kind === "create") throw new FilePathRefused(`${full} already exists.`)
         let before: PreviousFile | null = null
         if (info) {
           const read = yield* attempt(() => readRegularFile(top, segments, VERSION_MAX_BYTES + 1))
@@ -1161,6 +1166,28 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const { full, root, segments } = resolveIn(ctx, path, cwd, yield* rootsOf(account, ctx), true)
         const done = yield* replaceFile(ctx, account, full, root, segments, next, "edit")
         return { full, effects: done.effects }
+      })
+  })
+
+  // --- export_to_file
+  const exportTool = makeLibraryExportTool({
+    wrap: (capability, run) => wrap(capability, (ctx, args, env) => run(ctx, args, env as never)),
+    create: (ctx, env, path, name, content) =>
+      Effect.gen(function* () {
+        const account = env as AccountEnv
+        const cwd = yield* currentDir(ctx, account)
+        const roots = yield* rootsOf(account, ctx)
+        const asked = resolveIn(ctx, path ?? name, cwd, roots, true)
+        // A taken name gets " (2)", " (3)"… beside it, never replaced (reference-harness's uniquifyPath).
+        const ext = posix.extname(asked.full)
+        const stem = asked.full.slice(0, asked.full.length - ext.length)
+        let place = asked
+        for (let n = 2; yield* attempt(() => statPath(place.root.hostRoot, place.segments)); n++) {
+          if (n > 100) throw new FilePathRefused(`${asked.full} and its numbered names are taken. Give another path.`)
+          place = resolveIn(ctx, `${stem} (${n})${ext}`, cwd, roots, true)
+        }
+        const done = yield* replaceFile(ctx, account, place.full, place.root, place.segments, () => content, "create")
+        return { full: place.full, effects: done.effects }
       })
   })
 
@@ -2680,6 +2707,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
       writeTool,
       editTool,
       ...cardFileTools,
+      exportTool,
       bashTool,
       outputTool,
       stopTool
