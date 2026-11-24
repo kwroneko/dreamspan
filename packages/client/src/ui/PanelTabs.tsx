@@ -10,7 +10,8 @@ import { Icon, type IconName } from "./Icon.tsx"
 import { UnsavedDot } from "./UnsavedChanges.tsx"
 
 interface SubjectTab {
-  readonly keepLabel?: boolean | undefined
+  /** Hover text in place of the label, when the label alone would read like another tab's. */
+  readonly hint?: string | undefined
   readonly dirty?: boolean | undefined
   readonly value: string
   readonly label: string
@@ -109,9 +110,13 @@ export function SubjectTabs({
     widths.reduce((total, width, index) => total + pick(width, index), 0)
   const open = tabs.findIndex((tab) => tab.value === value)
   const compact = ready && sum((width) => width.full) > room
-  // Compact, the open one keeps its name when that still fits beside the others' portraits.
+  // Compact, the open one keeps its name in the room beside the others' portraits, cut short with
+  // an ellipsis when it's long, and only when at least a few letters of it fit.
+  const spare =
+    compact && open >= 0 ? room - sum((width, index) => (index === open ? 0 : width.short)) - GAP_SUBJECT : 0
   const named =
-    compact && open >= 0 && sum((width, index) => (index === open ? width.full : width.short)) <= room ? open : -1
+    compact && open >= 0 && spare >= Math.min(widths[open]!.full - GAP_SUBJECT, widths[open]!.short + 48) ? open : -1
+  const openWidth = named >= 0 && spare < widths[open]!.full - GAP_SUBJECT ? Math.floor(spare) : undefined
   const chip = (tab: SubjectTab, short: boolean) => (
     <>
       {tab.avatar ? (
@@ -126,19 +131,20 @@ export function SubjectTabs({
         tab.icon && <Icon name={tab.icon} />
       )}
       <span className={short ? "sr-only" : "min-w-0 truncate py-1"}>{tab.label}</span>
-      {tab.note && !short && (
+      {/* Kept when short too: a collapsed persona still says it's you. */}
+      {tab.note && (
         <span aria-hidden="true" className="shrink-0 rounded-sm bg-surface-raised px-1 text-xs text-muted">
           {tab.note}
         </span>
       )}
     </>
   )
-  // Short, the persona is set apart by a rule instead of its word ("you").
+  // Short, the persona keeps its word ("you") beside its portrait.
   const chipClass = (tab: SubjectTab, short: boolean) =>
     `relative flex max-w-44 shrink-0 items-center gap-1.5 rounded-md border py-0.5 text-sm ${
-      short && tab.note ? "ml-2 before:absolute before:inset-y-1 before:-left-1.5 before:w-px before:bg-border" : ""
-    } ${
-      tab.avatar ? `border-border text-text ${short ? "px-0.5" : "pr-2 pl-0.5"}` : "border-transparent px-2 text-muted"
+      tab.avatar
+        ? `border-border text-text ${short ? (tab.note ? "pr-1 pl-0.5" : "px-0.5") : "pr-2 pl-0.5"}`
+        : "border-transparent px-2 text-muted"
     }`
   return (
     <div className="relative min-w-0 overflow-hidden">
@@ -147,8 +153,8 @@ export function SubjectTabs({
         {[false, true].map((short) => (
           <div key={String(short)} className="flex">
             {tabs.map((tab) => (
-              <span key={tab.value} className={chipClass(tab, short && tab.avatar !== undefined && !tab.keepLabel)}>
-                {chip(tab, short && tab.avatar !== undefined && !tab.keepLabel)}
+              <span key={tab.value} className={chipClass(tab, short && tab.avatar !== undefined)}>
+                {chip(tab, short && tab.avatar !== undefined)}
               </span>
             ))}
           </div>
@@ -161,14 +167,15 @@ export function SubjectTabs({
           className="flex items-center gap-1 overflow-x-auto overscroll-x-contain pb-1"
         >
           {tabs.map((tab, index) => {
-            const short = compact && tab.avatar !== undefined && !tab.keepLabel && index !== named
+            const short = compact && tab.avatar !== undefined && index !== named
             return (
               <BaseTabs.Tab
                 data-layout-audit-ignore="inset: Tabs form the panel navigation strip"
                 key={tab.value}
                 value={tab.value}
                 data-unsaved={tab.dirty || undefined}
-                title={tab.note ? `${tab.label} (${tab.note})` : tab.label}
+                style={index === named && openWidth !== undefined ? { maxWidth: openWidth } : undefined}
+                title={tab.hint ?? (tab.note ? `${tab.label} (${tab.note})` : tab.label)}
                 aria-description={
                   [tab.note, tab.dirty ? "Unsaved changes" : ""].filter(Boolean).join(". ") || undefined
                 }

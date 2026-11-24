@@ -92,8 +92,8 @@ export interface PanelTabEntry {
     readonly crop?: AvatarCrop | undefined
   }
   readonly note?: string
-  /** Same-named cards keep their distinguishing text on compact strips. */
-  readonly keepLabel?: boolean | undefined
+  /** The tab's hover text, when its label alone would read like another tab's. */
+  readonly hint?: string | undefined
 }
 
 export const chatPanels = makeRegistry<PanelDescriptor>()
