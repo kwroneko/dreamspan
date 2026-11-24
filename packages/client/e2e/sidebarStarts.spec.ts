@@ -147,6 +147,42 @@ for (const width of [1340, 1920, 390])
     await expect(page.locator("[data-workshop-intro]")).toBeVisible()
   })
 
+test("the sidebar start links remeasure when switching characters at a fixed width", async ({ page }) => {
+  const long = "A very long synthetic character name for the review"
+  const short = "Mia"
+  const card = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      yield* api.CreateCard({ label: short, name: short })
+      return yield* api.CreateCard({ label: long, name: long })
+    })
+  )
+  await page.setViewportSize({ width: 1340, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/?sbw=500&character=${card.entityId}`)
+  const row = page.locator('[aria-label="Sidebar"] [data-sidebar-starts]')
+  await expect(row.getByRole("link", { name: `New Roleplay with ${long}`, exact: true })).toBeVisible()
+  await page.evaluate(async () => {
+    await document.fonts.ready
+  })
+  await expect(row).toHaveAttribute("data-short", "true")
+  // Keep the observed box fixed while the chat and sidebar around it change.
+  await row.evaluate((el) => {
+    const { width, height } = el.getBoundingClientRect()
+    el.style.width = `${width}px`
+    el.style.height = `${height}px`
+  })
+
+  await page
+    .getByRole("main")
+    .getByRole("link", { name: `Open ${short}`, exact: true })
+    .click()
+  await expect(row.getByRole("link", { name: `New Roleplay with ${short}`, exact: true })).toBeVisible()
+  await expect(row.getByRole("link", { name: `New Workshop with ${short}`, exact: true })).toBeVisible()
+  expect(await row.evaluate((el) => el.style.width)).not.toBe("")
+  await expect(row.locator("[data-start-with]")).toHaveText([`with ${short}`, `with ${short}`])
+  for (const name of await row.locator("[data-start-with]").all()) await expect(name).toBeVisible()
+})
+
 // From the narrowest sidebar to wide: the labels read in full; side by side where both fit.
 test("the start row at every sidebar width", async ({ page }, info) => {
   test.setTimeout(180_000)

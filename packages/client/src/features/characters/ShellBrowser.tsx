@@ -1415,7 +1415,7 @@ function Browser() {
           // One column of rows; dragged wide, a row stays a row's width, its pin beside its text.
           <div className="max-w-controls">
             {kind === "character" && card && (
-              <StartRow>
+              <StartRow characterLabel={cardLabel}>
                 <SlotOutlet slot={characterChatActions} props={{ entityId: card.card.entityId, label: cardLabel }} />
               </StartRow>
             )}
