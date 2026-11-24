@@ -61,7 +61,6 @@ export const revertable = (effect: RolloutEffect) =>
   effect.kind === "library.revise" ||
   (effect.kind === "file.edit" && typeof effect.undo?.card === "object" && effect.undo.card !== null)
 
-
 /** It can still be undone (or reverted) from here: the app kept how, and it isn't taken back yet. */
 export const undoable = (effect: RolloutEffect) =>
   effect.undo !== null && effect.undoneAt === null && !fullyReverted(effect)

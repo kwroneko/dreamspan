@@ -265,7 +265,9 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
 
     SharedNoteHead: ({ userId, entityId }) =>
       sharedNote(sql, userId, entityId).pipe(
-        Effect.map((shared) => (shared === null ? null : { revisionId: shared.head as RevisionId, scope: shared.scope })),
+        Effect.map((shared) =>
+          shared === null ? null : { revisionId: shared.head as RevisionId, scope: shared.scope }
+        ),
         query("SharedNoteHead")
       ),
 

@@ -375,17 +375,15 @@ describe("ST import jobs", () => {
       const { importId } = yield* api.StartStImport({ unsupported: [] })
       yield* sendStFile(importId, "settings.json", files.get("settings.json")!)
       const replacement = api.StartStImport({ unsupported: [] })
-      const read = vi
-        .spyOn(reader, "StImportSources")
-        .mockImplementationOnce(() =>
-          Effect.fail(
-            new StorageError({
-              operation: "StImportSources",
-              reason: "other",
-              message: "Synthetic source read failure"
-            })
-          )
+      const read = vi.spyOn(reader, "StImportSources").mockImplementationOnce(() =>
+        Effect.fail(
+          new StorageError({
+            operation: "StImportSources",
+            reason: "other",
+            message: "Synthetic source read failure"
+          })
         )
+      )
       const readFailure = yield* Effect.flip(replacement).pipe(Effect.ensuring(Effect.sync(() => read.mockRestore())))
       assert.strictEqual(readFailure._tag, "ServerError")
       assert.strictEqual((yield* api.GetStImport({ importId })).job.status, "running")
