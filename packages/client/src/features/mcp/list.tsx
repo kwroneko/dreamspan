@@ -2,7 +2,7 @@
 import { MCP_TIMEOUT_DEFAULT_S, type McpConnectionSettings, type McpTransport } from "@dreamspan/shared/mcp.ts"
 import { originOf } from "@dreamspan/shared/providers.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { type FormEvent, useState } from "react"
+import { type FormEvent, useRef, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Field, focusFirstInvalid, formText, Input, SecretInput, Textarea } from "../../ui/Field.tsx"
@@ -160,6 +160,7 @@ function NewServerForm({
     command: "",
     args: ""
   })
+  const tokens = useRef(new Map<string, string>())
   const { name, about, transport, url, command, args } = form.values
   const setName = (name: string) => form.edit({ name })
   const setAbout = (about: string) => form.edit({ about })
@@ -255,7 +256,7 @@ function NewServerForm({
                   : "Optional."
               }
             >
-              <SecretInput name="apiKey" />
+              <SecretInput name="apiKey" memory={tokens} memoryKey={url.trim()} />
             </Field>
           </>
         )}
