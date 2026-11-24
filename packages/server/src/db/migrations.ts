@@ -102,6 +102,38 @@ export const migrationDefinitions = {
       `CREATE INDEX version_library_revision ON version_library(revision_id)`,
       `ALTER TABLE queued_messages ADD COLUMN library_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(library_json))`
     ]
+  },
+  // Older queued sends stored no revision. Capture the head present at upgrade for those rows.
+  // The original payload check predates library-only sends.
+  "0018_queue_library_revisions": {
+    outsideTransaction: [
+      {
+        table: "queued_messages",
+        create: baseline
+          .find((statement) => statement.startsWith("CREATE TABLE queued_messages ("))!
+          .replace(
+            "    -- A side chat's story position for the reply this entry asks for (spec/WORKSHOP.md §4).\n" +
+              "    story_at_json TEXT CHECK (story_at_json IS NULL OR json_valid(story_at_json)),",
+            "    library_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(library_json)),"
+          )
+          .replace(
+            "json_array_length(images_json) > 0)",
+            "json_array_length(images_json) > 0 OR json_array_length(library_json) > 0)"
+          )
+      },
+      `UPDATE queued_messages AS q SET library_json = (
+        SELECT json_group_array(json_object('kind', kind, 'refId', id, 'revisionId', revision, 'name', label))
+        FROM (
+          SELECT e.kind, r.id, r.head_revision_id AS revision, r.label
+          FROM json_each(q.library_json) j
+          JOIN entity_refs r ON r.id = j.value ->> '$.refId'
+          JOIN entities e ON e.id = r.entity_id AND e.kind = j.value ->> '$.kind'
+          JOIN chats c ON c.id = q.chat_id AND c.kind = 'workshop' AND c.owner_user_id = e.owner_user_id
+          WHERE e.purged_at IS NULL
+          GROUP BY r.id ORDER BY min(j.key)
+        )
+      ) WHERE library_json <> '[]'`
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

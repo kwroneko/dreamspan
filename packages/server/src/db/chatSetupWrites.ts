@@ -32,22 +32,22 @@ import { forkRecency, forkThrough, onForkPath } from "./forks.ts"
 import { selectedIn, slotDeletedIn, nextSeq } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { LeafMoved, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
-import { chatQueue, ownedQueued, type QueuedRow, toQueued } from "./queueRows.ts"
+import { chatQueue, ownedQueued, type QueuedRow, queuedLibrary, toQueued } from "./queueRows.ts"
 import { type ChatRow, rewriteColumns, toVersion, toChat } from "./rows.ts"
 import { separateThreads } from "./threads.ts"
 import type { StoredRewrite } from "@dreamspan/shared/regexScripts.ts"
 import { transaction as runTransaction } from "./tx.ts"
 import { checkAutoTurn, claimAutoTurn } from "./autoGuard.ts"
-import { checkLibrary } from "./libraryAttachments.ts"
+import { pinLibrary, type LibraryPin, type VersionWithLibraryPins } from "./libraryAttachments.ts"
 
 const userMessage = (
   content: string,
   speakerEntityId: EntityId | null,
   images?: import("@dreamspan/shared/chat.ts").MessageImages,
   rewrite?: StoredRewrite,
-  library?: import("@dreamspan/shared/chat.ts").MessageLibrary
-) =>
-  new NewVersion({
+  libraryPins?: ReadonlyArray<LibraryPin>
+): VersionWithLibraryPins => ({
+  ...new NewVersion({
     speakerEntityId,
     writer: "human",
     content,
@@ -55,13 +55,10 @@ const userMessage = (
     macroMode: "verbatim",
     origin: "user_written",
     ...(images === undefined ? {} : { images }),
-    ...(library === undefined || library.length === 0 ? {} : { library }),
     ...(rewrite === undefined ? {} : { rewrite })
-  })
-
-/** A queued message's library items (spec/WORKSHOP-CARDS.md §4.4), recorded when it posts. */
-const queuedLibrary = (row: QueuedRow): import("@dreamspan/shared/chat.ts").MessageLibrary =>
-  JSON.parse(row.library_json ?? "[]")
+  }),
+  ...(libraryPins?.length ? { libraryPins } : {})
+})
 
 /** A queued message's rewrite, as SendOrQueue stored it, for the version it posts as. */
 const queuedRewrite = (row: QueuedRow): StoredRewrite | undefined =>
@@ -215,7 +212,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           ORDER BY f.id = ${queuedIn} DESC, ${sql.literal(forkRecency("f"))} DESC LIMIT 1`
         let forkId: ForkId | null = fork?.id ?? null
         // A live slot of a live chat: neither NotFound nor LeafMoved can happen.
-        const append = (parentSlotId: string, version: NewVersion) =>
+        const append = (parentSlotId: string, version: VersionWithLibraryPins) =>
           graph
             .appendMessage({
               userId: owner,
@@ -508,7 +505,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             : []
         for (const id of round ?? []) yield* graph.checkSpeaker(userId, id)
         yield* graph.checkImages(userId, images ?? [], chatId)
-        if (kind === "message") yield* checkLibrary(sql, userId, chatId, library ?? [])
+        const libraryPins = kind === "message" ? yield* pinLibrary(sql, userId, chatId, library ?? []) : []
         yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
         yield* graph.checkSpeaker(userId, speakerEntityId)
         if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)
@@ -558,7 +555,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                   }
                 : {}),
               images_json: JSON.stringify(images ?? []),
-              library_json: JSON.stringify(kind === "message" ? (library ?? []) : []),
+              library_json: JSON.stringify(libraryPins),
               speaker_entity_id: speakerEntityId,
               reply_speaker_entity_id: kind === "message" ? replySpeakerEntityId : null,
               no_reply: kind === "message" && noReply === true ? 1 : 0,
@@ -597,7 +594,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           branch,
           version:
             kind === "message"
-              ? userMessage(content, speakerEntityId, images, rewrite, library)
+              ? userMessage(content, speakerEntityId, images, rewrite, libraryPins)
               : reply(speakerEntityId, direction, autoPick === true),
           commitDraft
         })
