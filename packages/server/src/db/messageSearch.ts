@@ -178,7 +178,15 @@ const searchMessages = (
         const [span] = yield* chatSpan(sql, id)
         let done = span?.last === null || span?.last === undefined
         while (!done && hits.length < limit && scanned < SCAN) {
-          const batch = yield* batchOf(sql, userId, match, before, true, JSON.stringify([id]), span!.first!)
+          const batch = yield* batchOf(
+            sql,
+            userId,
+            match,
+            Math.min(before, span!.last! + 1),
+            true,
+            JSON.stringify([id]),
+            span!.first!
+          )
           let read = 0
           for (const row of batch) {
             read++
