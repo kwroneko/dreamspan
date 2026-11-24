@@ -84,7 +84,7 @@ export const makeFileShareWriteHandlers = Effect.gen(function* () {
           const [held] = yield* sql<{ id: string }>`UPDATE file_shares SET mode = ${mode}
             WHERE owner_user_id = ${userId} AND path = ${path} AND grantee_user_id = ${grantee.id}
               AND suspended_at IS NULL AND inode = ${inode} AND device = ${device}
-              AND birth_ms IS ${birthMs} RETURNING id`
+              AND (birth_ms IS NULL OR birth_ms = ${birthMs}) RETURNING id`
           if (held) return { share: (yield* ownShare(userId, { id: held.id }))! }
         }
         yield* sql`INSERT INTO file_share_invitations ${sql.insert({

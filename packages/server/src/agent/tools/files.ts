@@ -1605,12 +1605,31 @@ export const makeFileTools = (deps: FileToolDeps) => {
           const readOnlyText = setup.readOnly.length
             ? `Read-only in this command, as their owner's files are over their storage limit: ${setup.readOnly.join(", ")}\n`
             : ""
+          // Register before checking the grants again so an immediate recheck can stop this
+          // command even while the final check is reading storage.
+          const checkStart = Effect.gen(function* () {
+            live.add(entry)
+            const why = yield* revoked(entry)
+            return entry.stopped ?? why ?? (entry.controller.signal.aborted ? "it was stopped" : null)
+          })
+          const endOutput = (bytes: number) =>
+            Effect.promise(async () => void (await sink?.end(bytes).catch(() => undefined)))
+          const notStarted = (why: string) => ({ isError: true, text: `Not started: ${why}.` })
 
           if (background) {
-            const before = yield* scanPlaces(setup.places).pipe(
-              Effect.tapError(() => Effect.promise(() => setup.close()))
+            const { before, why } = yield* scanPlaces(setup.places).pipe(
+              Effect.flatMap((before) => Effect.map(checkStart, (why) => ({ before, why }))),
+              Effect.onExit((exit) =>
+                exit._tag === "Success" && exit.value.why === null
+                  ? Effect.void
+                  : Effect.promise(async () => {
+                      live.delete(entry)
+                      await setup.close()
+                      await sink?.end(0).catch(() => undefined)
+                    })
+              )
             )
-            live.add(entry)
+            if (why !== null) return notStarted(why)
             const job: Job = {
               id: sink!.id,
               userId: env.userId,
@@ -1673,29 +1692,35 @@ export const makeFileTools = (deps: FileToolDeps) => {
           }
 
           const run = Effect.gen(function* () {
-            // It may have waited for a free slot: what it was given is checked again first.
-            const why = yield* revoked(entry)
-            if (why) return { notStarted: why } as const
             const before = yield* scanPlaces(setup.places)
-            live.add(entry)
+            const why = yield* checkStart
+            if (why !== null) return { notStarted: why } as const
             const result = yield* attempt((signal) => {
               // Stopping the call (Stop) or taking away what it was given stops the command.
               signal.addEventListener("abort", () => entry.controller.abort(), { once: true })
               if (signal.aborted) entry.controller.abort()
-              return spec(entry.controller.signal)
-            }).pipe(Effect.ensuring(Effect.sync(() => live.delete(entry))))
+              return entry.controller.signal.aborted ? Promise.resolve(null) : spec(entry.controller.signal)
+            })
+            live.delete(entry)
+            if (result === null) return { notStarted: entry.stopped ?? "it was stopped" } as const
             const after = yield* scanPlaces(setup.places)
             return { result, found: diffPlaces(before, after) }
           })
           const ran = yield* Semaphore.withPermit(instance)(Semaphore.withPermit(accountPermits(env.userId))(run)).pipe(
-            Effect.ensuring(Effect.promise(() => setup.close()))
+            Effect.onExit((exit) =>
+              Effect.promise(async () => {
+                live.delete(entry)
+                await setup.close()
+                if (exit._tag !== "Success") await sink?.end(sink.kept()).catch(() => undefined)
+              })
+            )
           )
           if ("notStarted" in ran) {
-            if (sink) yield* Effect.promise(() => sink.end(0).catch(() => undefined))
-            return { isError: true, text: `Not started: ${ran.notStarted}.` }
+            yield* endOutput(0)
+            return notStarted(ran.notStarted)
           }
           const { result, found } = ran
-          if (sink) yield* Effect.promise(() => sink.end(result.outputBytes).catch(() => undefined))
+          yield* endOutput(result.outputBytes)
           if (result.cwd) ctx.cache.set(CWD_KEY, result.cwd)
           const { changes, overQuota } = yield* afterCommand(call, env.userId, result, found)
           const output = result.tail === "" ? result.head : `${result.head}\n…\n${result.tail}`
@@ -1766,11 +1791,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const job = jobs.get(id)
         const own = job && job.userId === env.userId ? job : null
         const limit = Number(args.limit ?? 400)
-        const state = own
-          ? own.ended
-            ? `ended ${Math.round((own.ended.at - own.startedAt) / 1000)} s after it started: ${own.ended.text.trimEnd()}`
-            : `still running (for ${Math.round((Date.now() - own.startedAt) / 1000)} s)`
-          : null
+        const stateOf = (job: Job) =>
+          job.ended
+            ? `ended ${Math.round((job.ended.at - job.startedAt) / 1000)} s after it started: ${job.ended.text.trimEnd()}`
+            : `still running (for ${Math.round((Date.now() - job.startedAt) / 1000)} s)`
         if (own && args.offset === undefined) {
           // The rest only once it ended, so the end comes with its last output.
           if (own.ended === null)
@@ -1781,7 +1805,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
           const more = read && read.next < read.size
           return {
             text:
-              `${id}: ${state}\n` +
+              `${id}: ${stateOf(own)}\n` +
               (text === "" ? "No new output.\n" : `New output:\n${headTail(text)}${text.endsWith("\n") ? "" : "\n"}`) +
               (more ? "[More output follows: call bash_output again.]" : ""),
             isError: own.ended?.failed === true
@@ -1792,7 +1816,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const last = page.from + page.lines.length - 1
         return {
           text:
-            `${id}${state ? `: ${state}` : ""}\nLines ${page.lines.length ? `${page.from}–${last}` : "none"} of ${page.totalLines.toLocaleString("en-US")}${page.cut ? " (the output was longer: only its first 16 MiB are kept)" : ""}:\n` +
+            `${id}${own ? `: ${stateOf(own)}` : ""}\nLines ${page.lines.length ? `${page.from}–${last}` : "none"} of ${page.totalLines.toLocaleString("en-US")}${page.cut ? " (the output was longer: only its first 16 MiB are kept)" : ""}:\n` +
             headTail(page.lines.join("\n")) +
             (last < page.totalLines ? `\n[Read on with offset=${last + 1}.]` : "")
         }

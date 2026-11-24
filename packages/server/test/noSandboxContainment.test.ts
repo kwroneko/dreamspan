@@ -64,6 +64,30 @@ const escapes = (sandbox: CommandSandbox) =>
 
 const linux = process.platform === "linux"
 
+it.live.skipIf(!linux)("collects a successful shell's output when a helper inherits its pipe", () =>
+  Effect.promise(async () => {
+    const limiter: CgroupLimiter = {
+      id: "test",
+      explanation: "Uses the command's process group for this test",
+      available: async () => ({ ok: true }),
+      open: async () => ({
+        wrap: (file, args) => ({ file, args: [...args] }),
+        env: {},
+        kill: async () => {},
+        finish: async () => ({ memoryCapped: false })
+      })
+    }
+    const command = spec("sleep 3 & printf 'shell done\\n'")
+    const result = await makeNoSandbox(makeRegistry([limiter])).run(
+      { ...command, limits: { ...command.limits, timeoutMs: 1000 } },
+      new AbortController().signal
+    )
+    assert.isFalse(result.timedOut)
+    assert.strictEqual(result.exitCode, 0)
+    assert.include(result.head, "shell done")
+  })
+)
+
 it.live.skipIf(!linux)(
   "ends what a command left behind, in a cgroup where there is one",
   () => escapes(noSandbox),

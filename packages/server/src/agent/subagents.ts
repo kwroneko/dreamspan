@@ -546,7 +546,15 @@ const parametersFor = (
             })
           )
         }
-      : {}),
+      : types.some((t) => t.context === "fork")
+        ? {
+            context: Type.Optional(
+              Type.Literal("task", {
+                description: "Use task to run a type that defaults to forking. It sees only what you write in `task`."
+              })
+            )
+          }
+        : {}),
     ...(background
       ? {
           background: Type.Optional(

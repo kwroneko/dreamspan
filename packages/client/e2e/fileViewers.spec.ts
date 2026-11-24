@@ -48,6 +48,28 @@ const audit = async (page: Page, info: Parameters<typeof expectLayout>[1], name:
 const openFile = (page: Page, folder: string, name: string) =>
   page.goto(`${server().url}/files?${new URLSearchParams({ path: folder, file: name })}`)
 
+test("Previous page returns to the exact UTF-8 page start", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const files = filesOf(page.request, server().url)
+  const pageBytes = 256 * 1024
+  const bytes = Buffer.alloc(6 * 1024 * 1024, "Synthetic text.\n")
+  // A character straddles each forward boundary. One byte before page two is a continuation byte.
+  bytes.write("éé", pageBytes - 3)
+  bytes.write("é", 2 * pageBytes - 2)
+  await files.put("/files/large.txt", bytes)
+  await openFile(page, "/files", "large.txt")
+
+  const next = page.getByRole("button", { name: "Next page" })
+  await next.click()
+  await next.click()
+  await expect(next).toBeEnabled()
+  const requested = page.waitForRequest((request) => Boolean(request.headers()["range"]))
+  await page.getByRole("button", { name: "Previous page" }).click()
+  expect((await requested).headers()["range"]).toBe(`bytes=${pageBytes - 1}-${2 * pageBytes + 2}`)
+  const text = page.getByRole("textbox", { name: "Contents of large.txt" })
+  await expect(text).toHaveText(/^é/)
+})
+
 for (const width of [1440, 390])
   test(`viewers and the editor at ${width}px`, async ({ page }, info) => {
     test.setTimeout(180_000)
