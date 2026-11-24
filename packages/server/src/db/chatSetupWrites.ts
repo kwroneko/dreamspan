@@ -785,6 +785,17 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               !wanted.options.some((option) => cardIndex(characters[keep]!, option) === index)
             )
               break
+            // None drawn (its card in the bin): made with a group-only greeting and alone now, it
+            // is made again from its ordinary greetings, or goes if it has none (rev-dfu1 #3).
+            const greeter = byId.get(characters[keep]!)
+            if (
+              wanted === undefined &&
+              characters.length === 1 &&
+              index !== null &&
+              greeter !== undefined &&
+              greeter.greetingIndexes.slice(greeter.greetings.length).includes(index)
+            )
+              break
             keep++
           }
           // What a message made again keeps: by speaker, the greeting it showed, each greeting's
@@ -887,15 +898,19 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             gone.delete(entity)
             const drawn = wantedOf.get(entity)
             // Another change's character, drawn there: its message as it was.
+            // A chat of one character keeps none of its group-only greetings.
+            const groupOnly = new Set(greeter?.greetingIndexes.slice(greeter.greetings.length) ?? [])
             const options =
               drawn?.options.map((option) => ({ ...option, card: cardIndex(entity, option) })) ??
-              [...(before?.versions ?? new Map<number, Row>()).entries()].map(([card, version]) => ({
-                index: greeter?.greetingIndexes.indexOf(card) ?? -1,
-                text: version.content,
-                frozen:
-                  version.frozen === null ? null : (JSON.parse(version.frozen) as { readonly [x: string]: string }),
-                card
-              }))
+              [...(before?.versions ?? new Map<number, Row>()).entries()]
+                .filter(([card]) => characters.length > 1 || !groupOnly.has(card))
+                .map(([card, version]) => ({
+                  index: greeter?.greetingIndexes.indexOf(card) ?? -1,
+                  text: version.content,
+                  frozen:
+                    version.frozen === null ? null : (JSON.parse(version.frozen) as { readonly [x: string]: string }),
+                  card
+                }))
             if (greeter === undefined || options.length === 0) {
               if (before !== undefined) lost.push(...[...before.edits.values()].flat(), ...before.scratchpads)
               continue
