@@ -1291,7 +1291,15 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 AND (SELECT count(*) FROM versions WHERE slot_id = s.id) = 1
                 AND NOT EXISTS (SELECT 1 FROM slots WHERE parent_slot_id = s.id)
                 AND NOT EXISTS (SELECT 1 FROM state_events WHERE slot_id = s.id
-                  AND (origin <> 'rollout' OR version_id IS NOT ${versionId}))`
+                  AND (origin <> 'rollout' OR version_id IS NOT ${versionId}))
+                -- A draft of it holding images (a swipe of one's own, an edit, an insertion
+                -- below) keeps it: recovered texts keep no images (rev-dd4b #2).
+                AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.status = 'active'
+                  AND d.images_json IS NOT NULL AND json_array_length(d.images_json) > 0
+                  AND ((d.target_kind = 'scratchpad' AND d.target_id = s.id)
+                    OR (d.target_kind = 'version_edit' AND d.target_id = ${versionId})
+                    OR (d.target_kind = 'insert' AND d.target_id = s.chat_id
+                      AND substr(d.field, instr(d.field, ':') + 1) = s.id)))`
             if (safe) {
               const events = yield* sql<{
                 key: string
