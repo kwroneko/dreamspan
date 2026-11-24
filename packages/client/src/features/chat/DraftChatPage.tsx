@@ -37,7 +37,7 @@ function DraftChat({
   onOpened
 }: {
   draftFor: DraftFor
-  /** A fresh pending chat was opened for the page (not one its URL named). */
+  /** A pending chat was opened for the page: a fresh one, or the one its URL named. */
   onOpened?: ((chat: Chat) => void) | undefined
 }) {
   const search = useSearch({ strict: false }) as Record<string, unknown>
@@ -93,7 +93,8 @@ function DraftChat({
       }
       rememberDraftFor(value.id, draftFor)
       setChat(value)
-      if (value.id !== reopen) onOpened?.(value)
+      // A reopened one too: a reload before the start card's title reached it still names it.
+      onOpened?.(value)
       if (value.id !== reopen)
         void navigate({
           to: ".",
