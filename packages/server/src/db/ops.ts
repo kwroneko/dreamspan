@@ -5365,6 +5365,8 @@ const ReadOpsOwn = RpcGroup.make(
       chatId: ChatId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       leafSlotId: Schema.NullOr(SlotId),
+      /** For export: pin the display end returned by Bottom, including trailing insertions. */
+      displayLeaf: Schema.optionalKey(Schema.Boolean),
       range: PathRange,
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PATH_WINDOW }))
     },

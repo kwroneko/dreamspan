@@ -369,11 +369,20 @@ export const makeReadHandlers = Effect.gen(function* () {
    * that places insertions: the same ranges as by depth, with the cursors (`older`, `newer`)
    * the slots at the positions next to the window, which may be inserted ones.
    */
-  const readDisplay = (chatId: ChatId, fork: ForkRow, leafSlotId: SlotId | null, range: PathRange, limit: number) =>
+  const readDisplay = (
+    chatId: ChatId,
+    fork: ForkRow,
+    leafSlotId: SlotId | null,
+    range: PathRange,
+    limit: number,
+    displayLeaf = false
+  ) =>
     Effect.gen(function* () {
       const leaf = (leafSlotId ?? fork.tip_slot_id) as SlotId | null
       let shownFork = (leafSlotId === null ? fork.id : null) as ForkId | null
       const shown = yield* displayTo(chatId, fork, leafSlotId)
+      if (displayLeaf && leafSlotId !== null && shown.end < 0)
+        return yield* new NotFound({ entity: "slot", id: leafSlotId })
       const read = (pieces: ReadonlyArray<PathPiece>, first: number, last: number, view: string) =>
         last < first ? Effect.succeed([] as ReadonlyArray<PathRow>) : displayWindow(sql, pieces, first, last, view)
       const at = (pieces: ReadonlyArray<PathPiece>, position: number) =>
@@ -398,7 +407,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         case "Bottom": {
           const first = Math.max(0, shown.end - limit + 1)
           return window(
-            leaf,
+            displayLeaf ? yield* at(shown.pieces, shown.end) : leaf,
             yield* read(shown.pieces, first, shown.end, fork.id),
             yield* at(shown.pieces, first - 1),
             null
@@ -899,7 +908,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         return found.map(toChat)
       }).pipe(query("ListChats")),
 
-    ReadPath: ({ userId, chatId, forkId, leafSlotId, range, limit }) =>
+    ReadPath: ({ userId, chatId, forkId, leafSlotId, range, limit, displayLeaf }) =>
       Effect.gen(function* () {
         const chat = yield* ownedChat(userId, chatId)
         // By fork, unless a leaf is named: the path to it, which no fork need end at, as the
@@ -909,7 +918,8 @@ export const makeReadHandlers = Effect.gen(function* () {
         let shownFork = (leafSlotId === null ? fork.id : null) as ForkId | null
         let view: string = fork.id
         // A fork with insertions is read by position on its display path.
-        if (yield* rearranges(sql, chatId, fork.id)) return yield* readDisplay(chatId, fork, leafSlotId, range, limit)
+        if (yield* rearranges(sql, chatId, fork.id))
+          return yield* readDisplay(chatId, fork, leafSlotId, range, limit, displayLeaf)
         if (leaf === null)
           return new PathWindow({ leafSlotId: null, forkId: shownFork, entries: [], older: null, newer: null })
         // Deleted messages are walked through but not shown; their replies stay in place.
