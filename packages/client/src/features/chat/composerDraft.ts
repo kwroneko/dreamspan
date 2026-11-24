@@ -83,7 +83,7 @@ type ComposerSave = typeof ComposerBeacon.Type
  * stale, as any other draft's copy). Carried into the fresh chat the tab opens in its place
  * (`carryLeftover`), or filed to the recovered texts once as the tab leaves (`fileLeftover`).
  */
-export interface Leftover {
+interface Leftover {
   readonly content: string
   readonly save: ComposerSave
   readonly copy: Copy
