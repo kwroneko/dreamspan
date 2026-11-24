@@ -60,6 +60,16 @@ export const migrationDefinitions = {
   // Receipts say which session accepted a composer save, even after the draft moves on.
   "0014_composer_save_session": {
     statements: ["ALTER TABLE composer_save_receipts ADD COLUMN accepted_session INTEGER"]
+  },
+  "0015_composer_commits": {
+    statements: [
+      `CREATE TABLE composer_commits (
+        draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
+        session INTEGER NOT NULL,
+        content_hash TEXT NOT NULL,
+        PRIMARY KEY (draft_id, session)
+      ) STRICT, WITHOUT ROWID`
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

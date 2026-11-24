@@ -168,7 +168,8 @@ describe("0002_files", () => {
           "guidance_target",
           "reasoning_stats",
           "native_reasoning",
-          "composer_save_session"
+          "composer_save_session",
+          "composer_commits"
         ]
       )
       // The existing row is kept, an image by default.
@@ -451,7 +452,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0011_guidance_target",
       "0012_reasoning_stats",
       "0013_native_reasoning",
-      "0014_composer_save_session"
+      "0014_composer_save_session",
+      "0015_composer_commits"
     ])
   }).pipe(Effect.provide(layer()))
 )

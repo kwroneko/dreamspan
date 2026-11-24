@@ -207,20 +207,21 @@ for (const scenario of scenarios)
           first.store.type(text)
         } else if (scenario === "a late copy of text already sent") {
           // Kept while the page closed, never sent from it: the same words went from elsewhere.
+          const opened = await Effect.runPromise(api.OpenComposer({ chatId: chat.id, forkId: null }))
           await keepCopy(
             makeCopy(
               owner,
               `composer:${chat.id}`,
-              first.store.snapshot().draftId!,
+              opened.id,
               {
                 kind: "composer",
                 payload: {
                   chatId: chat.id,
-                  draftId: first.store.snapshot().draftId!,
-                  rowVersion: 1,
-                  session: 0,
+                  draftId: opened.id,
+                  rowVersion: opened.rowVersion,
+                  session: opened.session,
                   next: false,
-                  content: opening.slice(0, 20)
+                  content: opening
                 }
               },
               Number(Atomics.load(time, 0)) - 60_000
