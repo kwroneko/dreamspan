@@ -820,7 +820,8 @@ const buildPiModel = async (
   prepared: Prepared,
   model: Model,
   effective: EffectiveModel,
-  bindings: ReadonlyArray<ThinkingBinding>
+  bindings: ReadonlyArray<ThinkingBinding>,
+  hasEffort: boolean
 ): Promise<PiModel<Api>> => {
   const found = await catalogEntry(prepared.kind, model.key)
   const base = found?.sameApi ? found.entry : null
@@ -842,7 +843,8 @@ const buildPiModel = async (
     api: prepared.api,
     provider: prepared.kind.piProvider,
     baseUrl: prepared.baseUrl,
-    reasoning: effective.reasoning.value,
+    // Some serializers explicitly disable thinking on Auto if the model is flagged as reasoning.
+    reasoning: effective.reasoning.value && (effective.reasoning.source !== "unknown" || hasEffort),
     ...(Object.keys(levels).length > 0 ? { thinkingLevelMap: levels } : {}),
     input: effective.vision.value ? ["text", "image"] : ["text"],
     cost: {
@@ -2488,7 +2490,14 @@ export const layer = (options: ProvidersOptions = {}) =>
               prepared.settings
             )
             const piModel = yield* Effect.tryPromise({
-              try: () => buildPiModel(prepared, model, effective, registry.thinkingBindings.list()),
+              try: () =>
+                buildPiModel(
+                  prepared,
+                  model,
+                  effective,
+                  registry.thinkingBindings.list(),
+                  request.options?.reasoning !== undefined
+                ),
               catch: (error) =>
                 scrubbed(prepared, providerError("unknown", `could not prepare the model: ${String(error)}`))
             })
@@ -2770,7 +2779,7 @@ export const layer = (options: ProvidersOptions = {}) =>
           })
           const effective = resolveModel(key, model.upstream, {}, prepared.connection.compat, prepared.settings)
           const built = yield* Effect.tryPromise({
-            try: () => buildPiModel(prepared, model, effective, registry.thinkingBindings.list()),
+            try: () => buildPiModel(prepared, model, effective, registry.thinkingBindings.list(), false),
             catch: (error) => providerError("unknown", `could not prepare the model: ${String(error)}`)
           }).pipe(Effect.result)
           if (built._tag === "Failure") return done(built.failure)
