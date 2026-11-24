@@ -147,15 +147,21 @@ export function CardTokensRow({
       <CardSurface placement="header" entityId={entityId as EntityId} label={label} />
     </div>
   )
+  const chats = <CardSurface placement="chats" entityId={entityId as EntityId} label={label} />
   return (
     <>
       {persona}
       <div
         data-card-header-row="usage"
-        className={`flex min-w-0 max-w-full items-center gap-1 text-xs leading-4 text-muted [&>a]:shrink-0 [&>span:has(+a)]:after:ml-1 [&>span:has(+a)]:after:content-['·']`}
+        className={`flex min-w-0 max-w-full items-center gap-1 text-xs leading-4 text-muted [&>a]:shrink-0 ${
+          panel
+            ? "[&>span:has(+a)]:after:ml-1 [&>span:has(+a)]:after:content-['·']"
+            : "[&>a+span]:before:mr-1 [&>a+span]:before:content-['·']"
+        }`}
       >
+        {!panel && chats}
         <CardTokens store={store} />
-        <CardSurface placement="chats" entityId={entityId as EntityId} label={label} />
+        {panel && chats}
       </div>
     </>
   )

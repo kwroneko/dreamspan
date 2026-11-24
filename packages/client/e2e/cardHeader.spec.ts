@@ -252,6 +252,17 @@ test("the picture's controls are over it, and reached by keyboard", async ({ pag
   ).toBeVisible()
 })
 
+test("card count order differs between the character tab and the full editor", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const counts = (scope: Page | Locator) => scope.locator('[data-card-header-row="usage"] > :is(a, [data-card-tokens])')
+  const panel = await open(page, PLAIN)
+  await expect(counts(panel)).toHaveText([/permanent$/, "1 chat"])
+  const refs = await admin((api) => api.ListLibrary({ kind: "card" }))
+  await page.goto(`${server().url}/library/${refs.find((ref) => ref.label === PLAIN)!.id}`)
+  await expect(counts(page)).toHaveText(["1 chat", /permanent$/])
+})
+
 test("the full editor's header is the same", async ({ page }) => {
   for (const scheme of ["light", "dark"] as const)
     for (const width of [1440, 390]) {
