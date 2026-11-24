@@ -12,7 +12,7 @@ import { Sheet } from "../../ui/Sheet.tsx"
 import { Away } from "../../ui/away.ts"
 import { useTabShown } from "../workbench/tab.tsx"
 import { useWorkspaceChanges } from "../editor/PresetWorkspace.tsx"
-import { UnsavedScope, useUnsavedTabs } from "../../ui/UnsavedChanges.tsx"
+import { UnsavedBranchShown, UnsavedScope, useUnsavedTabs } from "../../ui/UnsavedChanges.tsx"
 import { SubjectTabs } from "../../ui/PanelTabs.tsx"
 import { inOrder, storedOrder } from "../../ui/tabOrder.ts"
 import { ToolTabs } from "../../ui/ToolTabs.tsx"
@@ -195,7 +195,10 @@ export function ChatSidePanel({
 } & SidePanelContent) {
   // A tab mounts when first shown and stays mounted, hidden, while the panel is open, so
   // switching tabs never ends what's in one: a summary's edit with its unsaved text, say.
-  const { tracker, dirty } = useUnsavedTabs()
+  // A chat's own notes count on their branch only (owner, 2026-11-24): the branch shown here.
+  const sessionId = "session" in content ? content.session.id : null
+  const branch = sessionId === null ? null : { chatId: sessionId, forkId: content.view.forkId ?? null }
+  const { tracker, dirty } = useUnsavedTabs(branch)
   // Shown apart from the chat (beside the frames, or as a sheet), it takes the chat kind's accent itself.
   const kindRoot = kindRootProps(useChatKindLook(content.view.chat?.kind))
   const editorChanges = useWorkspaceChanges()
@@ -312,26 +315,28 @@ export function ChatSidePanel({
             }
           >
             <UnsavedScope tracker={tracker} tab={t.value}>
-              {"pending" in content ? (
-                <PendingPanelContent
-                  key={t.descriptor.id}
-                  descriptor={t.descriptor}
-                  tab={t.value}
-                  active={t.value === tab}
-                  pending={content.pending}
-                  view={content.view}
-                />
-              ) : (
-                <PanelContent
-                  key={t.descriptor.id}
-                  descriptor={t.descriptor}
-                  tab={t.value}
-                  active={t.value === tab}
-                  notesFocus={notesFocus}
-                  onNotes={notes}
-                  {...content}
-                />
-              )}
+              <UnsavedBranchShown branch={branch}>
+                {"pending" in content ? (
+                  <PendingPanelContent
+                    key={t.descriptor.id}
+                    descriptor={t.descriptor}
+                    tab={t.value}
+                    active={t.value === tab}
+                    pending={content.pending}
+                    view={content.view}
+                  />
+                ) : (
+                  <PanelContent
+                    key={t.descriptor.id}
+                    descriptor={t.descriptor}
+                    tab={t.value}
+                    active={t.value === tab}
+                    notesFocus={notesFocus}
+                    onNotes={notes}
+                    {...content}
+                  />
+                )}
+              </UnsavedBranchShown>
             </UnsavedScope>
           </div>
         </div>
