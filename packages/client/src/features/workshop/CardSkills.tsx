@@ -148,6 +148,7 @@ function SkillDialog({
           </ul>
         )}
         <DialogActions>
+          {form.refusedAction}
           <Button hint="Closes without changing the skill." onClick={cancel}>
             Cancel
           </Button>

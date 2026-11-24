@@ -369,6 +369,7 @@ function TypeEditor({
             Delete type
           </Button>
         )}
+        {form.refusedAction}
       </div>
     </form>
   )

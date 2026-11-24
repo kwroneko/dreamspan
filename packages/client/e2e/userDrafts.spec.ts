@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { loginCookie, withCookie, type Client } from "./support/rpc.ts"
 import { openPanel, closePanel, openSummarySettings } from "./support/panel.ts"
@@ -152,27 +153,39 @@ for (const width of [1440, 390])
       await expect(page.getByLabel("Stop string 1", { exact: true })).toHaveValue("STILL WRITING")
       await page.getByLabel("Stop string 1", { exact: true }).scrollIntoViewIfNeeded()
       await shot(page, `model-${width}-${theme}`)
+      // A new chat's first message is its pending chat's composer draft (draftchats3, f543b0e9d:
+      // the old `pending-chat:<card>` user_field keys are read by nothing and filed to the bin).
       await page.goto(`${server().url}/cards/${ref.entityId}/chat`)
+      await expect.poll(() => new URL(page.url()).searchParams.get("draft")).not.toBeNull()
+      const pendingChat = new URL(page.url()).searchParams.get("draft") as ChatId
+      const pendingText = () =>
+        api((client) => Effect.map(client.OpenComposer({ chatId: pendingChat, forkId: null }), (d) => d.content))
       const message = page.getByRole("textbox", { name: "Message", exact: true })
-      await message.fill(`Unsent opening ${width} ${theme}`)
-      await expect
-        .poll(() => draftText(`pending-chat:${ref.entityId}`, "First message"))
-        .toBe(`Unsent opening ${width} ${theme}`)
+      await expect(message).toBeEditable()
+      const opening = `Unsent opening ${width} ${theme}`
+      await message.fill(opening)
+      await expect.poll(pendingText).toBe(opening)
       await page.reload()
-      await expectTextBox(message, `Unsent opening ${width} ${theme}`)
+      await expectTextBox(message, opening)
       await message.fill("x")
-      await expect.poll(() => draftText(`pending-chat:${ref.entityId}`, "First message")).toBe("x")
-      await page.getByRole("button", { name: "Undo / history", exact: true }).click()
-      await page.getByRole("button", { name: "Undo field change", exact: true }).click()
-      await expectTextBox(message, `Unsent opening ${width} ${theme}`)
-      await page.keyboard.press("Escape")
+      await expect.poll(pendingText).toBe("x")
+      await page.getByRole("button", { name: "Earlier text in this box", exact: true }).click()
+      await page
+        .getByRole("dialog", { name: "Earlier text" })
+        .getByRole("button")
+        .filter({ hasText: `${opening.length} characters` })
+        .first()
+        .click()
+      await expectTextBox(message, opening)
+      await expect.poll(pendingText).toBe(opening)
       await page.reload()
       await expectTextBox(message, `Unsent opening ${width} ${theme}`)
       await shot(page, `pending-${width}-${theme}`)
       const fresh = await browser.newContext({ viewport: { width, height: 1000 }, colorScheme: theme })
       const device = await fresh.newPage()
       await authenticate(device)
-      await device.goto(`${server().url}/cards/${ref.entityId}/chat`)
+      // The same new chat is its URL (`?draft=`); a bare /cards/<id>/chat draws a fresh one.
+      await device.goto(page.url())
       await expectTextBox(
         device.getByRole("textbox", { name: "Message", exact: true }),
         `Unsent opening ${width} ${theme}`

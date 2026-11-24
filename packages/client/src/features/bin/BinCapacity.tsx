@@ -93,6 +93,7 @@ function CapacityField({ field, label, value }: { field: keyof BinLimits; label:
           >
             Save
           </Button>
+          {form.refusedAction}
         </div>
       </Field>
       <ErrorAlert error={action.error} />

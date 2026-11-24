@@ -250,6 +250,7 @@ function LimitsForm({ settings }: { settings: SubagentSettings }) {
         >
           Use the defaults
         </Button>
+        {form.refusedAction}
       </div>
     </form>
   )
@@ -427,6 +428,7 @@ function ModelsForm({ settings }: { settings: SubagentSettings }) {
             Discard changes
           </Button>
         )}
+        {form.refusedAction}
       </div>
     </form>
   )
