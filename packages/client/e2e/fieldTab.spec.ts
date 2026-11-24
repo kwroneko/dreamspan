@@ -13,7 +13,7 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser, type Client } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, startServer, withAdmin } from "./support/server.ts"
 import { noteText } from "./support/notes.ts"
-import { openPanel } from "./support/panel.ts"
+import { openPanel, panelTab } from "./support/panel.ts"
 import { level1 } from "./support/summaries.ts"
 import { textBoxValue } from "./support/textbox.ts"
 
@@ -64,6 +64,42 @@ const openCard = async (page: Page, name: string) => {
   await page.goto(`${server().url}/library/${card.id}`)
   return card
 }
+
+test("a reused card field preview binds to the new card's store", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { chat, a, b } = await admin((api) =>
+    Effect.gen(function* () {
+      const a = yield* api.CreateCard({ label: "Preview Alpha", name: "Preview Alpha" })
+      const b = yield* api.CreateCard({ label: "Preview Beta", name: "Preview Beta" })
+      const chat = yield* api.CreateChat({ title: "Card previews" })
+      for (const card of [a, b])
+        yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
+      return { chat, a, b }
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chat.id}?panel=card:${a.entityId}`)
+  const panel = page.getByRole("tabpanel", { name: "Definition", exact: true })
+  const link = panel.getByRole("link", { name: "Open Description in a tab", exact: true })
+  await link.click()
+  const frame = page.locator("[data-frame]")
+  const preview = frame.locator("[data-tab][data-preview]")
+  await expect(preview).toContainText("Preview Alpha · Description")
+  const tabId = (await preview.getAttribute("data-tab"))!
+
+  await panelTab(page, "Preview Beta")
+  await link.click()
+  await expect(preview).toHaveAttribute("data-tab", tabId)
+  await expect(preview).toContainText("Preview Beta · Description")
+  await expect(page).toHaveURL(new RegExp(`/library/${b.id}/field`))
+  const field = frame.getByRole("textbox", { name: "Description", exact: true })
+  await field.fill("Written only to Beta.")
+  await expect
+    .poll(() => textBoxValue(panel.getByRole("textbox", { name: "Description", exact: true })))
+    .toBe("Written only to Beta.")
+  await panelTab(page, "Preview Alpha")
+  await expect.poll(() => textBoxValue(panel.getByRole("textbox", { name: "Description", exact: true }))).toBe("")
+})
 
 test("1440: the expand button opens the field as a tab beside, the same text live both ways and after a reload", async ({
   page

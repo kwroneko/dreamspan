@@ -159,7 +159,10 @@ const watchStore = (store: EditorStore) => {
   }
 }
 
+let nextEditorStoreId = 0
+
 export class EditorStore {
+  readonly instanceId = ++nextEditorStoreId
   snapshot: EditorSnapshot | null = null
   loadError: AppError | null = null
   /** The last save that failed, until one succeeds. */

@@ -70,11 +70,9 @@ function FieldView({ target, supplied }: { target: FieldTabTarget; supplied?: Ed
 }
 
 /** A chat's own note: the chat's store for it while the chat is open, so its panel shows the same text. */
-function NoteFieldView({ target, url }: { target: FieldTabTarget; url: URL }) {
+function NoteFieldView({ target }: { target: FieldTabTarget }) {
   const live = useLiveChatNoteStore(target.refId, target.chatNote)
-  return (
-    <FieldView key={`${fieldTabKey(url) ?? target.refId}\n${live ? "bound" : "own"}`} target={target} supplied={live} />
-  )
+  return <FieldView key={live?.instanceId ?? "own"} target={target} supplied={live} />
 }
 
 export function FieldPage() {
@@ -82,14 +80,17 @@ export function FieldPage() {
   const url = new URL(href, "http://tab.invalid")
   const target = fieldTabTarget(url)
   if (!target) return <Alert tone="warning">This link doesn't name a field.</Alert>
+  const key = fieldTabKey(url) ?? target.refId
   const chat = url.searchParams.get("chat")
-  if (target.chatNote) return <NoteFieldView target={target} url={url} />
+  if (target.chatNote) return <NoteFieldView key={key} target={target} />
   // Opened from a chat: its stores while it's open, so its panel shows the same text.
   if (chat && !readOnlyRef(target.refId))
     return (
       <ChatBoundEditor refId={target.refId as RefId} focus={undefined} chatId={chat} onClose={undefined}>
-        {(bound) => <FieldView key={bound.store ? "bound" : "own"} target={target} supplied={bound.store} />}
+        {(bound) => (
+          <FieldView key={`${key}\n${bound.store?.instanceId ?? "own"}`} target={target} supplied={bound.store} />
+        )}
       </ChatBoundEditor>
     )
-  return <FieldView key={target.refId} target={target} />
+  return <FieldView key={key} target={target} />
 }
