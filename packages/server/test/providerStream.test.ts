@@ -6,6 +6,7 @@ import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { resolveModel, type ConnectionSettings, type ModelId, type ProviderKind } from "@dreamspan/shared/providers.ts"
 import { Effect, Exit, Fiber, Layer, Scope, Stream } from "effect"
+import { vi } from "vitest"
 import * as Database from "../src/db/Database.ts"
 import * as Network from "../src/net/Network.ts"
 import { classify, parseRetryAfter } from "../src/providers/errors.ts"
@@ -1556,6 +1557,40 @@ describe("secrets stay where they were entered (audit regressions)", () => {
 })
 
 describe("provider registry", () => {
+  it.live("leaves no idle watchdog when an adapter throws before streaming", () =>
+    Effect.gen(function* () {
+      const server = yield* mock((_request, res) => json(res, 200, openAiList([{ id: "m" }])))
+      const { userId, connection, modelId, providers } = yield* connect("openai-chat", `${server.url}/v1`, null, "m")
+      const registry = yield* ProviderRegistry
+      const builtin = registry.kinds.get("openai-chat")!
+      yield* registry.kinds.register({
+        ...builtin,
+        streams: {
+          ...builtin.streams,
+          streamSimple: () => {
+            throw new Error("adapter failed during construction")
+          }
+        }
+      })
+      const allocate = vi.spyOn(globalThis, "setInterval")
+      const clear = vi.spyOn(globalThis, "clearInterval")
+      try {
+        const error = yield* collect(
+          providers.stream({ userId, connectionId: connection.id, modelId, context, attribution: { purpose: "test" } })
+        ).pipe(Effect.flip)
+        assert.include(error.message, "adapter failed during construction")
+        for (const result of allocate.mock.results) {
+          if (result.type === "return") assert.isTrue(clear.mock.calls.some(([watch]) => watch === result.value))
+        }
+      } finally {
+        const results = allocate.mock.results.slice()
+        allocate.mockRestore()
+        clear.mockRestore()
+        for (const result of results) if (result.type === "return") clearInterval(result.value)
+      }
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
   it.live("a plugin can add a provider kind and a request transform, and both go away with its scope", () =>
     Effect.gen(function* () {
       const server = yield* mock((request, res) =>
