@@ -5,10 +5,12 @@ import { syncClientPlugins } from "../../pluginLifecycle.ts"
 import { type StoryScope as Scope } from "@dreamspan/shared/branchNaming.ts"
 import type { StoryAt } from "@dreamspan/shared/chat.ts"
 import { StoryScope } from "./StoryScope.tsx"
+import { fullyReverted } from "./changeRows.ts"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
+import { ConfirmDialog } from "../../ui/Dialog.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import {
@@ -19,6 +21,7 @@ import {
   openHint,
   opensNow,
   openTarget,
+  revertable,
   undoable,
   undoHint,
   type RolloutEffect
@@ -42,14 +45,33 @@ export function EffectRow({
   // A made item that's undone is in the bin, as a deleted one is until its undo: there's nothing to open.
   const opens = target !== null && opensNow(current) && !(inBin && current.kind !== "library.delete")
   const state = effectState(current)
-  const undo = async () => {
+  const [note, setNote] = useState<string | null>(null)
+  const [ask, setAsk] = useState(false)
+  const keys = [EFFECTS_KEY, "library", "chats", "chat-lists", "bin"]
+  const undo = async (binAnyway = false) => {
+    setNote(null)
     const result = await action.run(
-      (client) => client("UndoRolloutEffect", effectKey(current)),
-      [EFFECTS_KEY, "library", "chats", "chat-lists", "bin"]
+      (client) => client("UndoRolloutEffect", { ...effectKey(current), ...(binAnyway ? { binAnyway } : {}) }),
+      keys
     )
     if (result.ok) {
       setShown(result.value)
+      setAsk(false)
       if (current.kind.startsWith("plugin.")) await syncClientPlugins()
+    } else if (current.kind === "library.create" && !binAnyway) setAsk(true)
+  }
+  // An edit is reverted, keeping later edits (spec/WORKSHOP-CARDS.md §8.1); one that conflicts
+  // writes nothing and says where to choose.
+  const revert = async () => {
+    setNote(null)
+    const result = await action.run((client) => client("RevertChange", { effects: [effectKey(current)] }), keys)
+    if (result.ok && result.value.conflicts.length > 0)
+      setNote("It changed since in a field this change touched. Revert it from its change row to choose what to keep.")
+  }
+  const redo = async () => {
+    for (const reversalId of current.reversion?.reversals ?? []) {
+      const result = await action.run((client) => client("RedoChange", { reversalId }), keys)
+      if (!result.ok || result.value.conflicts.length > 0) return
     }
   }
   return (
@@ -114,9 +136,20 @@ export function EffectRow({
               className="h-7 px-2 text-xs"
               pending={action.pending}
               hint={undoHint(current)}
-              onClick={() => void undo()}
+              onClick={() => void (revertable(current) ? revert() : undo())}
             >
-              Undo
+              {revertable(current) ? "Revert" : "Undo"}
+            </Button>
+          )}
+          {fullyReverted(current) && current.undoneAt === null && (current.reversion?.reversals.length ?? 0) > 0 && (
+            <Button
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              pending={action.pending}
+              hint="Puts this change back, keeping edits made since, as a new revision."
+              onClick={() => void redo()}
+            >
+              Redo
             </Button>
           )}
           {opens && (
@@ -133,11 +166,26 @@ export function EffectRow({
           )}
         </span>
       </div>
-      {action.error && (
+      {action.error && !ask && (
         <p role="alert" className="text-danger [overflow-wrap:anywhere]">
-          Not undone: {action.error.message}
+          Not {revertable(current) ? "reverted" : "undone"}: {action.error.message}
         </p>
       )}
+      {note && (
+        <p role="alert" className="text-danger [overflow-wrap:anywhere]">
+          Not reverted: {note}
+        </p>
+      )}
+      <ConfirmDialog
+        open={ask}
+        onOpenChange={setAsk}
+        title="Move it to the bin?"
+        description="It was changed since, or a chat uses it. Move it to the bin anyway? You can restore it from the bin."
+        confirmLabel="Move to the bin"
+        confirmHint="Moves it to the bin as it is now."
+        pending={action.pending}
+        onConfirm={() => void undo(true)}
+      />
     </div>
   )
 }

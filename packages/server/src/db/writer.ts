@@ -3,6 +3,7 @@ import { makeFileVersionWriteHandlers } from "./fileVersions.ts"
 import { makeFileShareWriteHandlers } from "./fileShares.ts"
 import { makeWorkingFolderWriteHandlers } from "./workingFolders.ts"
 import { makeWorkshopEffectHandlers } from "./workshopEffects.ts"
+import { makeChangeReversalWriteHandlers } from "./changeReversals.ts"
 import { makeWorkshopGrantWriteHandlers } from "./workshopGrants.ts"
 import { makePersonaLockWriteHandlers } from "./personaLocks.ts"
 import { installStorageKindValidation } from "./storageKinds.ts"
@@ -132,6 +133,8 @@ const handlers = Layer.unwrap(
                 },
                 bin
               )),
+              // Revert and Redo of a workshop's library changes (spec/WORKSHOP-CARDS.md §8.1).
+              ...(yield* makeChangeReversalWriteHandlers({ EditRef: library.EditRef })),
               ...(yield* makeWorkshopGrantWriteHandlers),
               ...(yield* makePersonaLockWriteHandlers),
               ...(yield* makePluginWriteHandlers),

@@ -224,6 +224,44 @@ export const migrationDefinitions = {
     statements: [
       "ALTER TABLE media_refs ADD COLUMN files_quota INTEGER NOT NULL DEFAULT 0 CHECK (files_quota IN (0, 1))"
     ]
+  },
+  // Revert and Redo of a workshop's changes (spec/WORKSHOP-CARDS.md §8.1): append-only records of
+  // what each took back (its fields' values before and after), the revision or file content it
+  // went from and to, and the changes it covers with the fields of each. `rollout_effects`'
+  // `undone_at` stays one-shot Undo's.
+  "0025_change_reversals": {
+    statements: [
+      `CREATE TABLE change_reversals (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE,
+        target_kind TEXT NOT NULL CHECK (target_kind IN ('entity', 'file')),
+        target_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('revert', 'redo')),
+        reverses_id TEXT REFERENCES change_reversals(id) ON DELETE CASCADE,
+        head_before TEXT,
+        head_after TEXT,
+        fields_json TEXT NOT NULL CHECK (json_valid(fields_json) AND json_type(fields_json) = 'array'),
+        before_json TEXT NOT NULL CHECK (json_valid(before_json) AND json_type(before_json) = 'object'),
+        after_json TEXT NOT NULL CHECK (json_valid(after_json) AND json_type(after_json) = 'object'),
+        created_at INTEGER NOT NULL,
+        CHECK ((action = 'redo') = (reverses_id IS NOT NULL))
+      ) STRICT`,
+      "CREATE INDEX change_reversals_chat ON change_reversals(chat_id, created_at)",
+      "CREATE INDEX change_reversals_reverses ON change_reversals(reverses_id)",
+      `CREATE TABLE change_reversal_effects (
+        reversal_id TEXT NOT NULL REFERENCES change_reversals(id) ON DELETE CASCADE,
+        rollout_id TEXT NOT NULL,
+        tool_call_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        fields_json TEXT NOT NULL CHECK (json_valid(fields_json) AND json_type(fields_json) = 'array'),
+        of_json TEXT NOT NULL CHECK (json_valid(of_json) AND json_type(of_json) = 'array'),
+        PRIMARY KEY (reversal_id, rollout_id, tool_call_id, seq),
+        FOREIGN KEY (rollout_id, tool_call_id, seq) REFERENCES rollout_effects(rollout_id, tool_call_id, seq) ON DELETE CASCADE
+      ) STRICT, WITHOUT ROWID`,
+      "CREATE INDEX change_reversal_effects_effect ON change_reversal_effects(rollout_id, tool_call_id, seq)"
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

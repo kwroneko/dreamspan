@@ -30,6 +30,7 @@ import {
   FOLD_NAMED,
   type ItemChange,
   itemChanges,
+  itemReverted,
   itemUndone,
   turnEndingAt
 } from "./changeRows.ts"
@@ -95,7 +96,7 @@ function FileRow({
 }) {
   const changes = changedFields(item.file.before, item.file.after)
   const names = changedNames(changes.map((c) => fieldLabel("card", item.file.after, [c.path[0]!], item.file.before)))
-  const undone = itemUndone(item)
+  const undone = itemUndone(item) || itemReverted(item)
   return (
     <div data-change-row={item.refId} className="flex items-center gap-2 text-xs">
       <ItemPicture item={item} />
@@ -124,7 +125,7 @@ function FileRow({
           </Tooltip>
         </div>
       </div>
-      <ItemChangeAction item={item} />
+      <ItemChangeAction item={item} reply={reply} />
     </div>
   )
 }
@@ -141,7 +142,7 @@ function Row({ item, reply }: { item: ItemChange; reply: ChangeReply }) {
       )
     : ""
   const since = loaded ? changedSince(loaded.revisions, item.to) : null
-  const undone = itemUndone(item)
+  const undone = itemUndone(item) || itemReverted(item)
   return (
     <div data-change-row={item.refId} className="flex items-center gap-2 text-xs">
       <ItemPicture item={item} />
@@ -176,7 +177,7 @@ function Row({ item, reply }: { item: ItemChange; reply: ChangeReply }) {
           </span>
         )}
       </div>
-      <ItemChangeAction item={item} />
+      <ItemChangeAction item={item} reply={reply} />
     </div>
   )
 }

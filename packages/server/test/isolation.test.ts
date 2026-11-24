@@ -1614,6 +1614,16 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.UndoRolloutEffects({ chatId: owner.chat.chatId, rolloutId: owner.chat.rolloutId }), "NotFound")
   },
+  RevertChange: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.RevertChange({ effects: [{ rolloutId: owner.chat.rolloutId, toolCallId: "call_1", seq: 0 }] }),
+        "NotFound"
+      )
+  },
+  RedoChange: {
+    probe: (actor) => refused(actor.api.RedoChange({ reversalId: "no-such-revert" }), "NotFound")
+  },
   SetWorkshopGrant: {
     probe: (actor, owner) =>
       refused(

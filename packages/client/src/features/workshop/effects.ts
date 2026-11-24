@@ -1,6 +1,7 @@
 // What a workshop run changed outside the chat (spec/WORKSHOP.md §3.6), as the step rows, the
 // Changes tab and the regenerate warning show it: where each change opens, whether it can still be
 // undone, and the undo itself. Apart from React, so it's tested on its own.
+import { fullyReverted } from "./changeRows.ts"
 import type { RolloutEffect } from "@dreamspan/shared/workshopApi.ts"
 import { Atom } from "effect/reactivity"
 import { AppClient } from "../../rpc.ts"
@@ -52,14 +53,25 @@ export const openHint = (effect: RolloutEffect) =>
       ? "Opens the folder in Files."
       : "Opens the item in its editor, with its history."
 
-/** It can still be undone from here: the app kept how, and it isn't undone yet. */
-export const undoable = (effect: RolloutEffect) => effect.undo !== null && effect.undoneAt === null
+/**
+ * An edit that Revert takes back rather than Undo (spec/WORKSHOP-CARDS.md §8.1): a library item's
+ * or a card file's, field by field, keeping later edits.
+ */
+export const revertable = (effect: RolloutEffect) =>
+  effect.kind === "library.revise" ||
+  (effect.kind === "file.edit" && typeof effect.undo?.card === "object" && effect.undo.card !== null)
+
+
+/** It can still be undone (or reverted) from here: the app kept how, and it isn't taken back yet. */
+export const undoable = (effect: RolloutEffect) =>
+  effect.undo !== null && effect.undoneAt === null && !fullyReverted(effect)
 
 /** Changes still standing: what a new version of the reply wouldn't undo. */
 export const outstanding = (effects: ReadonlyArray<RolloutEffect>) => effects.filter((e) => e.undoneAt === null)
 
-/** "Undone", or nothing while it stands. */
-export const effectState = (effect: RolloutEffect) => (effect.undoneAt === null ? null : "Undone")
+/** "Undone" or "Reverted", or nothing while it stands. */
+export const effectState = (effect: RolloutEffect) =>
+  effect.undoneAt !== null ? "Undone" : fullyReverted(effect) ? "Reverted" : null
 
 /** Undo's hover: what it does to this kind of change. */
 export const undoHint = (effect: RolloutEffect) =>
@@ -76,14 +88,16 @@ export const undoHint = (effect: RolloutEffect) =>
             : effect.kind === "library.create"
               ? "Moves the item it made to the bin."
               : effect.kind === "library.revise"
-                ? "Puts the item back as it was before, as a new revision."
+                ? "Takes this change out of the item, keeping edits made since, as a new revision."
                 : effect.kind === "library.delete"
                   ? "Takes it back out of the bin."
                   : effect.kind === "file.create"
                     ? "Removes the file it made. Its content is kept as an earlier version."
-                    : effect.kind === "file.write" || effect.kind === "file.edit"
-                      ? "Puts the file back as it was before. The current text is kept as an earlier version."
-                      : "Undoes this change."
+                    : revertable(effect)
+                      ? "Takes this change out of the card file, keeping edits made since. The file as it is now is kept as an earlier version."
+                      : effect.kind === "file.write" || effect.kind === "file.edit"
+                        ? "Puts the file back as it was before. The current text is kept as an earlier version."
+                        : "Undoes this change."
 
 /** Open is offered while the item is there to open: one in the bin (made and undone, or deleted) isn't. */
 export const opensNow = (effect: RolloutEffect) =>

@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util"
 import { admitsEffect, outsideEffect } from "../agent/effects.ts"
 import { toolForKind } from "../execution.ts"
 import { DEFAULT_MAX_IMAGES } from "../assembler/images.ts"
@@ -638,8 +637,10 @@ export const layer = Layer.effect(
               })
               // A workshop's tail lines (the working folder, agent/turnNotes.ts) are told again
               // only on a turn after they changed: with the new user turn, after the cached prefix.
-              const notes = snapshot.agentAssembly?.turnNotes ?? []
-              if (notes.length && !isDeepStrictEqual(prior.snapshot.agentAssembly?.turnNotes ?? [], notes)) {
+              // Only the lines that are new are told, so one line's change doesn't repeat the rest.
+              const told = prior.snapshot.agentAssembly?.turnNotes ?? []
+              const notes = (snapshot.agentAssembly?.turnNotes ?? []).filter((line) => !told.includes(line))
+              if (notes.length) {
                 const last = additions.at(-1)
                 if (last?.role === "rpUser")
                   additions[additions.length - 1] = {

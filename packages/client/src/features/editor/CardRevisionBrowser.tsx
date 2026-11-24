@@ -14,7 +14,7 @@ import { readableChatTitle } from "../chat/chatTitle.ts"
 import { ReadableDiff, readableLines } from "../../ui/ReadableDiff.tsx"
 import { RevisionEntry, revisionName } from "../../ui/RevisionEntry.tsx"
 import { promptLabel } from "./promptLabel.ts"
-import { useContext, useEffect, useState } from "react"
+import { type ReactNode, useContext, useEffect, useState } from "react"
 import { PanelVariantNavigation } from "./panelActions.tsx"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
@@ -60,7 +60,9 @@ export function FieldComparison({
   doc,
   settingLines,
   beforeLabel,
-  afterLabel
+  afterLabel,
+  actions,
+  defaultOpen = false
 }: {
   label: string
   change: FieldChange
@@ -68,14 +70,18 @@ export function FieldComparison({
   afterLabel: string
   doc: Doc
   settingLines?: SettingLines | undefined
+  /** Buttons on the field's line (a change view's Revert this field); clicking them doesn't fold it. */
+  actions?: ReactNode
+  defaultOpen?: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen)
   const text = isText(change.before) && isText(change.after)
   const order = change.path.length === 1 && change.path[0] === "order"
   const lines = order ? orderLines(doc) : settingLines?.(change.path)
   return (
     <details
       className="min-w-0 rounded-md border border-border p-2"
+      open={defaultOpen || undefined}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <Tooltip label="Shows the changes to this field.">
@@ -84,7 +90,16 @@ export function FieldComparison({
           title={`Show or hide changes to ${label}`}
         >
           <Icon name={open ? "down" : "right"} size={16} className="shrink-0" />
-          <span>{label}</span>
+          <span className="min-w-0 flex-1">{label}</span>
+          {actions && (
+            // A click on a button here is the button's, not the summary's.
+            <span
+              className="flex shrink-0 flex-wrap items-center justify-end gap-1 font-normal"
+              onClick={(event) => event.preventDefault()}
+            >
+              {actions}
+            </span>
+          )}
         </summary>
       </Tooltip>
       {open && (

@@ -383,6 +383,8 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   UndoLibraryEdit: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UndoRolloutEffect: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UndoRolloutEffects: "Not exposed: undoing a whole reply's changes is the user's, from the Changes tab.",
+  RevertChange: "Not exposed: Revert on a change row is the user's; the assistant's own is revert_change.",
+  RedoChange: "Not exposed: Redo on a change row is the user's.",
   UndoThreads: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UnhideImportedRun: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UpdateConnection: "User-only security, consent, account, credential or network configuration.",

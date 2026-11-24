@@ -3,6 +3,8 @@ import { WorkshopFiles } from "../files/WorkshopFiles.ts"
 import { HostFolderRefusal } from "../files/hostFolders.ts"
 import { FILES_TOP } from "@dreamspan/shared/files.ts"
 import { FILE_UNDO_ON_HOST } from "../db/workshopEffects.ts"
+import { changedUnits, combinedFileEdits, docOfUnits } from "@dreamspan/shared/changeReversal.ts"
+import type { User } from "@dreamspan/shared/domain.ts"
 import { EffectUndoRefused, HostFolderRefused } from "@dreamspan/shared/workshopApi.ts"
 import { CurrentUser } from "@dreamspan/shared/api.ts"
 import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
@@ -123,6 +125,125 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       }),
       Effect.tap((effect) => notifyUndo(actor.id, [effect]))
     )
+  /** A card file edit's fields before and after (`undo.card` of `edit_card_file`), or null. */
+  const cardEdit = (effect: RolloutEffect) => {
+    const card = effect.undo?.card as { before?: unknown; after?: unknown; name?: unknown } | undefined
+    return effect.kind === "file.edit" && card && typeof card.before === "object" && typeof card.after === "object"
+      ? {
+          name: typeof card.name === "string" ? card.name : "",
+          before: card.before as Record<string, unknown>,
+          after: card.after as Record<string, unknown>
+        }
+      : null
+  }
+  const keyOf = (e: { rolloutId: string; toolCallId: string; seq: number }) => ({
+    rolloutId: e.rolloutId,
+    toolCallId: e.toolCallId,
+    seq: e.seq
+  })
+  type ReversalInput = {
+    readonly fields?: ReadonlyArray<string>
+    readonly choices?: Readonly<Record<string, "now" | "before">>
+    readonly dryRun?: boolean
+    readonly message?: string
+  }
+  /** A card file's revert failed on the host: its refusal, else a plain one. */
+  const onHost = <A, R>(effect: Effect.Effect<A, unknown, R>) =>
+    effect.pipe(
+      Effect.mapError((cause) =>
+        cause instanceof EffectUndoRefused || cause instanceof NotFound
+          ? cause
+          : new EffectUndoRefused({ message: "The card file couldn't be changed. Open its versions." })
+      )
+    )
+  /** A revert or redo changed a library item: what open chats send may change, as after an undo. */
+  const notifyReverted = (userId: UserId) => warmth.refreshUser(userId, true)
+  /**
+   * Reverts one item's changes (spec/WORKSHOP-CARDS.md §8.1): a library item's in the writer, a
+   * card file's on the files host, which records it after writing the file.
+   */
+  const revert = (
+    actor: User,
+    keys: ReadonlyArray<{ rolloutId: string; toolCallId: string; seq: number }>,
+    options: ReversalInput
+  ) =>
+    Effect.gen(function* () {
+      const effects: Array<RolloutEffect> = []
+      for (const key of keys) effects.push(yield* reader.RolloutEffectFor({ ...key, userId: actor.id }))
+      if (effects.every((e) => e.kind === "library.revise"))
+        return yield* writer.RevertLibraryChange({ userId: actor.id, effects: keys, ...options })
+      const edits = effects
+        .filter((e) => e.undoneAt === null)
+        .sort((a, b) => a.createdAt - b.createdAt || a.seq - b.seq)
+        .map((e) => ({ effect: e, card: cardEdit(e) }))
+      const path = edits[0]?.effect.targetId
+      if (edits.length === 0 || path === undefined)
+        return yield* new EffectUndoRefused({ message: "This change was undone already." })
+      if (edits.some((e) => e.card === null || e.effect.targetId !== path))
+        return yield* new EffectUndoRefused({ message: "Only edits of one item are reverted together." })
+      const { before, after } = combinedFileEdits(edits.map((e) => e.card!))
+      const units = changedUnits(before, after)
+      const fields = options.fields ? units.filter((u) => options.fields!.includes(u)) : units
+      return yield* onHost(
+        files.reverseCardFile(actor, {
+          path,
+          original: before,
+          changed: after,
+          fields,
+          choices: options.choices,
+          dryRun: options.dryRun,
+          record: (written) =>
+            writer.RecordFileReversal({
+              userId: actor.id,
+              path,
+              label: written.name,
+              action: "revert",
+              reversesId: null,
+              headBefore: written.before,
+              headAfter: written.after,
+              fields: written.plan.fields,
+              before: written.plan.before,
+              after: written.plan.after,
+              effects: edits.map(({ effect, card }) => {
+                const of = changedUnits(card!.before, card!.after)
+                return { ...keyOf(effect), of, fields: of }
+              })
+            })
+        })
+      )
+    }).pipe(Effect.tap((outcome) => (outcome.reversalId ? notifyReverted(actor.id) : Effect.void)))
+  /** Takes a revert back (Redo): a library item's in the writer, a card file's on the files host. */
+  const redo = (actor: User, reversalId: string, options: ReversalInput) =>
+    Effect.gen(function* () {
+      const record = yield* reader.FileReversal({ userId: actor.id, reversalId })
+      if (record.targetKind === "entity")
+        return yield* writer.RedoLibraryChange({ userId: actor.id, reversalId, ...options })
+      const fields = options.fields ? record.fields.filter((f) => options.fields!.includes(f)) : record.fields
+      return yield* onHost(
+        files.reverseCardFile(actor, {
+          path: record.targetId,
+          original: docOfUnits(record.before),
+          changed: docOfUnits(record.after),
+          fields,
+          choices: options.choices,
+          dryRun: options.dryRun,
+          record: (written) =>
+            writer.RecordFileReversal({
+              userId: actor.id,
+              path: record.targetId,
+              label: written.name,
+              action: "redo",
+              reversesId: record.id,
+              headBefore: written.before,
+              headAfter: written.after,
+              fields: written.plan.fields,
+              before: written.plan.before,
+              after: written.plan.after,
+              effects: record.effects
+            })
+        })
+      )
+    }).pipe(Effect.tap((outcome) => (outcome.reversalId ? notifyReverted(actor.id) : Effect.void)))
   /**
    * The capabilities of the tools a chat of `kind` offers with `state`, as `grants` and the MCP
    * servers' rows stand; `story`, the story a side chat is beside.
@@ -333,6 +454,10 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       ),
     UndoRolloutEffect: (input) =>
       Effect.flatMap(CurrentUser, (user) => undo(user, input)).pipe(internal("UndoRolloutEffect")),
+    RevertChange: ({ effects, ...options }) =>
+      Effect.flatMap(CurrentUser, (user) => revert(user, effects, options)).pipe(internal("RevertChange")),
+    RedoChange: ({ reversalId, ...options }) =>
+      Effect.flatMap(CurrentUser, (user) => redo(user, reversalId, options)).pipe(internal("RedoChange")),
     UndoRolloutEffects: (input) =>
       Effect.flatMap(CurrentUser, (user) =>
         Effect.gen(function* () {
@@ -345,13 +470,51 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
           const rows = all.filter(
             (e) => (e.subagent?.rolloutId ?? e.rolloutId) === input.rolloutId && e.undoneAt === null
           )
-          if (!rows.some((e) => e.kind.startsWith("plugin."))) {
+          // Revert all of this reply (spec/WORKSHOP-CARDS.md §8.1): an item's edits are reverted
+          // as its row's Revert does, three-way; everything else is undone as before.
+          // An item the reply made goes to the bin with its edits, by the built undo.
+          const made = new Set(rows.filter((e) => e.kind === "library.create").map((e) => e.targetId))
+          const itemOf = (e: RolloutEffect) =>
+            e.kind === "library.revise" && !made.has(e.targetId)
+              ? `entity:${e.targetId}`
+              : cardEdit(e)
+                ? `file:${e.targetId}`
+                : null
+          const reverted = (e: RolloutEffect) =>
+            e.reversion !== undefined && e.reversion.fields.length >= e.reversion.of.length
+          if (!rows.some((e) => e.kind.startsWith("plugin.") || itemOf(e) !== null)) {
             const result = yield* writer.UndoRolloutEffects({ ...input, userId: user.id })
             yield* notifyUndo(user.id, result.undone)
             return result
           }
           const undone: Array<(typeof rows)[number]> = []
+          const items = new Set<string>()
           for (const [at, row] of rows.entries()) {
+            const item = itemOf(row)
+            if (item !== null) {
+              if (items.has(item) || reverted(row)) continue
+              items.add(item)
+              const group = rows.filter((e) => itemOf(e) === item)
+              const outcome = yield* revert(user, group.map(keyOf), {}).pipe(Effect.exit)
+              const name =
+                /^(?:Edited|Created) the (?:card|lorebook|preset) (.*)$/s.exec(row.title)?.[1] ??
+                cardEdit(row)?.name ??
+                "This item"
+              const reason =
+                outcome._tag === "Failure"
+                  ? `${name} couldn't be reverted. Open its change view to see why.`
+                  : outcome.value.conflicts.length > 0
+                    ? `${name} changed since in ${outcome.value.conflicts.length === 1 ? "a field" : `${outcome.value.conflicts.length} fields`} this reply changed. Open its change view to choose what to keep.`
+                    : null
+              if (reason !== null)
+                return {
+                  undone,
+                  refused: { effect: row, reason },
+                  left: rows.slice(at + 1).filter((e) => !group.includes(e))
+                }
+              undone.push(...group)
+              continue
+            }
             const result = yield* undo(user, row).pipe(Effect.exit)
             if (result._tag === "Failure")
               return {
