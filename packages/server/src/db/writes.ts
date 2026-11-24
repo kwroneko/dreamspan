@@ -560,6 +560,7 @@ export const makeWriteHandlers = (bin: Bin) =>
         versionId,
         forkId,
         content,
+        keepContent,
         images,
         reasoning,
         replySections,
@@ -665,7 +666,9 @@ export const makeWriteHandlers = (bin: Bin) =>
                 VALUES (${versionId}, ${row.content}, ${at}, ${before ?? normal(had)}, ${hadThinking}, ${hadSections})`
               if (thinkingChanged)
                 yield* sql`UPDATE version_records SET reasoning = ${thinking}, raw_reasoning = ${rawReasoning},
-                  reply_sections = ${sections}, raw_sections = ${rawSections}, updated_at = ${at} WHERE id = ${versionId}`
+                  reply_sections = ${sections}, raw_sections = ${rawSections},
+                  rewrite_json = ${keepContent ? rewritten.rewrite_json : (row.rewrite_json ?? null)},
+                  updated_at = ${at} WHERE id = ${versionId}`
               // The import matcher reads whether this history exists, even when text did
               // not change. Certify image- and thinking-only amends in its whole-chat snapshot too.
               yield* sql`UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = ${slot.chat_id}`

@@ -1943,17 +1943,19 @@ export class ChatSession {
   /**
    * A finished version the user wrote changes in place; anything else gets a new version.
    * `thinking`: the edit's thinking field, plain text ("" removes it), with the draft it was
-   * typed into; absent, the version's thinking stays as it is.
+   * typed into; absent, the version's thinking stays as it is. Undefined content keeps the
+   * source's body without applying its edit scripts.
    */
   async edit(
     entry: PathEntry,
-    content: string,
+    content: string | undefined,
     draft: DraftCommit | null = null,
     images?: import("@dreamspan/shared/chat.ts").MessageImages,
     thinking?: { readonly text: string; readonly draft: DraftCommit | null }
   ): Promise<Outcome<unknown>> {
     const { version } = entry
     const commit = {
+      ...(content === undefined ? {} : { content }),
       ...(draft === null ? {} : { draft }),
       ...(images === undefined ? {} : { images }),
       ...(thinking === undefined
@@ -1965,7 +1967,6 @@ export class ChatSession {
         client("AmendVersion", {
           versionId: version.id,
           forkId: this.view.forkId,
-          content,
           expectedRowVersion: version.rowVersion,
           ...commit
         })
@@ -1981,7 +1982,6 @@ export class ChatSession {
         slotId: entry.slotId,
         forkId: this.view.forkId,
         sourceVersionId: version.id,
-        content,
         expectedRowVersion: entry.rowVersion,
         ...commit
       })

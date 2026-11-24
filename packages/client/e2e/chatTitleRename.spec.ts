@@ -5,6 +5,7 @@ import { mkdirSync } from "node:fs"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
+import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -102,3 +103,69 @@ for (const width of [1340, 600, 390])
     await field.press("Enter")
     await expect(title).toHaveText(`Entered ${width}`)
   })
+
+test("rename handles focus leaving its actions and guards a pending save", async ({ page }) => {
+  const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.CreateChat({ title: "Original" }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const held: { release?: () => void } = {}
+  let renames = 0
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      if (typeof data === "string" && JSON.parse(data).tag === "RenameChat" && ++renames === 2)
+        held.release = () => upstream.send(data)
+      else upstream.send(data)
+    })
+  })
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  const title = page.getByRole("heading", { level: 1 }).getByRole("button")
+  const field = page.getByRole("textbox", { name: "Chat name", exact: true })
+  const save = page.getByRole("button", { name: "Save the name" })
+  const cancel = page.getByRole("button", { name: "Cancel renaming" })
+
+  await title.click()
+  await field.fill("Escaped from Save")
+  await field.press("Tab")
+  await expect(save).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(title).toHaveText("Original")
+
+  await title.click()
+  await field.fill("Saved on blur")
+  await field.press("Tab")
+  await page.keyboard.press("Tab")
+  await expect(cancel).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(title).toHaveText("Saved on blur")
+
+  await title.click()
+  await field.fill("Submitted")
+  await save.click()
+  try {
+    await expect.poll(() => held.release !== undefined).toBe(true)
+    await expect(cancel).toBeDisabled()
+    await field.press("Escape")
+    await expect(field).toHaveValue("Submitted")
+    await field.press("Tab")
+    await expect(field).toBeVisible()
+  } finally {
+    held.release?.()
+  }
+  await expect(title).toHaveText("Submitted")
+  expect(renames).toBe(2)
+})
+
+test("a phone chat title matching a switch label leaves its controls visible", async ({ page }) => {
+  const label = "Summarize older messages"
+  const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.CreateChat({ title: label }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  const tab = await openPanel(page, "This chat")
+  await expect(tab.getByRole("heading", { name: label, exact: true })).toHaveClass("sr-only")
+  const summaries = tab.getByRole("region", { name: "Summaries", exact: true })
+  await expect(summaries.getByRole("switch", { name: label })).toBeVisible()
+  await expect(summaries.locator(".sr-only")).toHaveCount(0)
+  await summaries.getByRole("button", { name: "Summaries", exact: true }).click()
+  await expect(page.getByRole("tabpanel", { name: "Summaries", exact: true })).toBeVisible()
+})

@@ -2659,6 +2659,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       versionId: VersionId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       content: Schema.String,
+      /** The body was kept; the rewrite record combines its provenance and the thinking edit's. */
+      keepContent: Schema.optionalKey(Schema.Boolean),
       /** Its images from now on (absent: kept); the earlier set stays in its history. */
       images: Schema.optionalKey(MessageImages),
       /** Its thinking from now on (null: none; absent: kept); the earlier one stays in its history. */

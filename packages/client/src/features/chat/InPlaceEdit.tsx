@@ -10,7 +10,15 @@
 // The text box is the registered `messageTextEditor` (editorHistory.tsx): a surface replacing it
 // gets `bare`, keeps the metrics contract (ARCHITECTURE §12, "Editing"), and grows with its text.
 import type { PathEntry, Version } from "@dreamspan/shared/chat.ts"
-import { type KeyboardEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import {
+  type KeyboardEvent,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore
+} from "react"
 import { SlotOutlet } from "../../slots.tsx"
 import { EditorTextActions } from "../../textActions.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -197,28 +205,36 @@ export function InPlaceText({
         onFirstFocus()
       }}
     >
-      <SlotOutlet
-        slot={messageTextEditor}
-        props={{
-          label: "Message text",
-          value: text,
-          base,
-          bare: true,
-          // Opened from the chat's other view, it leaves focus there (Composition.tsx).
-          autoFocus: !draft.mirror,
-          caret: initialCaret?.offset,
-          caretTop: initialCaret?.top,
-          onCaretPlaced,
-          // Drawn: it takes the rendered text's place in this frame (Message.tsx `VersionBody`).
-          onReady: onShown,
-          // Text just added to your version: marked and scrolled to, focus left where it is.
-          flash: added,
-          onSelectionChange: selection.set,
-          onChange: (value) => draft.setText(value)
-        }}
-      />
+      <Suspense fallback={null}>
+        <SlotOutlet
+          slot={messageTextEditor}
+          props={{
+            label: "Message text",
+            value: text,
+            base,
+            bare: true,
+            // Opened from the chat's other view, it leaves focus there (Composition.tsx).
+            autoFocus: !draft.mirror,
+            caret: initialCaret?.offset,
+            caretTop: initialCaret?.top,
+            onCaretPlaced,
+            suspend: true,
+            // Text just added to your version: marked and scrolled to, focus left where it is.
+            flash: added,
+            onSelectionChange: selection.set,
+            onChange: (value) => draft.setText(value)
+          }}
+        />
+        <EditorCommitted onShown={onShown} />
+      </Suspense>
     </div>
   )
+}
+
+/** The registered surface has committed, including its layout effects. */
+function EditorCommitted({ onShown }: { onShown: () => void }) {
+  useLayoutEffect(onShown, [onShown])
+  return null
 }
 
 /**

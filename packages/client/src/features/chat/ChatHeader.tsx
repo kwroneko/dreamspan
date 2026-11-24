@@ -139,18 +139,28 @@ function ChatTitle({
   }, [request])
   /** Escape keeps the name: the blur that follows mustn't save. */
   const kept = useRef(false)
+  const submitting = useRef(false)
+  const [saving, setSaving] = useState(false)
   const save = async (event?: FormEvent) => {
     event?.preventDefault()
-    if (write.pending || kept.current) return
+    if (submitting.current || kept.current) return
     if (draft.trim() === shown) {
       if (draft !== initial) void typed.discard()
       return setEditing(false)
     }
-    const ok = await typed.commit(async (text) => (await write.run(() => session.rename(text))).ok)
-    if (ok) setEditing(false)
-    else input.current?.focus()
+    submitting.current = true
+    setSaving(true)
+    try {
+      const ok = await typed.commit(async (text) => (await write.run(() => session.rename(text))).ok)
+      if (ok) setEditing(false)
+      else input.current?.focus()
+    } finally {
+      submitting.current = false
+      setSaving(false)
+    }
   }
   const cancel = () => {
+    if (submitting.current) return
     kept.current = true
     // Kept the name: what was typed goes to the bin, recoverable.
     if (draft !== initial) void typed.discard()
@@ -169,7 +179,20 @@ function ChatTitle({
   return (
     <>
       {editing ? (
-        <form className="flex min-w-0 flex-1 flex-col" onSubmit={(event) => void save(event)}>
+        <form
+          className="flex min-w-0 flex-1 flex-col"
+          onSubmit={(event) => void save(event)}
+          // An action's tooltip can consume Escape before it bubbles to the form.
+          onKeyDownCapture={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault()
+              cancel()
+            }
+          }}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) void save()
+          }}
+        >
           <span className="flex min-w-0 items-center gap-1">
             <Input
               ref={input}
@@ -179,22 +202,13 @@ function ChatTitle({
               value={draft}
               maxLength={200}
               autoFocus
-              disabled={write.pending}
-              readOnly={!typed.ready}
+              readOnly={saving || !typed.ready}
               onFocus={(event) => {
                 kept.current = false
                 event.currentTarget.select()
               }}
-              onChange={(event) => typed.setText(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault()
-                  cancel()
-                }
-              }}
-              // Focus moving to Save or Cancel isn't leaving the field: their click decides.
-              onBlur={(event) => {
-                if (!event.currentTarget.form?.contains(event.relatedTarget)) void save()
+              onChange={(event) => {
+                if (!submitting.current) typed.setText(event.currentTarget.value)
               }}
               className="h-8 min-w-0 flex-1 text-base font-semibold"
             />
@@ -203,12 +217,13 @@ function ChatTitle({
               label="Save the name"
               hint="Save the name (Enter)"
               icon="check"
-              disabled={write.pending}
+              disabled={saving}
             />
             <IconButton
               label="Cancel renaming"
               hint="Cancel (Escape)"
               icon="close"
+              disabled={saving}
               onMouseDown={(event) => event.preventDefault()}
               onClick={cancel}
             />

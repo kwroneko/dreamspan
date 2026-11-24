@@ -37,6 +37,78 @@ const archive = (port: number) => ({
 
 const tiles = (scope: ReturnType<Page["locator"]>) => scope.locator("[data-remote-card]")
 
+for (const place of ["Home", "Sidebar"] as const)
+  test(`${place}: leaving cardex for Groups keeps the archive visible until the group page arrives`, async ({
+    page
+  }) => {
+    const port = await freePort()
+    const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: String(port) })
+    try {
+      await asUser(server, ADMIN.handle, ADMIN.password, (api) =>
+        Effect.gen(function* () {
+          const chat = yield* api.CreateChat({ title: "Synthetic group" })
+          for (const name of ["Ava Local", "Bela Local"]) {
+            const card = yield* api.CreateCard({ label: name, name })
+            yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
+          }
+          yield* api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: null,
+            branch: false,
+            content: "Hello.",
+            reply: false
+          })
+        })
+      )
+      await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+      await page.setViewportSize({ width: 1440, height: 900 })
+      const held: { release?: () => void } = {}
+      await page.routeWebSocket(/\/rpc$/, (socket) => {
+        const upstream = socket.connectToServer()
+        socket.onMessage((data) => {
+          const request = typeof data === "string" ? JSON.parse(data) : null
+          if (
+            request?.tag === "WatchShellForks" &&
+            request.payload.sections.some((s: { id: string }) => s.id === "groups")
+          )
+            held.release = () => upstream.send(data)
+          else upstream.send(data)
+        })
+      })
+      await page.goto(server.url)
+      const main = page.getByRole("main")
+      const scope = place === "Home" ? main : page.locator("[data-shell-list]")
+      const choose = async (name: string) => {
+        if (place === "Home")
+          await main
+            .getByRole("group", { name: "Show", exact: true })
+            .getByRole("button", { name, exact: true })
+            .click()
+        else {
+          await page.getByRole("combobox", { name: "Show", exact: true }).click()
+          await page.getByRole("option", { name: new RegExp(`^${name}`) }).click()
+        }
+      }
+      if (place === "Sidebar")
+        await page
+          .getByRole("group", { name: "Left panel", exact: true })
+          .getByRole("button", { name: "Characters", exact: true })
+          .click()
+      await choose("cardex")
+      await expect(tiles(scope).first()).toBeVisible()
+      await choose("Groups")
+      await expect.poll(() => held.release !== undefined).toBe(true)
+      await expect(tiles(scope).first()).toBeVisible()
+      await expect(scope.getByRole("link", { name: "Open Ava Local", exact: true })).toHaveCount(0)
+      await expect(scope.getByText("Loading groups…", { exact: true })).toHaveCount(0)
+      held.release!()
+      await expect(scope.getByLabel("Groups", { exact: true })).toContainText("Synthetic group")
+      await expect(tiles(scope)).toHaveCount(0)
+    } finally {
+      await server.stop()
+    }
+  })
+
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
     test(`${width} ${theme}: cardex on home and in the side panel`, async ({ page }, info) => {

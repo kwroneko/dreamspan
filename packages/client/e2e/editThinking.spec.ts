@@ -40,6 +40,67 @@ const lastEntry = (chatId: string) =>
       .pipe(Effect.map((path) => path.entries.at(-1)!))
   )
 
+test("the phone thinking editor locks its disclosure, message actions and pending save", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const chat = await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Thinking save in progress" })
+      const sent = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        content: "A synthetic message.",
+        reply: false
+      })
+      if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
+      yield* api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false })
+      return chat
+    })
+  )
+  const held: { release?: () => void } = {}
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      if (typeof data === "string" && JSON.parse(data).tag === "EditVersion") held.release = () => upstream.send(data)
+      else upstream.send(data)
+    })
+  })
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  const reply = page.getByRole("article").last()
+  const panel = reply.locator('[data-reasoning-panel="reasoning"]')
+  const disclosure = panel.getByRole("button", { name: /^Reasoning \d/ })
+  await disclosure.click()
+  await showActions(reply)
+  await panel.getByRole("button", { name: "Edit thinking" }).click()
+  const thinking = panel.getByRole("textbox", { name: "Thinking", exact: true })
+  const controls = panel.locator("[data-thinking-edit]")
+  await expect(disclosure).toBeDisabled()
+  await expect(disclosure).toHaveAttribute("aria-expanded", "true")
+  const region = panel.getByRole("region", { name: "Reasoning" })
+  await expect(region).toHaveAttribute("id", (await disclosure.getAttribute("aria-controls"))!)
+  await expect(region.getByRole("textbox", { name: "Thinking", exact: true })).toBeVisible()
+  await expect(reply.getByRole("button", { name: "More actions", exact: true })).toBeDisabled()
+
+  const submitted = "The submitted thinking."
+  await replaceEditorText(thinking, submitted)
+  await controls.getByRole("button", { name: "Save thinking" }).click()
+  try {
+    await expect.poll(() => held.release !== undefined).toBe(true)
+    await expect(thinking).not.toBeEditable()
+    await expect(controls.getByRole("button", { name: "Delete thinking" })).toBeDisabled()
+    await expect(controls.getByRole("button", { name: "Cancel", exact: true })).toBeDisabled()
+    await thinking.click()
+    await page.keyboard.type("Ignored")
+    await thinking.press("Escape")
+    await expectTextBox(thinking, submitted)
+  } finally {
+    held.release?.()
+  }
+  await expect(thinking).toHaveCount(0)
+  expect((await lastEntry(chat.id)).version.reasoning).toBe(submitted)
+})
+
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
     test(`a reply's thinking is edited, deleted and added on its own, and exported, at ${width} ${theme}`, async ({

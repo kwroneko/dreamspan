@@ -23,8 +23,11 @@ const COLUMNS = "grid grid-cols-2 gap-3 @xl:grid-cols-3 @3xl:grid-cols-4 @4xl:gr
 function Home({ data }: { data: ShellLibrary }) {
   const [browse, setBrowse] = useHomeBrowse()
   const { search } = browse
+  const tabs = useGroupsSwitch(browse)
   // A card source shown in place of the user's cards; nothing is asked of it otherwise (§5.1).
-  const sources = useSourceBrowse(browse.source, browse.remote, (remote, options) => setBrowse({ remote }, options))
+  const sources = useSourceBrowse(tabs.shown.source, tabs.shown.remote, (remote, options) =>
+    setBrowse({ remote }, options)
+  )
   const source = sources.info
   // With nothing imported, what the intro offers (first-run steps) stands in for the empty grid.
   const intro = useSyncExternalStore(homeIntro.subscribe, homeIntro.snapshot).entries.length > 0
@@ -83,56 +86,45 @@ function Home({ data }: { data: ShellLibrary }) {
           </>
         )}
       </div>
+      {tabs.groups && (
+        <GroupGrid needle={needle} sort={browse.sort} reversed={browse.reversed} className={COLUMNS} {...tabs.groups} />
+      )}
       {source !== null ? (
         // The source's cards only: never mixed with the user's (spec/CARD-SOURCES.md §3.2).
         <SourceResults browse={sources} className={COLUMNS} />
       ) : (
-        <LocalCards data={data} browse={browse} search={search} needle={needle} />
+        <LocalCards data={data} browse={tabs.shown} />
       )}
     </div>
   )
 }
 
-function LocalCards({
-  data,
-  browse,
-  search,
-  needle
-}: {
-  data: ShellLibrary
-  browse: HomeBrowse
-  search: string
-  needle: string
-}) {
+function LocalCards({ data, browse }: { data: ShellLibrary; browse: HomeBrowse }) {
   const [, setBrowse] = useHomeBrowse()
-  // Switching to Groups, the tab before stays until the groups are read (useGroupsSwitch).
-  const tabs = useGroupsSwitch(browse)
-  const shown = tabs.shown
-  const cards = browseCards(browsable(data), shown, search)
-  const grouped = useGroupedFamilies(shown, search)
+  const { search } = browse
+  const needle = search.trim().toLowerCase()
+  const cards = browseCards(browsable(data), browse, search)
+  const grouped = useGroupedFamilies(browse, search)
   return (
     <>
-      {tabs.groups && (
-        <GroupGrid needle={needle} sort={browse.sort} reversed={browse.reversed} className={COLUMNS} {...tabs.groups} />
-      )}
-      {tabs.characters && (
+      {browse.filter !== "groups" && (
         <CharacterGrid
           cards={cards}
-          sort={shown.sort}
-          markPersonas={mixesPersonas(shown)}
-          families={grouped ? { expanded: shown.family, onToggle: (family) => setBrowse({ family }) } : undefined}
+          sort={browse.sort}
+          markPersonas={mixesPersonas(browse)}
+          families={grouped ? { expanded: browse.family, onToggle: (family) => setBrowse({ family }) } : undefined}
           className={COLUMNS}
         >
-          {!cards.length && <CardGridEmpty filter={shown.filter} needle={needle} place="home" />}
+          {!cards.length && <CardGridEmpty filter={browse.filter} needle={needle} place="home" />}
         </CharacterGrid>
       )}
       {/* With archived cards shown, their actions follow the last tile: no row above the grid. */}
-      {shown.filter === "archived" && cards.length > 0 && (
+      {browse.filter === "archived" && cards.length > 0 && (
         <div>
           <SlotOutlet slot={archivedCardActions} props={{ place: "home" }} />
         </div>
       )}
-      <SlotOutlet slot={cardSearchExtras} props={{ data, browse: shown, search, className: COLUMNS }} />
+      <SlotOutlet slot={cardSearchExtras} props={{ data, browse, search, className: COLUMNS }} />
     </>
   )
 }

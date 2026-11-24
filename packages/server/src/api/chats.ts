@@ -19,7 +19,8 @@ import {
   type EntityId,
   type ForkId,
   type NewVersion,
-  type SlotId
+  type SlotId,
+  type Version
 } from "@dreamspan/shared/chat.ts"
 import { BranchSwitch, GenerationUnavailable, messageDraftKey, NotContinuable } from "@dreamspan/shared/chatApi.ts"
 import { TextTooLong } from "@dreamspan/shared/composerApi.ts"
@@ -69,6 +70,20 @@ type ThinkingChange =
   /** The reply sections it has from now on; null: none. */
   | { readonly _tag: "Sections"; readonly sections: ReplySections | null }
 const KEPT: ThinkingChange = { _tag: "Kept" }
+
+/** Keep the existing script record (it has no per-field breakdown) and add newly recorded scripts once. */
+const extendScriptRecord = <T>(previous: ReadonlyArray<T>, next: ReadonlyArray<T>) => {
+  const recorded = new Set(previous.map((item) => JSON.stringify(item)))
+  return [
+    ...previous,
+    ...next.filter((item) => {
+      const key = JSON.stringify(item)
+      if (recorded.has(key)) return false
+      recorded.add(key)
+      return true
+    })
+  ]
+}
 
 export const makeChatHandlers = Effect.gen(function* () {
   const reader = yield* Reader
@@ -291,23 +306,36 @@ export const makeChatHandlers = Effect.gen(function* () {
     user: UserId,
     slotId: SlotId,
     forkId: ForkId | null | undefined,
-    versionId: import("@dreamspan/shared/chat.ts").VersionId,
-    content: string,
+    source: Version,
+    content: string | undefined,
     /** Thinking typed in the edit: the reasoning scripts that run on edits rewrite it too. */
     thinking: ThinkingChange = KEPT
   ) =>
     Effect.gen(function* () {
       const { chatId } = yield* reader.GetSlot({ userId: user, slotId, forkId: forkId ?? null })
-      return yield* rewriteText(reader, {
+      const written = yield* rewriteText(reader, {
         userId: user,
         chatId,
         forkId,
-        at: { slotId, versionId },
+        at: { slotId, versionId: source.id },
         edit: true,
-        content,
+        content: content ?? source.content,
+        keepContent: content === undefined,
         ...(thinking._tag === "Reasoning" && thinking.text ? { reasoning: thinking.text } : {}),
         ...(thinking._tag === "Sections" && thinking.sections ? { sections: thinking.sections } : {})
       })
+      if (content !== undefined || !source.rewrite) return written
+      const raw = yield* reader.RawVersionText({ userId: user, versionId: source.id })
+      return {
+        ...written,
+        rewrite: {
+          applied: extendScriptRecord(source.rewrite.applied, written.rewrite?.applied ?? []),
+          failed: extendScriptRecord(source.rewrite.failed, written.rewrite?.failed ?? []),
+          raw: raw.content,
+          rawReasoning: thinking._tag === "Reasoning" ? (written.rewrite?.rawReasoning ?? null) : raw.reasoning,
+          rawSections: thinking._tag === "Sections" ? (written.rewrite?.rawSections ?? null) : raw.sections
+        }
+      }
     })
 
   /**
@@ -681,8 +709,9 @@ export const makeChatHandlers = Effect.gen(function* () {
         const source = yield* reader.GetVersion({ userId: id, versionId: sourceVersionId })
         // An edit goes through the scripts that run on edits (ST's updateMessage), its thinking too.
         const change = thinkingChange(source, reasoning)
-        const written = yield* editRewrite(id, slotId, forkId, sourceVersionId, content, change)
+        const written = yield* editRewrite(id, slotId, forkId, source, content, change)
         const version = userText(written.content, "edited", source.speakerEntityId, sourceVersionId)
+        const attachments = images ?? (content === undefined ? source.images : undefined)
         // The thinking goes with the text unless the edit changed it, its sections too (ST keeps
         // the reasoning block of an edited message).
         const thinking = change._tag === "Reasoning" ? (written.reasoning ?? change.text) : source.reasoning
@@ -694,7 +723,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           forkId: forkId ?? null,
           version: {
             ...version,
-            ...(images === undefined ? {} : { images }),
+            ...(attachments === undefined ? {} : { images: attachments }),
             ...(thinking ? { reasoning: thinking } : {}),
             ...(sections?.sections.length ? { replySections: sections } : {}),
             ...(written.rewrite ? { rewrite: written.rewrite } : {})
@@ -739,7 +768,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = yield* userId
         const { entry } = yield* reader.GetSlot({ userId: id, slotId, forkId: forkId ?? null })
-        const written = yield* editRewrite(id, slotId, forkId, entry.version.id, content)
+        const written = yield* editRewrite(id, slotId, forkId, entry.version, content)
         const version = userText(written.content, "user_written", entry.version.speakerEntityId)
         const added = yield* writer.AddSelectedVersion({
           userId: id,
@@ -897,12 +926,13 @@ export const makeChatHandlers = Effect.gen(function* () {
         const amended = yield* reader.GetVersion({ userId: id, versionId })
         // Thinking typed differently from what it has is plain text, through the edit scripts.
         const change = thinkingChange(amended, reasoning)
-        const written = yield* editRewrite(id, amended.slotId, forkId, versionId, content, change)
+        const written = yield* editRewrite(id, amended.slotId, forkId, amended, content, change)
         const version = yield* writer.AmendVersion({
           userId: id,
           versionId,
           forkId: forkId ?? null,
           content: written.content,
+          ...(content === undefined ? { keepContent: true } : {}),
           ...(written.rewrite ? { rewrite: written.rewrite } : {}),
           ...(images === undefined ? {} : { images }),
           ...(change._tag === "Reasoning" ? { reasoning: (written.reasoning ?? change.text) || null } : {}),

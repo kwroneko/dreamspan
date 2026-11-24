@@ -66,6 +66,7 @@ export const rewriteText = (
       | { readonly leafSlotId: SlotId | null; readonly speakerEntityId: EntityId | null }
     readonly edit: boolean
     readonly content: string
+    readonly keepContent?: boolean | undefined
     readonly reasoning?: string | undefined
     readonly sections?: ReplySections | null | undefined
   }
@@ -77,6 +78,9 @@ export const rewriteText = (
     ...(sections ? { sections } : {})
   }
   if (content === "" && !reasoning && !sections?.sections.length) return Effect.succeed(unchanged)
+  const allItems = rewriteItems(content, reasoning, sections)
+  const items = params.keepContent ? allItems.slice(1) : allItems
+  if (items.length === 0) return Effect.succeed(unchanged)
   // Suspended, so even a reader that can't take the call leaves the text as it is.
   return Effect.suspend(() =>
     reader.RewriteText({
@@ -85,14 +89,14 @@ export const rewriteText = (
       ...(params.forkId === undefined ? {} : { forkId: params.forkId }),
       at: params.at,
       edit: params.edit,
-      items: rewriteItems(content, reasoning, sections)
+      items
     })
   ).pipe(
     Effect.map((results): Rewritten => {
       const applied = results.flatMap((result) => result.applied)
       const failed = results.flatMap((result) => result.failed)
       if (applied.length === 0 && failed.length === 0) return unchanged
-      const next = fromItems(results, content, reasoning, sections)
+      const next = fromItems(params.keepContent ? [undefined, ...results] : results, content, reasoning, sections)
       const sectionsChanged =
         !!sections && sections.sections.some((section, i) => next.sections!.sections[i]!.text !== section.text)
       return {

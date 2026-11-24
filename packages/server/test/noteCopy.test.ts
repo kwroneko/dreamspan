@@ -61,3 +61,32 @@ it.live("a note copy retains the destination revision in History and can be rest
     )
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
 )
+
+it.live("opening a chat note rejects a binned branch whose tip is still shared", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const chat = yield* api.CreateChat({ title: "Synthetic note branch" })
+    const main = chat.currentForkId!
+    const sent = yield* api.SendMessage({
+      chatId: chat.id,
+      parentSlotId: null,
+      branch: false,
+      content: "A shared tip.",
+      reply: false
+    })
+    if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
+    const slotId = sent.entry.slotId
+    const note = yield* api.CreateChatNote({ chatId: chat.id, forkId: main, title: "Weather", content: "Sun" })
+    const forkId = (yield* api.CreateFork({ chatId: chat.id, fromForkId: main, atSlotId: slotId })).fork.id
+    const editor = { refId: note.id, chatNote: { chatId: chat.id, forkId, slotId } }
+    assert.equal((yield* api.OpenEditor(editor)).chatNote?.scope, forkId)
+
+    yield* api.DeleteFork({ forkId })
+    const gone = yield* Effect.flip(api.OpenEditor(editor))
+    assert.equal(gone._tag, "NotFound")
+    assert.equal(
+      (yield* api.OpenEditor({ ...editor, chatNote: { ...editor.chatNote, forkId: main } })).doc.content,
+      "Sun"
+    )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+)

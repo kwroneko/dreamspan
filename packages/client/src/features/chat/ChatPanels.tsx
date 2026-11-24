@@ -348,6 +348,7 @@ export function ChatSidePanel({
         open
         onOpenChange={(open) => !open && onClose()}
         title={kindTitle(title, content.view.chat?.kind)}
+        dedupeLabels={false}
         container={document.getElementById("content")}
         initialFocus={
           restoreFocus

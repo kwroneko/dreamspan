@@ -240,7 +240,9 @@ describe("the shared components refuse a repeat", () => {
     // Popovers, dialogs and sheets render into a portal, which a static render leaves out.
     for (const name of ["Popover", "Dialog", "Sheet"]) {
       const text = readFileSync(resolve(import.meta.dirname, `../src/ui/${name}.tsx`), "utf8")
-      expect(text, name).toMatch(/<TitledContainer title=\{title\}>\{children\}<\/TitledContainer>/)
+      expect(text, name).toMatch(
+        /<TitledContainer title=\{title\}(?: dedupeLabels=\{dedupeLabels\})?>\s*\{children\}\s*<\/TitledContainer>/
+      )
     }
     const dialogs = readFileSync(resolve(import.meta.dirname, "../src/ui/Dialog.tsx"), "utf8")
     expect(dialogs.match(/<TitledContainer title=\{title\}>/g)).toHaveLength(2)

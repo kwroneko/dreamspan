@@ -47,7 +47,9 @@ export const noteAt = Effect.fnUntraced(function* (
   if (ref.kind !== "note" || (head.owner as { chat?: string } | undefined)?.chat !== chatId) {
     return yield* new NotFound({ entity: "note", id: ref.id })
   }
-  const [tip] = yield* sql<{ tip: SlotId | null }>`SELECT tip_slot_id AS tip FROM forks WHERE id = ${fork}`
+  const [tip] = yield* sql<{ tip: SlotId | null; deleted_at: number | null }>`
+    SELECT tip_slot_id AS tip, deleted_at FROM forks WHERE id = ${fork}`
+  if (latest && (!tip || tip.deleted_at !== null)) return yield* new NotFound({ entity: "fork", id: fork })
   const end = latest
     ? ((yield* displayEndOf(sql, chatId, { id: fork, tip_slot_id: tip?.tip ?? null })) as SlotId | null)
     : (tip?.tip ?? null)

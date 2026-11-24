@@ -1103,7 +1103,7 @@ function Browser() {
   const grouped = useGroupedFamilies(tabs.shown, search)
   const setSearch = (search: string) => setBrowse({ search })
   // A card source shown in the character grid; asked nothing unless it's shown (§5.1).
-  const sources = useSourceBrowse(grid ? browse.source : null, browse.remote, (remote, options) =>
+  const sources = useSourceBrowse(grid ? tabs.shown.source : null, tabs.shown.remote, (remote, options) =>
     setBrowse({ remote }, options)
   )
   const source = grid ? sources.info : null
@@ -1342,6 +1342,15 @@ function Browser() {
         data-shell-list
         className={`@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable] ${grid && !source ? "-mt-2 pt-2 scroll-py-2" : ""}`}
       >
+        {grid && tabs.groups && (
+          <GroupGrid
+            needle={needle}
+            sort={browse.sort}
+            reversed={browse.reversed}
+            className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
+            {...tabs.groups}
+          />
+        )}
         {grid && source ? (
           // The source's cards only: never mixed with the user's (spec/CARD-SOURCES.md §3.2).
           <div className="flex min-w-0 flex-col gap-2 py-2">
@@ -1355,15 +1364,6 @@ function Browser() {
         ) : grid && data ? (
           // Two tiles a row at the sidebar's usual width, more as it widens (8.5rem each at least).
           <>
-            {tabs.groups && (
-              <GroupGrid
-                needle={needle}
-                sort={browse.sort}
-                reversed={browse.reversed}
-                className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
-                {...tabs.groups}
-              />
-            )}
             {tabs.characters && (
               <>
                 <CharacterGrid

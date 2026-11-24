@@ -4,6 +4,7 @@ import { Effect, Exit, Scope } from "effect"
 import { createElement } from "react"
 import { chatCommands } from "../../src/features/chat/commands.tsx"
 import { composerControls } from "../../src/features/chat/composerControls.tsx"
+import { messageTextEditor } from "../../src/features/chat/editorHistory.tsx"
 import { messageActions, viewOf } from "../../src/features/chat/messageActions.tsx"
 import { cardContributions } from "../../src/features/cardForks/surfaces.tsx"
 import { chatPanels } from "../../src/features/chat/panels.tsx"
@@ -28,13 +29,28 @@ export const close = async (id: string) => {
 }
 
 export const install = async (
-  id: "plugin" | "settings" | "notes" | "history" | "family-tab" | "cards" | "card-hide"
+  id: "plugin" | "settings" | "notes" | "history" | "family-tab" | "cards" | "card-hide" | "text-editor"
 ) => {
   await close(id)
   const scope = await Effect.runPromise(Scope.make())
   scopes.set(id, scope)
   const own = async (dispose: () => void) => Effect.runPromise(Scope.addFinalizer(scope, Effect.sync(dispose)))
-  if (id === "cards") {
+  if (id === "text-editor") {
+    await own(
+      messageTextEditor.register({
+        id: "message.code-editor",
+        order: 10,
+        component: ({ label, value, onChange }) =>
+          createElement("textarea", {
+            "aria-label": label,
+            rows: 1,
+            className: "block w-full resize-none",
+            value,
+            onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => onChange(event.currentTarget.value)
+          })
+      })
+    )
+  } else if (id === "cards") {
     for (const [placement, suffix] of [
       ["actions", "fork"],
       ["family", "family-surface"],

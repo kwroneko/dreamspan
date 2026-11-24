@@ -799,7 +799,8 @@ export class ChatApi extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
 
       sourceVersionId: VersionId,
-      content: Schema.String,
+      /** Absent when saving thinking on its own: keep the source's body and its rewrite record. */
+      content: Schema.optionalKey(Schema.String),
       images: Schema.optionalKey(MessageImages),
       /** Its thinking as typed in the edit, plain text ("": none); absent: the source's is kept. */
       reasoning: Schema.optionalKey(Schema.String),
@@ -850,7 +851,8 @@ export class ChatApi extends RpcGroup.make(
     payload: {
       versionId: VersionId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
-      content: Schema.String,
+      /** Absent when saving thinking on its own: keep the version's body and its rewrite record. */
+      content: Schema.optionalKey(Schema.String),
       /** Its images from now on (absent: kept); the earlier set stays in its history. */
       images: Schema.optionalKey(MessageImages),
       /** Its thinking from now on, plain text ("": none; absent: kept); the earlier one stays in its history. */
