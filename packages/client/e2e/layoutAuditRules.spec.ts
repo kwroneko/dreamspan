@@ -125,3 +125,36 @@ test("a growing box's free room and a 12px group gap aren't gaps between icon bu
     </main>`)
   expect((await layoutAudit(page)).filter((v) => v.kind === "iconrow")).toEqual([])
 })
+
+test("a hidden box kept between shown buttons is a blank; one at a row's end, out of the flow or removed isn't", async ({
+  page
+}) => {
+  const icon = `<svg width="16" height="16"><path d="M0 0h16"/></svg>`
+  const button = (id: string, style = "") =>
+    `<button id="${id}" aria-label="${id}" style="width:32px;height:32px;padding:0;border:0;${style}">${icon}</button>`
+  await page.setContent(`
+    <main style="padding:16px">
+      <div style="display:flex;align-items:center;gap:4px">
+        ${button("sort")}<span id="personas" style="visibility:hidden">${button("inner")}</span>${button("forks")}
+      </div>
+      <div style="display:flex;align-items:center;gap:4px">
+        ${button("first")}${button("trailing", "visibility:hidden")}
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;position:relative">
+        ${button("left")}<span style="visibility:hidden;position:absolute;left:0;width:200px;height:32px"></span>${button("gone", "visibility:hidden;display:none")}${button("right")}
+      </div>
+      <div style="display:flex;align-items:center;gap:4px">
+        ${button("prev")}<button style="display:grid;height:32px"><span style="grid-area:1/1">Tab</span><span style="grid-area:1/1;visibility:hidden">Longer tab</span></button>${button("next")}
+        <span style="display:grid"><span style="grid-area:1/1">Label</span><span style="grid-area:1/1;visibility:hidden">Label</span></span>${button("last")}
+      </div>
+    </main>`)
+  const found = (await layoutAudit(page)).filter((v) => v.kind === "blank")
+  expect(found.map((v) => [v.selector, v.related])).toEqual([["#personas", "#forks"]])
+  expect(found[0]!.measurement).toContain("keeps a blank between #sort and #forks")
+  // The fix: the control stays shown, disabled.
+  await page.locator("#personas").evaluate((el) => {
+    el.style.visibility = ""
+    el.querySelector("button")!.setAttribute("disabled", "")
+  })
+  expect((await layoutAudit(page)).filter((v) => v.kind === "blank")).toEqual([])
+})

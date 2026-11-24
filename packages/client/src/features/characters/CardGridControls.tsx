@@ -28,7 +28,8 @@ export function CardGridControls({
   searchLabel: string
   /**
    * The card sources Show offers; while one is shown, the search and sort work on it
-   * (spec/CARD-SOURCES.md §3.2), and Include personas stays, disabled.
+   * (spec/CARD-SOURCES.md §3.2), and Include personas and Group forks stay, disabled: every tab
+   * shows the same buttons in the same places, so none leaves a gap or moves the sort.
    */
   sources?: SourceBrowse | undefined
   onSource?: (id: string) => void
@@ -49,13 +50,25 @@ export function CardGridControls({
     const filters = node.querySelector<HTMLElement>('.card-grid-filter [role="group"]')!
     const sort = node.querySelector<HTMLElement>(".card-grid-sort > *")!
     const search = node.querySelector<HTMLElement>(".card-grid-search-size")!
+    // A scrollbar takes room below what it scrolls (none where scrollbars overlay the content).
+    const probe = document.createElement("div")
+    probe.style.cssText = "position:absolute;visibility:hidden;overflow-x:scroll;width:50px;height:50px"
+    node.append(probe)
+    const bar = probe.offsetHeight - probe.clientHeight
+    probe.remove()
     const measure = () => {
+      // The filters and the sort's choices scroll where they don't fit. Their scrollbar's room is
+      // kept while it doesn't show, so a tab whose choices or counts are longer (a card source's)
+      // moves nothing below them.
+      for (const scroller of node.querySelectorAll<HTMLElement>("[data-scroll-keep]"))
+        scroller.toggleAttribute("data-scrolling", scroller.scrollWidth > scroller.clientWidth)
       const gap = parseFloat(getComputedStyle(node.querySelector(".card-grid-controls")!).columnGap)
       const sortWidth = sort.getBoundingClientRect().width
       const medium = Math.ceil(search.getBoundingClientRect().width + sortWidth + gap)
       const wide = Math.ceil(filters.getBoundingClientRect().width + sortWidth + gap)
       // Constructed sheets follow the app's CSP, which disallows inline style elements.
       sheet.replaceSync(`
+        [data-scroll-keep]:not([data-scrolling]) { padding-bottom: ${bar}px; }
         @container ${name} (min-width: ${medium}px) {
           .card-grid-controls { grid-template-columns: minmax(0, 1fr) max-content; }
           .card-grid-filter { grid-column: 1 / -1; }
@@ -70,7 +83,7 @@ export function CardGridControls({
       `)
     }
     const observer = new ResizeObserver(measure)
-    for (const element of [filters, sort, search]) observer.observe(element)
+    for (const element of [node, filters, sort, search]) observer.observe(element)
     measure()
     return () => {
       observer.disconnect()
@@ -81,7 +94,7 @@ export function CardGridControls({
     <div ref={root} data-card-grid-controls style={{ containerType: "inline-size", containerName: name }}>
       <div aria-hidden="true" className="card-grid-search-size invisible absolute h-0 w-xs" />
       <div className="card-grid-controls grid min-w-0 grid-cols-1 items-start gap-2">
-        <div className="card-grid-filter min-w-0 overflow-x-auto [&>div]:w-max">
+        <div data-scroll-keep className="card-grid-filter min-w-0 overflow-x-auto [&>div]:w-max">
           <CardFilterControl
             archived
             value={browse.filter}
@@ -96,17 +109,23 @@ export function CardGridControls({
           />
         </div>
         <div
-          className="card-grid-sort min-w-0 max-w-full justify-self-end overflow-x-auto"
-          data-layout-audit-ignore="inset: Unbordered scrolling sort toolbar aligns its controls with the segmented row, rather than enclosing them in a panel"
+          className="card-grid-sort min-w-0 max-w-full justify-self-end"
+          data-layout-audit-ignore="inset: Unbordered sort toolbar (its choices scrolling where they don't fit) aligns its controls with the segmented row, rather than enclosing them in a panel"
         >
-          <div className="flex w-max items-start gap-1 [&>button]:mt-[3px]">
+          {/* Only the sort's choices scroll; the direction and the toggles stay in view, in place. */}
+          <div className="flex max-w-full items-start gap-1 [&>button]:mt-[3px]">
             {shown && sources ? (
               <>
-                <SourceSortControl browse={sources} />
+                <SourceSortControl browse={sources} scrolls />
                 <IncludePersonas
                   browse={browse}
                   onChange={onChange}
                   disabledReason={`Personas are your own cards; ${shown.name} lists characters.`}
+                />
+                <CardGroupingControl
+                  browse={browse}
+                  onChange={onChange}
+                  disabledReason={`${shown.name} lists each card on its own.`}
                 />
               </>
             ) : (
@@ -116,6 +135,7 @@ export function CardGridControls({
                   reversed={browse.reversed}
                   onChange={onChange}
                   className="items-start! [&>button]:mt-[3px]"
+                  scrolls
                 />
                 <IncludePersonas browse={browse} onChange={onChange} />
                 <CardGroupingControl browse={browse} onChange={onChange} />

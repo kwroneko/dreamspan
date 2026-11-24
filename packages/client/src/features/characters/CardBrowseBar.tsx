@@ -2,7 +2,7 @@ import { CardGroupingControl } from "./cardGrouping.tsx"
 // The characters' filter and sort in one compact row, for a narrow place: the left panel's
 // grid (with Groups and Include personas), Add characters (with Include personas).
 // The home page lays the same parts out with CardGridControls. A card source shown (the
-// left panel's) takes over the sort, and Filters ends the row.
+// left panel's) takes over the sort, and its Filters sits beside the filter choice.
 import { type SourceBrowse, SourceFiltersButton, SourceSortControl } from "../cardSources/browse.tsx"
 import { type CardBrowse, CardFilterControl, CardSortControl, IncludePersonas } from "./cardBrowse.tsx"
 import { browsable, type ShellLibrary, useGroupCount } from "./shellData.tsx"
@@ -64,45 +64,62 @@ export function CardBrowseBar({
   filtersId?: string
 } & SourceProps) {
   const shown = sources?.info ?? null
+  // The bar's width alone decides its lines, never the choice shown: from 27rem the filter takes
+  // the room the sort and toggles leave on one line (its choice cut short if need be); narrower,
+  // the filter has the first line and the sort and toggles the second, at its end. Every filter
+  // shows the same toggles in the same places (disabled where they do nothing), so switching
+  // filters leaves no gap between buttons and moves neither the sort nor its direction (owner,
+  // 2026-11-23). Filters, a source's own, sits on the free side, beside the filter choice.
   return (
-    // Wraps where the sidebar is narrowest: the filter keeps room for its choice, and the
-    // sort and toggles move to a second line rather than squeezing it.
-    <div className="flex max-w-controls min-w-0 shrink-0 flex-wrap items-center gap-1">
-      <div className="min-w-24 flex-auto">
-        {groups ? (
-          <GroupsFilter data={data} browse={browse} onChange={onChange} sources={sources} onSource={onSource} />
-        ) : (
-          <CardFilterControl
-            compact
-            value={browse.filter}
-            onChange={(filter) => onChange({ filter })}
-            cards={browsable(data)}
-            withPersonas={browse.withPersonas}
-            sources={sources?.options ?? []}
-            source={shown?.id ?? null}
-            {...(onSource ? { onSource } : {})}
-          />
-        )}
-      </div>
-      {shown && sources ? (
-        <>
-          <SourceSortControl compact browse={sources} />
-          {includePersonas && (
-            <IncludePersonas
-              browse={browse}
-              onChange={onChange}
-              disabledReason={`Personas are your own cards; ${shown.name} lists characters.`}
-            />
+    <div data-card-browse-bar className="@container/browsebar w-full max-w-controls min-w-0 shrink-0">
+      <div className="flex flex-wrap items-center gap-1 @min-[27rem]/browsebar:flex-nowrap">
+        <div className="flex min-w-0 basis-full items-center gap-1 @min-[27rem]/browsebar:flex-1 @min-[27rem]/browsebar:basis-0">
+          <div className="min-w-0 flex-1">
+            {groups ? (
+              <GroupsFilter data={data} browse={browse} onChange={onChange} sources={sources} onSource={onSource} />
+            ) : (
+              <CardFilterControl
+                compact
+                value={browse.filter}
+                onChange={(filter) => onChange({ filter })}
+                cards={browsable(data)}
+                withPersonas={browse.withPersonas}
+                sources={sources?.options ?? []}
+                source={shown?.id ?? null}
+                {...(onSource ? { onSource } : {})}
+              />
+            )}
+          </div>
+          {shown && sources && <SourceFiltersButton compact browse={sources} panelId={filtersId} />}
+        </div>
+        <div className="ms-auto flex shrink-0 items-center gap-1">
+          {shown && sources ? (
+            <>
+              <SourceSortControl compact browse={sources} />
+              {includePersonas && (
+                <IncludePersonas
+                  browse={browse}
+                  onChange={onChange}
+                  disabledReason={`Personas are your own cards; ${shown.name} lists characters.`}
+                />
+              )}
+              {families && (
+                <CardGroupingControl
+                  browse={browse}
+                  onChange={onChange}
+                  disabledReason={`${shown.name} lists each card on its own.`}
+                />
+              )}
+            </>
+          ) : (
+            <>
+              <CardSortControl compact sort={browse.sort} reversed={browse.reversed} onChange={onChange} />
+              {includePersonas && <IncludePersonas browse={browse} onChange={onChange} />}
+              {families && <CardGroupingControl browse={browse} onChange={onChange} />}
+            </>
           )}
-          <SourceFiltersButton compact browse={sources} panelId={filtersId} />
-        </>
-      ) : (
-        <>
-          <CardSortControl compact sort={browse.sort} reversed={browse.reversed} onChange={onChange} />
-          {includePersonas && <IncludePersonas browse={browse} onChange={onChange} />}
-          {families && <CardGroupingControl browse={browse} onChange={onChange} />}
-        </>
-      )}
+        </div>
+      </div>
     </div>
   )
 }
