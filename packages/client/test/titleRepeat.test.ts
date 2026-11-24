@@ -53,7 +53,7 @@ const COUNT = /\.(?:length|size|total|count)\b|toLocaleString|\bcount\b/i
  * the entry at zero: the check fails until it matches.
  */
 const PENDING: Record<string, number> = {
-  "client/src/features/cardSources/filters.tsx": 5
+  "client/src/features/cardSources/filters.tsx": 2
 }
 
 describe("generic labels built from names", () => {
