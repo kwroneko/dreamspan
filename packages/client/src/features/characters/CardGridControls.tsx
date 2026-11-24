@@ -65,10 +65,10 @@ export function CardGridControls({
       const gap = parseFloat(getComputedStyle(node.querySelector(".card-grid-controls")!).columnGap)
       const sortWidth = sort.getBoundingClientRect().width
       // With a source's search options beside the box, the row holds the box at its smallest
-      // (8rem), the options, and the sort, whose choices scroll before anything wraps.
+      // (8rem), the options and the whole sort; narrower, the sort takes its own row above.
       const options = node.querySelector<HTMLElement>("[data-search-options]")
       const medium = options
-        ? Math.ceil(128 + gap + options.getBoundingClientRect().width + gap + Math.min(sortWidth, 240))
+        ? Math.ceil(128 + gap + options.getBoundingClientRect().width + gap + sortWidth)
         : Math.ceil(search.getBoundingClientRect().width + sortWidth + gap)
       const wide = Math.ceil(filters.getBoundingClientRect().width + sortWidth + gap)
       // Constructed sheets follow the app's CSP, which disallows inline style elements.
@@ -79,7 +79,6 @@ export function CardGridControls({
           .card-grid-filter { grid-column: 1 / -1; }
           .card-grid-search { grid-row: 2; grid-column: 1; max-width: 20rem; }
           .card-grid-search[data-with-options] { max-width: none; flex-wrap: nowrap; }
-          .card-grid-controls:has(> [data-with-options]) { grid-template-columns: minmax(min-content, 1fr) minmax(0, max-content); }
           .card-grid-sort { grid-row: 2; grid-column: 2; }
         }
         @container ${name} (min-width: ${Math.max(medium, wide)}px) {
@@ -163,7 +162,7 @@ export function CardGridControls({
                 placeholder={`Search ${shown.name}`}
                 value={sources.remote.text}
                 onChange={(event) => sources.change({ text: event.currentTarget.value })}
-                {...(filtersId !== undefined ? { className: "min-w-32 flex-1 basis-48 @xl:max-w-xs!" } : {})}
+                {...(filtersId !== undefined ? { className: "min-w-32 flex-1 basis-48 max-w-none!" } : {})}
               />
               {filtersId !== undefined && <SourceSearchOptions browse={sources} filtersId={filtersId} />}
             </>
