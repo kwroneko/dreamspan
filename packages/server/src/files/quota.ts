@@ -475,12 +475,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   /** An admin's quota for one account; null returns it to the instance default. */
   const setQuota = (userId: string, bytes: number | null) =>
     Effect.gen(function* () {
-      const raw = yield* deps.reader.GetAppSetting({ key: QUOTAS_SETTING })
-      const decoded = Schema.decodeUnknownOption(Quotas)(raw ?? {})
-      const quotas: Record<string, number> = { ...(decoded._tag === "Some" ? decoded.value : {}) }
-      if (bytes === null) delete quotas[userId]
-      else quotas[userId] = bytes
-      yield* deps.writer.SetAppSetting({ key: QUOTAS_SETTING, value: quotas })
+      yield* deps.writer.SetAccountFilesQuota({ userId: userId as never, bytes })
       return yield* usage(userId)
     })
 

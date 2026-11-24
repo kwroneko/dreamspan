@@ -487,6 +487,29 @@ it.live.skipIf(!commands)(
   120_000
 )
 
+it.live("concurrent admin edits keep each account's quota override", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const admin = yield* api.Whoami()
+    const writer = yield* Writer
+    const other = yield* writer.CreateUser({
+      handle: "quota-neighbor",
+      displayName: "Neighbor",
+      role: "user",
+      passwordHash: "synthetic"
+    })
+    yield* Effect.all(
+      [
+        api.SetFilesQuota({ userId: admin.id, quotaBytes: 100_000 }),
+        api.SetFilesQuota({ userId: other.id, quotaBytes: 200_000 })
+      ],
+      { concurrency: "unbounded" }
+    )
+    assert.strictEqual((yield* api.GetFilesUsage({ userId: admin.id })).quotaBytes, 100_000)
+    assert.strictEqual((yield* api.GetFilesUsage({ userId: other.id })).quotaBytes, 200_000)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+)
+
 it.live("retention removes old versions, and the media only they named", () => {
   const config = testConfig()
   return Effect.gen(function* () {

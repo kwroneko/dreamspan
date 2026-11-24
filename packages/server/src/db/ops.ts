@@ -2220,6 +2220,12 @@ const WriteOpsChatOwn = RpcGroup.make(
     success: Schema.Void,
     error: StorageError
   }),
+  /** Changes one account's override in the instance quota setting. */
+  Rpc.make("SetAccountFilesQuota", {
+    payload: { userId: UserId, bytes: Schema.NullOr(Schema.Int) },
+    success: Schema.Void,
+    error: StorageError
+  }),
   // --- The usage ledger (PROVIDERS §9.1).
   Rpc.make("OpenLlmRequest", {
     payload: { userId: UserId, request: OpenLlmRequest },
