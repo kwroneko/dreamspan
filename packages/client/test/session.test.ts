@@ -191,6 +191,35 @@ describe("ChatSession", () => {
     registry.dispose()
   })
 
+  it("keeps shared live text ordered when a split view delivers an older rewrite or snapshot", () => {
+    vi.stubGlobal("requestAnimationFrame", () => 1)
+    vi.stubGlobal("cancelAnimationFrame", () => {})
+    const registry = AtomRegistry.make()
+    const first = new ChatSession(chatId, null, registry, "user")
+    const second = new ChatSession(chatId, null, registry, "user")
+    vi.spyOn(first, "open").mockResolvedValue(undefined)
+    vi.spyOn(second, "open").mockResolvedValue(undefined)
+    const receive = (view: InstanceType<typeof ChatSession>, ...events: Array<ChatEvent>) => {
+      const session = view as unknown as { receive: (batch: Array<ChatEvent>, anchor: null) => void; flush: () => void }
+      session.receive(events, null)
+      session.flush()
+    }
+    const versionId = reply.id
+    const original = { _tag: "Hello", live: [{ versionId, text: "The tide <cot>plan", sequence: 1 }] } as const
+    const rewrite = { _tag: "Delta", versionId, offset: 8, text: "", replace: true, sequence: 2 } as const
+    receive(first, original, rewrite, { _tag: "Delta", versionId, offset: 8, text: " turned.", sequence: 3 })
+    receive(second, original, rewrite)
+    expect(registry.get(liveText(versionId))).toBe("The tide turned.")
+
+    // A newer snapshot can shorten the text. An earlier delta or snapshot must not restore it.
+    receive(first, { _tag: "Hello", live: [{ versionId, text: "The tide", sequence: 4 }] })
+    receive(second, { _tag: "Delta", versionId, offset: 8, text: " turned.", sequence: 3 })
+    expect(registry.get(liveText(versionId))).toBe("The tide")
+    first.dispose()
+    second.dispose()
+    registry.dispose()
+  })
+
   it("reads a shared message's cast in the new fork when position subscribers recheck synchronously", async () => {
     vi.useFakeTimers()
     const { s } = session()

@@ -86,6 +86,8 @@ export const liveWaitingFor = Atom.family((_id: VersionId) => Atom.make(0))
 
 /** Multiple workbench views share live atoms in the same registry. */
 const liveOwners = new WeakMap<AtomRegistry.AtomRegistry, Map<VersionId, number>>()
+// Each shared text atom has its own cursor because the hub coalesces the three streams separately.
+const liveSequences = new WeakMap<AtomRegistry.AtomRegistry, WeakMap<Atom.Atom<string | null>, number>>()
 
 export interface ChatView {
   readonly chat: Chat | null
@@ -161,7 +163,12 @@ const withPosition = (entry: PathEntry, position: number | undefined) =>
   position === undefined || entry.position === position ? entry : ({ ...entry, position } as PathEntry)
 
 /** A streamed text's change (`Delta`, `Reasoning`, `Section`); `replace`: from `offset` on. */
-type LiveDelta = { readonly offset: number; readonly text: string; readonly replace?: boolean }
+type LiveDelta = {
+  readonly offset: number
+  readonly text: string
+  readonly replace?: boolean
+  readonly sequence?: number
+}
 
 /**
  * What a chat's page shows before its first read: a chat a pending page just saved, as its
@@ -244,6 +251,7 @@ export class ChatSession {
   /** The fork the URL asks for; null opens the chat's current fork. */
   private requestedFork: ForkId | null
   private readonly registry: AtomRegistry.AtomRegistry
+  private readonly sequences: WeakMap<Atom.Atom<string | null>, number>
   private readonly notice: (title: string) => void
 
   /** The chat this session shows. */
@@ -266,6 +274,8 @@ export class ChatSession {
     this.userId = userId
     this.requestedFork = requestedFork
     this.registry = registry
+    this.sequences = liveSequences.get(registry) ?? new WeakMap()
+    liveSequences.set(registry, this.sequences)
     this.notice = notice
     // A chat just saved from its pending page opens on what that page had, and reads it again.
     const seed = requestedFork === null ? seeds.get(chatId) : undefined
@@ -1142,42 +1152,38 @@ export class ChatSession {
 
   /** Applies the deltas received so far: one atom update per version. */
   private flush() {
-    for (const [pending, atom, stored] of [
+    for (const [pending, stream, stored] of [
+      [this.pending, liveText, () => ""],
       [this.pendingReasoning, liveReasoning, (id: VersionId) => this.storedReasoning(id)],
       [this.pendingSections, liveSections, (id: VersionId) => this.storedSections(id)]
     ] as const) {
       if (pending.size === 0) continue
       Atom.batch(() => {
         for (const [id, deltas] of pending) {
-          let text = this.registry.get(atom(id)) ?? stored(id)
-          for (const { offset, text: added, replace } of deltas) {
-            if (offset <= text.length && (replace || offset + added.length > text.length))
-              text = text.slice(0, offset) + added
+          const atom = stream(id)
+          const current = this.registry.get(atom)
+          let text = current ?? stored(id)
+          let sequence = this.sequences.get(atom) ?? -1
+          for (const { offset, text: added, replace, sequence: next } of deltas) {
+            if (next !== undefined && next <= sequence) continue
+            if (offset > text.length) {
+              if (PERF && stream === liveText) perf.gaps++
+              continue
+            }
+            if (replace || offset + added.length > text.length) text = text.slice(0, offset) + added
+            if (next !== undefined) sequence = next
           }
-          this.setLiveSide(atom, id, text)
+          if (sequence >= 0) this.sequences.set(atom, sequence)
+          this.keepLive(id)
+          if (text !== current) this.registry.set(atom, text)
+          if (PERF && stream === liveText) {
+            perf.rowUpdates++
+            if (mountedBodies.has(id)) perf.shownUpdates++
+          }
         }
       })
       pending.clear()
     }
-    if (this.pending.size === 0) return
-    Atom.batch(() => {
-      for (const [id, deltas] of this.pending) {
-        let text = this.registry.get(liveText(id)) ?? ""
-        // A delta adds text past what's shown; a `replace` one (scripts rewrote the text so far)
-        // is the text from its offset on, even if shorter.
-        for (const { offset, text: added, replace } of deltas) {
-          if (offset > text.length) {
-            if (PERF) perf.gaps++
-          } else if (replace || offset + added.length > text.length) text = text.slice(0, offset) + added
-        }
-        this.setLive(id, text)
-        if (PERF) {
-          perf.rowUpdates++
-          if (mountedBodies.has(id)) perf.shownUpdates++
-        }
-      }
-    })
-    this.pending.clear()
   }
 
   private apply(
@@ -1195,13 +1201,12 @@ export class ChatSession {
       return
     switch (event._tag) {
       case "Hello": {
-        for (const { versionId, text, waitingCache: waiting, reasoning, sections, steps } of event.live) {
+        for (const { versionId, text, sequence, waitingCache: waiting, reasoning, sections, steps } of event.live) {
+          this.keepLive(versionId)
           this.registry.set(waitingCache(versionId), waiting ?? false)
-          if (text.length >= (this.registry.get(liveText(versionId)) ?? "").length) this.setLive(versionId, text)
-          if (reasoning && reasoning.length >= (this.registry.get(liveReasoning(versionId)) ?? "").length)
-            this.setLiveSide(liveReasoning, versionId, reasoning)
-          if (sections && sections.length >= (this.registry.get(liveSections(versionId)) ?? "").length)
-            this.setLiveSide(liveSections, versionId, sections)
+          this.liveSnapshot(liveText(versionId), text, sequence)
+          this.liveSnapshot(liveReasoning(versionId), reasoning, sequence)
+          this.liveSnapshot(liveSections(versionId), sections, sequence)
           if (steps) this.setLiveSteps(versionId, steps)
         }
         // The first Hello opens the chat. Another means the socket reconnected, and
@@ -1270,7 +1275,8 @@ export class ChatSession {
         if (this.view.entries.some((e) => e.version.id === event.versionId)) this.notice(event.message)
         return
       case "WaitingCache":
-        if (!this.live.has(event.versionId)) this.setLive(event.versionId, "")
+        this.keepLive(event.versionId)
+        if (this.registry.get(liveText(event.versionId)) === null) this.registry.set(liveText(event.versionId), "")
         this.registry.set(waitingCache(event.versionId), event.waiting)
         return
       case "Cache": {
@@ -1554,9 +1560,20 @@ export class ChatSession {
     }
   }
 
-  private setLive(id: VersionId, text: string) {
+  private keepLive(id: VersionId) {
     if (!this.live.has(id)) this.live.set(id, this.mountLive(id))
-    this.registry.set(liveText(id), text)
+  }
+
+  private liveSnapshot(atom: ReturnType<typeof liveText>, text: string | undefined, sequence: number | undefined) {
+    const current = this.registry.get(atom)
+    if (sequence === undefined) {
+      if (text !== undefined && text.length >= (current ?? "").length) this.registry.set(atom, text)
+      return
+    }
+    const seen = this.sequences.get(atom) ?? -1
+    if (sequence < seen || (sequence === seen && current !== null)) return
+    this.sequences.set(atom, sequence)
+    this.registry.set(atom, text ?? "")
   }
 
   /** A loaded version's saved reasoning: where a continuation's streamed reasoning goes on from. */
@@ -1569,13 +1586,8 @@ export class ChatSession {
     return sectionsDisplay(this.view.entries.find((e) => e.version.id === id)?.version.replySections)
   }
 
-  private setLiveSide(atom: typeof liveReasoning, id: VersionId, text: string) {
-    if (!this.live.has(id)) this.live.set(id, this.mountLive(id))
-    this.registry.set(atom(id), text)
-  }
-
   private setLiveSteps(id: VersionId, steps: ReadonlyArray<RolloutStep>) {
-    if (!this.live.has(id)) this.live.set(id, this.mountLive(id))
+    this.keepLive(id)
     this.registry.set(liveSteps(id), steps)
   }
 
