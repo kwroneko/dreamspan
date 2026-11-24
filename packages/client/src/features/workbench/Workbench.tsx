@@ -397,37 +397,44 @@ function useRoom(store: WorkbenchStore, center: HTMLElement | null, wide: boolea
 }
 
 /**
- * Where the frames scroll (a window too narrow for them), the focused frame stays in view: a
- * tab moved or opened there, or focus moving to it, scrolls the row just enough to show it.
+ * Keep the focused frame in view when focus, its tab or the scrollport's size changes.
  */
 function useFocusedInView(center: HTMLElement | null, frameId: string | null, tabId: string | null) {
   useLayoutEffect(() => {
     if (!center || !frameId) return
-    if (center.scrollWidth <= center.clientWidth && center.scrollHeight <= center.clientHeight) return
-    const frame = [...center.querySelectorAll<HTMLElement>("[data-frame]")].find((f) => f.dataset["frame"] === frameId)
-    if (!frame) return
-    const box = frame.getBoundingClientRect()
-    const view = center.getBoundingClientRect()
-    const inner = {
-      left: view.left + center.clientLeft,
-      top: view.top + center.clientTop,
-      right: view.left + center.clientLeft + center.clientWidth,
-      bottom: view.top + center.clientTop + center.clientHeight
+    const reveal = () => {
+      if (center.scrollWidth <= center.clientWidth && center.scrollHeight <= center.clientHeight) return
+      const frame = [...center.querySelectorAll<HTMLElement>("[data-frame]")].find(
+        (f) => f.dataset["frame"] === frameId
+      )
+      if (!frame) return
+      const box = frame.getBoundingClientRect()
+      const view = center.getBoundingClientRect()
+      const inner = {
+        left: view.left + center.clientLeft,
+        top: view.top + center.clientTop,
+        right: view.left + center.clientLeft + center.clientWidth,
+        bottom: view.top + center.clientTop + center.clientHeight
+      }
+      // Just enough: the near edge first, the far one when the frame fits.
+      const dx =
+        box.left < inner.left
+          ? box.left - inner.left
+          : box.right > inner.right
+            ? Math.min(box.right - inner.right, box.left - inner.left)
+            : 0
+      const dy =
+        box.top < inner.top
+          ? box.top - inner.top
+          : box.bottom > inner.bottom
+            ? Math.min(box.bottom - inner.bottom, box.top - inner.top)
+            : 0
+      if (dx !== 0 || dy !== 0) center.scrollBy({ left: dx, top: dy, behavior: "instant" })
     }
-    // Just enough: the near edge first, the far one when the frame fits.
-    const dx =
-      box.left < inner.left
-        ? box.left - inner.left
-        : box.right > inner.right
-          ? Math.min(box.right - inner.right, box.left - inner.left)
-          : 0
-    const dy =
-      box.top < inner.top
-        ? box.top - inner.top
-        : box.bottom > inner.bottom
-          ? Math.min(box.bottom - inner.bottom, box.top - inner.top)
-          : 0
-    if (dx !== 0 || dy !== 0) center.scrollBy({ left: dx, top: dy, behavior: "instant" })
+    const observer = new ResizeObserver(reveal)
+    observer.observe(center)
+    reveal()
+    return () => observer.disconnect()
   }, [center, frameId, tabId])
 }
 

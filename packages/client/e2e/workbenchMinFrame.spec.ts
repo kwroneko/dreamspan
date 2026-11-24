@@ -290,3 +290,30 @@ test("a divider moves when a restored frame is clamped to its minimum", async ({
   expect(Math.abs((await second!.boundingBox())!.width - secondBefore + 80)).toBeLessThanOrEqual(1)
   expect(Math.abs((await third!.boundingBox())!.x - thirdBefore)).toBeLessThanOrEqual(1)
 })
+
+test("narrowing the window keeps the same focused frame within the scrollport", async ({ page }) => {
+  await fresh(page, 1920)
+  await gotoWithLayout(page, server().url, "/", [
+    "r",
+    [0.25, 0.25, 0.25, 0.25],
+    [0, "/library"],
+    [0, "/library"],
+    [0, "/library"],
+    [0, "="]
+  ])
+  const focused = frames(page).last()
+  await expect(focused).toHaveAttribute("data-focused", "")
+  await page.setViewportSize({ width: 1024, height: 1000 })
+
+  const center = page.locator("[data-workbench]")
+  await expect
+    .poll(() =>
+      center.evaluate((element) => {
+        const view = element.getBoundingClientRect()
+        const frame = element.querySelector("[data-frame][data-focused]")!.getBoundingClientRect()
+        return Math.max(view.left - frame.left, frame.right - (view.left + element.clientWidth))
+      })
+    )
+    .toBeLessThanOrEqual(0.5)
+  await expect(focused).toHaveAttribute("data-focused", "")
+})
