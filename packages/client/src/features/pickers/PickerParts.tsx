@@ -2,8 +2,8 @@
 // chip and the side panel tabs' dropdowns), the filter, and the list of radio rows, each with
 // a muted line under its name and an optional icon button beside it that acts on the row
 // without choosing it or closing the popover.
-import { type KeyboardEvent, type ReactNode, type RefObject, useEffect, useRef, useState } from "react"
-import { WindowedList } from "../../ui/WindowedList.tsx"
+import { type ReactNode, type Ref, type RefObject, useEffect, useImperativeHandle, useRef, useState } from "react"
+import { WindowedList, type WindowedListHandle } from "../../ui/WindowedList.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
@@ -112,10 +112,10 @@ export function PickerSearch({
       onKeyDown={(event) => {
         if (navigate && (event.key === "ArrowDown" || (event.key === "Enter" && !event.nativeEvent.isComposing))) {
           event.preventDefault()
-          navigate(event.key as "ArrowDown" | "Enter")
+          navigate(event.key)
           return
         }
-        // Down goes into the list (at the checked row when it's shown); Enter takes the first row.
+        // Non-windowed lists have every row in the DOM.
         const rows = document.getElementById(controls)?.querySelectorAll<HTMLElement>("[role=radio]")
         if (!rows?.length) return
         if (event.key === "ArrowDown") {
@@ -131,25 +131,11 @@ export function PickerSearch({
   )
 }
 
-/** Up and Down move between a list's rows; Home and End go to its first and last shown row. */
-const moveInList = (event: KeyboardEvent<HTMLElement>, search: HTMLElement | null | undefined) => {
-  const target = event.target as HTMLElement
-  if (target.getAttribute("role") !== "radio") return
-  const rows = [...event.currentTarget.querySelectorAll<HTMLElement>("[role=radio]")]
-  const at = rows.indexOf(target)
-  const next =
-    event.key === "ArrowDown"
-      ? rows[at + 1]
-      : event.key === "ArrowUp"
-        ? (rows[at - 1] ?? (at === 0 ? search : undefined))
-        : event.key === "Home"
-          ? rows[0]
-          : event.key === "End"
-            ? rows.at(-1)
-            : undefined
-  if (next === undefined && !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return
-  event.preventDefault()
-  next?.focus()
+const radio = (row: HTMLElement) => row.querySelector<HTMLElement>("[role=radio]")
+const rowAction = (row: HTMLElement) => row.querySelector<HTMLElement>("[data-picker-action]:enabled") ?? radio(row)
+
+export interface PickerListNavigation {
+  readonly searchKey: (key: "ArrowDown" | "Enter") => void
 }
 
 interface PickerRowAction {
@@ -180,6 +166,7 @@ export interface PickerItem {
  * the row that takes its place, so the keyboard stays in the list and the popover stays open.
  */
 export function PickerList({
+  ref,
   id,
   title,
   items,
@@ -190,6 +177,7 @@ export function PickerList({
   fallbackFocus,
   rowSize = 48
 }: {
+  ref: Ref<PickerListNavigation>
   id: string
   title: string
   items: ReadonlyArray<PickerItem>
@@ -203,6 +191,17 @@ export function PickerList({
   /** Where focus goes when an action empties the list. */
   fallbackFocus?: RefObject<HTMLElement | null> | undefined
 }) {
+  const list = useRef<WindowedListHandle>(null)
+  const current = Math.max(
+    0,
+    items.findIndex((item) => item.value === value)
+  )
+  useImperativeHandle(ref, () => ({
+    searchKey: (key) => {
+      if (key === "ArrowDown") list.current?.focusItem(current, radio)
+      else if (items[0]) onChoose(items[0].value)
+    }
+  }))
   // Where focus goes once an action has changed the rows.
   const refocus = useRef<{ index: number; value: string } | null>(null)
   const values = items.map((item) => item.value).join("\n")
@@ -221,11 +220,9 @@ export function PickerList({
       return
     }
     // Still there (archiving failed, or the current preset stays listed): focus it again.
-    const rows = [...element.querySelectorAll<HTMLElement>("[data-picker-row]")]
-    const same = rows.find((row) => row.dataset.pickerRow === wanted.value)
-    const next = same ?? rows[Math.min(wanted.index, rows.length - 1)]
-    const target = next?.querySelector<HTMLElement>("[data-picker-action]") ?? next?.querySelector("[role=radio]")
-    ;(target ?? fallbackFocus?.current)?.focus()
+    const same = items.findIndex((item) => item.value === wanted.value)
+    if (items.length === 0) fallbackFocus?.current?.focus()
+    else list.current?.focusItem(same >= 0 ? same : Math.min(wanted.index, items.length - 1), rowAction)
   }, [values]) // eslint-disable-line react-hooks/exhaustive-deps -- once the rows have changed
   if (items.length === 0)
     return (
@@ -236,6 +233,7 @@ export function PickerList({
   // Hundreds of presets or thousands of cards: only the rows in view (and a few more) mount.
   return (
     <WindowedList
+      ref={list}
       id={id}
       role="radiogroup"
       aria-label={title}
@@ -244,11 +242,30 @@ export function PickerList({
       itemKey={itemKey}
       estimateSize={rowSize}
       gap={false}
-      initialIndex={Math.max(
-        0,
-        items.findIndex((item) => item.value === value)
-      )}
-      onKeyDown={(event) => moveInList(event, fallbackFocus?.current)}
+      initialIndex={current}
+      onKeyDown={(event) => {
+        const target = event.target as HTMLElement
+        if (target.getAttribute("role") !== "radio") return
+        const index = Number(target.closest<HTMLElement>("[data-index]")?.dataset.index)
+        switch (event.key) {
+          case "ArrowDown":
+            list.current?.focusItem(index + 1, radio)
+            break
+          case "ArrowUp":
+            if (index === 0) fallbackFocus?.current?.focus()
+            else list.current?.focusItem(index - 1, radio)
+            break
+          case "Home":
+            list.current?.focusItem(0, radio)
+            break
+          case "End":
+            list.current?.focusItem(items.length - 1, radio)
+            break
+          default:
+            return
+        }
+        event.preventDefault()
+      }}
       renderItem={(item, index) => {
         const checked = item.value === value
         return (

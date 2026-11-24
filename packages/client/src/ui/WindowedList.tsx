@@ -1,9 +1,25 @@
 // The branch lists share measured windowing: only a viewport and a few neighbours mount.
 // Small lists keep their full DOM. The focused row stays mounted even when scrolled away.
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
-import { useCallback, useLayoutEffect, useRef, useState, type HTMLAttributes, type ReactNode } from "react"
+import {
+  useCallback,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type HTMLAttributes,
+  type ReactNode,
+  type Ref
+} from "react"
+
+type RowTarget = (row: HTMLElement) => HTMLElement | null
+
+export interface WindowedListHandle {
+  readonly focusItem: (index: number, target: RowTarget) => void
+}
 
 export function WindowedList<T>({
+  ref,
   items,
   itemKey,
   renderItem,
@@ -14,6 +30,7 @@ export function WindowedList<T>({
   gap = true,
   ...props
 }: {
+  ref?: Ref<WindowedListHandle>
   items: ReadonlyArray<T>
   itemKey: (item: T) => string
   renderItem: (item: T, index: number) => ReactNode
@@ -32,6 +49,7 @@ export function WindowedList<T>({
   const positioned = useRef(false)
   const windowed = items.length > 60
   const [focused, setFocused] = useState<string | null>(null)
+  const pendingFocus = useRef<{ key: string; target: RowTarget } | null>(null)
   const focusedIndex = focused === null ? -1 : items.findIndex((item) => itemKey(item) === focused)
   const getItemKey = useCallback((index: number) => itemKey(items[index]!), [items, itemKey])
   // eslint-disable-next-line react-hooks/incompatible-library -- mutable virtualizer; compiler opted out above
@@ -62,6 +80,31 @@ export function WindowedList<T>({
   const rows = windowed
     ? virtualizer.getVirtualItems()
     : items.map((item, index) => ({ index, key: itemKey(item), start: 0 }))
+  const rowElement = (index: number) => parent.current?.querySelector<HTMLElement>(`[data-index="${index}"]`)
+  useImperativeHandle(ref, () => ({
+    focusItem: (index, target) => {
+      const item = items[index]
+      if (!item) return
+      if (windowed) virtualizer.scrollToIndex(index, { align: "auto" })
+      const row = rowElement(index)
+      if (row) {
+        pendingFocus.current = null
+        target(row)?.focus()
+      } else {
+        const key = itemKey(item)
+        pendingFocus.current = { key, target }
+        setFocused(key)
+      }
+    }
+  }))
+  useLayoutEffect(() => {
+    const pending = pendingFocus.current
+    if (!pending) return
+    const row = rowElement(focusedIndex)
+    if (focused !== pending.key || !row) return
+    pendingFocus.current = null
+    pending.target(row)?.focus()
+  }, [focused, focusedIndex, rows])
   const List = listLabel ? "ol" : "div"
   const Row = listLabel ? "li" : "div"
   return (

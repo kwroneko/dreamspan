@@ -20,6 +20,7 @@ import { NEW_PRESET_HINT, NewPresetDialog, newPresetName } from "../editor/NewPr
 import {
   type PickerBodyProps,
   type PickerItem,
+  type PickerListNavigation,
   PickerFooterButton,
   PickerList,
   PickerPopover,
@@ -51,6 +52,7 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
   const view: PresetView = archivedView ? "archived" : prefs.presetSort
   const [query, setQuery] = useState("")
   const search = useRef<HTMLInputElement>(null)
+  const navigation = useRef<PickerListNavigation>(null)
   const [pending, setPending] = useState<string | null>(null)
   const [last, setLast] = useState<{ ref: LibraryRef; archived: boolean } | null>(null)
   const listId = useId()
@@ -143,6 +145,7 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
         onChange={setQuery}
         inputRef={focus === "search" ? focusRef : search}
         controls={listId}
+        navigate={(key) => navigation.current?.searchKey(key)}
       />
       <Segmented<PresetView>
         label="Show presets"
@@ -158,6 +161,7 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
         }))}
       />
       <PickerList
+        ref={navigation}
         id={listId}
         title="Prompt preset"
         items={items}
