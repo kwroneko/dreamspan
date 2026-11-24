@@ -27,7 +27,7 @@ test("a binned locked preset can be replaced or unlocked from either picker", as
     answer: reply
   })
   try {
-    const { workshop, story } = await rpc((api) =>
+    const { workshop, replaceStory, unlockStory } = await rpc((api) =>
       Effect.gen(function* () {
         const connection = yield* api.CreateConnection({
           kind: "openai-chat",
@@ -46,8 +46,9 @@ test("a binned locked preset can be replaced or unlocked from either picker", as
         })
         const workshop = yield* api.CreateWorkshop({})
         yield* api.SetWorkshopGrant({ chatId: workshop.id, capability: "library.write", mode: "allow" })
-        const story = yield* api.CreateChat({ title: "Preset lock story" })
-        return { workshop, story }
+        const replaceStory = yield* api.CreateChat({ title: "Replace locked preset" })
+        const unlockStory = yield* api.CreateChat({ title: "Unlock missing preset" })
+        return { workshop, replaceStory, unlockStory }
       })
     )
     await page.setViewportSize({ width: 1440, height: 900 })
@@ -59,22 +60,34 @@ test("a binned locked preset can be replaced or unlocked from either picker", as
     const preset = (await rpc((api) => api.ListLibrary({ kind: "preset" }))).find((p) => p.label === label)!
     await rpc((api) =>
       Effect.gen(function* () {
-        yield* api.ChangeCast({ chatId: story.id, slotId: null, change: { _tag: "Preset", ref: preset.id } })
+        for (const story of [replaceStory, unlockStory]) {
+          yield* api.ChangeCast({ chatId: story.id, slotId: null, change: { _tag: "Preset", ref: preset.id } })
+        }
         const effects = yield* api.ListRolloutEffects({ chatId: workshop.id })
-        yield* api.UndoRolloutEffect(effects.find((effect) => effect.targetId === preset.entityId)!)
+        const creation = effects.find(
+          (effect) => effect.kind === "library.create" && effect.targetId === preset.entityId
+        )!
+        // Confirm the workshop Undo after locking the preset in both chats.
+        yield* api.UndoRolloutEffect({ ...creation, binAnyway: true })
       })
     )
-    await page.goto(`${server().url}/chats/${story.id}`)
+    await page.goto(`${server().url}/chats/${replaceStory.id}`)
     const chip = presetChip(page)
     await expect(chip).toContainText("Preset unavailable")
     await chip.click()
     await expect(page.getByRole("switch", { name: "Lock for this chat" })).toBeChecked()
-    await expect(page.getByRole("radio", { name: "Default (built-in)", exact: true })).toBeEnabled()
-    await page.keyboard.press("Escape")
+    await page.getByRole("radio", { name: "Default (built-in)", exact: true }).click()
+    await expect(chip).toContainText("Default (built-in)")
+    await expect(chip.getByRole("img", { name: "Preset locked for this chat" })).toBeVisible()
+
+    await page.goto(`${server().url}/chats/${unlockStory.id}`)
     const panel = await openPanel(page, "Prompt preset")
     await panel.getByRole("button", { name: /Prompt preset for the next reply: Preset unavailable/ }).click()
-    await page.getByRole("switch", { name: "Lock for this chat" }).click()
+    const lock = page.getByRole("switch", { name: "Lock for this chat" })
+    await expect(lock).toBeChecked()
+    await lock.click()
     await expect(chip).toContainText("Default (built-in)")
+    await expect(chip.getByRole("img", { name: "Preset locked for this chat" })).toHaveCount(0)
   } finally {
     await scripted.stop()
   }
