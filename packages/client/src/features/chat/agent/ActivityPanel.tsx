@@ -2,7 +2,7 @@
 // message, newest first: summaries, condensations, judgments of replies. Each row says what it
 // was, how it ended, the model, when, its tokens and cost, and links to where it can be looked at
 // (a summary's request, or the reply a judgment was about). Agent replies are reached from their
-// message instead. Read in pages of 50 (`ListActivity`), again whenever the summaries change.
+// message instead. Read in pages of 50 (`ListActivity`), refreshing while decisions run.
 import type { ActivityCursor, ActivityRow } from "@dreamspan/shared/agent.ts"
 import type { SlotId } from "@dreamspan/shared/chat.ts"
 import type { RequestStatus } from "@dreamspan/shared/usage.ts"
@@ -94,7 +94,7 @@ export function ActivityPanel({ session, view, active, onJump }: PanelProps) {
   const [before, setBefore] = useState<ActivityCursor | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  // The summaries changing is what adds a row here; read again then, and when the tab is shown.
+  // Read again when the summaries change or the tab is shown.
   const lcm = view.lcm
   useEffect(() => {
     if (!active) return
@@ -113,13 +113,39 @@ export function ActivityPanel({ session, view, active, onJump }: PanelProps) {
       current = false
     }
   }, [session, active, lcm])
+  useEffect(() => {
+    if (!active || rows === null) return
+    const running = rows.findIndex((row) => row.kind === "decision" && row.status === "running")
+    if (running === -1) return
+    // Start just before the newest running decision so this works on older pages too.
+    const previous = rows[running - 1]
+    const before = previous ? { startedAt: previous.startedAt, id: previous.id, kind: previous.kind } : undefined
+    let current = true
+    const refresh = async () => {
+      const result = await session.call((client) =>
+        client("ListActivity", { chatId: session.id, ...(before ? { before } : {}) })
+      )
+      if (!current) return
+      if (!result.ok) {
+        timer = window.setTimeout(() => void refresh(), 1_000)
+        return
+      }
+      const decisions = new Map(result.value.rows.filter((row) => row.kind === "decision").map((row) => [row.id, row]))
+      setRows((shown) => shown?.map((row) => (row.kind === "decision" ? (decisions.get(row.id) ?? row) : row)) ?? null)
+    }
+    let timer = window.setTimeout(() => void refresh(), 1_000)
+    return () => {
+      current = false
+      window.clearTimeout(timer)
+    }
+  }, [active, rows, session])
   const older = async () => {
     if (before === null) return
     setLoading(true)
     const result = await session.call((client) => client("ListActivity", { chatId: session.id, before }))
     setLoading(false)
     if (result.ok) {
-      setRows([...(rows ?? []), ...result.value.rows])
+      setRows((shown) => [...(shown ?? []), ...result.value.rows])
       setBefore(result.value.before)
     } else setError(`The activity couldn't be read: ${result.error.message}`)
   }
