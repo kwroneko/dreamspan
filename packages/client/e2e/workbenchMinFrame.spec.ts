@@ -266,3 +266,27 @@ test("an edge drop fits when moving the tab closes its source frame", async ({ p
   await expect(frames(page).last().getByRole("tab", { name: "Characters", exact: true })).toBeVisible()
   await expectWholeStrips(page)
 })
+
+test("a divider moves when a restored frame is clamped to its minimum", async ({ page }) => {
+  await fresh(page, 1920)
+  await gotoWithLayout(page, server().url, "/", ["r", [0.01, 0.35, 0.64], [0, "="], [0, "/library"], [0, "/library"]])
+  await expect(frames(page)).toHaveCount(3)
+  const [first, second, third] = await frames(page).all()
+  const firstBefore = (await first!.boundingBox())!.width
+  const secondBefore = (await second!.boundingBox())!.width
+  const thirdBefore = (await third!.boundingBox())!.x
+  expect(firstBefore).toBe(MIN_FRAME)
+  expect(secondBefore).toBeGreaterThan(MIN_FRAME + 80)
+  const handle = page.getByRole("separator", { name: "Resize frames side by side" }).first()
+  const box = (await handle.boundingBox())!
+  const x = box.x + box.width / 2
+  const y = box.y + box.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x + 80, y, { steps: 10 })
+  await page.mouse.up()
+
+  await expect.poll(async () => Math.abs((await first!.boundingBox())!.width - firstBefore - 80)).toBeLessThanOrEqual(1)
+  expect(Math.abs((await second!.boundingBox())!.width - secondBefore + 80)).toBeLessThanOrEqual(1)
+  expect(Math.abs((await third!.boundingBox())!.x - thirdBefore)).toBeLessThanOrEqual(1)
+})
