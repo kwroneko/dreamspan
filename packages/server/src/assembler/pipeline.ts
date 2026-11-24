@@ -287,9 +287,14 @@ export interface ProjectedEntry {
   readonly name: string
   readonly persona: boolean
   readonly piece: number
+  /** Rendered library attachments bypass prose scripts and HTML filtering. */
+  readonly libraryText?: string
   /** Sent as a system message without a name: a merged chat's section and join (`merge-layout`). */
   readonly system?: true
 }
+
+export const withLibraryText = (entry: ProjectedEntry, text: string) =>
+  entry.libraryText ? (text ? `${text}\n${entry.libraryText}` : entry.libraryText) : text
 
 /**
  * One assembly, filled in by the stages in turn. Each stage may read what earlier stages
