@@ -2,6 +2,7 @@
 // paths), how a draft reads as overrides, and which fields an edit touched. The single model's
 // form saves the whole draft; the model list's Edit N… applies only the fields ticked, each by
 // its paths, to every selected model.
+import { canonicalJson } from "@dreamspan/shared/editing.ts"
 import { applyModelPatch, valueAt, withValueAt } from "@dreamspan/shared/modelPatch.ts"
 import type { Model, ModelOverrides } from "@dreamspan/shared/providers.ts"
 import { SAMPLER_KEYS, type SamplerKey } from "@dreamspan/shared/samplerRules.ts"
@@ -299,7 +300,7 @@ export const commonOf = (
     const counts = new Map<string, { value: unknown; count: number }>()
     for (const model of models) {
       const value = spec(id).paths.map((path) => valueAt(model.overrides, path))
-      const key = JSON.stringify(value)
+      const key = JSON.stringify(value.map(canonicalJson))
       const entry = counts.get(key)
       if (entry) entry.count += 1
       else counts.set(key, { value, count: 1 })

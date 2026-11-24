@@ -32,6 +32,23 @@ it("what many models share, and how they differ", () => {
   expect(mixed.vision).toBeUndefined()
 })
 
+it("compares bulk settings by value, preserving array order and explicit nulls", () => {
+  const sampling = { top_k: 30, min_p: 0.1, extra: [1, { b: 2, a: null }] }
+  const a = model("a", { sampling })
+  const same = model("b", { sampling: { extra: [1, { a: null, b: 2 }], min_p: 0.1, top_k: 30 } })
+  const { draft, mixed } = commonOf([a, same])
+  expect(mixed.sampling).toBeUndefined()
+  expect(
+    massPatches(draft, ["sampling"], [{ id: a.id, limits: { context: 8192, maxOutput: 4096 } }])[0]?.values
+  ).toEqual({ sampling })
+  for (const other of [
+    { ...sampling, extra: [{ b: 2, a: null }, 1] },
+    { ...sampling, extra: [1, { b: 2 }] }
+  ]) {
+    expect(commonOf([a, model("b", { sampling: other })]).mixed.sampling).toBeDefined()
+  }
+})
+
 it("a copy fills and names every field the source sets", () => {
   const source = { reasoning: false, settings: { samplers: { temperature: 0.4 }, stop: ["END"] }, name: "Source" }
   const fields = fieldsSet(source)
