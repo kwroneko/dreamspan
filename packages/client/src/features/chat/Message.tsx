@@ -256,7 +256,13 @@ function VersionBody({
       {/* One cell holding both while the edit's box is being drawn (above). */}
       <div className={editText !== null && !shown ? "grid *:min-w-0 *:[grid-area:1/1]" : "contents"}>
         {editText !== null && <div className={shown ? "contents" : "pointer-events-none opacity-0"}>{editText}</div>}
-        <div ref={textBox} className="flex flex-col gap-2 compact:gap-1" hidden={editText !== null && shown}>
+        {/* The reply's text: the only part of a message besides its thinking a double-click edits (editFrom). */}
+        <div
+          ref={textBox}
+          data-reply-text
+          className="flex flex-col gap-2 compact:gap-1"
+          hidden={editText !== null && shown}
+        >
           {text === "" && generating ? (
             <p className="text-sm text-muted" aria-live="polite">
               {waiting ? "Waiting for the cache…" : "Writing…"}
@@ -568,6 +574,21 @@ const thinkingAt = (target: EventTarget | null): ThinkingSpot | null => {
   return { kind: target.closest("[data-thinking-edit]") ? null : panel.getAttribute("data-reasoning-panel") }
 }
 
+/**
+ * What a double-click on `target` in the message `row` edits: its thinking (the thinking's own
+ * editor, `thinkingAt`), its text ("text": the message's edit, only from the reply's text,
+ * `data-reply-text`), or nothing. Nothing is the rule, not the exception: everything else in a
+ * message (its header, portrait, previews, notices, the failure and resume rows, the footer, an
+ * edit's status, a control, an image) keeps the browser's double-click, a word selected.
+ */
+const editFrom = (row: Element, target: EventTarget | null): ThinkingSpot | "text" | null => {
+  if (!(target instanceof Element) || !canEditFrom(target)) return null
+  const thinking = thinkingAt(target)
+  if (thinking) return thinking
+  const text = target.closest("[data-reply-text]")
+  return text !== null && row.contains(text) ? "text" : null
+}
+
 /** A third click within this long of a double-click selects a paragraph instead of editing. */
 const TRIPLE_CLICK_MS = 450
 
@@ -735,9 +756,10 @@ export const Message = memo(function Message({
     pendingEdit.current = null
   }
   const onDoubleClick = (event: MouseEvent) => {
-    if (generating || outside(event) || !canEditFrom(event.target)) return
+    const from = generating || outside(event) ? null : editFrom(event.currentTarget, event.target)
+    if (from === null) return
     // In the thinking: its own editor, never the message's (owner, 2026-11-23).
-    const thinking = thinkingAt(event.target)
+    const thinking = from === "text" ? null : from
     if (thinking) {
       if (thinking.kind !== thinkingPanel(version) || session.editor(thinkingKey(version.id))) return
     } else {
