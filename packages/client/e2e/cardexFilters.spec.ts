@@ -199,18 +199,15 @@ test("the search row and the filter row keep together at every width", async ({ 
     const within = main.getByRole("button", { name: "Search in: All text", exact: true })
     const panels = main.locator("[data-filter-panels]")
     const tag = panels.locator("input")
-    const lastPanel = panels.locator(":scope > button").last()
+    const lastPanel = panels.locator("button:has([data-filter-panel])").last()
     for (const width of [1024, 1252, 1352, 1452, 1602, 1752, 1952, 2560, 3840]) {
       await page.setViewportSize({ width, height: 900 })
       await expect
         .poll(
           async () => {
-            const [b, i, t, l, row] = await Promise.all(
-              [box, within, tag, lastPanel, panels].map((at) => at.boundingBox())
-            )
-            // The tag field takes the next line only when its 10rem don't fit after the last button.
-            const room = row!.x + row!.width - (l!.x + l!.width + 8) >= 160
-            return [Math.round(i!.y - b!.y), room ? Math.round(t!.y - l!.y) : 0]
+            const [b, i, t, l] = await Promise.all([box, within, tag, lastPanel].map((at) => at.boundingBox()))
+            // The tag field is never alone on a line: the last button keeps it company.
+            return [Math.round(i!.y - b!.y), Math.round(t!.y - l!.y)]
           },
           { message: `window ${width}` }
         )
