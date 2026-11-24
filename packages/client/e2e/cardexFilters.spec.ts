@@ -20,6 +20,28 @@ const freePort = () =>
     })
   })
 
+test("Cardex Edit beside uses the room the sidebar can give up", async ({ page }) => {
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: "0" })
+  try {
+    await page.setViewportSize({ width: 1340, height: 1000 })
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    await page.goto(new URL("/?show=src.cardex&sbw=850", server.url).href)
+    const workbench = page.locator("[data-workbench]")
+    await expect.poll(() => workbench.evaluate((element) => element.clientWidth)).toBe(490)
+    const card = workbench.locator("[data-remote-card]:not([data-held])").first()
+    await card.getByRole("link", { name: /^Open / }).click({ button: "right" })
+    await page.getByRole("menuitem", { name: "Edit beside", exact: true }).click()
+
+    const frames = workbench.locator("[data-frame]")
+    await expect(frames).toHaveCount(2)
+    await expect(frames.first().locator("[data-remote-card]").first()).toBeVisible()
+    await expect(frames.last().locator("[data-read-only-card]")).toBeVisible()
+    expect(new URL(page.url()).searchParams.get("sbw")).toBe("850")
+  } finally {
+    await server.stop()
+  }
+})
+
 test("the NSFW controls show the account rating in a fresh tab", async ({ page }) => {
   const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: "0" })
   try {
