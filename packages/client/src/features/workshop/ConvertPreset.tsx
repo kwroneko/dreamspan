@@ -2,7 +2,7 @@
 // from this one's saved version. The story pieces are listed to keep, drop or reword; the
 // workshop pieces are added. The original never changes.
 import type { PresetDoc } from "@dreamspan/shared/docs/preset.ts"
-import { type ConversionChoice, conversionItems, workshopPieces } from "@dreamspan/shared/workshopPreset.ts"
+import { choiceOf, type ConversionChoice, conversionItems, workshopPieces } from "@dreamspan/shared/workshopPreset.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { type FormEvent, useMemo } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
@@ -80,8 +80,9 @@ function ConvertDialog({
   }
   const { name, instructions, choices } = values
   const edit = (change: Partial<typeof values>) => draft.setText(JSON.stringify({ ...values, ...change }))
-  const set = (identifier: string, change: Partial<ConversionChoice>) =>
-    edit({ choices: { ...choices, [identifier]: { ...choices[identifier]!, ...change } } })
+  // A prompt added since the draft has no choice kept: the change starts from its default.
+  const set = (item: (typeof items)[number], change: Partial<ConversionChoice>) =>
+    edit({ choices: { ...choices, [item.identifier]: { ...choiceOf(item, choices), ...change } } })
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (action.pending || !draft.ready) return
@@ -91,7 +92,10 @@ function ConvertDialog({
           client("ConvertPresetToWorkshop", {
             refId: refId as never,
             label: name.trim(),
-            choices: Object.values(choices),
+            // Only the pieces shown: a choice for a prompt gone from the preset can't apply.
+            choices: Object.values(choices).filter((choice) =>
+              items.some((item) => item.identifier === choice.identifier)
+            ),
             instructions
           }),
         ["library"]
@@ -121,7 +125,7 @@ function ConvertDialog({
         {items.length > 0 && (
           <ul className="flex flex-col gap-3" aria-label="Pieces to keep or drop">
             {items.map((item) => {
-              const choice = choices[item.identifier] ?? { identifier: item.identifier, keep: item.kind === "review" }
+              const choice = choiceOf(item, choices)
               return (
                 <li key={item.identifier} className="flex flex-col gap-2 rounded-md border border-border p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -131,7 +135,7 @@ function ConvertDialog({
                       // The piece's own reason shows below; Keep and Drop explain themselves on hover.
                       inlineDescription={false}
                       value={choice.keep ? "keep" : "drop"}
-                      onValueChange={(value) => set(item.identifier, { keep: value === "keep" })}
+                      onValueChange={(value) => set(item, { keep: value === "keep" })}
                       options={[
                         { value: "keep", label: "Keep", description: "The new preset keeps this piece." },
                         { value: "drop", label: "Drop", description: "The new preset leaves this piece out." }
@@ -143,7 +147,7 @@ function ConvertDialog({
                     <Field label={`Text of ${item.name}`}>
                       <Textarea
                         value={choice.content ?? item.content}
-                        onChange={(event) => set(item.identifier, { content: event.currentTarget.value })}
+                        onChange={(event) => set(item, { content: event.currentTarget.value })}
                       />
                     </Field>
                   )}

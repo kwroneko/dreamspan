@@ -109,6 +109,19 @@ export interface ConversionChoice {
   readonly content?: string
 }
 
+/** An item's choice as kept, else its default: a prompt added since the draft has none kept. */
+export const choiceOf = (
+  item: Pick<ConversionItem, "identifier" | "kind">,
+  choices: Readonly<Record<string, ConversionChoice>>
+): ConversionChoice => choices[item.identifier] ?? { identifier: item.identifier, keep: item.kind === "review" }
+
+/** The choices with new text for a prompt `doc` no longer has: a conversion would drop the text. */
+export const goneReplacements = (doc: Pick<PresetDoc, "prompts">, choices: ReadonlyArray<ConversionChoice>) =>
+  choices.filter(
+    (choice) =>
+      choice.keep && choice.content !== undefined && !doc.prompts.some((p) => p.identifier === choice.identifier)
+  )
+
 /**
  * The workshop preset made from `doc`: dropped pieces leave the prompts and the order, kept ones
  * take their new text, and the workshop pieces are added after the main prompt and the card
