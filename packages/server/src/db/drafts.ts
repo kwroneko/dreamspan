@@ -13,6 +13,7 @@ import type { UserId } from "@dreamspan/shared/domain.ts"
 import {
   applyPatch,
   composerKey,
+  deletedSince,
   diffPatch,
   Draft,
   DraftHistoryPolicy,
@@ -1336,7 +1337,11 @@ export const makeDraftStore = (
           WHERE chat_id = ${chatId} AND operation_id = ${base.operationId}`
         if (receipt !== undefined) {
           let displaced: DraftDisplacement | null = null
-          if (draft !== null && receipt.displaced_json !== null) {
+          if (
+            draft !== null &&
+            receipt.displaced_json !== null &&
+            !deletedSince(toDraft(draft), { draftId: base.draftId, expectedRowVersion: base.rowVersion })
+          ) {
             const kept = JSON.parse(receipt.displaced_json) as { session: number; seq: number; at: number }
             const [entry] = yield* sql<EntryRow>`SELECT * FROM draft_history
               WHERE draft_id = ${draft.id} AND seq = ${kept.seq + 1} AND displaced = 1`

@@ -20,7 +20,7 @@ vi.mock("../../../client/src/features/editor/backup.ts", async (original) => ({
     copies.delete(c.key)
   }
 }))
-for (const kind of ["lost clear acknowledgement", "stale text"] as const)
+for (const kind of ["lost clear acknowledgement", "stale text", "lost displacement acknowledgement"] as const)
   it.live(`composer recovery acknowledges ${kind} without reopening deleted text`, () =>
     Effect.gen(function* () {
       copies.clear()
@@ -35,13 +35,29 @@ for (const kind of ["lost clear acknowledgement", "stale text"] as const)
         operationId: uuidv7(),
         content: "Text deliberately cleared"
       })
+      const displacement = makeCopy(
+        owner,
+        `composer:${chat.id}`,
+        opened.id,
+        {
+          kind: "composer",
+          payload: { ...address, rowVersion: opened.rowVersion, content: "Text from another tab" }
+        },
+        1
+      )
+      let current = written.draft!
+      if (kind === "lost displacement acknowledgement" && displacement.save.kind === "composer") {
+        const displaced = yield* api.SaveComposer(displacement.save.payload)
+        assert.strictEqual(displaced.draft!.displaced?.content, written.draft!.content)
+        current = displaced.draft!
+      }
       const clear = makeCopy(
         owner,
         `composer:${chat.id}`,
         opened.id,
         {
           kind: "composer",
-          payload: { ...address, rowVersion: written.draft!.rowVersion, content: "" }
+          payload: { ...address, rowVersion: current.rowVersion, content: "" }
         },
         1
       )
@@ -50,20 +66,26 @@ for (const kind of ["lost clear acknowledgement", "stale text"] as const)
       // The closing save reached the server, but the page closed before it could
       // remove its durable browser copy. Reopening must replay that exact receipt.
       const cleared = yield* api.SaveComposer(clear.save.payload)
-      assert.isAbove(cleared.draft!.clearedVersion!, written.draft!.rowVersion)
+      assert.isAbove(cleared.draft!.clearedVersion!, current.rowVersion)
       const copy =
         kind === "lost clear acknowledgement"
           ? clear
-          : makeCopy(
-              owner,
-              `composer:${chat.id}`,
-              opened.id,
-              {
-                kind: "composer",
-                payload: { ...address, rowVersion: written.draft!.rowVersion, content: "Offline text before deletion" }
-              },
-              1
-            )
+          : kind === "lost displacement acknowledgement"
+            ? displacement
+            : makeCopy(
+                owner,
+                `composer:${chat.id}`,
+                opened.id,
+                {
+                  kind: "composer",
+                  payload: {
+                    ...address,
+                    rowVersion: written.draft!.rowVersion,
+                    content: "Offline text before deletion"
+                  }
+                },
+                1
+              )
       copies.set(copy.key, copy)
       const replayed: Array<unknown> = []
       const session = {
@@ -93,6 +115,7 @@ for (const kind of ["lost clear acknowledgement", "stale text"] as const)
       assert.deepStrictEqual(replayed, [copy.save.payload])
       assert.strictEqual(copies.size, 0)
       assert.strictEqual(store.snapshot().text, "")
+      assert.isNull(store.snapshot().conflict)
       const server = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
       assert.strictEqual(server.content, "")
       assert.strictEqual(server.rowVersion, cleared.draft!.rowVersion)
