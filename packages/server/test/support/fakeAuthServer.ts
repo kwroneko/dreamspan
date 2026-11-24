@@ -52,7 +52,10 @@ const json = (response: ServerResponse, status: number, body: unknown) =>
 
 const token = () => randomBytes(24).toString("base64url")
 
-export const startFakeAuthServer = async (initial: Partial<FakeAuthState> = {}): Promise<FakeAuthServer> => {
+export const startFakeAuthServer = async (
+  initial: Partial<FakeAuthState> = {},
+  address?: { bind: string; advertise: string }
+): Promise<FakeAuthServer> => {
   const state: FakeAuthState = { accessTtlS: 3600, refuseRefresh: false, registerBody: null, ...initial }
   const recorded: Array<string> = []
   const clients = new Map<string, Record<string, unknown>>()
@@ -164,8 +167,14 @@ export const startFakeAuthServer = async (initial: Partial<FakeAuthState> = {}):
       if (!response.headersSent) response.writeHead(500).end(String(error))
     })
   })
-  await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve))
-  base = `http://127.0.0.1:${(http.address() as AddressInfo).port}`
+  await new Promise<void>((resolve, reject) => {
+    http.once("error", reject)
+    http.listen(0, address?.bind ?? "127.0.0.1", () => {
+      http.off("error", reject)
+      resolve()
+    })
+  })
+  base = `http://${address?.advertise ?? "127.0.0.1"}:${(http.address() as AddressInfo).port}`
   return {
     url: base,
     state,
