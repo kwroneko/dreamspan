@@ -134,6 +134,50 @@ describe("a new workshop's pending chat", () => {
       )
   )
 
+  it.live("retrying a carry leaves an item removed from the replacement detached (rev-dd7 #2)", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, quill } = yield* setup
+        const book = yield* api.CreateLorebook({ label: "Harbour ledger" })
+        const first = yield* api.OpenDraftChat({ draftFor: `workshop:${quill}:` })
+        const original = yield* api.OpenComposer({ chatId: first.id, forkId: null })
+        yield* api.SetComposerLibrary({ chatId: first.id, draftId: original.id, add: [book.id], remove: [] })
+        yield* (yield* Writer).SweepPendingChat({ userId, chatId: first.id })
+
+        const replacement = yield* api.OpenDraftChat({ draftFor: `workshop:${quill}:`, reopen: first.id })
+        const composer = yield* api.OpenComposer({ chatId: replacement.id, forkId: null })
+        const key = { chatId: replacement.id, draftId: composer.id }
+        const carry = { ...key, add: [book.id], remove: [], carriedFrom: first.id }
+        const attached = yield* api.SetComposerLibrary(carry)
+        assert.deepStrictEqual(
+          attached.map((item) => item.refId),
+          [book.id]
+        )
+        yield* api.SetComposerLibrary({ ...key, add: [], remove: [book.id] })
+
+        assert.deepStrictEqual(yield* api.SetComposerLibrary(carry), [])
+        assert.deepStrictEqual(yield* api.GetComposerLibrary(key), [])
+        const denied = yield* api
+          .SendMessage({
+            chatId: replacement.id,
+            parentSlotId: replacement.activeLeafSlotId,
+            branch: false,
+            content: "Review the ledger.",
+            library: attached.map(({ kind, refId }) => ({ kind, refId })),
+            composer: { draftId: composer.id, session: composer.session },
+            reply: false
+          })
+          .pipe(Effect.flip)
+        assert.strictEqual(denied._tag, "NotFound")
+        // Adding it again by hand is a new action.
+        assert.deepStrictEqual(
+          (yield* api.SetComposerLibrary({ ...key, add: [book.id], remove: [] })).map((item) => item.refId),
+          [book.id]
+        )
+      })
+    )
+  )
+
   it.live("ten new workshops opened and left make the seeds once, and nothing more in the library", () =>
     run(
       Effect.gen(function* () {

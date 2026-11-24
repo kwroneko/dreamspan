@@ -181,7 +181,8 @@ describe("0002_files", () => {
           "workshop_import_media_quota",
           "change_reversals",
           "bin_reply_edits",
-          "library_classes"
+          "library_classes",
+          "composer_library_carries"
         ]
       )
       // The existing row is kept, an image by default.
@@ -537,7 +538,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0024_workshop_import_media_quota",
       "0025_change_reversals",
       "0026_bin_reply_edits",
-      "0027_library_classes"
+      "0027_library_classes",
+      "0028_composer_library_carries"
     ])
   }).pipe(Effect.provide(layer()))
 )

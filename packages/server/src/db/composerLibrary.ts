@@ -7,6 +7,7 @@ import type { MessageLibrary } from "@dreamspan/shared/chat.ts"
 import type { ComposerLibraryItem } from "@dreamspan/shared/composerApi.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { NotFound, StorageError } from "./ops.ts"
+import { sweptComposerLibrary } from "./pendingChats.ts"
 
 /** As many as a message carries (`MessageLibrary`). */
 const MAX_ITEMS = 16
@@ -39,12 +40,21 @@ export const composerLibrary = (sql: SqlClient.SqlClient) => {
     chatId: string,
     draftId: string,
     add: ReadonlyArray<string>,
-    remove: ReadonlyArray<string>
+    remove: ReadonlyArray<string>,
+    carriedFrom?: string
   ) =>
     Effect.gen(function* () {
       yield* owned(userId, chatId, draftId, add.length > 0)
       for (const refId of remove) yield* sql`DELETE FROM composer_library WHERE draft_id=${draftId} AND ref_id=${refId}`
+      const held = carriedFrom === undefined ? null : yield* sweptComposerLibrary(sql, userId, carriedFrom)
       for (const refId of add) {
+        if (carriedFrom !== undefined) {
+          if (!held?.includes(refId) || remove.includes(refId)) continue
+          // The receipt survives removal or send. A retry reads the draft as it is now.
+          const [applied] = yield* sql`INSERT INTO composer_library_carries (draft_id, source_chat_id, ref_id)
+            VALUES (${draftId}, ${carriedFrom}, ${refId}) ON CONFLICT DO NOTHING RETURNING ref_id`
+          if (!applied) continue
+        }
         const [ref] = yield* sql<{
           kind: string
         }>`SELECT e.kind FROM entity_refs r JOIN entities e ON e.id = r.entity_id
