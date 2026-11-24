@@ -116,6 +116,15 @@ export const setMiddleMin = (px: number) => {
   notify()
 }
 
+/** How much wider the middle would get if its content needed a larger minimum. */
+export const middleWidthGrowth = (minimum: number) => {
+  const current = Math.max(MIDDLE_MIN, middleMin)
+  if (minimum <= current) return 0
+  const columnWidth = (middle: number) =>
+    [...allocate(columns, viewport - middle).values()].reduce((sum, width) => sum + Math.floor(width), 0)
+  return columnWidth(current) - columnWidth(minimum)
+}
+
 export const removeColumn = (id: string) => {
   if (!columns.has(id)) return
   const next = new Map(columns)

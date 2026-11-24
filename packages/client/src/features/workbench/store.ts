@@ -31,6 +31,7 @@ import {
   initialLayout,
   type Layout,
   type LayoutAction,
+  minSize,
   moveTab,
   moveToNewFrame,
   neighbours,
@@ -46,6 +47,7 @@ import {
   type Direction
 } from "./model.ts"
 import { layoutKeys, readLayoutParam, withoutLayoutParams } from "../../tabLayoutParams.ts"
+import { middleWidthGrowth } from "../../ui/columnLayout.ts"
 
 export type HistoryState = Record<string, unknown>
 type Action = "PUSH" | "REPLACE"
@@ -189,7 +191,10 @@ export class WorkbenchStore {
   }
   /** Whether `next` leaves the frames it adds or shrinks room for their strips (`hasRoom`). */
   private fits(next: Layout) {
-    return hasRoom(this.layout, next, this.room.width, this.room.height)
+    const { width, height } = this.room
+    const minimum = minSize(next.root, "x")
+    const extra = width > 0 && minimum > width ? middleWidthGrowth(minimum) : 0
+    return hasRoom(this.layout, next, width + extra, height)
   }
   /** Whether splitting a frame leaves both halves room for their strips. */
   canSplit = (frameId: string, direction: Direction) =>
