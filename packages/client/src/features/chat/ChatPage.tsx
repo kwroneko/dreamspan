@@ -63,7 +63,7 @@ import { castCharacters, chatDisplayName } from "./chatTitle.ts"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { LANE_PX, useCoverage } from "./CoverageRail.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
-import { ANCHORED_POPUP } from "../../ui/anchorScroll.ts"
+import { ANCHORED_POPUP, AnchoredPopupEvent } from "../../ui/anchorScroll.ts"
 import type { CSSProperties } from "react"
 import { type ContextMark, Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
@@ -672,13 +672,7 @@ export function MessageList({
   // streaming reply carried the menu up with its row, then closed it as the row left the view.
   // It holds on again after, unless the user scrolled away meanwhile.
   const intent = useRef(0)
-  const menus = useRef({ open: new Set<EventTarget>(), resume: false, since: 0 })
-  /** Whether a menu opened from a row in the list is open (a row gone takes its menu with it). */
-  const menuOpen = () => {
-    for (const anchor of menus.current.open)
-      if (anchor instanceof Node && !anchor.isConnected) menus.current.open.delete(anchor)
-    return menus.current.open.size > 0
-  }
+  const menus = useRef({ open: 0, resume: false, since: 0 })
   useEffect(() => {
     const list = parent.current
     if (list === null) return
@@ -687,24 +681,22 @@ export function MessageList({
       hold(false)
     }
     const onMenu = (event: Event) => {
-      const anchor = event.target
-      if (!(event instanceof CustomEvent) || anchor === null) return
+      if (!(event instanceof AnchoredPopupEvent)) return
       const state = menus.current
-      if (event.detail === true) {
-        if (state.open.size === 0) {
-          state.resume = follow.stuck
-          state.since = performance.now()
-          hold(false)
-        }
-        state.open.add(anchor)
-        return
+      if (state.open === 0) {
+        state.resume = follow.stuck
+        state.since = performance.now()
+        hold(false)
       }
-      state.open.delete(anchor)
-      if (menuOpen() || !state.resume) return
-      state.resume = false
-      if (intent.current >= state.since) return
-      hold(true)
-      virtualizer.scrollToEnd()
+      state.open++
+      event.detail(() => {
+        state.open--
+        if (state.open > 0 || !state.resume) return
+        state.resume = false
+        if (parent.current !== list || intent.current >= state.since) return
+        hold(true)
+        virtualizer.scrollToEnd()
+      })
     }
     const onWheel = (event: WheelEvent) => {
       if (event.deltaY < 0) letGo()
@@ -728,7 +720,12 @@ export function MessageList({
       }
       // Capture reaching the end before the virtualizer measures its newly mounted rows.
       // Their corrected estimates can grow the list beyond END_PX in that same commit.
-      else if (spacing === "compact" && !revealing.current && !menuOpen() && performance.now() - intent.current > 300)
+      else if (
+        spacing === "compact" &&
+        !revealing.current &&
+        menus.current.open === 0 &&
+        performance.now() - intent.current > 300
+      )
         hold(true)
     }
     list.addEventListener(ANCHORED_POPUP, onMenu)
@@ -779,7 +776,7 @@ export function MessageList({
     if (
       !follow.stuck &&
       !revealing.current &&
-      !menuOpen() &&
+      menus.current.open === 0 &&
       fromEnd <= END_PX &&
       performance.now() - intent.current > 300
     )
