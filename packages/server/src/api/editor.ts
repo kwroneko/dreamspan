@@ -7,7 +7,7 @@ import { convertToWorkshop, goneReplacements } from "@dreamspan/shared/workshopP
 import { builtinPreset } from "../db/assemblySources.ts"
 import { CARD_SCHEMA_VERSION } from "@dreamspan/shared/docs/card.ts"
 import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
-import { DraftKey, entityDraftTarget } from "@dreamspan/shared/drafts.ts"
+import { type Draft, DraftKey, entityDraftTarget } from "@dreamspan/shared/drafts.ts"
 import { newCardDoc, parseField, validateDoc } from "@dreamspan/shared/editing.ts"
 import { EditRefused, type ForkMergeApi, InvalidDocument, SavedRef } from "@dreamspan/shared/editorApi.ts"
 import { NotFound, ServerError } from "@dreamspan/shared/errors.ts"
@@ -28,6 +28,7 @@ import { editedDoc } from "@dreamspan/shared/presetConditions.ts"
 import type { User } from "@dreamspan/shared/domain.ts"
 import { Option } from "effect"
 import { CardSources } from "../sources/CardSources.ts"
+import { draftBaseKey } from "../sources/cache.ts"
 
 type Internal = StorageError | RpcClientError.RpcClientError
 
@@ -104,7 +105,7 @@ export const makeEditorHandlers = Effect.gen(function* () {
     )
   const draftChanged =
     (id: UserId) =>
-    <E, R>(effect: Effect.Effect<import("@dreamspan/shared/drafts.ts").Draft, E, R>) =>
+    <E, R>(effect: Effect.Effect<Draft, E, R>) =>
       Effect.tap(effect, (draft) => Effect.sync(() => notices.publish(id, { _tag: "UserDraftChanged", draft })))
   // A card on a card source before it's added (spec/CARD-SOURCES.md §4.3): its editor opens
   // under the placeholder id (`src:<source>:<remote>`) on the cached document, and its edits are
@@ -113,6 +114,14 @@ export const makeEditorHandlers = Effect.gen(function* () {
   const sources = yield* Effect.serviceOption(CardSources)
   const remoteKey = (from: { sourceId: string; remoteId: string }, field: string) =>
     new DraftKey({ targetKind: "remote_card", targetId: `${from.sourceId}:${from.remoteId}`, field })
+  const saveRemoteDraft = <E, R>(
+    user: User,
+    from: { sourceId: string; remoteId: string },
+    write: Effect.Effect<Draft, E, R>
+  ) =>
+    Option.isSome(sources)
+      ? sources.value.cache.withDraftBases([draftBaseKey(user.id, from)], write, (draft) => draft.status === "active")
+      : write
   const fromSource = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.catchIf(
       effect,
@@ -165,15 +174,19 @@ export const makeEditorHandlers = Effect.gen(function* () {
     ) =>
       Effect.gen(function* () {
         yield* checkField(field)
-        return yield* writer.SaveDraft({
-          userId: user.id,
-          key: remoteKey(from, field),
-          draftId,
-          content,
-          expectedRowVersion,
-          expectedSession,
-          baseRevision: null
-        })
+        return yield* saveRemoteDraft(
+          user,
+          from,
+          writer.SaveDraft({
+            userId: user.id,
+            key: remoteKey(from, field),
+            draftId,
+            content,
+            expectedRowVersion,
+            expectedSession,
+            baseRevision: null
+          })
+        )
       }),
     EditorDraftHistory: ({ field, limit, before }: Parameters<typeof handlers.EditorDraftHistory>[0], from, user) =>
       reader.DraftHistory({
@@ -188,7 +201,12 @@ export const makeEditorHandlers = Effect.gen(function* () {
       { refId: _, field, scope: __, ...restore }: Parameters<typeof handlers.RestoreEditorDraft>[0],
       from,
       user
-    ) => writer.RestoreDraftState({ userId: user.id, key: remoteKey(from, field), ...restore }),
+    ) =>
+      saveRemoteDraft(
+        user,
+        from,
+        writer.RestoreDraftState({ userId: user.id, key: remoteKey(from, field), ...restore })
+      ),
     DiscardEditorDraft: (
       { field, draftId, expectedRowVersion }: Parameters<typeof handlers.DiscardEditorDraft>[0],
       from,

@@ -66,7 +66,7 @@ class PortraitSources {
     for (const listener of this.listeners) listener()
   }
 
-  /** A view's pictures as they are now; called on each of its renders. */
+  /** A view's pictures as they are now. URL and cast changes affect only this view's entries. */
   publish(tabId: string, source: PortraitSource) {
     this.sources.set(tabId, source)
     const shown = source.viewer.shown
@@ -106,24 +106,16 @@ class PortraitSources {
         inPlace.has(key) ? [inPlace.get(key)!] : removed.has(key) ? [] : below.has(key) ? [key, below.get(key)!] : [key]
       )
     ]
-    // "Keep one image open": one opened here closes the other views' ones, but not their copy of it.
-    if (onTop.length > 0 && source.viewer.single) {
-      for (const [other, s] of this.sources) {
-        if (other === tabId || s.viewer.shown.every((e) => ids.includes(e.portrait.id))) continue
-        s.viewer.set(s.viewer.shown.filter((e) => ids.includes(e.portrait.id)))
-      }
-    }
-    // The column shows a picture once, so one closed here (a second click on it) closes it in
-    // every view that holds it, as in a single pane (owner, 2026-11-24). One swapped in place
-    // isn't closed; a view going away (`remove`) leaves the others'.
-    const closed = new Set(before.filter((id) => !ids.includes(id) && !inPlace.has(keyOf(tabId, id))))
-    if (closed.size > 0) {
-      for (const [other, s] of this.sources) {
-        if (other === tabId || !s.viewer.shown.some((e) => closed.has(e.portrait.id))) continue
-        s.viewer.set(s.viewer.shown.filter((e) => !closed.has(e.portrait.id)))
-      }
-    }
     this.notify()
+  }
+
+  /** A portrait click or single-image open also updates the other views' stacks. */
+  changeOtherViews(tabId: string, id: string, action: "close" | "keep") {
+    for (const [other, { viewer }] of this.sources) {
+      if (other === tabId) continue
+      const next = viewer.shown.filter((e) => (action === "keep" ? e.portrait.id === id : e.portrait.id !== id))
+      if (next.length !== viewer.shown.length) viewer.set(next)
+    }
   }
 
   /** The view is gone, or no longer shows the column (a phone). */

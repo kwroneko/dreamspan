@@ -10,7 +10,7 @@ import { Dialog } from "./Dialog.tsx"
 import { useImagePrefs } from "./imagePrefs.ts"
 import type { AvatarCrop } from "@dreamspan/shared/media.ts"
 import { mediaUrl, pictureUrl } from "./mediaImage.ts"
-import { close, even, keepOnly, move, replace, show, split, type Stack, toggle } from "./portraitStack.ts"
+import { close, even, isOpen, keepOnly, move, replace, show, split, type Stack, toggle } from "./portraitStack.ts"
 import { Segmented } from "./Segmented.tsx"
 import { ToolbarSlider } from "./Slider.tsx"
 import { useAway } from "./away.ts"
@@ -26,6 +26,8 @@ export interface Portrait {
   readonly name: string
   readonly mediaId: string | null
   readonly picture?: AvatarCrop | undefined
+  /** The whole picture's own address when it isn't a stored file (a card source's card). */
+  readonly src?: string | undefined
   /** A message's attached image rather than a portrait: the viewer's labels say "image". */
   readonly image?: true | undefined
 }
@@ -76,6 +78,7 @@ export function PortraitProvider({
   current,
   stack: suppliedStack,
   onStackChange,
+  onSharedChange,
   tabHref,
   children
 }: {
@@ -84,6 +87,8 @@ export function PortraitProvider({
   tabHref?: ((portrait: Portrait) => string | null) | undefined
   stack?: Stack<Portrait>
   onStackChange?: (next: Stack<Portrait>) => void
+  /** A toggle closed this portrait, or a single-image action kept it. */
+  onSharedChange?: ((id: string, action: "close" | "keep") => void) | undefined
   children: ReactNode
 }) {
   const [localStack, setLocalStack] = useState<Stack<Portrait>>([])
@@ -98,8 +103,16 @@ export function PortraitProvider({
   const replaces = single || !inline
   const shown = stack.map((entry) => ({ ...entry, portrait: current?.(entry.portrait) ?? entry.portrait }))
   const viewer: PortraitViewer = {
-    open: (portrait) => setStack((stack) => toggle(stack, portrait, replaces)),
-    show: (portrait) => setStack((stack) => show(stack, portrait, replaces)),
+    open: (portrait) => {
+      const wasOpen = isOpen(stack, portrait.id)
+      setStack((stack) => toggle(stack, portrait, replaces))
+      if (wasOpen) onSharedChange?.(portrait.id, "close")
+      else if (single) onSharedChange?.(portrait.id, "keep")
+    },
+    show: (portrait) => {
+      setStack((stack) => show(stack, portrait, replaces))
+      if (single) onSharedChange?.(portrait.id, "keep")
+    },
     replace: (from, portrait) => setStack((stack) => replace(stack, from, portrait)),
     close: (id) => setStack((stack) => (id === undefined ? stack.slice(1) : close(stack, id))),
     shown,
@@ -203,6 +216,7 @@ export function PortraitView({
   const { mode } = useImagePrefs()
   const [zoom, setZoom] = useState<Zoom>("fit")
   const [scale, setScale] = useState<{ value: number; natural: NaturalSize | null; min: number } | null>(null)
+  src = src ?? portrait.src
   const shows = portrait.mediaId !== null || src !== undefined
   const visible = shows && mode === "show"
   const shownScale = scale?.value ?? 1

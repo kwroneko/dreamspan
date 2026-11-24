@@ -81,6 +81,60 @@ const issuesOf = (api: Api, versionId: VersionId) =>
   })
 
 describe("signed thinking through an agent run", () => {
+  for (const manual of [false, true])
+    it.live(
+      `editing signed thinking before a tool call ${manual ? "refuses on manual Claude" : "sends plain text on adaptive Claude"}`,
+      () =>
+        Effect.gen(function* () {
+          yield* agent
+          const fake = enforcingAnthropic({
+            needsTurnThinking: () => manual,
+            reply: (body) =>
+              hasResult(body)
+                ? { thinking: "Ansel keeps it.", text: "Ansel keeps the lamp." }
+                : { thinking: "Check the keeper.", call: { name: "look_up", input: { topic: "keeper" } } }
+          })
+          const mock = yield* mockOf(fake.handler)
+          const api = yield* client()
+          const { chat, events, version } = yield* generateReply(api, {
+            connection: { kind: "anthropic", baseUrl: mock.url, apiKey: "sk-ant-made-up-for-tests-0000" },
+            modelKey: manual ? "claude-haiku-4-5" : "claude-sonnet-4-6",
+            model: {},
+            state: agentOn
+          })
+          assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
+          assert.strictEqual(signedIn(fake.verdicts.at(-1)!.body), 1)
+          const readPath = api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+          const original = (yield* readPath).entries.at(-1)!
+          const resume = api.ResumeFromStep({
+            versionId: version.id,
+            step: 0,
+            expectedRowVersion: original.rowVersion,
+            edit: { kind: "text", text: "Check the map." }
+          })
+          if (manual) {
+            const requests = fake.verdicts.length
+            const refused = yield* Effect.flip(resume)
+            assert.strictEqual(refused._tag, "NotResumable")
+            assert.include(refused.message, "original signed thinking")
+            const still = (yield* readPath).entries.at(-1)!
+            assert.strictEqual(still.version.id, original.version.id)
+            assert.strictEqual(still.versionCount, original.versionCount)
+            assert.lengthOf(fake.verdicts, requests)
+          } else {
+            const resumed = yield* resume
+            yield* eventually(() => finished(events, resumed.version.id) !== undefined)
+            assert.strictEqual(finished(events, resumed.version.id)?.status, "complete")
+            const last = fake.verdicts.at(-1)!
+            assert.strictEqual(signedIn(last.body), 0)
+            assert.isTrue(hasResult(last.body))
+            assert.isTrue(
+              blocksOf(last.body).some((b) => b.type === "text" && b.text === "Edited thinking:\nCheck the map.")
+            )
+          }
+        }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+    )
+
   it.live("with nothing changed, the run sends its thinking back as it came, and nothing is noted", () =>
     Effect.gen(function* () {
       yield* agent

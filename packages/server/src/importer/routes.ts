@@ -35,6 +35,7 @@ import { Accounts } from "../auth/Accounts.ts"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { CardSources } from "../sources/CardSources.ts"
+import { type CacheKey, draftBaseKey } from "../sources/cache.ts"
 import { defaultLimits } from "../formats/safety.ts"
 import { BodyRefused, firstBytes, readBody } from "./body.ts"
 import { Formats } from "./Formats.ts"
@@ -1113,6 +1114,7 @@ export const layer = Layer.unwrap(
       type Entry = Parameters<typeof writer.SaveDraftBatch>[0]["entries"][number]
       const entries: Array<Entry> = []
       const userDraftAt = new Set<number>()
+      const remoteBases: Array<CacheKey | undefined> = []
       for (const draft of input.value.drafts) {
         if (parseField(draft.field) === null) return jsonError(400, "that isn't a field of a document")
         // A card on a card source before it's added (spec/CARD-SOURCES.md §4.3): its fields'
@@ -1126,6 +1128,7 @@ export const layer = Layer.unwrap(
                 sourceId: from.sourceId,
                 items: [{ remoteId: from.remoteId, sha256: null }]
               })
+        if (from !== null && held === undefined) remoteBases[entries.length] = draftBaseKey(user.id, from)
         entries.push({
           _tag: "draft",
           key:
@@ -1193,7 +1196,17 @@ export const layer = Layer.unwrap(
       for (const composer of input.value.composers ?? []) {
         entries.push({ _tag: "composer", ...composer })
       }
-      const saved = entries.length === 0 ? [] : yield* writer.SaveDraftBatch({ userId: user.id, entries })
+      const save = writer.SaveDraftBatch({ userId: user.id, entries })
+      const saved =
+        entries.length === 0
+          ? []
+          : yield* remoteBases.length === 0
+              ? save
+              : sources.cache.withDraftBases(
+                  remoteBases,
+                  save,
+                  (results, index) => results[index]?.draft?.status === "active"
+                )
       let recovered = 0
       saved.forEach((result, at) => {
         recovered += result.recovered

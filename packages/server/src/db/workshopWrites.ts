@@ -115,7 +115,11 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           yield* sql`INSERT OR IGNORE INTO entity_tags (entity_id, tag) VALUES (${made.entity_id}, 'persona')`
           persona = made.entity_id
         }
-        const defaults: StoredWorkshopDefaults = { card: defaultCard.entity_id, preset: prompt.id, persona }
+        const defaults: StoredWorkshopDefaults = {
+          card: defaultCard.entity_id,
+          preset: prompt.id,
+          persona: stored?.persona === undefined ? persona : stored.persona
+        }
         if (
           !stored ||
           stored.card !== defaults.card ||

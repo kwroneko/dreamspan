@@ -40,6 +40,7 @@ export const summaryChunkRoom = Effect.fnUntraced(function* ({
   model,
   reply,
   settings,
+  configuredStyle,
   chatId
 }: {
   sql: SqlClient.SqlClient
@@ -48,6 +49,7 @@ export const summaryChunkRoom = Effect.fnUntraced(function* ({
   model: ModelInput
   reply: ContextSnapshot
   settings: ResolvedLcm
+  configuredStyle: string | undefined
   chatId: string
 }) {
   // Keep the established path and cost for chats using their reply model for summaries.
@@ -72,7 +74,7 @@ export const summaryChunkRoom = Effect.fnUntraced(function* ({
           inputs: [],
           clipTokens: 1,
           tail: settings.tail ?? (workshop ? WORKSHOP_SUMMARY_INSTRUCTION : BUILTIN_SUMMARY_INSTRUCTION),
-          style: selector.select(settings.style),
+          style: selector.select(configuredStyle),
           ...(settings.withPreset === "raw" || workshop ? { withPreset: false } : {}),
           ...(workshop ? { workshopTranscript: [] } : {})
         }

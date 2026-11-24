@@ -12,6 +12,7 @@ import type { SqlClient } from "effect/sql"
 import { displayEndOf, displayLength, displaySlots, pathPieces, positionOf } from "./displayPath.ts"
 import { insertForkRow, shownIn, slotDeletedIn } from "./forkState.ts"
 import { placeAsShown } from "./forkOrder.ts"
+import { lastShown } from "./forks.ts"
 import type { ForkRow } from "./rows.ts"
 import { pairedWorkshopForks, writePairing } from "./workshopPairing.ts"
 
@@ -108,7 +109,7 @@ const workshopCuts = (sql: SqlClient.SqlClient, storyId: string, story: ForkRow,
         WHERE id IN ${sql.in([...sources.keys()])}`).map((c) => [c.id, c.title])
     )
     const cuts: Array<WorkshopCut> = []
-    const atEnd = at !== null && at === (yield* displayEndOf(sql, storyId, story))
+    const atEnd = at !== null && at === (yield* lastShown(sql, storyId, story))
     for (const [workshopId, source] of sources) {
       const tip = (yield* displayEndOf(sql, workshopId, source)) ?? null
       // A branch from the story's end takes the whole workshop, including messages

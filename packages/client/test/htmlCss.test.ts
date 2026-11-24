@@ -215,6 +215,18 @@ describe("parser differentials", () => {
     )
   })
 
+  it("queues media only for declarations that reach the scoped sheet", () => {
+    const out = scopeCss(
+      ".a { background: url(https://media.invalid/discarded.png), image-set(var(--source)); " +
+        "background-image: url(https://media.invalid/kept.png) }",
+      "chat=s",
+      "prefix"
+    )
+    expect(out.css).not.toContain("discarded")
+    expect(out.css).toContain("kept.png")
+    expect(out.media).toEqual(["/media/external?chat=s&url=https%3A%2F%2Fmedia.invalid%2Fkept.png"])
+  })
+
   it("bounds nesting and size before anything recursive walks the input", () => {
     expect(scoped("@media all{".repeat(5000) + ".a{color:red}" + "}".repeat(5000))).toBe("")
     expect(scoped(".a{width:" + "calc(".repeat(100_000) + "1px" + ")".repeat(100_000) + "}")).toBe("")
@@ -397,7 +409,7 @@ describe("embedded font envelopes and message ownership", () => {
       const out = message([face(data)])
       expect(out).toContain(`url("${data}")`)
       expect(out).toContain(`font-family: ${messageFontClass("first")}-inter`)
-      expect(out).toContain(`.message-html.${messageFontClass("first")} .custom-a{font-family:`)
+      expect(out).toContain(`.message-html:where(.${messageFontClass("first")}) .custom-a{font-family:`)
     }
     expect(message([face(NARROW_WOFF2)], "second")).not.toContain(`${messageFontClass("first")}-inter`)
   })
@@ -448,11 +460,11 @@ describe("embedded font envelopes and message ownership", () => {
         "first",
         mode
       )
-      const own =
-        mode === "prefix" ? `.message-html.${messageFontClass("first")}` : `:scope.${messageFontClass("first")}`
+      const root = mode === "prefix" ? ".message-html" : ":scope"
+      const own = `${root}:where(.${messageFontClass("first")})`
       expect(out).toContain(`${own} .custom-b{& > span{font: 20px ${messageFontClass("first")}-inter;}}`)
       expect(out).not.toMatch(/@keyframes[^}]*font-family/)
-      expect(out).toContain(".custom-a{color: red;}")
+      expect(out).toContain(`${root}:where(:not(.${messageFontClass("first")})) .custom-a{color: red;}`)
       expect(stylesheetViolations(out, false)).toEqual([])
     }
   })

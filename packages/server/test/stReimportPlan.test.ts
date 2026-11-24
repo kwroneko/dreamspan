@@ -126,6 +126,45 @@ const gained = (
 }
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" })("ST re-import preview", (it) => {
+  it.effect("does not count a skipped greeting's swipes as already imported for its child", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const source = `${PREFIX}chats/Alice/Greeting parent.jsonl`
+      const files = new Map([
+        [`${PREFIX}characters/Alice.png`, card("Alice", "m0")],
+        [source, file(turns(2))]
+      ])
+      assert.strictEqual((yield* importStPath(api, onDisk(files), PREFIX)).job.status, "complete")
+
+      const revised = message({
+        name: "Alice",
+        mes: "new greeting",
+        minute: 0,
+        swipes: ["m0", "new greeting"],
+        swipeId: 1
+      })
+      const child = "chats/Alice/Greeting child.jsonl"
+      files.set(source, file([revised]))
+      files.set(`${PREFIX}${child}`, file([revised, ...own("child", 1, 1)], "Greeting parent"))
+      const root = onDisk(files)
+      const plan = yield* planEnded(
+        api,
+        (yield* api.StartStImportPlan({ folder: { root, prefix: PREFIX } })).plan.planId
+      )
+      const { importId } = yield* api.StartStPathImport({
+        path: root,
+        prefix: PREFIX,
+        plan: { planId: plan.planId, skip: [] }
+      })
+      const done = yield* jobEnded(api, importId)
+      assert.strictEqual(done.job.status, "complete")
+      assert.isFalse((done.report?.issues ?? []).some((issue) => issue.code === ST_CHANGED_SINCE_CHECK))
+      assert.strictEqual(byPath(plan).get(source.slice(PREFIX.length))?.target, "greeting")
+      assert.strictEqual(byPath(plan).get(source.slice(PREFIX.length))?.chatTitle, "Greeting parent")
+      assert.strictEqual(byPath(plan).get(child)?.counts.newSwipes, 1)
+    })
+  )
+
   it.effect("shows what the import then does, writes nothing, and holds the import to it", () =>
     Effect.gen(function* () {
       const api = yield* client()

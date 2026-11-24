@@ -12,7 +12,7 @@ import type {
   SourceInfo,
   SourceQuery
 } from "@dreamspan/shared/cardSources.ts"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate, useRouter } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAction } from "../../actions.tsx"
@@ -26,8 +26,9 @@ import { Alert, Badge, EmptyState } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { RemoteBrowse } from "../characters/homeSearch.ts"
 import { SortDirection, type SortOrder, SortScroller } from "../characters/cardBrowse.tsx"
-import { TILE_CLASS, TILE_SURFACE_CLASS, TileFace, useOpenCharacter } from "../characters/shellData.tsx"
+import { TILE_CLASS, TILE_SURFACE_CLASS, TileFace, useCharacterNavigation } from "../characters/shellData.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
+import { OPEN_BESIDE_HINT, OPEN_NEW_TAB_HINT, PAGE_BESIDE_HINT, openBeside, openPageBeside, useCanOpenBeside } from "../../ui/openBeside.ts"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { canHideCreator, CreatorHeader, hideCreator, showCreator, shownCreator } from "./creator.tsx"
 import {
@@ -512,16 +513,25 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
   const view = cardSourceViews.get(info.id)
   const link = cardLink(info.id, card.remoteId)
   const chat = chatLink(info.id, card.remoteId)
-  const href = `/sources/${encodeURIComponent(info.id)}/cards/${encodeURIComponent(card.remoteId)}/chat`
+  // The card's read-only page (Inspect's): View beside.
+  const pageHref = `/sources/${encodeURIComponent(info.id)}/cards/${encodeURIComponent(card.remoteId)}`
+  const canBeside = useCanOpenBeside()
   const navigate = useNavigate()
   const ratingShown = card.rating !== undefined
   const adopt = useAdoptRemote()
-  const openCharacter = useOpenCharacter()
+  const character = useCharacterNavigation()
+  const router = useRouter()
   // The user's own card for it (§3.7): from the results, or just added here.
   const [added, setAdded] = useState<{ entityId: string; archived: boolean } | null>(null)
   const [flash, setFlash] = useState(false)
   const mine = added ?? (card.held ? { entityId: card.held.entityId, archived: card.held.archived } : null)
-  const openMine = (entityId: string) => openCharacter(entityId as EntityId)
+  // What a click opens: your card's chat, else the draft chat. Open beside and a new browser tab open it too.
+  const entity = mine?.entityId as EntityId | undefined
+  const heldChat = entity === undefined ? null : character.link(entity)
+  const clickHref = heldChat === null ? `${pageHref}/chat` : router.buildLocation(heldChat).href
+  const openMine = () => {
+    if (entity !== undefined) character.open(entity)
+  }
   const face = (
     <TileFace
       name={card.name}
@@ -594,12 +604,11 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
         open={menu}
         onOpenChange={setMenu}
         trigger={
-          mine !== null ? (
+          heldChat !== null ? (
             <Tooltip label={`Opens your ${card.name}.`}>
               <Link
-                to="/cards/$entityId/chat"
-                params={{ entityId: mine.entityId }}
-                onClick={openOnPlainClick(() => openMine(mine.entityId))}
+                {...heldChat}
+                onClick={openOnPlainClick(openMine)}
                 aria-label={`Open ${card.name}`}
                 className={`${TILE_CLASS} hover:border-focus`}
               >
@@ -616,11 +625,7 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
         }
       >
         {mine !== null ? (
-          <MenuItem
-            icon="person"
-            description="Opens your copy, as a click does."
-            onClick={() => openMine(mine.entityId)}
-          >
+          <MenuItem icon="person" description="Opens your copy, as a click does." onClick={openMine}>
             Open your card
           </MenuItem>
         ) : (
@@ -630,6 +635,24 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
             onClick={() => void navigate(chat)}
           >
             Open
+          </MenuItem>
+        )}
+        {canBeside && (
+          <MenuItem icon="split-right" description={OPEN_BESIDE_HINT} onClick={() => openBeside(clickHref)}>
+            Open beside
+          </MenuItem>
+        )}
+        <MenuItem
+          icon="external"
+          description={OPEN_NEW_TAB_HINT}
+          onClick={() => window.open(clickHref, "_blank", "noopener")}
+        >
+          Open in a new browser tab
+        </MenuItem>
+        {/* The card's read-only page beside, to inspect many cards (owner, 2026-11-24). */}
+        {canBeside && (
+          <MenuItem icon="eye" description={PAGE_BESIDE_HINT} onClick={() => openPageBeside(pageHref)}>
+            View beside
           </MenuItem>
         )}
         {mine === null && (
@@ -668,13 +691,6 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
             Show on {info.name}
           </MenuItem>
         )}
-        <MenuItem
-          icon="external"
-          description="Opens it in a new tab of the browser."
-          onClick={() => window.open(href, "_blank", "noopener")}
-        >
-          Open in a new browser tab
-        </MenuItem>
         {card.url !== undefined && (
           <MenuItem
             icon="external"

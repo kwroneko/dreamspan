@@ -3,16 +3,17 @@
 // not display name; bookmarks.js keeps child filenames in the split message's extra.branches.
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { assert, layer } from "@effect/vitest"
+import { assert, it, layer } from "@effect/vitest"
 import { Effect } from "effect"
 import { client, post, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { card, encode, header, jsonl, message } from "./support/stFolder.ts"
 import { importStFolder } from "./support/stUpload.ts"
-import { Writer } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import { extract, readZip } from "../src/formats/zip.ts"
 import { defaultLimits } from "../src/formats/safety.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { worldInfo } from "./formats/support.ts"
+import { chatExport } from "../src/importer/chatExport.ts"
 
 const archive = new Map<string, Uint8Array>()
 const emptyArchive = new Map<string, Uint8Array>()
@@ -52,6 +53,96 @@ const folder = new Map([
     ])
   ]
 ])
+
+it.live("exports the original path once even when another message arrives between passes", () =>
+  Effect.gen(function* () {
+    const expected = Array.from({ length: 1001 }, (_, index) => `Message ${index + 1}`)
+    const { api } = yield* importStFolder(
+      new Map([
+        ["characters/Voice.png", card("Voice", "Hello.")],
+        [
+          "chats/Voice/Path.jsonl",
+          jsonl([header({}), ...expected.map((mes, minute) => message({ name: "User", user: true, mes, minute }))])
+        ]
+      ])
+    )
+    const user = yield* api.Whoami()
+    const [chat] = yield* api.ListChats({ limit: 10, before: null })
+    const reader = yield* Reader
+    let reads = 0
+    const exported = yield* chatExport(
+      {
+        ...reader,
+        ReadPath: (input, options) =>
+          reader.ReadPath(input, options).pipe(
+            Effect.tap(() =>
+              ++reads === 2
+                ? api
+                    .SendMessage({
+                      chatId: chat!.id,
+                      parentSlotId: chat!.activeLeafSlotId,
+                      branch: false,
+                      content: "New after the first pass",
+                      reply: false
+                    })
+                    .pipe(
+                      Effect.tap((sent) => Effect.sync(() => assert.strictEqual(sent._tag, "Posted"))),
+                      Effect.orDie
+                    )
+                : Effect.void
+            )
+          )
+      },
+      user.id,
+      { chatId: chat!.id, forkId: null, scope: "branch", format: "jsonl" }
+    )
+    const body = yield* Effect.promise(async () => {
+      const chunks: Array<Uint8Array> = []
+      for await (const chunk of exported.body) chunks.push(chunk)
+      return Buffer.concat(chunks).toString("utf8")
+    })
+    assert.deepStrictEqual(
+      body
+        .trim()
+        .split("\n")
+        .slice(1)
+        .map((line) => JSON.parse(line).mes),
+      expected
+    )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+)
+
+it.live("keeps a trailing insertion when export pins the branch's display leaf", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const chat = yield* api.CreateChat({ title: "Export with an insertion" })
+    const sent = yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "First" })
+    if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
+    yield* api.InsertMessage({
+      chatId: chat.id,
+      forkId: chat.currentForkId!,
+      anchor: sent.entry.slotId,
+      expectedRowVersion: sent.entry.rowVersion,
+      body: { _tag: "Write", speaker: null, content: "Inserted last" }
+    })
+    const exported = yield* post("/library/chat-export", {
+      chatId: chat.id,
+      forkId: null,
+      scope: "branch",
+      format: "jsonl"
+    })
+    assert.strictEqual(exported.status, 200)
+    const body = yield* Effect.promise(() => exported.text())
+    assert.deepStrictEqual(
+      body
+        .trim()
+        .split("\n")
+        .slice(1)
+        .map((line) => JSON.parse(line).mes),
+      ["First", "Inserted last"]
+    )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+)
 
 layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seconds" })("adversarial export", (it) => {
   it.effect("preserves duplicate-name group speakers, current branch, named files and parent navigation", () =>

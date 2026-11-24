@@ -4,7 +4,7 @@
 // bin without a row is always left over (a purge, an eviction, a failed move) and the sweep removes
 // it. Restore moves it back to its path, or to "name (restored)" when that is taken, then forgets
 // the row. Everything on disk goes through descriptors opened without following links.
-import { constants } from "node:fs"
+import { constants, type Stats } from "node:fs"
 import { lstat, mkdir, open, readdir, rename, rmdir, type FileHandle } from "node:fs/promises"
 import { join } from "node:path"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
@@ -88,14 +88,16 @@ export const makeFilesBin = (deps: FilesBinDeps) => {
     segments: ReadonlyArray<string>,
     full: string,
     /** Who deleted it, when not the owner of the tree (a folder shared with them). */
-    actor?: { readonly userId: string; readonly handle: string }
-  ): Effect.Effect<BinItem, unknown> =>
+    actor?: { readonly userId: string; readonly handle: string },
+    matches?: (info: Stats) => boolean
+  ): Effect.Effect<BinItem | null, unknown> =>
     Effect.gen(function* () {
       if (segments.length === 0) return yield* Effect.fail(new FilePathRefused("The top folder can't be deleted."))
       const name = segments.at(-1)!
       const source = yield* Effect.tryPromise(() => openFolder(root, segments.slice(0, -1)))
       return yield* Effect.gen(function* () {
         const info = yield* Effect.tryPromise(() => lstat(at(source, name)))
+        if (matches && !matches(info)) return null
         const entryKind = info.isFile()
           ? "file"
           : info.isDirectory()
@@ -118,25 +120,40 @@ export const makeFilesBin = (deps: FilesBinDeps) => {
           byteSize,
           ...(actor ? { actor: { userId: actor.userId as never, handle: actor.handle } } : {})
         })
-        yield* Effect.tryPromise(async () => {
+        const moved = yield* Effect.tryPromise(async () => {
           const bin = await openBin(userId)
           try {
             await mkdir(at(bin, itemId), { mode: 0o700 })
-            const holder = await open(at(bin, itemId), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+            let moved = false
             try {
-              await rename(at(source, name), at(holder, name))
-            } catch (error) {
-              await holder.close()
-              await rmdir(at(bin, itemId)).catch(() => undefined)
-              throw error
+              const holder = await open(at(bin, itemId), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+              try {
+                if (matches) {
+                  const current = await lstat(at(source, name)).catch((error: NodeJS.ErrnoException) => {
+                    if (error.code === "ENOENT") return null
+                    throw error
+                  })
+                  if (!current || !matches(current)) return false
+                }
+                await rename(at(source, name), at(holder, name))
+                moved = true
+                return true
+              } finally {
+                await holder.close()
+              }
+            } finally {
+              if (!moved) await rmdir(at(bin, itemId)).catch(() => undefined)
             }
-            await holder.close()
           } finally {
             await bin.close()
           }
         }).pipe(
           Effect.tapError(() => deps.writer.ForgetFileBinItem({ userId: userId as never, itemId }).pipe(Effect.ignore))
         )
+        if (!moved) {
+          yield* deps.writer.ForgetFileBinItem({ userId: userId as never, itemId })
+          return null
+        }
         return item
       }).pipe(Effect.ensuring(Effect.promise(() => source.close())))
     })

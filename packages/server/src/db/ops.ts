@@ -18,7 +18,7 @@ import { PluginId, PluginPins, PluginData, PluginRejected } from "@dreamspan/sha
 import { ExternalMediaPrefs, ExternalMediaTarget } from "@dreamspan/shared/externalMedia.ts"
 import {
   MediaApprovalHost,
-  MediaChoice,
+  MediaApprovalDecision,
   MediaHost,
   MediaHosts,
   MediaKind,
@@ -821,6 +821,8 @@ const SavedMediaWriteOps = RpcGroup.make(
   Rpc.make("RecordSavedMediaResult", {
     payload: {
       id: Schema.Int,
+      ownerUserId: UserId,
+      url: Schema.String,
       at: Schema.Int,
       saved: Schema.NullOr(Schema.Struct({ sha256: Sha256, mime: Schema.String, byteSize: Schema.Int })),
       failure: Schema.NullOr(Schema.String)
@@ -837,8 +839,7 @@ const SavedMediaWriteOps = RpcGroup.make(
   Rpc.make("DecideMediaApproval", {
     payload: {
       userId: UserId,
-      refIds: Schema.NullOr(Schema.Array(RefId)),
-      decisions: Schema.Array(Schema.Struct({ host: Schema.String, choice: MediaChoice })),
+      decisions: Schema.Array(MediaApprovalDecision),
       at: Schema.Int
     },
     success: MediaHosts,
@@ -1731,7 +1732,7 @@ const WriteOpsChatOwn = RpcGroup.make(
       expectedRowVersion: Schema.Int,
       threads: ThreadStarts
     },
-    success: Schema.Struct({ ...StartedThreads.fields, chat: Chat }),
+    success: Schema.Struct({ ...StartedThreads.fields, chat: Chat, continuingChoice: Schema.NullOr(ComposerChoice) }),
     error: Schema.Union([NotFound, StaleWrite, ThreadsRefused, StorageError])
   }),
   /** Names a thread (empty: unnamed) in all its branches, if it's at `rowVersion`; its new row version. */
@@ -2222,6 +2223,12 @@ const WriteOpsChatOwn = RpcGroup.make(
     success: Schema.Void,
     error: StorageError
   }),
+  /** Changes one account's override in the instance quota setting. */
+  Rpc.make("SetAccountFilesQuota", {
+    payload: { userId: UserId, bytes: Schema.NullOr(Schema.Int) },
+    success: Schema.Void,
+    error: StorageError
+  }),
   // --- The usage ledger (PROVIDERS §9.1).
   Rpc.make("OpenLlmRequest", {
     payload: { userId: UserId, request: OpenLlmRequest },
@@ -2452,6 +2459,18 @@ const WriteOpsChatOwn = RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   })
 )
+
+const FileVersionWrite = Schema.Struct({
+  path: Schema.String.check(Schema.isMaxLength(4096)),
+  inode: Schema.NullOr(Schema.Number),
+  /** null: a recorded deletion or creation, with no content. */
+  sha256: Schema.NullOr(Sha256),
+  mime: Schema.String,
+  byteSize: Schema.Int,
+  origin: Schema.String,
+  rolloutId: Schema.optionalKey(Schema.String),
+  toolCallId: Schema.optionalKey(Schema.String)
+})
 
 export class WriteOpsChat extends mergeOps(WriteOpsChatOwn, McpWriteOps) {}
 
@@ -2969,23 +2988,22 @@ const WriteOpsLibraryOwn = RpcGroup.make(
   Rpc.make("RecordFileVersions", {
     payload: {
       userId: UserId,
-      versions: Schema.Array(
-        Schema.Struct({
-          path: Schema.String.check(Schema.isMaxLength(4096)),
-          inode: Schema.NullOr(Schema.Number),
-          /** null: a recorded deletion or creation, with no content. */
-          sha256: Schema.NullOr(Sha256),
-          mime: Schema.String,
-          byteSize: Schema.Int,
-          origin: Schema.String,
-          rolloutId: Schema.optionalKey(Schema.String),
-          toolCallId: Schema.optionalKey(Schema.String)
-        })
-      ),
+      versions: Schema.Array(FileVersionWrite),
       /** The account that acted, when not the owner (a command through a folder shared to edit). */
       actorUserId: Schema.optionalKey(UserId)
     },
     success: Schema.Array(Schema.String),
+    error: StorageError
+  }),
+  /** Keeps a replacement's earlier contents only if their new charge fits its reservation. */
+  Rpc.make("RecordReplacementVersion", {
+    payload: {
+      userId: UserId,
+      version: FileVersionWrite,
+      maxAddedBytes: Schema.Int,
+      actorUserId: Schema.optionalKey(UserId)
+    },
+    success: Schema.NullOr(Schema.Struct({ id: Schema.String, addedBytes: Schema.Int })),
     error: StorageError
   }),
   /**
@@ -5368,10 +5386,24 @@ const ReadOpsOwn = RpcGroup.make(
       chatId: ChatId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       leafSlotId: Schema.NullOr(SlotId),
+      /** For export: pin the display end returned by Bottom, including trailing insertions. */
+      displayLeaf: Schema.optionalKey(Schema.Boolean),
       range: PathRange,
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PATH_WINDOW }))
     },
     success: PathWindow,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The shown version of a visible message at a zero-based position on a fixed path. */
+  Rpc.make("ReadPathVersionAt", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: SlotId,
+      position: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+    },
+    success: Schema.NullOr(Schema.Struct({ id: VersionId, speakerEntityId: Schema.NullOr(EntityId) })),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** One of the user's live versions: not in the bin, nor its message or chat. */

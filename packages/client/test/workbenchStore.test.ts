@@ -9,6 +9,28 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+it("opens a side preview without adding a browser Back step", () => {
+  vi.useFakeTimers()
+  vi.stubGlobal("window", new EventTarget())
+  const browser = createMemoryHistory({ initialEntries: ["/settings", "/"], initialIndex: 1 })
+  const store = new WorkbenchStore("user", browser, null, () => {})
+  const stop = store.start()
+  try {
+    const opener = focusedTab(store.layout)?.id
+    const editor = store.openBeside("/library/card", { preview: true })
+    expect(store.frames()).toHaveLength(2)
+    expect(findTab(store.layout, editor)?.preview).toBe(true)
+    expect(focusedTab(store.layout)?.id).toBe(opener)
+    expect(browser.location.pathname).toBe("/")
+
+    browser.back()
+    expect(browser.location.pathname).toBe("/settings")
+    expect(focusedTab(store.layout)?.href).toBe("/settings")
+  } finally {
+    stop()
+  }
+})
+
 it("replaces an earlier layout when a fresh URL opens, even without further interaction", () => {
   vi.useFakeTimers()
   vi.stubGlobal("window", new EventTarget())

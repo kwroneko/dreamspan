@@ -88,15 +88,24 @@ export const SavedMediaStatus = Schema.Struct({
 })
 export type SavedMediaStatus = typeof SavedMediaStatus.Type
 
+const ReviewedMediaUrls = Schema.Array(Schema.String.check(Schema.isMaxLength(8192)))
+
 export const MediaApprovalHost = Schema.Struct({
   host: Schema.String,
   files: Schema.Int,
-  kinds: Schema.Array(Schema.Struct({ kind: MediaKind, files: Schema.Int }))
+  kinds: Schema.Array(Schema.Struct({ kind: MediaKind, files: Schema.Int })),
+  urls: ReviewedMediaUrls
 })
 export type MediaApprovalHost = typeof MediaApprovalHost.Type
 
 export const MediaChoice = Schema.Literals(["approve", "approve-subdomains", "once", "decline"])
 export type MediaChoice = typeof MediaChoice.Type
+
+export const MediaApprovalDecision = Schema.Struct({
+  host: Schema.String,
+  choice: MediaChoice,
+  urls: ReviewedMediaUrls
+})
 
 /** Which entries an approval is about: these refs' current revisions, or everything waiting. */
 const MediaApprovalScope = Schema.Struct({
@@ -126,10 +135,7 @@ export class SavedMediaApi extends RpcGroup.make(
   }),
   Rpc.make("DecideMediaApproval", {
     payload: {
-      ...MediaApprovalScope.fields,
-      decisions: Schema.Array(Schema.Struct({ host: Schema.String, choice: MediaChoice })).check(
-        Schema.isMaxLength(500)
-      )
+      decisions: Schema.Array(MediaApprovalDecision).check(Schema.isMaxLength(500))
     },
     success: MediaHosts,
     error: ServerError

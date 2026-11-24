@@ -259,7 +259,7 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   const tab = page.getByRole("tabpanel", { name: "Tall" })
   const view = tab.getByRole("button", { name: "View Tall's picture" })
   await view.hover()
-  await expect(page.getByText("View the whole picture", { exact: true })).toBeVisible()
+  await expect(page.getByText("Opens this portrait at full size.", { exact: true })).toBeVisible()
   await shoot(page, "tab-portrait-desktop")
   const pictureButton = tab.getByRole("button", { name: "Picture", exact: true })
   await pictureButton.hover()
@@ -490,7 +490,7 @@ test("every choice in the Picture dialog explains where it's shown, and Portrait
     await (role === "slider" ? dialog.locator("[data-cutout-controls] [data-index='0']") : target).hover()
     await expect(page.getByText(text, { exact: true }).last()).toBeVisible()
   }
-  await explains("Full picture", "The picture shown when it's opened large, and in exported card files")
+  await explains("Full picture", "The picture shown when it's opened large and in PNG exports")
   await explains("Portrait", "The small portrait shown beside messages, in the cast, and in lists and tiles")
   await explains("Free", "Crop the full picture to any shape")
   await explains("2:3", "Crop the full picture two wide by three high, like a portrait")
@@ -498,10 +498,10 @@ test("every choice in the Picture dialog explains where it's shown, and Portrait
   await explains("Cutout size", "Make the full picture's box bigger or smaller", "slider")
   await explains("Reset to the original", "Go back to the whole image as the full picture, with the default portrait")
   await dialog.getByRole("button", { name: "About cutout controls" }).hover()
-  await expect(page.getByText(/opened large and in exported card files/).last()).toBeVisible()
+  await expect(page.getByText(/opened large and in PNG exports/).last()).toBeVisible()
   const previews = dialog.getByRole("region", { name: "Previews" })
   await expect(previews.getByText("Opened large", { exact: true })).toBeVisible()
-  await expect(previews.getByText("Exported file", { exact: true })).toBeVisible()
+  await expect(previews.getByText("PNG export", { exact: true })).toBeVisible()
   await page.mouse.move(0, 0)
   const places = async () => {
     const stage = (await dialog.locator("[data-cutout-stage]").boundingBox())!

@@ -47,6 +47,7 @@ import { Reader } from "../db/Database.ts"
 import type { OverlaySlot, OverlayVersion, PlaceOverlay } from "../db/stImportPlace.ts"
 import { emptyDigest } from "../db/stImportPlanCount.ts"
 import { sourceTime } from "../formats/sourceTime.ts"
+import type { StChatPart } from "../formats/stChat.ts"
 import { Formats } from "./Formats.ts"
 import { stChatTarget, type StChatRecordView } from "./stChatTarget.ts"
 import { readStFolderFile } from "./stFolderDisk.ts"
@@ -107,7 +108,7 @@ interface RouteRecord extends StChatRecordView {
 
 interface FileState {
   readonly entry: StPlanEntry
-  readonly target: StPlanTarget
+  target: StPlanTarget
   /** Its own record (existing, unfinished), or its parent's (a branch). */
   readonly recordId: string
   /** The stored record its batches are read as. */
@@ -131,6 +132,8 @@ interface FileState {
   nextPart: number
   index: number
   userTurns: number
+  /** A possible greeting waits until a second message or the end of the file. */
+  pendingGreeting: StChatPart["batches"][number] | null
   lastAt: number | null
   cursor: { readonly id: string; readonly depth: number } | null
   matching: boolean
@@ -334,14 +337,7 @@ export class StImportPlans extends Context.Service<
       /** A file is read: its counts stand, and the rounds go on past it. */
       const settle = (plan: Plan, file: FileState, status: "done" | "failed", error: string | null = null) => {
         if (file.status === "done" || file.status === "failed") return
-        // A chat of one message, not the user's, or of none: the import skips it (DESIGN §1.4).
-        if (status === "done" && (file.index === 0 || (file.index === 1 && file.userTurns === 0))) {
-          file.counts = counting()
-          plan.held -= file.messages.length
-          file.messages = []
-          file.moreMessages = 0
-          ;(file as { target: StPlanTarget }).target = "greeting"
-        }
+        file.pendingGreeting = null
         file.status = status
         file.error = error
         // A new branch the import takes gets its record from its first messages on.
@@ -485,6 +481,7 @@ export class StImportPlans extends Context.Service<
           nextPart: 0,
           index: 0,
           userTurns: 0,
+          pendingGreeting: null,
           lastAt: null,
           cursor: null,
           matching: true,
@@ -510,6 +507,7 @@ export class StImportPlans extends Context.Service<
               nextPart: 0,
               index: 0,
               userTurns: 0,
+              pendingGreeting: null,
               lastAt: null,
               cursor: null,
               matching: true,
@@ -538,10 +536,11 @@ export class StImportPlans extends Context.Service<
           // Hashed as the import hashes the bytes it takes (`stBytesHash`), before the parse
           // takes them.
           file.content.update(bytes)
+          const firstIndex = file.index + (file.pendingGreeting === null ? 0 : 1)
           const parsed = yield* formats.st.chatPart({
             bytes,
             first: index === 0,
-            firstIndex: file.index,
+            firstIndex,
             carryAt: file.lastAt,
             // As the import dates a message without a date (StImports.file).
             fallbackAt: sourceTime(file.entry.modifiedMs) ?? Date.now()
@@ -553,7 +552,21 @@ export class StImportPlans extends Context.Service<
           }
           file.userTurns += parsed.userTurns
           file.lastAt = parsed.lastAt
-          for (const batch of parsed.batches) {
+          const messages = firstIndex + parsed.messages
+          let batches = parsed.batches
+          // The importer skips empty and greeting-only chats. Keep their possible writes out of
+          // the matcher and the shared overlay until we know the importer will take the file.
+          if (messages === 0 || (messages === 1 && file.userTurns === 0)) {
+            if (last) {
+              file.chatTitle = (yield* reader.GetChat({ userId: plan.user.id, chatId: file.chatId })).title
+              file.target = "greeting"
+            } else file.pendingGreeting ??= batches[0] ?? null
+            batches = []
+          } else if (file.pendingGreeting !== null) {
+            batches = [file.pendingGreeting, ...batches]
+            file.pendingGreeting = null
+          }
+          for (const batch of batches) {
             const overlay = plan.overlays.get(file.chatId)
             const pending =
               overlay === undefined ? 0 : overlay.slots.length + overlay.versions.length + overlay.selects.length

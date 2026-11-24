@@ -13,6 +13,13 @@ describe("htmlDepthForm", () => {
     expect(htmlDepthForm("<table><tr><td>HP</td><td>12</td></tr></table>", "text")).toBe("HP 12")
   })
 
+  it("ignores code delimiters inside HTML tags while keeping inline code", () => {
+    expect(htmlDepthForm('<a title="use `x`">visible</a> then `<b>literal</b>`', "text")).toBe(
+      "visible then `<b>literal</b>`"
+    )
+    expect(htmlDepthForm('<a title="`">visible</a> then `example`', "text")).toBe("visible then `example`")
+  })
+
   it("drops what isn't text: styles, scripts, comments", () => {
     expect(htmlDepthForm("<style>.a{color:red}</style><p>Kept.</p><!-- note --><script>x()</script>", "text")).toBe(
       "Kept."

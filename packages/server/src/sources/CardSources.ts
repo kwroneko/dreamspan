@@ -53,7 +53,7 @@ import { Providers } from "../providers/Providers.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { Secrets } from "../secrets.ts"
 import type { AdapterSummary, CardSourceAdapter, SourceHttp } from "./adapter.ts"
-import { blobPath, DEFAULT_CAP_BYTES, makeSourceCache, type SourceCache } from "./cache.ts"
+import { blobPath, DEFAULT_CAP_BYTES, draftBaseKey, makeSourceCache, type SourceCache } from "./cache.ts"
 import { makeSourceHttp } from "./guard.ts"
 import { withConditionalGets } from "./httpCache.ts"
 import { makeCoalescer, makeLimiter } from "./limiter.ts"
@@ -319,19 +319,11 @@ const make = (options: CardSourcesOptions = {}) =>
     yield* cache.load
     // A card with unsaved edits keeps its cached file while they wait (§4.1): the edits are a
     // diff from it. If the drafts can't be read, the sweep waits for the next round.
-    const sweep = reader.EditedRemoteCards().pipe(
-      Effect.flatMap((edited) =>
-        cache.sweepKeeping(
-          edited.map(({ userId, sourceId, remoteId }) => ({
-            user: userId,
-            source: sourceId,
-            kind: "card",
-            id: remoteId
-          }))
-        )
-      ),
-      Effect.catch((error) => Effect.logWarning("card source cache sweep skipped", error))
-    )
+    const sweep = cache
+      .sweepKeeping(
+        Effect.map(reader.EditedRemoteCards(), (edited) => edited.map((card) => draftBaseKey(card.userId, card)))
+      )
+      .pipe(Effect.catch((error) => Effect.logWarning("card source cache sweep skipped", error)))
     yield* sweep
     yield* Effect.forkScoped(Effect.repeat(sweep, Schedule.spaced("10 minutes")))
     const limiter = makeLimiter(options.now)

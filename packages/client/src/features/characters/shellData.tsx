@@ -14,6 +14,7 @@ import type {
 import { Link, useNavigate, useRouter, useSearch } from "@tanstack/react-router"
 import { openOnPlainClick } from "../../ui/links.ts"
 import { OPEN_BESIDE_HINT, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
+import { openPageBeside, PAGE_BESIDE_HINT } from "../../ui/openBeside.ts"
 import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { Effect, Schedule, Stream } from "effect"
@@ -255,9 +256,7 @@ const lastLine = (latest: { readonly slot: string | null }) =>
  * sidebar on the character's chats and its card's panel, as a click opens it (`useOpenCharacter`),
  * so Open beside, Alt-click and a new browser tab open the character too (owner, 2026-11-06).
  */
-const characterLink = (card: ShellCard) => {
-  const latest = card.open ?? null
-  const entity = card.card.entityId
+const characterLink = (entity: EntityId, latest: ShellCard["open"]) => {
   const character = { character: entity, panel: `card:${entity}` }
   return latest
     ? {
@@ -268,38 +267,30 @@ const characterLink = (card: ShellCard) => {
     : { to: "/cards/$entityId/chat" as const, params: { entityId: entity }, search: character }
 }
 
-export function useOpenCharacter() {
+export function useCharacterNavigation() {
   const navigation = useShellNavigation()
   const result = useAtomValue(shellAtom)
   const navigate = useNavigate()
   const userId = useSession().user.id
-  return (entity: EntityId) => {
-    navigation.picked()
+  const link = (entity: EntityId) => {
+    const matches = (card: ShellCard) => card.card.entityId === entity
     const card = AsyncResult.isSuccess(result)
-      ? [...result.value.cards, ...result.value.personas].find((c) => c.card.entityId === entity)
+      ? (result.value.cards.find(matches) ?? result.value.personas.find(matches) ?? result.value.archived.find(matches))
       : undefined
-    const latest = card?.open ?? null
-    const panel = `card:${entity}`
-    rememberPanel(userId, panel)
-    if (latest)
-      void navigate({
-        to: "/chats/$chatId",
-        params: { chatId: latest.chatId },
-        search: {
-          ...sidebarCleared,
-          character: entity,
-          fork: latest.forkId,
-          panel,
-          ...lastLine(latest)
-        }
-      })
-    else
-      void navigate({
-        to: "/cards/$entityId/chat",
-        params: { entityId: entity },
-        search: { ...sidebarCleared, character: entity, panel }
-      })
+    const target = characterLink(entity, card?.open ?? null)
+    return { ...target, search: { ...sidebarCleared, ...target.search } }
   }
+  const open = (entity: EntityId) => {
+    navigation.picked()
+    const target = link(entity)
+    rememberPanel(userId, target.search.panel)
+    void navigate(target)
+  }
+  return { link, open }
+}
+
+export function useOpenCharacter() {
+  return useCharacterNavigation().open
 }
 
 /**
@@ -485,7 +476,8 @@ function CharacterTile({
   onFamily?: (family: string | null) => void
 }) {
   const open = useOpenCharacter()
-  const besideHref = useRouter().buildLocation(characterLink(card)).href
+  const link = characterLink(card.card.entityId, card.open)
+  const besideHref = useRouter().buildLocation(link).href
   const canBeside = useCanOpenBeside()
   const [menu, setMenu] = useState(false)
   const c = card.card
@@ -522,7 +514,7 @@ function CharacterTile({
   const button = !pick ? (
     // A link to the chat it opens, so it opens in a new browser tab too.
     <Link
-      {...characterLink(card)}
+      {...link}
       onClick={openOnPlainClick(() => open(c.entityId))}
       onDragStart={onDragStart}
       aria-label={`Open ${c.label}${marked ? " (persona)" : ""}`}
@@ -595,6 +587,12 @@ function CharacterTile({
           >
             Open in a new browser tab
           </MenuItem>
+          {/* The card's full-page editor beside (owner, 2026-11-24), as a drop on a frame opens it. */}
+          {canBeside && (
+            <MenuItem icon="edit" description={PAGE_BESIDE_HINT} onClick={() => openPageBeside(editor)}>
+              Edit beside
+            </MenuItem>
+          )}
           <CardSurface placement="tile-menu" entityId={c.entityId} />
         </ContextMenu>
       )}

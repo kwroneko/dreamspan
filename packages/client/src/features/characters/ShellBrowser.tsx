@@ -482,7 +482,8 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
 
 /**
  * A chat row's portraits while it is pending, and after, until it unmounts: two portrait boxes
- * and the count tile's sliver, whatever the cast turns out to be, so reading it moves nothing.
+ * and the count tile's sliver, whatever the cast turns out to be, so reading it moves nothing
+ * (the tile is one width for every count).
  * The chat's own picture is known at once and fills the first box; read faces fill both; a box
  * left over stays empty. Pending boxes without a picture are quiet bars.
  */
@@ -525,6 +526,7 @@ function ReservedPortraits({ fork, pending }: { fork: ShellFork; pending: boolea
         })}
         <PortraitOverflow
           remaining={count ? remaining : 1}
+          fixedWidth
           className={`fork-row-overflow${count ? "" : " invisible"}`}
         />
       </span>
@@ -648,7 +650,11 @@ export function ForkRow({
                             )}
                           </span>
                         ))}
-                        <PortraitOverflow remaining={fork.cast.length - 2} className="fork-row-overflow invisible" />
+                        <PortraitOverflow
+                          remaining={fork.cast.length - 2}
+                          fixedWidth
+                          className="fork-row-overflow invisible"
+                        />
                       </>
                     ) : (
                       <>
@@ -663,7 +669,7 @@ export function ForkRow({
                             size="md"
                           />
                         ))}
-                        <PortraitOverflow remaining={fork.cast.length - 2} className="fork-row-overflow" />
+                        <PortraitOverflow remaining={fork.cast.length - 2} fixedWidth className="fork-row-overflow" />
                       </>
                     )}
                   </span>
@@ -1409,7 +1415,7 @@ function Browser() {
           // One column of rows; dragged wide, a row stays a row's width, its pin beside its text.
           <div className="max-w-controls">
             {kind === "character" && card && (
-              <StartRow>
+              <StartRow characterLabel={cardLabel}>
                 <SlotOutlet slot={characterChatActions} props={{ entityId: card.card.entityId, label: cardLabel }} />
               </StartRow>
             )}

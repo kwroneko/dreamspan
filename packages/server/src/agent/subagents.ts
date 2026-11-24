@@ -1770,10 +1770,8 @@ export const agentTool: RolloutTool<AgentArgs> = {
   effect: "read",
   // Never a story reply's tool (§9: no story use until the owner accepts one).
   replyTool: false,
-  // Like tool_search and load_skill, it reads no story facts itself: its child reads them only
-  // through the reply's own offered tools, at the reply's position (`storyAt`), each under its
-  // own declaration.
-  storyRead: "conversation",
+  // A child's report may include positioned story reads from the parent's offered tools.
+  storyRead: "positioned",
   titleField: "task",
   description: description(),
   parameters: parametersFor(),
@@ -2306,7 +2304,7 @@ export const messageAgentTool: RolloutTool<MessageArgs> = {
   capability: "subagents",
   effect: "read",
   replyTool: false,
-  storyRead: "conversation",
+  storyRead: "positioned",
   titleField: "agent",
   description: messageDescription(false),
   parameters: messageParameters(false),

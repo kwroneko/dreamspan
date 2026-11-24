@@ -6,6 +6,7 @@
 // A quote draws its bar there too. Lines in a fenced code block are left as they are.
 import { type Extension, RangeSetBuilder, type Text } from "@codemirror/state"
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view"
+import { exampleMessages } from "./messageStyles.ts"
 
 /** The rendered insets (styles.css): a quote's bar and padding, a list's padding. */
 const QUOTE = "(3px + 0.9em)"
@@ -57,16 +58,17 @@ function markDecoration(parts: ReadonlyArray<Part>): Decoration {
   return decoration
 }
 
-/** The insets of every line of `doc`. */
-export function blockLines(doc: Text): DecorationSet {
-  const builder = new RangeSetBuilder<Decoration>()
+/** The insets of one message, in the document's coordinates. */
+function decorateMessage(doc: Text, builder: RangeSetBuilder<Decoration>, from: number, to: number) {
+  const last = doc.lineAt(to).number
   let fence: string | null = null
   // The open list items, outermost first: where each one's text starts, and the quotes around it.
   let items: Array<{ content: number; parts: Part[] }> = []
   let previousBlank = true
-  for (let number = 1; number <= doc.lines; number++) {
+  for (let number = doc.lineAt(from).number; number <= last; number++) {
     const line = doc.line(number)
-    const text = line.text
+    const start = Math.max(from, line.from)
+    const text = line.text.slice(start - line.from, to - line.from)
     const fenced = FENCE.exec(text)
     const marks = fenced?.[1]
     const info = fenced?.[2] ?? ""
@@ -94,7 +96,7 @@ export function blockLines(doc: Text): DecorationSet {
       items.push({ content: indent + item[0].length, parts: [...parts] })
       const inset = [...parts, ...items.map(() => LIST as Part)]
       builder.add(line.from, line.from, lineDecoration(inset, true))
-      builder.add(line.from, line.from + at + item[0].length, markDecoration(inset))
+      builder.add(start, start + at + item[0].length, markDecoration(inset))
     } else {
       // A line under an item continues it when indented to its text, or right after it.
       const indent = /^\s*/.exec(text.slice(at))![0].length
@@ -103,11 +105,19 @@ export function blockLines(doc: Text): DecorationSet {
         builder.add(line.from, line.from, lineDecoration([...parts, ...items.map(() => LIST as Part)], false))
       else if (parts.length > 0) {
         builder.add(line.from, line.from, lineDecoration(parts, true))
-        builder.add(line.from, line.from + at, markDecoration(parts))
+        builder.add(start, start + at, markDecoration(parts))
       }
     }
     previousBlank = false
   }
+}
+
+/** The insets of every line, with independent block state for each example message. */
+export function blockLines(doc: Text, examples = false): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>()
+  if (examples) {
+    for (const [from, to] of exampleMessages(doc.toString())) decorateMessage(doc, builder, from, to)
+  } else decorateMessage(doc, builder, 0, doc.length)
   return builder.finish()
 }
 
@@ -119,16 +129,16 @@ const theme = EditorView.theme({
 })
 
 /** Quotes and list items inset as the message renders them. */
-export const messageBlockLines: Extension = [
+export const messageBlockLines = (examples: boolean): Extension => [
   theme,
   ViewPlugin.fromClass(
     class {
       decorations: DecorationSet
       constructor(view: EditorView) {
-        this.decorations = blockLines(view.state.doc)
+        this.decorations = blockLines(view.state.doc, examples)
       }
       update(update: ViewUpdate) {
-        if (update.docChanged) this.decorations = blockLines(update.state.doc)
+        if (update.docChanged) this.decorations = blockLines(update.state.doc, examples)
       }
     },
     { decorations: (plugin) => plugin.decorations }

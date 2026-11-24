@@ -215,7 +215,7 @@ export function messageStyling(html: boolean, place: StylingPlace = {}): Extensi
   return [
     field,
     plugin,
-    messageBlockLines,
+    messageBlockLines(examples),
     messageTextTheme,
     // A field keeps the font, size, line height and surface the fields around it have.
     place.field ? [] : messageBoxTheme,

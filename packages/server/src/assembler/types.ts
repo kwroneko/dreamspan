@@ -15,7 +15,7 @@ import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 83
+export const ASSEMBLER_VERSION = 84
 
 export type Role = "system" | "user" | "assistant"
 
@@ -216,6 +216,8 @@ export interface SnapshotInputs {
   readonly cards: ReadonlyArray<{ readonly entity: string; readonly ref: string | null; readonly revision: string }>
   /** Who of `cards` was away or a narrator (spec/CHARACTER-CONTEXT.md §9.1); absent when neither. */
   readonly presence?: import("@dreamspan/shared/knowledge.ts").VersionPresence
+  /** The resolved context view, including when it reads the whole path without a viewer. */
+  readonly contextView?: string
   /** A separate context's viewer (`knowledge` stage), whose knowledge the agent's read tools keep to; absent: none. */
   readonly viewer?: string
   /** The viewer's identities through card replacements (`Knowledge.aliases`); absent: only `viewer`. */

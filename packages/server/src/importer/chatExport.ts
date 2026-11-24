@@ -3,7 +3,6 @@
 // the response as it's read, so neither the server nor the browser holds a whole chat. The
 // library archive (libraryArchive.ts) writes every chat the same way.
 import type { CastCard, Chat, EntityId, Fork, PathEntry, RecordedGeneration, Version } from "@dreamspan/shared/chat.ts"
-import type { PathWindow } from "@dreamspan/shared/chatApi.ts"
 import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chatPosition.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { NotFound } from "@dreamspan/shared/errors.ts"
@@ -120,34 +119,30 @@ export const chatFiles = (
 
     /** Keep only page cursors on the backwards pass; re-read each page root first. */
     async function* pathOf(fork: Fork): AsyncGenerator<ReadonlyArray<PathEntry>> {
+      const read = (leafSlotId: SlotId | null, end: SlotId | null) =>
+        run(
+          reader.ReadPath({
+            userId,
+            chatId,
+            forkId: fork.id,
+            leafSlotId,
+            displayLeaf: true,
+            range: end === null ? { _tag: "Bottom" } : { _tag: "Older", from: end },
+            limit: WINDOW
+          })
+        )
       const cursors: Array<SlotId | null> = []
+      let leaf: SlotId | null = null
       let cursor: SlotId | null = null
       do {
         cursors.push(cursor)
-        const page: PathWindow = await run(
-          reader.ReadPath({
-            userId,
-            chatId,
-            forkId: fork.id,
-            leafSlotId: null,
-            range: cursor === null ? { _tag: "Bottom" } : { _tag: "Older", from: cursor },
-            limit: WINDOW
-          })
-        )
+        const page = await read(leaf, cursor)
+        leaf ??= page.leafSlotId
+        if (leaf === null) return
         cursor = page.older
       } while (cursor !== null)
       while (cursors.length > 0) {
-        const from = cursors.pop()!
-        const page: PathWindow = await run(
-          reader.ReadPath({
-            userId,
-            chatId,
-            forkId: fork.id,
-            leafSlotId: null,
-            range: from === null ? { _tag: "Bottom" } : { _tag: "Older", from },
-            limit: WINDOW
-          })
-        )
+        const page = await read(leaf, cursors.pop()!)
         yield page.entries
       }
     }

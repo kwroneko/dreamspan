@@ -57,19 +57,40 @@ const preview = (text: string) => {
 /** Where `query` (lower case) is in `text`, ignoring case; -1 when it isn't. */
 const findIn = (text: string, query: string) => text.toLowerCase().indexOf(query)
 
+/** The match's bounds in the original text, including any character that expanded. */
+const matchRange = (text: string, query: string): readonly [number, number] | null => {
+  const lower = text.toLowerCase()
+  const match = lower.indexOf(query)
+  if (match < 0) return null
+  const end = match + query.length
+  if (lower.length === text.length) return [match, end]
+
+  let start = 0
+  let original = 0
+  let folded = 0
+  for (const character of text) {
+    if (folded <= match) start = original
+    original += character.length
+    folded += character.toLowerCase().length
+    if (folded >= end) return [start, original]
+  }
+  return null
+}
+
 /** The plain words around the first place `query` is in them, with it marked; the start when it isn't there. */
 function Found({ text, query }: { text: string; query: string }) {
   const flat = plain(text)
-  const at = query === "" ? -1 : findIn(flat, query)
-  if (at < 0) return <>{preview(text)}</>
+  const found = query === "" ? null : matchRange(flat, query)
+  if (found === null) return <>{preview(text)}</>
+  const [at, through] = found
   const start = Math.max(0, at - 60)
   const end = Math.min(flat.length, start + 240)
   return (
     <>
       {start > 0 && "…"}
       {flat.slice(start, at)}
-      <mark className="rounded-sm bg-warning/30 text-text">{flat.slice(at, at + query.length)}</mark>
-      {flat.slice(at + query.length, end)}
+      <mark className="rounded-sm bg-warning/30 text-text">{flat.slice(at, through)}</mark>
+      {flat.slice(through, end)}
       {end < flat.length && "…"}
     </>
   )

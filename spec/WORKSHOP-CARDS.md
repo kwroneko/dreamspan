@@ -21,7 +21,7 @@ The workshop already has most of the machinery a coding agent for cards needs: l
 
 ### 1.1 In the build
 
-- **Personality.** A workshop is a chat whose cast is one assistant card (default: the seeded Assistant) and a workshop persona. The start card's Assistant picker sends `CreateWorkshop { card }`; the URL keeps it as `workshopCard`. The card is assembled as any chat's character: its description, personality, system prompt and greeting reach the model as definitions, under the Workshop preset (ARCHITECTURE §16 "Workshop context", "Seeds, card and persona").
+- **Personality.** A workshop is a chat whose cast is one assistant card (default: the seeded Assistant) and a workshop persona. The start card's Assistant picker keeps the card's entity ID in the URL as `workshopCard`. The card is assembled as any chat's character: its description, personality, system prompt and greeting reach the model as definitions, under the Workshop preset (ARCHITECTURE §16 "Workshop context", "Seeds, card and persona").
 - **Library tools.** `list_library`, `read_card`, `read_preset`, `read_lorebook`, `read_note`, `list_revisions` (capability `library.read`, modes `allow` only: "Always on: the assistant can't help without it"); `create_card`, `edit_card`, `clone_card`, `edit_preset`, `edit_lorebook`, `create_preset`, `create_lorebook`, `set_ref_archived`, `restore_revision` (capability `library.write`, default Allowed). Names resolve against all the user's live and archived entries; an ambiguous name fails with candidates.
 - **Approvals.** A capability is Off, Ask first or Allowed per workshop (`workshop_grants`, keyed by chat, capability and `target`). Ask first stops the call inside its step with the server's own description of it (`describe`), Allow / Allow in this workshop / Decline / Add a note; definitions are byte-identical under Ask and Allowed, so the cache holds. A targeted grant exists: a card skill's approval is bound to its digest, and a side workshop's `chats.read` grant to its story.
 - **Effects.** Every library change writes a receipt and `rollout_effects` rows (`library.create`, `library.revise`) with an immutable undo recipe in the same writer transaction. Undo bins a made item, or restores the previous revision while the head is still the assistant's revision; otherwise it refuses: "Changed since; open its history before undoing this change." `StepEffects` shows Undo and Open under the step; the Changes tab lists every effect, grouped by reply, with Undo all of this reply; regenerating a reply with standing changes warns first.
@@ -117,13 +117,13 @@ So a class asks once and its answer covers the class, not the call. The prompt i
 
 Owner [D]: "'About this card' as a workshop creation setting is both far too restrictive… The workshop would be using the pre-selected card as its personality, like an RP chat, not using it as an object."
 
-**What the user clicks.** Either the existing way: New Workshop (sidebar, Chats page) → the intro's **Assistant** picker → the cardmaker card. Or, new: the card's ⋯ menu (the library tile's menu, the card page's and full editor's More, the Cast row's ⋯) → **New workshop with this card** (hover "Starts a workshop whose assistant is this card, as a story starts with a character."). It's a `cardContributions` entry, placement `actions`, `overflow: true`, a `menu` item, and a `chatCardActions` entry beside the built "Set as workshop persona" (order 36): both slots exist and are menus, so no new space is taken. It opens `/new/workshop?workshopCard=<ref>`, the built pending workshop.
+**What the user clicks.** Either the existing way: New Workshop (sidebar, Chats page) → the intro's **Assistant** picker → the cardmaker card. Or, new: the card's ⋯ menu (the library tile's menu, the card page's and full editor's More, the Cast row's ⋯) → **New workshop with this card** (hover "Starts a workshop whose assistant is this card, as a story starts with a character."). It's a `cardContributions` entry, placement `actions`, `overflow: true`, a `menu` item, and a `chatCardActions` entry beside the built "Set as workshop persona" (order 36): both slots exist and are menus, so no new space is taken. It opens the built pending workshop at `/new/workshop?workshopCard=<entityId>`, which validates the choice against library card entity IDs.
 
 **What they see.** The workshop not made yet, with the cardmaker's portrait and greeting where the messages will be, its name in the header, the composer focused.
 
 **What the model sees.** Unchanged from today: the Workshop preset's Main, the card's definitions as the character it plays, the persona, the workshop instructions (with §2.1's paragraph), the tool definitions. The cardmaker's style instructions are the character's own text, so "write cards like this" works with no tool call.
 
-**What's stored.** Unchanged: `CreateWorkshop { card }` at the first send.
+**What's stored.** On the first send, the pending workshop calls `StartWorkshop` with the selected entity ID as `card`.
 
 **Its own card is in view** (§2.1), so the assistant can read its full fields with `read_card` without a prompt (its text is in the request already), and change it without one (owner [D], §2.1), with a change row and Revert like any other card.
 
@@ -161,7 +161,7 @@ Owner [D] (2026-11-24): "8000 tokens is fine, but remember that the way of readi
 
 **The delta here.**
 
-1. **Small items are inlined; large ones are referenced.** An attached item whose whole text fits the **inline limit** is in the message whole; above it the message holds a reference, with reference-harness's summary view inside it. The inline limit is 8,000 tokens by the model's local tokenizer (owner [D]), lowered to 20% of the model's window where that is less (reference-harness's adaptive share), so a small local model isn't flooded. Both are frozen with the version at send (it's history): the cache never breaks for them and causal order holds.
+1. **Attachments share one inline budget per turn.** The inline limit is 8,000 tokens by the model's local tokenizer (owner [D]), lowered to 20% of the model's window where that is less (reference-harness's adaptive share). The budget for all library attachments together is at most that limit and must fit the input space left for the newest message after the fixed prompt, tools, output reserve, user text and other attachments are counted. Count the rendered elements, including tags and references. Reserve a compact reference for each item first, then expand items in attachment order to their whole text where it fits, or to a bounded summary where there is room. A compact reference identifies the item and pinned revision for a paged tool read. If even the compact references cannot fit, reject the send before storing the message and ask the user to remove attachments. Freeze the chosen renderings with the message version at send so history and cache order hold.
 
    ```
    <attached_card name="Mara Quill" id="ref_3k9…" revision="7" tokens="3,140">
@@ -175,7 +175,7 @@ Owner [D] (2026-11-24): "8000 tokens is fine, but remember that the way of readi
    </attached_card>
    ```
 
-   Lorebooks and presets follow the same rule: inline when the whole book or preset fits, otherwise a reference with its index (a book's entries by title with their keys and tokens, at most 50, then "38 more: read_lorebook with view index"; a preset's prompts by name, on or off, and tokens).
+   Lorebooks and presets draw from the same turn budget. A reference can include a bounded index where space permits (a book's entries by title with their keys and tokens, at most 50, then "38 more: read_lorebook with view index"; a preset's prompts by name, on or off, and tokens).
 
 2. **Reads are the same model for attached and found items.** `read_card`, `read_lorebook` and `read_preset` gain reference-harness's views, reading the library head (or a revision, §9), in tokens rather than characters since every count here is a local-tokenizer count:
    - `view: "summary"` (the default when the item is over the inline limit; otherwise the default is `"whole"`): the reference's lines above.
@@ -189,7 +189,7 @@ Owner [D] (2026-11-24): "8000 tokens is fine, but remember that the way of readi
 
 ### 4.4 What's stored [P]
 
-- `version_attachments` gains kind `library` with `ref_id` and `revision_id` (the head at send); `composer_images` gains the same kind for the draft (a card attached and not sent yet survives a reload, as files do). One additive migration.
+- `version_attachments` gains kind `library` with `ref_id`, `revision_id` (the head at send) and the frozen rendering; `composer_images` gains the same kind for the draft (a card attached and not sent yet survives a reload, as files do). One additive migration.
 - Being in view is derived, never granted: the set of `library` attachments on the reply's path up to its user message, plus the cast and the path's creation effects (§2.1). No grant row, so a branch, a swipe or a fork can't disagree with what the user sees on that branch.
 - The pending workshop's `workshopAttach` URL list (with `workshopCard` and `workshopPersona`), dropped of ids the library doesn't have, as the start card already does.
 
@@ -290,9 +290,9 @@ The built Undo restores the previous revision only while the head is still the a
 
 1. Take the change as the pair (B, A): the revision before the turn's first change to the item and the one after its last. Let H be the head now.
 2. For each field the change touched: if H equals A there, set it to B. If H differs from A there and from B, try to reverse the change's hunks on H's text (a three-way merge of B and H on base A, line-based for prose, by identity for greetings, lorebook entries and preset prompts). A field where that applies cleanly is reverted; one where it doesn't is a **conflict**.
-3. Without conflicts, one writer transaction writes one revision (origin `user`, message "Reverted the assistant's change of 14:02", `origin_ref` naming the effect), records the revert on the effect (`undo_result_json`, built: immutable, once), and the row says "Reverted". Open drafts stay drafts, as with every saved change (§14.2).
-4. With conflicts, nothing is written: the change view opens with the conflicting fields marked, each showing now and as it was before this change, and **Keep now** / **Take before** per field (the update resolver's pattern), then **Revert the rest** writes the revision.
-5. **Redo** reverts the revert the same way (it's a change like any other).
+3. Without conflicts, one writer transaction writes the new revision (origin `user`, message "Reverted the assistant's change of 14:02") and appends a reversal record linked to that revision, the previous head, and the original effects and fields it covers. For a row covering several effects, record the affected fields against each original effect. Per-field reverts record only the selected fields. The existing `undo_result_json` and `undone_at` stay reserved for one-shot Undo. Open drafts stay drafts, as with every saved change (§14.2).
+4. With conflicts, nothing is written: the change view opens with the conflicting fields marked, each showing now and as it was before this change, and **Keep now** / **Take before** per field (the update resolver's pattern), then **Revert the rest** records only the fields it reverts.
+5. **Redo** reverses the recorded revert using its before and after revisions as the merge inputs. Append a redo record for the original effects and fields it reapplies, linked to the revert it reverses. Derive each field's state from its latest successful reversal record and the row's state from its fields. The row says "Reverted" when all of its changed fields are reverted. A field can be reverted again after a redo.
 
 **Created items.** Undo bins the item, as built. If it was changed since, or a chat uses it, it asks first ("Ove Brekke was changed since and is in 1 chat. Move it to the bin anyway? You can restore it from the bin."), instead of refusing.
 
@@ -337,14 +337,14 @@ The same model, with their existing tools and diffs:
 
 | What | Where | Change |
 |---|---|---|
-| An attached item on a message | `version_attachments` kind `library`, `ref_id`, `revision_id` | Additive migration |
+| An attached item on a message | `version_attachments` kind `library`, `ref_id`, `revision_id`, frozen rendering | Additive migration |
 | An attached item in a draft | `composer_images` kind `library`, `ref_id` | The same migration |
 | Allow in this chat | `workshop_grants (chat, capability, target '', allow)` | None (built) |
 | Allow (this reply) | `tool_approvals` answer with `scope: reply`, held on the run | None (prompt JSON) |
 | Allow always for [character] | Account setting `workshop.cardGrants` keyed by card entity, user-only, excluded from `change_setting` | A registered setting |
 | Allow always | Account setting `workshop.alwaysGrants`, user-only, excluded from `change_setting` | A registered setting |
 | The four classes | `workshopCapabilities`, `capabilityDefaults` (Ask first) | Registry entries; `library.read` becomes an alias that existing grants map onto `library.cards` |
-| A revert | A revision (origin `user`, `origin_ref` the effect) and the effect's `undo_result_json` | None |
+| A revert or redo | A revision (origin `user`) and an append-only reversal record with before and after revisions, original effects and affected fields | Additive migration |
 | A revision message from the agent | `entity_revisions.message` | None |
 
 ## 12. Build units

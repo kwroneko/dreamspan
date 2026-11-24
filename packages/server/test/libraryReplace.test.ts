@@ -48,6 +48,23 @@ const setup = Effect.gen(function* () {
 })
 
 describe("library search and replace", () => {
+  it.effect("finds saved non-ASCII case equivalents of ASCII search text", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = yield* api.CreateCard({ label: "Unicode", name: "Unicode", description: "Kelvin and ſail" })
+      for (const find of ["kelvin", "sail"]) {
+        const asked = search(find, "", { kinds: ["card"] })
+        const preview = yield* api.PreviewLibraryReplace({ search: asked })
+        assert.deepEqual(
+          preview.entries.map((entry) => entry.refId),
+          [card.id]
+        )
+        const exact = yield* api.PreviewLibraryReplace({ search: { ...asked, matchCase: true } })
+        assert.isEmpty(exact.entries)
+      }
+    }).pipe(Effect.provide(serverLayer(testConfig())))
+  )
+
   it.effect("undo restores prior regex approval after the user changed scripts with replace", () =>
     Effect.gen(function* () {
       const f = yield* setup

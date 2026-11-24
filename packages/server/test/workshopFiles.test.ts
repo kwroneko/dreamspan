@@ -12,8 +12,8 @@ import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { completionChunks, sse, startMockProvider, type Recorded } from "./support/mockProvider.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { unquoteToolData } from "./support/toolData.ts"
-import { linuxBwrap } from "../src/sandbox/linuxBwrap.ts"
 import { WorkshopFiles } from "../src/files/WorkshopFiles.ts"
+import { linuxBwrap } from "../src/sandbox/linuxBwrap.ts"
 
 interface Body {
   messages: Array<{ role: string; content?: string }>
@@ -44,6 +44,61 @@ const call = (name: string, args: unknown, id: string) => [
 ]
 
 const commands = (await linuxBwrap.available()).ok
+
+it.live("a file tool can replace a file when its retained version and smaller contents fit", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const original = "Original synthetic text.\n".repeat(300)
+    const replacement = "Rewritten synthetic text.\n".repeat(50)
+    const mock = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        startMockProvider((request, res) => {
+          const messages = (request.body as unknown as Body).messages
+          if (!messages.some((message) => message.content?.includes("REPLACEMENT TASK")))
+            return sse(res, completionChunks(["Ready."], {}))
+          const done = messages.filter((message) => message.role === "tool").length
+          if (done === 0) return sse(res, call("read_file", { path: "plan.md" }, "read-plan"))
+          if (done === 1) return sse(res, call("write_file", { path: "plan.md", content: replacement }, "write-plan"))
+          return sse(res, completionChunks(["Done."], {}))
+        })
+      ),
+      (provider) => Effect.promise(() => provider.close())
+    )
+    const api = yield* client()
+    yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+      model: { context: 100_000 }
+    })
+    const me = yield* api.Whoami()
+    const files = yield* WorkshopFiles
+    yield* files.folderAt(me.id, "/files")
+    const plan = join(config.dataDir, "files", me.id, "plan.md")
+    yield* Effect.promise(() => writeFile(plan, original))
+    const baseline = yield* api.GetFilesUsage({ fresh: true })
+    yield* api.SetFilesQuota({ userId: me.id, quotaBytes: baseline.usedBytes + replacement.length + 100 })
+    const chat = yield* api.CreateWorkshop({ title: "Replacement quota" })
+    const events: Array<ChatEvent> = []
+    yield* api.SubscribeChat({ chatId: chat.id }).pipe(
+      Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+      Effect.forkScoped
+    )
+    yield* eventually(() => events.length > 0)
+    const sent = yield* posted(
+      api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: chat.activeLeafSlotId,
+        branch: false,
+        content: "REPLACEMENT TASK"
+      })
+    )
+    const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+    yield* eventually(() => finished(events, reply.entry.version.id) !== undefined)
+    assert.strictEqual(yield* Effect.promise(() => readFile(plan, "utf8")), replacement)
+    const usage = yield* api.GetFilesUsage({ fresh: true })
+    assert.strictEqual(usage.versionsBytes, original.length)
+    assert.isFalse(usage.over)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
 
 it.live(
   "writes, reads, edits and runs a command in the account's files, with effects and Undo",

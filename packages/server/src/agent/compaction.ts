@@ -64,6 +64,7 @@ export const summarySafeText = (text: string): string => {
       // fragment as data before re-encoding; regex cannot see escaped nested keys.
       let start = -1,
         quoted = false,
+        hasString = false,
         escaped = false,
         copied = 0
       const stack: Array<string> = []
@@ -74,6 +75,7 @@ export const summarySafeText = (text: string): string => {
           if (c !== "{" && c !== "[") continue
           start = at
           quoted = false
+          hasString = false
           escaped = false
         }
         if (quoted) {
@@ -82,8 +84,10 @@ export const summarySafeText = (text: string): string => {
           else if (c === '"') quoted = false
           continue
         }
-        if (c === '"') quoted = true
-        else if (c === "{" || c === "[") stack.push(c)
+        if (c === '"') {
+          quoted = true
+          hasString = true
+        } else if (c === "{" || c === "[") stack.push(c)
         else if (c === "}" || c === "]") {
           if (stack.at(-1) !== (c === "}" ? "{" : "[")) {
             stack.length = 0
@@ -105,7 +109,14 @@ export const summarySafeText = (text: string): string => {
           start = -1
         }
       }
-      parts.push(scrubLiteral(value.slice(copied)))
+      // A page can end inside JSON whose strings contain another serialized value.
+      // Withhold that fragment when we cannot decode its strings at their quoting level.
+      if (start >= 0 && hasString)
+        parts.push(
+          scrubLiteral(value.slice(copied, start)),
+          "[partial JSON data withheld; read_run recovers the original]"
+        )
+      else parts.push(scrubLiteral(value.slice(copied)))
       return parts.join("")
     }
     if (Array.isArray(value)) return value.map((part) => walk(part, depth + 1))

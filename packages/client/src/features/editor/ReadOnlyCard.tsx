@@ -9,7 +9,7 @@ import { useEffect, useState } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { RemoteCardLine } from "../cardSources/RemoteBadge.tsx"
-import { remoteImageUrl, useSourceCall } from "../cardSources/remote.ts"
+import { remoteImageFullUrl, remoteImageUrl, useSourceCall } from "../cardSources/remote.ts"
 import type { Caller } from "./caller.ts"
 import { CardEditor } from "./CardEditor.tsx"
 import { CardHeader } from "./CardNameHeader.tsx"
@@ -24,6 +24,7 @@ function useSourcePicture(entityId: string) {
   const [picture, setPicture] = useState<{
     readonly id: string
     readonly src: ((width: number) => string) | null
+    readonly full: string | null
   } | null>(null)
   useEffect(() => {
     const from = remoteOf(entityId)
@@ -33,19 +34,20 @@ function useSourcePicture(entityId: string) {
       if (out?.ok)
         setPicture({
           id: entityId,
-          src: out.value.summary.image ? remoteImageUrl(from.sourceId, out.value.summary.image) : null
+          src: out.value.summary.image ? remoteImageUrl(from.sourceId, out.value.summary.image) : null,
+          full: out.value.summary.image ? remoteImageFullUrl(from.sourceId, out.value.summary.image) : null
         })
     })
     return () => controller.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `call` is a fresh closure each render
   }, [entityId])
-  return picture?.id === entityId ? picture.src : null
+  return picture?.id === entityId ? picture : null
 }
 
 export function ReadOnlyCardEditor({ store, call }: { store: EditorStore; call: Caller }) {
   const ref = useEditorState(store).snapshot!.ref
   const name = useText(store, ["name"]) || ref.label
-  const src = useSourcePicture(ref.entityId)
+  const picture = useSourcePicture(ref.entityId)
   const navigate = useNavigate()
   const own = (refId: string) =>
     void navigate({ to: "/library/$refId", params: { refId }, replace: true, resetScroll: false })
@@ -66,7 +68,14 @@ export function ReadOnlyCardEditor({ store, call }: { store: EditorStore; call: 
             <CardHeader
               portrait={
                 <CardHeaderPortrait>
-                  <Avatar id={ref.entityId} name={name} size="fill" className="size-full" {...(src ? { src } : {})} />
+                  {/* A click opens the whole picture, as every other portrait's does. */}
+                  <Avatar
+                    id={ref.entityId}
+                    name={name}
+                    size="fill"
+                    className="size-full"
+                    {...(picture?.src && picture.full ? { src: picture.src, full: picture.full, preview: true } : {})}
+                  />
                 </CardHeaderPortrait>
               }
             >

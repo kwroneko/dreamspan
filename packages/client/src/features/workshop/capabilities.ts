@@ -91,6 +91,20 @@ export const choosePending = (
   return next
 }
 
+/** Choices still offered by the server, including any changed sets of modes. */
+export const offeredPendingGrants = (
+  grants: PendingGrants,
+  capabilities: ReadonlyArray<WorkshopCapability>
+): PendingGrants => {
+  const next = new Map<string, WorkshopGrantChoice>()
+  for (const row of capabilities) {
+    const key = grantKey(row.id, row.target)
+    const choice = grants.get(key)
+    if (choice && (choice.mode === null || row.modes.includes(choice.mode))) next.set(key, choice)
+  }
+  return next.size === grants.size ? grants : next
+}
+
 /** The rows as they'll stand once made: the server's, with the choices made before the first send. */
 export const withPendingGrants = (
   capabilities: ReadonlyArray<WorkshopCapability>,

@@ -1824,7 +1824,11 @@ describe("the cache (§4.1)", () => {
       yield* cache.put(key("a", "card", "edited"), { bytes: bytes(1) })
       now += 1
       yield* cache.put(key("a", "card", "other"), { bytes: bytes(2) })
-      yield* cache.sweepKeeping([key("a", "card", "edited")])
+      const edited = key("a", "card", "edited")
+      // The reader's sweep started before the draft save. Its stale result can't remove the pin.
+      yield* cache.sweepKeeping(
+        cache.withDraftBases([edited], Effect.succeed("active"), (status) => status === "active").pipe(Effect.as([]))
+      )
       now += 1
       yield* cache.put(key("a", "card", "more"), { bytes: bytes(3) })
       now += 1
@@ -1840,7 +1844,7 @@ describe("the cache (§4.1)", () => {
       assert.isNotNull(yield* cache.get(key("a", "card", "edited")))
       now += 30 * DAY
       // Saved or reverted: the next sweep names it no longer, and it goes with its age.
-      yield* cache.sweepKeeping([])
+      yield* cache.sweepKeeping(Effect.succeed([]))
       assert.isFalse(cache.has(key("a", "card", "edited")))
     })
   )
@@ -1854,7 +1858,7 @@ describe("the cache (§4.1)", () => {
       )
       yield* cache.load
       const edited = Array.from({ length: 40 }, (_, i) => key("a", "card", `edited-${i}`))
-      yield* cache.sweepKeeping(edited)
+      yield* cache.sweepKeeping(Effect.succeed(edited))
       for (const [i, entry] of edited.entries()) {
         now++
         yield* cache.put(entry, { bytes: new Uint8Array(600).fill(i) })
@@ -1863,7 +1867,7 @@ describe("the cache (§4.1)", () => {
       assert.isFalse(cache.has(edited[0]!))
       assert.isTrue(cache.has(edited.at(-1)!))
       now += 30 * DAY
-      yield* cache.sweepKeeping([])
+      yield* cache.sweepKeeping(Effect.succeed([]))
       assert.strictEqual(cache.usedBytes(), 0)
     })
   )

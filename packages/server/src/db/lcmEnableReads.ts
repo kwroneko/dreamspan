@@ -276,11 +276,21 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           const blocked = blockedWith("runway")
           return { enabled, imported: offer, fromScratch: blocked, adopted: offer ? blocked : null, ...noted }
         }
-        const settings = resolveLcm(state.lcm, (yield* readDefaults(sql, userId)).lcm)
+        const defaults = yield* readDefaults(sql, userId)
+        const settings = resolveLcm(state.lcm, defaults.lcm)
         const recent = built.lcm?.recentBudget ?? { target: 0, maximum: 0 }
         const leafInput = Math.min(
           chunkSize(settings.leafInput, recent),
-          yield* summaryChunkRoom({ sql, assembler, layer, model, reply: built, settings, chatId })
+          yield* summaryChunkRoom({
+            sql,
+            assembler,
+            layer,
+            model,
+            reply: built,
+            settings,
+            configuredStyle: state.lcm?.style ?? defaults.lcm?.style,
+            chatId
+          })
         )
         if (leafInput < 1 || leafInput * 2 > recent.maximum - recent.target) {
           const blocked = blockedWith("runway")

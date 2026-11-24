@@ -5,10 +5,10 @@ import { describe, expect, it } from "vitest"
 import { blockLines } from "../src/ui/messageBlockLines.ts"
 
 /** Each inset line as [its number, its inset, the marks hanging in it, or "" for a continued line]. */
-const insets = (source: string) => {
+const insets = (source: string, examples = false) => {
   const doc = Text.of(source.split("\n"))
   const out: Array<[number, string, string]> = []
-  const set = blockLines(doc)
+  const set = blockLines(doc, examples)
   for (let cursor = set.iter(); cursor.value; cursor.next()) {
     const spec = cursor.value.spec as { class: string; attributes: { style: string } }
     const line = doc.lineAt(cursor.from)
@@ -51,5 +51,24 @@ describe("message block lines", () => {
     expect(
       insets(["````md", "```", "- code", "~~~~", "> code", "````text", "- code", "`````  ", "- list"].join("\n"))
     ).toEqual([[9, "calc(1.5em)", "- "]])
+  })
+
+  it("keeps list indentation within each example message", () => {
+    expect(
+      insets(
+        "<START>\n{{char}}: First example\n- First item\ncontinued text\n<start>\n{{user}}: New example\n- Another item\n{{char}}: New reply",
+        true
+      )
+    ).toEqual([
+      [3, "calc(1.5em)", "- "],
+      [4, "calc(1.5em)", ""],
+      [7, "calc(1.5em)", "- "]
+    ])
+  })
+
+  it("resets code fences at example message boundaries", () => {
+    expect(insets("{{char}}: ```\n- Inside code\n{{user}}: > Outside code", true)).toEqual([
+      [3, "calc((3px + 0.9em))", "> "]
+    ])
   })
 })

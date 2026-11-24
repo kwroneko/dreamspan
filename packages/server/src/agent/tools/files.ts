@@ -8,6 +8,7 @@
 import { locateFolder } from "../../files/workingFolder.ts"
 import { createHash } from "node:crypto"
 import { isUtf8 } from "node:buffer"
+import type { Stats } from "node:fs"
 import { lstat, readFile, readdir, rmdir, statfs, type FileHandle } from "node:fs/promises"
 import { join, posix } from "node:path"
 import { Type } from "@earendil-works/pi-ai"
@@ -863,23 +864,93 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const top = root.hostRoot
         const info = yield* attempt(() => statPath(top, segments))
         if (info && !info.isFile()) throw new FilePathRefused(`${full} isn't a regular file.`)
-        let before: { bytes: Buffer; inode: number } | null = null
+        let before: { bytes: Buffer; info: Stats; sha256: string; byteSize: number } | null = null
         if (info) {
           const read = yield* attempt(() => readRegularFile(top, segments, VERSION_MAX_BYTES + 1))
           if (read.truncated) throw new FilePathRefused(`${full} is too large to change with the file tools. Use bash.`)
           const seen = ctx.cache.get(readKey(full))
           if (seen === undefined) throw new FilePathRefused(`Read ${full} with read_file before changing it.`)
-          if (seen !== sha256(read.bytes))
+          const hash = sha256(read.bytes)
+          if (seen !== hash)
             throw new FilePathRefused(`${full} changed since you read it. Read it again before changing it.`)
-          before = { bytes: read.bytes, inode: read.info.ino }
+          before = { bytes: read.bytes, info: read.info, sha256: hash, byteSize: read.bytes.byteLength }
         } else if (kind === "edit") throw new FilePathRefused(`${full} doesn't exist. Create it with write_file.`)
         const content = next(before?.bytes ?? null)
-        // The new content and the kept version both count against the quota.
-        const adding = content.byteLength + (before?.bytes.byteLength ?? 0)
-        if (deps.quota && counted) yield* deps.quota.check(env.userId, adding, "write files")
-        const versionId = before ? yield* keepVersion(ctx, env.userId, full, before, "agent") : null
-        const written = yield* attempt(() => writeRegularFile(top, segments, content, { createFolders: true }))
-        if (counted) deps.quota?.wrote(env.userId, adding)
+        const expected = before?.info ?? null
+        const quota = counted ? deps.quota : undefined
+        const reservation = quota
+          ? yield* quota.replacement(env.userId, expected, before, content.byteLength, "write files")
+          : null
+        let keptBytes = 0
+        let committed = false
+        const { written, versionId } = yield* Effect.gen(function* () {
+          if (reservation && !reservation.reserve(content.byteLength))
+            return yield* Effect.fail(new QuotaExceeded(reservation.over(content.byteLength)))
+          let versionId: string | null = null
+          if (before) {
+            if (reservation) {
+              const { sha256: hash, byteSize, info, bytes } = before
+              const saved = yield* deps.holding(
+                [hash],
+                Effect.andThen(
+                  storeMedia(deps.dataDir, hash, bytes),
+                  reservation.keep(content.byteLength, byteSize, (maxAddedBytes) =>
+                    deps.writer.RecordReplacementVersion({
+                      userId: env.userId as never,
+                      maxAddedBytes,
+                      version: {
+                        path: full,
+                        inode: info.ino,
+                        sha256: hash,
+                        byteSize,
+                        mime: "application/octet-stream",
+                        origin: "agent",
+                        rolloutId: ctx.rolloutId,
+                        toolCallId: ctx.toolCallId
+                      }
+                    })
+                  )
+                )
+              )
+              keptBytes = saved.addedBytes
+              versionId = saved.id
+            } else
+              versionId = yield* keepVersion(
+                ctx,
+                env.userId,
+                full,
+                { bytes: before.bytes, inode: before.info.ino },
+                "agent"
+              )
+          }
+          const written = yield* attempt(() =>
+            writeRegularFile(top, segments, content, {
+              createFolders: true,
+              expected,
+              ...(reservation
+                ? {
+                    stage: reservation.stage,
+                    committing: () => reservation.committing(content.byteLength, keptBytes),
+                    landed: (file) => {
+                      reservation.landed(file)
+                      committed = true
+                    }
+                  }
+                : {})
+            })
+          )
+          return { written, versionId }
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (!committed) {
+                reservation?.release()
+                quota?.wrote(env.userId, keptBytes)
+              }
+            })
+          ),
+          Effect.uninterruptible
+        )
         deps.onChanged?.(env.userId, [full])
         const after = sha256(content)
         ctx.cache.set(readKey(full), after)
