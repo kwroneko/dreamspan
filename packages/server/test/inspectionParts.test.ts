@@ -157,3 +157,22 @@ it("boxes unlocated rewritten text even when the located neighbours moved out of
     { start: 16, end: 21, source: 0 }
   ])
 })
+
+// Owner, 2026-11-24: a new chat's first request called an imported card's greeting "rewritten".
+// Its recorded piece kept the card's CRLF; the message goes out without carriage returns.
+const greeting = '*Mira looks up from the ledger.* "You\'re late, Tobin."\r\n\r\n*She sets down her pen.* "Sit, Tobin."'
+const sent = greeting.replace(/\r/g, "")
+
+it("finds a piece whose only difference is the carriage returns the message lost, not rewritten", () => {
+  assert.deepStrictEqual(locate(sent, [{ source: 0, text: greeting }]), {
+    parts: [{ start: 0, end: sent.length, source: 0 }],
+    groups: []
+  })
+})
+
+it("still marks a piece a prompt regex script changed as rewritten, CRLF or not", () => {
+  const changed = sent.replace("Sit, Tobin.", "Sit down, Tobin.")
+  assert.deepStrictEqual(locate(changed, [{ source: 0, text: greeting }]).parts, [
+    { start: 0, end: changed.length, source: 0, rewritten: true }
+  ])
+})
