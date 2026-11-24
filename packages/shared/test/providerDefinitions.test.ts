@@ -85,7 +85,15 @@ describe("resolveModel with a provider", () => {
   it("keeps the model's own edits over the provider's", () => {
     const model = resolveModel("m", {}, { cacheBreakpoints: "auto", cacheLayout: { lookback: true } }, {}, settings)
     expect(model.cacheBreakpoints).toEqual({ value: "auto", source: "user" })
-    expect(model.cacheLayout).toEqual({ value: { lookback: true }, source: "user" })
+    expect(model.cacheLayout).toEqual({ value: { lookback: true, maxMarkers: 4 }, source: "user" })
+  })
+  it("keeps the Bedrock layout when a model overrides only the minimum", () => {
+    const listed = { cacheLayout: { lookback: true, summarySplit: true, maxMarkers: 8, minTokens: 2048 } }
+    const model = resolveModel("m", listed, { cacheLayout: { minTokens: 4096 } }, {}, settings)
+    expect(model.cacheLayout).toEqual({
+      value: { lookback: false, summarySplit: true, maxMarkers: 4, minTokens: 4096 },
+      source: "user"
+    })
   })
   it("changes nothing for a provider with no cache settings", () => {
     const model = resolveModel("m", {}, {}, {}, {})

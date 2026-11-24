@@ -691,9 +691,11 @@ export const resolveModel = (
         ? breakpoints
         : { value: provider.cacheBreakpoints, source: "provider" },
     cacheLayout:
-      cacheLayout.source === "user" || Object.keys(layout).length === 0
-        ? cacheLayout
-        : { value: { ...cacheLayout.value, ...layout }, source: "provider" },
+      cacheLayout.source === "user"
+        ? { value: { ...upstream.cacheLayout, ...layout, ...cacheLayout.value }, source: "user" }
+        : Object.keys(layout).length === 0
+          ? cacheLayout
+          : { value: { ...cacheLayout.value, ...layout }, source: "provider" },
     compat: {
       ...(assumed ? { supportsDeveloperRole: false } : {}),
       ...connectionCompat,

@@ -12,8 +12,8 @@
 //   nothing is returned. So whatever the browser reads is the structure built here: no rule can
 //   end early, and no string, comment or escape can carry text out of its place.
 // - Selectors are scoped twice: by a prefix written into each selector, and, where the browser
-//   has it, inside `@scope (.message-html)`, which the browser enforces: a rule there styles
-//   nothing outside a message body whatever its selector says.
+//   has it, inside `@scope` on the view's message bodies, which the browser enforces: a rule
+//   there styles nothing outside those bodies whatever its selector says.
 // - Nothing loads unless it's a `data:` or in-document `#` address, or an http(s) address with
 //   media consent, which becomes a proxy address built here (media.ts). Every other loading
 //   form (image(), image-set(), cross-fade(), element(), paint(), src(), @import, a bare string
@@ -119,7 +119,7 @@ export const renameId = (name: string) => `user-content-${name}`
 
 /**
  * How top-level selectors are kept inside message bodies: `scope` wraps them in
- * `@scope (.message-html)` and prefixes `:scope`, `prefix` prefixes `.message-html` (same
+ * `@scope` on their root class and prefixes `:scope`, `prefix` prefixes that class (same
  * specificity). `scope` where the browser supports it.
  */
 export type ScopeMode = "scope" | "prefix"
@@ -851,6 +851,7 @@ function writeSelectors(
   writer: Writer,
   nested: boolean,
   mode: ScopeMode,
+  bodyClass: string,
   messageClass?: string,
   privateRule = false
 ): boolean {
@@ -870,7 +871,7 @@ function writeSelectors(
         writer.ident("scope")
       } else {
         writer.delim(".")
-        writer.ident(MESSAGE_SCOPE)
+        writer.ident(bodyClass)
       }
       if (messageClass) {
         // Match either the source body or all other bodies without changing specificity.
@@ -904,6 +905,7 @@ const SIMPLE_NAME = /^-?[_a-zA-Z][-\w]*$/
 interface Context {
   readonly policy: Policy
   readonly mode: ScopeMode
+  readonly bodyClass: string
   readonly declarations?: "shared" | "private"
   readonly generatedText?: boolean
 }
@@ -916,6 +918,7 @@ function writeRule(item: Extract<Item, { kind: "rule" }>, writer: Writer, contex
       writer,
       nested,
       context.mode,
+      context.bodyClass,
       context.declarations ? context.policy.messageClass : undefined,
       context.declarations === "private"
     )
@@ -1096,7 +1099,8 @@ export function scopeStyles(
   styles: ReadonlyArray<string>,
   mediaScope?: string | null,
   mode: ScopeMode = defaultScopeMode(),
-  messageKey?: string
+  messageKey?: string,
+  bodyClass = MESSAGE_SCOPE
 ): ScopedCss {
   const parsed = styles.map((css) => {
     const values = parse(css)
@@ -1111,7 +1115,9 @@ export function scopeStyles(
     ...definedNames(parsed.flatMap((items) => items ?? []))
   }
   const scoped = parsed.map((items, index) =>
-    items === null ? { css: "", blocked: styles[index]!.length > MAX_MESSAGE_CSS } : scopeItems(items, policy, mode)
+    items === null
+      ? { css: "", blocked: styles[index]!.length > MAX_MESSAGE_CSS }
+      : scopeItems(items, policy, mode, bodyClass)
   )
   return {
     css: scoped
@@ -1128,10 +1134,11 @@ export function scopeCss(css: string, mediaScope?: string | null, mode: ScopeMod
   return scopeStyles([css], mediaScope, mode)
 }
 
-function scopeItems(items: ReadonlyArray<Item>, policy: Policy, mode: ScopeMode): ScopedCss {
+function scopeItems(items: ReadonlyArray<Item>, policy: Policy, mode: ScopeMode, bodyClass: string): ScopedCss {
   const context: Context = {
     policy,
     mode,
+    bodyClass,
     ...(policy.messageClass && policy.fonts.size ? { declarations: "shared" as const } : {})
   }
   const writer = new Writer()
@@ -1145,7 +1152,7 @@ function scopeItems(items: ReadonlyArray<Item>, policy: Policy, mode: ScopeMode)
     writer.space()
     writer.punct("(")
     writer.delim(".")
-    writer.ident(MESSAGE_SCOPE)
+    writer.ident(bodyClass)
     writer.punct(")")
     writer.punct("{")
   }

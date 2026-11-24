@@ -3582,11 +3582,11 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     success: Schema.Boolean,
     error: Schema.Union([ImportLeaseLost, StorageError])
   }),
-  /** Adopts ST's default persona only while the user has no stored default. */
+  /** Adopts ST's default persona if it is still eligible and the user has no stored default. */
   Rpc.make("StImportDefaultPersona", {
     payload: { userId: UserId, importId: Schema.String, entityId: EntityId },
     success: Schema.Boolean,
-    error: Schema.Union([ImportLeaseLost, NotFound, StorageError])
+    error: Schema.Union([ImportLeaseLost, StorageError])
   }),
   /**
    * Makes `importId` the user's current run, and drops what the user's earlier runs held for a

@@ -11,9 +11,9 @@ import type { SlotId } from "@dreamspan/shared/chat.ts"
  * Scopes a text's CSS (css.ts). The renderer's lazy chunk sets it, so its CSS parser stays out
  * of the app's first load; stored texts wait for it, as no message has rendered before it.
  */
-let scoper: ((styles: ReadonlyArray<string>, key: string) => string) | null = null
+let scoper: ((styles: ReadonlyArray<string>, key: string, bodyClass: string) => string) | null = null
 const sheets = new Set<MessageStyles>()
-export function setStyleScoper(scope: (styles: ReadonlyArray<string>, key: string) => string) {
+export function setStyleScoper(scope: (styles: ReadonlyArray<string>, key: string, bodyClass: string) => string) {
   if (scoper) return
   scoper = scope
   for (const styles of sheets) styles.refresh()
@@ -110,28 +110,27 @@ export function hasImageSyntax(text: string): boolean {
   return false
 }
 
-const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/gm
-const FENCED = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\1[`~]*[ \t]*(?=\n|$)|$)/my
+const FENCE_LINE = /(?<![^\r\n]) {0,3}(`{3,}|~{3,})([^\r\n]*)/g
 
-/**
- * Keep the old fence matching exactly (including its multiline `$`). Only try the full
- * pattern once an opener has a following newline: otherwise its two greedy runs backtrack
- * quadratically over an unterminated line of backticks. Every successful match advances both
- * searches past that block; when no newline remains, no later opener can match either.
- */
+/** Removes each fenced block through its closing line, or the end of the text while it is open. */
 function withoutFences(text: string): string {
   const pieces: string[] = []
   let from = 0
-  FENCE_OPEN.lastIndex = 0
-  for (let open = FENCE_OPEN.exec(text); open; open = FENCE_OPEN.exec(text)) {
-    if (text.indexOf("\n", FENCE_OPEN.lastIndex) < 0) break
-    FENCED.lastIndex = open.index
-    const match = FENCED.exec(text)!
-    pieces.push(text.slice(from, match.index))
-    from = FENCED.lastIndex
-    FENCE_OPEN.lastIndex = from
+  let open: string | null = null
+  FENCE_LINE.lastIndex = 0
+  for (let line = FENCE_LINE.exec(text); line; line = FENCE_LINE.exec(text)) {
+    const mark = line[1]!
+    const tail = line[2]!
+    if (open === null) {
+      if (mark[0] === "`" && tail.includes("`")) continue
+      pieces.push(text.slice(from, line.index))
+      open = mark
+    } else if (mark[0] === open[0] && mark.length >= open.length && !/[^ \t]/.test(tail)) {
+      from = FENCE_LINE.lastIndex
+      open = null
+    }
   }
-  pieces.push(text.slice(from))
+  if (open === null) pieces.push(text.slice(from))
   return pieces.join("")
 }
 
@@ -166,14 +165,16 @@ export function extractStyles(text: string): ReadonlyArray<string> {
 /**
  * The chat view's card styles: one constructed stylesheet on the document (`style-src 'self'`
  * doesn't govern it, where a `<style>` element couldn't apply), from every message in the
- * loaded window, scoped to message bodies, so a greeting's style keeps applying while the
+ * loaded window, scoped to this view's message bodies, so a greeting's style keeps applying while the
  * greeting is scrolled away. A body that rendered reports its display text's styles; a message
  * that hasn't rendered yet contributes its stored text's.
  */
 export class MessageStyles {
+  readonly bodyClass: string
   private readonly id: string
   constructor(id: string) {
     this.id = id
+    this.bodyClass = `rpview-${id}`
   }
 
   private readonly mediaReleases = new Map<string, () => void>()
@@ -249,7 +250,7 @@ export class MessageStyles {
         const cached = this.stored.get(entry.key)
         if (cached?.text === entry.text) return cached.css
         if (!scoper) return ""
-        const css = scoper(extractStyles(entry.text), this.fontKey(entry.key))
+        const css = scoper(extractStyles(entry.text), this.fontKey(entry.key), this.bodyClass)
         this.stored.set(entry.key, { text: entry.text, css })
         return css
       })
