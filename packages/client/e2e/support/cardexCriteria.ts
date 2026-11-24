@@ -81,7 +81,13 @@ export function cardexCriteriaTests() {
             await controls.getByRole("textbox", { name: "Tags", exact: true }).focus()
             // More load as the list scrolls to its end (no More button).
             await expect(suggestedTags.getByRole("listitem").first()).toBeVisible()
-            await suggestedTags.getByRole("listitem").last().scrollIntoViewIfNeeded()
+            // To the list's end, as a user scrolls: the last row in view can leave the sentinel under it just out.
+            await suggestedTags.evaluate((list) => {
+              let scroller = list.parentElement
+              while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY))
+                scroller = scroller.parentElement
+              scroller?.scrollTo({ top: scroller.scrollHeight })
+            })
             await expect.poll(() => suggestedTags.getByRole("listitem").count()).toBeGreaterThanOrEqual(20)
             // Escape closes the list (and only the list).
             await controls.getByRole("textbox", { name: "Tags", exact: true }).press("Escape")
@@ -265,17 +271,13 @@ export function cardexCriteriaTests() {
               await page.getByRole("menuitemcheckbox", { name: "Name, A to Z", exact: true }).click()
             }
             const search = scope.getByRole("searchbox", { name: "Search cardex", exact: true })
-            // Twice: on a phone the sheet's side panel and the wide one each ask, and when their two
-            // identical searches don't arrive together the server can't share one, so a single failure
-            // would leave one of them, perhaps the one shown, answered in name order. Cleared after.
-            await fetch(`http://127.0.0.1:${port}/__fake/fail?path=/api/v1/search&sort=name&status=500&times=2`)
+            await fetch(`http://127.0.0.1:${port}/__fake/fail?path=/api/v1/search&sort=name&status=500&times=1`)
             await search.fill("synthetic")
             await expect(
               scope.getByText("cardex couldn't use name order just now. Showing best matches.", {
                 exact: true
               })
             ).toBeVisible()
-            await fetch(`http://127.0.0.1:${port}/__fake/fail?times=0`)
             await expectLayout(page, info, `cardex-temporary-sort-${place}-${width}-${theme}`, {
               scope: place === "home" ? "main" : "[data-shell-list]"
             })

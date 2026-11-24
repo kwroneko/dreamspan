@@ -142,9 +142,16 @@ function LoadMore({ suggestions }: { suggestions: ReturnType<typeof useSuggestio
   useEffect(() => {
     const node = sentinel.current
     if (!node || !next || loading) return
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) moreRef.current()
-    })
+    // Measured against the list's own scroller, not the window: the tag field's list can reach
+    // past the window's bottom edge, and its end then never counted as shown.
+    let root: HTMLElement | null = node.parentElement
+    while (root && !/(auto|scroll)/.test(getComputedStyle(root).overflowY)) root = root.parentElement
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) moreRef.current()
+      },
+      { root }
+    )
     observer.observe(node)
     return () => observer.disconnect()
   }, [next, loading])
@@ -407,7 +414,7 @@ function TagInput({ browse, inline = false }: { browse: SourceBrowse; inline?: b
       {...(inline ? {} : { "data-layout-overlay": "Tag suggestions float under the tag field" })}
     >
       {!inline && (
-        <div className="flex items-center gap-1.5 px-2 pb-0.5 text-sm font-semibold">
+        <div className="flex min-h-6 items-center gap-1.5 px-2 text-sm font-semibold">
           Tags
           <AboutHint heading="Tags" info>
             {tagsAbout}
@@ -1384,13 +1391,19 @@ function SearchOptions({
 }
 
 /** The phone's Filters sheet: the tags first, a folding row per panel, the checkboxes, Show results. */
-function FiltersSheet({ browse, set }: { browse: SourceBrowse; set: SetFilters }) {
+function FiltersSheet({ browse, set, side }: { browse: SourceBrowse; set: SetFilters; side: boolean }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const caps = browse.caps!
   const { panels, switches } = layoutOf(caps)
   const total = totalLabel(browse.results)
   return (
-    <Sheet open={browse.filtersOpen} onOpenChange={browse.setFiltersOpen} title="Filters" imageControls={false}>
+    <Sheet
+      open={browse.filtersOpen}
+      onOpenChange={browse.setFiltersOpen}
+      title="Filters"
+      imageControls={false}
+      side={side}
+    >
       <div className="flex min-h-0 flex-1 flex-col">
         <div data-filter-sheet className="flex min-h-0 flex-1 flex-col divide-y divide-border overflow-y-auto px-4">
           {(caps.tags.include || caps.tags.exclude) && (
@@ -1490,7 +1503,8 @@ export function SourceFiltersPanel({
   browse,
   id,
   filtersButton = false,
-  searchOptions = true
+  searchOptions = true,
+  sidebar = false
 }: {
   browse: SourceBrowse
   id: string
@@ -1498,6 +1512,8 @@ export function SourceFiltersPanel({
   filtersButton?: boolean
   /** Show the search's options as the bar's first row; off where they sit beside the search box. */
   searchOptions?: boolean
+  /** The bar is the left sidebar's: its Filters sheet is a side sheet there, not the whole window. */
+  sidebar?: boolean
 }) {
   const caps = browse.caps
   if (!caps) return null
@@ -1544,7 +1560,7 @@ export function SourceFiltersPanel({
           <Switches browse={browse} filters={switches} set={set} />
         </div>
       )}
-      <FiltersSheet browse={browse} set={set} />
+      <FiltersSheet browse={browse} set={set} side={sidebar} />
     </div>
   )
 }

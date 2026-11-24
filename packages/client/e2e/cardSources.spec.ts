@@ -95,7 +95,8 @@ for (const width of [1440, 390])
         // Search and the source's sorts.
         const search = main.getByRole("searchbox", { name: "Search cardex", exact: true })
         await search.fill("lantern")
-        await expect.poll(async () => (await tiles(main).allInnerTexts()).every((t) => /lantern/i.test(t))).toBe(true)
+        // Text content, not innerText: a tile scrolled out of view skips its rendering (content-visibility).
+        await expect.poll(async () => (await tiles(main).allTextContents()).every((t) => /lantern/i.test(t))).toBe(true)
         await expect(page).toHaveURL(/sq=lantern/)
         await main.getByRole("group", { name: "Sort by", exact: true }).getByRole("button", { name: "Name" }).click()
         await expect(page).toHaveURL(/ssort=name/)
@@ -108,6 +109,10 @@ for (const width of [1440, 390])
         await tags.fill("mystery")
         await tags.press("Enter")
         await expectLayout(page, info, `home-cardex-filters-${width}-${theme}`, { scope: "main" })
+        // The suggestions stay open as tags are added (they cover the chips on a wide bar):
+        // Escape closes them, as a user would, leaving the sheet open.
+        await tags.press("Escape")
+        await expect(controls.getByRole("list", { name: "Suggested tags", exact: true })).toHaveCount(0)
         await closeSheet(page)
         const chips = main.getByRole("group", { name: "Active filters", exact: true })
         await expect(chips).toContainText("Hide forks")
@@ -249,6 +254,22 @@ for (const width of [1440, 390])
         await expect(list.getByRole("link", { name: "Open Ava Local", exact: true })).toHaveCount(0)
         await expectLayout(page, info, `sidebar-cardex-${width}-${theme}`, { scope: "[data-shell-list]" })
         await list.screenshot({ path: info.outputPath("sidebar.png") })
+        // One sidebar only: a phone's menu, not it and the desktop's hidden one, each searching.
+        await expect(page.locator("[data-shell-list]")).toHaveCount(1)
+        // Its Filters open as a side sheet at the left edge: exactly over the desktop sidebar, at
+        // its width, so nothing of the page is cut; on a phone, the menu's width.
+        await page.locator('[aria-controls="side-source-filters"]').filter({ visible: true }).click()
+        const sheet = page.getByRole("dialog", { name: "Filters", exact: true })
+        await expect(sheet).toBeVisible()
+        const box = (await sheet.boundingBox())!
+        expect(box.x).toBe(0)
+        const sidebarWidth =
+          // By its markup: the open sheet hides the rest of the page from the accessibility tree.
+          width >= 1024 ? (await page.locator('aside[aria-label="Sidebar"]').boundingBox())!.width : null
+        expect(Math.abs(box.width - (sidebarWidth ?? Math.min(352, width * 0.88)))).toBeLessThanOrEqual(1)
+        await expectLayout(page, info, `sidebar-cardex-filters-${width}-${theme}`, { scope: "[data-filter-sheet]" })
+        await page.screenshot({ path: info.outputPath("sidebar-filters.png") })
+        await closeSheet(page)
         await hideAppNavigation(page)
       } finally {
         await server.stop()
