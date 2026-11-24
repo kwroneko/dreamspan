@@ -32,7 +32,7 @@ export interface PresetSelection {
   readonly value: string
   /** The chosen preset's entry; null for the built-in one, or one no list has. */
   readonly current: LibraryRef | null
-  /** What the chip and the tab say: the preset's name, or "Default (built-in)". */
+  /** What the chip and the tab say, or null while the selection loads. */
   readonly label: string | null
   readonly live: ReadonlyArray<LibraryRef>
   readonly archived: ReadonlyArray<LibraryRef>
@@ -66,7 +66,7 @@ export function usePresetSelection(session: ChatSession | null): PresetSelection
   // for a moment, in neither: it's still the one last seen, and the chip doesn't flash "…".
   const [seen, setSeen] = useState<LibraryRef | null>(null)
   if (found !== null && found !== seen) setSeen(found)
-  const current = found ?? (seen !== null && seen.id === chosen ? seen : null)
+  const current = found ?? (presets.waiting && seen?.id === chosen ? seen : null)
   const loaded = lists !== null && chosen !== undefined && (!session || view?.cast != null)
   return {
     ...(session
@@ -84,7 +84,7 @@ export function usePresetSelection(session: ChatSession | null): PresetSelection
     loaded,
     value: chosen ?? BUILTIN,
     current,
-    label: !loaded ? null : chosen === null ? BUILTIN_PRESET_LABEL : (current?.label ?? null),
+    label: !loaded ? null : chosen === null ? BUILTIN_PRESET_LABEL : (current?.label ?? "Preset unavailable"),
     live,
     archived,
     choose: async (value) => {
