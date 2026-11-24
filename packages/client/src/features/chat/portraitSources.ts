@@ -103,13 +103,7 @@ class PortraitSources {
     this.order = [
       ...onTop,
       ...this.order.flatMap((key) =>
-        inPlace.has(key)
-          ? [inPlace.get(key)!]
-          : removed.has(key)
-            ? []
-            : below.has(key)
-              ? [key, below.get(key)!]
-              : [key]
+        inPlace.has(key) ? [inPlace.get(key)!] : removed.has(key) ? [] : below.has(key) ? [key, below.get(key)!] : [key]
       )
     ]
     // "Keep one image open": one opened here closes the other views' ones.
