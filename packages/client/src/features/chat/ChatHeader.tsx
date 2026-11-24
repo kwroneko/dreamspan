@@ -170,6 +170,7 @@ function ChatTitle({
             <Input
               ref={input}
               aria-label="Chat name"
+              data-layout-audit-ignore="inset: The field takes the name's line in place, so the header keeps its height"
               aria-description="Enter renames it, Escape keeps the name. Leave it empty to name it after its characters."
               value={draft}
               maxLength={200}
