@@ -4830,6 +4830,12 @@ const ReadOpsOwn = RpcGroup.make(
     .setPayload(Schema.Struct({ ...historyReadRpcs[2].payloadSchema.fields, userId: UserId }))
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   Rpc.make("ShellEpoch", { payload: { userId: UserId }, success: Schema.String, error: StorageError }),
+  /** Internal routing for chat events, including soft-deleted chats. */
+  Rpc.make("ShellChatOwners", {
+    payload: { chatIds: Schema.Array(ChatId) },
+    success: Schema.Array(UserId),
+    error: StorageError
+  }),
   Rpc.make("ShellMaterialize", {
     payload: { userId: UserId },
     success: ShellSnapshotRead,

@@ -2,9 +2,11 @@
 // and each subscriber gets the chat's events in batches, one per frame at most.
 import type { ChatId } from "@dreamspan/shared/chat.ts"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { type Cause, Context, Effect, Layer, Queue, type Scope } from "effect"
 
 type Batch = ReadonlyArray<ChatEvent>
+type Listener = (chatId: ChatId, event?: ChatEvent, owner?: UserId) => void
 
 interface Subscriber {
   readonly queue: Queue.Queue<Batch, Cause.Done>
@@ -64,9 +66,9 @@ export class ChatHub extends Context.Service<
     readonly publish: (chatId: ChatId, event: ChatEvent) => void
     /**
      * Ends every subscription to a chat that's gone: what's pending goes out at once, then
-     * `last`, and their streams end.
+     * `last`, and their streams end. Pass the owner if the chat could have appeared in the shell.
      */
-    readonly close: (chatId: ChatId, last: ChatEvent) => void
+    readonly close: (chatId: ChatId, last: ChatEvent, owner?: UserId) => void
     /**
      * Subscribes for as long as the scope lasts. `hello` is taken at the moment of
      * subscribing, so no event falls between it and the ones that follow.
@@ -79,7 +81,7 @@ export class ChatHub extends Context.Service<
      * Calls `listener` for each change published to a chat: every
      * event but streamed text and the cache estimate, which follows from the others.
      */
-    readonly listen: (listener: (chatId: ChatId, event?: ChatEvent) => void) => Effect.Effect<void, never, Scope.Scope>
+    readonly listen: (listener: Listener) => Effect.Effect<void, never, Scope.Scope>
     /**
      * Whether a tab may still have the chat open: someone is subscribed, or the last one left
      * (or it was given out, `touch`) less than `graceMs` ago, at most HELD_MAX_MS (or the server
@@ -101,7 +103,7 @@ export class ChatHub extends Context.Service<
       ChatHub,
       Effect.gen(function* () {
         const subscribers = new Map<ChatId, Set<Subscriber>>()
-        const listeners = new Set<(chatId: ChatId, event?: ChatEvent) => void>()
+        const listeners = new Set<Listener>()
         const pending = new Map<ChatId, Array<ChatEvent>>()
         // When each chat's last subscriber left, for `held`, oldest first: kept HELD_MAX_MS, then
         // forgotten, so a long-running server holds only the chats left lately.
@@ -145,8 +147,8 @@ export class ChatHub extends Context.Service<
             else pending.set(chatId, [event])
             timer ??= setTimeout(flush, BATCH_MS)
           },
-          close: (chatId, last) => {
-            for (const listener of listeners) listener(chatId)
+          close: (chatId, last, owner) => {
+            for (const listener of listeners) listener(chatId, undefined, owner)
             const batch = coalesce([...(pending.get(chatId) ?? []), last])
             pending.delete(chatId)
             for (const subscriber of subscribers.get(chatId) ?? []) {
