@@ -5,6 +5,7 @@ import { mkdirSync } from "node:fs"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
+import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -152,4 +153,19 @@ test("rename handles focus leaving its actions and guards a pending save", async
   }
   await expect(title).toHaveText("Submitted")
   expect(renames).toBe(2)
+})
+
+test("a phone chat title matching a switch label leaves its controls visible", async ({ page }) => {
+  const label = "Summarize older messages"
+  const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.CreateChat({ title: label }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  const tab = await openPanel(page, "This chat")
+  await expect(tab.getByRole("heading", { name: label, exact: true })).toHaveClass("sr-only")
+  const summaries = tab.getByRole("region", { name: "Summaries", exact: true })
+  await expect(summaries.getByRole("switch", { name: label })).toBeVisible()
+  await expect(summaries.locator(".sr-only")).toHaveCount(0)
+  await summaries.getByRole("button", { name: "Summaries", exact: true }).click()
+  await expect(page.getByRole("tabpanel", { name: "Summaries", exact: true })).toBeVisible()
 })

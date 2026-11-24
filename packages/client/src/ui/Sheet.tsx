@@ -15,6 +15,7 @@ export function Sheet({
   container,
   children,
   initialFocus,
+  dedupeLabels = true,
   imageControls = true,
   side = false
 }: {
@@ -28,6 +29,8 @@ export function Sheet({
   onOpenChange: (open: boolean) => void
   /** Its heading, beside the close button. */
   title: ReactNode
+  /** False when the title is a user-supplied name that can coincide with an unrelated label. */
+  dedupeLabels?: boolean
   /** Keep a sheet within the landmark it belongs to. */
   container?: HTMLElement | null | undefined
   /** False: no image controls in its header, for a sheet that shows no pictures. */
@@ -59,7 +62,9 @@ export function Sheet({
             )}
             <WindowClose ref={closeRef} onClick={() => onOpenChange(false)} />
           </div>
-          <TitledContainer title={title}>{children}</TitledContainer>
+          <TitledContainer title={title} dedupeLabels={dedupeLabels}>
+            {children}
+          </TitledContainer>
         </BaseDialog.Popup>
       </BaseDialog.Portal>
     </BaseDialog.Root>

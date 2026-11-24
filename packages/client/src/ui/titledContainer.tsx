@@ -5,9 +5,9 @@
 // or heading says the same words is a mistake. In development and tests it throws, so it can't
 // land; in production its label is for assistive technology only: the title names the control,
 // and nothing shows twice. A single field in a titled popover passes `labelHidden`.
-import { createContext, isValidElement, useContext, type ReactNode } from "react"
+import { createContext, isValidElement, useContext, useMemo, type ReactNode } from "react"
 
-const ContainerTitle = createContext<string | null>(null)
+const ContainerTitle = createContext<{ words: string; dedupeLabels: boolean } | null>(null)
 
 /** Its words, lower case, punctuation and spacing aside: "Created after ?" is "created after". */
 export const titleWords = (text: string) =>
@@ -30,9 +30,18 @@ export const shownText = (node: ReactNode): string => {
 }
 
 /** Gives `title` to what it holds, as its container's name. */
-export function TitledContainer({ title, children }: { title: ReactNode; children: ReactNode }) {
+export function TitledContainer({
+  title,
+  children,
+  dedupeLabels = true
+}: {
+  title: ReactNode
+  children: ReactNode
+  dedupeLabels?: boolean
+}) {
   const words = titleWords(shownText(title))
-  return <ContainerTitle.Provider value={words || null}>{children}</ContainerTitle.Provider>
+  const value = useMemo(() => (words ? { words, dedupeLabels } : null), [words, dedupeLabels])
+  return <ContainerTitle.Provider value={value}>{children}</ContainerTitle.Provider>
 }
 
 /**
@@ -42,7 +51,7 @@ export function TitledContainer({ title, children }: { title: ReactNode; childre
  */
 export function useTitledAbove(text: string): boolean {
   const title = useContext(ContainerTitle)
-  return title !== null && titleWords(text) === title
+  return title !== null && titleWords(text) === title.words
 }
 
 /** The error a repeat raises in development and tests. */
@@ -63,9 +72,9 @@ const strict = import.meta.env.DEV || import.meta.env.MODE === "test"
  */
 export function useRepeatsTitle(label: ReactNode, hidden: boolean, what: string): boolean {
   const title = useContext(ContainerTitle)
-  if (hidden || !title) return false
+  if (hidden || !title?.dedupeLabels) return false
   const text = shownText(label)
-  if (titleWords(text) !== title) return false
+  if (titleWords(text) !== title.words) return false
   if (strict) throw new TitleRepeated(what, text.trim())
   return true
 }
