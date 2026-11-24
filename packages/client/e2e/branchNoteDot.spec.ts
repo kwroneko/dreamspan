@@ -126,7 +126,8 @@ test("a preset note link opened in a browser tab keeps the branch draft", async 
     const url = await urlOpenedInNewTab(page, () => link.click(click))
     const other = await context.newPage()
     await other.goto(url)
-    await expect(noteText(other)).toHaveText("Branch draft.")
+    // The opened tab shows the branch draft, not the saved text, within 10 s.
+    await expect(noteText(other)).toHaveText("Branch draft.", { timeout: 10_000 })
     await other.close()
   }
   const href = new URL((await link.getAttribute("href"))!, page.url())

@@ -13,6 +13,7 @@ import { openPanel } from "./support/panel.ts"
 import { saveRevision } from "./support/saveRevision.ts"
 import { asUser, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { urlOpenedInNewTab } from "./support/browserTab.ts"
 
 const server = serverPerFile(withAdmin)
 let login: { readonly url: string; readonly cookie: string } | null = null
@@ -248,8 +249,8 @@ for (const [width, theme] of [
 
     // A middle-click on the first thread's link opens it in a new browser tab.
     const link = timelineRow(page).getByRole("link", { name: "Mira and Tobin", exact: true })
-    const [opened] = await Promise.all([context.waitForEvent("page"), link.click({ button: "middle" })])
-    await opened.waitForLoadState()
+    const opened = await context.newPage()
+    await opened.goto(await urlOpenedInNewTab(page, () => link.click({ button: "middle" })))
     expect(new URL(opened.url()).pathname).toBe(`/chats/${chat.chatId}`)
     await expect(trigger(opened, "Thread", "Mira and Tobin")).toBeVisible()
     await opened.close()
@@ -265,7 +266,8 @@ for (const [width, theme] of [
     await expect(foot.getByRole("link", { name: "Open thread Mira and Tobin", exact: true })).toBeVisible()
     await expect(foot.getByRole("button", { name: /^Open branch Side path/ })).toBeVisible()
     const docksLink = foot.getByRole("link", { name: "Open thread Docks", exact: true })
-    const [linked] = await Promise.all([context.waitForEvent("page"), docksLink.click({ button: "middle" })])
+    const linked = await context.newPage()
+    await linked.goto(await urlOpenedInNewTab(page, () => docksLink.click({ button: "middle" })))
     await expect(trigger(linked, "Thread", "Docks")).toBeVisible()
     await linked.close()
     await docksLink.click({ button: "right" })
