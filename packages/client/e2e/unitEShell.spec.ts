@@ -91,7 +91,7 @@ for (const width of [1440, 390]) {
     // The left panel's place is in the URL (owner, 2026-10-31); browsing it keeps the chat in the middle.
     const before = new URL(page.url()).pathname
     await crumbs.getByRole("button", { name: "All chats", exact: true }).click()
-    await expect(crumbs).toHaveCount(0)
+    await expect(crumbs).toHaveText("All chats")
     await expect.poll(() => new URL(page.url()).searchParams.get("character")).toBeNull()
     expect(new URL(page.url()).pathname).toBe(before)
     // Browsing the grid changes only the left panel until a character is picked.

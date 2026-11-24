@@ -60,7 +60,7 @@ const expectCharacterSidebar = async (page: Page, name: string, chat: string, ot
   const crumbs = sidebar.getByRole("navigation", { name: "Chat breadcrumbs" })
   await expect(crumbs).toContainText("All chats")
   await expect(crumbs).toContainText(name)
-  await expect(sidebar.getByRole("button", { name: `New chat with ${name}`, exact: true })).toBeVisible()
+  await expect(sidebar.getByRole("button", { name: `New Roleplay with ${name}`, exact: true })).toBeVisible()
   await expect(sidebar.getByRole("link", { name: new RegExp(`^Open chat ${chat}`) })).toBeVisible()
   await expect(sidebar.getByRole("link", { name: new RegExp(`^Open chat ${other}`) })).toHaveCount(0)
 }

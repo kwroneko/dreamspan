@@ -72,11 +72,11 @@ for (const width of [1440, 390])
       await panel.screenshot({ path: join(shots, `${phase}-${width}-${scene}.png`), animations: "disabled" })
     }
 
-    // All chats: no breadcrumbs; the filter row sits right under the search.
+    // All chats: its one crumb, where you are, so the list starts where a character's does.
     await visit("", async () => {
       await expect(panel.getByRole("link", { name: "Open chat Lamp story" }).first()).toBeVisible()
     })
-    await expect(crumbs).toHaveCount(0)
+    await expect(crumbs).toHaveText("All chats")
     await shoot("all")
     const all = { search: await box(search), filters: await box(filters), list: await box(list) }
 
@@ -94,15 +94,15 @@ for (const width of [1440, 390])
     }
     expect.soft(character.crumbs.y).toBeGreaterThanOrEqual(bottom(character.filters))
     expect.soft(character.list.y).toBeGreaterThanOrEqual(bottom(character.crumbs))
-    // Nothing above the crumbs moves when they come; the list moves down by their line.
+    // Nothing moves: the crumbs' line is there in All chats too (owner, 2026-11-24).
     expect.soft(Math.abs(character.search.y - all.search.y)).toBeLessThanOrEqual(1)
     expect.soft(Math.abs(character.filters.y - all.filters.y)).toBeLessThanOrEqual(1)
-    expect.soft(character.list.y).toBeGreaterThan(all.list.y)
+    expect.soft(Math.abs(character.list.y - all.list.y)).toBeLessThanOrEqual(1)
     if (process.env.LAYOUT_AUDIT) await expectLayout(page, info, `sidebar-crumbs-${width}-character`, { scope })
 
     // Back to all chats from the crumbs: the filter row stays where it was.
     await crumbs.getByRole("button", { name: "All chats", exact: true }).click()
-    await expect(crumbs).toHaveCount(0)
+    await expect(crumbs).toHaveText("All chats")
     expect.soft(Math.abs((await box(filters)).y - all.filters.y)).toBeLessThanOrEqual(1)
     expect.soft(Math.abs((await box(list)).y - all.list.y)).toBeLessThanOrEqual(1)
 

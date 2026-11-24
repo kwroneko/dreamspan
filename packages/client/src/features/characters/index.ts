@@ -18,8 +18,8 @@ import { routes } from "../../routes.tsx"
 import { CardPage } from "./CardPage.tsx"
 import { CharactersPage } from "./CharactersPage.tsx"
 import { GroupPage } from "./GroupPage.tsx"
-import { characterChatActions, sidebarFoot } from "./homeSlots.ts"
-import { NewCharacterChat } from "./NewCharacterChat.tsx"
+import { characterChatActions, sidebarChatStarts, sidebarFoot } from "./homeSlots.ts"
+import { NewCharacterChat, NewRoleplayStart } from "./NewCharacterChat.tsx"
 import { OpenChatBranches } from "./ShellBrowser.tsx"
 import { homeSearch } from "./homeSearch.ts"
 import { cardContributions } from "../cardForks/surfaces.tsx"
@@ -52,6 +52,7 @@ export const register = () => {
   registerPersonaLock()
   panelEditorActions.register({ id: "characters.panel-favourite", order: 40, component: PanelFavourite })
   characterChatActions.register({ id: "characters.new-chat", order: 10, component: NewCharacterChat })
+  sidebarChatStarts.register({ id: "characters.new-roleplay", order: 10, component: NewRoleplayStart })
   cardContributions.register({
     id: "characters.chats-link",
     placement: "chats",
