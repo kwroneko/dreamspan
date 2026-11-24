@@ -83,7 +83,9 @@ export const ApprovalAnswer = Schema.Literals(["allow", "allow_chat", "allow_car
 export type ApprovalAnswer = typeof ApprovalAnswer.Type
 
 export class EffectUndoRefused extends Schema.TaggedError<EffectUndoRefused>()("EffectUndoRefused", {
-  message: Schema.String
+  message: Schema.String,
+  /** The unconfirmed creation Undo can be retried with binAnyway. */
+  binConfirmation: Schema.optionalKey(Schema.Struct({ changed: Schema.Boolean, chats: Schema.Int }))
 }) {}
 
 export const RolloutEffectRecord = Schema.Struct({

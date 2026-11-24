@@ -4,7 +4,6 @@
 // uses it. Done, it says "Reverted" (with Redo) or "Undone", muted. A revert that conflicts writes
 // nothing and opens the change view to choose. The change view's header shows the same.
 import type { ReversalOutcome } from "@dreamspan/shared/workshopApi.ts"
-import { Effect } from "effect"
 import { useEffect, useRef, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -14,7 +13,6 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 import { openNearProps } from "../workbench/kinds.ts"
 import {
   type ChangeReply,
-  changedSince,
   changeViewHref,
   type ItemChange,
   itemReverted,
@@ -123,32 +121,23 @@ export function ItemChangeAction({
   }
   const pending = item.effects.filter(undoable)
   if (pending.length === 0) return null
-  const undoAll = async (binAnyway: boolean) => {
+  const undo = async (binAnyway = false) => {
     // The writer bins the created item with the edits the reply made to it.
     for (const effect of pending.filter((e) => e.kind === "library.create")) {
       const result = await action.run(
         (client) => client("UndoRolloutEffect", { ...effectKey(effect), ...(binAnyway ? { binAnyway } : {}) }),
         CHANGE_KEYS
       )
-      if (!result.ok) return
+      if (!result.ok) {
+        const confirmation = result.error.binConfirmation
+        if (!binAnyway && confirmation) {
+          action.clearError()
+          setAsk(askText(item.label, confirmation.changed, confirmation.chats))
+        }
+        return
+      }
     }
     setAsk(null)
-  }
-  const undo = async () => {
-    // Changed since, or in a chat: ask first (spec/WORKSHOP-CARDS.md §8.1).
-    const seen = await action.run(
-      (client) =>
-        Effect.all({
-          revisions: client("ListRevisions", { refId: item.refId as never, limit: 50 }),
-          editor: client("OpenEditor", { refId: item.refId as never })
-        }),
-      []
-    )
-    if (!seen.ok) return
-    const changed = changedSince(seen.value.revisions, item.to) !== null
-    const chats = seen.value.editor.usedByChats
-    if (changed || chats > 0) setAsk(askText(item.label, changed, chats))
-    else await undoAll(false)
   }
   const revert = async () => {
     setConflicted(false)
@@ -202,7 +191,7 @@ export function ItemChangeAction({
         confirmLabel="Move to the bin"
         confirmHint={`Moves ${item.label} to the bin as it is now.`}
         pending={action.pending}
-        onConfirm={() => void undoAll(true)}
+        onConfirm={() => void undo(true)}
       />
     </span>
   )

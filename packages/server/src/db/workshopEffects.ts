@@ -282,9 +282,16 @@ const createUndoer: Undoer = {
       const ref = yield* lib.ownedRef(ctx.userId, String(undo.refId))
       if (ref.entity_id !== effect.targetId) return yield* refuse()
       if (!ctx.binAnyway) {
-        if ((yield* lib.usedByChats(ctx.userId, ref)) > 0)
-          return yield* refuse("A chat uses this item. Use this item's Undo to confirm moving it to the bin.")
-        yield* checkedCreation(ctx, effect)
+        const chats = yield* lib.usedByChats(ctx.userId, ref)
+        const changed = yield* checkedCreation(ctx, effect).pipe(
+          Effect.as(null),
+          Effect.catchTag("EffectUndoRefused", Effect.succeed)
+        )
+        if (changed || chats > 0)
+          return yield* new EffectUndoRefused({
+            message: changed?.message ?? "A chat uses this item. Use this item's Undo to confirm moving it to the bin.",
+            binConfirmation: { changed: changed !== null, chats }
+          })
       }
       if (ref.kind === "card") {
         const live = yield* ctx.sql<{ id: string }>`SELECT e.id FROM entities e
