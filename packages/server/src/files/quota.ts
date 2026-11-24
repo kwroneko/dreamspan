@@ -54,12 +54,12 @@ export interface Usage {
   readonly usedBytes: number
   readonly quotaBytes: number
   readonly measuredAt: number
-  /** The walk stopped at its limits: the real usage is higher. */
+  /** The walk was incomplete: some usage may be uncounted. */
   readonly partial: boolean
 }
 
 const PARTIAL_TEXT = (what: string) =>
-  `Your files are too many to count. Delete files you don't need and empty the bin to ${what} again.`
+  `Your files couldn't be fully counted. Check that the folders are accessible, or delete files and empty the bin to ${what} again.`
 
 export class QuotaExceeded extends Error {
   override readonly name = "QuotaExceeded"
@@ -87,11 +87,16 @@ export const measureTree = async (
   const deadline = Date.now() + maxMs
   let bytes = 0
   let entries = 0
+  let partial = false
+  const missing = (error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") partial = true
+    return null
+  }
   const stack = [root]
   while (stack.length) {
     const path = stack.pop()!
     if (skip?.(path)) continue
-    const info = await lstat(path, { bigint: false }).catch(() => null)
+    const info = await lstat(path, { bigint: false }).catch(missing)
     if (!info) continue
     const key = inodeKey(info)
     if (seen.has(key)) continue
@@ -101,11 +106,11 @@ export const measureTree = async (
     bytes += size
     if (++entries >= maxEntries || Date.now() > deadline) return { bytes, entries, partial: true }
     if (info.isDirectory()) {
-      const names = await readdir(path).catch(() => [] as Array<string>)
-      for (const name of names) stack.push(join(path, name))
+      const names = await readdir(path).catch(missing)
+      for (const name of names ?? []) stack.push(join(path, name))
     }
   }
-  return { bytes, entries, partial: false }
+  return { bytes, entries, partial }
 }
 
 /**
@@ -123,12 +128,17 @@ export const measureBin = async (
   items = true
 ) => {
   const deadline = Date.now() + maxMs
-  const holders = items ? await readdir(bin).catch(() => [] as Array<string>) : [""]
+  let partial = false
+  const missing = (error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") partial = true
+    return []
+  }
+  const holders = items ? await readdir(bin).catch(missing) : [""]
   let bytes = 0
   let entries = 0
   for (const holder of holders) {
     const folder = holder === "" ? bin : join(bin, holder)
-    for (const name of await readdir(folder).catch(() => [] as Array<string>)) {
+    for (const name of await readdir(folder).catch(missing)) {
       const left = Math.max(1, maxEntries - entries)
       const measured = await measureTree(
         join(folder, name),
@@ -142,7 +152,7 @@ export const measureBin = async (
       if (measured.partial || entries >= maxEntries || Date.now() > deadline) return { bytes, partial: true }
     }
   }
-  return { bytes, partial: false }
+  return { bytes, partial }
 }
 
 export interface QuotaDeps {

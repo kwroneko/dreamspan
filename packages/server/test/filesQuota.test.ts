@@ -2,7 +2,7 @@
 // a small quota is refused new writes and commands with how much it uses, the usage RPC says
 // so, an admin's quota lifts it, and retention removes old versions and the media only they
 // named. Synthetic data only.
-import { link, mkdir, rename, lstat, symlink, truncate, writeFile } from "node:fs/promises"
+import { chmod, link, lstat, mkdir, rename, symlink, truncate, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Stream } from "effect"
@@ -64,7 +64,7 @@ describe("a walk that stops at its limits", () => {
       })
       const refused = yield* Effect.exit(quota.check("u", 1, "write files"))
       assert.strictEqual(refused._tag, "Failure")
-      assert.match(String(yield* quota.afterCommand("u")), /too many to count/)
+      assert.match(String(yield* quota.afterCommand("u")), /couldn't be fully counted/)
     })
   )
 })
@@ -343,6 +343,24 @@ describe("measuring", () => {
     assert.isNull(parseByteSize("ten gigs"))
     assert.isNull(parseByteSize("-1G"))
   })
+
+  it.live.skipIf(process.getuid?.() === 0)(
+    "marks an unreadable directory as partial and a missing path as complete",
+    () =>
+      Effect.promise(async () => {
+        const root = tempDir("measure-unreadable")
+        const folder = join(root, "restricted")
+        await mkdir(folder)
+        await writeFile(join(folder, "hidden"), "synthetic contents")
+        await chmod(folder, 0)
+        try {
+          assert.isTrue((await measureTree(root)).partial)
+          assert.isFalse((await measureTree(join(root, "missing"))).partial)
+        } finally {
+          await chmod(folder, 0o700)
+        }
+      })
+  )
 
   it.live("counts sizes, each inode once, and never follows links", () =>
     Effect.promise(async () => {
