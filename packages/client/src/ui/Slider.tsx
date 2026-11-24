@@ -2,10 +2,92 @@
 // drag (and each key press); `onValueCommitted` fires once the pointer lets go, or after a key,
 // so a caller can show a value live and save it once.
 import { Slider as BaseSlider } from "@base-ui/react/slider"
-import { useId, type ReactNode } from "react"
+import { type KeyboardEvent, useId, type ReactNode } from "react"
 import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
+import { LOG_POSITIONS, logScale } from "./logScale.ts"
 import { useRepeatsTitle } from "./titledContainer.tsx"
 import { Tooltip } from "./Tooltip.tsx"
+
+/**
+ * `scale="log"`: the slider runs over positions on a log scale between `min` and `max` (see
+ * logScale.ts) and speaks in values. A drag gives readable values (4,096; 16,000; 128,000), a
+ * value set elsewhere sits at its exact place, the arrows move by a hundredth of the track, Page
+ * Up/Down (or Shift) by a tenth, and Home and End go to `min` and `max`.
+ */
+export type SliderScale = "linear" | "log"
+
+function scaledProps({
+  scale,
+  value,
+  min,
+  max,
+  step,
+  largeStep,
+  onValueChange,
+  onValueCommitted
+}: {
+  scale: SliderScale
+  value: number
+  min: number
+  max: number
+  step: number
+  largeStep: number
+  onValueChange: (value: number) => void
+  onValueCommitted?: ((value: number) => void) | undefined
+}) {
+  if (scale === "linear")
+    return {
+      root: {
+        value,
+        min,
+        max,
+        step,
+        largeStep,
+        onValueChange: (next: number) => onValueChange(next),
+        onValueCommitted: (next: number) => onValueCommitted?.(next)
+      },
+      toValue: (next: number) => next,
+      onKeyDown: undefined
+    }
+  const log = logScale(min, max)
+  const at = log.positionOf(value)
+  // The thumb where the value put it says the exact value, not the scale's nearest step.
+  const toValue = (position: number) => (position === at ? value : log.valueAt(position))
+  const onKeyDown = (event: KeyboardEvent) => {
+    const current = Math.min(max, Math.max(min, value))
+    const large = event.shiftKey || event.key === "PageUp" || event.key === "PageDown"
+    const next =
+      event.key === "Home"
+        ? min
+        : event.key === "End"
+          ? max
+          : event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "PageUp"
+            ? log.stepFrom(current, 1, large)
+            : event.key === "ArrowLeft" || event.key === "ArrowDown" || event.key === "PageDown"
+              ? log.stepFrom(current, -1, large)
+              : null
+    if (next === null) return
+    // As Base UI does for its keys: this slider handles them, and nothing around it sees them.
+    event.preventDefault()
+    event.stopPropagation()
+    if (next === current) return
+    onValueChange(next)
+    onValueCommitted?.(next)
+  }
+  return {
+    root: {
+      value: at,
+      min: 0,
+      max: LOG_POSITIONS,
+      step: 1,
+      largeStep: LOG_POSITIONS / 10,
+      onValueChange: (next: number) => onValueChange(toValue(next)),
+      onValueCommitted: (next: number) => onValueCommitted?.(toValue(next))
+    },
+    toValue,
+    onKeyDown
+  }
+}
 
 export function Slider({
   label,
@@ -17,6 +99,7 @@ export function Slider({
   largeStep,
   valueText,
   disabled = false,
+  scale = "linear",
   onValueChange,
   onValueCommitted
 }: {
@@ -30,22 +113,27 @@ export function Slider({
   /** The value as read out and shown, "1200 px". */
   valueText: (value: number) => string
   disabled?: boolean
+  scale?: SliderScale
   onValueChange: (value: number) => void
   onValueCommitted: (value: number) => void
 }) {
   const aboutId = useId()
   const repeats = useRepeatsTitle(label, false, "The slider's label")
+  const scaled = scaledProps({
+    scale,
+    value,
+    min,
+    max,
+    step,
+    largeStep: largeStep ?? step * 5,
+    onValueChange,
+    onValueCommitted
+  })
   return (
     <BaseSlider.Root
-      value={value}
-      min={min}
-      max={max}
-      step={step}
-      largeStep={largeStep ?? step * 5}
+      {...scaled.root}
       disabled={disabled}
       thumbAlignment="edge"
-      onValueChange={(next) => onValueChange(next)}
-      onValueCommitted={(next) => onValueCommitted(next)}
       className="flex w-full max-w-xl flex-col gap-2 data-disabled:opacity-50"
     >
       <div className="flex items-baseline justify-between gap-3">
@@ -62,7 +150,8 @@ export function Slider({
           <BaseSlider.Thumb
             data-layout-overlay="Slider thumb rides over its track and fill"
             aria-describedby={about ? aboutId : undefined}
-            getAriaValueText={(_formatted, current) => valueText(current)}
+            getAriaValueText={(_formatted, current) => valueText(scaled.toValue(current))}
+            onKeyDown={scaled.onKeyDown}
             className="size-5 rounded-full border border-border bg-surface shadow-sm outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus"
           />
         </BaseSlider.Track>
@@ -145,6 +234,7 @@ export function FieldSlider({
   largeStep,
   valueText,
   disabled = false,
+  scale = "linear",
   onValueChange
 }: {
   label: string
@@ -155,18 +245,24 @@ export function FieldSlider({
   largeStep?: number
   valueText: (value: number) => string
   disabled?: boolean
+  scale?: SliderScale
   onValueChange: (value: number) => void
 }) {
+  const scaled = scaledProps({
+    scale,
+    value: Math.min(max, Math.max(min, value)),
+    min,
+    max,
+    step,
+    largeStep: largeStep ?? step * 10,
+    onValueChange
+  })
   return (
     <BaseSlider.Root
-      value={Math.min(max, Math.max(min, value))}
-      min={min}
-      max={max}
-      step={step}
-      largeStep={largeStep ?? step * 10}
+      {...scaled.root}
+      onValueCommitted={undefined}
       disabled={disabled}
       thumbAlignment="edge"
-      onValueChange={(next) => onValueChange(next)}
       className="flex w-full data-disabled:opacity-50"
     >
       <BaseSlider.Control className="flex h-6 w-full touch-none items-center select-none">
@@ -175,7 +271,8 @@ export function FieldSlider({
           <BaseSlider.Thumb
             data-layout-overlay="Slider thumb rides over its track and fill"
             aria-label={label}
-            getAriaValueText={(_formatted, current) => valueText(current)}
+            getAriaValueText={(_formatted, current) => valueText(scaled.toValue(current))}
+            onKeyDown={scaled.onKeyDown}
             className="size-5 rounded-full border border-border bg-surface shadow-sm outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus"
           />
         </BaseSlider.Track>

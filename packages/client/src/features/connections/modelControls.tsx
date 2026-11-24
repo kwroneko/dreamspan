@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react"
 import { AboutHint, LabelWithHelp } from "../../ui/AboutHint.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Field, Fieldset, Input } from "../../ui/Field.tsx"
-import { FieldSlider } from "../../ui/Slider.tsx"
+import { FieldSlider, type SliderScale } from "../../ui/Slider.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import type { Row } from "./modelForm.ts"
 
@@ -135,6 +135,7 @@ export function RangeField({
   max,
   step,
   whole = false,
+  scale = "linear",
   limit,
   note,
   error,
@@ -154,6 +155,8 @@ export function RangeField({
   max: number
   step: number
   whole?: boolean
+  /** "log" for a range over orders of magnitude (token counts): see the ui Slider. */
+  scale?: SliderScale
   limit?: Limit
   /** A short tag after the label ("not sent"), with its explanation. */
   note?: { readonly text: string; readonly hint: string } | undefined
@@ -214,6 +217,7 @@ export function RangeField({
         step={step}
         largeStep={whole ? Math.max(step, Math.round((max - min) / 20 / step) * step) : step * 10}
         valueText={format}
+        scale={scale}
         onValueChange={onSlide}
       />
       {limit && (
