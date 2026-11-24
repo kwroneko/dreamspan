@@ -134,6 +134,48 @@ export const fileTyped = (
   })
 
 /**
+ * The first message typed on the old workshop pages, before a new workshop and a story's
+ * Workshop tab became pending chats (draftchats5, sidedraft): a `user_field` draft under
+ * `pending-workshop:new` or `pending-workshop:<story>`, which nothing reads any more.
+ */
+export const legacyWorkshopDraft = (targetId: string, field: string) =>
+  field === "First message" && targetId.startsWith("pending-workshop:")
+
+/** What such a draft's text is filed as: the story's name when it was typed beside one. */
+export const legacyWorkshopLabel = (sql: SqlClient.SqlClient, userId: string, targetId: string) =>
+  Effect.map(
+    sql<{ title: string }>`SELECT title FROM chats /* chat:includes-pending: names a story by id */
+      WHERE id = ${targetId.slice("pending-workshop:".length)} AND owner_user_id = ${userId}`,
+    ([story]) => (story?.title?.trim() ? `Workshop about ${story.title.trim()}` : "New workshop")
+  )
+
+/**
+ * Files every old workshop page's first message (`legacyWorkshopDraft`) to recovered texts,
+ * with every text its history can restore, and deletes the draft (its history with it). Run as
+ * the writer starts: idempotent, and nothing once they are gone. A save sent to such a key later
+ * (a browser's copy) is filed the same way (writes.ts).
+ */
+export const fileLegacyWorkshopDrafts = (sql: SqlClient.SqlClient, bin: Pick<Bin, "drafts" | "recover">) =>
+  Effect.gen(function* () {
+    const rows = yield* sql<{ id: string; user_id: UserId; target_id: string; field: string; content: string }>`
+      SELECT id, user_id, target_id, field, content FROM drafts
+      WHERE target_kind = 'user_field' AND field = 'First message' AND target_id LIKE 'pending-workshop:%'`
+    for (const row of rows) {
+      const lost = yield* bin.drafts.unsaved(row.id, row.content, [])
+      if (lost.length > 0)
+        yield* bin.recover(
+          row.user_id,
+          new DraftKey({ targetKind: "user_field", targetId: row.target_id, field: row.field }),
+          lost,
+          "discard",
+          yield* legacyWorkshopLabel(sql, row.user_id, row.target_id)
+        )
+      yield* sql`DELETE FROM drafts WHERE id = ${row.id}`
+    }
+    return rows.length
+  })
+
+/**
  * Removes a pending chat of the user's that nobody keeps (left, or abandoned: the caller decides),
  * in the caller's transaction. Its typing goes to recovered texts first, as "New chat with
  * <names>": the composer, a greeting edit not saved, anything else typed into it, each with what

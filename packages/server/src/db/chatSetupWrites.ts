@@ -44,6 +44,7 @@ import type { StoredRewrite } from "@dreamspan/shared/regexScripts.ts"
 import { transaction as runTransaction } from "./tx.ts"
 import { checkAutoTurn, claimAutoTurn } from "./autoGuard.ts"
 import { pinLibrary, type LibraryPin, type VersionWithLibraryPins } from "./libraryAttachments.ts"
+import { personaInStory } from "./workshopDefaults.ts"
 
 const userMessage = (
   content: string,
@@ -677,6 +678,12 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             WHERE id = ${chatId}`
           const forkOf = forkId ?? current?.fork ?? null
           if (forkOf === null) return yield* new NotFound({ entity: "fork", id: chatId })
+          // A workshop beside a story never plays the story's persona or one of its cards: their
+          // descriptions and books would bring the story's roleplay into it (workfix1). Its first
+          // send keeps the persona chosen here, so the choice is refused, as its making refuses it.
+          const story = (chat.draft_for ?? "").startsWith("side:") ? chat.draft_for!.split(":")[1]! : null
+          if (persona !== undefined && story !== null && (yield* personaInStory(sql, userId, story, persona)))
+            return { pending: true, changed: false, fellBack: false, refusedPersona: true }
           const fork = { id: forkOf, chatId }
           // The change is the chat's start's: nothing is said yet (DESIGN §2.1).
           for (const event of events) yield* graph.insertStateEvent(userId, chatId, null, null, null, event, forkOf)
@@ -835,19 +842,24 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             const entity = characters[i]!
             const greeter = byId.get(entity)
             const wanted = wantedOf.get(entity)
-            if (greeter === undefined || wanted === undefined) continue
-            const offered = new Map(wanted.options.map((option) => [cardIndex(entity, option), option]))
+            if (greeter === undefined) continue
+            // None drawn for it (its card moved to the bin since): it keeps the greetings it has,
+            // except that a group-only one goes once it is the chat's only character.
+            if (wanted === undefined && characters.length > 1) continue
+            const groupOnly = new Set(greeter.greetingIndexes.slice(greeter.greetings.length))
+            const offered =
+              wanted === undefined ? null : new Map(wanted.options.map((option) => [cardIndex(entity, option), option]))
             const versions = yield* versionsOf(slot.id)
             const have = new Set(versions.map((version) => refIndex(version.ref)))
             let ordinal = Math.max(-1, ...versions.map((version) => version.ordinal)) + 1
-            for (const [index, option] of offered)
+            for (const [index, option] of offered ?? [])
               if (!have.has(index)) {
                 yield* graph.insertVersion(slot.id, ordinal++, greetingVersionOf(greeter, option), at, forkOf, userId)
                 changed = true
               }
             const removed = versions.filter((version) => {
               const index = refIndex(version.ref)
-              return index !== null && !offered.has(index)
+              return index !== null && (offered === null ? groupOnly.has(index) : !offered.has(index))
             })
             if (removed.length === 0) continue
             const stays = versions

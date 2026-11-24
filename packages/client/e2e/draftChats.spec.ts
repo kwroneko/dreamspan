@@ -340,6 +340,36 @@ test("what's typed after a swept new chat stopped saving survives a reload, in r
   await expect.poll(recovered, { timeout: 15_000 }).toContain(last)
 })
 
+test("a reload before the start card's title reached the new chat still names it", async ({ page }) => {
+  await start(page)
+  // The rename never reaches the server on the first load (a slow connection, say).
+  let held = true
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      if (held && typeof data === "string" && data.includes('"RenameChat"')) return
+      upstream.send(data)
+    })
+    upstream.onMessage((data) => socket.send(data))
+  })
+  await page.goto(`${server().url}/chats`)
+  await page.getByRole("textbox", { name: "Title of the new chat", exact: true }).fill("Notes on rope")
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await expect.poll(() => draftOf(page)).not.toBeNull()
+  const draft = draftOf(page)!
+  await expect(composer(page)).toBeEditable()
+  await page.waitForTimeout(1000)
+  held = false
+  await page.reload()
+  await expect(composer(page)).toBeEditable()
+  await composer(page).fill("The first words.")
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await expect(page).toHaveURL(chatUrl(draft))
+  await expect
+    .poll(() => admin((api) => api.GetChat({ chatId: draft as never })).then((chat) => chat.title))
+    .toBe("Notes on rope")
+})
+
 test("a new chat's own notes and snippets wait, disabled, saying why", async ({ page }) => {
   await start(page)
   const card = await importCard(page, { name: "Mira Notes", first_mes: "Mira opens the door." })

@@ -34,6 +34,8 @@ import { type OpsOf, serveOps } from "./opsOf.ts"
 import { defaultBinLimits, type BinLimits } from "@dreamspan/shared/bin.ts"
 import { makeAccountWriteHandlers } from "./accounts.ts"
 import { makeBin } from "./bin.ts"
+import { fileLegacyWorkshopDrafts } from "./pendingChats.ts"
+import { transaction } from "./tx.ts"
 import { makeBinWriteHandlers } from "./binWrites.ts"
 import { makeChatSetupWriteHandlers } from "./chatSetupWrites.ts"
 import { makeGenerationWriteHandlers } from "./generationWrites.ts"
@@ -73,6 +75,11 @@ const handlers = Layer.unwrap(
       yield* SqlClient.SqlClient,
       binLimits,
       draftClock === null ? Date.now : () => Number(Atomics.load(new BigInt64Array(draftClock), 0))
+    )
+    // The old workshop pages' first messages, which nothing reads now: to recovered texts with
+    // their history, before anything else is written (pendingChats.ts).
+    yield* fileLegacyWorkshopDrafts(yield* SqlClient.SqlClient, bin).pipe(
+      transaction(yield* SqlClient.SqlClient, "FileLegacyWorkshopDrafts")
     )
     const [graph, library, binOps, providers, accounts, chatSetup, generation] = yield* Effect.all([
       makeWriteHandlers(bin),

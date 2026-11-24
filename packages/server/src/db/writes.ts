@@ -20,6 +20,7 @@ import { remoteOf } from "@dreamspan/shared/cardSources.ts"
 import { composerKey, DraftHistoryPolicy, DraftKey, parseDraftTarget } from "@dreamspan/shared/drafts.ts"
 import { heldRemoteCards } from "./cardOrigins.ts"
 import { legacyPendingDraft } from "./migrationPendingChats.ts"
+import { legacyWorkshopDraft, legacyWorkshopLabel } from "./pendingChats.ts"
 import type { Bin } from "./bin.ts"
 import { EDIT_THINKING_FIELD, NotAmendable } from "@dreamspan/shared/chatApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
@@ -225,11 +226,14 @@ export const makeWriteHandlers = (bin: Bin) =>
         // An old new-chat page's first message (a browser's copy sent on, or a tab from before):
         // nothing reads its draft any more, so its text goes to recovered texts (0018_pending_chats).
         // Every text its history holds goes too, as the draft and its history are deleted.
-        if (key.targetKind === "user_field" && legacyPendingDraft(key.targetId, key.field)) {
+        // So does an old workshop page's (`pending-workshop:`, pendingChats.ts).
+        const workshop = legacyWorkshopDraft(key.targetId, key.field)
+        if (key.targetKind === "user_field" && (workshop || legacyPendingDraft(key.targetId, key.field))) {
           const [row] = yield* sql<{ id: string }>`SELECT id FROM drafts WHERE user_id = ${userId}
             AND target_kind = 'user_field' AND target_id = ${key.targetId} AND field = ${key.field}`
           const texts = row === undefined ? [content] : yield* drafts.unsaved(row.id, content, [])
-          for (const text of texts.toReversed()) yield* fileLate(userId, key, text, "New chat")
+          const label = workshop ? yield* legacyWorkshopLabel(sql, userId, key.targetId) : "New chat"
+          for (const text of texts.toReversed()) yield* fileLate(userId, key, text, label)
           yield* sql`DELETE FROM drafts WHERE user_id = ${userId} AND target_kind = 'user_field'
             AND target_id = ${key.targetId} AND field = ${key.field}`
         }

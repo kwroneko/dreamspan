@@ -961,6 +961,10 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
               })
             })
           )
+          if (synced.refusedPersona)
+            return yield* new ServerError({
+              message: "A workshop beside a story can't use the story's persona or one of its characters."
+            })
           if (synced.pending) {
             if (synced.changed) hub.publish(chatId, { _tag: "Reload" })
             hub.publish(chatId, { _tag: "State" })

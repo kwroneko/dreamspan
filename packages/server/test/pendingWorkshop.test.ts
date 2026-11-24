@@ -314,4 +314,34 @@ describe("a new workshop's pending chat", () => {
       })
     )
   )
+
+  it.live("a side workshop not started yet refuses a card of its story as your persona", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, quill } = yield* setup
+        const story = yield* api.StartChat({
+          cards: [quill],
+          persona: null,
+          greeting: null,
+          first: { _tag: "Send", content: "Quill writes by the window.", speakerEntityId: null },
+          title: "Window"
+        })
+        const draft = yield* api.OpenDraftChat({ draftFor: `side:${story.chat.id}:` })
+        const refused = yield* api
+          .ChangeCast({
+            chatId: draft.id,
+            slotId: null,
+            forkId: draft.currentForkId!,
+            pending: true,
+            change: { _tag: "Persona", entityId: quill }
+          })
+          .pipe(Effect.flip)
+        assert.strictEqual(refused._tag, "ServerError")
+        const state = foldState(
+          yield* (yield* Reader).StateEventsAt({ userId, chatId: draft.id, slotId: draft.activeLeafSlotId })
+        )
+        assert.notInclude(state.playedByMe, quill)
+      })
+    )
+  )
 })
