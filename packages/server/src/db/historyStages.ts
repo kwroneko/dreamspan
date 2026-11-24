@@ -168,11 +168,13 @@ export const prepareHistoryStage = Effect.fnUntraced(function* (
   // A failed enclosing transaction may roll TEMP deletions back. Reconcile orphaned
   // rows independently of the in-memory token cache before accepting more preparation.
   yield* sql`DELETE FROM history_prepared_rows WHERE token NOT IN (SELECT value FROM json_each(${JSON.stringify([...map.keys(), plan.token])}))`
-  for (const [key, old] of map)
-    if (old.expires < now || (map.size >= 8 && key !== plan.token)) {
-      yield* sql`DELETE FROM history_prepared_rows WHERE token=${key}`
-      map.delete(key)
-    }
+  const expired = [...map].filter(([, old]) => old.expires < now).map(([key]) => key)
+  const removed = new Set(expired)
+  if (!input.token && map.size - removed.size >= 8) {
+    const oldest = [...map.keys()].find((key) => !removed.has(key))
+    if (oldest !== undefined) removed.add(oldest)
+  }
+  for (const key of removed) yield* sql`DELETE FROM history_prepared_rows WHERE token=${key}`
   yield* sql.unsafe(
     `INSERT INTO history_prepared_rows SELECT ?,n+?,target,current_id,after_id,content,slot,copy,override_id,own,item,
     seq+?,reduce_seq+?,before_json,after_json,ordinal,expected_updated FROM history_bulk`,
@@ -184,6 +186,7 @@ export const prepareHistoryStage = Effect.fnUntraced(function* (
   plan.processed += input.edits.length
   plan.bytes += bytes
   historyEditDigest(input.edits, plan.digest)
+  for (const key of removed) map.delete(key)
   map.set(plan.token, plan)
   return plan.token
 })
