@@ -103,7 +103,7 @@ const sourceHelp: Record<string, readonly [string, string, string?]> = {
 }
 
 export function placeholderHelp(identifier: string, byDefinitions = false): string {
-  const help = sourceHelp[identifier]
+  const help = Object.hasOwn(sourceHelp, identifier) ? sourceHelp[identifier] : undefined
   if (!help)
     return "This placeholder has no content source in the app, so no text is inserted when a request is built. There is no text to edit here or in the preset."
   const [source, edit, setting] = help

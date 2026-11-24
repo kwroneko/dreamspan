@@ -57,3 +57,7 @@ test("source help explains Definitions routing and unknown sources truthfully", 
   expect(placeholderHelp("charDescription", true)).toContain("sent through the enabled Definitions block instead")
   expect(placeholderHelp("unknownMarker")).toContain("no text is inserted")
 })
+
+test.each(["constructor", "toString", "__proto__"])("%s has no placeholder source", (identifier) => {
+  expect(placeholderHelp(identifier)).toBe(placeholderHelp("unknownMarker"))
+})
