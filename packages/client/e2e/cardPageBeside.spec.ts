@@ -243,3 +243,35 @@ test("cardex cards: View beside replaces the side pane's preview; a new browser 
     await server.stop()
   }
 })
+
+test("cardex cards: Edit beside opens the editor as the side pane's preview, as Open in the editor does", async ({
+  page
+}) => {
+  const port = await freePort()
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: String(port) })
+  try {
+    await setup(page, server)
+    await page.goto(server.url)
+    const main = page.getByRole("main")
+    await main.getByRole("button", { name: "cardex", exact: true }).click()
+    const tiles = main.locator("[data-remote-card]")
+    await expect(tiles.nth(3)).toBeVisible()
+    const names = await tiles.evaluateAll((nodes) =>
+      nodes.map((n) => (n.querySelector("a")?.getAttribute("aria-label") ?? "").replace(/^Open /, ""))
+    )
+    // Edit beside comes right after Open in the editor.
+    await tiles.nth(0).getByRole("link").first().click({ button: "right" })
+    const texts = await page.getByRole("menuitem").allTextContents()
+    const editor = texts.findIndex((t) => /^Open in the editor/.test(t))
+    expect(editor).toBeGreaterThan(0)
+    expect(texts[editor + 1]).toMatch(/^Edit beside/)
+    await page.keyboard.press("Escape")
+    await walk(page, tiles, names, /^Edit beside/, "cardex-editor")
+    // The side pane shows the card's full editor, at the editor's URL.
+    const side = frames(page).nth(1)
+    await side.locator("[data-tab]").nth(1).getByRole("tab").click()
+    await expect(page).toHaveURL(/\/library\//)
+  } finally {
+    await server.stop()
+  }
+})

@@ -29,6 +29,7 @@ import { SortDirection, type SortOrder, SortScroller } from "../characters/cardB
 import { TILE_CLASS, TILE_SURFACE_CLASS, TileFace, useCharacterNavigation } from "../characters/shellData.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
 import {
+  EDITOR_BESIDE_HINT,
   OPEN_BESIDE_HINT,
   OPEN_NEW_TAB_HINT,
   PAGE_BESIDE_HINT,
@@ -678,6 +679,16 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
             onClick={() => void navigate({ href: remoteEditorHref(info.id, card.remoteId) })}
           >
             Open in the editor
+          </MenuItem>
+        )}
+        {/* The editor beside, as the side pane's preview tab, to read card after card (owner, 2026-11-24). */}
+        {mine === null && canBeside && (
+          <MenuItem
+            icon="edit"
+            description={EDITOR_BESIDE_HINT}
+            onClick={() => openPageBeside(remoteEditorHref(info.id, card.remoteId))}
+          >
+            Edit beside
           </MenuItem>
         )}
         {mine === null && (

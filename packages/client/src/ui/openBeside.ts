@@ -30,6 +30,9 @@ export const OPEN_BESIDE_HINT =
 /** A card's own page beside (owner, 2026-11-24): its editor, or a card source's read-only page. */
 export const PAGE_BESIDE_HINT = "Open this card's page in the pane next to this one."
 
+/** A card source's card in the full editor beside (owner, 2026-11-24), for reading card after card. */
+export const EDITOR_BESIDE_HINT = "Shows every field in the editor, in the pane next to this one."
+
 /** The explanations of a link's other two open items, as the chat rows' menu has them. */
 export const OPEN_HERE_HINT = "Opens it here, as a click does."
 export const OPEN_NEW_TAB_HINT = "Opens it in a new browser tab."
