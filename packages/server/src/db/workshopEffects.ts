@@ -37,6 +37,7 @@ import { makeLibraryQueries } from "./library.ts"
 import { transaction } from "./tx.ts"
 import { workshopLimits as limits } from "../workshopLimits.ts"
 import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
+import { newWorkshopImportMedia } from "./workshopImportMedia.ts"
 
 type Handlers = Parameters<typeof WriteOps.of>[0]
 type OperationName =
@@ -72,6 +73,7 @@ type Key = {
   readonly rolloutId: string
   readonly toolCallId: string
   readonly approvalDigest?: string
+  readonly cardFileImport?: { readonly maxAddedBytes: number }
   readonly expectedRefs?: ReadonlyArray<{
     readonly refId: RefId
     readonly rowVersion: number
@@ -525,12 +527,13 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
           capability,
           "library"
         )
-        if (mode === "off")
+        if (mode === "off" || (key.cardFileImport && grants.some((g) => g.capability === "files" && g.mode === "off")))
           return yield* new EffectUndoRefused({ message: "This capability is turned off in this workshop." })
-        if (mode === "ask") {
+        if (mode === "ask" || key.cardFileImport) {
           const [approval] = yield* sql`SELECT 1 FROM tool_approvals WHERE rollout_id = ${key.rolloutId}
             AND tool_call_id = ${key.toolCallId} AND capability = ${capability}
-            AND digest = ${key.approvalDigest ?? null} AND status = 'used'`
+            AND digest = ${key.approvalDigest ?? null} AND status = 'used'
+            AND (${key.cardFileImport ? 1 : 0} = 0 OR answer = 'allow')`
           if (!approval)
             return yield* new EffectUndoRefused({ message: "This change needs a current approval. Ask again." })
         }
@@ -615,6 +618,8 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
           if ((!policy && !creates) || input.capability !== (policy?.capability ?? creations[input.operation]))
             return yield* refuseOperation("This operation has no safe undo recipe, so it wasn't done.")
           const value = input.payload as Record<string, unknown>
+          if (input.cardFileImport && (input.operation !== "ImportFile" || value?.kind !== "card"))
+            return yield* refuseOperation("The card file import requires a character card.")
           const rpc = WriteOps.requests.get(input.operation as never)
           if ((!rpc && input.operation !== "SetAgentSetting") || !value || value.userId !== input.userId)
             return yield* refuseOperation("Invalid operation owner.")
@@ -782,6 +787,13 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                       value.presetLorebooks !== undefined)
                   )
                     return yield* refuseOperation("Import this file from the library page.")
+                  if (
+                    input.operation === "ImportFile" &&
+                    !input.cardFileImport &&
+                    Array.isArray(value.media) &&
+                    value.media.length > 0
+                  )
+                    return yield* refuseOperation("Use the card file import for files with pictures.")
                   // A file the assistant imports is its own writing: as with its edits, changed
                   // scripts and HTML stay off and nothing in it grants a permission.
                   let imported: Record<string, unknown> = {}
@@ -833,6 +845,16 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                     ])
                       if (typeof json === "string") yield* checkDocument(JSON.parse(json))
                   }
+                  const newMedia = input.cardFileImport
+                    ? yield* newWorkshopImportMedia(
+                        sql,
+                        input.userId,
+                        (payload as Parameters<Handlers["ImportFile"]>[0]).media
+                      )
+                    : []
+                  const addedBytes = newMedia.reduce((total, row) => total + row.addedBytes, 0)
+                  if (input.cardFileImport && addedBytes > input.cardFileImport.maxAddedBytes)
+                    return yield* refuseOperation("Available Files storage changed while importing. Try again.")
                   const origin = `${input.rolloutId}:${input.toolCallId}`
                   const result = yield* handler!({
                     ...(payload as object),
@@ -849,6 +871,9 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                   ) as { id: RefId }
                   if (input.operation === "ImportFile" && (result as { created: boolean }).created !== true)
                     return yield* refuseOperation("Import this file from the library page.")
+                  if (newMedia.length)
+                    yield* sql`UPDATE media_refs SET files_quota = 1 WHERE owner_user_id = ${input.userId}
+                      AND media_id IN (SELECT id FROM media_assets WHERE sha256 IN ${sql.in(newMedia.map((row) => row.sha256))})`
                   const first = yield* creation(made.id)
                   const effects = [first]
                   // A card's Undo answers for the notes that came with it (`createUndoer`).
@@ -857,7 +882,13 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                       ORDER BY id LIMIT 1`
                     effects.push(yield* creation(ref!.id))
                   }
-                  return { result: pendingOperationResult(input.operation, result), effects }
+                  return {
+                    result: pendingOperationResult(
+                      input.operation,
+                      input.cardFileImport ? { ...(result as object), addedBytes } : result
+                    ),
+                    effects
+                  }
                 }
                 if (input.operation === "SendOrQueue") {
                   const running = yield* sql`SELECT 1 FROM versions v JOIN slots s ON s.id = v.slot_id

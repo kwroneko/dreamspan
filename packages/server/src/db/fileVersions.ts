@@ -11,11 +11,16 @@ import { query, transaction } from "./tx.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
 import type { Writer } from "./Database.ts"
 import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
+import { newWorkshopImportMedia } from "./workshopImportMedia.ts"
 
-/** The Files quota counts each media row once, including when several paths hold it. */
+/** The Files quota counts each media row once, including when several paths or imports hold it. */
 const versionBytes = (sql: SqlClient.SqlClient, userId: string, sha256?: string) =>
   sql<{ bytes: number | null }>`SELECT sum(m.byte_size) AS bytes FROM media_assets m
-    WHERE m.id IN (SELECT media_id FROM file_versions WHERE owner_user_id = ${userId} AND media_id IS NOT NULL)
+    WHERE m.id IN (
+      SELECT media_id FROM file_versions WHERE owner_user_id = ${userId} AND media_id IS NOT NULL
+      UNION
+      SELECT media_id FROM media_refs WHERE owner_user_id = ${userId} AND files_quota = 1
+    )
     ${sha256 === undefined ? sql`` : sql`AND m.sha256 = ${sha256}`}`.pipe(Effect.map(([row]) => row?.bytes ?? 0))
 
 export const makeFileVersionWriteHandlers = Effect.gen(function* () {
@@ -291,6 +296,11 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
         ),
         query("FileSharesGrantedTo")
       ),
-    FileVersionBytes: ({ userId, sha256 }) => versionBytes(sql, userId, sha256).pipe(query("FileVersionBytes"))
+    FileVersionBytes: ({ userId, sha256 }) => versionBytes(sql, userId, sha256).pipe(query("FileVersionBytes")),
+    WorkshopImportBytes: ({ userId, media }) =>
+      newWorkshopImportMedia(sql, userId, media).pipe(
+        Effect.map((rows) => rows.reduce((total, row) => total + row.addedBytes, 0)),
+        query("WorkshopImportBytes")
+      )
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })

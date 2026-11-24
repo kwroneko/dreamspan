@@ -13,12 +13,13 @@ const MAX_ITEMS = 16
 
 export const composerLibrary = (sql: SqlClient.SqlClient) => {
   /** The user's composer draft of a live chat; `workshop`: one of a workshop's. */
-  const owned = (userId: UserId, chatId: string, draftId: string, workshop: boolean) =>
+  const owned = (userId: UserId, chatId: string, draftId: string, workshop: boolean, forkId?: string) =>
     Effect.gen(function* () {
       const [row] = yield* sql`SELECT d.id FROM drafts d JOIN chats c ON c.id=d.target_id
       WHERE d.id=${draftId} AND d.user_id=${userId} AND d.target_kind='composer'
         AND c.id=${chatId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL
-        AND (${workshop ? 0 : 1} OR c.kind='workshop')`
+        AND (${workshop ? 0 : 1} OR c.kind='workshop')
+        ${forkId === undefined ? sql`` : sql`AND d.field = ${forkId}`}`
       if (!row) return yield* new NotFound({ entity: "composer", id: draftId })
     })
   /** The draft's items still in the library (not binned), in the order attached. */
@@ -65,12 +66,17 @@ export const composerLibrary = (sql: SqlClient.SqlClient) => {
         })
       return items
     })
-  /** A send's items leave the draft it commits; the others stay for the next message. */
-  const consume = (draftId: string | undefined, sent: MessageLibrary) =>
-    Effect.forEach(
-      draftId === undefined ? [] : sent,
-      (item) => sql`DELETE FROM composer_library WHERE draft_id=${draftId!} AND ref_id=${item.refId}`,
-      { discard: true }
-    )
+  /** A send takes only the items still attached to its draft. */
+  const consume = (userId: UserId, chatId: string, forkId: string, draftId: string | undefined, sent: MessageLibrary) =>
+    Effect.gen(function* () {
+      if (draftId === undefined || sent.length === 0) return
+      yield* owned(userId, chatId, draftId, true, forkId)
+      const rows = yield* sql<MessageLibrary[number]>`SELECT ref_id AS refId, kind FROM composer_library
+        WHERE draft_id = ${draftId}`
+      const attached = new Map(rows.map((item) => [item.refId, item.kind]))
+      for (const { refId, kind } of sent)
+        if (attached.get(refId) !== kind) return yield* new NotFound({ entity: "composer attachment", id: refId })
+      yield* sql`DELETE FROM composer_library WHERE draft_id = ${draftId} AND ref_id IN ${sql.in(sent.map((item) => item.refId))}`
+    })
   return { read, set, consume }
 }

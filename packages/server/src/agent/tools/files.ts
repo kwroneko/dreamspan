@@ -410,14 +410,15 @@ export const makeFileTools = (deps: FileToolDeps) => {
   }
 
   /** The capability's standing, checked again at the call; the account; its folders made. */
-  const proof = (ctx: ToolContext, capability: string) =>
+  const proof = (ctx: ToolContext, capability: string, cardFileImport?: true) =>
     Effect.gen(function* () {
       const actor = yield* deps.reader.AuthorizePluginTool({
         userId: ctx.userId,
         rolloutId: ctx.rolloutId,
         toolCallId: ctx.toolCallId,
         capability,
-        requireApproval: false,
+        requireApproval: cardFileImport === true,
+        ...(cardFileImport ? { requireFiles: true as const } : {}),
         ...(ctx.approvalDigest ? { digest: ctx.approvalDigest } : {})
       })
       const env = accountEnv(deps, actor.id)
@@ -555,10 +556,11 @@ export const makeFileTools = (deps: FileToolDeps) => {
         args: Record<string, unknown>,
         env: AccountEnv,
         actor: User
-      ) => Effect.Effect<ToolOutput, unknown>
+      ) => Effect.Effect<ToolOutput, unknown>,
+      cardFileImport?: true
     ) =>
     (ctx: ToolContext, args: Record<string, unknown>): Effect.Effect<ToolOutput> =>
-      proof(ctx, capability).pipe(
+      proof(ctx, capability, cardFileImport).pipe(
         Effect.flatMap(({ actor, env }) => {
           ctx.cache.set(ACTOR_KEY, actor)
           return run(ctx, args, env, actor)
@@ -1094,8 +1096,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
     formats: () => deps.formats,
     dataDir: deps.dataDir,
     writer: () => deps.writer,
+    quota: deps.quota,
     holding: deps.holding,
-    wrap: (capability, run) => wrap(capability, (ctx, args, env) => run(ctx, args, env as never)),
+    wrap: (capability, run, cardFileImport) =>
+      wrap(capability, (ctx, args, env) => run(ctx, args, env as never), cardFileImport),
     readPlace: (ctx, env, path) => readPlace(ctx, env as AccountEnv, path),
     markRead: (ctx, full, bytes) => ctx.cache.set(readKey(full), sha256(Buffer.from(bytes))),
     wasRead: (ctx, full) => ctx.cache.get(readKey(full)) !== undefined,

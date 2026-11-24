@@ -237,7 +237,16 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
           FROM workshop_grants WHERE chat_id = ${chatId} AND owner_user_id = ${userId} AND target = ${target ?? ""}
             AND (expires_at IS NULL OR expires_at > ${now}) ORDER BY capability`
       }).pipe(query("WorkshopGrants")),
-    AuthorizePluginTool: ({ userId, rolloutId, toolCallId, capability, digest, requireApproval, rollback }) =>
+    AuthorizePluginTool: ({
+      userId,
+      rolloutId,
+      toolCallId,
+      capability,
+      digest,
+      requireApproval,
+      requireFiles,
+      rollback
+    }) =>
       Effect.gen(function* () {
         const run = yield* ownedRollout(sql, userId, rolloutId)
         const [chat] = yield* sql`SELECT 1 FROM chats c WHERE c.id = ${run.chat_id} AND c.kind = 'workshop'
@@ -259,6 +268,8 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
           "outside"
         )
         if (mode === "off") return yield* new ApprovalRefused({ message: "This capability is off in this workshop." })
+        if (requireFiles && grants.some((grant) => grant.capability === "files" && grant.mode === "off"))
+          return yield* new ApprovalRefused({ message: "Files are off in this workshop." })
         if (requireApproval || (mode === "ask" && !rollback)) {
           const [approval] =
             yield* sql`SELECT 1 FROM tool_approvals WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}

@@ -2833,6 +2833,9 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       toolCallId: Schema.String,
       capability: Schema.String,
       approvalDigest: Schema.optionalKey(Schema.String),
+      cardFileImport: Schema.optionalKey(
+        Schema.Struct({ maxAddedBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) })
+      ),
       expected: Schema.Unknown,
       operation: Schema.String,
       payload: Schema.Unknown
@@ -6330,6 +6333,7 @@ const ReadOpsOwn = RpcGroup.make(
       capability: Schema.String,
       digest: Schema.optionalKey(Schema.String),
       requireApproval: Schema.Boolean,
+      requireFiles: Schema.optionalKey(Schema.Literal(true)),
       rollback: Schema.optionalKey(Schema.Boolean)
     },
     success: User,
@@ -6449,9 +6453,14 @@ const ReadOpsOwn = RpcGroup.make(
     ),
     error: StorageError
   }),
-  /** Bytes an account's file versions hold: each stored content once, optionally just for a hash. */
+  /** Bytes charged to Files for versions and workshop imports: each content once, optionally by hash. */
   Rpc.make("FileVersionBytes", {
     payload: { userId: UserId, sha256: Schema.optionalKey(Sha256) },
+    success: Schema.Int,
+    error: StorageError
+  }),
+  Rpc.make("WorkshopImportBytes", {
+    payload: { userId: UserId, media: Schema.Array(Schema.Struct({ sha256: Sha256, byteSize: Schema.Int })) },
     success: Schema.Int,
     error: StorageError
   }),

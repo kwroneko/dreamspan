@@ -58,6 +58,22 @@ describe("composer library items", () => {
         })
       )
 
+      const stale = yield* api.CreateCard({ label: "Removed card", name: "Removed card" })
+      const cached = yield* api.SetComposerLibrary({ ...key, add: [stale.id], remove: [] })
+      yield* api.SetComposerLibrary({ ...key, add: [], remove: [stale.id] })
+      yield* notFound(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: chat.activeLeafSlotId,
+          branch: false,
+          content: "Tighten these.",
+          library: cached.map(({ kind, refId }) => ({ kind, refId })),
+          composer: { draftId: draft.id, session: draft.session },
+          reply: false
+        })
+      )
+      assert.deepStrictEqual(yield* api.GetComposerLibrary(key), after)
+
       // A send carries two of the three; the third stays for the next message.
       const { entry } = yield* posted(
         api.SendMessage({

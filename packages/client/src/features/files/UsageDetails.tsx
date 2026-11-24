@@ -14,9 +14,9 @@ import { usageLine } from "./usage.ts"
 const rows = (usage: FilesUsage) => [
   { label: "Your files", bytes: usage.filesBytes, about: "Everything in your files." },
   {
-    label: "Earlier versions",
+    label: "Earlier versions and imports",
     bytes: usage.versionsBytes,
-    about: "Earlier content kept so changes can be undone or restored. Kept for 30 days."
+    about: "Earlier file versions kept for up to 30 days, and pictures saved to your library by the workshop."
   },
   { label: "Bin", bytes: usage.binBytes, about: "Files and folders you deleted, until the bin is emptied." },
   {
