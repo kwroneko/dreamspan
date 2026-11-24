@@ -22,7 +22,7 @@ import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput }
 import { pagedView, VIEWS } from "./library.ts"
 
 /** The largest card file the tools read: CHARX files carry their assets. */
-const CARD_FILE_BYTES = 32 * 2 ** 20
+export const CARD_FILE_BYTES = 32 * 2 ** 20
 
 type Place = {
   readonly full: string

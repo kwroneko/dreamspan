@@ -52,6 +52,8 @@ import {
   RolloutEffectRecord,
   EffectUndoRefused,
   ReplyEffects,
+  ReversalOptions,
+  ReversalOutcome,
   UndoAllReport,
   WorkshopDefaults,
   WorkshopCreationFields,
@@ -3265,8 +3267,53 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
   }),
   Rpc.make("UndoRolloutEffect", {
-    payload: { userId: UserId, ...EffectKey },
+    payload: { userId: UserId, ...EffectKey, binAnyway: Schema.optionalKey(Schema.Boolean) },
     success: RolloutEffect,
+    error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
+  }),
+  /**
+   * Reverts one library item's changes (db/changeReversals.ts; spec/WORKSHOP-CARDS.md §8.1) as a
+   * new revision, recording what it took back; a conflict or dry run writes nothing.
+   */
+  Rpc.make("RevertLibraryChange", {
+    payload: {
+      userId: UserId,
+      effects: Schema.Array(Schema.Struct(EffectKey)),
+      message: Schema.optionalKey(Schema.String),
+      ...ReversalOptions
+    },
+    success: ReversalOutcome,
+    error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
+  }),
+  /** Takes a library revert back (Redo) as a new revision; a conflict or dry run writes nothing. */
+  Rpc.make("RedoLibraryChange", {
+    payload: {
+      userId: UserId,
+      reversalId: Schema.String,
+      message: Schema.optionalKey(Schema.String),
+      ...ReversalOptions
+    },
+    success: ReversalOutcome,
+    error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
+  }),
+  /** The files host wrote a card file's revert or redo: its record, in one transaction. */
+  Rpc.make("RecordFileReversal", {
+    payload: {
+      userId: UserId,
+      path: Schema.String,
+      label: Schema.String,
+      action: Schema.Literals(["revert", "redo"]),
+      reversesId: Schema.NullOr(Schema.String),
+      headBefore: Schema.NullOr(Schema.String),
+      headAfter: Schema.NullOr(Schema.String),
+      fields: Schema.Array(Schema.String),
+      before: Schema.Record(Schema.String, Schema.Unknown),
+      after: Schema.Record(Schema.String, Schema.Unknown),
+      effects: Schema.Array(
+        Schema.Struct({ ...EffectKey, of: Schema.Array(Schema.String), fields: Schema.Array(Schema.String) })
+      )
+    },
+    success: Schema.String,
     error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
   }),
   /** Every change of one reply not yet undone, newest first, in one transaction (workshopEffects.ts). */
@@ -6480,6 +6527,40 @@ const ReadOpsOwn = RpcGroup.make(
     payload: { userId: UserId, ...EffectKey },
     success: RolloutEffect,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** One revert of the account's, with the changes it covers (db/changeReversals.ts): a card file's Redo. */
+  Rpc.make("FileReversal", {
+    payload: { userId: UserId, reversalId: Schema.String },
+    success: Schema.Struct({
+      id: Schema.String,
+      targetKind: Schema.Literals(["entity", "file"]),
+      targetId: Schema.String,
+      label: Schema.String,
+      fields: Schema.Array(Schema.String),
+      before: Schema.Record(Schema.String, Schema.Unknown),
+      after: Schema.Record(Schema.String, Schema.Unknown),
+      effects: Schema.Array(
+        Schema.Struct({ ...EffectKey, of: Schema.Array(Schema.String), fields: Schema.Array(Schema.String) })
+      )
+    }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A workshop's reverts, redos and binned creations since its last finished reply: the tail line's. */
+  Rpc.make("ChatReversalsSince", {
+    payload: { userId: UserId, chatId: Schema.String },
+    success: Schema.Struct({
+      reversals: Schema.Array(
+        Schema.Struct({
+          action: Schema.Literals(["revert", "redo"]),
+          targetKind: Schema.Literals(["entity", "file"]),
+          kind: Schema.String,
+          label: Schema.String,
+          fields: Schema.Array(Schema.String)
+        })
+      ),
+      binned: Schema.Array(Schema.String)
+    }),
+    error: StorageError
   }),
   Rpc.make("VersionEffects", {
     payload: { userId: UserId, versionId: Schema.String },

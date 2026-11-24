@@ -213,7 +213,7 @@ test.describe("workshop card files", () => {
       const view = page.locator("section", { has: page.getByRole("heading", { name: "Wren Hollow · changes" }) }).last()
       const changed = view.getByLabel("What changed", { exact: true }).locator("details")
       await expect(changed).toHaveCount(1)
-      await expect(changed.locator("summary")).toHaveText(["Description"])
+      await expect(changed.locator("summary")).toHaveText([/^Description/])
       await changed.first().locator("summary").click()
       await expect(view.getByText("A synthetic harbour keeper.")).toBeVisible()
       await expect(view.getByText(/changed by the assistant in a workshop reply/)).toBeVisible()
@@ -234,5 +234,24 @@ test.describe("workshop card files", () => {
       const doc = await admin((api) => api.OpenEditor({ refId: ref.id }))
       expect(doc.doc.description).toBe("A synthetic harbour keeper.")
       expect(doc.doc.name).toBe("Wren Hollow")
+
+      // Revert (spec/WORKSHOP-CARDS.md §8.1): the field goes back in the file, which stays a PNG
+      // card, and the row says Reverted.
+      await view.locator("[data-change-action]").click()
+      await expect(view.locator("[data-change-state]")).toHaveText("Reverted", { timeout: 15_000 })
+      const back = await page.request.get(`${server().url}${FILES_ROUTES.raw}?${new URLSearchParams({ path: WREN })}`, {
+        headers: { origin: server().url }
+      })
+      const again = await page.request.post(`${server().url}/library/import?name=wren.png`, {
+        data: await back.body(),
+        headers: { origin: server().url, "content-type": "application/octet-stream" }
+      })
+      expect(again.status()).toBe(200)
+      const againRef = (await again.json()).library.ref.id as RefId
+      const reverted = await admin((api) => api.OpenEditor({ refId: againRef }))
+      expect(reverted.doc.description).toBe("A synthetic lighthouse keeper.")
+      await shot("reverted")
+      await page.goBack()
+      await expect(page.locator(`[data-change-row="${WREN}"] [data-change-state]`).first()).toHaveText("Reverted")
     })
 })

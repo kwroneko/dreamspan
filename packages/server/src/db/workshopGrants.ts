@@ -12,6 +12,7 @@ import { query, transaction } from "./tx.ts"
 import { displayEndOf } from "./displayPath.ts"
 import type { StoryAt } from "@dreamspan/shared/chat.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
+import { withReversions } from "./changeReversals.ts"
 import { childEffects, newestFirst, resumeLineage as lineage } from "./subagentEffects.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { callsFrom } from "../agent/steps.ts"
@@ -303,7 +304,7 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
         )
         // Its subagents' changes are the reply's too (spec/SUBAGENTS.md §8).
         const children = yield* childEffects(sql, [rolloutId], { undone: false })
-        return children.length === 0 ? own : [...own, ...children].sort(newestFirst)
+        return yield* withReversions(sql, children.length === 0 ? own : [...own, ...children].sort(newestFirst))
       }).pipe(query("RolloutEffectsForRun")),
     RolloutEffectFor: (input) =>
       Effect.gen(function* () {
@@ -375,7 +376,7 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
             )
           })
           .map(toRolloutEffect)
-        return children.length === 0 ? own : [...own, ...children].sort(newestFirst)
+        return yield* withReversions(sql, children.length === 0 ? own : [...own, ...children].sort(newestFirst))
       }).pipe(query("VersionEffects"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })

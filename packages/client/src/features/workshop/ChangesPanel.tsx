@@ -136,10 +136,10 @@ function ReplyGroup({ chatId, group, binned }: { chatId: ChatId; group: ReplyCha
             variant="ghost"
             className="ml-auto h-7 px-2 text-xs"
             pending={action.pending}
-            hint="Takes back everything this reply changed, newest first. It stops at a change that can’t be undone."
+            hint="Takes back everything this reply changed, newest first: edits are reverted, keeping later edits, and new items go to the bin. It stops at a change that can’t be taken back."
             onClick={() => void undoAll()}
           >
-            Undo all of this reply
+            Revert all of this reply
           </Button>
         )}
       </div>
@@ -160,7 +160,7 @@ function ReplyGroup({ chatId, group, binned }: { chatId: ChatId; group: ReplyCha
   )
 }
 
-const undidText = (n: number) => (n === 1 ? "Undid 1 change." : `Undid ${n} changes.`)
+const undidText = (n: number) => (n === 1 ? "Took back 1 change." : `Took back ${n} changes.`)
 
 /** What "Undo all of this reply" did, and what it couldn't. */
 function UndoAllOutcome({ report }: { report: UndoAllReport }) {
@@ -168,18 +168,18 @@ function UndoAllOutcome({ report }: { report: UndoAllReport }) {
   if (report.refused === null)
     return (
       <p role="status" className="text-xs text-muted" data-undo-all-report="">
-        {undone === 0 ? "Nothing left to undo." : undidText(undone)}
+        {undone === 0 ? "Nothing left to take back." : undidText(undone)}
       </p>
     )
   return (
     <div role="alert" className="flex flex-col gap-1 text-xs [overflow-wrap:anywhere]" data-undo-all-report="">
       {undone > 0 && <p className="text-muted">{undidText(undone)}</p>}
       <p className="text-danger">
-        Not undone: {report.refused.effect.title}. {report.refused.reason}
+        Not taken back: {report.refused.effect.title}. {report.refused.reason}
       </p>
       {report.left.length > 0 && (
         <p className="text-muted">
-          Left as {report.left.length === 1 ? "it is" : "they are"}, since a newer change couldn’t be undone:{" "}
+          Left as {report.left.length === 1 ? "it is" : "they are"}, since a newer change couldn’t be taken back:{" "}
           {report.left.map((e) => e.title).join("; ")}.
         </p>
       )}

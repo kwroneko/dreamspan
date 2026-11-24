@@ -178,7 +178,8 @@ describe("0002_files", () => {
           "composer_library",
           "recovered_label_owner",
           "card_files",
-          "workshop_import_media_quota"
+          "workshop_import_media_quota",
+          "change_reversals"
         ]
       )
       // The existing row is kept, an image by default.
@@ -531,7 +532,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0021_composer_library",
       "0022_recovered_label_owner",
       "0023_card_files",
-      "0024_workshop_import_media_quota"
+      "0024_workshop_import_media_quota",
+      "0025_change_reversals"
     ])
   }).pipe(Effect.provide(layer()))
 )

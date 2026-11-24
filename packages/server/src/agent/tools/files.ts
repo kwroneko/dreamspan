@@ -77,7 +77,9 @@ import {
 import { forkStart } from "../messages.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
 import type { Formats } from "../../importer/Formats.ts"
-import { makeCardFileTools } from "./cardFiles.ts"
+import { CARD_FILE_BYTES, makeCardFileTools } from "./cardFiles.ts"
+import { visibleDoc } from "../libraryView.ts"
+import { type ConflictChoice, planReversal, type ReversalPlan, unitPath } from "@dreamspan/shared/changeReversal.ts"
 
 /** Where subagents' isolated copies go, under /files (spec/SUBAGENTS.md §3.3). */
 const COPIES = ".subagents"
@@ -2086,6 +2088,90 @@ export const makeFileTools = (deps: FileToolDeps) => {
       )
     })
 
+  /**
+   * Takes a change back in a card file in Files (spec/WORKSHOP-CARDS.md §8.1): `changed` and
+   * `original` are its fields after and before the change, `fields` which to take back. The file
+   * as it is now is read with the format worker, the fields are planned three-way, and the result
+   * is written in the file's own format, the file as it was kept as a version. A conflict or a dry
+   * run writes nothing. `record` stores the reversal (one writer transaction) once written.
+   */
+  const reverseCardFile = (
+    actor: User,
+    input: {
+      readonly path: string
+      readonly original: Record<string, unknown>
+      readonly changed: Record<string, unknown>
+      readonly fields: ReadonlyArray<string>
+      readonly choices?: Readonly<Record<string, ConflictChoice>> | undefined
+      readonly dryRun?: boolean | undefined
+      readonly record: (written: {
+        readonly before: string
+        readonly after: string
+        readonly name: string
+        readonly plan: ReversalPlan
+      }) => Effect.Effect<string, unknown>
+    }
+  ) =>
+    Effect.gen(function* () {
+      const formats = deps.formats
+      if (!formats) return yield* new EffectUndoRefused({ message: "Card files can't be read on this server." })
+      const env = accountEnv(deps, actor.id)
+      const segments = resolveFilesPath(input.path, FILES_MOUNT).segments
+      return yield* withFileTree(
+        env.userId,
+        Effect.gen(function* () {
+          const current = yield* attempt(() => readRegularFile(env.filesRoot, segments, CARD_FILE_BYTES + 1)).pipe(
+            Effect.orElseSucceed(() => null)
+          )
+          if (!current || current.truncated)
+            return yield* new EffectUndoRefused({ message: "The card file isn't there any more." })
+          const info = yield* formats.readCardFile(current.bytes).pipe(Effect.orElseSucceed(() => null))
+          if (!info) return yield* new EffectUndoRefused({ message: "The file isn't a card file any more." })
+          const plan = planReversal({
+            original: input.original,
+            changed: input.changed,
+            now: visibleDoc("card", info.doc) as Record<string, unknown>,
+            fields: input.fields,
+            ...(input.choices ? { choices: input.choices } : {})
+          })
+          const outcome = (reversalId: string | null) => ({
+            reversalId,
+            fields: plan.fields,
+            conflicts: plan.conflicts.map((c) => ({
+              field: c.field,
+              ...(c.now === undefined ? {} : { now: c.now }),
+              ...(c.before === undefined ? {} : { before: c.before })
+            }))
+          })
+          if (plan.doc === null || input.dryRun === true || plan.fields.length === 0) return outcome(null)
+          const doc = plan.doc
+          const tops = [...new Set(plan.fields.map((f) => unitPath(f)[0]).filter((f) => f !== undefined))]
+          const changes = tops.map((field) =>
+            field === "alternate_greetings"
+              ? { field, items: (Array.isArray(doc[field]) ? doc[field] : []) as Array<string> }
+              : { field, text: typeof doc[field] === "string" ? doc[field] : "" }
+          )
+          const edited = yield* formats
+            .editCardFile(current.bytes, changes)
+            .pipe(Effect.mapError(() => new EffectUndoRefused({ message: "The card file couldn't be changed." })))
+          if ("error" in edited) return yield* new EffectUndoRefused({ message: edited.error })
+          yield* keepVersion(null, env.userId, input.path, { bytes: current.bytes, inode: current.info.ino }, "restore")
+          deps.quota?.wrote(env.userId, current.bytes.byteLength)
+          const next = Buffer.from(edited.bytes)
+          yield* attempt(() => writeRegularFile(env.filesRoot, segments, next))
+          deps.quota?.wrote(env.userId, next.byteLength)
+          deps.onChanged?.(env.userId, [input.path])
+          const id = yield* input.record({
+            before: sha256(current.bytes),
+            after: sha256(next),
+            name: edited.after.name,
+            plan
+          })
+          return outcome(id)
+        })
+      )
+    })
+
   /** Why commands can't run here, for the capability row; null: they can. */
   const commandsUnavailable = () =>
     sandboxFor().pipe(
@@ -2542,6 +2628,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
       stopTool
     ] as unknown as ReadonlyArray<RolloutTool<never>>,
     undoEffect,
+    reverseCardFile,
     commandsUnavailable,
     commandsNote
   }

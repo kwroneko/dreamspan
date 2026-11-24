@@ -4,6 +4,7 @@
 import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import type { Doc } from "@dreamspan/shared/library.ts"
 import type { FieldChange } from "../editor/fields.ts"
+import { combinedFileEdits } from "@dreamspan/shared/changeReversal.ts"
 import type { RolloutEffect } from "./effects.ts"
 
 /** One item a turn changed. */
@@ -48,18 +49,7 @@ const cardFileEdit = (effect: RolloutEffect): CardFileEdit | null => {
 
 /** The fields the edits changed (oldest first): each as before the first that changed it, after the last. */
 const cardFileFields = (edits: ReadonlyArray<CardFileEdit>) => {
-  const before: Record<string, unknown> = {}
-  const after: Record<string, unknown> = {}
-  const seen = new Set<string>()
-  for (const edit of edits)
-    for (const key of new Set([...Object.keys(edit.before), ...Object.keys(edit.after)])) {
-      if (!seen.has(key)) {
-        seen.add(key)
-        if (key in edit.before) before[key] = edit.before[key]
-      }
-      delete after[key]
-      if (key in edit.after) after[key] = edit.after[key]
-    }
+  const { before, after } = combinedFileEdits(edits)
   return { before: before as Doc, after: after as Doc }
 }
 
@@ -171,6 +161,48 @@ export const cardFileChangeTarget = (url: URL) => {
 
 /** Every change of the item is undone: the row says so, muted. */
 export const itemUndone = (item: ItemChange) => item.effects.every((e) => e.undoneAt !== null)
+
+/**
+ * The item's fields that stand reverted: those reverted in every change of the item that changed
+ * them (a field another change of it changed and nothing reverted there still stands).
+ */
+export const revertedFieldsOf = (item: ItemChange): ReadonlySet<string> => {
+  const live = item.effects.filter((e) => e.undoneAt === null)
+  const all = new Set(live.flatMap((e) => e.reversion?.fields ?? []))
+  return new Set(
+    [...all].filter((field) =>
+      live.every((e) => !e.reversion?.of.includes(field) || e.reversion.fields.includes(field))
+    )
+  )
+}
+
+/** Every field the change changed stands reverted (spec/WORKSHOP-CARDS.md §8.1). */
+export const fullyReverted = (effect: RolloutEffect) =>
+  effect.reversion !== undefined && effect.reversion.of.every((f) => effect.reversion!.fields.includes(f))
+
+/** An edited item whose every change stands reverted: the row says "Reverted", with Redo. */
+export const itemReverted = (item: ItemChange) =>
+  !item.created &&
+  item.effects.some((e) => e.undoneAt === null) &&
+  item.effects.every((e) => e.undoneAt !== null || fullyReverted(e))
+
+/** The reverts holding the item's reverted fields, newest first: Redo takes these back. */
+export const standingReverts = (item: ItemChange) =>
+  [...new Set(item.effects.flatMap((e) => e.reversion?.reversals ?? []))].toSorted().reverse()
+
+/** The keys of the item's changes not undone, to revert together. */
+export const liveKeys = (item: ItemChange) =>
+  item.effects
+    .filter((e) => e.undoneAt === null)
+    .map((e) => ({ rolloutId: e.rolloutId, toolCallId: e.toolCallId, seq: e.seq }))
+
+/** A comparison row's field, as a revert takes it: the top-level key, or a list element by id. */
+export const unitOfPath = (path: ReadonlyArray<string | number>) =>
+  JSON.stringify(
+    typeof path[1] === "string" && /^(?:id|identifier|uid)=/.test(path[1])
+      ? [String(path[0]), path[1]]
+      : [String(path[0])]
+  )
 
 /**
  * The turn a message ends (§7.1): its first and last messages, when `slotId` is the last reply

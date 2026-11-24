@@ -279,6 +279,23 @@ describe("card files", () => {
         assert.isTrue(effects.some((e) => e.kind === "library.create"))
         const library = yield* api.ListLibrary({ kind: "card" })
         assert.isTrue(library.some((ref) => ref.label === "Wren Hollow"))
+        // Revert takes the field back in the file's own format, keeping the old file as a version;
+        // Redo puts the change back (spec/WORKSHOP-CARDS.md §8.1).
+        const key = { rolloutId: edit.rolloutId, toolCallId: edit.toolCallId, seq: edit.seq }
+        const reverted = yield* api.RevertChange({ effects: [key] })
+        assert.deepStrictEqual(reverted.fields, ['["description"]'])
+        const was = readCardFile(yield* Effect.promise(() => readFile(onDisk)), defaultLimits)!
+        assert.strictEqual(was.format, "png")
+        assert.strictEqual(was.doc.description, "A lighthouse keeper.")
+        assert.strictEqual(was.doc.name, "Wren Hollow")
+        const listed = (yield* api.ListVersionEffects({ versionId: id })).find((e) => e.kind === "file.edit")!
+        assert.deepStrictEqual(listed.reversion?.fields, ['["description"]'])
+        const redone = yield* api.RedoChange({ reversalId: reverted.reversalId! })
+        assert.deepStrictEqual(redone.fields, ['["description"]'])
+        assert.strictEqual(
+          readCardFile(yield* Effect.promise(() => readFile(onDisk)), defaultLimits)!.doc.description,
+          "A harbour keeper."
+        )
         yield* api.UndoRolloutEffect({ rolloutId: edit.rolloutId, toolCallId: edit.toolCallId, seq: edit.seq })
         const back = readCardFile(yield* Effect.promise(() => readFile(onDisk)), defaultLimits)!
         assert.strictEqual(back.doc.description, "A lighthouse keeper.")

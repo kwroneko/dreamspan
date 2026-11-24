@@ -15,6 +15,7 @@ import { ExecutionRegistry } from "../execution.ts"
 import { MediaHolds } from "../importer/MediaHolds.ts"
 import { Formats } from "../importer/Formats.ts"
 import { DISK_RESERVE_BYTES, FILE_TOOLS, makeFileTools } from "../agent/tools/files.ts"
+import { reversalNote } from "../agent/reversalNote.ts"
 import { COMMANDS_UNSANDBOXED } from "../agent/capabilities.ts"
 import { settleOrphanedCopies } from "../agent/subagents.ts"
 import { makeAddressSet } from "../net/addressSet.ts"
@@ -35,6 +36,8 @@ export class WorkshopFiles extends Context.Service<
   WorkshopFiles,
   {
     readonly undoEffect: (actor: User, effect: RolloutEffect) => Effect.Effect<RolloutEffect, unknown>
+    /** Takes a change back in a card file in Files (agent/tools/files.ts `reverseCardFile`). */
+    readonly reverseCardFile: ReturnType<typeof makeFileTools>["reverseCardFile"]
     /** Why commands can't run on this server, for the capability row; null: they can. */
     readonly commandsUnavailable: () => Effect.Effect<string | null>
     /** What the row adds where commands run with weaker limits; null: nothing. */
@@ -227,6 +230,8 @@ export class WorkshopFiles extends Context.Service<
           }
         })
       )
+      // What the user took back since the last reply (spec/WORKSHOP-CARDS.md §8.2), once.
+      yield* execution.turnNotes.register(reversalNote(reader))
       // The turn's tail says where commands start (§2.1), when the turn offers the file tools.
       yield* execution.turnNotes.register({
         id: "files.workingFolder",
@@ -304,6 +309,7 @@ export class WorkshopFiles extends Context.Service<
       )
       return {
         undoEffect: files.undoEffect,
+        reverseCardFile: files.reverseCardFile,
         commandsUnavailable: files.commandsUnavailable,
         commandsNote: files.commandsNote,
         quota,

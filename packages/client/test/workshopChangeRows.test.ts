@@ -12,8 +12,12 @@ import {
   changeViewHref,
   changeViewTarget,
   itemChanges,
+  itemReverted,
   itemUndone,
-  turnEndingAt
+  revertedFieldsOf,
+  standingReverts,
+  turnEndingAt,
+  unitOfPath
 } from "../src/features/workshop/changeRows.ts"
 import type { RolloutEffect } from "../src/features/workshop/effects.ts"
 
@@ -200,5 +204,36 @@ describe("turn boundaries", () => {
     expect(turnEndingAt(path, "a1")).toBe(null)
     expect(turnEndingAt(path, "u2")).toBe(null)
     expect(turnEndingAt(path, "missing")).toBe(null)
+  })
+})
+
+describe("reverted state (spec/WORKSHOP-CARDS.md §8.1)", () => {
+  const D = JSON.stringify(["description"])
+  const P = JSON.stringify(["personality"])
+  const reverted = (fields: ReadonlyArray<string>, of: ReadonlyArray<string>, reversals: ReadonlyArray<string>) => ({
+    reversion: { fields, of, reversals }
+  })
+
+  it("is per field: a field stands reverted when every change of the item that changed it has it reverted", () => {
+    const first = { ...revise("e1", "Mara Quill", "r1", "r2"), ...reverted([D], [D, P], ["x1"]) }
+    const second = { ...revise("e1", "Mara Quill", "r2", "r3"), ...reverted([], [P], []) }
+    const [item] = itemChanges([second, first])
+    expect([...revertedFieldsOf(item!)]).toEqual([D])
+    expect(itemReverted(item!)).toBe(false)
+    expect(standingReverts(item!)).toEqual(["x1"])
+  })
+
+  it("says Reverted once every field is, with the reverts holding them newest first", () => {
+    const first = { ...revise("e1", "Mara Quill", "r1", "r2"), ...reverted([D, P], [D, P], ["01a", "01b"]) }
+    const [item] = itemChanges([first])
+    expect(itemReverted(item!)).toBe(true)
+    expect(itemUndone(item!)).toBe(false)
+    expect(standingReverts(item!)).toEqual(["01b", "01a"])
+  })
+
+  it("names a comparison's field as the revert takes it: the top key, or a list element by id", () => {
+    expect(unitOfPath(["description"])).toBe(D)
+    expect(unitOfPath(["entries", "uid=3", "content"])).toBe(JSON.stringify(["entries", "uid=3"]))
+    expect(unitOfPath(["extensions", "depth"])).toBe(JSON.stringify(["extensions"]))
   })
 })

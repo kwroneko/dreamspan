@@ -35,6 +35,7 @@ import { makeSubagentSettingReadHandlers } from "./subagentSettings.ts"
 import { makeMessageSearchHandlers } from "./messageSearch.ts"
 import { makeLibraryReplaceReadHandlers } from "./libraryReplace.ts"
 import { makeWorkshopGrantReadHandlers } from "./workshopGrants.ts"
+import { makeChangeReversalReadHandlers } from "./changeReversals.ts"
 import { makePersonaLockReadHandlers } from "./personaLocks.ts"
 import { makeWorkshopAttachReadHandlers } from "./workshopAttach.ts"
 import { ReadOps } from "./ops.ts"
@@ -92,7 +93,8 @@ RpcServer.layer<OpsOf<typeof ReadOps>>(ReadOps, { concurrency: 1, disableFatalDe
               makeWorkingFolderReadHandlers,
               makeSubagentReadHandlers,
               makeSubagentSettingReadHandlers,
-              makePersonaLockReadHandlers
+              makePersonaLockReadHandlers,
+              makeChangeReversalReadHandlers
             ]),
             ([
               history,
@@ -123,7 +125,8 @@ RpcServer.layer<OpsOf<typeof ReadOps>>(ReadOps, { concurrency: 1, disableFatalDe
               workingFolders,
               subagents,
               subagentSettings,
-              personaLocks
+              personaLocks,
+              reversals
             ]) =>
               ReadOps.of(
                 stateModuleHandlers(
@@ -138,6 +141,7 @@ RpcServer.layer<OpsOf<typeof ReadOps>>(ReadOps, { concurrency: 1, disableFatalDe
                       ...stImport,
                       ...stImportPlan,
                       ...editor,
+                      ...reversals,
                       ...assembly,
                       ...inspector,
                       ...planning,

@@ -2,14 +2,17 @@
 // a scripted reply edits one card and makes another; under the turn's last message a row per item
 // names it (opening the card as it is now) and counts its change (opening the change view). Wide,
 // with the card open beside the workshop, both open in the card's frame and the workshop keeps
-// its own; on a phone they open in place. The change view shows only the fields that differ, and
-// the row's Revert puts the card back. Synthetic cards and a scripted loopback provider only.
+// its own; on a phone they open in place. The change view shows only the fields that differ, each
+// with Revert this field and Redo; a Revert that conflicts shows the field now and before with Keep
+// now / Take before (§8.1); the row's Redo takes a revert back, and a made card changed since asks
+// before the bin. Synthetic cards and a scripted loopback provider only.
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
+import { textField } from "@dreamspan/shared/editing.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser, type Client } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -73,6 +76,30 @@ test.describe("workshop change rows", () => {
   test.afterAll(async () => {
     await provider.stop()
   })
+
+  /** A user's own save of one text field. */
+  const userEdit = (refId: RefId, key: string, content: string) =>
+    admin((api) =>
+      Effect.gen(function* () {
+        const field = textField([key])
+        const before = yield* api.OpenEditor({ refId })
+        const draft = yield* api.SaveEditorDraft({
+          refId,
+          field,
+          content,
+          draftId: null,
+          expectedRowVersion: null,
+          expectedSession: null,
+          baseRevisionId: before.ref.headRevisionId
+        })
+        yield* api.CommitEditorDrafts({
+          refId,
+          expectedRowVersion: before.ref.rowVersion,
+          fields: [{ field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
+          message: null
+        })
+      })
+    )
 
   const importCard = async (page: Page, name: string) => {
     const data = {
@@ -169,21 +196,69 @@ test.describe("workshop change rows", () => {
         const view = page.locator("section", { has: page.getByRole("heading", { name: `${name} · changes` }) }).last()
         const changed = view.getByLabel("What changed", { exact: true }).locator("details")
         await expect(changed).toHaveCount(2)
-        await expect(changed.locator("summary")).toHaveText(["Description", "Scenario"])
+        await expect(changed.locator("summary")).toHaveText([/^Description/, /^Scenario/])
         await changed.first().locator("summary").click()
         await expect(view.getByText("logs every ship by lamplight")).toBeVisible()
         await expect(view.getByText(/Changed by the assistant in a workshop reply/)).toBeVisible()
         await shot("view")
         await expectLayout(page, info, `change-view-${width}-${theme}`, { scope: "main" })
 
-        // Revert from the view's header: the card is as it was, and the row says Reverted.
+        // One field reverted from its line, then put back with Redo (spec/WORKSHOP-CARDS.md §7.4).
+        const scenario = changed.nth(1)
+        await scenario.locator("[data-field-revert]").hover()
+        await expect(tip).toHaveText("Puts this field back as it was before this change, as a new revision.")
+        await scenario.locator("[data-field-revert]").click()
+        await expect(scenario.locator("[data-field-reverted]")).toHaveText("Reverted", { timeout: 15_000 })
+        let doc = await admin((api) => api.OpenEditor({ refId: card.id }))
+        expect(doc.doc.scenario).toBe("A calm night.")
+        expect(doc.doc.description).toBe("A synthetic keeper who logs every ship by lamplight.")
+        await page.mouse.move(0, 0)
+        await shot("field-reverted")
+        await scenario.locator("[data-field-redo]").click()
+        await expect(scenario.locator("[data-field-revert]")).toBeVisible({ timeout: 15_000 })
+        doc = await admin((api) => api.OpenEditor({ refId: card.id }))
+        expect(doc.doc.scenario).toBe("The fog came in early tonight.")
+
+        // The user changes the same words since: Revert writes nothing and shows the conflict,
+        // now and before; Take before, then Revert the rest.
+        await userEdit(card.id, "description", "A synthetic keeper who logs every gull by moonlight.")
         await view.locator("[data-change-action]").click()
+        const conflicts = view.locator("[data-change-conflicts]")
+        await expect(conflicts).toBeVisible({ timeout: 15_000 })
+        await expect(conflicts.locator("[data-conflict]")).toHaveCount(1)
+        await expect(conflicts.getByText("every gull by moonlight")).toBeVisible()
+        doc = await admin((api) => api.OpenEditor({ refId: card.id }))
+        expect(doc.doc.description).toBe("A synthetic keeper who logs every gull by moonlight.")
+        await shot("conflict")
+        await expectLayout(page, info, `change-conflict-${width}-${theme}`, { scope: "main" })
+        await conflicts.getByRole("button", { name: "Take before" }).click()
+        await conflicts.locator("[data-revert-rest]").click()
         await expect(view.locator("[data-change-state]")).toHaveText("Reverted", { timeout: 15_000 })
-        const doc = await admin((api) => api.OpenEditor({ refId: card.id }))
+        await expect(conflicts).toHaveCount(0)
+        doc = await admin((api) => api.OpenEditor({ refId: card.id }))
         expect(doc.doc.description).toBe("A synthetic lighthouse keeper.")
         expect(doc.doc.scenario).toBe("A calm night.")
         if (width === 390) await page.goBack()
-        await expect(page.locator(`[data-change-row="${card.id}"] [data-change-state]`).first()).toHaveText("Reverted")
+        const row = page.locator(`[data-change-row="${card.id}"]`).first()
+        await expect(row.locator("[data-change-state]")).toHaveText("Reverted")
         await shot("reverted")
+
+        // Redo on the row takes the revert back: the description as it was before the revert.
+        await row.locator("[data-change-redo]").click()
+        await expect(row.locator("[data-change-action]")).toHaveText("Revert", { timeout: 15_000 })
+        doc = await admin((api) => api.OpenEditor({ refId: card.id }))
+        expect(doc.doc.description).toBe("A synthetic keeper who logs every gull by moonlight.")
+        expect(doc.doc.scenario).toBe("The fog came in early tonight.")
+
+        // A made card changed since asks before it goes to the bin.
+        const oveRow = page.locator("[data-change-rows] [data-change-row]").nth(1)
+        const oveRef = (await oveRow.locator("[data-change-name]").getAttribute("href"))!.split("/").at(-1)!
+        await userEdit(decodeURIComponent(oveRef) as RefId, "description", "Changed by hand.")
+        await oveRow.locator("[data-change-action]").click()
+        const dialog = page.getByRole("alertdialog")
+        await expect(dialog).toContainText(`Ove for ${name} was changed since.`)
+        await shot("ask")
+        await dialog.getByRole("button", { name: "Move to the bin" }).click()
+        await expect(oveRow.locator("[data-change-state]")).toHaveText("Undone", { timeout: 15_000 })
       })
 })

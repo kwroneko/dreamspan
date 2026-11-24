@@ -1,0 +1,244 @@
+// Revert and Redo of one change, like git revert (spec/WORKSHOP-CARDS.md §8.1): a change is the
+// pair (B, A), the document before it and after it, and H is the document now. Each field the
+// change touched is taken back on H: set to B where H still equals A, else the change's hunks are
+// reversed on H's text (a three-way merge of B and H on base A). Where that doesn't apply cleanly
+// the field is a conflict, and nothing is written until the user picks for it. Pure, so the
+// writer, the files host and the client compute the same thing.
+import { canonicalJson } from "./editing.ts"
+import { merge3 } from "./merge.ts"
+
+type Path = ReadonlyArray<string>
+
+const isObject = (u: unknown): u is Record<string, unknown> => typeof u === "object" && u !== null && !Array.isArray(u)
+const own = (object: Record<string, unknown>, key: string) => (Object.hasOwn(object, key) ? object[key] : undefined)
+const same = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b)
+
+const IDENTITIES = ["id", "identifier", "uid"] as const
+
+/** The key that names every element of these lists, as History's comparisons split them. */
+const identityOf = (lists: ReadonlyArray<ReadonlyArray<unknown>>) =>
+  IDENTITIES.find((key) =>
+    lists.every((list) =>
+      list.every((element) => {
+        if (!isObject(element)) return false
+        const id = own(element, key)
+        return typeof id === "string" || typeof id === "number"
+      })
+    )
+  )
+
+/** A field's key: its path as JSON, `["description"]` or `["entries","uid=3"]`. */
+export const unitKey = (path: Path) => JSON.stringify(path)
+export const unitPath = (key: string): Path => {
+  const parsed = JSON.parse(key) as unknown
+  return Array.isArray(parsed) && parsed.every((s) => typeof s === "string") ? parsed : []
+}
+
+/**
+ * The fields that differ between two documents, as a revert takes them: each top-level field,
+ * except a list whose elements have ids (a lorebook's entries, a preset's prompts), which is
+ * element by element (`uid=3`), as History's comparisons list them.
+ */
+export const changedUnits = (before: unknown, after: unknown): ReadonlyArray<string> => {
+  const b = isObject(before) ? before : {}
+  const a = isObject(after) ? after : {}
+  const keys = [...new Set([...Object.keys(b), ...Object.keys(a)])]
+  return keys.flatMap((key) => {
+    const x = own(b, key)
+    const y = own(a, key)
+    if (same(x, y)) return []
+    if (Array.isArray(x) && Array.isArray(y)) {
+      const id = identityOf([x, y])
+      if (id !== undefined) {
+        const named = (list: ReadonlyArray<unknown>) =>
+          new Map(list.map((e) => [`${id}=${String((e as Record<string, unknown>)[id])}`, e]))
+        const xs = named(x)
+        const ys = named(y)
+        const changed = [...new Set([...xs.keys(), ...ys.keys()])].filter((k) => !same(xs.get(k), ys.get(k)))
+        // Reordered with nothing else changed: the list's order is the change.
+        if (changed.length > 0) return changed.map((k) => unitKey([key, k]))
+      }
+    }
+    return [unitKey([key])]
+  })
+}
+
+/** The element of `list` that `segment` (`uid=3`) names. */
+const findIn = (list: ReadonlyArray<unknown>, segment: string) => {
+  const at = segment.indexOf("=")
+  const id = segment.slice(0, at)
+  const value = segment.slice(at + 1)
+  return list.findIndex((e) => isObject(e) && String(own(e, id)) === value)
+}
+
+/** A field's value in a document; undefined where it has none. */
+const unitValue = (doc: unknown, key: string): unknown => {
+  const [top, element] = unitPath(key)
+  if (top === undefined || !isObject(doc)) return undefined
+  const value = own(doc, top)
+  if (element === undefined) return value
+  if (!Array.isArray(value)) return undefined
+  const at = findIn(value, element)
+  return at < 0 ? undefined : value[at]
+}
+
+/**
+ * `doc` with a field set (removed for undefined). An element that isn't in the list goes after
+ * the one before it in `order` (the list as the value came from), else first.
+ */
+const withUnit = (
+  doc: Record<string, unknown>,
+  key: string,
+  value: unknown,
+  order: unknown
+): Record<string, unknown> => {
+  const [top, element] = unitPath(key)
+  if (top === undefined) return doc
+  if (element === undefined) {
+    const next = { ...doc }
+    if (value === undefined) delete next[top]
+    else next[top] = value
+    return next
+  }
+  const list = Array.isArray(own(doc, top)) ? [...(own(doc, top) as Array<unknown>)] : []
+  const at = findIn(list, element)
+  if (at >= 0) {
+    if (value === undefined) list.splice(at, 1)
+    else list[at] = value
+  } else if (value !== undefined) {
+    const source = Array.isArray(order) ? order : []
+    const from = findIn(source, element)
+    let place = 0
+    for (let i = from - 1; i >= 0; i--) {
+      const prior = source[i]
+      const id = IDENTITIES.find((k) => isObject(prior) && own(prior, k) !== undefined)
+      const there = id === undefined ? -1 : findIn(list, `${id}=${String((prior as Record<string, unknown>)[id])}`)
+      if (there >= 0) {
+        place = there + 1
+        break
+      }
+    }
+    list.splice(place, 0, value)
+  }
+  return { ...doc, [top]: list }
+}
+
+/** A partial document holding these fields' values (keyed by `unitKey`), for `planReversal`. */
+export const docOfUnits = (values: Readonly<Record<string, unknown>>): Record<string, unknown> => {
+  let doc: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(values)) doc = withUnit(doc, key, value, undefined)
+  return doc
+}
+
+/** A field that can't be taken back on its own: what it is now, and what it was before the change. */
+interface ReversalConflict {
+  readonly field: string
+  readonly now?: unknown
+  readonly before?: unknown
+}
+
+/** For a conflicting field: keep it as it is now, or take it as it was before the change. */
+export type ConflictChoice = "now" | "before"
+
+export interface ReversalPlan {
+  /** The document with the fields taken back; null when a conflict is left. */
+  readonly doc: Record<string, unknown> | null
+  /** The fields taken back (already as before counts). */
+  readonly fields: ReadonlyArray<string>
+  /** Each field's value before and after the reversal, for the record (absent: none). */
+  readonly before: Readonly<Record<string, unknown>>
+  readonly after: Readonly<Record<string, unknown>>
+  readonly conflicts: ReadonlyArray<ReversalConflict>
+  /** Conflicting fields kept as they are now. */
+  readonly kept: ReadonlyArray<string>
+}
+
+/**
+ * Takes a change back on `now`: `changed` is the document after the change (A) and `original`
+ * before it (B), both whole or holding only the fields named. `fields` limits it to those (all
+ * the change's otherwise); `choices` settles conflicts. Redo is the same with a revert's after
+ * as `changed` and its before as `original`.
+ */
+export const planReversal = (input: {
+  readonly original: unknown
+  readonly changed: unknown
+  readonly now: Record<string, unknown>
+  readonly fields: ReadonlyArray<string>
+  readonly choices?: Readonly<Record<string, ConflictChoice>>
+}): ReversalPlan => {
+  let doc = input.now
+  const fields: Array<string> = []
+  const before: Record<string, unknown> = {}
+  const after: Record<string, unknown> = {}
+  const conflicts: Array<ReversalConflict> = []
+  const kept: Array<string> = []
+  for (const field of input.fields) {
+    const a = unitValue(input.changed, field)
+    const b = unitValue(input.original, field)
+    const h = unitValue(input.now, field)
+    const merged = merge3(a, h, b)
+    const choice = input.choices?.[field]
+    let value: unknown
+    if (merged.conflicts.length === 0) value = merged.value
+    else if (choice === "before") value = b
+    else if (choice === "now") {
+      kept.push(field)
+      continue
+    } else {
+      conflicts.push({
+        field,
+        ...(h === undefined ? {} : { now: h }),
+        ...(b === undefined ? {} : { before: b })
+      })
+      continue
+    }
+    fields.push(field)
+    if (h !== undefined) before[field] = h
+    if (value !== undefined) after[field] = value
+    const [top] = unitPath(field)
+    doc = withUnit(
+      doc,
+      field,
+      value,
+      top === undefined ? undefined : own(isObject(input.original) ? input.original : {}, top)
+    )
+  }
+  return { doc: conflicts.length > 0 ? null : doc, fields, before, after, conflicts, kept }
+}
+
+/**
+ * Each field's state from its reversal records, oldest first: reverted when its latest record
+ * that names it is a revert.
+ */
+export const revertedFields = (
+  records: ReadonlyArray<{ readonly action: "revert" | "redo"; readonly fields: ReadonlyArray<string> }>
+): ReadonlySet<string> => {
+  const state = new Map<string, boolean>()
+  for (const record of records) for (const field of record.fields) state.set(field, record.action === "revert")
+  return new Set([...state].filter(([, reverted]) => reverted).map(([field]) => field))
+}
+
+/**
+ * A card file's edits in one turn, oldest first, as one change: each field as before the first
+ * edit that changed it and after the last (`undo.card` of `edit_card_file`).
+ */
+export const combinedFileEdits = (
+  edits: ReadonlyArray<{
+    readonly before: Readonly<Record<string, unknown>>
+    readonly after: Readonly<Record<string, unknown>>
+  }>
+) => {
+  const before: Record<string, unknown> = {}
+  const after: Record<string, unknown> = {}
+  const seen = new Set<string>()
+  for (const edit of edits)
+    for (const key of new Set([...Object.keys(edit.before), ...Object.keys(edit.after)])) {
+      if (!seen.has(key)) {
+        seen.add(key)
+        if (Object.hasOwn(edit.before, key)) before[key] = edit.before[key]
+      }
+      delete after[key]
+      if (Object.hasOwn(edit.after, key)) after[key] = edit.after[key]
+    }
+  return { before, after }
+}

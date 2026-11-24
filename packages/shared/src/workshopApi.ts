@@ -96,9 +96,47 @@ export const RolloutEffect = Schema.Struct({
    */
   subagent: Schema.optionalKey(
     Schema.Struct({ handle: Schema.String, rolloutId: Schema.String, callId: Schema.String })
+  ),
+  /**
+   * Its Revert and Redo records (spec/WORKSHOP-CARDS.md §8.1), when it has any: the fields of this
+   * change that stand reverted, all the fields it changed, and the reverts holding them, newest
+   * first (Redo takes those back). Fields are `changeReversal.ts` `unitKey`s.
+   */
+  reversion: Schema.optionalKey(
+    Schema.Struct({
+      fields: Schema.Array(Schema.String),
+      of: Schema.Array(Schema.String),
+      reversals: Schema.Array(Schema.String)
+    })
   )
 })
 export type RolloutEffect = typeof RolloutEffect.Type
+/** For a conflicting field of a revert: keep it as it is now, or take it as it was before the change. */
+const ConflictChoice = Schema.Literals(["now", "before"])
+/**
+ * What a Revert or Redo did (spec/WORKSHOP-CARDS.md §8.1): the fields it took back and its record;
+ * or, when a field conflicts, nothing written and each conflict with the field as it is now and
+ * as it was before the change.
+ */
+export const ReversalOutcome = Schema.Struct({
+  reversalId: Schema.NullOr(Schema.String),
+  fields: Schema.Array(Schema.String),
+  conflicts: Schema.Array(
+    Schema.Struct({
+      field: Schema.String,
+      now: Schema.optionalKey(Schema.Unknown),
+      before: Schema.optionalKey(Schema.Unknown)
+    })
+  )
+})
+export type ReversalOutcome = typeof ReversalOutcome.Type
+/** The fields to take back (all of the change's when absent), choices for conflicts, and a dry run. */
+export const ReversalOptions = {
+  fields: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMaxLength(4096)))),
+  choices: Schema.optionalKey(Schema.Record(Schema.String, ConflictChoice)),
+  /** Only say what it would take back and what conflicts: nothing is written. */
+  dryRun: Schema.optionalKey(Schema.Boolean)
+}
 /**
  * What "Undo all of this reply" did: the changes it undid, newest first; the one it couldn't undo
  * and why; and the older ones it left untried because of it.
@@ -320,8 +358,40 @@ export class WorkshopApi extends RpcGroup.make(
     error: Schema.Union([NotFound, ServerError])
   }),
   Rpc.make("UndoRolloutEffect", {
-    payload: EffectKey,
+    payload: {
+      ...EffectKey,
+      /**
+       * For an item the reply made: move it to the bin even though it changed since or a chat
+       * uses it (the user was asked, spec/WORKSHOP-CARDS.md §8.1).
+       */
+      binAnyway: Schema.optionalKey(Schema.Boolean)
+    },
     success: RolloutEffect,
+    error: Schema.Union([NotFound, EffectUndoRefused, ServerError])
+  }),
+  /**
+   * Reverts one item's changes (spec/WORKSHOP-CARDS.md §8.1): the library edits or card file edits
+   * named, as one change from the first's before to the last's after, taken back on the item as it
+   * is now field by field, as a new revision (a new file version). A conflict writes nothing.
+   */
+  Rpc.make("RevertChange", {
+    payload: {
+      effects: Schema.Array(Schema.Struct(EffectKey)),
+      /** The new revision's message ("Reverted the assistant's change of 14:02"). */
+      message: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+      ...ReversalOptions
+    },
+    success: ReversalOutcome,
+    error: Schema.Union([NotFound, EffectUndoRefused, ServerError])
+  }),
+  /** Takes a revert back (Redo) on the item as it is now, as a new revision; a conflict writes nothing. */
+  Rpc.make("RedoChange", {
+    payload: {
+      reversalId: Schema.String,
+      message: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+      ...ReversalOptions
+    },
+    success: ReversalOutcome,
     error: Schema.Union([NotFound, EffectUndoRefused, ServerError])
   }),
   /** Undoes every change one reply made, newest first, stopping at the first that can't be undone. */

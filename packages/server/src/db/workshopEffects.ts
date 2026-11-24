@@ -136,6 +136,8 @@ interface UndoContext {
   readonly sql: SqlClient.SqlClient
   readonly ops: Operations
   readonly bin: Bin
+  /** A made item goes to the bin though it changed since (the user was asked, WORKSHOP-CARDS §8.1). */
+  readonly binAnyway?: boolean
 }
 /** The refusal that sends an Undo to the files host (api/workshop.ts). */
 export const FILE_UNDO_ON_HOST = "File undo must run through the host."
@@ -228,7 +230,10 @@ const createUndoer: Undoer = {
   unchanged: libraryUnchanged,
   run: (ctx, effect) =>
     Effect.gen(function* () {
-      const ref = yield* checkedCreation(ctx, effect)
+      const ref = ctx.binAnyway
+        ? yield* makeLibraryQueries(ctx.sql).ownedRef(ctx.userId, String(effect.undo!.refId))
+        : yield* checkedCreation(ctx, effect)
+      if (ref.entity_id !== effect.targetId) return yield* refuse()
       const undo = effect.undo!
       if (ref.kind === "card") {
         const live = yield* ctx.sql<{ id: string }>`SELECT e.id FROM entities e
@@ -479,7 +484,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         return row
       })
     /** One effect's undo, inside the caller's transaction; one already undone stays as it is. */
-    const undoRow = (userId: UserId, row: EffectRow) =>
+    const undoRow = (userId: UserId, row: EffectRow, binAnyway = false) =>
       Effect.gen(function* () {
         if (row.kind.startsWith("plugin.")) return yield* refuse("Plugin file undo must run through the host.")
         // Files are on disk, outside SQLite: the files host puts them back (agent/tools/files.ts).
@@ -489,7 +494,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         if (!undoer || row.undo_json === null)
           return yield* new EffectUndoRefused({ message: "This change cannot be undone here." })
         const undoResult = yield* undoer
-          .run({ sql, userId, ops, bin }, toRolloutEffect(row))
+          .run({ sql, userId, ops, bin, binAnyway: binAnyway && row.kind === "library.create" }, toRolloutEffect(row))
           .pipe(Effect.catchTag(["StaleWrite", "InvalidDocument", "RefOperationRefused"], () => Effect.fail(refuse())))
         const at = Math.max(Date.now(), row.created_at)
         yield* sql`UPDATE rollout_effects SET undone_at = ${at}, undo_result_json = ${JSON.stringify(undoResult)} WHERE rollout_id = ${row.rollout_id} AND tool_call_id = ${row.tool_call_id} AND seq = ${row.seq}`
@@ -1247,7 +1252,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               entity: "rollout effect",
               id: `${input.rolloutId}:${input.toolCallId}:${input.seq}`
             })
-          return yield* undoRow(input.userId, row)
+          return yield* undoRow(input.userId, row, input.binAnyway === true)
         }).pipe(transaction(sql, "UndoRolloutEffect")),
       // "Undo all of this reply": one transaction, newest change first. Each undo runs in its own
       // savepoint, so a refused one leaves nothing half done; the first refusal stops the rest,
