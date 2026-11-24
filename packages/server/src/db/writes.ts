@@ -199,12 +199,27 @@ export const makeWriteHandlers = (bin: Bin) =>
             }
           } else baseRevision = null
         }
-        // A swipe of one's own, or an edit, of a reply that finished empty and was removed
-        // meanwhile (its first save, or a browser's retry): the text goes to recovered texts,
-        // once, and the answer is a discarded draft with nothing in it.
-        if (key.targetKind === "scratchpad" || key.targetKind === "version_edit") {
-          const dropped = yield* droppedReplyLabel(sql, userId, key.targetId)
-          if (dropped !== null) {
+        // A swipe of one's own, an edit, or text to insert below, of a reply that finished empty
+        // and was removed meanwhile (its first save, or a browser's retry): the text goes to
+        // recovered texts, once, and the answer is a discarded draft with nothing in it. An
+        // insertion's anchor is its field's slot, in a chat of the user's (rev-dd2 #1).
+        const droppedTarget =
+          key.targetKind === "scratchpad" || key.targetKind === "version_edit"
+            ? key.targetId
+            : key.targetKind === "insert"
+              ? key.field.slice(key.field.indexOf(":") + 1)
+              : null
+        if (droppedTarget !== null && droppedTarget !== "") {
+          const dropped = yield* droppedReplyLabel(sql, userId, droppedTarget)
+          const owned =
+            key.targetKind !== "insert" ||
+            (yield* sql<{ n: number }>`SELECT 1 AS n FROM chats
+              WHERE id = ${key.targetId} AND owner_user_id = ${userId}`).length > 0
+          // Images can't be kept in recovered texts: the save isn't taken, so the browser keeps
+          // its copy, images and all, for Browser recovery (rev-dd2 #2).
+          if (dropped !== null && owned && images !== undefined && images.length > 0)
+            return yield* new NotFound({ entity: "message", id: droppedTarget })
+          if (dropped !== null && owned) {
             if (content.length > DraftHistoryPolicy.maxContentChars)
               return yield* new DraftTooLarge({ length: content.length, max: DraftHistoryPolicy.maxContentChars })
             const filed = yield* fileLate(userId, key, content, dropped)
@@ -266,14 +281,16 @@ export const makeWriteHandlers = (bin: Bin) =>
         return saved
       })
 
-    /** Text for a draft that's gone, to recovered texts, unless the latest from there already holds it. */
+    /** Text for a draft that's gone, to recovered texts, unless that draft already filed the same text. */
     const fileLate = (userId: UserId, key: DraftKey, content: string, label: string) =>
       Effect.gen(function* () {
         if (content.trim() === "") return false
-        const [latest] = yield* sql<{ content: string }>`SELECT content FROM recovered_texts
+        // Any text filed from this draft before, not only the latest: a retry replayed after a
+        // newer save is filed once (rev-dd2 #7).
+        const [filed] = yield* sql<{ n: number }>`SELECT 1 AS n FROM recovered_texts
           WHERE user_id = ${userId} AND source_kind = ${key.targetKind} AND source_id = ${key.targetId}
-          ORDER BY created_at DESC, id DESC LIMIT 1`
-        if (latest?.content === content) return false
+            AND source_field = ${key.field} AND content = ${content} LIMIT 1`
+        if (filed !== undefined) return false
         yield* bin.recover(userId, key, [content], "discard", label)
         return true
       })

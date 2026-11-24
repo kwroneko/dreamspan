@@ -3,7 +3,8 @@ import { NewVersion } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { Writer } from "../src/db/Database.ts"
-import { client, posted, serverLayer, testConfig } from "./support/config.ts"
+import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { png, textChunk } from "./formats/support.ts"
 it.live("a deletion barrier must remain at the source when a saved edit moves history", () =>
   Effect.gen(function* () {
     const api = yield* client()
@@ -366,5 +367,83 @@ it.live("a swipe of one's own saved after its empty reply was dropped goes to re
     const edited = "An edit of the dropped reply, saved late."
     yield* api.SaveMessageDraft({ target: { _tag: "Edit", versionId: running.version.id }, ...late, content: edited })
     assert.include(yield* recovered, edited)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
+const uploadImage = Effect.gen(function* () {
+  const port = yield* serverPort
+  const response = yield* Effect.promise(() =>
+    fetch(`http://127.0.0.1:${port}/chat/image`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: png(textChunk("fixture", "late swipe"))
+    })
+  )
+  assert.strictEqual(response.status, 200)
+  return (yield* Effect.promise(() => response.json())) as { mediaId: string }
+})
+
+it.live("text to insert below a reply dropped before its first save goes to recovered texts (rev-dd2 #1)", () =>
+  Effect.gen(function* () {
+    const { api, chat, running, empty, recovered } = yield* writing
+    const target = {
+      _tag: "Insert",
+      chatId: chat.id,
+      forkId: (yield* api.GetChat({ chatId: chat.id })).currentForkId!,
+      anchor: running.slotId
+    } as const
+    yield* empty
+    const typed = "Typed to insert below the reply, saved only after it was dropped."
+    const late = { target, draftId: null, expectedRowVersion: null, expectedSession: null, content: typed }
+    const saved = yield* api.SaveMessageDraft(late)
+    assert.strictEqual(saved.status, "discarded")
+    assert.include(yield* recovered, typed)
+    yield* api.SaveMessageDraft(late)
+    assert.lengthOf(
+      (yield* recovered).filter((text) => text === typed),
+      1
+    )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
+it.live("a late swipe with an image isn't taken as saved, so its browser copy keeps the image (rev-dd2 #2)", () =>
+  Effect.gen(function* () {
+    const { api, running, empty } = yield* writing
+    const image = yield* uploadImage
+    yield* empty
+    const refused = yield* api
+      .SaveMessageDraft({
+        target: { _tag: "Write", slotId: running.slotId },
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        content: "A swipe with a picture.",
+        images: [image]
+      })
+      .pipe(Effect.flip)
+    assert.strictEqual(refused._tag, "NotFound")
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
+it.live("a late save replayed after a newer one is filed once (rev-dd2 #7)", () =>
+  Effect.gen(function* () {
+    const { api, running, empty, recovered } = yield* writing
+    yield* empty
+    const save = (content: string) =>
+      api.SaveMessageDraft({
+        target: { _tag: "Write", slotId: running.slotId },
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        content
+      })
+    const first = "Late swipe text A."
+    yield* save(first)
+    yield* save("Late swipe text B, newer.")
+    yield* save(first)
+    assert.lengthOf(
+      (yield* recovered).filter((text) => text === first),
+      1
+    )
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
