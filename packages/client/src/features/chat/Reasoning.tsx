@@ -9,6 +9,7 @@
 // `reasoningPanels` slot. While a reply is being written, everything after a complete opening
 // tag streams into that panel, and its header reads "Thinking…" (pulsing) until the closing
 // tag has come and the body starts (owner, 2026-11-02); open or folded as the user prefers.
+// The thinking's own editor (editThinking.tsx) opens in place of the panel's text.
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { SlotId, ThinkingPart, Version } from "@dreamspan/shared/chat.ts"
@@ -23,6 +24,8 @@ import { reasoningActions, reasoningPanels } from "./presentation.tsx"
 import { collapseCount, subscribeCollapses } from "./reasoningActions.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { liveReasoning, liveSections, liveText, type ChatSession } from "./session.ts"
+import { ThinkingEditor, thinkingPanel, useThinkingEditor } from "./editThinking.tsx"
+import type { MessageDraft } from "./messageDraft.ts"
 import { useDisplayed } from "./useDisplayed.ts"
 
 const words = (text: string) => {
@@ -44,8 +47,12 @@ interface PanelProps {
 function Reasoning({ version, session, hiddenThinking, parentSlotId, depth }: PanelProps) {
   const live = useAtomValue(liveReasoning(version.id))
   const body = useAtomValue(liveText(version.id)) ?? version.content
+  const editor = useThinkingEditor(session, version.id)
   const text = live ?? version.reasoning ?? ""
-  if (text === "") return null
+  // The thinking's editor shows here unless the reply's tagged thinking is what it edits; a
+  // message without thinking shows it here once Add thinking opened it.
+  const editing = editor !== undefined && version.status !== "generating" && thinkingPanel(version) === "reasoning"
+  if (text === "" && !editing) return null
   return (
     <ReasoningBlock
       key={version.id}
@@ -58,8 +65,9 @@ function Reasoning({ version, session, hiddenThinking, parentSlotId, depth }: Pa
       kind="reasoning"
       hidden={hiddenThinking?.includes("reasoning") ?? false}
       first
-      label="Reasoning"
+      label={text === "" ? "Thinking" : "Reasoning"}
       thinking={body === ""}
+      editor={editing ? editor : undefined}
     />
   )
 }
@@ -69,8 +77,10 @@ function ReplySections({ version, session, hiddenThinking, parentSlotId, depth }
   const live = useAtomValue(liveSections(version.id))
   const reasoning = useAtomValue(liveReasoning(version.id)) ?? version.reasoning ?? ""
   const body = useAtomValue(liveText(version.id)) ?? version.content
+  const editor = useThinkingEditor(session, version.id)
   const text = live ?? sectionsDisplay(version.replySections)
   const streaming = version.status === "generating"
+  const editing = editor !== undefined && !streaming && thinkingPanel(version) === "sections"
   // The body starts only once the last section has closed (chat/replySections.ts), so a reply
   // still being written with no body yet is thinking: everything after the opening tag is here.
   const thinking = streaming && body === ""
@@ -90,6 +100,7 @@ function ReplySections({ version, session, hiddenThinking, parentSlotId, depth }
       label="Thinking in the reply"
       streamingLabel={thinking ? "Thinking…" : "Thinking in the reply"}
       thinking={thinking}
+      editor={editing ? editor : undefined}
       notice={
         !streaming && sectionUnclosed(version.replySections)
           ? "Never closed: the reply ended inside its thinking."
@@ -122,8 +133,11 @@ function ReasoningBlock({
   label,
   streamingLabel = `${label}…`,
   thinking = streaming,
-  notice = null
+  notice = null,
+  editor
 }: PanelProps & {
+  /** The thinking's editor (editThinking.tsx), open: shown in place of the text. */
+  editor?: MessageDraft | undefined
   text: string
   streaming: boolean
   kind: "reasoning" | "sections"
@@ -203,34 +217,40 @@ function ReasoningBlock({
           {hint}
         </span>
         <div className="flex w-full flex-wrap items-center gap-x-1 pl-4 empty:hidden sm:w-auto sm:pl-0">
-          <SlotOutlet slot={reasoningActions} props={{ version, text, streaming, kind, hidden, first, session }} />
+          {text !== "" && (
+            <SlotOutlet slot={reasoningActions} props={{ version, text, streaming, kind, hidden, first, session }} />
+          )}
         </div>
       </div>
       {notice && <p className="pl-4 text-xs text-muted">{notice}</p>}
-      {open && (
-        <div
-          id={id}
-          role="region"
-          aria-label={label}
-          aria-busy={streaming && thinking ? true : undefined}
-          className="border-l-2 border-border pl-3 text-sm text-muted"
-        >
-          <MessageBody text={text}>
-            {shown.pending ? (
-              // Its place kept, not shown, until the display scripts answer.
-              <div className="invisible" aria-hidden>
+      {editor ? (
+        <ThinkingEditor session={session} version={version} editor={editor} />
+      ) : (
+        open && (
+          <div
+            id={id}
+            role="region"
+            aria-label={label}
+            aria-busy={streaming && thinking ? true : undefined}
+            className="border-l-2 border-border pl-3 text-sm text-muted"
+          >
+            <MessageBody text={text}>
+              {shown.pending ? (
+                // Its place kept, not shown, until the display scripts answer.
+                <div className="invisible" aria-hidden>
+                  <Markdown text={shown.text ?? ""} sourceText={text} streaming={streaming} />
+                </div>
+              ) : (
                 <Markdown text={shown.text ?? ""} sourceText={text} streaming={streaming} />
-              </div>
-            ) : (
-              <Markdown text={shown.text ?? ""} sourceText={text} streaming={streaming} />
-            )}
-          </MessageBody>
-          {shown.issues.map((issue, i) => (
-            <p key={i} role="note" className="text-xs">
-              {issue}
-            </p>
-          ))}
-        </div>
+              )}
+            </MessageBody>
+            {shown.issues.map((issue, i) => (
+              <p key={i} role="note" className="text-xs">
+                {issue}
+              </p>
+            ))}
+          </div>
+        )
       )}
       {viewer.error && (
         <p role="alert" className="text-xs text-danger">

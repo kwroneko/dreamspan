@@ -10,16 +10,7 @@ import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import type { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
 import { parseField, valueField, type FieldPath } from "@dreamspan/shared/editing.ts"
 import type { NoteEntry, SharedNote } from "@dreamspan/shared/editorApi.ts"
-import {
-  type ReactNode,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore
-} from "react"
+import { type ReactNode, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { SlotOutlet } from "../../slots.tsx"
@@ -28,7 +19,7 @@ import { Field, Fieldset } from "../../ui/Field.tsx"
 import { Slider } from "../../ui/Slider.tsx"
 import { EmptyState } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
-import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
 import { CardSources } from "../cardSources/index.tsx"
 import type { Caller } from "./caller.ts"
 import { CardTextEditor } from "./CardTextEditor.tsx"
@@ -45,7 +36,7 @@ import { PromptUseNote } from "./PromptUseNote.tsx"
 import { SearchNavigation } from "./searchNavigation.ts"
 import { type EditorStore, useEditorState, useText, useValue, useWorkingDoc } from "./store.ts"
 import { MACROS_COUNTED, useCountMacros } from "./countMacros.ts"
-import { tokenizerText, tokensText, useTokenCounts } from "./tokenCounts.ts"
+import { TokenCount } from "./TokenCount.tsx"
 import { useEditorReadOnly } from "./readOnly.ts"
 
 /** What each field is for, on hover over its label. */
@@ -71,20 +62,7 @@ const HINTS = {
 function FieldTokens({ store, path }: { store: EditorStore; path: FieldPath }) {
   const text = useText(store, path) ?? ""
   const expand = useCountMacros(store)
-  const texts = useMemo(() => [expand(text)], [expand, text])
-  const { counts, tokenizer, pending } = useTokenCounts(texts)
-  return (
-    <Tooltip label={`${MACROS_COUNTED} ${tokenizerText(tokenizer)}`}>
-      <span
-        tabIndex={0}
-        data-field-tokens
-        aria-busy={pending || undefined}
-        className="rounded text-xs font-normal text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus"
-      >
-        {tokensText(counts[0] ?? null, tokenizer, pending)}
-      </span>
-    </Tooltip>
-  )
+  return <TokenCount text={expand(text)} about={MACROS_COUNTED} />
 }
 
 /** A text field of the card with its hint, and its token count where it's prompt text. */

@@ -1,8 +1,8 @@
-// A reply's tagged thinking in its edit (review-thinkedit1; SillyTavern's reasoning block, which
-// its auto-parse fills from the reply's text): the auto-parsed section is the message's thinking
-// field, explained as thinking in the reply, changed in its tags and removed like any other. At
-// desktop and phone widths, light and dark, with a layout audit of the open editor. Synthetic
-// chat only.
+// A reply's tagged thinking, edited on its own (thinkedit2; SillyTavern's reasoning block, which
+// its auto-parse fills from the reply's text): the auto-parsed section is the message's thinking,
+// opened by its panel's Edit (no Add thinking offered), changed in its tags and deleted like any
+// other. At desktop and phone widths, light and dark, with a layout audit of the open editor.
+// Synthetic chat only.
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, test } from "@playwright/test"
@@ -69,46 +69,44 @@ for (const width of [1440, 390])
       const tagged = sectionsDisplay(generated.replySections)
       expect(tagged).toMatch(/\S/)
       const reply = page.getByRole("article").last()
+      const panel = reply.locator('[data-reasoning-panel="sections"]')
       const thinking = reply.getByRole("textbox", { name: "Thinking", exact: true })
-      const edit = async () => {
-        await showActions(reply)
-        await reply.getByRole("button", { name: "Edit", exact: true }).click()
-        await expect(reply.getByRole("textbox", { name: "Message text", exact: true })).toBeVisible()
-      }
-      const save = async () => {
-        await reply.getByRole("button", { name: "Save", exact: true }).click()
-        await expect(reply.getByRole("textbox", { name: "Message text", exact: true })).toHaveCount(0)
+      const saveThinking = async () => {
+        await reply
+          .locator("[data-thinking-edit] [data-field-chrome]")
+          .getByRole("button", { name: "Save thinking", exact: true })
+          .click()
+        await expect(thinking).toHaveCount(0)
       }
 
-      // The tagged thinking is the edit's thinking, opened by Edit thinking, not Add thinking.
-      const editThinking = reply.getByRole("button", { name: "Edit thinking", exact: true })
-      await edit()
+      // The tagged thinking is the reply's thinking: its panel's Edit opens it; no Add thinking.
+      const editThinking = panel.getByRole("button", { name: "Edit thinking", exact: true })
+      await showActions(reply)
+      await reply.getByRole("button", { name: "More actions" }).click()
+      await expect(page.getByRole("menuitem", { name: "Add thinking" })).toHaveCount(0)
+      await page.keyboard.press("Escape")
       await editThinking.click()
       await expectTextBox(thinking, tagged)
-      await expect(reply.getByRole("button", { name: "Add thinking", exact: true })).toHaveCount(0)
-      await reply.getByRole("button", { name: "About Thinking", exact: true }).hover()
-      await expect(page.getByText(/The thinking in the reply, shown folded above it/).last()).toBeVisible()
       await shot("edit-tagged-thinking")
       await expectLayout(page, info, `edit-tagged-thinking-${width}-${theme}`, { scope: "article:last-of-type" })
 
-      // Changed: still thinking in the reply, in its tags, on a new version.
+      // Changed: still thinking in the reply, in its tags, on a new version with the text as it was.
       await replaceEditorText(thinking, "Wade across at the ford.")
-      await save()
+      await saveThinking()
       await expect
         .poll(async () => sectionsDisplay((await lastEntry(chat.id)).version.replySections))
         .toBe("Wade across at the ford.")
       const saved = (await lastEntry(chat.id)).version
       expect(saved.replySections!.sections[0]!.open).toBe(generated.replySections!.sections[0]!.open)
       expect(saved.reasoning).toBeUndefined()
-      await reply.locator('[data-reasoning-panel="sections"] button[aria-expanded]').first().click()
+      expect(saved.content).toBe(generated.content)
+      await panel.locator("button[aria-expanded]").first().click()
       await expect(reply.getByRole("region", { name: "Thinking in the reply" })).toHaveText(/Wade across at the ford\./)
 
-      // Removed like any other thinking.
-      await edit()
+      // Deleted like any other thinking.
       await editThinking.click()
-      await reply.getByRole("button", { name: "Remove thinking", exact: true }).click()
-      await expect(thinking).toHaveCount(0)
-      await save()
+      await reply.getByRole("button", { name: "Delete thinking", exact: true }).click()
+      await saveThinking()
       await expect.poll(async () => (await lastEntry(chat.id)).version.replySections).toBeUndefined()
-      await expect(reply.locator('[data-reasoning-panel="sections"]')).toHaveCount(0)
+      await expect(panel).toHaveCount(0)
     })

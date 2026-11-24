@@ -7,6 +7,7 @@ import { createElement, type ReactNode } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { registerEditorHistory } from "../src/features/chat/editorHistory.tsx"
+import { registerEditThinking } from "../src/features/chat/editThinking.tsx"
 import { registerGuidanceEdit } from "../src/features/chat/guidanceEdit.tsx"
 import { register as registerInsertMessage } from "../src/features/chat/insertMessage/index.tsx"
 import {
@@ -97,6 +98,7 @@ describe("pinned message actions", () => {
       ...registerGuidanceEdit(),
       ...registerInsertMessage(),
       ...registerEditorHistory(),
+      ...registerEditThinking(),
       ...registerRewrites()
     ]
     messageActionPins.connect({}, null, null)
@@ -188,6 +190,7 @@ describe("pinned message actions", () => {
       "message.continue",
       "message.write-version",
       "message.add-guidance",
+      "message.add-thinking",
       "message.branch",
       "message.insert-above",
       "message.insert-below",
