@@ -243,7 +243,9 @@ export class EditorStore {
         unwatch()
       }
     },
-    changed: () => !this.gone && (this.dirtyFields().length > 0 || this.held() !== null)
+    changed: () => !this.gone && (this.dirtyFields().length > 0 || this.held() !== null),
+    /** A chat's own note's changes are its branch's: a scope showing another branch doesn't count them. */
+    branch: () => (this.chatNote ? { chatId: this.chatNote.chatId, forkId: this.chatNote.forkId ?? null } : null)
   }
 
   private rechecking: Promise<void> | null = null
