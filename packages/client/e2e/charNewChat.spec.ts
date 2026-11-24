@@ -50,7 +50,7 @@ for (const width of [390, 1440]) {
         return
       }
       await expect(panel.locator(`[data-chat-id="${group.chat.id}"]`)).toBeVisible()
-      const action = panel.getByRole("button", { name: `New Roleplay with ${name}`, exact: true })
+      const action = panel.getByRole("link", { name: `New Roleplay with ${name}`, exact: true })
       await expect(action).toBeVisible()
       const findings = await expectLayout(page, info, "left-character-chats", { scope: selector })
       writeFileSync(info.outputPath("left-layout.json"), JSON.stringify(findings, null, 2))
@@ -73,7 +73,7 @@ for (const width of [390, 1440]) {
       for (const query of [`forks=${group.chat.id}`, `forks=${group.chat.id}&character=${card.entityId}`, ""]) {
         await page.goto(`${server().url}/?side=chats&${query}`)
         await showAppNavigation(page)
-        await expect(panel.getByRole("button", { name: /^New Roleplay with / })).toHaveCount(0)
+        await expect(panel.getByRole("link", { name: /^New Roleplay with / })).toHaveCount(0)
       }
     })
   }
