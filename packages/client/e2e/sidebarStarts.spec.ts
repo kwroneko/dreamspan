@@ -102,19 +102,38 @@ for (const width of [1340, 1920, 390])
     await expect(menu.getByRole("menuitem", { name: /Open in a new browser tab/ })).toBeVisible()
     await page.keyboard.press("Escape")
 
-    // A character's chats: the row reads New Roleplay with them, in the same place; the list too.
+    // A character's chats: New Roleplay and New Workshop with them, in the same place; the list too.
     await visit(`?character=${entity}`)
-    const withMira = panel.getByRole("button", { name: "New Roleplay with Mira", exact: true })
+    const withMira = panel.getByRole("link", { name: "New Roleplay with Mira", exact: true })
+    const workshopMira = panel.getByRole("link", { name: "New Workshop with Mira", exact: true })
     await expect(withMira).toBeVisible()
-    await expect(workshop).toHaveCount(0)
-    const character = { row: await box(withMira), list: await box(firstSection) }
-    expect(Math.abs(character.row.y - all.row.y)).toBeLessThanOrEqual(1)
-    expect(Math.abs(character.row.height - all.row.height)).toBeLessThanOrEqual(1)
-    expect(Math.abs(character.list.y - all.list.y)).toBeLessThanOrEqual(1)
-    await withMira.hover()
-    await expect(tooltip(page)).toHaveText("Start a new roleplay with Mira.")
+    await expect(workshopMira).toBeVisible()
+    const [cr, cw] = [await box(withMira), await box(workshopMira)]
+    expect(Math.abs(cr.y - cw.y)).toBeLessThanOrEqual(1)
+    expect(Math.abs(cr.y - all.row.y)).toBeLessThanOrEqual(1)
+    expect(Math.abs(cr.height - all.row.height)).toBeLessThanOrEqual(1)
+    expect(Math.abs((await box(firstSection)).y - all.list.y)).toBeLessThanOrEqual(1)
+    expect(cw.x - (cr.x + cr.width)).toBeCloseTo(8, 0)
     await expectLayout(page, info, `sidebar-starts-character-${width}`, { scope })
     await shoot(`character-${width}-dark`)
+    await withMira.hover()
+    await expect(tooltip(page)).toHaveText("Start a new roleplay with Mira.")
+    await workshopMira.hover()
+    await expect(tooltip(page)).toHaveText(
+      "Start a workshop with Mira as the assistant: for writing and editing cards, presets and lorebooks."
+    )
+    await page.mouse.move(0, 0)
+    await workshopMira.click({ button: "right" })
+    await expect(page.getByRole("menu").getByRole("menuitem", { name: /Open in a new browser tab/ })).toBeVisible()
+    await page.keyboard.press("Escape")
+
+    // New Workshop with Mira: a workshop whose assistant is Mira's card.
+    await workshopMira.click()
+    await expect(page).toHaveURL(/\/new\/workshop\?/)
+    expect(new URL(page.url()).searchParams.get("workshopCard")).toBe(entity)
+    await expect(
+      page.locator("[data-workshop-intro]").getByRole("button", { name: "Assistant: Mira", exact: true })
+    ).toBeVisible()
 
     // Each opens its chat not made yet.
     await visit("")
@@ -134,7 +153,7 @@ test("the start row at every sidebar width", async ({ page }, info) => {
   const { panel, scope } = await setup(page, 1920)
   const roleplay = panel.getByRole("link", { name: "New Roleplay", exact: true })
   const workshop = panel.getByRole("link", { name: "New Workshop", exact: true })
-  const measured: Array<{ sidebar: number; stacked: boolean }> = []
+  const measured: Array<{ sidebar: number; stacked: boolean; names?: boolean }> = []
   for (const sbw of [220, 240, 260, 280, 320, 400, 560, 800]) {
     await page.goto(`${server().url}/?sbw=${sbw}`)
     await expect(roleplay).toBeVisible()
@@ -152,7 +171,34 @@ test("the start row at every sidebar width", async ({ page }, info) => {
       await panel.screenshot({ path: join(shots, `width-${sbw}-dark.png`), animations: "disabled" })
     }
   }
+  // A character's: their names after both labels where the row has room, else on neither.
+  const withMira = panel.getByRole("link", { name: "New Roleplay with Mira", exact: true })
+  const workshopMira = panel.getByRole("link", { name: "New Workshop with Mira", exact: true })
+  const shown = (link: Locator) =>
+    link.locator("[data-start-with]").evaluate((el) => getComputedStyle(el).visibility === "visible")
+  for (const sbw of [220, 240, 280, 320, 360, 400, 560, 800]) {
+    await page.goto(`${server().url}/?sbw=${sbw}&character=${entity}`)
+    await expect(withMira).toBeVisible()
+    await page.mouse.move(0, 0)
+    const [r, w] = [await box(withMira), await box(workshopMira)]
+    const stacked = w.y > r.y + 1
+    const names = [await shown(withMira), await shown(workshopMira)]
+    expect(names[0]).toBe(names[1])
+    if (names[0]) expect(stacked).toBe(false)
+    for (const link of [withMira, workshopMira])
+      expect(await link.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+    if (stacked) expect(Math.abs(r.width - w.width)).toBeLessThanOrEqual(1)
+    else expect(w.x - (r.x + r.width)).toBeCloseTo(8, 0)
+    measured.push({ sidebar: sbw, stacked, names: names[0]! })
+    await expectLayout(page, info, `sidebar-starts-character-width-${sbw}`, { scope })
+    if (shots && (sbw === 220 || sbw === 320 || sbw === 560)) {
+      mkdirSync(shots, { recursive: true })
+      await panel.screenshot({ path: join(shots, `character-width-${sbw}-dark.png`), animations: "disabled" })
+    }
+  }
   await info.attach("sidebar widths", { body: JSON.stringify(measured, null, 2), contentType: "application/json" })
+  console.log(JSON.stringify(measured))
   // The default width keeps them side by side.
   expect(measured.find((m) => m.sidebar >= 320)?.stacked).toBe(false)
+  expect(measured.find((m) => m.sidebar === 800 && m.names !== undefined)?.names).toBe(true)
 })

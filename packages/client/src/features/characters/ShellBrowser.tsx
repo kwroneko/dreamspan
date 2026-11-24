@@ -45,6 +45,7 @@ import { SourceChips, SourceFiltersPanel } from "../cardSources/filters.tsx"
 import { GroupGrid, useGroupsSwitch } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
 import { characterChatActions, sidebarChatStarts, sidebarFoot } from "./homeSlots.ts"
+import { StartRow } from "./NewCharacterChat.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { Loading, LoadingProgress, PlaceholderBar } from "../../ui/Spinner.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
@@ -1408,13 +1409,15 @@ function Browser() {
           // One column of rows; dragged wide, a row stays a row's width, its pin beside its text.
           <div className="max-w-controls">
             {kind === "character" && card && (
-              <SlotOutlet slot={characterChatActions} props={{ entityId: card.card.entityId, label: cardLabel }} />
+              <StartRow>
+                <SlotOutlet slot={characterChatActions} props={{ entityId: card.card.entityId, label: cardLabel }} />
+              </StartRow>
             )}
             {/* In the slot a character's New Roleplay has, as tall: side by side, stacked where they don't fit. */}
             {kind === "all" && (
-              <div data-sidebar-starts className="mt-2 flex flex-wrap gap-2 empty:hidden">
+              <StartRow>
                 <SlotOutlet slot={sidebarChatStarts} props={{}} />
-              </div>
+              </StartRow>
             )}
             {/* A chat's own pins are among its named and pinned branches. */}
             {kind !== "chat" && data && (

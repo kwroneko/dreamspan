@@ -27,8 +27,8 @@ import { askBeforeReply } from "./regenerateWarning.ts"
 import { SIDE_CHAT_TAB, TALK_ABOUT } from "./sideChat.ts"
 import { StepEffects } from "./StepEffects.tsx"
 import { talkAbout } from "./talkAbout.ts"
-import { NewWorkshopStart, WorkshopStartCard } from "./StartCard.tsx"
-import { sidebarChatStarts } from "../characters/homeSlots.ts"
+import { NewWorkshopStart, NewWorkshopWithCharacter, WorkshopStartCard } from "./StartCard.tsx"
+import { characterChatActions, sidebarChatStarts } from "../characters/homeSlots.ts"
 import { ConvertPresetButton } from "./ConvertPreset.tsx"
 import { registerWorkshopPersona } from "./workshopPersona.tsx"
 import { editorActions } from "../editor/editorSlots.ts"
@@ -75,6 +75,7 @@ export const register = () => [
   ...registerWorkshopPersona(),
   chatStartSections.register({ id: "workshop.start", order: 20, component: WorkshopStartCard }),
   sidebarChatStarts.register({ id: "workshop.sidebar-start", order: 20, component: NewWorkshopStart }),
+  characterChatActions.register({ id: "workshop.character-start", order: 20, component: NewWorkshopWithCharacter }),
   // A workshop of its own before it exists, which the card's New workshop opens: made by its first send.
   routes.register({
     id: "workshop.start",
