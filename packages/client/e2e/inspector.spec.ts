@@ -212,7 +212,7 @@ test("a reply's context opens from the reply, with its sources and the cache bre
   await page.goto(`${server().url}/chats/${chat.id}`)
   await expect(reply(page)).toContainText(REPLY)
   await messageMenu(reply(page), "Open request inspector")
-  await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}/context/${chat.reply}\\?fork=[^&]+$`))
+  await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}/context/${chat.reply}\\?fork=[^&]+(&wb=[^&]*)?$`))
   const messages = page.getByRole("region", { name: "Messages" })
   await expect(messages.getByText("Card “Mira”: description")).toBeVisible()
   await expect(messages.getByText("Preset prompt “Main Prompt”")).toBeVisible()
@@ -279,7 +279,7 @@ test("an earlier reply and a swipe each open their own request from the message'
   await expect(replies).toHaveCount(2)
   // The swipe, the second version of the last reply.
   await messageMenu(replies.last(), "Open request inspector")
-  await expect(page).toHaveURL(new RegExp(`/chats/${made.id}/context/${made.swipe}\\?fork=[^&]+$`))
+  await expect(page).toHaveURL(new RegExp(`/chats/${made.id}/context/${made.swipe}\\?fork=[^&]+(&wb=[^&]*)?$`))
   await expect(page.getByText(/^swipe, /)).toBeVisible()
   const messages = page.getByRole("region", { name: "Messages" })
   // The earlier reply is in its history, by message and version.
@@ -288,7 +288,7 @@ test("an earlier reply and a swipe each open their own request from the message'
   await page.getByRole("link", { name: "← Back to the reply" }).click()
   // The earlier reply opens its own request.
   await messageMenu(replies.first(), "Open request inspector")
-  await expect(page).toHaveURL(new RegExp(`/chats/${made.id}/context/${made.first}\\?fork=[^&]+$`))
+  await expect(page).toHaveURL(new RegExp(`/chats/${made.id}/context/${made.first}\\?fork=[^&]+(&wb=[^&]*)?$`))
   await expect(page.getByText(/^normal, /)).toBeVisible()
   await scrollUntil(messages, messages.getByText("The bell rang twice.", { exact: true }))
   await expect(messages.getByText("The bell rang twice.", { exact: true })).toBeVisible()
@@ -486,7 +486,7 @@ for (const width of [1440, 390])
       const original = page.getByRole("article", { name: "Reply" }).filter({ hasText: REPLY })
       await expect(original).toBeVisible()
       await messageMenu(original, "Open request inspector")
-      await expect(page).toHaveURL(new RegExp(`\\?fork=${made.original}$`))
+      await expect(page).toHaveURL(new RegExp(`\\?fork=${made.original}(&wb=[^&]*)?$`))
       // The history sources link to the viewed fork too.
       const messages = page.getByRole("region", { name: "Messages" })
       await expect(messages.getByRole("link", { name: "Message 2" })).toHaveAttribute(
@@ -948,7 +948,9 @@ test("a rewritten piece shows in its source's box, labelled changed before sendi
         // The mark says what happened, and its hover says how.
         const mark = box.getByText("(changed before sending)", { exact: true })
         await mark.hover()
-        await expect(page.getByText("This text was changed after the prompt was assembled", { exact: false })).toBeVisible()
+        await expect(
+          page.getByText("This text was changed after the prompt was assembled", { exact: false })
+        ).toBeVisible()
         await page.mouse.move(0, 0)
         await expect(messages.getByText("Added by the assembler").filter({ hasText: after })).toHaveCount(0)
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
