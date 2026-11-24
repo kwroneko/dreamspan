@@ -61,6 +61,18 @@ export const makeDraftChatHandlers = Effect.gen(function* () {
           draftFor === "empty"
             ? ["empty", ""]
             : [draftFor.slice(0, draftFor.indexOf(":")), draftFor.slice(draftFor.indexOf(":") + 1)]
+        // A new workshop: made as the first send made it before, pending (spec/WORKSHOP-CARDS.md §3).
+        if (kind === "workshop") {
+          const [card = "", persona = ""] = of.split(":")
+          return given(
+            yield* writer.CreateWorkshop({
+              userId: id,
+              draftFor,
+              ...(card === "" ? {} : { card }),
+              ...(persona === "" ? {} : { persona: persona === "none" ? null : persona })
+            })
+          )
+        }
         // A new chat's own cast, not started yet (New chat with this cast there), has no group:
         // its characters, who the user plays left out.
         const unstarted = kind === "group" ? pending.find((chat) => chat.chatId === of) : undefined

@@ -61,7 +61,11 @@ export const commitPendingChat = (sql: SqlClient.SqlClient, chatId: string, at: 
   Effect.gen(function* () {
     const chat = yield* pendingRow(sql, chatId)
     if (chat === null) return false
-    const retitle = chat.title_source === "auto" && !(chat.draft_for ?? "").startsWith("group:")
+    // A group's new chat keeps the group's name, a workshop its own ("Workshop", or the one given).
+    const retitle =
+      chat.title_source === "auto" &&
+      !(chat.draft_for ?? "").startsWith("group:") &&
+      !(chat.draft_for ?? "").startsWith("workshop:")
     const title = retitle ? titleFor(yield* castNames(sql, chat), at) : null
     yield* sql`UPDATE chats SET status = 'active', draft_for = NULL, created_at = ${at}, last_message_at = ${at},
         title = coalesce(${title}, title), row_version = row_version + 1

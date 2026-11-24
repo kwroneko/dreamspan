@@ -337,7 +337,7 @@ export const settingsPlaces = [
   }),
   place({
     name: "New workshop: first message",
-    source: "features/workshop/PendingWorkshop.tsx:428",
+    source: "features/chat/Composer.tsx:853",
     setup: async () => null,
     open: async (page, _, ctx) => {
       await go(page, ctx, "/new/workshop")
@@ -347,10 +347,10 @@ export const settingsPlaces = [
   }),
   place({
     name: "New workshop: title",
-    source: "features/workshop/StartWorkshopPage.tsx:32",
+    source: "features/workshop/StartCard.tsx:211",
     setup: async () => null,
     open: async (page, _, ctx) => {
-      await go(page, ctx, "/new/workshop")
+      await go(page, ctx, "/chats")
       return page.getByLabel("Title of the new workshop", { exact: true })
     },
     shown: (page) => page.getByLabel("Title of the new workshop", { exact: true })

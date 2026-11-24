@@ -199,8 +199,16 @@ function DraftChat({
   )
 }
 
-function DraftChatPage({ draftFor, onOpened }: { draftFor: DraftFor; onOpened?: (chat: Chat) => void }) {
-  useTitle("New chat")
+function DraftChatPage({
+  draftFor,
+  onOpened,
+  pageTitle = "New chat"
+}: {
+  draftFor: DraftFor
+  onOpened?: (chat: Chat) => void
+  pageTitle?: string
+}) {
+  useTitle(pageTitle)
   return (
     <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Another entry is another chat. */}
@@ -228,9 +236,23 @@ export function GroupDraftChatPage() {
 
 /** /new/chat: a chat with nobody in it yet (the Chats page's New chat). */
 export function EmptyDraftChatPage() {
-  // The title typed on the Chats page's start card names the chat it opens (a rename, which
-  // starts nothing); the title's draft ends once it's the chat's.
-  const title = useUserDraft(EMPTY_CHAT_TITLE, "Title", "")
+  return <TitledDraftChatPage draftFor="empty" titleKey={EMPTY_CHAT_TITLE} />
+}
+
+/**
+ * A new chat named by the title typed on the Chats page's start card (`titleKey`, its user
+ * draft): a rename, which starts nothing; the title's draft ends once it's the chat's.
+ */
+export function TitledDraftChatPage({
+  draftFor,
+  titleKey,
+  pageTitle
+}: {
+  draftFor: DraftFor
+  titleKey: string
+  pageTitle?: string
+}) {
+  const title = useUserDraft(titleKey, "Title", "")
   const call = useCaller()
   const [opened, setOpened] = useState<Chat | null>(null)
   // The name given, once read: a fresh chat opened after a sweep gets it too.
@@ -246,5 +268,5 @@ export function EmptyDraftChatPage() {
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per chat opened, when the title is read
   }, [opened, title.ready])
-  return <DraftChatPage draftFor="empty" onOpened={setOpened} />
+  return <DraftChatPage draftFor={draftFor} onOpened={setOpened} {...(pageTitle === undefined ? {} : { pageTitle })} />
 }

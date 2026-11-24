@@ -131,9 +131,9 @@ for (const width of [1340, 1920, 390])
     await workshopMira.click()
     await expect(page).toHaveURL(/\/new\/workshop\?/)
     expect(new URL(page.url()).searchParams.get("workshopCard")).toBe(entity)
-    await expect(
-      page.locator("[data-workshop-intro]").getByRole("button", { name: "Assistant: Mira", exact: true })
-    ).toBeVisible()
+    // Its pending chat, Mira's card its assistant.
+    await expect(page).toHaveURL(/\/new\/workshop\?.*draft=/, { timeout: 30_000 })
+    await expect(page.locator("[data-center-header]").first().getByText("Mira", { exact: true })).toBeVisible()
 
     // Each opens its chat not made yet.
     await visit("")
@@ -143,8 +143,8 @@ for (const width of [1340, 1920, 390])
     if (phone) await expect(panel).toHaveCount(0)
     await visit("")
     await workshop.click()
-    await expect(page).toHaveURL(/\/new\/workshop(\?|$)/)
-    await expect(page.locator("[data-workshop-intro]")).toBeVisible()
+    await expect(page).toHaveURL(/\/new\/workshop\?draft=/, { timeout: 30_000 })
+    await expect(page.locator("[data-center-header]").first().getByText("new", { exact: true })).toBeVisible()
   })
 
 test("the sidebar start links remeasure when switching characters at a fixed width", async ({ page }) => {

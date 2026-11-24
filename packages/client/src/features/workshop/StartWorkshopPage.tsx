@@ -1,101 +1,44 @@
-// /new/workshop: a workshop of its own before it exists (owner, 2026-11-17: "The chat is created
-// when the first message is sent"). The Chats page's New workshop opens it, making nothing: the
-// chat's surface with the workshop's header (its title, "new", the kind's badge), an intro where
-// its messages will be with the start card's choices (the assistant, the persona, in the URL as
-// there) and its title (the same draft as the card's), still changeable, and the saved
-// workshop's composer (`PendingWorkshop`). The first send makes it, then its page opens in place.
-import type { CastCard } from "@dreamspan/shared/chat.ts"
-import { useAtomValue } from "@effect/atom-react"
-import { useNavigate } from "@tanstack/react-router"
-import { AsyncResult } from "effect/reactivity"
-import { Input } from "../../ui/Field.tsx"
-import { Badge } from "../../ui/Surface.tsx"
-import { Tooltip } from "../../ui/Tooltip.tsx"
-import { useViewPrefs } from "../../ui/viewPrefs.ts"
-import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
-import { aboutLine, ChatHeaderFrame } from "../chat/ChatHeader.tsx"
-import { KindBadge } from "../chat/KindBadge.tsx"
-import { useTitle } from "../shell.tsx"
-import { PendingWorkshop } from "./PendingWorkshop.tsx"
-import { StartChoices, useWorkshopStart } from "./StartCard.tsx"
-import { workshopDefaultsAtom } from "./workshopPersona.tsx"
-import { NEW_WORKSHOP_COPY, NEW_WORKSHOP_TITLE, WORKSHOP_ATTACH_KEY } from "./workshopStart.ts"
+// /new/workshop: a new workshop, the same page as a new roleplay chat (DraftChatPage.tsx; owner,
+// 2026-11-17: "The chat is created when the first message is sent"). The server opens it as a
+// pending chat with the assistant and persona chosen (the URL's `workshopCard`, `workshopPersona`,
+// as the Chats page's start card sets them), so its greeting is a message, its header, composer,
+// strip and panels are the saved workshop's, and the first send starts it in place, moving nothing
+// (spec/WORKSHOP-CARDS.md §3). The assistant and persona change there as in any chat: the Cast
+// tab and the speaker chip. The title typed on the start card names it.
+//
+// "Work on in a workshop" → A new workshop opens it with the items in the URL (`workshopAttach`):
+// they go into its composer as the saved composer's attachments (`composer_library` on its
+// draft), so a reload keeps them and the first send carries them; the URL then drops them.
+import { useSearch } from "@tanstack/react-router"
+import { useEffect, useRef } from "react"
 import { usePlaceParam } from "../../usePlaceParam.ts"
-import { useLibraryItems } from "./workOnInWorkshop.tsx"
-
-const INTRO =
-  "Ask an assistant about your cards, presets and lorebooks, outside any story. It can read and change your library and set up chats. Your first message starts the workshop."
+import { useLiveLibraryComposers } from "../chat/libraryAttachments.tsx"
+import { DRAFT_PARAM, TitledDraftChatPage } from "../chat/DraftChatPage.tsx"
+import { useWorkshopStart } from "./StartCard.tsx"
+import { NEW_WORKSHOP_TITLE, WORKSHOP_ATTACH_KEY } from "./workshopStart.ts"
 
 export function StartWorkshopPage() {
-  const navigate = useNavigate()
-  const prefs = useViewPrefs().prefs
-  const { card, setCard, persona, setPersona } = useWorkshopStart()
-  const defaults = useAtomValue(workshopDefaultsAtom)
-  const stored = AsyncResult.isSuccess(defaults) ? defaults.value : null
-  const titleDraft = useUserDraft(NEW_WORKSHOP_TITLE, "Title", "")
-  // What "Work on in a workshop" → A new workshop put in its first message, in the URL.
+  const { card, persona } = useWorkshopStart()
   const [attachParam, setAttach] = usePlaceParam(WORKSHOP_ATTACH_KEY, "")
-  const attachIds = attachParam.split(",").filter((id) => id !== "")
-  const attached = useLibraryItems(attachIds)
-  const title = titleDraft.text.trim() || "New workshop"
-  useTitle(title)
-  // The assistant's portrait where the saved workshop's header shows it, so the first send moves nothing.
-  const header = (characters: ReadonlyArray<CastCard>) => (
-    <ChatHeaderFrame
-      characters={characters}
-      portraitsOpen={false}
-      loading={false}
-      about={aboutLine(characters, title, null)}
-      actions={null}
-      title={
-        <>
-          <h1 className="min-w-0 truncate text-base font-semibold">{title}</h1>
-          <Tooltip label="Not saved yet: sending the first message saves the workshop.">
-            <span
-              tabIndex={0}
-              className="shrink-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <Badge>new</Badge>
-            </span>
-          </Tooltip>
-          <KindBadge kind="workshop" />
-        </>
-      }
-    />
-  )
-  const intro = (
-    <div data-workshop-intro="" className="mx-3 flex flex-col gap-2 rounded-lg bg-surface-raised px-3 py-2">
-      <p className="text-sm text-muted">{INTRO}</p>
-      <UserDraftStatus draft={titleDraft} />
-      <StartChoices card={card} setCard={setCard} persona={persona} setPersona={setPersona} />
-      <Input
-        aria-label="Title of the new workshop"
-        placeholder="Title (optional)"
-        value={titleDraft.text}
-        disabled={!titleDraft.ready}
-        onChange={(event) => titleDraft.setText(event.currentTarget.value)}
-      />
-    </div>
-  )
+  const search = useSearch({ strict: false }) as Record<string, unknown>
+  const draft = typeof search[DRAFT_PARAM] === "string" ? (search[DRAFT_PARAM] as string) : ""
+  const composers = useLiveLibraryComposers()
+  const composer = draft === "" ? undefined : composers.find((live) => live.chatId === draft)
+  // Handed over once, when the new workshop's composer is there.
+  const handed = useRef(false)
+  useEffect(() => {
+    if (handed.current || composer === undefined) return
+    const ids = attachParam.split(",").filter((id) => id !== "")
+    if (ids.length === 0) return
+    handed.current = true
+    composer.add(ids)
+    setAttach("", true)
+  }, [composer, attachParam, setAttach])
   return (
-    <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <PendingWorkshop
-        start={{ card, persona }}
-        // Your persona at the speaker chip is the same choice as the card's You.
-        onPersona={(id) => setPersona(id === stored?.persona ? "" : id)}
-        title={titleDraft.text}
-        header={header}
-        intro={intro}
-        copyKey={NEW_WORKSHOP_COPY}
-        library={{
-          items: attached,
-          remove: (refId) => setAttach(attachIds.filter((id) => id !== refId).join(","), true)
-        }}
-        portraitWidth={{ small: 48, default: 60, large: 72, largest: 84 }[prefs.portraitSize]}
-        onTitleSent={() => titleDraft.commit(titleDraft.text, async () => true)}
-        // Its own page opens in place: the same surface, now saved.
-        onCreated={(chat) => void navigate({ to: "/chats/$chatId", params: { chatId: chat.id }, replace: true })}
-      />
-    </div>
+    <TitledDraftChatPage
+      draftFor={`workshop:${card}:${persona}`}
+      titleKey={NEW_WORKSHOP_TITLE}
+      pageTitle="New workshop"
+    />
   )
 }

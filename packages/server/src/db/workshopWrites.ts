@@ -42,7 +42,8 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
       card: chosenCard,
       persona: chosenPersona,
       preset: chosenPreset,
-      grants
+      grants,
+      draftFor
     }: Parameters<Parameters<typeof WriteOps.of>[0]["CreateWorkshop"]>[0]) =>
       Effect.gen(function* () {
         // A side chat's story: the user's, live, of a kind that takes one (spec/WORKSHOP.md §4).
@@ -152,7 +153,16 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         const chatId = uuidv7() as ChatId
         const storyTitle = story?.title?.trim()
         const name = title?.trim() || (storyTitle ? `About ${storyTitle}` : "Workshop")
-        yield* sql`INSERT INTO chats ${sql.insert({ id: chatId, owner_user_id: userId, kind: "workshop", status: "active", title: name, created_at: at })}`
+        // A new-workshop page's is pending (chat:includes-pending: made so), until its first turn.
+        yield* sql`INSERT INTO chats ${sql.insert({
+          id: chatId,
+          owner_user_id: userId,
+          kind: "workshop",
+          status: draftFor === undefined ? "active" : "pending",
+          title: name,
+          created_at: at,
+          ...(draftFor === undefined ? {} : { draft_for: draftFor })
+        })}`
         if (attachTo !== undefined) {
           yield* graph.insertStateEvent(userId, chatId, null, null, null, {
             key: "workshop.attached",

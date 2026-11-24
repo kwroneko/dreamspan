@@ -150,6 +150,9 @@ export function useComposerLibrary(
   const [error, setError] = useState<string | null>(null)
   const queue = useRef(Promise.resolve())
   const shown = useRef(items)
+  // Added before the draft was known (a new workshop's page handing over what it was opened
+  // with): attached once it is, after its first read.
+  const early = useRef<ReadonlyArray<RefId>>([])
   useEffect(() => {
     shown.current = items
   }, [items])
@@ -194,6 +197,11 @@ export function useComposerLibrary(
       if (live) setReady(true)
       return live ? read : null
     })
+    if (early.current.length > 0) {
+      const waiting = early.current
+      early.current = []
+      run(() => call("SetComposerLibrary", { add: waiting, remove: [] }))
+    }
     return () => {
       live = false
     }
@@ -211,6 +219,10 @@ export function useComposerLibrary(
         (refId) => !shown.current.some((there) => there.refId === refId)
       )
       if (fresh.length === 0) return
+      if (draftId === null) {
+        early.current = [...new Set([...early.current, ...fresh])]
+        return
+      }
       if (shown.current.length + fresh.length > MAX) {
         setError(`A message can carry at most ${MAX} cards, lorebooks and presets.`)
         return
