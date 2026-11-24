@@ -47,7 +47,8 @@ function DraftChat({
   const [chat, setChat] = useState<Chat | null>(null)
   const [attempt, setAttempt] = useState(0)
   // The chat the URL named when the page opened: a later catch-up of the URL opens nothing.
-  const [reopen] = useState(named)
+  // Null once the server swept it, so the next attempt opens a fresh one.
+  const [reopen, setReopen] = useState(named)
   const started = useRef(false)
   useEffect(preloadChatPage, [])
   useEffect(() => {
@@ -119,6 +120,13 @@ function DraftChat({
           replace: true,
           resetScroll: false
         })
+      },
+      onDeleted: () => {
+        if (started.current) return
+        // Swept while open (no tab had it for a while; a reconnect after a long sleep, say): a
+        // fresh one for the same entry, with no notice. The chat shown stays until it's here.
+        setReopen(null)
+        setAttempt((n) => n + 1)
       }
     }),
     [navigate]
@@ -181,16 +189,18 @@ export function EmptyDraftChatPage() {
   const title = useUserDraft(EMPTY_CHAT_TITLE, "Title", "")
   const call = useCaller()
   const [opened, setOpened] = useState<Chat | null>(null)
-  const renamed = useRef(false)
+  // The name given, once read: a fresh chat opened after a sweep gets it too.
+  const named = useRef<string | null>(null)
   useEffect(() => {
-    if (opened === null || !title.ready || renamed.current) return
-    renamed.current = true
-    const name = title.text.trim()
+    if (opened === null || !title.ready) return
+    const first = named.current === null
+    if (first) named.current = title.text.trim()
+    const name = named.current!
     if (name === "") return
     void call((client) => client("RenameChat", { chatId: opened.id, name })).then((result) => {
-      if (result.ok) void title.commit(title.text, async () => true)
+      if (result.ok && first) void title.commit(title.text, async () => true)
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when both are here
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per chat opened, when the title is read
   }, [opened, title.ready])
   return <DraftChatPage draftFor="empty" onOpened={setOpened} />
 }

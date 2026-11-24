@@ -5,6 +5,7 @@ import { expect, test, type Page } from "@playwright/test"
 import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { showActions } from "./support/message.ts"
+import { closePanel, openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -58,6 +59,8 @@ const start = async (page: Page) => {
 }
 
 test.describe.configure({ mode: "parallel" })
+
+const NOT_STARTED = "Available once the chat is started: send a message first."
 
 test("a card's new chat changes nothing until it starts, and a reload keeps it", async ({ page }) => {
   await start(page)
@@ -135,7 +138,142 @@ test("sending a message starts the chat with the greeting and the message", asyn
   expect(await listed(draft)).toBe(true)
 })
 
-const NOT_STARTED = "Available once the chat is started: send a message first."
+test("duplicating the greeting starts the chat, and the page follows", async ({ page }) => {
+  await start(page)
+  const card = await importCard(page, { name: "Mira Twice", first_mes: "Mira opens the door." })
+  const draft = await openDraft(page, `/cards/${card.entityId}/chat`)
+  const greeting = page.getByRole("article").filter({ hasText: "Mira opens the door." })
+  await showActions(greeting.first())
+  await greeting.first().getByRole("button", { name: "More actions" }).click()
+  await page.getByRole("menuitem", { name: /^Duplicate/ }).click()
+  await expect(page).toHaveURL(chatUrl(draft))
+  await expect(greeting).toHaveCount(2)
+  expect(await listed(draft)).toBe(true)
+})
+
+test("a History replacement in its greeting starts the chat, and the page follows", async ({ page }) => {
+  await start(page)
+  const card = await importCard(page, { name: "Mira Replace", first_mes: "Mira waves at the ferry." })
+  const draft = (await openDraft(page, `/cards/${card.entityId}/chat`)) as ChatId
+  await expect(page.getByRole("article").filter({ hasText: "Mira waves at the ferry." })).toBeVisible()
+  // The same write the History panel's replace makes, from another tab or this one.
+  await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.GetChat({ chatId: draft })
+      const path = yield* api.ReadPath({
+        chatId: draft,
+        forkId: null,
+        leafSlotId: null,
+        range: { _tag: "Bottom" },
+        limit: 10
+      })
+      const version = path.entries[0]!.version
+      yield* api.ApplyHistoryEdits({
+        title: "Replace",
+        applications: [
+          {
+            chatId: draft,
+            forkId: chat.currentForkId!,
+            edits: [
+              {
+                kind: "version_replace" as const,
+                targetId: version.id,
+                beforeId: version.id,
+                before: version.content,
+                after: version.content.replace("waves", "nods")
+              }
+            ]
+          }
+        ]
+      })
+    })
+  )
+  await expect(page).toHaveURL(chatUrl(draft))
+  await expect(page.getByRole("article").filter({ hasText: "Mira nods at the ferry." })).toBeVisible()
+  expect(await listed(draft)).toBe(true)
+})
+
+test("a new chat the server swept while it was open gives way to a fresh one, quietly", async ({ page }) => {
+  await start(page)
+  // The server ends a swept chat's subscriptions with Deleted (a tab back from a long sleep, say).
+  // Sent here into the page's own subscription, a batch of one event, as the server sends it.
+  const subscriptions = new Map<string, unknown>()
+  let deleted: ((chatId: string) => void) | null = null
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      upstream.send(data)
+      if (typeof data !== "string") return
+      const parsed = JSON.parse(data) as unknown
+      for (const message of (Array.isArray(parsed) ? parsed : [parsed]) as Array<Record<string, unknown>>)
+        if (message["_tag"] === "Request" && message["tag"] === "SubscribeChat")
+          subscriptions.set((message["payload"] as { chatId: string }).chatId, message["id"])
+    })
+    upstream.onMessage((data) => socket.send(data))
+    deleted = (chatId) =>
+      socket.send(
+        JSON.stringify({ _tag: "Chunk", requestId: subscriptions.get(chatId), values: [[{ _tag: "Deleted" }]] })
+      )
+  })
+  const card = await importCard(page, { name: "Mira Swept", first_mes: "Mira opens the door." })
+  const draft = await openDraft(page, `/cards/${card.entityId}/chat`)
+  await composer(page).fill("Typed before the sleep.")
+  await expect
+    .poll(() =>
+      admin((api) => Effect.map(api.OpenComposer({ chatId: draft as ChatId, forkId: null }), (d) => d.content))
+    )
+    .toBe("Typed before the sleep.")
+  await expect.poll(() => subscriptions.has(draft)).toBe(true)
+  deleted!(draft)
+  // Another new chat for the same card, in place: its URL names it, its greeting shows, and
+  // nothing says anything happened.
+  await expect.poll(() => draftOf(page)).not.toBe(draft)
+  const fresh = draftOf(page)!
+  await expect(page).toHaveURL(new RegExp(`/cards/${card.entityId}/chat\\?draft=${fresh}`))
+  await expect(page.getByRole("article").filter({ hasText: "Mira opens the door." })).toBeVisible()
+  await expect(composer(page)).toBeEditable()
+  await expect(page.getByRole("alert")).toHaveCount(0)
+  expect((await admin((api) => api.GetChat({ chatId: fresh as ChatId }))).status).toBe("pending")
+  // What was typed in the one swept is in recovered texts, and neither is listed.
+  await expect
+    .poll(
+      async () =>
+        (await admin((api) => api.ListRecoveredTexts({ limit: 50, before: null }))).map((text) => text.sourceLabel),
+      { timeout: 20_000 }
+    )
+    .toContain("New chat with Mira Swept")
+  expect(await listed(draft)).toBe(false)
+  expect(await listed(fresh)).toBe(false)
+})
+
+test("a new chat's own notes and snippets wait, disabled, saying why", async ({ page }) => {
+  await start(page)
+  const card = await importCard(page, { name: "Mira Notes", first_mes: "Mira opens the door." })
+  await openDraft(page, `/cards/${card.entityId}/chat`)
+  const notes = await openPanel(page, "Notes")
+  const own = notes.getByRole("region", { name: "This chat's notes" })
+  for (const name of ["Add note", "Link shared note"]) {
+    const button = own.getByRole("button", { name, exact: true })
+    await expect(button).toHaveAttribute("aria-disabled", "true")
+    await button.hover()
+    await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(NOT_STARTED)
+  }
+  const snippets = await openPanel(page, "Snippets")
+  const create = snippets.getByRole("button", { name: "New snippet", exact: true })
+  await expect(create).toHaveAttribute("aria-disabled", "true")
+  await create.hover()
+  await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(NOT_STARTED)
+  // Once started, they're there to use.
+  await closePanel(page)
+  await composer(page).fill("Hello, Mira.")
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await expect(page).toHaveURL(/\/chats\//)
+  const started = await openPanel(page, "Notes")
+  await expect(
+    started.getByRole("region", { name: "This chat's notes" }).getByRole("button", { name: "Add note", exact: true })
+  ).not.toHaveAttribute("aria-disabled", "true")
+})
+
 const SHOTS = process.env.DRAFT_SHOTS
 
 /** Where the header's controls are, by name: nothing may move as the chat starts. */

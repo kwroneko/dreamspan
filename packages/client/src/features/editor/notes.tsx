@@ -777,7 +777,8 @@ export function NoteSectionHeader({
   addHint,
   onNew,
   onPick,
-  titleHidden = false
+  titleHidden = false,
+  refused = null
 }: {
   /** The section's name: "This chat", a card's name. */
   title: string
@@ -790,6 +791,8 @@ export function NoteSectionHeader({
   addHint: string
   onNew: () => void
   onPick: () => void
+  /** Why neither can be used now (a chat not started yet): both stay, disabled, saying so. */
+  refused?: string | null
 }) {
   const row = useRef<HTMLDivElement>(null)
   const [narrow, setNarrow] = useState(false)
@@ -810,12 +813,14 @@ export function NoteSectionHeader({
         narrow ? (
           <>
             <span className="block font-medium">{label}</span>
-            {hint}
+            {refused ?? hint}
           </>
         ) : (
-          hint
+          (refused ?? hint)
         )
       }
+      disabled={refused !== null}
+      focusableWhenDisabled={refused !== null}
       onClick={onClick}
     >
       <Icon name={icon} />

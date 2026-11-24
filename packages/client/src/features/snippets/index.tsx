@@ -36,6 +36,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { SNIPPET_FOCUS, workspaceViews } from "../editor/workspaceViews.ts"
 import { SnippetLarge } from "./SnippetLarge.tsx"
+import { notStarted } from "../chat/chatStarted.ts"
 
 let workspace: SnippetWorkspace | null = null
 /** Told when the workspace is made or goes, for a view that may render before it (a reload). */
@@ -52,11 +53,16 @@ const useCurrentWorkspace = () =>
     },
     () => workspace
   )
-function Scope({ session, onOpenPanel, children }: ChatSurfaceProps) {
+function Scope({ session, view, onOpenPanel, children }: ChatSurfaceProps) {
   useEffect(() => {
     workspace?.setChat(session.id)
     return () => workspace?.setChat(null)
   }, [session.id])
+  const refused = notStarted(view.chat)
+  useEffect(() => {
+    workspace?.setNotStarted(refused)
+    return () => workspace?.setNotStarted(null)
+  }, [refused])
   useEffect(() => {
     workspace?.setOpener(() => onOpenPanel("snippets"))
     return () => workspace?.setOpener(null)
@@ -264,14 +270,16 @@ function SnippetBlock({
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-2 py-2">
               <Switch
                 checked={item.global}
-                disabled={item.global && state.chatId === null}
+                disabled={item.global && (state.chatId === null || state.notStarted !== null)}
                 onCheckedChange={(global) => void workspace.setGlobal(item.ref.id, global)}
                 hint={
-                  item.global
-                    ? state.chatId === null
-                      ? "In every chat. Open a chat to make it that chat's own."
-                      : "In every chat. Switch it off to keep it only in this chat, every branch of it."
-                    : "Only in this chat, every branch of it. Switch it on to have it in every chat."
+                  item.global && state.notStarted !== null
+                    ? state.notStarted
+                    : item.global
+                      ? state.chatId === null
+                        ? "In every chat. Open a chat to make it that chat's own."
+                        : "In every chat. Switch it off to keep it only in this chat, every branch of it."
+                      : "Only in this chat, every branch of it. Switch it on to have it in every chat."
                 }
               >
                 All chats
@@ -312,10 +320,13 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
             </Field>
             <Button
               hint={
-                state.chatId === null
+                state.notStarted ??
+                (state.chatId === null
                   ? "An empty snippet for all chats"
-                  : "An empty snippet for this chat, every branch of it; its switch makes it one for all chats"
+                  : "An empty snippet for this chat, every branch of it; its switch makes it one for all chats")
               }
+              disabled={state.notStarted !== null}
+              focusableWhenDisabled={state.notStarted !== null}
               onClick={() => void store.create()}
             >
               New snippet
@@ -406,10 +417,12 @@ function SnippetChoices({ context, done }: { context: TextActionContext; done: (
       <MenuItem
         icon="plus"
         description={
-          state.chatId === null
+          state.notStarted ??
+          (state.chatId === null
             ? "Makes a snippet for all chats with this text."
-            : "Makes a snippet for this chat with this text."
+            : "Makes a snippet for this chat with this text.")
         }
+        disabled={state.notStarted !== null}
         onClick={() => {
           done()
           void store.appendNew(context.text)

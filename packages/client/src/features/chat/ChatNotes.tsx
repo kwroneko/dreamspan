@@ -1,3 +1,4 @@
+import { notStarted } from "./chatStarted.ts"
 import { libraryListAtom } from "../library/queries.ts"
 // A chat's notes (DESIGN §4.1): its own, made here, then each cast card's (the cards the user
 // plays included: a persona note is a card's note), as blocks (`NoteList`): each with its switch,
@@ -212,6 +213,8 @@ export function NotesTab({
     entries,
     relinked
   } = useChatNotes(session, leafSlotId)
+  // A chat not started yet has no notes of its own (the server refuses them).
+  const refused = notStarted(useSyncExternalStore(session.subscribe, session.snapshot).chat)
   const [picking, setPicking] = useState<Group | null>(null)
   // The note just added: it scrolls into view and flashes once it shows (owner, 2026-11-02).
   const [added, setAdded] = useState<string | null>(null)
@@ -264,6 +267,7 @@ export function NotesTab({
                   <NoteSectionHeader
                     title="This chat"
                     addHint="Adds a new note to this chat."
+                    refused={refused}
                     onNew={() => void add({ card: null })}
                     onPick={() => setPicking({ card: null })}
                   />

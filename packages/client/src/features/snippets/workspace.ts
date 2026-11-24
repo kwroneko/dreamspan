@@ -26,6 +26,11 @@ interface State {
   readonly floating: boolean
   /** The chat shown, whose own snippets are listed with those for all chats; null outside one. */
   readonly chatId: ChatId | null
+  /**
+   * Why the chat shown can't have snippets of its own yet (a chat not started: the server refuses
+   * them), or null. New snippet and the switch to this chat stay, disabled, saying so.
+   */
+  readonly notStarted: string | null
   /** Bumped as snippet editors mount and unmount, so what shows the target reads it again. */
   readonly editors: number
   /** Text just added to a snippet: its editor marks it briefly and scrolls to it. */
@@ -57,6 +62,7 @@ export class SnippetWorkspace {
       error: null,
       floating: false,
       chatId: null,
+      notStarted: null,
       editors: 0,
       added: null,
       recent: this.readRecent()
@@ -132,6 +138,9 @@ export class SnippetWorkspace {
   }
   setOpener(open: (() => void) | null) {
     this.openPanel = open
+  }
+  setNotStarted(notStarted: string | null) {
+    if (notStarted !== this.state.notStarted) this.update({ notStarted })
   }
   setChat(chatId: ChatId | null) {
     if (chatId === this.state.chatId) return

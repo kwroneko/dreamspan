@@ -837,6 +837,8 @@ export function MessageList({
  */
 export interface DraftHost {
   readonly onStarted: (view: ChatView) => void
+  /** The server swept the chat while it was open (it had no tab for a while): open another. */
+  readonly onDeleted: () => void
 }
 
 export function OpenChat({
@@ -984,10 +986,13 @@ function ChatSurface({
       void session.open(slot)
     }
   }, [session, fork, slot, view.forkId, view.chat, entry, pending])
-  // Deleted while open, here or elsewhere: there's nothing left to show.
+  // Deleted while open, here or elsewhere: there's nothing left to show. A new chat's page
+  // opens another for the same entry instead, quietly (its typing is in recovered texts).
   useEffect(() => {
-    if (!pending && view.deleted) void navigate({ to: "/chats", replace: true })
-  }, [navigate, pending, view.deleted])
+    if (pending || !view.deleted) return
+    if (draft !== null) draft.onDeleted()
+    else void navigate({ to: "/chats", replace: true })
+  }, [navigate, pending, view.deleted, draft])
   // Pin the viewed branch even when it is currently the chat's default. The router's
   // location can advance before these props; an outgoing render must not undo the pick.
   useEffect(() => {

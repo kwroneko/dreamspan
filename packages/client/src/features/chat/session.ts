@@ -1206,9 +1206,9 @@ export class ChatSession {
         if (event.forkId !== undefined && this.view.forkId !== null && event.forkId !== this.view.forkId) return
       // falls through
       case "Slot": {
-        // A new chat's first turn (anything but a greeting) started it on the server: read it.
-        const version = event._tag === "Slot" ? event.entry.version : event.version
-        if (this.view.chat?.status === "pending" && version.origin !== "greeting") void this.readStarted()
+        // A new chat's first turn started it on the server (a send, a reply, a greeting's swipe,
+        // edit or duplicate): read it. Any change while pending, since a duplicate is a greeting too.
+        if (this.view.chat?.status === "pending") void this.readStarted()
         this.update({ pathRevision: this.view.pathRevision + 1 })
         for (const events of this.readEvents) events.push(event)
         return this.applyState(event)
@@ -1218,6 +1218,8 @@ export class ChatSession {
         for (const events of this.readEvents) events.push(event)
         return this.applyState(event)
       case "Reload":
+        // A History replacement on a new chat starts it, and arrives as a reload.
+        if (this.view.chat?.status === "pending") void this.readStarted()
         if (event.forkId !== undefined) void this.refreshContext()
         forksChanged(this.chatId)
         return this.reload()

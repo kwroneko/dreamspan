@@ -3,6 +3,7 @@
 // chat" first, its box glowing blue and its edits going to the note, which is named and linked
 // under it; "Original", the card's or preset's own text, edited as usual. A field no note
 // replaces has "Edit for this chat only" in its box's strip, shown on hover and focus.
+import { notStarted } from "../chat/chatStarted.ts"
 import type { NoteReplacementView, PresetContext } from "@dreamspan/shared/inspectorApi.ts"
 import { useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
@@ -190,6 +191,8 @@ function ReplaceButton({
     setError(null)
     onMade({ note: made.value.id, title: what })
   }
+  // A chat not started yet has no notes of its own (the server refuses them).
+  const refused = notStarted(chat.view.chat)
   const start = () => {
     const others = otherReplacing(notes, target)
     if (others.length > 0) setAsking(others)
@@ -199,10 +202,14 @@ function ReplaceButton({
     <>
       <IconButton
         label="Edit for this chat only"
-        hint={`Edit ${what} for this chat only. The ${target.kind === "preset_prompt" ? "preset" : "card"} stays as it is; this chat sends your version instead.`}
+        hint={
+          refused ??
+          `Edit ${what} for this chat only. The ${target.kind === "preset_prompt" ? "preset" : "card"} stays as it is; this chat sends your version instead.`
+        }
         icon="note"
         className={chromeButton}
-        disabled={pending}
+        disabled={pending || refused !== null}
+        focusableWhenDisabled={refused !== null}
         onClick={start}
       />
       <ConfirmDialog
