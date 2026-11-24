@@ -63,7 +63,9 @@ const chat = (
   keepalive: (path: string, body: string) => Promise<boolean> = async () => false,
   saveFails: () => boolean = () => false,
   /** Awaited before a save's answer comes back: the save is on its way meanwhile. */
-  answer: () => Promise<void> = async () => {}
+  answer: () => Promise<void> = async () => {},
+  /** The clock of this composer's page. */
+  at = 100000
 ) => {
   const session = {
     id: chatId as ChatId,
@@ -100,7 +102,7 @@ const chat = (
       return 1
     },
     clearTimer: () => {},
-    now: () => 100000,
+    now: () => at,
     keepalive
   })
 }
@@ -346,5 +348,34 @@ it("text cleared after the sweep leaves no copy to file later (rev-dv1 #3)", asy
   await settle()
   store.type("")
   await settle()
+  expect(keptFor("old")).toEqual([])
+})
+
+it("clearing after a replacement copy failed leaves none of the earlier text (rev-dd2 #5)", async () => {
+  const old = await stopped([])
+  old.type("Text A, typed after the stop.")
+  await settle()
+  expect(keptFor("old").map((copy) => copy.content)).toEqual(["Text A, typed after the stop."])
+  // B's copy can't be put: A's stays.
+  aborting.on = true
+  old.type("Text A, typed after the stop, and B replacing it.")
+  await settle()
+  aborting.on = false
+  old.type("")
+  await settle()
+  expect(keptFor("old")).toEqual([])
+})
+
+it("a carry opened late isn't also replayed to the swept chat (rev-dd2 #6)", async () => {
+  const old = await stopped([])
+  old.type("Typed after the stop, carried a minute later.")
+  await settle()
+  carryLeftover("old", "fresh")
+  const freshCalls: Array<Call> = []
+  const fresh = chat("fresh", freshCalls, () => false, undefined, undefined, undefined, 100000 + 60_000)
+  fresh.setFork("fork" as ForkId, false)
+  await vi.waitFor(() => expect(fresh.snapshot().text).toBe("Typed after the stop, carried a minute later."))
+  await settle()
+  expect(saves(freshCalls).filter((call) => call.payload.chatId === "old")).toEqual([])
   expect(keptFor("old")).toEqual([])
 })
