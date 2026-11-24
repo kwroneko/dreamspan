@@ -271,6 +271,52 @@ test("typing ends a run; Continue carries on only when clicked, and Stop stops t
   await staysAt(before + 2)
 })
 
+for (const action of ["typing", "Stop and Dismiss"] as const)
+  test(`${action} while Auto's Generate acknowledgement is pending`, async ({ page }) => {
+    let requestId: string | undefined
+    let release: (() => void) | undefined
+    let stops = 0
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string }) : null
+        if (request?.tag === "Generate") requestId = request.id
+        if (request?.tag === "StopGeneration") stops++
+        upstream.send(data)
+      })
+      upstream.onMessage((data) => {
+        const response = typeof data === "string" ? (JSON.parse(data) as { _tag?: string; requestId?: string }) : null
+        if (requestId !== undefined && response?._tag === "Exit" && response.requestId === requestId)
+          release = () => socket.send(data)
+        else socket.send(data)
+      })
+    })
+
+    const chatId = await chatOf(["Mira", "Wren", "Ash"])
+    await page.goto(`${server().url}/chats/${chatId}`)
+    await expect(messages(page)).toHaveCount(1)
+    const before = provider.completions.length
+    provider.hold()
+    await start(page, 5)
+    await expect.poll(() => provider.completions.length).toBe(before + 1)
+    await expect.poll(() => release !== undefined).toBe(true)
+    if (action === "typing") {
+      await box(page).fill("Wait")
+      await expect(row(page)).toHaveAttribute("data-auto-run", "typed")
+      release!()
+      await staysAt(before + 1)
+      expect(stops).toBe(0)
+      provider.release()
+      await expect(row(page)).toContainText("Stopped after 1 of 5: you started typing.")
+    } else {
+      await row(page).getByRole("button", { name: "Stop", exact: true }).click()
+      await row(page).getByRole("button", { name: "Dismiss", exact: true }).click()
+      expect(stops).toBe(0)
+      release!()
+      await expect.poll(() => stops).toBe(1)
+    }
+  })
+
 test("a run belongs to its tab: a reload ends it", async ({ page }) => {
   const chatId = await chatOf(["Mira", "Wren", "Ash"])
   await page.goto(`${server().url}/chats/${chatId}`)
