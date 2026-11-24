@@ -469,14 +469,14 @@ describe("provider reasoning sent back in plain chats", () => {
 
 // --- OpenAI Responses: encrypted reasoning items
 
-const responsesHandler = () => {
+const responsesHandler = (showSummary = true) => {
   let n = 0
   return (request: Recorded, res: ServerResponse) => {
     n++
     const thought = {
       type: "reasoning",
       id: `rs_${n}`,
-      summary: [{ type: "summary_text", text: `Plan ${n}.` }],
+      summary: showSummary ? [{ type: "summary_text", text: `Plan ${n}.` }] : [],
       encrypted_content: `opaque-${n}`
     }
     const item = {
@@ -488,7 +488,9 @@ const responsesHandler = () => {
     }
     sse(res, [
       { type: "response.output_item.added", output_index: 0, item: { ...thought, summary: [] } },
-      { type: "response.reasoning_summary_text.delta", output_index: 0, summary_index: 0, delta: `Plan ${n}.` },
+      ...(showSummary
+        ? [{ type: "response.reasoning_summary_text.delta", output_index: 0, summary_index: 0, delta: `Plan ${n}.` }]
+        : []),
       { type: "response.output_item.done", output_index: 0, item: thought },
       { type: "response.output_item.added", output_index: 1, item: { ...item, content: [] } },
       { type: "response.output_text.delta", output_index: 1, content_index: 0, delta: `Reply ${n}.` },
@@ -513,6 +515,21 @@ const reasoningItems = (body: Record<string, unknown> | null | undefined) =>
   )
 
 describe("encrypted reasoning on OpenAI Responses", () => {
+  it.live("sends an encrypted reasoning item back even with an empty summary", () =>
+    Effect.gen(function* () {
+      const mock = yield* mockOf(responsesHandler(false))
+      const api = yield* client()
+      const { chat, events, version } = yield* generateReply(api, {
+        connection: { kind: "openai-responses", baseUrl: mock.url, apiKey: "synthetic-key" },
+        model: {},
+        ...presetWith(1)
+      })
+      assert.isNotOk(version.reasoning)
+      yield* turn(api, chat, events, "The tide turns.")
+      assert.deepStrictEqual(reasoningItems(mock.requests().at(-1)!.body), ["opaque-1"])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
   it.live("N=2 sends the last 2 replies' reasoning items back, before their messages", () =>
     Effect.gen(function* () {
       const mock = yield* mockOf(responsesHandler())

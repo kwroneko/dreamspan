@@ -1,6 +1,7 @@
 // /request/next: a chat's next request (nextRequest.ts), as a request inspector tab. Built with
 // `GetNextRequest` where the chat's open view stands, again whenever its estimate changes;
 // assembled and counted locally, so nothing is sent.
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
 import type { DraftRequest } from "@dreamspan/shared/inspectorApi.ts"
 import { useSearch } from "@tanstack/react-router"
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from "react"
@@ -13,14 +14,18 @@ import { nextRequestOf, nextRequests } from "./nextRequest.ts"
 const DraftRequestView = lazy(() => import("./ContextPage.tsx").then((m) => ({ default: m.DraftRequestView })))
 
 export function NextRequestPage() {
-  const { chat, leaf, fork } = nextRequestOf(useSearch({ strict: false }))
+  const { chat, leaf, fork, chatTab } = nextRequestOf(useSearch({ strict: false }))
   useTitle("Your next request")
   useSyncExternalStore(nextRequests.subscribe, nextRequests.version)
-  const live = chat === null ? null : nextRequests.find(chat)
-  const at = live ?? { leaf, fork, tokens: null }
+  const live = chat === null ? null : nextRequests.find(chat, chatTab)
+  const at = live ?? { leaf, fork, revision: null }
   const call = useCaller()
-  const asked = JSON.stringify([chat, at.leaf, at.fork, at.tokens])
-  const [state, setState] = useState<{ asked: string | null; request: DraftRequest | null; error: string | null }>({
+  const asked = JSON.stringify([chat, at.leaf, at.fork, at.revision])
+  const [state, setState] = useState<{
+    asked: string | null
+    request: { value: DraftRequest; chatId: ChatId; forkId: ForkId | null } | null
+    error: string | null
+  }>({
     asked: null,
     request: null,
     error: null
@@ -33,7 +38,11 @@ export function NextRequestPage() {
         if (!current) return
         setState(
           result.ok
-            ? { asked, request: result.value, error: null }
+            ? {
+                asked,
+                request: result.value === null ? null : { value: result.value, chatId: chat, forkId: at.fork },
+                error: null
+              }
             : { asked, request: null, error: result.error.message }
         )
       }
@@ -61,7 +70,11 @@ export function NextRequestPage() {
       ) : state.request !== null ? (
         <div className={fresh ? "" : "opacity-60"}>
           <Suspense fallback={<Loading label="Loading the request…" />}>
-            <DraftRequestView request={state.request} />
+            <DraftRequestView
+              request={state.request.value}
+              chatId={state.request.chatId}
+              forkId={state.request.forkId}
+            />
           </Suspense>
         </div>
       ) : !fresh ? (

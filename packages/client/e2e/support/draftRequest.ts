@@ -172,6 +172,28 @@ export function draftRequestTests() {
     await expect(box).toBeVisible()
   })
 
+  test("the first request reopens the pending chat after its old tab was saved", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.SetGenerationDefaults({ defaults: { model: originalModel, preset: null } })
+    )
+    const pending = `${server().url}/cards/${entityId}/chat`
+    await page.goto(pending)
+    await page.getByRole("textbox", { name: "Message", exact: true }).fill("The ferry leaves at dawn.")
+    await page.getByRole("button", { name: /^Context: about .* in your first request/ }).click()
+    await page.getByRole("dialog", { name: "Context" }).getByRole("link", { name: "View request" }).click()
+    const inspector = page.getByRole("tab", { name: "Your first request" })
+    const back = page.getByRole("link", { name: "← Go to the new chat", exact: true })
+    await back.click()
+    await page.getByRole("button", { name: "Send", exact: true }).click()
+    await expect(page).toHaveURL(/\/chats\/[^/?]+/)
+    await inspector.click()
+    await back.click()
+    await expect(page).toHaveURL((url) => url.pathname === new URL(pending).pathname)
+    await expect(page.getByRole("tab", { name: "Your first request" })).toHaveAttribute("aria-selected", "false")
+  })
+
   for (const width of [1440, 390]) {
     for (const theme of ["light", "dark"] as const) {
       test(`a chat not sent yet shows its first request: ${width} ${theme}`, async ({ page }, info) => {

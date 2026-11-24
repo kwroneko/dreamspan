@@ -377,14 +377,15 @@ export class AppCoreApi extends RpcGroup.make(
    * Each text's tokens with the tokenizer of the model chats generate with, or an approximation
    * that says so (ARCHITECTURE §6 "Text tokens"), for the counts the editors show. `model`: a
    * chat's own model, which counts instead (a message edited in that chat); without it, the
-   * account's.
+   * account's. `localOnly` bypasses the connection's provider counting setting.
    */
   Rpc.make("CountTokens", {
     payload: {
       texts: Schema.Array(Schema.String.check(Schema.isMaxLength(COUNT_TOKENS_CHARS))).check(
         Schema.isMaxLength(COUNT_TOKENS_TEXTS)
       ),
-      model: Schema.optionalKey(ModelChoice)
+      model: Schema.optionalKey(ModelChoice),
+      localOnly: Schema.optionalKey(Schema.Boolean)
     },
     success: Schema.Struct({ counts: Schema.Array(Schema.Int), tokenizer: TokenizerInfo }),
     error: ServerError

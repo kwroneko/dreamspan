@@ -11,6 +11,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
+import { scrollUntil } from "./support/scrollPane.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { cacheChip, nextReply } from "./support/strip.ts"
 
@@ -216,6 +217,17 @@ test.describe("the strip", () => {
     await expect(
       page.getByText(new RegExp(`^Built now: .*, about ${tokens.toLocaleString("en-US")} tokens\\.`))
     ).toBeVisible()
+    const fork = new URL(page.url()).searchParams.get("fork")
+    expect(fork).toBeTruthy()
+    const request = page.getByRole("region", { name: "Messages", exact: true })
+    const expand = request.getByRole("button", { name: "Expand every turn" })
+    if (await expand.isVisible()) await expand.click()
+    const source = request.getByRole("region", { name: "Message 1", exact: true })
+    const link = await scrollUntil(request, source.getByRole("link").first())
+    const destination = new URL((await link.getAttribute("href"))!, server().url)
+    expect(destination.pathname).toBe(`/chats/${chatId}`)
+    expect(destination.searchParams.get("fork")).toBe(fork)
+    expect(destination.searchParams.get("slot")).toBeTruthy()
   })
 
   test("View request has the link's open menu", async ({ page }) => {
@@ -229,13 +241,16 @@ test.describe("the strip", () => {
   })
 
   test("typing counts nothing until it pauses, then once", async ({ page }) => {
-    const counts: Array<string> = []
+    const effective = await admin((api) =>
+      Effect.map(api.GetNextContext({ chatId, leafSlotId: null }), (next) => next.model!)
+    )
+    const counts: Array<{ tag?: string; payload?: unknown }> = []
     await page.routeWebSocket(/\/rpc$/, (socket) => {
       const upstream = socket.connectToServer()
       socket.onMessage((data) => {
         if (typeof data === "string") {
-          const tag = (JSON.parse(data) as { tag?: string }).tag
-          if (tag === "CountTokens" || tag === "GetNextRequest") counts.push(tag)
+          const rpc = JSON.parse(data) as (typeof counts)[number]
+          if (rpc.tag === "CountTokens" || rpc.tag === "GetNextRequest") counts.push(rpc)
         }
         upstream.send(data)
       })
@@ -252,7 +267,16 @@ test.describe("the strip", () => {
     await expect.poll(() => counts.length, { timeout: 10_000 }).toBe(1)
     await expect.poll(() => chipTokens(page)).toBeGreaterThan(before)
     await page.waitForTimeout(2_000)
-    expect(counts).toEqual(["CountTokens"])
+    expect(counts).toMatchObject([
+      {
+        tag: "CountTokens",
+        payload: {
+          localOnly: true,
+          model: { connection: effective.connection, model: effective.model },
+          texts: [typed]
+        }
+      }
+    ])
     await contextChip(page).click()
     await expect(page.getByRole("list", { name: "Parts of the request" })).toContainText("Your message")
   })
@@ -285,6 +309,36 @@ test.describe("the strip", () => {
         })
         await shoot(page, `chat-cache-popover-${width}-${theme}`)
       })
+})
+
+test("an open next request refreshes after a sampler-only model edit", async ({ page }) => {
+  const chatId = await chatWith(
+    { provider: "openai-compatible", kind: "openai-chat", baseUrl: `${provider.url}/v1` },
+    "synthetic-sampler-preview"
+  )
+  const setTemperature = (temperature: number) =>
+    admin((api) =>
+      Effect.gen(function* () {
+        const { model: choice } = yield* api.GetGenerationDefaults()
+        const models = yield* api.ListModels({ connectionId: choice!.connection, includeHidden: true })
+        const model = models.find((model) => model.id === choice!.model)!
+        yield* api.EditModel({
+          modelId: model.id,
+          expectedRowVersion: model.rowVersion,
+          overrides: { settings: { samplers: { temperature } } }
+        })
+      })
+    )
+  await setTemperature(0.5)
+  await openChat(page, chatId)
+  await contextChip(page).click()
+  await page.getByRole("link", { name: "View request", exact: true }).click()
+  const size = page.getByText(/^Built now: .* tokens\./)
+  await expect(page.getByText(/temperature 0\.5\b/)).toBeVisible()
+  const before = await size.textContent()
+  await setTemperature(0.8)
+  await expect(page.getByText(/temperature 0\.8\b/)).toBeVisible()
+  await expect(size).toHaveText(before!)
 })
 
 test.describe("a chat not sent yet", () => {

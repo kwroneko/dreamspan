@@ -14,6 +14,7 @@
 // on always-on families. Catalog compatibility fields retain precedence.
 
 type Family = "opus" | "sonnet" | "haiku" | "fable" | "mythos"
+const legacyClaude = /claude-(?:[123](?:[-.]|$)|instant)/i
 
 /** The family and version a model id names: `claude-opus-4-8`, `us.anthropic.claude-sonnet-5-5-v1:0`, `claude-fable-5-2@2026…`. */
 const claudeVersion = (key: string) => {
@@ -31,7 +32,7 @@ export const claudeThinkingForm = (key: string): "adaptive-only" | "adaptive" | 
   if (!v) {
     if (/claude-mythos-preview/i.test(key)) return "adaptive"
     // Known legacy naming; a new Claude family defaults to the newest request form.
-    if (/claude-(?:[123](?:[-.]|$)|instant)/i.test(key)) return null
+    if (legacyClaude.test(key)) return null
     return /claude-/i.test(key) ? "adaptive-only" : null
   }
   if (v.family === "fable" || v.family === "mythos") return "adaptive-only"
@@ -90,10 +91,15 @@ export const claudeThinkingDefaults = (
  * record it), so a request that sends such blocks back opts into enforcement with
  * `thinking.block_binding.prefix_mismatch_behavior: "drop_block"` (beta
  * `thinking-binding-controls-2026-08-01`). Earlier models (Opus 5, Sonnet 5, Fable 5, 4.x) check
- * only the signature.
+ * only the signature. Unknown IDs can be inference profiles or aliases for bound models;
+ * consult the catalog when the key is opaque and require prefix validation when uncertain.
  */
-export const claudeBoundThinking = (key: string): boolean => {
+const knownClaudeBinding = (key: string): boolean | null => {
   const v = claudeVersion(key)
-  if (!v) return false
+  if (!v) return legacyClaude.test(key) ? false : null
   return v.family === "fable" || v.family === "mythos" ? atLeast(v, 5, 1) : atLeast(v, 5, 5)
 }
+
+export const claudeBoundThinking = (key: string, catalogKey?: string): boolean =>
+  // Context-window catalogs can match an older variant of a recognizable model.
+  knownClaudeBinding(key) ?? (catalogKey === undefined ? null : knownClaudeBinding(catalogKey)) ?? true

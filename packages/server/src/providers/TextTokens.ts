@@ -33,7 +33,8 @@ export class TextTokens extends Context.Service<
       userId: UserId,
       texts: ReadonlyArray<string>,
       /** A chat's own model, counting instead of the account's. */
-      model?: typeof ModelChoice.Type
+      model?: typeof ModelChoice.Type,
+      localOnly?: boolean
     ) => Effect.Effect<{ readonly counts: ReadonlyArray<number>; readonly tokenizer: TokenizerInfo }>
   }
 >()("rp/providers/TextTokens") {
@@ -88,19 +89,19 @@ export class TextTokens extends Context.Service<
        * one chats generate with; none when there's no default. The model is read as the user's,
        * and counts by its own connection.
        */
-      const chosenModel = (userId: UserId, given: typeof ModelChoice.Type | undefined) =>
+      const chosenModel = (userId: UserId, given: typeof ModelChoice.Type | undefined, localOnly: boolean) =>
         Effect.gen(function* () {
           const choice = given ?? (yield* reader.GetGenerationDefaults({ userId })).model
           if (choice === null) return Option.none()
           const model = yield* reader.GetModel({ userId, modelId: choice.model })
-          const via = countingVia(yield* reader.GetTokenCounting({ userId }), model.connectionId)
+          const via = localOnly ? null : countingVia(yield* reader.GetTokenCounting({ userId }), model.connectionId)
           return Option.some({ connectionId: model.connectionId, modelKey: model.key, via })
         }).pipe(Effect.orElseSucceed(() => Option.none()))
 
       return TextTokens.of({
-        count: (userId, texts, given) =>
+        count: (userId, texts, given, localOnly = false) =>
           Effect.gen(function* () {
-            const chosen = yield* chosenModel(userId, given)
+            const chosen = yield* chosenModel(userId, given, localOnly)
             if (Option.isNone(chosen))
               return yield* approximate(texts, "No model is chosen for chats, so there's no model's tokenizer to use.")
             const { connectionId, modelKey, via } = chosen.value

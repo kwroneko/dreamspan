@@ -1060,6 +1060,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           kind: c.kind,
           api: c.api,
           key: m.key,
+          ...(effective.catalog ? { catalogKey: effective.catalog.match } : {}),
           prefill: effective.prefill.value,
           continueUnavailable: prefillUnavailable(
             { kind: c.kind, api: c.api, key: m.key, prefill: effective.prefill.value },

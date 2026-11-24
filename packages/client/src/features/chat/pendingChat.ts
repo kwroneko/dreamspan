@@ -261,6 +261,7 @@ export const pendingView = (characters: ReadonlyArray<CastCard>, playing: CastCa
     queue: [],
     cache: null,
     history: null,
+    contextRevision: 0,
     lcm: null,
     lcmVersion: 0,
     lcmViewer: null,

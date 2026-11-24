@@ -82,8 +82,15 @@ export interface ReplayTerms {
   readonly prefix: boolean
 }
 
-export const replayTerms = (target: { readonly api: string; readonly key: string }): ReplayTerms => ({
-  prefix: target.api === "anthropic-messages" ? claudeBoundThinking(target.key) : target.api !== "openai-responses"
+export const replayTerms = (target: {
+  readonly api: string
+  readonly key: string
+  readonly catalogKey?: string
+}): ReplayTerms => ({
+  prefix:
+    target.api === "anthropic-messages"
+      ? claudeBoundThinking(target.key, target.catalogKey)
+      : target.api !== "openai-responses"
 })
 
 /** The beta that `thinking.block_binding` needs on Anthropic Messages. */

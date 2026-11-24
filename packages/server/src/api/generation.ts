@@ -24,7 +24,8 @@ export const makeGenerationHandlers = Effect.gen(function* () {
       formats
         .previewStSettings(text, surface)
         .pipe(Effect.catchTag("FormatWorkerFailed", serverError("PreviewStSettings"))),
-    CountTokens: ({ texts, model }) => Effect.flatMap(CurrentUser, (user) => tokens.count(user.id, texts, model)),
+    CountTokens: ({ texts, model, localOnly }) =>
+      Effect.flatMap(CurrentUser, (user) => tokens.count(user.id, texts, model, localOnly)),
     GetTokenCounting: () =>
       Effect.flatMap(CurrentUser, (user) => reader.GetTokenCounting({ userId: user.id })).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], serverError("GetTokenCounting"))

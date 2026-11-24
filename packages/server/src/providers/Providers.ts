@@ -1587,7 +1587,11 @@ export const layer = (options: ProvidersOptions = {}) =>
         const history = carriesHistoryReplay(incoming.context.messages)
         // What this provider checks of signed blocks sent back (thinkingBinding.ts `replayTerms`):
         // with `prefix`, everything before each and the unbroken run, in tool runs too.
-        const terms = replayTerms({ api: prepared.api, key: model.key })
+        const terms = replayTerms({
+          api: prepared.api,
+          key: model.key,
+          ...(model.upstream.catalog ? { catalogKey: model.upstream.catalog.match } : {})
+        })
         const replay = history ? terms : undefined
         const request: StreamRequest = history
           ? {
@@ -2105,7 +2109,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 options.replayReasoning &&
                 (piModel.compat as { readonly supportsMidConvoEffort?: boolean } | undefined)
                   ?.supportsMidConvoEffort === true &&
-                replayTerms({ api: prepared.api, key: model.key }).prefix
+                terms.prefix
                   ? ({ ...piModel, compat: { ...piModel.compat, supportsMidConvoEffort: false } } as PiModel<Api>)
                   : piModel
               const events = prepared.kind.streams.streamSimple(streamModel, transcript, {

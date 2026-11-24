@@ -11,7 +11,7 @@ import { Effect, Layer, Stream } from "effect"
 import * as Database from "../src/db/Database.ts"
 import * as Network from "../src/net/Network.ts"
 import * as ProviderBuiltins from "../src/providers/builtins.ts"
-import { claudeThinkingDefaults, claudeThinkingForm } from "../src/providers/claudeThinking.ts"
+import { claudeBoundThinking, claudeThinkingDefaults, claudeThinkingForm } from "../src/providers/claudeThinking.ts"
 import * as Providers from "../src/providers/Providers.ts"
 import { makeSecrets, Secrets } from "../src/secrets.ts"
 import { anthropicSse, startMockProvider } from "./support/mockProvider.ts"
@@ -101,6 +101,15 @@ const bodyFor = (
   }).pipe(Effect.scoped)
 
 describe("the thinking request per Claude family", () => {
+  it("requires a matching prefix unless a Claude family is known to allow arbitrary history", () => {
+    assert.isTrue(claudeBoundThinking("application-inference-profile"))
+    assert.isTrue(claudeBoundThinking("application-inference-profile", "us.anthropic.claude-opus-5-5-v1:0"))
+    assert.isFalse(claudeBoundThinking("application-inference-profile", "claude-sonnet-4-6"))
+    assert.isTrue(claudeBoundThinking("claude-opus-5-6", "claude-opus-5"))
+    assert.isFalse(claudeBoundThinking("claude-3-5-sonnet-20241022"))
+    assert.isTrue(claudeBoundThinking("claude-future-6"))
+  })
+
   it("reads the family and version from direct, Bedrock and Vertex ids", () => {
     const cases: ReadonlyArray<readonly [string, ReturnType<typeof claudeThinkingForm>]> = [
       ["claude-fable-5-2", "adaptive-only"],

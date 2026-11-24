@@ -290,6 +290,14 @@ export const inspectionInputs = (
           activation: null
         }
       ])
+    } else if (snapshot.request.prefill !== null && preset.ref && snapshot.inputs.type !== "continue") {
+      const source = describe({
+        kind: "preset",
+        ref: preset.ref,
+        revision: preset.revision,
+        identifier: snapshot.inputs.type === "impersonate" ? "prefill.impersonation" : "prefill.assistant"
+      })
+      sources.push([{ ...source, label: "Prefill" }])
     }
     return {
       model: model && {
