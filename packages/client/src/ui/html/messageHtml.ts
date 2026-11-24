@@ -11,9 +11,9 @@ import type { SlotId } from "@dreamspan/shared/chat.ts"
  * Scopes a text's CSS (css.ts). The renderer's lazy chunk sets it, so its CSS parser stays out
  * of the app's first load; stored texts wait for it, as no message has rendered before it.
  */
-let scoper: ((styles: ReadonlyArray<string>, key: string) => string) | null = null
+let scoper: ((styles: ReadonlyArray<string>, key: string, bodyClass: string) => string) | null = null
 const sheets = new Set<MessageStyles>()
-export function setStyleScoper(scope: (styles: ReadonlyArray<string>, key: string) => string) {
+export function setStyleScoper(scope: (styles: ReadonlyArray<string>, key: string, bodyClass: string) => string) {
   if (scoper) return
   scoper = scope
   for (const styles of sheets) styles.refresh()
@@ -165,14 +165,16 @@ export function extractStyles(text: string): ReadonlyArray<string> {
 /**
  * The chat view's card styles: one constructed stylesheet on the document (`style-src 'self'`
  * doesn't govern it, where a `<style>` element couldn't apply), from every message in the
- * loaded window, scoped to message bodies, so a greeting's style keeps applying while the
+ * loaded window, scoped to this view's message bodies, so a greeting's style keeps applying while the
  * greeting is scrolled away. A body that rendered reports its display text's styles; a message
  * that hasn't rendered yet contributes its stored text's.
  */
 export class MessageStyles {
+  readonly bodyClass: string
   private readonly id: string
   constructor(id: string) {
     this.id = id
+    this.bodyClass = `rpview-${id}`
   }
 
   private readonly mediaReleases = new Map<string, () => void>()
@@ -248,7 +250,7 @@ export class MessageStyles {
         const cached = this.stored.get(entry.key)
         if (cached?.text === entry.text) return cached.css
         if (!scoper) return ""
-        const css = scoper(extractStyles(entry.text), this.fontKey(entry.key))
+        const css = scoper(extractStyles(entry.text), this.fontKey(entry.key), this.bodyClass)
         this.stored.set(entry.key, { text: entry.text, css })
         return css
       })

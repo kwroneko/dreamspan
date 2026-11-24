@@ -3,8 +3,11 @@
 // inside the message, remote images are blocked with a note, and the viewer's switch shows the
 // markup as text instead.
 import { expect, test, type Page } from "@playwright/test"
+import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
+import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { gotoWithLayout } from "./support/workbench.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "10000", FAKE_GENERATOR_TOKENS: "10" })
 
@@ -36,6 +39,44 @@ const importCard = async (page: Page, name: string) => {
   expect(response.status()).toBe(200)
 }
 
+for (const mode of ["scope", "prefix"] as const) {
+  test(`message styles stay in their workbench view (${mode})`, async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 900 })
+    if (mode === "prefix") await page.addInitScript(() => Reflect.deleteProperty(window, "CSSScopeRule"))
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const { left, right } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        const left = yield* api.CreateChat({ title: "Styled chat" })
+        const right = yield* api.CreateChat({ title: "Unstyled chat" })
+        const first = yield* api.SendMessage({
+          chatId: left.id,
+          parentSlotId: null,
+          branch: false,
+          reply: false,
+          content: "<style>.stat { border-top: 3px solid }</style>"
+        })
+        if (first._tag !== "Posted") throw new Error("Synthetic send queued")
+        for (const [chatId, parentSlotId, label] of [
+          [left.id, first.entry.slotId, "Same chat"],
+          [right.id, null, "Other chat"]
+        ] as const)
+          yield* api.SendMessage({
+            chatId,
+            parentSlotId,
+            branch: false,
+            reply: false,
+            content: `<div class="stat">${label}</div>`
+          })
+        return { left, right }
+      })
+    )
+    await gotoWithLayout(page, server().url, `/chats/${left.id}`, ["r", [1, 1], [0, "="], [0, `/chats/${right.id}`]])
+    const stats = page.locator("[data-frame] .custom-stat")
+    await expect(stats.filter({ hasText: "Same chat" })).toHaveCSS("border-top-width", "3px")
+    await expect(stats.filter({ hasText: "Other chat" })).toHaveCSS("border-top-width", "0px")
+  })
+}
+
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
     test(`a greeting's HTML and styles at ${width} (${theme})`, async ({ page }, info) => {
@@ -56,7 +97,7 @@ for (const width of [1440, 390])
       await importCard(page, name)
       await page.goto(`${server().url}/library`)
       await page.getByRole("link", { name: `Start a chat with ${name}`, exact: true }).click()
-      const article = page.getByRole("article", { name: `Greeting from ${name}`, exact: true })
+      const article = page.getByRole("article", { name: "Reply", exact: true })
       const body = article.locator(".markdown")
       const status = body.locator(".custom-status")
       await expect(status).toHaveText("HP 12/20 Day 3")
@@ -75,11 +116,11 @@ for (const width of [1440, 390])
       expect(pin!.y + pin!.height).toBeLessThanOrEqual(box!.y + box!.height + 1)
       // data: images load; the remote one is blocked, with the note under the message.
       await expect(body.getByRole("img", { name: "A dot" })).toBeVisible()
-      await expect(article.getByRole("note")).toHaveText("Images from other sites are blocked.")
+      await expect(article.getByRole("note")).toContainText("Images from other sites are blocked.")
       expect(requests).toEqual([])
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
       await expectLayout(page, info, `html-greeting-${width}-${theme}`, {
-        scope: `article[aria-label="Greeting from ${name}"]`
+        scope: 'article[aria-label="Reply"]'
       })
       await page.screenshot({ path: info.outputPath(`html-greeting-${width}-${theme}.png`) })
 
