@@ -192,3 +192,66 @@ it("a stale preset conversion save keeps a choice's keep flag", () => {
     choices: { custom: { identifier: "custom", keep: true, replacement: "Replacement text" } }
   })
 })
+
+// Stale saves (review of 7e301b2d9): what the stale edit didn't change keeps the current value.
+const staleMerge = (current: unknown, incoming: unknown, start: unknown) =>
+  JSON.parse(
+    reconcileForm(
+      { id: "draft", rowVersion: 3, content: JSON.stringify(current) },
+      { draftId: "draft", expectedRowVersion: 1 },
+      JSON.stringify(incoming),
+      JSON.stringify(start)
+    ).content
+  )
+const withContext = {
+  name: "",
+  settings: { samplers: { reasoning_effort: "high", openai_max_context: 50000 } },
+  drafts: { "settings.samplers.openai_max_context": "50000" }
+}
+const withEffort = { name: "", settings: { samplers: { reasoning_effort: "high" } }, drafts: {} }
+
+it("a stale rename keeps a Context typed beside an effort", () => {
+  expect(staleMerge(withContext, { ...withEffort, name: "Renamed" }, withEffort)).toEqual({
+    ...withContext,
+    name: "Renamed"
+  })
+})
+
+it("a stale effort reset to Auto drops the effort and keeps a Context typed since", () => {
+  expect(staleMerge(withContext, { name: "", settings: {}, drafts: {} }, withEffort)).toEqual({
+    name: "",
+    settings: { samplers: { openai_max_context: 50000 } },
+    drafts: { "settings.samplers.openai_max_context": "50000" }
+  })
+})
+
+it("a stale rename doesn't bring back a Context cleared since", () => {
+  const typed = {
+    name: "",
+    settings: { samplers: { openai_max_context: 50000 } },
+    drafts: { "settings.samplers.openai_max_context": "50000" }
+  }
+  expect(staleMerge({ name: "", settings: {}, drafts: {} }, { ...typed, name: "Renamed" }, typed)).toEqual({
+    name: "Renamed",
+    settings: {},
+    drafts: {}
+  })
+})
+
+it("a stale lorebook bulk tick keeps a value changed since", () => {
+  const start = { ticked: { order: { v: 100 } } }
+  expect(
+    staleMerge({ ticked: { order: { v: 321 } } }, { ticked: { order: { v: 100 }, scanDepth: { v: 5 } } }, start)
+  ).toEqual({ ticked: { order: { v: 321 }, scanDepth: { v: 5 } } })
+})
+
+it("a stale model bulk edit keeps a field and its tick added since", () => {
+  const start = { ids: ["m1", "m2"], ticked: [], draft: { context: "", maxOutput: "" } }
+  const fromA = { ...start, ticked: ["context"], draft: { context: "50000", maxOutput: "" } }
+  const fromB = { ...start, ticked: ["maxOutput"], draft: { context: "", maxOutput: "900" } }
+  expect(staleMerge(fromA, fromB, start)).toEqual({
+    ids: ["m1", "m2"],
+    ticked: ["context", "maxOutput"],
+    draft: { context: "50000", maxOutput: "900" }
+  })
+})

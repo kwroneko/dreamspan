@@ -50,8 +50,11 @@ export const selectionDigest = (ids: ReadonlyArray<string>) => {
 interface MassForm {
   readonly ids: ReadonlyArray<ModelId>
   readonly ticked: ReadonlyArray<FieldId>
-  /** The form's draft as text (`Draft`), once edited; until then, what the models share. */
-  readonly draft: string | null
+  /**
+   * The form's draft, once edited; until then, what the models share. Kept as an object, so a
+   * save from another tab merges field by field (text: a draft kept before that change).
+   */
+  readonly draft: Draft | string | null
 }
 
 /** A field beside its tick, and the mark that says the models differ in it. */
@@ -120,7 +123,9 @@ export function ModelMassEditDialog({
   }, [models, chosen])
   // What the models share: the fields they differ in say so.
   const common = useMemo(() => commonOf(selected), [selected])
-  const values = form.values.draft === null ? common.draft : readDraft(form.values.draft, common.draft)
+  const kept = form.values.draft
+  const values =
+    kept === null ? common.draft : readDraft(typeof kept === "string" ? kept : JSON.stringify(kept), common.draft)
   const ticked = new Set(form.values.ticked)
   const [submitted, setSubmitted] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
@@ -137,7 +142,7 @@ export function ModelMassEditDialog({
     const edited = new Set([...extra, ...fieldsChanged(values, next)])
     form.edit({
       ids: chosen,
-      draft: JSON.stringify(next),
+      draft: next,
       ticked: FIELD_IDS.filter((id) => ticked.has(id) || edited.has(id))
     })
   }
