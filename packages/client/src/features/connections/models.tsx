@@ -7,6 +7,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
+import { formatCost } from "../chat/versionMetrics.tsx"
 import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import { type ModelField, ModelSettingsEditor, sourceTitle, useEndpointsFetch } from "./ModelSettingsEditor.tsx"
 
@@ -233,12 +234,15 @@ export function FeedRoutes({ feed }: { feed: Model["upstream"]["priceFeed"] }) {
       <span className="text-muted" data-price-routes={routes.length}>
         Routes:{" "}
         {routes
-          .map(
-            (route) =>
-              `${route.target ?? route.upstream} $${route.price!.input} / $${route.price!.output}${
-                route.pctOfList === undefined ? "" : ` (${route.pctOfList} %)`
-              }`
-          )
+          .map((route) => {
+            const price = route.price!
+            const currency = price.currency ?? "USD"
+            const input = formatCost({ amount: price.input, currency })
+            const output = formatCost({ amount: price.output, currency })
+            return `${route.target ?? route.upstream} ${input} / ${output}${
+              route.pctOfList === undefined ? "" : ` (${route.pctOfList} %)`
+            }`
+          })
           .join(", ")}
       </span>
     </Tooltip>
