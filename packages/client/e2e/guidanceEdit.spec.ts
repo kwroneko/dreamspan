@@ -217,12 +217,26 @@ for (const width of [1440, 390]) {
   test(`guidance typed and reloaded before any save comes back from this browser, with its bar (${width}px)`, async ({
     page
   }) => {
-    // Saves dropped until the reload: the text is only in this browser's copy.
+    // The target choice is refused and the text initially exists only in this browser's copy.
     let dropSaves = true
     await page.routeWebSocket(/\/rpc$/, (socket) => {
       const upstream = socket.connectToServer()
       socket.onMessage((data) => {
-        if (dropSaves && typeof data === "string" && JSON.parse(data).tag === "SaveComposer") return
+        const request = typeof data === "string" ? JSON.parse(data) : null
+        if (dropSaves && request?.tag === "SaveComposer") return
+        if (dropSaves && request?.tag === "SetComposerChoice" && request.payload?.guidanceSlotId) {
+          socket.send(
+            JSON.stringify({
+              _tag: "Exit",
+              requestId: request.id,
+              exit: {
+                _tag: "Failure",
+                cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Synthetic guidance write failure" } }]
+              }
+            })
+          )
+          return
+        }
         upstream.send(data)
       })
     })
@@ -236,9 +250,11 @@ for (const width of [1440, 390]) {
     await expectTextBox(box(page), "Aria looks out to sea.")
     await box(page).fill("Aria sees a storm coming.")
     await page.waitForTimeout(100)
-    expect((await rpc((api) => api.OpenComposer({ chatId, forkId: null }))).content).toBe("")
-    await page.reload()
+    const draft = await rpc((api) => api.OpenComposer({ chatId, forkId: null }))
+    expect(draft.content).toBe("")
+    expect((await rpc((api) => api.GetComposerChoice({ chatId, draftId: draft.id }))).guidanceSlotId).toBeNull()
     dropSaves = false
+    await page.reload()
     await expectTextBox(box(page), "Aria sees a storm coming.")
     await expect(bar(page)).toContainText("Guidance for a new swipe of Aria's reply")
     // It reaches the server once saves go through, and New version uses it.
