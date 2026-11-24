@@ -225,6 +225,8 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
           total: out.value.reset ? out.value.total : (out.value.total ?? r.total),
           capped: out.value.reset ? out.value.totalCapped : (out.value.totalCapped ?? r.capped),
           estimated: out.value.totalEstimated ?? r.estimated,
+          hidden: out.value.reset ? out.value.hidden : r.hidden,
+          hiddenCapped: out.value.reset ? out.value.hiddenCapped : r.hiddenCapped,
           notice: out.value.notice,
           status: "ready"
         }
