@@ -27,6 +27,7 @@ import {
   focusedTab,
   frameOfTab,
   frames,
+  hasRoom,
   initialLayout,
   type Layout,
   type LayoutAction,
@@ -117,6 +118,8 @@ export class WorkbenchStore {
   private closed: Array<{ readonly href: string; readonly frameId: string | undefined }> = []
   /** Tabs whose views have changes not yet saved (`UnsavedTracker`), for the tab's dot. */
   private readonly unsavedTabs = new Set<string>()
+  /** The frames' room in px (Workbench.tsx), 0 while unmeasured or on a phone: no split is refused. */
+  private room = { width: 0, height: 0 }
 
   readonly userId: string
   private readonly browser: RouterHistory
@@ -176,6 +179,27 @@ export class WorkbenchStore {
     return () => void this.listeners.delete(listener)
   }
   snapshot = () => this.layout
+
+  /** The room the frames share now, measured by the view; splits that wouldn't fit are refused. */
+  setRoom(width: number, height: number) {
+    const next = { width: Math.round(width), height: Math.round(height) }
+    if (next.width === this.room.width && next.height === this.room.height) return
+    this.room = next
+    for (const listener of this.listeners) listener()
+  }
+  /** Whether `next` leaves the frames it adds or shrinks room for their strips (`hasRoom`). */
+  private fits(next: Layout) {
+    return hasRoom(this.layout, next, this.room.width, this.room.height)
+  }
+  /** Whether splitting a frame leaves both halves room for their strips. */
+  canSplit = (frameId: string, direction: Direction) =>
+    this.fits(splitFrame(this.layout, frameId, direction, { empty: true }))
+  /** Whether a tab moved to a new frame beside one (its own by default) leaves room for both. */
+  canMoveToSplit = (tabId: string, direction: Direction, frameId?: string, before = false) =>
+    this.fits(moveToNewFrame(this.layout, tabId, direction, { ...(frameId ? { frameId } : {}), before }))
+  /** Whether a drop on a frame's zone fits: into it always, into a new frame on a side as `canSplit`. */
+  canDrop = (frameId: string, zone: DropZone) =>
+    zone === "center" || this.canSplit(frameId, zone === "left" || zone === "right" ? "row" : "column")
 
   private set(next: Layout, action: Action = "REPLACE", saveAfter = 0) {
     if (next === this.layout) return
@@ -463,6 +487,7 @@ export class WorkbenchStore {
   isUnsaved = (tabId: string) => this.unsavedTabs.has(tabId)
   /** Splits a frame; the new frame shows the shown tab's item too, at the same place. */
   split(frameId: string, direction: Direction) {
+    if (!this.canSplit(frameId, direction)) return
     const frame = this.frames().find((f) => f.id === frameId)
     const shown = frame?.active ? this.histories.get(frame.active) : undefined
     const copyId = newId("t")
@@ -506,11 +531,14 @@ export class WorkbenchStore {
    */
   openBeside(href: string, { preview = false }: { readonly preview?: boolean } = {}) {
     const focused = focusedFrame(this.layout)
-    let frame = neighbours(this.layout, focused.id).right
-    if (!frame) {
+    const near = neighbours(this.layout, focused.id)
+    let frame = near.right
+    if (!frame && this.canSplit(focused.id, "row")) {
       frame = newId("f")
       this.layout = splitFrame(this.layout, focused.id, "row", { newFrameId: frame, empty: true })
     }
+    // No room for another frame: the frame on the left, else any other, else this one.
+    frame ??= near.left ?? this.frames().find((f) => f.id !== focused.id)?.id ?? focused.id
     // The link's sidebar place comes with it, as a click on it would bring it (a character's
     // tile scopes the sidebar to the character's chats).
     this.shellChange = shellCarried(href)
@@ -537,10 +565,12 @@ export class WorkbenchStore {
     const from = (frameId && this.frames().find((f) => f.id === frameId)?.id) || focusedFrame(this.layout).id
     const near = neighbours(this.layout, from)
     let frame = near.right ?? near.left ?? near.down ?? near.up ?? this.frames().find((f) => f.id !== from)?.id
-    if (!frame) {
+    if (!frame && this.canSplit(from, "row")) {
       frame = newId("f")
       this.layout = splitFrame(this.layout, from, "row", { newFrameId: frame, empty: true })
     }
+    // No room beside it: in the frame itself.
+    frame ??= from
     // Beside what that frame shows, never in place of its preview tab (as `dropOpen`).
     const preview = this.frames()
       .find((f) => f.id === frame)
@@ -554,6 +584,7 @@ export class WorkbenchStore {
    * first (`moveToNewFrame`).
    */
   moveToSplit(tabId: string, direction: Direction, frameId?: string, before = false) {
+    if (!this.canMoveToSplit(tabId, direction, frameId, before)) return
     this.set(moveToNewFrame(this.layout, tabId, direction, { ...(frameId ? { frameId } : {}), before }))
   }
   /**
@@ -578,6 +609,7 @@ export class WorkbenchStore {
       }
       return
     }
+    if (!this.canDrop(frameId, zone)) return
     const id = newId("f")
     this.layout = splitFrame(this.layout, frameId, zone === "left" || zone === "right" ? "row" : "column", {
       newFrameId: id,
