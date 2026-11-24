@@ -4,7 +4,7 @@ import type { Context as PiContext } from "@earendil-works/pi-ai"
 import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { type ConnectionSettings, type ModelId, Price } from "@dreamspan/shared/providers.ts"
-import { Effect, Layer, Schema, Stream } from "effect"
+import { Effect, Fiber, Layer, Schema, Stream } from "effect"
 import * as Database from "../src/db/Database.ts"
 import * as Network from "../src/net/Network.ts"
 import * as ProviderBuiltins from "../src/providers/builtins.ts"
@@ -103,11 +103,7 @@ describe("the price list format", () => {
           input: 0,
           output: 0,
           per_request: 0.01,
-          tiers: [
-            { input_above: 1000, per_request: 1 },
-            { input_above: 2000 },
-            { input_above: 3000, per_request: 0 }
-          ]
+          tiers: [{ input_above: 1000, per_request: 1 }, { input_above: 2000 }, { input_above: 3000, per_request: 0 }]
         }
       ]
     })!
@@ -337,6 +333,45 @@ describe("asking a connection's server for its prices", () => {
       assert.match(cost.formula, /^endpoint:\d+$/)
       assert.closeTo(cost.amount, (1000 * 2 + 100 * 10) / 1e6, 1e-12)
     }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("changing the address clears cached prices and discards an old response that arrives last", () =>
+    Effect.gen(function* () {
+      const first = yield* gateway()
+      const next = yield* gateway()
+      const { connection, settings, userId, feedOf, refresh, state } = yield* connectWith(first.url, true)
+      assert.strictEqual((yield* feedOf("m"))?.price?.input, 2)
+
+      const asked = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<void>()
+      first.setHandler(async ({ path }, res) => {
+        if (path !== PRICES) return json(res, 200, { data: [{ id: "m" }] })
+        asked.resolve()
+        await release.promise
+        json(res, 200, { object: "list", unit: "USD per 1M tokens", data: [{ id: "m", input: 50, output: 10 }] })
+      })
+      const old = yield* Effect.forkChild(refresh)
+      yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
+      yield* Effect.promise(() => asked.promise)
+
+      const writer = yield* Database.Writer
+      const moved = yield* writer.UpdateConnection({
+        userId,
+        connectionId: connection.id,
+        expectedRowVersion: connection.rowVersion,
+        settings: { ...settings, baseUrl: next.url }
+      })
+      assert.isUndefined(yield* feedOf("m"))
+      const providers = yield* Providers.Providers
+      yield* providers.setKey(userId, connection.id, "sk-gw-0002", moved.rowVersion)
+      yield* refresh
+      const current = yield* feedOf("m")
+      assert.strictEqual(current?.price?.input, 2)
+      release.resolve()
+      yield* Fiber.join(old)
+      assert.deepStrictEqual(yield* feedOf("m"), current)
+      assert.strictEqual((yield* state)?.state, "supported")
+    }).pipe(Effect.scoped, Effect.provide(layer({ endpointsTimeoutMs: 10_000 })))
   )
 })
 

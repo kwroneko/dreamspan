@@ -169,6 +169,9 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         yield* sql`UPDATE connections SET ${sql.update({ ...settingsColumns(normalized), updated_at: Date.now() })},
                      row_version = row_version + 1
                    WHERE id = ${connectionId}`
+        if (row.base_url !== normalized.baseUrl)
+          yield* sql`UPDATE models SET upstream_json = json_remove(upstream_json, '$.priceFeed')
+            WHERE connection_id = ${connectionId} AND json_type(upstream_json, '$.priceFeed') IS NOT NULL`
         return yield* reloadConnection(connectionId)
       }).pipe(transaction(sql, "UpdateConnection")),
 
@@ -371,9 +374,10 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         return { changed }
       }).pipe(transaction(sql, "RecomputeCosts")),
 
-    SetModelPriceFeeds: ({ userId, connectionId, feeds }) =>
+    SetModelPriceFeeds: ({ userId, connectionId, expectedRowVersion, feeds }) =>
       Effect.gen(function* () {
-        yield* ownedConnection(userId, connectionId)
+        const row = yield* ownedConnection(userId, connectionId)
+        if (row.row_version !== expectedRowVersion) return { updated: 0, stale: true }
         let updated = 0
         for (const { key, feed } of feeds) {
           const rows =
@@ -387,7 +391,7 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
                   WHERE connection_id = ${connectionId} AND model_key = ${key} RETURNING id`
           updated += rows.length
         }
-        return { updated }
+        return { updated, stale: false }
       }).pipe(transaction(sql, "SetModelPriceFeeds")),
 
     SetModelHidden: ({ userId, modelId, hidden }) =>
