@@ -132,6 +132,7 @@ const scenarios = [
   "cutting the text and pasting it back",
   "page hidden and shown again",
   "reload",
+  "reload with a failed corrective read",
   "a late copy of text already sent"
 ] as const
 
@@ -244,12 +245,22 @@ for (const scenario of scenarios)
           const closing = first
           const release = closing.hold()
           closing.store.beacon()
+          let reads = 0
           first = page(api, chat.id, owner, time, async () => {
+            reads++
             release()
             await Promise.all(closing.keepalives)
             await vi.waitFor(async () => assert.lengthOf(await copiesOfUser(owner), 0))
+            if (reads === 2 && scenario === "reload with a failed corrective read") throw new Error("Offline")
           })
-          await open(first.store)
+          if (scenario === "reload with a failed corrective read") {
+            first.store.setFork(null, false)
+            await vi.waitFor(() => assert.strictEqual(reads, 2))
+            await first.store.flush()
+            assert.isFalse(first.store.snapshot().ready)
+            await first.pause(2000)
+            assert.isTrue(first.store.snapshot().ready)
+          } else await open(first.store)
           assert.strictEqual(first.store.snapshot().text, text, "the reopened box has the last keystrokes")
           text = `${first.store.snapshot().text} howls outside.`
           first.store.type(text)

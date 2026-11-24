@@ -235,6 +235,10 @@ export class ComposerDraft {
     void this.enqueue(() => this.goTo(fork, branch))
   }
 
+  private retryOpen(fork: ForkId | null, branch: boolean) {
+    this.env.setTimer(() => void this.enqueue(() => this.goTo(fork, branch)), RETRY_MS)
+  }
+
   private async goTo(fork: ForkId | null, branch: boolean): Promise<void> {
     if (this.requested !== fork) return
     // A send taken from the box before this step ran is answered first.
@@ -251,9 +255,7 @@ export class ComposerDraft {
     // The chat view reports why a read failed. A chat or fork that's gone stays shut; anything
     // else (the connection, say) is tried again.
     if (!opened.ok) {
-      if (opened.error.tag !== "NotFound") {
-        this.env.setTimer(() => void this.enqueue(() => this.goTo(fork, branch)), RETRY_MS)
-      }
+      if (opened.error.tag !== "NotFound") this.retryOpen(fork, branch)
       return
     }
     const draft = opened.value
@@ -275,16 +277,35 @@ export class ComposerDraft {
   /** The fork's text in the box, with what this browser kept of it when a page closed. */
   private async show(fork: ForkId | null, opened: Draft, before: ReadonlyArray<Copy>) {
     this.error = null
-    const saved = await this.saveCopies(opened, before)
-    const { conflict, unsent } = saved
-    let { draft } = saved
-    if (saved.answered && unsent === null) {
+    const { draft, conflict, unsent, answered } = await this.saveCopies(opened, before)
+    if (this.requested !== fork) return
+    if (answered && unsent === null) {
       // A copy of this draft was saved after the read, so the read may lack its text: the box
       // would show older text, and what's typed on it would go over the newer text as another
       // tab's. Read again: the server has it now.
-      const again = await this.reopen()
-      if (again !== null && again.id === draft.id) draft = again
+      if (this.ready) {
+        this.ready = false
+        this.emit()
+      }
+      return this.showCorrected(fork, draft.id, conflict)
     }
+    this.showDraft(draft, conflict, unsent)
+  }
+
+  private async showCorrected(fork: ForkId | null, draftId: string, conflict: ReplayConflict | null): Promise<void> {
+    if (this.requested !== fork || this.ready) return
+    const again = await this.session.call((client) => client("OpenComposer", { chatId: this.chatId, forkId: fork }))
+    if (this.requested !== fork) return
+    if (!again.ok) {
+      if (again.error.tag !== "NotFound")
+        this.env.setTimer(() => void this.enqueue(() => this.showCorrected(fork, draftId, conflict)), RETRY_MS)
+      return
+    }
+    if (again.value.id !== draftId) return this.goTo(fork, false)
+    this.showDraft(again.value, conflict, null)
+  }
+
+  private showDraft(draft: Draft, conflict: ReplayConflict | null, unsent: Copy | null) {
     this.take(draft)
     const save = unsent === null ? null : pendingOf(unsent)
     if (save?.kind === "composer") {
@@ -296,7 +317,6 @@ export class ComposerDraft {
     }
     this.replayedAt = unsent?.at ?? null
     this.conflict = conflict
-    if (this.requested !== fork) return
     this.ready = true
     this.emit()
     if (this.unsaved) this.schedule(0)
