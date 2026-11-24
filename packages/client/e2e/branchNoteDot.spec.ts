@@ -4,6 +4,7 @@
 import { Effect } from "effect"
 import { expect, type Page, test } from "@playwright/test"
 import type { ForkId } from "@dreamspan/shared/chat.ts"
+import { openPanel } from "./support/panel.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { asUser } from "./support/rpc.ts"
 
@@ -68,4 +69,66 @@ test("a chat note's unsaved dot shows on its branch only, and comes back with it
   await switchTo(page, "Alder", "Previous branch")
   await expect(tab.locator("[data-unsaved-dot]")).toBeVisible()
   await expect(editor.getByRole("textbox", { name: "Text of Weather" })).toContainText("Rain by evening.")
+})
+
+test("a preset note link opened in a browser tab keeps the branch draft", async ({ page, context }) => {
+  const { chatId, forkId, slotId, refId } = await admin((api) =>
+    Effect.gen(function* () {
+      const preset = yield* api.CreatePreset({ label: "Branch note preset" })
+      yield* api.ChangeGenerationDefaults({ change: { preset: preset.id } })
+      const card = yield* api.CreateCard({ label: "Branch Wren", name: "Wren" })
+      const start = yield* api.StartChat({
+        cards: [card.entityId],
+        persona: null,
+        greeting: null,
+        first: { _tag: "Send", content: "Before the fork.", speakerEntityId: null }
+      })
+      const chatId = start.chat.id
+      yield* api.SendMessage({
+        chatId,
+        parentSlotId: start.entry.slotId,
+        branch: false,
+        content: "On the original branch."
+      })
+      const fork = yield* api.SendMessage({
+        chatId,
+        parentSlotId: start.entry.slotId,
+        branch: true,
+        content: "On the fork."
+      })
+      if (fork._tag !== "Posted") throw new Error("synthetic message queued")
+      const forkId = fork.chat.currentForkId!
+      const slotId = fork.entry.slotId
+      const note = yield* api.CreateChatNote({ chatId, forkId, title: "Fog", content: "Saved forecast." })
+      yield* api.ChangeCast({ chatId, slotId, forkId, change: { _tag: "Note", entityId: note.entityId, active: true } })
+      return { chatId, forkId, slotId, refId: note.id }
+    })
+  )
+  expect(forkId).not.toBe(chatId)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chatId}?fork=${forkId}&panel=notes`)
+  const text = page.getByRole("textbox", { name: "Text of Fog" })
+  await text.press("ControlOrMeta+a")
+  await page.keyboard.insertText("Branch draft.")
+  await expect
+    .poll(
+      async () => (await admin((api) => api.OpenEditor({ refId, chatNote: { chatId, forkId, slotId } }))).drafts.length
+    )
+    .toBeGreaterThan(0)
+
+  const preset = await openPanel(page, "Prompt preset")
+  const link = preset.getByRole("link", { name: "Fog", exact: true })
+  const noteText = (tab: Page) =>
+    tab.getByRole("region", { name: "Note editor", exact: true }).getByRole("textbox", { name: "Text of Fog" })
+  for (const click of [{ modifiers: ["Control" as const] }, { button: "middle" as const }]) {
+    await page.bringToFront()
+    const [other] = await Promise.all([context.waitForEvent("page", { timeout: 10_000 }), link.click(click)])
+    await expect(noteText(other)).toHaveText("Branch draft.")
+    await other.close()
+  }
+  const href = new URL((await link.getAttribute("href"))!, page.url())
+  expect(href.searchParams.get("fork")).toBe(forkId)
+  await link.click()
+  await expect(noteText(page)).toHaveText("Branch draft.")
 })
