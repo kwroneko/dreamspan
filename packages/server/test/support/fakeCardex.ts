@@ -1158,6 +1158,8 @@ export const startFakeCardex = async (options: FakeCardexOptions = {}): Promise<
     const exclude = list(params.get("not_tags"))
     if (include.length > 20 || exclude.length > 20) return { refused: capturedError("error-tags-21") }
     const author = params.get("author") ?? ""
+    const cover = params.get("has_cover")
+    const explicitMin = Number(params.get("min_tokens") ?? "0")
     const min = Number(params.get("min_tokens") ?? String(DEFAULT_MIN_TOKENS))
     const max = Number(params.get("max_tokens") ?? "Infinity")
     const noForks = truthy(params.get("exclude_forks"))
@@ -1187,12 +1189,12 @@ export const startFakeCardex = async (options: FakeCardexOptions = {}): Promise<
         : kind === "both" && q
           ? [...cards, ...lorebooks.filter((c) => [c.name, c.tagline].some((t) => t.toLowerCase().includes(q)))]
           : cards
-    const matching = pool.filter(
+    const withoutDefaults = pool.filter(
       (c) =>
         // Meaning search finds something for any words; text search needs them.
         (semantic || !q || words(c)) &&
         // Lorebooks are never left out for a missing cover or their token count.
-        (!truthy(params.get("has_cover") ?? "true") || c.hasCover || c.lorebook === true) &&
+        (!truthy(cover) || c.hasCover || c.lorebook === true) &&
         (kind !== "character_lorebook" || c.hasLorebook) &&
         !notSites.includes(c.site) &&
         groups.every((group) => group.some((tag) => c.tags.includes(tag))) &&
@@ -1209,8 +1211,11 @@ export const startFakeCardex = async (options: FakeCardexOptions = {}): Promise<
         !exclude.some((t) => c.tags.includes(t)) &&
         (nsfw === "include" || (nsfw === "only" ? c.nsfw : !c.nsfw)) &&
         (!author || identity(c) === author.toLowerCase()) &&
-        (c.lorebook === true || (c.tokens >= min && c.tokens <= max)) &&
+        (c.lorebook === true || (c.tokens >= explicitMin && c.tokens <= max)) &&
         (!noForks || !c.fork)
+    )
+    const matching = withoutDefaults.filter(
+      (c) => c.lorebook === true || ((cover !== null || c.hasCover) && c.tokens >= min)
     )
     // Semantic mode ranks by likeness to the words: here, a stable hash of the words and the card.
     const likeness = (c: FakeCard) => createHash("sha256").update(`${q}\u0000${c.slug}`).digest().readUInt32BE(0)
@@ -1230,7 +1235,7 @@ export const startFakeCardex = async (options: FakeCardexOptions = {}): Promise<
     }
     const by = semantic ? (a: FakeCard, b: FakeCard) => likeness(a) - likeness(b) : order[sort]!
     const sorted = [...matching].sort((a, b) => by(a, b) || a.slug.localeCompare(b.slug))
-    const hidden = pool.length - pool.filter((c) => c.lorebook === true || c.tokens >= min).length
+    const hidden = withoutDefaults.length - matching.length
     return {
       mode,
       limit,
