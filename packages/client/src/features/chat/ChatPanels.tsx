@@ -287,6 +287,7 @@ export function ChatSidePanel({
             label="Chat panel"
             focusOnMount={restoreFocus && tools.some((tab) => tab.value === focusTab)}
             moreLabel="More tools"
+            trailingControlVisible={ownClose}
             onReorder={(values) => {
               const order = storedOrder(tabOrder, values)
               if (inOrder(usualTools, order).some((tool, index) => tool.value !== values[index])) {

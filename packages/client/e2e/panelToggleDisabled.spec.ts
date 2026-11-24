@@ -171,6 +171,49 @@ test("closing the panel by keyboard returns focus to its chat", async ({ page })
   await expect(composer).toBeFocused()
 })
 
+test("the preset tab clears More tools as the panel's close appears", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 900 })
+  await page.emulateMedia({ reducedMotion: "no-preference" })
+  const { chat } = await fixture("Narrow panel tools")
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${url}/chats/${chat.id}?panel=preset&cpw=260`)
+  const preset = panel(page).getByRole("tab", { name: "Prompt preset", exact: true })
+  await expect(preset).toBeVisible()
+  await expect(preset).not.toHaveAttribute("data-tab-guest", "true")
+  await page.evaluate(async () => {
+    await document.fonts.ready
+  })
+
+  const maxOverlap = await page.evaluate(async () => {
+    const path = "/src/features/chat/presentation.tsx"
+    const { chatHeaderActions } = (await import(/* @vite-ignore */ path)) as {
+      chatHeaderActions: { disable: (id: string) => void }
+    }
+    const row = document.querySelector("[data-chat-panel-tabs]")!
+    return new Promise<number>((resolve) => {
+      let start: number | undefined
+      let max = 0
+      const frame = (now: number) => {
+        if (!row.querySelector('[aria-label="Hide panel"]')) {
+          requestAnimationFrame(frame)
+          return
+        }
+        start ??= now
+        const preset = row.querySelector('[role="tab"][data-tab-value="preset"]')?.getBoundingClientRect()
+        const more = row.querySelector('[aria-label="More tools"]')?.getBoundingClientRect()
+        if (preset && more) max = Math.max(max, Math.min(preset.right, more.right) - Math.max(preset.left, more.left))
+        if (now - start < 250) requestAnimationFrame(frame)
+        else resolve(max)
+      }
+      requestAnimationFrame(frame)
+      chatHeaderActions.disable("chat.panel")
+    })
+  })
+  await expect(panel(page).getByRole("button", { name: "Hide panel", exact: true })).toBeVisible()
+  await expect(preset).toHaveAttribute("data-tab-guest", "true")
+  expect(maxOverlap).toBeLessThanOrEqual(1)
+})
+
 test("a chat not made yet keeps its panel's close when its panel toggle is disabled", async ({ page }) => {
   test.setTimeout(120_000)
   // A card source's card before its first send.
