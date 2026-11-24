@@ -370,6 +370,33 @@ test("a reload before the start card's title reached the new chat still names it
     .toBe("Notes on rope")
 })
 
+test("reloading a named new chat keeps its name, whatever the start card holds now (rev-dfu1 #4)", async ({
+  page,
+  context
+}) => {
+  await start(page)
+  await page.goto(`${server().url}/chats`)
+  await page.getByRole("textbox", { name: "Title of the new chat", exact: true }).fill("Alpha")
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await expect.poll(() => draftOf(page)).not.toBeNull()
+  const draft = draftOf(page)!
+  const titleOf = () => admin((api) => api.GetChat({ chatId: draft as never })).then((chat) => chat.title)
+  await expect.poll(titleOf).toBe("Alpha")
+  // Another tab types the next chat's title on the start card, not sent.
+  const other = await context.newPage()
+  await other.goto(`${server().url}/chats`)
+  const card = other.getByRole("textbox", { name: "Title of the new chat", exact: true })
+  await expect(card).toHaveValue("")
+  await card.fill("Beta")
+  await other.waitForTimeout(1500)
+  await page.reload()
+  await expect(composer(page)).toBeEditable()
+  await page.waitForTimeout(1500)
+  expect(await titleOf()).toBe("Alpha")
+  await other.reload()
+  await expect(other.getByRole("textbox", { name: "Title of the new chat", exact: true })).toHaveValue("Beta")
+})
+
 test("a new chat's own notes and snippets wait, disabled, saying why", async ({ page }) => {
   await start(page)
   const card = await importCard(page, { name: "Mira Notes", first_mes: "Mira opens the door." })
