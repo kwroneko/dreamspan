@@ -3,7 +3,7 @@
 // and "We also need to avoid layout shifts." Every tab shows the same buttons in the same places
 // (Include personas and Group forks disabled with why where they do nothing), so switching tabs
 // moves neither the sort nor its direction button, and nothing invisible sits between buttons.
-// GRID_TOGGLES_SHOTS=<folder> keeps a 1340 px dark window screenshot of each tab there.
+// GRID_TOGGLES_SHOTS=<folder> keeps 1340 and 390 px dark window screenshots of each tab there.
 import { createServer } from "node:net"
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
@@ -86,6 +86,12 @@ for (const theme of ["light", "dark"] as const)
         // The sort bar as seen: its choices' scroller (a source's longer list scrolls inside it).
         const sort = controls.locator(".card-grid-sort [data-scroll-keep]")
         const direction = controls.locator(".card-grid-sort").getByRole("button", { name: /^Order: / })
+        // Archive unused… (owner, 2026-11-24): a button on the sort's other side from the toggles,
+        // on every tab, enabled, the row's gap before the sort.
+        const archive = controls.getByRole("button", { name: "Archive unused…", exact: true })
+        const rowGap = await controls
+          .locator(".card-grid-controls")
+          .evaluate((row) => parseFloat(getComputedStyle(row).columnGap))
         await expect(show.getByRole("button", { name: "cardex", exact: true })).toBeVisible()
         let home: { sort: Box; direction: Box } | null = null
         for (const tab of TABS) {
@@ -98,6 +104,23 @@ for (const theme of ["light", "dark"] as const)
           const now = { sort: await box(sort), direction: await box(direction) }
           home ??= now
           const what = `home ${width} ${theme} ${tab}`
+          await expect(archive).toBeEnabled()
+          const archived = await box(archive)
+          expect
+            .soft(
+              Math.abs(archived.x + archived.width + rowGap - now.sort.x),
+              `${what} archive button: gap to the sort`
+            )
+            .toBeLessThan(0.5)
+          expect.soft(Math.abs(archived.y - now.sort.y), `${what} archive button: top`).toBeLessThan(0.5)
+          if (tab === "All" || tab === "cardex") {
+            await archive.click()
+            const dialog = page.getByRole("dialog", { name: "Archive unused cards", exact: true })
+            await expect(dialog).toBeVisible()
+            await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+            await expect(dialog).toBeHidden()
+            await settle(page)
+          }
           // cardex has its own sorts, so its bar is wider: its right end and the direction stay.
           if (tab === "cardex") sameRight(now.sort, home.sort, `${what} sort`)
           else same(now.sort, home.sort, `${what} sort`)
@@ -135,8 +158,10 @@ for (const theme of ["light", "dark"] as const)
               .soft(Math.abs(strip.sourceCount - strip.filterCount!), `home ${width} ${tab}: cardex count gap`)
               .toBeLessThan(0.5)
           await expectLayout(page, info, `home-${tab}-${width}-${theme}`, { scope: "[data-card-grid-controls]" })
-          if (shots && width === 1340 && theme === "dark")
-            await page.screenshot({ path: join(shots, `home-${tab.replace(/ /g, "-").toLowerCase()}.png`) })
+          if (shots && (width === 1340 || width === 390) && theme === "dark")
+            await page.screenshot({
+              path: join(shots, `home-${tab.replace(/ /g, "-").toLowerCase()}${width === 390 ? "-390" : ""}.png`)
+            })
         }
 
         // The left panel: the same through its Show menu.
@@ -168,8 +193,10 @@ for (const theme of ["light", "dark"] as const)
           else same(now.sort, side.sort, `${what} sort`)
           same(now.direction, side.direction, `${what} direction`)
           await expectLayout(page, info, `side-${tab}-${width}-${theme}`, { scope: "[data-card-browse-bar]" })
-          if (shots && width === 1340 && theme === "dark")
-            await page.screenshot({ path: join(shots, `sidebar-${tab.replace(/ /g, "-").toLowerCase()}.png`) })
+          if (shots && (width === 1340 || width === 390) && theme === "dark")
+            await page.screenshot({
+              path: join(shots, `sidebar-${tab.replace(/ /g, "-").toLowerCase()}${width === 390 ? "-390" : ""}.png`)
+            })
         }
         await hideAppNavigation(page)
       }

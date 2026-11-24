@@ -8,6 +8,7 @@ import { sourcesAtom } from "../cardSources/remote.ts"
 import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
+import { Icon } from "../../ui/Icon.tsx"
 import { Checkbox } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { AmountInput } from "../../ui/Field.tsx"
@@ -247,6 +248,36 @@ export function ArchiveUnused({ place }: { place: string }) {
           Archive unused cards…
         </button>
       </Tooltip>
+      {open && <ArchiveDialog close={() => setOpen(false)} trigger={trigger} />}
+    </>
+  )
+}
+
+/**
+ * The same review as a button, before the Characters page's sort on every tab (owner, 2026-11-24:
+ * "It's an action unlike those other buttons, so it needs to be separated. Put it on the other
+ * side of the order selection cluster compared to those, and style it differently, as a button.").
+ * It reviews the whole library, so it's enabled on every tab; on a narrow row only its icon shows.
+ */
+export function ArchiveUnusedButton({ place }: { place: string }) {
+  const [open, setOpen] = useOpenPlace(`archive-unused-button:${place}`)
+  const trigger = useRef<HTMLButtonElement>(null)
+  return (
+    <>
+      <Button
+        ref={trigger}
+        aria-label="Archive unused…"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        hint="Review older unused cards to archive together."
+        className="@max-[40rem]:px-2.5"
+        onClick={() => setOpen(true)}
+      >
+        <Icon name="archive" />
+        <span aria-hidden="true" className="@max-[40rem]:hidden">
+          Archive unused…
+        </span>
+      </Button>
       {open && <ArchiveDialog close={() => setOpen(false)} trigger={trigger} />}
     </>
   )

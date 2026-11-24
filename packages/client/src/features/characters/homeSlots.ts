@@ -31,6 +31,12 @@ export const characterChatActions = defineSlot<{ entityId: EntityId; label: stri
  */
 export const archivedCardActions = defineSlot<{ place: string }>("cards.archived-actions")
 
+/**
+ * Actions before the Characters page's sort, on every tab (owner, 2026-11-24): what acts on the
+ * library rather than on what's shown. `place` names the host, as for `archivedCardActions`.
+ */
+export const cardGridActions = defineSlot<{ place: string }>("cards.grid-actions")
+
 /** Results offered after an ordinary local card search. */
 export const cardSearchExtras = defineSlot<{
   data: ShellLibrary
