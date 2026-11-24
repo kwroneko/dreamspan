@@ -169,7 +169,20 @@ function ChatTitle({
   return (
     <>
       {editing ? (
-        <form className="flex min-w-0 flex-1 flex-col" onSubmit={(event) => void save(event)}>
+        <form
+          className="flex min-w-0 flex-1 flex-col"
+          onSubmit={(event) => void save(event)}
+          // An action's tooltip can consume Escape before it bubbles to the form.
+          onKeyDownCapture={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault()
+              cancel()
+            }
+          }}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) void save()
+          }}
+        >
           <span className="flex min-w-0 items-center gap-1">
             <Input
               ref={input}
@@ -186,16 +199,6 @@ function ChatTitle({
                 event.currentTarget.select()
               }}
               onChange={(event) => typed.setText(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault()
-                  cancel()
-                }
-              }}
-              // Focus moving to Save or Cancel isn't leaving the field: their click decides.
-              onBlur={(event) => {
-                if (!event.currentTarget.form?.contains(event.relatedTarget)) void save()
-              }}
               className="h-8 min-w-0 flex-1 text-base font-semibold"
             />
             <IconButton
