@@ -17,6 +17,7 @@ import {
 } from "./presentation.tsx"
 import { useChatCommandKeys } from "./commands.tsx"
 import { useIsPanelTab } from "./panels.tsx"
+import { FinishMeantTitle, meantTitle } from "./meantTitle.tsx"
 // A chat (DESIGN §10.1): a URL per chat and per message, the path in a virtualized list
 // anchored at the bottom, and the composer. Nothing here locks while replies generate.
 import { RegistryContext } from "@effect/atom-react"
@@ -1304,8 +1305,11 @@ export function ChatPage() {
   const validPanel = useIsPanelTab(search.panel)
   usePlaceNotice(search.panel !== undefined && !validPanel ? "This panel is no longer available." : null)
   const panel = validPanel ? (search.panel as string) : null
+  // A new chat started here before the start card's title reached it: that rename finishes now.
+  const meant = useMemo(() => meantTitle(chatId)?.titleKey ?? null, [chatId])
   return (
     <div data-fill className="flex min-h-0 flex-1 flex-col">
+      {meant !== null && <FinishMeantTitle key={chatId} chatId={chatId} titleKey={meant} />}
       <OpenChat chatId={chatId} fork={fork} slot={slot} panel={panel} />
     </div>
   )

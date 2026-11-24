@@ -677,3 +677,91 @@ test("a rename retried after a reload leaves a newer rename alone (rev-dd3 #9)",
   await page.waitForTimeout(2000)
   expect(await titleOf()).toBe("Beta")
 })
+
+test("a rename another tab's came before leaves the start card's title on the card (rev-dd4a #4)", async ({ page }) => {
+  await start(page)
+  // The rename never reaches the server on the first load.
+  let held = true
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      if (held && typeof data === "string" && data.includes('"RenameChat"')) return
+      upstream.send(data)
+    })
+    upstream.onMessage((data) => socket.send(data))
+  })
+  await page.goto(`${server().url}/chats`)
+  const card = page.getByRole("textbox", { name: "Title of the new chat", exact: true })
+  await card.fill("Alpha")
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await expect.poll(() => draftOf(page)).not.toBeNull()
+  const draft = draftOf(page)!
+  await expect(composer(page)).toBeEditable()
+  await page.waitForTimeout(1000)
+  // Another tab names it meanwhile; then this one reloads, its rename still meant.
+  await admin((api) => api.RenameChat({ chatId: draft as never, name: "Beta" }))
+  held = false
+  await page.reload()
+  await expect(composer(page)).toBeEditable()
+  await page.waitForTimeout(2000)
+  expect((await admin((api) => api.GetChat({ chatId: draft as never }))).title).toBe("Beta")
+  // Alpha wasn't applied, so it's still the start card's.
+  await page.goto(`${server().url}/chats`)
+  await expect(card).toHaveValue("Alpha")
+})
+
+/** Routes the page's RPC socket: answers to the requests `hold` names wait until the returned release. */
+const holdAnswers = async (page: Page, hold: (request: string) => boolean) => {
+  let holding = true
+  const waiting: Array<() => void> = []
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    const held = new Set<unknown>()
+    socket.onMessage((data) => {
+      const request = typeof data === "string" ? (JSON.parse(data) as { id?: unknown }) : null
+      if (holding && request?.id !== undefined && hold(data as string)) held.add(request.id)
+      upstream.send(data)
+    })
+    upstream.onMessage((data) => {
+      const answer = typeof data === "string" ? (JSON.parse(data) as { requestId?: unknown }) : null
+      if (holding && answer?.requestId !== undefined && held.has(answer.requestId))
+        return void waiting.push(() => socket.send(data))
+      socket.send(data)
+    })
+  })
+  return () => {
+    holding = false
+    for (const send of waiting.splice(0)) send()
+  }
+}
+
+test("a first turn sent before the start card's title was read still names the chat (rev-dd4a #6)", async ({
+  page
+}) => {
+  await start(page)
+  await page.goto(`${server().url}/chats`)
+  const card = page.getByRole("textbox", { name: "Title of the new chat", exact: true })
+  await card.fill("Alpha")
+  await page.waitForTimeout(1500)
+  // The start card's title read is slow on the new chat's page.
+  const release = await holdAnswers(
+    page,
+    (request) => request.includes('"GetUserDraft"') && request.includes('"chat:new"')
+  )
+  await page.goto(`${server().url}/new/chat`)
+  await expect.poll(() => draftOf(page)).not.toBeNull()
+  const draft = draftOf(page)!
+  await expect(composer(page)).toBeEditable()
+  await composer(page).fill("The first words.")
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await expect(page).toHaveURL(chatUrl(draft))
+  release()
+  await expect
+    .poll(() => admin((api) => api.GetChat({ chatId: draft as never })).then((chat) => chat.title), {
+      timeout: 10_000
+    })
+    .toBe("Alpha")
+  // The start card's title is the chat's now: the card is empty for the next new chat.
+  await page.goto(`${server().url}/chats`)
+  await expect(card).toHaveValue("")
+})

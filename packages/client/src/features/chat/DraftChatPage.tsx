@@ -14,7 +14,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type ActionResult, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { useCaller } from "../editor/caller.ts"
-import { useUserDraft } from "../editor/userDraft.tsx"
 import { EMPTY_CHAT_TITLE } from "./ChatsPage.tsx"
 import { useTitle } from "../shell.tsx"
 import { type DraftHost, OpenChat } from "./ChatPage.tsx"
@@ -23,8 +22,9 @@ import { useIsPanelTab } from "./panels.tsx"
 import { carryPanelFocus } from "./ChatPanels.tsx"
 import { seedChat } from "./session.ts"
 import { carryLeftover, fileLeftover } from "./composerDraft.ts"
-import { rememberDraftFor } from "./chatStarted.ts"
+import { rememberDraftFor, rememberReplaced } from "./chatStarted.ts"
 import { ChatSkeleton } from "./SkeletonMessages.tsx"
+import { FinishMeantTitle, meantTitle } from "./meantTitle.tsx"
 
 /** The search param naming the page's pending chat, so a reload reopens it. */
 export const DRAFT_PARAM = "draft"
@@ -79,6 +79,8 @@ function DraftChat({
       const value = opened.value
       // What was typed in the swept chat after its saving stopped goes on in this one.
       if (replacing.current && shownId.current !== null) carryLeftover(shownId.current, value.id)
+      // The chat this one takes the place of: swept while shown, or before a reload.
+      const replaced = replacing.current ? shownId.current : reopen !== null && value.id !== reopen ? reopen : null
       replacing.current = false
       // The chat the URL names was started meanwhile (in another tab, say): it's that chat now.
       if (value.status !== "pending") {
@@ -92,6 +94,7 @@ function DraftChat({
         return
       }
       rememberDraftFor(value.id, draftFor)
+      if (replaced !== null) rememberReplaced(value.id, replaced)
       setChat(value)
       // A reopened one too: a reload before the rename this tab meant for it still names it.
       onOpened?.(value, value.id === reopen)
@@ -238,33 +241,9 @@ export function EmptyDraftChatPage() {
 }
 
 /**
- * The rename this browser tab meant for new chat `chatId` and hasn't seen through, kept for a
- * reload, by the chat's id: `name` (null: the start card's title, not read yet when the chat
- * opened, rev-dd3 #8) and the title it replaces, `from`, so a retry after another rename leaves
- * that one (#9). Read (`intent` undefined), kept, or done (null).
- */
-interface MeantTitle {
-  readonly name: string | null
-  readonly from: string
-}
-const meantTitle = (chatId: string, intent?: MeantTitle | null): MeantTitle | null => {
-  const key = `dreamspan.meantTitle:${chatId}`
-  try {
-    if (intent === undefined) {
-      const kept: unknown = JSON.parse(sessionStorage.getItem(key) ?? "null")
-      return typeof kept === "object" && kept !== null && "from" in kept ? (kept as MeantTitle) : null
-    }
-    if (intent === null) sessionStorage.removeItem(key)
-    else sessionStorage.setItem(key, JSON.stringify(intent))
-  } catch {
-    // Storage unavailable: a reload before the rename leaves the chat its default title.
-  }
-  return null
-}
-
-/**
  * A new chat named by the title typed on the Chats page's start card (`titleKey`, its user
- * draft): a rename, which starts nothing; the title's draft ends once it's the chat's.
+ * draft): a rename, which starts nothing; the title's draft ends once it's the chat's. A chat
+ * started before the rename was seen through gets it on its own page (meantTitle.tsx).
  */
 export function TitledDraftChatPage({
   draftFor,
@@ -275,41 +254,27 @@ export function TitledDraftChatPage({
   titleKey: string
   pageTitle?: string
 }) {
-  const title = useUserDraft(titleKey, "Title", "")
-  const call = useCaller()
-  const [opened, setOpened] = useState<{ readonly chat: Chat; readonly reopened: boolean } | null>(null)
-  const onOpened = useCallback((chat: Chat, reopened: boolean) => {
-    // Kept before the URL names the chat: a reload at once still names it as meant.
-    if (!reopened && meantTitle(chat.id) === null) meantTitle(chat.id, { name: null, from: chat.title })
-    setOpened({ chat, reopened })
-  }, [])
+  const [opened, setOpened] = useState<ChatId | null>(null)
   // The name given, once read: a fresh chat opened after a sweep gets it too.
   const named = useRef<string | null>(null)
-  useEffect(() => {
-    if (opened === null) return
-    const { chat, reopened } = opened
-    // A chat its URL named takes only the rename this tab meant for it and hadn't seen through (a
-    // reload before it), never what the start card holds now: that's for the next new chat.
-    const kept = meantTitle(chat.id)
-    if (reopened && kept === null) return
-    const from = kept?.from ?? chat.title
-    let name = reopened ? kept!.name : null
-    let first = false
-    if (name === null) {
-      if (!title.ready) return
-      first = named.current === null
-      if (first) named.current = title.text.trim()
-      name = named.current!
-    }
-    if (name === "") return void meantTitle(chat.id, null)
-    meantTitle(chat.id, { name, from })
-    void call((client) => client("RenameChat", { chatId: chat.id, name, from })).then((result) => {
-      if (!result.ok) return
-      meantTitle(chat.id, null)
-      // The start card's title ends once it's this chat's, and only then.
-      if (first || (title.ready && title.text.trim() === name)) void title.commit(title.text, async () => true)
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per chat opened, when the title is read
-  }, [opened, title.ready])
-  return <DraftChatPage draftFor={draftFor} onOpened={onOpened} {...(pageTitle === undefined ? {} : { pageTitle })} />
+  const onOpened = useCallback(
+    (chat: Chat, reopened: boolean) => {
+      // Kept before the URL names the chat: a reload at once still names it as meant. A chat its
+      // URL named takes only the rename this tab meant for it and hadn't seen through (a reload
+      // before it), never what the start card holds now: that's for the next new chat.
+      if (!reopened && meantTitle(chat.id) === null)
+        meantTitle(chat.id, { name: named.current, from: chat.title, titleKey })
+      setOpened(chat.id)
+    },
+    [titleKey]
+  )
+  const onNamed = useCallback((name: string) => {
+    named.current ??= name
+  }, [])
+  return (
+    <>
+      <FinishMeantTitle chatId={opened} titleKey={titleKey} onNamed={onNamed} />
+      <DraftChatPage draftFor={draftFor} onOpened={onOpened} {...(pageTitle === undefined ? {} : { pageTitle })} />
+    </>
+  )
 }

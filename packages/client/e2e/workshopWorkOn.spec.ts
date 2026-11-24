@@ -359,6 +359,69 @@ test.describe("work on in a workshop", () => {
     await expect(message.getByLabel("Attached from your library").locator("[data-library-tile]")).toHaveCount(1)
   })
 
+  for (const removed of [false, true])
+    test(`a new workshop swept after its handover reached the server ${removed ? "leaves an item removed since out" : "hands it to the one opened in its place"} (rev-dd4a #2)`, async ({
+      page
+    }) => {
+      test.setTimeout(120_000)
+      await setUp(page, 1340, "dark")
+      const book = await admin((api) => api.CreateLorebook({ label: removed ? "Harbour rules" : "Harbour charts" }))
+      // While `offline`, the page can't connect at all.
+      let offline = false
+      const sockets: Array<{ close: () => Promise<void> }> = []
+      await page.routeWebSocket(/\/rpc$/, (socket) => {
+        if (offline) return void socket.close()
+        sockets.push(socket)
+        const upstream = socket.connectToServer()
+        socket.onMessage((data) => upstream.send(data))
+        upstream.onMessage((data) => socket.send(data))
+      })
+      await page.goto(`${server().url}/new/workshop?workshopAttach=${book.id}`)
+      await expect(page).toHaveURL(/[?&]draft=/)
+      const first = new URL(page.url()).searchParams.get("draft")!
+      // The server has it: its tile shows, and the URL no longer names it.
+      const tiles = page.getByLabel("Attachments", { exact: true }).locator("[data-library-tile]")
+      await expect(tiles).toHaveCount(1)
+      await expect(page).not.toHaveURL(/workshopAttach=/, { timeout: 15_000 })
+      if (removed) {
+        // The X shows on hover or focus: by keyboard, as the tile row lets.
+        await page.getByRole("button", { name: "Remove Harbour rules" }).focus()
+        await page.keyboard.press("Enter")
+        await expect(tiles).toHaveCount(0)
+        await page.waitForTimeout(500)
+      }
+      // The page goes offline (a laptop asleep); meanwhile its workshop is swept.
+      offline = true
+      for (const socket of sockets.splice(0)) await socket.close()
+      // One login for the leave and the wait: the server throttles logins.
+      const swept = await admin((api) =>
+        Effect.gen(function* () {
+          yield* api.LeaveDraftChat({ chatId: first as never })
+          for (let i = 0; i < 80; i++) {
+            const gone = yield* Effect.match(api.GetChat({ chatId: first as never }), {
+              onFailure: () => true,
+              onSuccess: () => false
+            })
+            if (gone) return true
+            yield* Effect.sleep(250)
+          }
+          return false
+        })
+      )
+      expect(swept).toBe(true)
+      offline = false
+      // Back online: a new workshop opens in its place, with what was handed over and not removed.
+      await expect.poll(() => new URL(page.url()).searchParams.get("draft"), { timeout: 30_000 }).not.toBe(first)
+      await page.getByLabel("Message", { exact: true }).fill("Chart the harbour.")
+      await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+      await expect(page).toHaveURL(/\/chats\//, { timeout: 30_000 })
+      const message = page.getByRole("article").filter({ hasText: "Chart the harbour." })
+      await expect(message).toBeVisible()
+      await expect(message.getByLabel("Attached from your library").locator("[data-library-tile]")).toHaveCount(
+        removed ? 0 : 1
+      )
+    })
+
   test("a card's More menu has it as a submenu", async ({ page }) => {
     await setUp(page, 1340, "dark")
     const card = await admin((api) =>

@@ -910,7 +910,8 @@ function ImageScope({
       },
       finish: async (sent: boolean) => {
         // The send may have taken items off the draft, or another tab may have removed them.
-        library?.reload()
+        if (sent) library?.sent()
+        else library?.reload()
         await enqueue(async () => {
           for (const entry of captured) {
             if (sent) await dropImage(entry.id)

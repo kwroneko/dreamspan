@@ -62,6 +62,30 @@ describe("naming", () => {
     }).pipe(Effect.scoped, Effect.provide(layer))
   )
 
+  it.live("a rename from a title the chat no longer has is refused, unless it has the name already (rev-dd4a #4)", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const made = yield* api.CreateChat({ title: "Workshop" })
+      // Applied, its answer lost; the retry finds the name there and is done.
+      yield* api.RenameChat({ chatId: made.id, name: "Alpha", from: "Workshop" })
+      assert.strictEqual((yield* api.RenameChat({ chatId: made.id, name: "Alpha", from: "Workshop" })).title, "Alpha")
+      // Another tab's rename came first: it stays, and the retry says it wasn't applied.
+      yield* api.RenameChat({ chatId: made.id, name: "Beta" })
+      assert.strictEqual(
+        yield* outcome(api.RenameChat({ chatId: made.id, name: "Gamma", from: "Alpha" })),
+        "EditRefused"
+      )
+      assert.strictEqual((yield* api.GetChat({ chatId: made.id })).title, "Beta")
+      // An automatic title changed meanwhile (a new chat's first turn retitles it) is nobody's
+      // rename: the name meant for it still goes on (rev-dd4a #6).
+      const fresh = yield* api.CreateChat({ title: "Mira, Nov 24" })
+      assert.strictEqual(
+        (yield* api.RenameChat({ chatId: fresh.id, name: "Alpha", from: "New chat" })).title,
+        "Alpha"
+      )
+    }).pipe(Effect.scoped, Effect.provide(layer))
+  )
+
   it.live("renaming a group renames its chats; renaming one of them takes it out of the group", () =>
     Effect.gen(function* () {
       const api = yield* client()

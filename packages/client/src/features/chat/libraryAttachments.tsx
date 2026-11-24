@@ -26,6 +26,7 @@ import { Menu, MenuItem } from "../../ui/Menu.tsx"
 import { CornerIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { openNearProps } from "../workbench/kinds.ts"
 import type { ChatSession } from "./session.ts"
+import { replacedDraftOf } from "./chatStarted.ts"
 
 type LibraryKind = ComposerLibraryItem["kind"]
 
@@ -80,11 +81,34 @@ export interface ComposerLibrary {
   readonly capture: () => MessageLibrary
   /** After a send the server took them off the draft: read the list again. */
   readonly reload: () => void
+  /** A send took them: what was handed over is spent. */
+  readonly sent: () => void
 }
 
 const MAX = 16
 /** How long a handover that didn't reach the server waits before it's tried again. */
 const HANDOVER_RETRY_MS = 2_000
+
+/**
+ * What was handed over (`hold`) to new chat `chatId`'s composer in this browser tab and not sent
+ * or removed since, kept for a reload: a chat opened in its place after a sweep (its composer
+ * and attachments gone with it) gets them too, though the URL no longer names them (rev-dd4a #2).
+ * Read (`next` undefined) or kept (empty: none).
+ */
+const handedOver = (chatId: string, next?: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const key = `dreamspan.handover:${chatId}`
+  try {
+    if (next === undefined) {
+      const kept: unknown = JSON.parse(sessionStorage.getItem(key) ?? "[]")
+      return Array.isArray(kept) ? kept.filter((id): id is string => typeof id === "string") : []
+    }
+    if (next.length === 0) sessionStorage.removeItem(key)
+    else sessionStorage.setItem(key, JSON.stringify(next))
+  } catch {
+    // Storage unavailable: a sweep while this tab sleeps takes the items with it.
+  }
+  return next ?? []
+}
 
 /**
  * A workshop composer mounted in this browser tab (every workbench tab's view stays mounted):
@@ -233,7 +257,18 @@ export function useComposerLibrary(
       if (!live) return null
       setReady(true)
       if (items === null) setTimeout(() => live && void run(read), HANDOVER_RETRY_MS)
-      else setLoaded(draftId)
+      else {
+        setLoaded(draftId)
+        // Opened in place of a new chat swept with what was handed over to it: those come here.
+        const replaced = replacedDraftOf(session.chatId)
+        const carried = replaced === null ? [] : handedOver(replaced)
+        if (replaced !== null && carried.length > 0) {
+          handedOver(session.chatId, [...new Set([...handedOver(session.chatId), ...carried])])
+          handedOver(replaced, [])
+          const missing = carried.filter((refId) => !items.some((there) => there.refId === refId))
+          if (missing.length > 0) void addHeld(missing)
+        }
+      }
       return items
     }
     void run(read)
@@ -274,27 +309,43 @@ export function useComposerLibrary(
   useLayoutEffect(() => {
     latestAdd.current = addOnce
   })
+  /** A handover the message must carry: tried again until the server takes or refuses it. */
+  const addHeld = (added: ReadonlyArray<string>) => {
+    setHolding((n) => n + 1)
+    const attempt = async (): Promise<boolean> => {
+      refused.current = false
+      const ok = await latestAdd.current(added)
+      if (ok || refused.current || !mounted.current) return ok
+      await new Promise((resolve) => setTimeout(resolve, HANDOVER_RETRY_MS))
+      return mounted.current ? attempt() : false
+    }
+    return attempt()
+      .then((ok) => {
+        if (ok) handedOver(session.chatId, [...new Set([...handedOver(session.chatId), ...added])])
+        return ok
+      })
+      .finally(() => setHolding((n) => n - 1))
+  }
   if (!takes) return null
   return {
     items,
     ready,
     busy: busy || holding > 0 || (draftId !== null && loaded !== draftId),
     error,
-    add: (added, hold = false) => {
-      if (!hold) return addOnce(added)
-      setHolding((n) => n + 1)
-      const attempt = async (): Promise<boolean> => {
-        refused.current = false
-        const ok = await latestAdd.current(added)
-        if (ok || refused.current || !mounted.current) return ok
-        await new Promise((resolve) => setTimeout(resolve, HANDOVER_RETRY_MS))
-        return mounted.current ? attempt() : false
-      }
-      return attempt().finally(() => setHolding((n) => n - 1))
+    add: (added, hold = false) => (hold ? addHeld(added) : addOnce(added)),
+    remove: (refId) => {
+      handedOver(
+        session.chatId,
+        handedOver(session.chatId).filter((id) => id !== refId)
+      )
+      void run(() => call("SetComposerLibrary", { add: [], remove: [refId as RefId] }))
     },
-    remove: (refId) => void run(() => call("SetComposerLibrary", { add: [], remove: [refId as RefId] })),
     capture: () => shown.current.map(({ kind, refId }) => ({ kind, refId })),
-    reload: () => void run(() => call("GetComposerLibrary"))
+    reload: () => void run(() => call("GetComposerLibrary")),
+    sent: () => {
+      handedOver(session.chatId, [])
+      void run(() => call("GetComposerLibrary"))
+    }
   }
 }
 
