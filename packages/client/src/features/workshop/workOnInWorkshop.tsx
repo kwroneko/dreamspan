@@ -3,8 +3,6 @@
 // tab's frames, most recent first, up to five, then A new workshop. Picking one puts the item in
 // that workshop's message (its composer's tiles) and shows its tab with the composer focused; a
 // new one opens the workshop not made yet with the item in its first message (`workshopAttach`).
-import type { ComposerLibraryItem } from "@dreamspan/shared/composerApi.ts"
-import type { LibraryRef, RefId } from "@dreamspan/shared/library.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
@@ -21,7 +19,6 @@ import { editorActions } from "../editor/editorSlots.ts"
 import { panelEditorActions } from "../editor/panelActions.tsx"
 import type { EditorStore } from "../editor/store.ts"
 import { useEditorState } from "../editor/store.ts"
-import { libraryListAtom } from "../library/queries.ts"
 import { useWorkbench } from "../workbench/tab.tsx"
 import { WORKSHOP_ATTACH_KEY } from "./workshopStart.ts"
 
@@ -155,23 +152,6 @@ const editorWorkOnIn = (compact: boolean) =>
     if (ref?.kind !== "lorebook" && ref?.kind !== "preset") return null
     return <WorkOnIn refId={ref.id} compact={compact} toolbar={ref.kind} />
   }
-
-const KINDS = ["card", "lorebook", "preset"] as const
-const listOf = (lists: ReadonlyArray<AsyncResult.AsyncResult<ReadonlyArray<LibraryRef>, unknown>>) =>
-  lists.flatMap((result) => (AsyncResult.isSuccess(result) ? result.value : []))
-
-/** The named items for ref ids (a link's `workshopAttach`): the ones in the library, in order. */
-export function useLibraryItems(refIds: ReadonlyArray<string>): ReadonlyArray<ComposerLibraryItem> {
-  const cards = useAtomValue(libraryListAtom("card"))
-  const lorebooks = useAtomValue(libraryListAtom("lorebook"))
-  const presets = useAtomValue(libraryListAtom("preset"))
-  const refs = new Map(listOf([cards, lorebooks, presets]).map((ref) => [ref.id as string, ref]))
-  return refIds.flatMap((refId) => {
-    const ref = refs.get(refId)
-    const kind = KINDS.find((entry) => entry === ref?.kind)
-    return ref && kind ? [{ kind, refId: ref.id as RefId, name: ref.label }] : []
-  })
-}
 
 export const registerWorkOnInWorkshop = () => [
   chatCardActions.register({ id: "workshop.work-on", order: 36, component: ChatCardWorkOnIn }),

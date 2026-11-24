@@ -24,14 +24,10 @@ import {
   chipLabel,
   chipText,
   choicesOf,
-  choosePending,
   modeDescriptionOf,
   modeLabelOf,
   modeText,
-  newCapabilitiesAtom,
-  type PendingGrants,
-  type WorkshopCapability,
-  withPendingGrants
+  type WorkshopCapability
 } from "./capabilities.ts"
 
 function CapabilityRow({
@@ -186,35 +182,6 @@ export function CapabilityChip({ session }: ComposerControlContext) {
           key={`${capability.id}:${capability.target ?? ""}`}
           chatId={session.chatId}
           capability={capability}
-        />
-      )}
-    />
-  )
-}
-
-/**
- * The chip of a workshop not made yet: what a new one offers (beside the story `attachTo`, or of
- * its own), with the choices made here, which its first send makes with it.
- */
-export function PendingCapabilityChip({
-  attachTo,
-  grants,
-  onGrants
-}: {
-  attachTo: ChatId | null
-  grants: PendingGrants
-  onGrants: (next: PendingGrants) => void
-}) {
-  const result = useAtomValue(newCapabilitiesAtom(attachTo ?? ""))
-  if (!AsyncResult.isSuccess(result)) return <LoadingChip label="What the assistant may do" />
-  return (
-    <CapabilityPopover
-      capabilities={withPendingGrants(result.value, grants)}
-      row={(capability) => (
-        <CapabilityRow
-          key={`${capability.id}:${capability.target ?? ""}`}
-          capability={capability}
-          choose={(mode) => onGrants(choosePending(grants, capability, mode))}
         />
       )}
     />

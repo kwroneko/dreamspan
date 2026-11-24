@@ -36,16 +36,18 @@ import { ChatPlaceScope, chatPlaceKey } from "../chat/chatPlace.ts"
 import { composerTextbox } from "../chat/composerFocus.ts"
 import { type Flashes, MessageList } from "../chat/ChatPage.tsx"
 import { KindBadge } from "../chat/KindBadge.tsx"
+import { NewBadge } from "../chat/ChatHeader.tsx"
+import { NOT_STARTED } from "../chat/chatStarted.ts"
 import { kindRootProps, useChatKindLook } from "../chat/kindLooks.ts"
 import type { PanelProps } from "../chat/panels.tsx"
 import { ChatSurfaceProviders, chatComposer, chatComposerNotes, chatOverlays } from "../chat/presentation.tsx"
-import { ChatSession, type ChatView } from "../chat/session.ts"
+import { ChatSession, type ChatView, seedChat } from "../chat/session.ts"
 import { branchLabel, useChatForks } from "../chat/forks.ts"
 import { SkeletonMessages } from "../chat/SkeletonMessages.tsx"
 import { useCanOpenBeside } from "../workbench/OpenBeside.tsx"
 import { useOpenBesideThis } from "./storyLink.tsx"
 import { SlotOutlet } from "../../slots.tsx"
-import { PendingSideChat } from "./PendingWorkshop.tsx"
+import { PendingSideDraft, type SideDraftHost } from "./PendingSideDraft.tsx"
 import { pairedWith, useWorkshopBranches } from "./workshopBranches.tsx"
 import type { WorkshopBranch } from "@dreamspan/shared/workshopApi.ts"
 import {
@@ -178,10 +180,12 @@ function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
       </div>
     )
   if (choice === null || missing) return <p className="px-4 py-4 text-sm text-muted">Loading the workshop…</p>
-  const header = (
+  // `draft`: the workshop not started yet that the tab shows, once it's open.
+  const header = (draft: Chat | null) => (
     <>
       <SideChatHeader
         shown={choice.shown}
+        draft={draft}
         all={list ?? []}
         onPick={(id) => {
           setFocusMade(null)
@@ -195,29 +199,65 @@ function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
       <ReadingLine story={session} view={storyView} />
     </>
   )
-  // None yet, or a new one: its composer, ready; the first send makes it.
+  // None yet, or a new one: a pending workshop shown as a saved one is; its first send starts it.
   if (choice.shown === null)
-    return <PendingSideChat key="new" story={session} attachFork={storyFork} header={header} onCreated={onCreated} />
+    return (
+      <PendingSideDraft
+        key={`new ${storyFork ?? ""}`}
+        story={session.id}
+        storyFork={storyFork}
+        header={header}
+        onCreated={onCreated}
+        onGone={gone}
+        Surface={PendingSideSurface}
+      />
+    )
   return (
     <SideChat
       key={choice.shown.id}
       chat={choice.shown}
       storyFork={storyFork}
       focusComposer={focusMade === choice.shown.id}
-      header={header}
+      header={header(null)}
       onGone={gone}
     />
   )
 }
 
-/** The header: the workshop shown (`null`: one not made yet), the others beside this chat, a new one. */
+/** A workshop not started yet, in the tab's own chat surface: its composer ready, as the tab was opened to talk. */
+function PendingSideSurface({
+  chat,
+  draft,
+  storyFork,
+  header,
+  onGone
+}: {
+  chat: Chat
+  draft: SideDraftHost
+  storyFork: ForkId | null
+  header: ReactNode
+  onGone: () => void
+}) {
+  return <SideChat chat={chat} storyFork={storyFork} focusComposer header={header} onGone={onGone} draft={draft} />
+}
+
+/** What a workshop beside a story not started yet is, on its "new" badge. */
+const NEW_SIDE_WORKSHOP =
+  "A new workshop to talk about this story out of character: nothing said here goes into the story. Your first message starts it."
+
+/**
+ * The header: the workshop shown (`null`: one not started yet, `draft` once it's open), the others
+ * beside this chat, a new one. What needs a started workshop stays in place, disabled, saying why.
+ */
 function SideChatHeader({
   shown,
+  draft,
   all,
   onPick,
   onNew
 }: {
   shown: Chat | null
+  draft: Chat | null
   all: ReadonlyArray<Chat>
   onPick: (id: ChatId) => void
   onNew: () => void
@@ -225,10 +265,10 @@ function SideChatHeader({
   const open = useOpenOwn()
   const wide = useCanOpenBeside()
   const href = shown === null ? null : `/chats/${shown.id}`
-  const title = shown?.title ?? "New workshop"
+  const title = shown?.title ?? draft?.title ?? "New workshop"
   const [panel, setPanel] = usePlaceParam(chatPlaceKey(SIDE_CHAT_SCOPE, "panel"), "")
   return (
-    <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-2">
+    <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-2" data-side-chat-header="">
       <KindBadge kind="workshop" />
       {all.length === 0 ? (
         <span data-layout-name className="min-w-0 flex-1 truncate px-1.5 py-1 text-sm font-medium">
@@ -276,34 +316,36 @@ function SideChatHeader({
           </MenuItem>
         </Menu>
       )}
-      {shown !== null && href !== null && (
-        <>
-          <Button
-            variant="ghost"
-            className="shrink-0 px-2 text-xs"
-            aria-pressed={panel === "workshop.changes"}
-            hint={
-              panel === "workshop.changes"
-                ? "Returns to this workshop’s conversation."
-                : "Shows what this workshop changed, with Undo."
-            }
-            onClick={() => setPanel(panel === "workshop.changes" ? "" : "workshop.changes")}
-          >
-            Changes
-          </Button>
-          <IconLink
-            label="Open beside the story"
-            hint={
-              wide
-                ? "Opens this workshop beside the story, in its own pane."
-                : "Opens this workshop on its own page. Back returns to the story."
-            }
-            icon="external"
-            href={href}
-            onOpen={() => open(href)}
-          />
-        </>
-      )}
+      {shown === null && <NewBadge hint={NEW_SIDE_WORKSHOP} />}
+      <Button
+        variant="ghost"
+        className="shrink-0 px-2 text-xs"
+        aria-pressed={panel === "workshop.changes"}
+        disabled={href === null}
+        focusableWhenDisabled
+        hint={
+          href === null
+            ? `Shows what this workshop changed, with Undo. ${NOT_STARTED}`
+            : panel === "workshop.changes"
+              ? "Returns to this workshop’s conversation."
+              : "Shows what this workshop changed, with Undo."
+        }
+        onClick={() => setPanel(panel === "workshop.changes" ? "" : "workshop.changes")}
+      >
+        Changes
+      </Button>
+      <IconLink
+        label="Open beside the story"
+        hint={`${
+          wide
+            ? "Opens this workshop beside the story, in its own pane."
+            : "Opens this workshop on its own page. Back returns to the story."
+        }${href === null ? ` ${NOT_STARTED}` : ""}`}
+        icon="external"
+        href={href ?? ""}
+        disabled={href === null}
+        {...(href === null ? {} : { onOpen: () => open(href) })}
+      />
     </div>
   )
 }
@@ -314,7 +356,8 @@ function SideChat({
   storyFork,
   focusComposer,
   header,
-  onGone
+  onGone,
+  draft
 }: {
   chat: Chat
   /** The story branch shown: the workshop shows a branch of its own that goes with it. */
@@ -323,6 +366,8 @@ function SideChat({
   focusComposer: boolean
   header: ReactNode
   onGone: () => void
+  /** A workshop not started yet (PendingSideDraft): told when its first turn starts it. */
+  draft?: SideDraftHost
 }) {
   const registry = useContext(RegistryContext)
   const userId = useSession().user.id
@@ -372,6 +417,7 @@ function SideChat({
       header={header}
       focusComposer={focusComposer}
       onGone={onGone}
+      draft={draft ?? null}
     />
   )
 }
@@ -383,7 +429,8 @@ function SideChatSurface({
   onFork,
   header,
   focusComposer,
-  onGone
+  onGone,
+  draft
 }: {
   session: ChatSession
   fork: ForkId
@@ -393,8 +440,27 @@ function SideChatSurface({
   header: ReactNode
   focusComposer: boolean
   onGone: () => void
+  draft: SideDraftHost | null
 }) {
   const view: ChatView = useSyncExternalStore(session.subscribe, session.snapshot)
+  // A new workshop's first turn started it: the tab shows it as any other, opening on what this
+  // shows, with no loading state in between.
+  const started = view.chat !== null && view.chat.status !== "pending"
+  useEffect(() => {
+    if (draft === null || !started) return
+    const now = session.snapshot()
+    if (now.chat === null) return
+    seedChat(now.chat.id, {
+      chat: now.chat,
+      forkId: now.forkId,
+      leafSlotId: now.leafSlotId,
+      entries: now.entries,
+      older: now.older,
+      newer: now.newer,
+      cast: now.cast
+    })
+    draft.onStarted(now.chat)
+  }, [draft, started, session])
   const open = useOpenOwn()
   const flashes = useRef<Flashes>({ opened: 0, repeat: null })
   const cast = useMemo(() => castView(view.cast), [view.cast])
@@ -407,8 +473,10 @@ function SideChatSurface({
     session.showFork(fork, null)
   }, [session, fork])
   useEffect(() => {
-    if (view.deleted) onGone()
-  }, [view.deleted, onGone])
+    if (!view.deleted) return
+    if (draft !== null) draft.onDeleted()
+    else onGone()
+  }, [view.deleted, onGone, draft])
   const [branchError, setBranchError] = useState<string | null>(null)
   const onBranch = useCallback(
     async (entry: PathEntry, index: number) => {
@@ -435,8 +503,31 @@ function SideChatSurface({
   const changes = sidePanel === "workshop.changes"
   const problem = view.error ?? branchError
   const root = useRef<HTMLDivElement>(null)
+  // Once its composer is there and settled: its box mounts after the surface, its editor may be
+  // made again as its draft is read, and a phone's sheet focuses its own first control as it
+  // opens, so for a moment the focus is given back to it; never once the user clicks or types.
   useEffect(() => {
-    if (focusComposer) (root.current ? composerTextbox(root.current) : null)?.focus({ preventScroll: true })
+    if (!focusComposer) return
+    let frame = 0
+    let frames = 0
+    const stop = () => {
+      cancelAnimationFrame(frame)
+      frames = Number.POSITIVE_INFINITY
+    }
+    document.addEventListener("pointerdown", stop, true)
+    document.addEventListener("keydown", stop, true)
+    const attempt = () => {
+      const box = root.current ? composerTextbox(root.current) : null
+      const home = box?.getRootNode() as Document | ShadowRoot | undefined
+      if (box && home?.activeElement !== box) box.focus({ preventScroll: true })
+      if (++frames < 90) frame = requestAnimationFrame(attempt)
+    }
+    attempt()
+    return () => {
+      stop()
+      document.removeEventListener("pointerdown", stop, true)
+      document.removeEventListener("keydown", stop, true)
+    }
   }, [focusComposer])
   return (
     <ChatPlaceScope value={SIDE_CHAT_SCOPE}>

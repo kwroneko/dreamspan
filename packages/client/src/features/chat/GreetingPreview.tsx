@@ -1,6 +1,5 @@
 // A greeting of a chat not made yet, as the saved chat shows a message: the portrait, the name,
-// the text, and its card's alternates to step through (StartChatPage.tsx; a pending workshop's
-// assistant, PendingWorkshop.tsx).
+// the text, and its card's alternates to step through (StartChatPage.tsx).
 import type { CardForChat } from "@dreamspan/shared/chatSetupApi.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"

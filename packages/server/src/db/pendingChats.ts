@@ -65,7 +65,8 @@ export const commitPendingChat = (sql: SqlClient.SqlClient, chatId: string, at: 
     const retitle =
       chat.title_source === "auto" &&
       !(chat.draft_for ?? "").startsWith("group:") &&
-      !(chat.draft_for ?? "").startsWith("workshop:")
+      !(chat.draft_for ?? "").startsWith("workshop:") &&
+      !(chat.draft_for ?? "").startsWith("side:")
     const title = retitle ? titleFor(yield* castNames(sql, chat), at) : null
     yield* sql`UPDATE chats SET status = 'active', draft_for = NULL, created_at = ${at}, last_message_at = ${at},
         title = coalesce(${title}, title), row_version = row_version + 1

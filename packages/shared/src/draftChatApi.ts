@@ -10,6 +10,7 @@ export const DraftFor = Schema.Union([
   Schema.TemplateLiteral(["card:", Schema.String]),
   Schema.TemplateLiteral(["group:", Schema.String]),
   Schema.TemplateLiteral(["workshop:", Schema.String]),
+  Schema.TemplateLiteral(["side:", Schema.String]),
   Schema.Literal("empty")
 ])
 export type DraftFor = typeof DraftFor.Type
@@ -22,7 +23,8 @@ export class DraftChatApi extends RpcGroup.make(
    * `card:<entity>` (the card's greeting, the persona locked to it or the default),
    * `group:<chat>` (each member's random greeting, the group's name), `empty` (nobody yet),
    * `workshop:<card>:<persona>` (a workshop, its assistant and persona as `CreateWorkshop` takes
-   * them: either empty for the workshop default, the persona `none` for none).
+   * them: either empty for the workshop default, the persona `none` for none), `side:<story>:<fork>`
+   * (a workshop beside that story, going with that branch, empty for its current one).
    * Each call makes a fresh one with fresh greetings, and sweeps the user's pending chats that
    * no tab has had open for a minute (their typing to recovered texts). `reopen`: the one the
    * page's URL names, returned as it is when it is still the user's (committed or pending for

@@ -26,6 +26,25 @@ const shots = process.env.SCREENSHOT_DIR
 /** The Workshop tab's panel: beside the chat, or a phone's sheet. */
 export const sidePanel = (page: Page) => page.getByRole("tabpanel", { name: "Workshop" })
 
+/** The tab's workshop not started yet: a pending chat, shown as a saved one is, with "new" in its header. */
+export const pendingSideChat = (page: Page) =>
+  sidePanel(page)
+    .locator("[data-side-chat]")
+    .filter({ has: page.getByText("new", { exact: true }) })
+
+/** What a new side workshop is, on its "new" badge's hover (no line of its own in the tab). */
+export const expectNewSideHint = async (page: Page) => {
+  await pendingSideChat(page).getByText("new", { exact: true }).hover()
+  const tip = page.locator('[data-layout-overlay="Tooltip floats above the page"]')
+  await expect(tip).toContainText("out of character")
+  await expect(tip).toContainText("Your first message starts it.")
+  await page.mouse.move(0, 0)
+  await expect(tip).toHaveCount(0)
+}
+
+/** The side chat's id, which its first send keeps (the pending chat starts in place). */
+export const sideChatId = async (side: ReturnType<Page["locator"]>) => (await side.getAttribute("data-side-chat"))!
+
 /** Sets up the scripted provider as the account's default model. */
 export const useSideChatProvider = (
   server: () => Parameters<typeof asUser>[0],
@@ -276,14 +295,21 @@ export function workshopSideChatTests() {
           // None yet: the tab opens on a new one's composer, and nothing is made until it's sent.
           await expect(page).not.toHaveURL(/[?&]workshop=/)
           const panel = sidePanel(page)
-          const pending = panel.locator("[data-side-chat-pending]")
+          const pending = pendingSideChat(page)
           await expect(panel.locator("[data-side-chat-reading]")).toContainText("Reads “Original”")
-          await expect(pending.locator("[data-side-chat-intro]")).toBeVisible()
+          await expect(pending).toBeVisible({ timeout: 30_000 })
           await expect(pending).toHaveAttribute("data-chat-kind", "workshop")
           await expect(pending.locator('[data-kind-badge="workshop"]')).toBeVisible()
+          // Its URL names it (`side.draft`), so a reload keeps the same one.
+          const draftId = await sideChatId(pending)
+          await expect(page).toHaveURL(new RegExp(`[?&]side\\.draft=${draftId}(&|$)`))
+          await expectNewSideHint(page)
           // The workshop's accent inside, the story's outside.
           const storyAccent = await accentOf(page, "[data-chat-main]")
-          expect(await accentOf(page, "[data-side-chat-pending]")).not.toBe(storyAccent)
+          expect(await accentOf(page, `[data-side-chat="${draftId}"]`)).not.toBe(storyAccent)
+          await page.reload()
+          await expect(pending).toBeVisible({ timeout: 30_000 })
+          expect(await sideChatId(pending)).toBe(draftId)
           await shot("opened")
           await expectLayout(page, info, `side-chat-opened-${width}-${theme}`, { scope: panelScope })
 
@@ -293,6 +319,8 @@ export function workshopSideChatTests() {
           await pending.getByRole("button", { name: /^Send( as .+)?$/ }).click()
           await expect(page).toHaveURL(/[?&]workshop=[^&]+/)
           const workshopId = new URL(page.url()).searchParams.get("workshop")!
+          expect(workshopId).toBe(draftId)
+          await expect(page).not.toHaveURL(/[?&]side\.draft=/)
           const side = panel.locator(`[data-side-chat="${workshopId}"]`)
           await expect(side).toBeVisible()
           await expect(side).toHaveAttribute("data-chat-kind", "workshop")
@@ -385,8 +413,9 @@ export function workshopSideChatTests() {
           )
           await page.goto(`${server().url}/chats/${story.id}?panel=workshop&workshop=${workshopId}`)
           await expect(page.getByText("That workshop isn't beside this chat any more.").first()).toBeVisible()
-          const empty = sidePanel(page).locator("[data-side-chat-pending]")
-          await expect(empty.locator("[data-side-chat-intro]")).toBeVisible()
+          const empty = pendingSideChat(page)
+          await expect(empty).toBeVisible({ timeout: 30_000 })
+          expect(await sideChatId(empty)).not.toBe(workshopId)
           await expect(sidePanel(page).getByRole("button", { name: "Start a workshop" })).toHaveCount(0)
           await shot("empty")
           await expectLayout(page, info, `side-chat-empty-${width}-${theme}`, { scope: panelScope })

@@ -335,7 +335,7 @@ export interface PendingHeaderActionProps {
 }
 
 /** Under the name: who else is in it, by name only (versions are on their cards). */
-export const aboutLine = (characters: ReadonlyArray<CastCard>, name: string | undefined, started: Date | null) => {
+const aboutLine = (characters: ReadonlyArray<CastCard>, name: string | undefined, started: Date | null) => {
   const others = characters.map((card) => card.name).filter((n) => n !== name)
   // With no one else, the day ST started it, which tells same-named chats apart.
   return others.length > 0
@@ -448,10 +448,14 @@ export function PendingChatHeader({
   )
 }
 
-/** A new chat not started yet: nothing lists it until its first message. */
-function NewBadge() {
+/** A new chat not started yet: nothing lists it until its first message. `hint`: what it is, for another kind. */
+export function NewBadge({
+  hint = "A new chat: it starts with your first message, and until then it isn’t in your chats."
+}: {
+  hint?: string
+}) {
   return (
-    <Tooltip label="A new chat: it starts with your first message, and until then it isn’t in your chats.">
+    <Tooltip label={hint}>
       <span tabIndex={0} className="shrink-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
         <Badge>new</Badge>
       </span>
@@ -460,7 +464,7 @@ function NewBadge() {
 }
 
 /** The header's row, the same for a saved chat and one not made yet. */
-export function ChatHeaderFrame({
+function ChatHeaderFrame({
   characters,
   picture = null,
   loading,

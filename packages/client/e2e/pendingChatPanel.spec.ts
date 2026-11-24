@@ -6,6 +6,7 @@ import { test, expect, type Page } from "@playwright/test"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"
+import { expectNewSideHint, pendingSideChat } from "./support/workshopSideChat.ts"
 
 const server = serverPerFile(withAdmin)
 
@@ -86,14 +87,17 @@ test("a new chat's side panel resizes and has the started chat's tabs", async ({
   await page.getByLabel("Message", { exact: true }).fill("Hello, Wren.")
   await page.getByRole("button", { name: "Send", exact: true }).click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+\?.*panel=workshop/)
-  await expect(workshop).not.toContainText(NOT_STARTED)
+  // (Its own placeholder: the header's disabled Changes says the same of a workshop not started.)
+  await expect(workshop.getByText(NOT_STARTED, { exact: true })).toHaveCount(0)
   await expect.poll(async () => Math.abs(((await panel.boundingBox())?.width ?? 0) - width)).toBeLessThanOrEqual(1)
   // The same tabs before and after.
   const saved = await tabNames(page)
   expect(pendingTabs.savedOnly).toEqual(["Workshop"])
   expect(saved).toEqual(pendingTabs)
-  // With no workshop beside it yet, the tab is its chat already: the intro and the composer.
-  await expect(workshop.locator("[data-side-chat-intro]")).toContainText("out of character")
+  // With no workshop beside it yet, the tab is its chat already: a new one, what it is on its
+  // "new" badge's hover, and the composer.
+  await expect(pendingSideChat(page)).toBeVisible({ timeout: 30_000 })
+  await expectNewSideHint(page)
   await expect(workshop.getByLabel("Message", { exact: true })).toBeVisible()
 })
 
@@ -261,5 +265,5 @@ for (const width of [1440, 390])
       expect((await tabNames(page)).savedOnly).toEqual(["Workshop"])
       await openPanel(page, "Workshop")
       await expect(page).toHaveURL(/panel=workshop/)
-      await expect(page.getByRole("tabpanel", { name: "Workshop" }).locator("[data-side-chat-intro]")).toBeVisible()
+      await expect(pendingSideChat(page)).toBeVisible({ timeout: 30_000 })
     })
