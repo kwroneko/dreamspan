@@ -206,9 +206,10 @@ export function StMarkdown({ text, sourceText = text }: MessageTextProps) {
     [settings.html, parts, mediaScope, saved]
   )
   // A message body's `<style>`s join the chat's stylesheet (ui/html/messageHtml.ts).
+  const fontKey = message ? (chat?.styles.fontKey(message.key) ?? message.key) : undefined
   const styles = useMemo(
-    () => (html && message ? scopeStyles(extractStyles(text), mediaScope, undefined, message.key) : null),
-    [html, message, text, mediaScope]
+    () => (html && fontKey !== undefined ? scopeStyles(extractStyles(text), mediaScope, undefined, fontKey) : null),
+    [html, fontKey, text, mediaScope]
   )
   useEffect(() => {
     if (styles && message && chat) chat.styles.report(message.key, styles.css, styles.media)
@@ -250,7 +251,7 @@ export function StMarkdown({ text, sourceText = text }: MessageTextProps) {
         <MediaBlocked value={html ? reportBlocked : null}>
           <Streamdown
             // Contained (styles.css): a card's `position: fixed` stays inside its message (fix 1).
-            className={`markdown${html ? " markdown-html" : ""}${html && message ? ` ${MESSAGE_SCOPE} ${messageFontClass(message.key)}` : ""}`}
+            className={`markdown${html ? " markdown-html" : ""}${html && fontKey !== undefined ? ` ${MESSAGE_SCOPE} ${messageFontClass(fontKey)}` : ""}`}
             mode="streaming"
             parseIncompleteMarkdown={false}
             parseMarkdownIntoBlocksFn={blocks}

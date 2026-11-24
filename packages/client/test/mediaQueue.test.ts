@@ -68,7 +68,7 @@ it("holds stylesheet resources for the loaded window and releases them on consen
   vi.stubGlobal("CSSStyleSheet", Sheet)
   const document = { adoptedStyleSheets: [] as Sheet[] }
   vi.stubGlobal("document", document)
-  const styles = new MessageStyles()
+  const styles = new MessageStyles("test")
   const detach = styles.attach()
   try {
     styles.setLoaded([{ key: "greeting", text: "" }])

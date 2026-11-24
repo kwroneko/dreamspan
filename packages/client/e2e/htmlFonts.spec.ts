@@ -9,6 +9,61 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
 
+test("two panes keep different versions of the same slot's font private", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const formatted = (font: string, label: string) =>
+    `<style>@font-face{font-family:Card;src:url("${font}")}.glyph{font:40px Card;display:inline-block}</style><span class="glyph" data-label="${label}">AAAA</span>`
+  const { chat, fork } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Synthetic split fonts" })
+      const sent = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        reply: false,
+        content: formatted(NARROW_WOFF2, "Narrow")
+      })
+      if (sent._tag !== "Posted") throw new Error("Synthetic send queued")
+      const { fork } = yield* api.CreateFork({
+        chatId: chat.id,
+        fromForkId: chat.currentForkId!,
+        atSlotId: sent.entry.slotId
+      })
+      const path = yield* api.ReadPath({
+        chatId: chat.id,
+        forkId: fork.id,
+        leafSlotId: null,
+        range: { _tag: "Bottom" },
+        limit: 1
+      })
+      const entry = path.entries[0]!
+      yield* api.EditVersion({
+        slotId: entry.slotId,
+        forkId: fork.id,
+        sourceVersionId: entry.version.id,
+        expectedRowVersion: entry.rowVersion,
+        content: formatted(WIDE_WOFF2, "Wide")
+      })
+      return { chat, fork }
+    })
+  )
+  await page.goto(`${server().url}/chats/${chat.id}?fork=${chat.currentForkId}`)
+  const panes = page.locator("[data-frame]")
+  await expect(panes.first().locator('.custom-glyph[data-label="Narrow"]')).toBeVisible()
+  await page.getByRole("button", { name: "Split right", exact: true }).click()
+  const right = panes.nth(1)
+  await right.getByRole("button", { name: /^Branch:.*switch branch$/ }).click()
+  await page.getByRole("dialog", { name: "Branches of this chat" }).locator(`[data-fork="${fork.id}"] a`).click()
+  const narrow = panes.first().locator('.custom-glyph[data-label="Narrow"]')
+  const wide = right.locator('.custom-glyph[data-label="Wide"]')
+  await expect(narrow).toBeVisible()
+  await expect(wide).toBeVisible()
+  const width = (node: Element) => node.getBoundingClientRect().width
+  await expect.poll(() => narrow.evaluate(width)).toBeCloseTo(64, 0)
+  await expect.poll(() => wide.evaluate(width)).toBeCloseTo(144, 0)
+})
+
 for (const prefixOnly of [false, true]) {
   test(`embedded fonts render without network requests and stay in their own message (${prefixOnly ? "prefix" : "scope"})`, async ({
     page
