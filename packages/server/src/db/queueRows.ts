@@ -14,6 +14,8 @@ export interface QueuedRow {
   readonly seq: number
   readonly kind: "message" | "generate"
   readonly images_json: string
+  /** Library items a workshop message carries once it posts (migration 0017). */
+  readonly library_json?: string
   readonly content: string
   /** The typed text before regex scripts rewrote it, and what they did (as on versions). */
   readonly raw_content: string | null
@@ -44,6 +46,7 @@ export const toQueued = (row: QueuedRow) =>
     kind: row.kind,
     content: row.content,
     images: JSON.parse(row.images_json),
+    ...(row.library_json && row.library_json !== "[]" ? { library: JSON.parse(row.library_json) } : {}),
     speakerEntityId: row.speaker_entity_id as EntityId | null,
     replySpeakerEntityId: row.reply_speaker_entity_id as EntityId | null,
     direction: row.direction,

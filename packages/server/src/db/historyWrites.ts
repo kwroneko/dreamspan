@@ -14,6 +14,7 @@ import { historyCurrent, historyFork } from "./historyShared.ts"
 import { recordHistoryReduction, recordReduction } from "./historyChanges.ts"
 import { transaction } from "./tx.ts"
 import type { WriteOps } from "./ops.ts"
+import { copyLibrary } from "./libraryAttachments.ts"
 
 export const makeHistoryWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -198,6 +199,7 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                 )
                 yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text, name, path)
                 SELECT ${afterId}, ordinal, media_id, kind, alt_text, name, path FROM version_attachments WHERE version_id=${current.id}`
+                yield* copyLibrary(sql, current.id, afterId)
                 copies.set(copyKey, afterId)
               }
               yield* recordHistoryReduction(sql, current.slot_id!, edit.after, current.id, forkId)

@@ -129,6 +129,7 @@ import {
   Fork,
   ForkId,
   MessageImages,
+  MessageLibrary,
   NewVersion,
   PathEntry,
   SlotId,
@@ -3306,6 +3307,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     payload: {
       images: Schema.optionalKey(MessageImages),
       imageDraftIds: Schema.optionalKey(ComposerImageIds),
+      /** Library items a workshop message carries (spec/WORKSHOP-CARDS.md §4.4); refused elsewhere. */
+      library: Schema.optionalKey(MessageLibrary),
       userId: UserId,
       chatId: ChatId,
       /** The fork it's sent in, as AppendMessage takes it. */

@@ -38,6 +38,7 @@ import { reachableSlot } from "./graphReachability.ts"
 import { type ChatRow, type ForkRow, rewriteColumns, toChat, toFork, toVersion } from "./rows.ts"
 import { transaction as runTransaction } from "./tx.ts"
 import { recordStoryAt } from "./workshopPairing.ts"
+import { copyLibrary } from "./libraryAttachments.ts"
 
 /**
  * The columns a fork's copy of a version doesn't take from it: its identity, text and
@@ -710,6 +711,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           else
             yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text, name, path)
               SELECT ${copy}, ordinal, media_id, kind, alt_text, name, path FROM version_attachments WHERE version_id = ${versionId}`
+          yield* copyLibrary(sql, versionId, copy)
           // Shorter than what the fork showed, before the fork shows the copy.
           yield* recordHistoryReduction(sql, row.slot_id, content, null, fork.id)
           yield* writeOverride(

@@ -229,6 +229,9 @@ export const makeBulkHistory = Effect.fnUntraced(function* (sql: SqlClient.SqlCl
     yield* sql`INSERT INTO version_attachments(version_id,ordinal,media_id,kind,alt_text, name, path)
       SELECT b.after_id,a.ordinal,a.media_id,a.kind,a.alt_text,a.name,a.path FROM history_bulk b
       JOIN version_attachments a ON a.version_id=b.current_id WHERE b.copy=1`
+    yield* sql`INSERT INTO version_library(version_id, ordinal, kind, ref_id, revision_id, name)
+      SELECT b.after_id, l.ordinal, l.kind, l.ref_id, l.revision_id, l.name FROM history_bulk b
+      JOIN version_library l ON l.version_id=b.current_id WHERE b.copy=1`
     yield* sql`INSERT INTO history_changes(slot_id,fork_id,chat_id,depth,revision,seq)
       SELECT b.slot,${fork.id},${fork.chat_id},s.depth,1,b.reduce_seq FROM history_bulk b JOIN slots s ON s.id=b.slot
       WHERE b.reduce_seq IS NOT NULL`

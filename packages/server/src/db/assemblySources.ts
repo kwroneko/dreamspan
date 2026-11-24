@@ -161,6 +161,8 @@ interface HistoryRow {
   readonly images_json: string
   /** Its attachments saved in Files (§6.1), for the `<attachment>` lines. */
   readonly attachments_json: string
+  /** Its library items with their documents at the recorded revisions (WORKSHOP-CARDS §4.3). */
+  readonly library_json: string
   readonly merge_json: string | null
   readonly slot_id: string
   readonly parent_slot_id: string | null
@@ -677,6 +679,10 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
                 'excluded', json(CASE WHEN a.kind <> 'file' AND ${imageExcludedIn(sql, fork, "o.id", "a.media_id")} THEN 'true' ELSE 'false' END))) FROM
               (SELECT va.media_id, va.kind, va.name, va.path, m.mime, m.byte_size FROM version_attachments va
                 JOIN media_assets m ON m.id = va.media_id WHERE va.version_id=v.id AND va.path IS NOT NULL ORDER BY va.ordinal) a) AS attachments_json,
+            (SELECT json_group_array(json_object('kind', l.kind, 'refId', l.ref_id, 'revisionId', l.revision_id,
+                'name', l.name, 'doc', json(r.doc_json))) FROM
+              (SELECT * FROM version_library WHERE version_id = v.id ORDER BY ordinal) l
+              JOIN entity_revisions r ON r.id = l.revision_id) AS library_json,
             (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.fork_id IS NULL
               AND NOT ${versionDeletedIn(sql, fork, "c")}) AS version_count,
             f.writer AS first_writer, f.origin AS first_origin,
@@ -725,13 +731,17 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             ...(row.hidden_thinking ? { thinkingHidden: hiddenParts(row.hidden_thinking) } : {}),
             ...(row.images_json !== "[]" ? { images: JSON.parse(row.images_json) } : {}),
             ...(row.attachments_json !== "[]" ? { attachments: JSON.parse(row.attachments_json) } : {}),
+            ...(row.library_json !== "[]" ? { library: JSON.parse(row.library_json) } : {}),
             macroMode: row.macro_mode,
             frozen: row.frozen_macros === null ? null : (JSON.parse(row.frozen_macros) as Record<string, string>),
             written: row.written === 1,
             inContext:
               row.context_excluded === 0 &&
               row.status !== "failed" &&
-              (row.content.length > 0 || row.images_json !== "[]" || row.attachments_json !== "[]"),
+              (row.content.length > 0 ||
+                row.images_json !== "[]" ||
+                row.attachments_json !== "[]" ||
+                row.library_json !== "[]"),
             sentAt: row.created_at,
             versions: row.version_count,
             selectedOrdinal: row.ordinal,

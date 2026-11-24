@@ -203,6 +203,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       readonly kind: "message" | "generate"
       readonly imageDraftIds?: readonly string[]
       readonly images?: import("@dreamspan/shared/chat.ts").MessageImages
+      readonly library?: import("@dreamspan/shared/chat.ts").MessageLibrary
       readonly content: string
       readonly speakerEntityId: EntityId | null
       readonly replySpeakerEntityId: EntityId | null
@@ -417,6 +418,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       replySpeakerEntityId,
       images,
       imageDraftIds,
+      library,
       reply,
       round,
       autoPick,
@@ -431,6 +433,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           kind: "message",
           ...(images === undefined ? {} : { images }),
           ...(imageDraftIds === undefined ? {} : { imageDraftIds }),
+          ...(library === undefined || library.length === 0 ? {} : { library }),
           content,
           speakerEntityId: speakerEntityId ?? null,
           replySpeakerEntityId: replySpeakerEntityId ?? null,

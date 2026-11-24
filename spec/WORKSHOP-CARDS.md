@@ -1,6 +1,6 @@
 # Workshop cards: a coding agent for cards
 
-**Status**: Proposed, 2026-11-24 (job `workshopcardsspec`). Nothing here is built. A delta from master `89eb816f` (ARCHITECTURE §14.2–§14.3 and §14.6 "History", §5 "The workbench", §3.8 "Change markers in the timeline", §16 "Workshop chats, client", "Workshop setup tools and undo", "Workshop approvals and undo", "Workshop presets and lorebooks", "Workshop skills in every mode", "Workshop side chat", "Workshop context", §18 "Attachments of any type"; spec/WORKSHOP.md §3; spec/WORKSHOP-CONTEXT.md §4.3) and from reference-harness `latest` (`src/tools/character-card.ts`, `src/tools/side-effects.ts`, `src/tools/file.ts`, the per-agent `tools` and `mcp_servers` allowlists in `src/config/schema.ts`). The owner's statements of 2026-11-24 are recorded in DESIGN §7.7 as **[D]**; everything else here is **[P]** unless it quotes them. §13: no questions are open.
+**Status**: Proposed, 2026-11-24 (job `workshopcardsspec`). Partly built: unit C2's storage and assembly (§4.3 whole or reference, §4.4) are implemented and documented in ARCHITECTURE §18 "Cards, lorebooks and presets attached to workshop messages"; the rest is not built. A delta from master `89eb816f` (ARCHITECTURE §14.2–§14.3 and §14.6 "History", §5 "The workbench", §3.8 "Change markers in the timeline", §16 "Workshop chats, client", "Workshop setup tools and undo", "Workshop approvals and undo", "Workshop presets and lorebooks", "Workshop skills in every mode", "Workshop side chat", "Workshop context", §18 "Attachments of any type"; spec/WORKSHOP.md §3; spec/WORKSHOP-CONTEXT.md §4.3) and from reference-harness `latest` (`src/tools/character-card.ts`, `src/tools/side-effects.ts`, `src/tools/file.ts`, the per-agent `tools` and `mcp_servers` allowlists in `src/config/schema.ts`). The owner's statements of 2026-11-24 are recorded in DESIGN §7.7 as **[D]**; everything else here is **[P]** unless it quotes them. §13: no questions are open.
 
 The workshop already has most of the machinery a coding agent for cards needs: library read and write tools, an approval prompt inside the steps, per-workshop grants, an effects table with Undo, a Changes tab, immutable card revisions with History and field comparisons, and the workbench's kind-affinity opens. What it lacks is the part a coding agent's user relies on most: a way to hand it the thing to work on, a gate on what else it may look at, a visible record between turns of what it changed, a revert for one change that survives later edits, and git-like version tools for the agent itself.
 
@@ -352,14 +352,14 @@ The same model, with their existing tools and diffs:
 | Unit | What | Depends on |
 |---|---|---|
 | C1 | New workshop with this card in card menus | — |
-| C2 | `library` attachments: migration, writer validation (owned, live), assembly of the frozen element (whole or reference with summary), in-view derivation (story cast and books included), the "changed since" tail line | — |
+| C2 | **Built** (workshopcards-u2): `library` attachments: migration, writer validation (owned, live), assembly of the frozen element (whole or reference with summary). In-view derivation moved to C7, the "changed since" tail line to C8 | — |
 | C2b | Paged reads: `view`, `offset`, `max_tokens`, indexes and `to_file` on `read_card`, `read_lorebook`, `read_preset` | — |
 | C3 | The paperclip menu in workshops, the multi-select card picker and the lorebook and preset pickers | C2 |
 | C4 | `CARD_DRAG` and library links dropped on a workshop composer | C2 |
 | C5 | Work on in a workshop (card, lorebook and preset menus; `workshopAttach`) | C2 |
 | C6 | Creations in view | C2 |
-| C7 | Resource classes, view-aware resolution in every library tool, the scoped prompt and its wording, card and always grants with their resolution, the card editor's Extra-tab section and the Settings section, the fixed instruction paragraph | C2, C6 |
-| C8 | Change rows, the change view tab kind, per-open affinity | — |
+| C7 | The in-view derivation (story cast and books included), resource classes, view-aware resolution in every library tool, the scoped prompt and its wording, card and always grants with their resolution, the card editor's Extra-tab section and the Settings section, the fixed instruction paragraph | C2, C6 |
+| C8 | Change rows, the change view tab kind, per-open affinity, the attached element's "changed since" tail line | — |
 | C9 | `read_revision`, `diff_revisions`, `revert_change`, `message`, the Versions skill | C10's merge |
 | C10 | Revert: field and hunk three-way, conflicts in the change view, Redo, Revert all, created-item bin asks, the tail line | C8 |
 | C11 | Card files as file attachments (§4.5): recognition, the card tile, the attachment line and note, `read_card_file`, `edit_card_file`, `import_card_file`, lorebook and preset JSON where cheap, the round-trip and end-to-end tests | C2b, C8, C10 |
