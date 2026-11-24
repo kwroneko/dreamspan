@@ -26,7 +26,7 @@ import { Avatar, PortraitOverflow } from "../../ui/Avatar.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { RemoteSourceBadges } from "../cardSources/RemoteBadge.tsx"
-import { Tooltip, TooltipProvider } from "../../ui/Tooltip.tsx"
+import { IconButton, Tooltip, TooltipProvider } from "../../ui/Tooltip.tsx"
 import { useBranchTabTitle } from "./branchParts.ts"
 import { openAppMenu, sidebarToggle, useTitle } from "../shell.tsx"
 import { ChatBadges } from "./ChatsPage.tsx"
@@ -146,6 +146,13 @@ function ChatTitle({
     if (ok) setEditing(false)
     else input.current?.focus()
   }
+  const cancel = () => {
+    kept.current = true
+    // Kept the name: what was typed goes to the bin, recoverable.
+    if (draft !== initial) void typed.discard()
+    setEditing(false)
+    write.clear()
+  }
   const many = group !== null && group.chats.length > 1
   if (view.chat === null || name === null)
     return (
@@ -159,33 +166,49 @@ function ChatTitle({
     <>
       {editing ? (
         <form className="flex min-w-0 flex-1 flex-col" onSubmit={(event) => void save(event)}>
-          <Input
-            ref={input}
-            aria-label="Chat name"
-            aria-description="Enter renames it, Escape keeps the name. Leave it empty to name it after its characters."
-            value={draft}
-            maxLength={200}
-            autoFocus
-            disabled={write.pending}
-            readOnly={!typed.ready}
-            onFocus={(event) => {
-              kept.current = false
-              event.currentTarget.select()
-            }}
-            onChange={(event) => typed.setText(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault()
-                kept.current = true
-                // Kept the name: what was typed goes to the bin, recoverable.
-                if (draft !== initial) void typed.discard()
-                setEditing(false)
-                write.clear()
-              }
-            }}
-            onBlur={() => void save()}
-            className="h-8 text-base font-semibold"
-          />
+          <span className="flex min-w-0 items-center gap-1">
+            <Input
+              ref={input}
+              aria-label="Chat name"
+              data-layout-audit-ignore="inset: The field takes the name's line in place, so the header keeps its height"
+              aria-description="Enter renames it, Escape keeps the name. Leave it empty to name it after its characters."
+              value={draft}
+              maxLength={200}
+              autoFocus
+              disabled={write.pending}
+              readOnly={!typed.ready}
+              onFocus={(event) => {
+                kept.current = false
+                event.currentTarget.select()
+              }}
+              onChange={(event) => typed.setText(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault()
+                  cancel()
+                }
+              }}
+              // Focus moving to Save or Cancel isn't leaving the field: their click decides.
+              onBlur={(event) => {
+                if (!event.currentTarget.form?.contains(event.relatedTarget)) void save()
+              }}
+              className="h-8 min-w-0 flex-1 text-base font-semibold"
+            />
+            <IconButton
+              type="submit"
+              label="Save the name"
+              hint="Save the name (Enter)"
+              icon="check"
+              disabled={write.pending}
+            />
+            <IconButton
+              label="Cancel renaming"
+              hint="Cancel (Escape)"
+              icon="close"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={cancel}
+            />
+          </span>
           {write.error && (
             <span role="alert" className="text-xs text-danger">
               {write.error.message}
