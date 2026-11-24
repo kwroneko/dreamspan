@@ -2,6 +2,7 @@ import { CardDoc } from "@dreamspan/shared/docs/card.ts"
 import { galleryAssets } from "@dreamspan/shared/gallery.ts"
 import { Schema } from "effect"
 import { revisionNumber } from "./revisionNumbers.ts"
+import { lcmPath } from "./lcmPath.ts"
 import { inFork, viewAt } from "./forkState.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { agentWrittenNotes, notesNamed } from "./agentNotes.ts"
@@ -116,6 +117,36 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
         if (!row) return yield* new NotFound({ entity: "revision", id: revisionId })
         return JSON.parse(row.doc_json) as Doc
       }).pipe(query("GetRevisionDoc")),
+
+    GetAttachedLibraryRevision: ({ userId, chatId, forkId, leafSlotId, kind, refId, revisionId }) =>
+      Effect.gen(function* () {
+        const missing = new NotFound({ entity: "attached revision", id: revisionId })
+        const [chat] = yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}
+          AND kind = 'workshop' AND deleted_at IS NULL`
+        if (!chat) return yield* missing
+        const path = yield* lcmPath(
+          sql,
+          userId,
+          chatId,
+          leafSlotId,
+          undefined,
+          Number.MAX_SAFE_INTEGER,
+          undefined,
+          false
+        )
+        const ids = path.flatMap(({ versionId }) => (versionId ? [versionId] : []))
+        const [held] = yield* sql<{ name: string; doc: string }>`
+          SELECT l.name, coalesce(r.doc_json, p.doc_json) AS doc
+          FROM version_library l
+          LEFT JOIN entity_revisions r ON r.id = l.revision_id
+          LEFT JOIN purged_library_documents p ON p.revision_id = l.revision_id
+          WHERE l.ref_id = ${refId} AND l.revision_id = ${revisionId} AND l.kind = ${kind}
+            AND (r.id IS NOT NULL OR p.revision_id IS NOT NULL)
+            AND l.version_id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
+          LIMIT 1`
+        if (!held) return yield* missing
+        return { name: held.name, doc: JSON.parse(held.doc) as Doc }
+      }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("GetAttachedLibraryRevision")),
 
     ListCardNotes: ({ userId, cardRefId }) =>
       Effect.gen(function* () {

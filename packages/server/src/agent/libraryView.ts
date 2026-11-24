@@ -60,7 +60,7 @@ const bookLines = (book: Doc, count: CountText) => {
     return `- ${entryTitle(entry, index)} (uid ${String(entry.uid)}${keys.length ? `; keys: ${keys.join(", ")}` : ""}${entry.enabled === false ? "; off" : ""}): ${number(tokens(count, text(entry.content)))} tokens`
   })
   const more = entries.length - shown.length
-  return more > 0 ? [...shown, `${more} more entries: read_lorebook with view index and after.`] : shown
+  return more > 0 ? [...shown, `${more} more entries.`] : shown
 }
 
 /**
@@ -104,11 +104,7 @@ export const summaryLines = (kind: LibraryKind, doc: Doc, count: CountText): Rea
     return `- ${name} (${entry.identifier}; ${entry.enabled === false ? "off" : "on"}): ${number(tokens(count, text(prompt?.content)))} tokens`
   })
   const more = indexed.length - shown.length
-  return [
-    `${prompts.size} prompts, ${order.length} in order`,
-    ...shown,
-    ...(more > 0 ? [`${more} more prompts: read_preset with view index and after.`] : [])
-  ]
+  return [`${prompts.size} prompts, ${order.length} in order`, ...shown, ...(more > 0 ? [`${more} more prompts.`] : [])]
 }
 
 const attribute = (value: string) =>
@@ -148,7 +144,7 @@ export const attachedElement = (item: AttachedItem, count: CountText, limit: num
     const inline = `${open(item.name)}>\n${intro}\n${fenced(whole, tag, "\\u003c")}\n</${tag}>`
     if (count(inline) <= limit) return inline
   }
-  const instruction = `${intro} It's too long to include whole: read it with ${READER[item.kind]} (it's attached, so that never asks).`
+  const instruction = `${intro} It's too long to include whole: read it with ${READER[item.kind]} using the attachment id and revision.`
   const reference = (name: string, lines: ReadonlyArray<string>) =>
     `${open(name)} whole="no">\n${[instruction, ...lines].join("\n")}\n</${tag}>`
   const omitted = "More details are available with the read tool."

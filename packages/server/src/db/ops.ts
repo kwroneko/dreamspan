@@ -5689,6 +5689,20 @@ const ReadOpsOwn = RpcGroup.make(
     success: Doc,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** A frozen revision attached to a visible message on the workshop's path. */
+  Rpc.make("GetAttachedLibraryRevision", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: SlotId,
+      kind: Schema.Literals(["card", "lorebook", "preset"]),
+      refId: RefId,
+      revisionId: RevisionId
+    },
+    success: Schema.Struct({ name: Schema.String, doc: Doc }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** The existing first imported card note, using the same identity as ImportFile. */
   Rpc.make("GetCardImportNote", {
     payload: { userId: UserId, cardRefId: RefId },
