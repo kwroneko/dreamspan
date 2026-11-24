@@ -618,3 +618,62 @@ for (const width of [1340, 390])
     await expect(page.getByRole("checkbox", { name: /^Always play as / })).toHaveCount(0)
     await page.keyboard.press("Escape")
   })
+
+/** Routes the page's RPC socket: a request `drop` names goes through, its answer doesn't come back. */
+const dropAnswers = async (page: Page, drop: (tag: string) => boolean) => {
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    const dropped = new Set<unknown>()
+    socket.onMessage((data) => {
+      const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: unknown }) : null
+      if (request?.tag !== undefined && drop(request.tag)) dropped.add(request.id)
+      upstream.send(data)
+    })
+    upstream.onMessage((data) => {
+      const answer = typeof data === "string" ? (JSON.parse(data) as { requestId?: unknown }) : null
+      if (answer?.requestId !== undefined && dropped.has(answer.requestId)) return
+      socket.send(data)
+    })
+  })
+}
+
+test("a reload before the start card's title was read still names the new chat (rev-dd3 #8)", async ({ page }) => {
+  await start(page)
+  await page.goto(`${server().url}/chats`)
+  await page.getByRole("textbox", { name: "Title of the new chat", exact: true }).fill("Alpha")
+  await page.waitForTimeout(1500)
+  let holding = true
+  await dropAnswers(page, (tag) => holding && tag === "GetUserDraft")
+  await page.goto(`${server().url}/new/chat`)
+  await expect.poll(() => draftOf(page)).not.toBeNull()
+  const draft = draftOf(page)!
+  holding = false
+  await page.reload()
+  await expect(composer(page)).toBeEditable()
+  await expect
+    .poll(() => admin((api) => api.GetChat({ chatId: draft as never })).then((chat) => chat.title), {
+      timeout: 10_000
+    })
+    .toBe("Alpha")
+})
+
+test("a rename retried after a reload leaves a newer rename alone (rev-dd3 #9)", async ({ page }) => {
+  await start(page)
+  // The server renames it, but its answer is lost (the route takes the page's next connection).
+  let dropping = true
+  await dropAnswers(page, (tag) => dropping && tag === "RenameChat")
+  await page.goto(`${server().url}/chats`)
+  await page.getByRole("textbox", { name: "Title of the new chat", exact: true }).fill("Alpha")
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await expect.poll(() => draftOf(page)).not.toBeNull()
+  const draft = draftOf(page)!
+  const titleOf = () => admin((api) => api.GetChat({ chatId: draft as never })).then((chat) => chat.title)
+  await expect.poll(titleOf).toBe("Alpha")
+  // Another tab renames it in the header.
+  await admin((api) => api.RenameChat({ chatId: draft as never, name: "Beta" }))
+  dropping = false
+  await page.reload()
+  await expect(composer(page)).toBeEditable()
+  await page.waitForTimeout(2000)
+  expect(await titleOf()).toBe("Beta")
+})

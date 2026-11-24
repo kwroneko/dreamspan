@@ -585,9 +585,11 @@ export class ChatApi extends RpcGroup.make(
    * Names a chat (DESIGN §2.1): its title becomes the name, and a chat imported from ST keeps
    * the day ST started it. An empty name gives back the automatic one. Open tabs get `Chat`.
    * A chat of a group leaves it for a group of its own name (RenameGroup renames them all).
+   * With `from`, only while its title is still that: a rename retried after another one is left
+   * undone (the chat comes back as it is).
    */
   Rpc.make("RenameChat", {
-    payload: { chatId: ChatId, name: ChatNameInput },
+    payload: { chatId: ChatId, name: ChatNameInput, from: Schema.optionalKey(Schema.String) },
     success: Chat,
     error: Schema.Union([...Errors])
   }),

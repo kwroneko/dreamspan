@@ -239,14 +239,23 @@ export function EmptyDraftChatPage() {
 
 /**
  * The rename this browser tab meant for new chat `chatId` and hasn't seen through, kept for a
- * reload: read (`name` null), kept (a name), or done (""). Per tab, by the chat's id.
+ * reload, by the chat's id: `name` (null: the start card's title, not read yet when the chat
+ * opened, rev-dd3 #8) and the title it replaces, `from`, so a retry after another rename leaves
+ * that one (#9). Read (`intent` undefined), kept, or done (null).
  */
-const meantTitle = (chatId: string, name: string | null): string | null => {
+interface MeantTitle {
+  readonly name: string | null
+  readonly from: string
+}
+const meantTitle = (chatId: string, intent?: MeantTitle | null): MeantTitle | null => {
   const key = `dreamspan.meantTitle:${chatId}`
   try {
-    if (name === null) return sessionStorage.getItem(key)
-    if (name === "") sessionStorage.removeItem(key)
-    else sessionStorage.setItem(key, name)
+    if (intent === undefined) {
+      const kept: unknown = JSON.parse(sessionStorage.getItem(key) ?? "null")
+      return typeof kept === "object" && kept !== null && "from" in kept ? (kept as MeantTitle) : null
+    }
+    if (intent === null) sessionStorage.removeItem(key)
+    else sessionStorage.setItem(key, JSON.stringify(intent))
   } catch {
     // Storage unavailable: a reload before the rename leaves the chat its default title.
   }
@@ -269,7 +278,11 @@ export function TitledDraftChatPage({
   const title = useUserDraft(titleKey, "Title", "")
   const call = useCaller()
   const [opened, setOpened] = useState<{ readonly chat: Chat; readonly reopened: boolean } | null>(null)
-  const onOpened = useCallback((chat: Chat, reopened: boolean) => setOpened({ chat, reopened }), [])
+  const onOpened = useCallback((chat: Chat, reopened: boolean) => {
+    // Kept before the URL names the chat: a reload at once still names it as meant.
+    if (!reopened && meantTitle(chat.id) === null) meantTitle(chat.id, { name: null, from: chat.title })
+    setOpened({ chat, reopened })
+  }, [])
   // The name given, once read: a fresh chat opened after a sweep gets it too.
   const named = useRef<string | null>(null)
   useEffect(() => {
@@ -277,20 +290,22 @@ export function TitledDraftChatPage({
     const { chat, reopened } = opened
     // A chat its URL named takes only the rename this tab meant for it and hadn't seen through (a
     // reload before it), never what the start card holds now: that's for the next new chat.
-    let name: string | null
+    const kept = meantTitle(chat.id)
+    if (reopened && kept === null) return
+    const from = kept?.from ?? chat.title
+    let name = reopened ? kept!.name : null
     let first = false
-    if (reopened) name = meantTitle(chat.id, null)
-    else {
+    if (name === null) {
       if (!title.ready) return
       first = named.current === null
       if (first) named.current = title.text.trim()
-      name = named.current
+      name = named.current!
     }
-    if (name === null || name === "") return
-    meantTitle(chat.id, name)
-    void call((client) => client("RenameChat", { chatId: chat.id, name })).then((result) => {
+    if (name === "") return void meantTitle(chat.id, null)
+    meantTitle(chat.id, { name, from })
+    void call((client) => client("RenameChat", { chatId: chat.id, name, from })).then((result) => {
       if (!result.ok) return
-      meantTitle(chat.id, "")
+      meantTitle(chat.id, null)
       // The start card's title ends once it's this chat's, and only then.
       if (first || (title.ready && title.text.trim() === name)) void title.commit(title.text, async () => true)
     })
