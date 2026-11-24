@@ -48,11 +48,12 @@ describe("the reasoning default", () => {
     assert.isUndefined(reported.compat.supportsDeveloperRole)
   })
 
-  for (const [kind, path, model] of [
-    ["openai-chat", "/v1", "synthetic-model"],
-    ["openrouter", "/api/v1", "vendor/synthetic-model"]
+  for (const [kind, path, model, thinkingFormat] of [
+    ["openai-chat", "/v1", "synthetic-model", undefined],
+    ["openrouter", "/api/v1", "vendor/synthetic-model", undefined],
+    ["openai-chat", "/v1", "synthetic-model", "qwen"]
   ] as const)
-    it.live(`${kind}: a model nobody describes is sent the chosen effort, and nothing without one`, () =>
+    it.live(`${thinkingFormat ?? kind}: sends a chosen effort and leaves Auto to the endpoint`, () =>
       Effect.gen(function* () {
         const server = yield* Effect.acquireRelease(
           Effect.promise(() =>
@@ -73,7 +74,7 @@ describe("the reasoning default", () => {
           settings: {
             name: "Test",
             baseUrl: server.url + path,
-            compat: {},
+            compat: thinkingFormat ? { thinkingFormat } : {},
             cacheTtlS: null,
             maxConcurrent: null,
             presetOverrideRefId: null
@@ -99,7 +100,11 @@ describe("the reasoning default", () => {
         const calls = server.requests().filter((r) => r.path.endsWith("/chat/completions"))
         assert.lengthOf(calls, 2)
         const [chosen, none] = [calls[0]!.body!, calls[1]!.body!]
-        if (kind === "openrouter") {
+        if (thinkingFormat === "qwen") {
+          assert.propertyVal(chosen, "enable_thinking", true)
+          assert.notProperty(none, "enable_thinking")
+          assert.notProperty(none, "reasoning_effort")
+        } else if (kind === "openrouter") {
           assert.deepStrictEqual(chosen.reasoning, { effort: "high" })
           assert.notProperty(none, "reasoning")
         } else {

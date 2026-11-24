@@ -148,15 +148,15 @@ export function ModelMassEditDialog({
     })
 
   // Each model's limits as Context and Reply length keep within, with the new ones when ticked.
-  const ownContext = ticked.has("context") ? wholeText(values.context).value : null
-  const ownOutput = ticked.has("maxOutput") ? wholeText(values.maxOutput).value : null
+  const ownContext = ticked.has("context") ? wholeText(values.context).value : undefined
+  const ownOutput = ticked.has("maxOutput") ? wholeText(values.maxOutput).value : undefined
   const targets = selected.map((model) => {
     const limits = effectiveLimits(model)
     return {
       id: model.id,
       limits: {
-        context: ownContext ?? model.overrides.context ?? limits.context.value,
-        maxOutput: ownOutput ?? model.overrides.maxOutput ?? limits.maxOutput.value
+        context: (ownContext === undefined ? model.overrides.context : ownContext) ?? limits.context.value,
+        maxOutput: (ownOutput === undefined ? model.overrides.maxOutput : ownOutput) ?? limits.maxOutput.value
       }
     }
   })

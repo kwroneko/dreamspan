@@ -35,7 +35,7 @@ export type ConnectionId = typeof ConnectionId.Type
 export const ModelId = idSchema("ModelId", "model")
 export type ModelId = typeof ModelId.Type
 /** The most models one hide or show changes: a connection's whole list, with room to spare. */
-const MODELS_HIDDEN_LIMIT = 10_000
+export const MODELS_HIDDEN_LIMIT = 10_000
 /** The models one hide or show changes (`SetModelsHidden`). */
 export const ModelIds = Schema.Array(ModelId).check(Schema.isMinLength(1), Schema.isMaxLength(MODELS_HIDDEN_LIMIT))
 export const CredentialId = idSchema("CredentialId", "credential")

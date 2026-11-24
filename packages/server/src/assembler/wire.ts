@@ -8,6 +8,7 @@ import { reasoningDetails, type ReplayedReasoning } from "./reasoningReplay.ts"
 import { HISTORY_REPLAY } from "../providers/thinkingBinding.ts"
 import type { Api, AssistantMessage, Context, Message, Model } from "@earendil-works/pi-ai"
 import type { AssembledRequest, ModelInput, RequestImage, RequestMessage, WireContext } from "./types.ts"
+import { isReasoningEffort } from "@dreamspan/shared/modelSettings.ts"
 import { claudeRules, modelRules } from "@dreamspan/shared/samplerRules.ts"
 
 /** The messages with the prefill appended as the start of the reply, where the model takes one. */
@@ -316,15 +317,13 @@ export const providerRequest = (request: AssembledRequest, model: ModelInput): P
   const settings = model.settings
   if (!settings) return base
   const { stable, ...wire } = base
-  const effort = settings.samplers?.reasoning_effort
+  const effort = model.mapping?.reasoning === false ? undefined : settings.samplers?.reasoning_effort
   const verbosity = settings.samplers?.verbosity
   return {
     ...wire,
     ...(settings.cacheRetention ? { cacheRetention: settings.cacheRetention } : {}),
     ...(settings.cacheRetention === "none" ? { breakpoints: [] } : stable ? { stable } : {}),
-    ...(["minimal", "low", "medium", "high", "xhigh", "max"].includes(effort ?? "")
-      ? { reasoning: effort as import("@earendil-works/pi-ai").ThinkingLevel }
-      : {}),
+    ...(isReasoningEffort(effort) ? { reasoning: effort } : {}),
     payload: {
       ...wire.payload,
       ...(settings.stop?.length
