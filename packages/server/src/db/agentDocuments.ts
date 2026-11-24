@@ -107,9 +107,22 @@ export const validateAgentDocument = (kind: EntityKind, head: Doc, next: Doc) =>
 
 /** List each changed element/setting separately; retain every value for the full diff. */
 export const documentDiff = (before: Doc, after: Doc) => {
-  const changes: Array<{ field: string; before: string; after: string }> = []
+  const changes: Array<{
+    field: string
+    before: string
+    after: string
+    beforeAbsent?: true
+    afterAbsent?: true
+  }> = []
   const shown = (value: unknown) => (typeof value === "string" ? value : (JSON.stringify(value, null, 2) ?? "(absent)"))
-  const record = (field: string, a: unknown, b: unknown) => changes.push({ field, before: shown(a), after: shown(b) })
+  const record = (field: string, a: unknown, b: unknown) =>
+    changes.push({
+      field,
+      before: shown(a),
+      after: shown(b),
+      ...(a === undefined ? { beforeAbsent: true } : {}),
+      ...(b === undefined ? { afterAbsent: true } : {})
+    })
   const object = (value: unknown): value is Record<string, unknown> =>
     value !== null && typeof value === "object" && !Array.isArray(value)
   const visit = (field: string, a: unknown, b: unknown): void => {

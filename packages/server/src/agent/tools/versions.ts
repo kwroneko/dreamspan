@@ -126,10 +126,9 @@ const readRevision: RolloutTool<Readonly<Record<string, unknown>>> = {
 const topField = (path: string) => /^[^[.:\s]+/.exec(path)?.[0] ?? path
 
 /** One field's difference as the assistant reads it: prose as a unified diff, settings in words. */
-const section = (change: { readonly field: string; readonly before: string; readonly after: string }) => {
-  const absent = "(absent)"
-  if (change.before === absent) return `${change.field}: added\n${change.after}`
-  if (change.after === absent) return `${change.field}: removed (it was:)\n${change.before}`
+const section = (change: ReturnType<typeof documentDiff>[number]) => {
+  if (change.beforeAbsent) return `${change.field}: added\n${change.after}`
+  if (change.afterAbsent) return `${change.field}: removed (it was:)\n${change.before}`
   const prose =
     change.before.includes("\n") || change.after.includes("\n") || change.before.length + change.after.length > 160
   return prose
