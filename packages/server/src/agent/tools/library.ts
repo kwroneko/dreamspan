@@ -1,8 +1,21 @@
 import { toolResultFrame } from "../toolData.ts"
-/** Library heads only; every lookup and snapshot is scoped to the rollout's owner. */
+/** Library heads and attached revisions, scoped to the rollout's owner. */
+import {
+  CARD_TEXT_FIELDS,
+  type CountEffect,
+  estimateCount,
+  findPart,
+  indexLines,
+  inlineLimit,
+  pageOf,
+  pageTokens,
+  summaryLines,
+  visibleDoc,
+  withCounts
+} from "../libraryView.ts"
 import { withoutCardSkills } from "../toolLoading.ts"
 import { Type } from "@earendil-works/pi-ai"
-import type { EntityKind, LibraryRef } from "@dreamspan/shared/library.ts"
+import type { EntityKind, LibraryRef, RefId, RevisionId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import type { RolloutTool, ToolContext } from "../tools.ts"
 
@@ -77,6 +90,71 @@ const listLibrary: RolloutTool<{
     )
 }
 
+const VIEWS = ["whole", "summary", "field", "index", "entry", "prompt"] as const
+
+const viewHelp: Record<"card" | "preset" | "lorebook", string> = {
+  card: 'Views: "whole" (the default when it fits), "summary" (each field\'s size, the default when it\'s too long), "field" (one page of one field: field, and greeting for an alternate greeting, from 1), "index" (its lorebook\'s entries, 50 a page, after a uid), "entry" (one entry of its lorebook by uid, paged).',
+  lorebook:
+    'Views: "whole" (the default when it fits), "summary" (its entries\' sizes, the default when it\'s too long), "index" (its entries, 50 a page, after a uid), "entry" (one entry by uid, its content paged).',
+  preset:
+    'Views: "whole" (the default when it fits), "summary" (its prompts\' sizes, the default when it\'s too long), "index" (its prompts in order, 50 a page, after an identifier), "prompt" (one prompt by identifier, its content paged).'
+}
+
+/** A pinned read pages one selected value or the full JSON, by exact character offset. */
+const readAttached = (
+  context: ToolContext,
+  kind: "card" | "preset" | "lorebook",
+  args: Readonly<Record<string, unknown>>
+) =>
+  Effect.gen(function* () {
+    const id = String(args[kind]) as RefId
+    const revision = String(args.revision) as RevisionId
+    if (!context.leafSlotId) return { text: "This turn has no attached library revision.", isError: true }
+    const { name, doc } = yield* context.reader.GetAttachedLibraryRevision({
+      userId: context.userId,
+      chatId: context.chatId,
+      forkId: context.forkId,
+      leafSlotId: context.leafSlotId,
+      kind,
+      refId: id,
+      revisionId: revision
+    })
+    const visible = kind === "card" ? withoutCardSkills(doc) : doc
+    const record = (value: unknown) => value as Readonly<Record<string, unknown>>
+    const selected =
+      kind === "lorebook" && args.entry !== undefined
+        ? (Array.isArray(visible.entries) ? visible.entries : []).find((entry) => record(entry).uid === args.entry)
+        : kind === "preset" && args.prompt !== undefined
+          ? (Array.isArray(visible.prompts) ? visible.prompts : []).find(
+              (prompt) => record(prompt).identifier === args.prompt
+            )
+          : visible
+    const value =
+      typeof args.field === "string" && selected !== undefined
+        ? Object.hasOwn(record(selected), args.field)
+          ? record(selected)[args.field]
+          : undefined
+        : selected
+    if (value === undefined)
+      return { text: "That field, entry or prompt is absent from the attached revision.", isError: true }
+    const identity = { id, name, revision }
+    const data = typeof value === "string" ? value : JSON.stringify(value)
+    const offset = Math.min(typeof args.offset === "number" ? args.offset : 0, data.length)
+    const end = Math.min(offset + 4_000, data.length)
+    return {
+      frame: toolResultFrame(identity),
+      text:
+        offset === 0 && end === data.length
+          ? JSON.stringify({ ...identity, doc: value })
+          : JSON.stringify({
+              ...identity,
+              excerpt: data.slice(offset, end),
+              offset,
+              nextOffset: end < data.length ? end : null
+            })
+    }
+  })
+
 const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Record<string, unknown>>> => ({
   source: import.meta.url,
   id: `read_${kind}`,
@@ -85,18 +163,87 @@ const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Re
   explanation: `Read a ${kind} from your library.`,
   effect: "read",
   capability: "library.read",
-  description: `Reads the saved library head of a ${kind}, by name, library id or entity id. Returns its revision and document. Unsaved drafts are not included.`,
+  description: `Reads a ${kind} by name, library id or entity id: the saved library head, or, with revision, the revision a workshop message attached (by its library id). Whole when that fits, otherwise in pages. Page sizes are in tokens (max_tokens, 2,000 by default, 200 to 8,000); a cut page says the offset to read on from. ${viewHelp[kind]} Without a view, an attached revision reads one field, entry or prompt by character offset (nextOffset). Unsaved drafts are not included.`,
   parameters: Type.Object({
-    [kind]: Type.String({ description: `The ${kind}'s name or id.` }),
-    ...(kind === "card" ? { fields: Type.Optional(Type.Array(Type.String())) } : {})
+    [kind]: Type.String({ description: `The ${kind}'s name or id. Use the library id with revision.` }),
+    revision: Type.Optional(Type.String({ description: "The revision id shown in an attachment." })),
+    ...(kind === "card" ? { fields: Type.Optional(Type.Array(Type.String())) } : {}),
+    view: Type.Optional(Type.Union(VIEWS.map((view) => Type.Literal(view)))),
+    field: Type.Optional(
+      Type.String({
+        description:
+          kind === "card"
+            ? "For view field: the field, such as description. Without a view, for an attached revision: the field of the document to read."
+            : "For an attached revision without a view: the field of the document, entry or prompt to read."
+      })
+    ),
+    ...(kind === "card"
+      ? {
+          greeting: Type.Optional(
+            Type.Integer({ minimum: 1, description: "For field alternate_greetings: which, from 1." })
+          )
+        }
+      : {}),
+    ...(kind === "preset"
+      ? { prompt: Type.Optional(Type.String({ description: "For view prompt: its identifier." })) }
+      : {
+          entry: Type.Optional(Type.Union([Type.Integer(), Type.String()], { description: "For view entry: its uid." }))
+        }),
+    offset: Type.Optional(Type.Integer({ minimum: 0, description: "Where a page starts, in characters." })),
+    max_tokens: Type.Optional(Type.Integer({ minimum: 200, maximum: 8000 })),
+    after: Type.Optional(
+      Type.Union([Type.Integer(), Type.String()], { description: "For view index: the last uid or identifier read." })
+    )
   }),
-  summarize: (args) => String(args[kind]),
+  summarize: (args) =>
+    args.view && args.view !== "whole" ? `${String(args[kind])} (${String(args.view)})` : String(args[kind]),
   execute: (context, args) =>
     Effect.gen(function* () {
-      const found = yield* resolveLibrary(context, kind, String(args[kind]))
-      if ("error" in found) return { text: found.error, isError: true }
-      const snapshot = yield* context.reader.OpenEditor({ userId: context.userId, refId: found.ref.id })
-      const visible = kind === "card" ? withoutCardSkills(snapshot.doc) : snapshot.doc
+      // An attached revision (spec/WORKSHOP-CARDS.md §4.3): without a view, one value by offset;
+      // with one, the same paged views as the head's.
+      if (args.revision !== undefined && args.view === undefined) return yield* readAttached(context, kind, args)
+      let source: {
+        readonly doc: Readonly<Record<string, unknown>>
+        readonly ref: LibraryRef | null
+        readonly id: string
+        readonly label: string
+        readonly revision: string
+      }
+      if (args.revision !== undefined) {
+        if (!context.leafSlotId) return { text: "This turn has no attached library revision.", isError: true }
+        const held = yield* context.reader.GetAttachedLibraryRevision({
+          userId: context.userId,
+          chatId: context.chatId,
+          forkId: context.forkId,
+          leafSlotId: context.leafSlotId,
+          kind,
+          refId: String(args[kind]) as RefId,
+          revisionId: String(args.revision) as RevisionId
+        })
+        source = { doc: held.doc, ref: null, id: String(args[kind]), label: held.name, revision: String(args.revision) }
+      } else {
+        const found = yield* resolveLibrary(context, kind, String(args[kind]))
+        if ("error" in found) return { text: found.error, isError: true }
+        const snapshot = yield* context.reader.OpenEditor({ userId: context.userId, refId: found.ref.id })
+        source = {
+          doc: snapshot.doc,
+          ref: snapshot.ref,
+          id: snapshot.ref.id,
+          label: snapshot.ref.label,
+          revision: snapshot.ref.headRevisionId
+        }
+      }
+      const visible = visibleDoc(kind, source.doc)
+      const count: CountEffect = context.countTokens
+        ? (text) => context.countTokens!(text).pipe(Effect.orElseSucceed(() => Math.ceil(text.length / 4)))
+        : estimateCount
+      const frame = toolResultFrame({
+        id: source.id,
+        ...(source.ref ? { entityId: source.ref.entityId } : {}),
+        revision: source.revision
+      })
+      const head = `${kind} "${source.label}" (id ${source.id}, revision ${source.revision})`
+      const answer = (text: string, isError = false) => ({ frame, text, ...(isError ? { isError } : {}) })
       const fields = args.fields as ReadonlyArray<string> | undefined
       const doc =
         kind === "card" && fields
@@ -108,25 +255,78 @@ const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Re
               )
             )
           : visible
-      const notes =
-        kind === "card"
-          ? yield* context.reader.ListCardNotes({ userId: context.userId, cardRefId: snapshot.ref.id })
-          : undefined
-      return {
-        frame: toolResultFrame({
-          id: snapshot.ref.id,
-          entityId: snapshot.ref.entityId,
-          revision: snapshot.ref.headRevisionId
-        }),
-        text: JSON.stringify({
-          ...identity(snapshot.ref),
-          revision: snapshot.ref.headRevisionId,
-          doc,
-          ...(notes
-            ? { notes: notes.map((note) => ({ id: note.ref.id, revision: note.ref.headRevisionId, doc: note.doc })) }
-            : {})
-        })
+      const view = args.view as (typeof VIEWS)[number] | undefined
+      const maxTokens = pageTokens(args.max_tokens)
+      const summary = () =>
+        Effect.map(
+          withCounts(count, (c) => summaryLines(kind, visible, c)),
+          (lines) => [head, ...lines].join("\n")
+        )
+      if (view === undefined || view === "whole") {
+        const fits = (yield* count(JSON.stringify(doc))) <= inlineLimit(context.window)
+        if (!fits)
+          return answer(
+            `${yield* summary()}\n${view === "whole" ? "Too long to read whole: read it by field." : "Too long to read whole: this is its summary. Read it with view field, index or entry."}`
+          )
+        const notes =
+          kind === "card" && source.ref
+            ? yield* context.reader.ListCardNotes({ userId: context.userId, cardRefId: source.ref.id })
+            : undefined
+        return answer(
+          JSON.stringify({
+            ...(source.ref ? identity(source.ref) : { id: source.id, name: source.label }),
+            revision: source.revision,
+            doc,
+            ...(notes
+              ? { notes: notes.map((note) => ({ id: note.ref.id, revision: note.ref.headRevisionId, doc: note.doc })) }
+              : {})
+          })
+        )
       }
+      if (view === "summary") return answer(yield* summary())
+      if (view === "index") {
+        if (kind === "card" && visible.character_book === undefined) return answer("This card has no lorebook.", true)
+        const after = args.after === undefined ? undefined : String(args.after)
+        const lines = yield* withCounts(count, (c) => indexLines(kind, visible, after, c))
+        return lines === null
+          ? answer(`No ${kind === "preset" ? "prompt" : "entry"} ${after} to read after.`, true)
+          : answer([head, ...lines].join("\n"))
+      }
+      if (view === "field") {
+        if (kind !== "card")
+          return answer(
+            `A ${kind} is read by ${kind === "preset" ? "prompt" : "entry"}: use view index, then view ${kind === "preset" ? "prompt" : "entry"}.`,
+            true
+          )
+        const field = String(args.field ?? "")
+        if (field === "alternate_greetings") {
+          const greetings = Array.isArray(visible.alternate_greetings) ? visible.alternate_greetings : []
+          const n = typeof args.greeting === "number" ? args.greeting : 0
+          const greeting = greetings[n - 1]
+          if (typeof greeting !== "string") return answer(`Give greeting, from 1 to ${greetings.length}.`, true)
+          return answer(
+            `${head}, alternate greeting ${n}:\n${yield* pageOf(greeting, `alternate greeting ${n}`, args.offset, maxTokens, count)}`
+          )
+        }
+        const value = visible[field]
+        if (!CARD_TEXT_FIELDS.includes(field as (typeof CARD_TEXT_FIELDS)[number]) || typeof value !== "string")
+          return answer(`Give field, one of ${[...CARD_TEXT_FIELDS, "alternate_greetings"].join(", ")}.`, true)
+        return answer(`${head}, ${field}:\n${yield* pageOf(value, field, args.offset, maxTokens, count)}`)
+      }
+      // entry or prompt: its settings, then a page of its text.
+      const wanted = view === "prompt" ? args.prompt : args.entry
+      if ((view === "prompt") !== (kind === "preset") || wanted === undefined)
+        return answer(
+          kind === "preset" ? "Give prompt, an identifier from view index." : "Give entry, a uid from view index.",
+          true
+        )
+      const part = findPart(kind, visible, String(wanted))
+      if (part === null) return answer(`No ${view} ${String(wanted)}: see view index.`, true)
+      const { content, ...settings } = part
+      const what = view === "prompt" ? `prompt ${String(wanted)}` : `entry ${String(wanted)}`
+      return answer(
+        `${head}, ${what}: ${JSON.stringify(settings)}\ncontent:\n${yield* pageOf(typeof content === "string" ? content : "", `the content of ${what}`, args.offset, maxTokens, count)}`
+      )
     }).pipe(Effect.catch(failRead))
 })
 

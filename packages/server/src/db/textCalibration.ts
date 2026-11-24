@@ -3,6 +3,7 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { UserId } from "@dreamspan/shared/domain.ts"
+import { requestInputTokens } from "./requestInput.ts"
 
 export const readTextCalibration = (
   sql: SqlClient.SqlClient,
@@ -14,8 +15,8 @@ export const readTextCalibration = (
 ) =>
   Effect.map(
     sql<{ estimated: number | null; actual: number | null; samples: number }>`
-    SELECT SUM(estimated_input) AS estimated, SUM(input_uncached + COALESCE(cache_read,0) + COALESCE(cache_write,0)) AS actual, COUNT(*) AS samples
-    FROM (SELECT estimated_input, input_uncached, cache_read, cache_write FROM llm_requests
+    SELECT SUM(estimated_input) AS estimated, SUM(input_tokens) AS actual, COUNT(*) AS samples
+    FROM (SELECT estimated_input, ${requestInputTokens(sql)} AS input_tokens FROM llm_requests
       WHERE owner_user_id=${userId} AND connection_id=${connectionId} AND model_key=${modelKey}
         AND input_tokenizer=${tokenizer} AND status='complete' AND usage_source='reported' AND ended_at <= ${asOf}
         AND estimated_input > 0 AND input_uncached IS NOT NULL

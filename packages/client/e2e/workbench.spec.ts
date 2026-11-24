@@ -254,6 +254,30 @@ test("an editor opened from one of two chat views shares that view's panel store
   )
 })
 
+test("Choose next reply returns to the chat that owns the panel", async ({ page }) => {
+  await fresh(page, 1440)
+  await page.goto(`${server().url}/chats/${fixtures.chatA}`)
+  await openPanel(page, "Prompt preset")
+  await page.getByRole("button", { name: "Split right", exact: true }).click()
+  await sidebarChat(page, "Lighthouse night").click()
+  const frames = page.locator("[data-frame]")
+  const left = frames.first()
+  const right = frames.nth(1)
+  const next = (frame: typeof left) => frame.getByRole("button", { name: /^Next:.*Choose who replies next/ })
+  await expect(next(right)).toHaveAccessibleName(/^Next: Wren/)
+  await left.getByRole("textbox", { name: "Message", exact: true }).click()
+  await openPanel(page, "Prompt preset")
+  await page.getByRole("link", { name: "Open the preset in the large editor" }).click()
+  await expect(left.getByRole("region", { name: "Preset editor", exact: true })).toBeVisible()
+  const panel = await openPanel(page, "This chat")
+  await panel.getByRole("button", { name: "Choose next reply", exact: true }).click()
+  await expect(next(left)).toHaveAttribute("aria-expanded", "true")
+  await page.getByRole("radio", { name: "No one", exact: true }).click()
+  await expect(next(left)).toHaveAccessibleName(/^Next: no one, until/)
+  await expect(next(right)).toHaveAccessibleName(/^Next: Wren/)
+  await expect(panel).toHaveCount(0)
+})
+
 // Half-width frames keep their header and composer readable: the branch picker shows its name
 // or, where there's no room, only its icon (the name in its explanation), never a name cut to a
 // letter; the speaker chip keeps a picture.
@@ -366,7 +390,8 @@ for (const width of [1024, 390])
 // show in two frames, and a tab dragged to a frame's edge splits there.
 test("open beside, one chat in two frames, and a tab dropped on an edge", async ({ page }) => {
   test.setTimeout(150_000)
-  await fresh(page, 1440)
+  // Wide enough for three frames side by side at their least width (minframe1).
+  await fresh(page, 1920)
   await page.goto(`${server().url}/chats/${fixtures.chatA}`)
   await expect(said(page, "The tide is out")).toBeVisible()
   // A chat row's right-click menu: Open beside.
@@ -384,7 +409,7 @@ test("open beside, one chat in two frames, and a tab dropped on an edge", async 
   await sidebarChat(page, "Harbour walk").click({ modifiers: ["Alt"] })
   await expect(frames).toHaveCount(3)
   await expect(said(page, "The tide is out")).toHaveCount(2)
-  await shot(page, "open-beside-1440-light")
+  await shot(page, "open-beside-1920-light")
 
   // The third frame's tab, dropped on the first frame's bottom edge: a frame below it.
   const tab = frames.nth(2).locator("[data-tab] [role=tab]")
@@ -409,7 +434,7 @@ test("open beside, one chat in two frames, and a tab dropped on an edge", async 
   await expect(arrow("Move to the frame above")).toHaveAttribute("d", "M12 16V8")
   await expect(arrow("Move to the frame on the right")).toHaveAttribute("d", "m12 16 4-4-4-4")
   await expect(menu.getByRole("menuitem", { name: /^Move to the frame on the left/ })).toBeDisabled()
-  await shot(page, "tab-menu-moves-1440-light")
+  await shot(page, "tab-menu-moves-1920-light")
   if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "tab-menu-moves")
   await page.keyboard.press("Escape")
 })

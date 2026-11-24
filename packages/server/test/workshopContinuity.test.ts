@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
-import type { Chat, VersionId } from "@dreamspan/shared/chat.ts"
+import type { Chat, MessageLibrary, VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect, Stream } from "effect"
 import { textField } from "@dreamspan/shared/editing.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
@@ -43,11 +43,17 @@ const watch = (api: Api, chat: Chat) =>
     yield* eventually(() => events.length > 0)
     return events
   })
-const send = (api: Api, chat: Chat, content: string) =>
+const send = (api: Api, chat: Chat, content: string, library?: MessageLibrary) =>
   Effect.gen(function* () {
     const current = yield* api.GetChat({ chatId: chat.id })
     const sent = yield* posted(
-      api.SendMessage({ chatId: chat.id, parentSlotId: current.activeLeafSlotId, branch: false, content })
+      api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: current.activeLeafSlotId,
+        branch: false,
+        content,
+        ...(library ? { library } : {})
+      })
     )
     return yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
   })
@@ -294,7 +300,12 @@ for (const [kind, cacheMode] of [
         assert.include(JSON.stringify(previous.messages), "c3ludGhldGljLXJlZGFjdGVk")
       }
       const before = mock.requests().length
-      const second = yield* send(api, chat, "Second request.")
+      const attachmentOnly = kind === "openai-chat"
+      const label = "Attachment-only follow-up"
+      const card = attachmentOnly ? yield* api.CreateCard({ name: label, label }) : null
+      const second = card
+        ? yield* send(api, chat, "", [{ kind: "card", refId: card.id }])
+        : yield* send(api, chat, "Second request.")
       yield* eventually(() =>
         events.some(
           (e) => e._tag === "Version" && e.version.id === second.entry.version.id && e.version.status === "complete"
@@ -311,8 +322,9 @@ for (const [kind, cacheMode] of [
       assert.strictEqual(JSON.stringify(next.system), JSON.stringify(previous.system))
       const tail = (next.messages as Array<unknown>).slice(prefix.length)
       assert.include(JSON.stringify(tail), "Final message.")
-      assert.include(JSON.stringify(tail), "Second request.")
-      assert.notInclude(JSON.stringify(prefix), "Second request.", "no look-ahead")
+      const followUp = card ? label : "Second request."
+      assert.include(JSON.stringify(tail), followUp)
+      assert.notInclude(JSON.stringify(prefix), followUp, "no look-ahead")
       const run = yield* api.GetRunContext({ versionId: second.entry.version.id })
       assert.strictEqual(run.continuity?.parentVersionId, first.entry.version.id)
       const reader = yield* Reader
@@ -328,7 +340,7 @@ for (const [kind, cacheMode] of [
         )
       assert.isTrue(
         (yield* api.GetRunTranscript({ versionId: second.entry.version.id })).entries.some(
-          (e) => e.role === "app" && e.text.includes("Second request.")
+          (e) => e.role === "app" && e.text.includes(followUp)
         )
       )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))

@@ -1,3 +1,4 @@
+import { EntityId } from "@dreamspan/shared/chat.ts"
 import { newCardDoc } from "@dreamspan/shared/editing.ts"
 import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { assert, describe, it } from "@effect/vitest"
@@ -50,6 +51,38 @@ describe("card archive", () => {
       yield* api.SetCardParent({ entityId: child.entityId, parentEntityId: null })
       assert.lengthOf(yield* api.ListArchiveCandidates({ criteria: { never: 30 } }), 0)
       assert.lengthOf(yield* api.ListArchiveCandidates({ criteria: { inactive: 6 } }), 0)
+    }).pipe(Effect.scoped, withServer(config))
+  })
+  it.live("counts a new parent link as activity for both existing cards", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const userId = (yield* api.Whoami()).id
+      const parent = EntityId.make("archive-parent")
+      const child = EntityId.make("archive-child")
+      const old = Date.now() - 220 * 86400000
+      yield* fixtureSql(
+        config.dataDir,
+        [parent, child].flatMap((id) => [
+          {
+            sql: "INSERT INTO entities(id, owner_user_id, kind, created_at) VALUES(?, ?, 'card', ?)",
+            params: [id, userId, old]
+          },
+          {
+            sql: "INSERT INTO entity_revisions(id, entity_id, doc_json, doc_hash, schema_version, origin, created_at) VALUES(?, ?, ?, ?, 1, 'user', ?)",
+            params: [`revision-${id}`, id, JSON.stringify(newCardDoc(id)), id, old]
+          },
+          {
+            sql: "INSERT INTO entity_refs(id, entity_id, head_revision_id, label, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?)",
+            params: [`ref-${id}`, id, `revision-${id}`, id, old, old]
+          }
+        ])
+      )
+      const inactive = () => api.ListArchiveCandidates({ criteria: { inactive: 6 } })
+      yield* api.SetCardParent({ entityId: child, parentEntityId: parent })
+      assert.lengthOf(yield* inactive(), 0)
+      yield* api.SetCardParent({ entityId: child, parentEntityId: null })
+      assert.lengthOf(yield* inactive(), 0)
     }).pipe(Effect.scoped, withServer(config))
   })
   it.live("counts messages, replies, saved edits and both sides of a fork, but not greetings or cast joins", () => {
@@ -163,10 +196,10 @@ describe("card archive", () => {
       yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
       const archived = yield* api.SetRefArchived({ refId: card.id, archived: true })
       assert.isNumber(archived.archivedAt)
-      assert.strictEqual(
-        (yield* api.SetRefArchived({ refId: card.id, archived: true })).archivedAt,
-        archived.archivedAt
-      )
+      assert.isTrue(archived.changed)
+      const alreadyArchived = yield* api.SetRefArchived({ refId: card.id, archived: true })
+      assert.isFalse(alreadyArchived.changed)
+      assert.strictEqual(alreadyArchived.archivedAt, archived.archivedAt)
       assert.isFalse((yield* api.ListCards()).some((c) => c.entityId === card.entityId))
       assert.isFalse((yield* api.ListCardUsage()).some((c) => c.entityId === card.entityId))
       assert.isFalse((yield* api.ListLibrary({ kind: "card" })).some((c) => c.id === card.id))
@@ -178,7 +211,9 @@ describe("card archive", () => {
       assert.isTrue(
         (yield* api.GetCast({ chatId: chat.id, slotId: null })).cards.some((c) => c.entityId === card.entityId)
       )
-      yield* api.SetRefArchived({ refId: card.id, archived: false })
+      const unarchived = yield* api.SetRefArchived({ refId: card.id, archived: false })
+      assert.isTrue(unarchived.changed)
+      assert.isFalse((yield* api.SetRefArchived({ refId: card.id, archived: false })).changed)
       assert.isTrue((yield* api.GetShellCards()).cards[0]!.favourite)
     }).pipe(Effect.scoped, withServer(testConfig()))
   )

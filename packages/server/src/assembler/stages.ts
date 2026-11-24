@@ -62,7 +62,7 @@ import { cachePrefixDigests, placeBreakpoints, summaryLevelOf } from "./breakpoi
 import { DEFAULT_MAX_IMAGES, imagesStage, messageImagesOf } from "./images.ts"
 import { reasoningReplayStage } from "./reasoningReplay.ts"
 import { attachmentLines } from "./attachments.ts"
-import { attachedElement, inlineLimit } from "../agent/libraryView.ts"
+import { attachedElements, inlineLimit } from "../agent/libraryView.ts"
 import { cardBlock, personaBlock } from "./layouts.ts"
 import { cardFieldKey, replacementFor, replacementsStage } from "./replacements.ts"
 import { cardFields, makeMacroEnvironment, type MacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
@@ -82,6 +82,7 @@ import type { ScriptRef } from "@dreamspan/shared/regexScripts.ts"
 import {
   projectedScript,
   projectedScriptKey,
+  withLibraryText,
   type Assembly,
   type AssemblerStage,
   AssemblySources,
@@ -1344,7 +1345,12 @@ const chatLine = (
   scripted: { readonly text: string; readonly volatile: boolean }
 ): ChatLine => {
   const behavior = need(assembly, "preset").doc.names_behavior
-  const text = scripted.text.replace(/\r/gm, "") || (projected.entry.images?.length ? "[Image]" : "")
+  const prose = scripted.text.replace(/\r/gm, "")
+  const text = withLibraryText(projected, prose) || (projected.entry.images?.length ? "[Image]" : "")
+  if (projected.libraryText) {
+    const piece = assembly.pieces[projected.piece]!
+    assembly.pieces[projected.piece] = { ...piece, text: withLibraryText(projected, piece.text ?? "") }
+  }
   const pieces = [projected.piece]
   const images = projected.entry.images?.length ? { images: projected.entry.images } : {}
   // A merged chat's section and join (assembler/merges.ts): system text, as summaries are sent.
@@ -2848,32 +2854,20 @@ const attachmentsStage = sync("attachments", (assembly) => {
 /**
  * Cards, lorebooks and presets a workshop message carries (spec/WORKSHOP-CARDS.md §4.3): an
  * `<attached_…>` element each after its text, the item as it was at the revision the message
- * recorded. Whole when it fits the inline limit (8,000 tokens, or a fifth of a smaller window, in
- * the model's own tokens), otherwise a reference with its summary for the read tools to page.
+ * recorded. A message's items share one budget, the inline limit (8,000 tokens, or a fifth of a
+ * smaller window, in the model's own tokens): whole while that lasts, else a summary, else a
+ * compact reference for the read tools to page (`attachedElements`).
  */
 const libraryAttachmentsStage = sync("library-attachments", (assembly) => {
-  if (!assembly.resolved?.some(({ entry }) => entry.library?.length)) return
-  const env = need(assembly, "macros")
-  const scripted = new Map(need(assembly, "scripted"))
+  const projected = need(assembly, "projected")
+  if (!projected.some(({ entry }) => entry.library?.length)) return
   const count = assembly.countText ?? estimateTokens
   const limit = inlineLimit(contextBudget(assembly) + need(assembly, "preset").doc.samplers.openai_max_tokens)
-  assembly.resolved = need(assembly, "resolved").map(({ entry, piece }) => {
-    if (!entry.library?.length) return { entry, piece }
-    const lines = entry.library.map((item) => attachedElement(item, count, limit)).join("\n")
-    const previous = scripted.get(entry.versionId)
-    if (previous)
-      scripted.set(entry.versionId, { ...previous, text: previous.text ? `${previous.text}\n${lines}` : lines })
-    const text = env.text(piece)
-    return {
-      entry,
-      piece: env.verbatim(
-        `library:${entry.versionId}`,
-        { kind: "message", slot: entry.slotId, version: entry.versionId },
-        text ? `${text}\n${lines}` : lines
-      )
-    }
-  })
-  assembly.scripted = scripted
+  assembly.projected = projected.map((message) =>
+    message.entry.library?.length
+      ? { ...message, libraryText: attachedElements(message.entry.library, count, limit).join("\n") }
+      : message
+  )
 })
 
 /** Workshop text has its own registered stage and inspector piece, after end-of-request. */
@@ -3199,13 +3193,13 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
     assembly.scripted = scripted
   }),
   attachmentsStage,
-  libraryAttachmentsStage,
   imageTokensStage,
   rolesStage,
   mergeLayoutStage,
   gapLinesStage,
   noteGateStage,
   replacementsStage,
+  libraryAttachmentsStage,
   loreScanStage,
   loreActivationStage,
   htmlDepthStage,

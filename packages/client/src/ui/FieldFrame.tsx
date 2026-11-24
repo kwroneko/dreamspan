@@ -54,11 +54,17 @@ export function FieldFrame({
           data-layout-audit-ignore="inset: The box's own controls sit in a slim strip along its border"
           className={
             side === "bottom"
-              ? "flex h-7 shrink-0 items-center justify-end gap-0.5 overflow-hidden px-2 max-sm:h-9"
-              : "flex h-full w-[5.5rem] shrink-0 items-center justify-end gap-0.5 overflow-hidden pr-1"
+              ? "@container/field-strip flex h-7 shrink-0 items-center justify-end gap-0.5 overflow-hidden px-2 max-sm:h-9"
+              : "@container/field-strip flex h-full w-[5.5rem] shrink-0 items-center justify-end gap-0.5 overflow-hidden pr-1"
           }
         >
-          {status && <span className="mr-auto flex min-w-0 items-center gap-2 pl-1 text-xs text-muted">{status}</span>}
+          {status && (
+            // One row as tall as the "edited" badge: a part with no room left beside the controls
+            // wraps out of sight instead of running under them.
+            <span className="mr-auto flex h-5 min-w-0 flex-wrap content-start items-center gap-x-2 overflow-hidden pr-0.5 pl-1 text-xs whitespace-nowrap text-muted">
+              {status}
+            </span>
+          )}
           <span data-field-reveal className="flex shrink-0 items-center gap-0.5">
             {tools}
           </span>

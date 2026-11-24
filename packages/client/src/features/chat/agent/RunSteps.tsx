@@ -25,6 +25,7 @@ import type {
 } from "@dreamspan/shared/agent.ts"
 import type { ForkId, VersionId } from "@dreamspan/shared/chat.ts"
 import type { InspectorUsage, RunContext } from "@dreamspan/shared/inspectorApi.ts"
+import { totalInputTokens } from "@dreamspan/shared/usage.ts"
 import { displayToolData } from "@dreamspan/shared/toolData.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { useNavigate, useSearch } from "@tanstack/react-router"
@@ -554,7 +555,7 @@ function Added({
 
 function UsageLine({ request }: { request: InspectorUsage }) {
   const c = request.counts
-  const input = c.inputUncached === null ? null : c.inputUncached + (c.cacheRead ?? 0) + (c.cacheWrite ?? 0)
+  const input = totalInputTokens(c)
   return (
     <p className="text-xs text-muted tabular-nums">
       {requestStatusText(request.status)}: input {count(input)}, cache read {count(c.cacheRead)}, output{" "}

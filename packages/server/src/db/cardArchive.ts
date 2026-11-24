@@ -12,6 +12,7 @@ export const archiveCandidatesSql = `SELECT e.id AS entityId, r.id AS refId, r.l
       r.created_at AS addedAt,
       max(
         coalesce(r.last_used_at, 0),
+        coalesce(e.forked_at, 0),
         coalesce((SELECT max(v.created_at) FROM version_participants p
           JOIN versions v ON v.id = p.version_id
           JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id

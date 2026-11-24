@@ -196,6 +196,19 @@ describe("styles", () => {
     ])
   })
 
+  it("keeps a multiline panel's styles out of the chat, even before its closing fence arrives", () => {
+    const panel = "```html\n<html>\n<head><style>.stat{color:red}</style></head>\n</html>"
+    const before = "<style>.before{}</style>\n"
+    expect(extractStyles(before + panel)).toEqual([".before{}"])
+    expect(extractStyles(before + panel + "\n````\n<style>.after{}</style>")).toEqual([".before{}", ".after{}"])
+  })
+
+  it("requires a closing fence of the same kind and at least the opening length", () => {
+    const text =
+      " ~~~~html\r\n```\r\n~~~\r\n~~~~ text\r\n<style>.inside{}</style>\r\n ~~~~\t\r\n<style>.after{}</style>"
+    expect(extractStyles(text)).toEqual([".after{}"])
+  })
+
   it("scopes each style on its own, so a broken one leaves the rest", () => {
     expect(scopeStyles(extractStyles('<style>.a { color: red }</style><style><a id="</style>')).css).toBe(
       ".message-html .custom-a{color: red;}"

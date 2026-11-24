@@ -13,7 +13,7 @@ function ChooseModel() {
   const selection = useModelSelection(null)
   return (
     <ModelPickerPopover
-      selection={selection}
+      selection={{ ...selection, waitForChoice: true }}
       trigger="Choose"
       triggerLabel="Choose a model for all chats"
       triggerClassName={`${link} rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus`}

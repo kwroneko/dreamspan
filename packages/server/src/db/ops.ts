@@ -217,6 +217,7 @@ import {
   EditorSnapshot,
   InvalidDocument,
   NoteEntry,
+  RefArchiveResult,
   SharedNote
 } from "@dreamspan/shared/editorApi.ts"
 import { NoteDoc, ReplaceTarget } from "@dreamspan/shared/docs/note.ts"
@@ -1940,7 +1941,7 @@ const WriteOpsChatOwn = RpcGroup.make(
    */
   Rpc.make("SetRefArchived", {
     payload: { userId: UserId, refId: RefId, archived: Schema.Boolean },
-    success: LibraryRef,
+    success: RefArchiveResult,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
   /**
@@ -3587,11 +3588,11 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     success: Schema.Boolean,
     error: Schema.Union([ImportLeaseLost, StorageError])
   }),
-  /** Adopts ST's default persona only while the user has no stored default. */
+  /** Adopts ST's default persona if it is still eligible and the user has no stored default. */
   Rpc.make("StImportDefaultPersona", {
     payload: { userId: UserId, importId: Schema.String, entityId: EntityId },
     success: Schema.Boolean,
-    error: Schema.Union([ImportLeaseLost, NotFound, StorageError])
+    error: Schema.Union([ImportLeaseLost, StorageError])
   }),
   /**
    * Makes `importId` the user's current run, and drops what the user's earlier runs held for a
@@ -4588,12 +4589,12 @@ const WriteOpsLibraryOwn = RpcGroup.make(
   }),
   /**
    * A reply whose speaker the decision model was to choose, once it didn't (nothing to ask, or no
-   * answer sure enough): Auto's pick stands, and the reply shows it. False when already settled.
+   * answer sure enough): the reply shows Auto's pick, or an eligible replacement. False when settled.
    */
   Rpc.make("SettleSpeaker", {
-    payload: { userId: UserId, versionId: VersionId },
+    payload: { userId: UserId, versionId: VersionId, speakerEntityId: Schema.optionalKey(EntityId) },
     success: Schema.Boolean,
-    error: StorageError
+    error: Schema.Union([NotFound, StorageError])
   }),
   /** State events a decision attaches to a version of its chat, with the decision as their origin. */
   Rpc.make("ApplyDecisionEffect", {
@@ -4834,6 +4835,12 @@ const ReadOpsOwn = RpcGroup.make(
     .setPayload(Schema.Struct({ ...historyReadRpcs[2].payloadSchema.fields, userId: UserId }))
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   Rpc.make("ShellEpoch", { payload: { userId: UserId }, success: Schema.String, error: StorageError }),
+  /** Internal routing for chat events, including soft-deleted chats. */
+  Rpc.make("ShellChatOwners", {
+    payload: { chatIds: Schema.Array(ChatId) },
+    success: Schema.Array(UserId),
+    error: StorageError
+  }),
   Rpc.make("ShellMaterialize", {
     payload: { userId: UserId },
     success: ShellSnapshotRead,
@@ -5334,6 +5341,7 @@ const ReadOpsOwn = RpcGroup.make(
         upstream: Schema.NullOr(Schema.String),
         startedAt: Schema.Number,
         formula: Schema.String,
+        inputTotal: Schema.optionalKey(Schema.Int),
         inputUncached: Schema.NullOr(Schema.Int),
         cacheRead: Schema.NullOr(Schema.Int),
         cacheWrite: Schema.NullOr(Schema.Int),
@@ -5596,6 +5604,11 @@ const ReadOpsOwn = RpcGroup.make(
     ),
     error: Schema.Union([NotFound, StorageError])
   }),
+  Rpc.make("ListSharedNoteRefs", {
+    payload: { userId: UserId },
+    success: Schema.Array(LibraryRef),
+    error: StorageError
+  }),
   /**
    * The user's shared notes not in the bin whose title has `query` (all without one), or the
    * one `refId` or `entityId` names.
@@ -5781,6 +5794,20 @@ const ReadOpsOwn = RpcGroup.make(
   Rpc.make("GetRevisionDoc", {
     payload: { userId: UserId, refId: RefId, revisionId: RevisionId },
     success: Doc,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A frozen revision attached to a visible message on the workshop's path. */
+  Rpc.make("GetAttachedLibraryRevision", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: SlotId,
+      kind: Schema.Literals(["card", "lorebook", "preset"]),
+      refId: RefId,
+      revisionId: RevisionId
+    },
+    success: Schema.Struct({ name: Schema.String, doc: Doc }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The existing first imported card note, using the same identity as ImportFile. */

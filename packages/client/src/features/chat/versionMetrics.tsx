@@ -133,7 +133,7 @@ export const costDetails = (m: VersionMetrics): ReadonlyArray<[string, string]> 
   const { inputUncached: uncached, cacheRead: read, cacheWrite: write, cacheWriteLong: long } = m
   if (uncached === null || read === null || write === null) rows.push(["Input tokens", "unknown"])
   else {
-    const all = uncached + read + write
+    const all = m.inputTotal ?? uncached + read + write
     rows.push([
       "Input tokens",
       `${count(all)} (${count(uncached)} uncached, ${count(read)} cache read, ${count(write)} cache write${

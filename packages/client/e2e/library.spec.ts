@@ -5,9 +5,61 @@ import { readFile, truncate, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { crc32, deflateSync } from "node:zlib"
 import { type Browser, expect, type Locator, type Page, test } from "@playwright/test"
+import { Effect } from "effect"
+import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
+
+test("a pending or failed shared-note read leaves the other Library sections usable", async ({ page }) => {
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      yield* api.CreateCard({ label: "Library retry fixture", name: "Library retry fixture" })
+      const chat = yield* api.CreateChat({ title: "Synthetic local note owner" })
+      yield* api.CreateChatNote({ chatId: chat.id, title: "Chat-only note" })
+      yield* api.CreateSharedNote({ title: "Library shared note", content: "Synthetic note." })
+    })
+  )
+  let fail: (() => void) | undefined
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message)) as { tag?: string; id?: string }
+      if (!fail && (request.tag === "ListSharedNoteRefs" || request.tag === "ListSharedNotes")) {
+        fail = () =>
+          socket.send(
+            JSON.stringify({
+              _tag: "Exit",
+              requestId: request.id,
+              exit: {
+                _tag: "Failure",
+                cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Synthetic note read failure" } }]
+              }
+            })
+          )
+      } else upstream.send(message)
+    })
+    upstream.onMessage((message) => socket.send(message))
+  })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/library`)
+  await expect.poll(() => fail !== undefined).toBe(true)
+  const cards = page.getByRole("list", { name: "Cards", exact: true })
+  await expect(cards).toContainText("Library retry fixture")
+  const notes = page.getByRole("tab", { name: /^Notes/ })
+  await notes.click()
+  const panel = page.getByRole("tabpanel", { name: /^Notes/ })
+  await expect(panel.getByText("Loading notes…", { exact: true })).toBeVisible()
+  fail!()
+  await expect(panel.getByRole("alert")).toContainText("Something failed on the server.")
+  await page.getByRole("tab", { name: /^Cards/ }).click()
+  await expect(cards).toContainText("Library retry fixture")
+  await notes.click()
+  await panel.getByRole("button", { name: "Try again", exact: true }).click()
+  await expect(notes).toHaveText("Notes · 1")
+  await expect(panel.getByRole("list", { name: "Notes", exact: true })).toContainText("Library shared note")
+  await expect(panel.getByText("Chat-only note")).toHaveCount(0)
+})
 
 const pngChunk = (type: string, data: Buffer) => {
   const out = Buffer.alloc(12 + data.byteLength)

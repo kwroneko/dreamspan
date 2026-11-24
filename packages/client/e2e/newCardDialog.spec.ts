@@ -8,6 +8,40 @@ import { openPanel } from "./support/panel.ts"
 
 const server = serverPerFile(withAdmin)
 
+test("creating a persona keeps the description recovered from an older draft", async ({ page }) => {
+  const name = "Draft persona"
+  const description = "A synthetic description from the older form."
+  const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+  await admin((api) =>
+    Effect.gen(function* () {
+      const ownerId = (yield* api.Whoami()).id
+      yield* api.SaveUserDraft({
+        ownerId,
+        targetId: "persona:new",
+        field: "Names",
+        content: JSON.stringify({ name, description }),
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null
+      })
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/library?show=personas`)
+  await page.getByRole("button", { name: "New persona", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "New persona", exact: true })
+  await expect(dialog.getByRole("textbox", { name: "Display name", exact: true })).toHaveValue(name)
+  await dialog.getByRole("button", { name: "Create", exact: true }).click()
+  await expect(page).toHaveURL(/\/library\/[^/]+/)
+  const doc = await admin((api) =>
+    Effect.gen(function* () {
+      const refs = yield* api.ListLibrary({ kind: "card" })
+      return (yield* api.OpenEditor({ refId: refs.find((ref) => ref.label === name)!.id })).doc
+    })
+  )
+  expect(doc.description).toBe(description)
+})
+
 for (const width of [1440, 390]) {
   test(`creation and naming controls at ${width}`, async ({ page }, info) => {
     test.setTimeout(180_000)

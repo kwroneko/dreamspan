@@ -3,7 +3,8 @@
 // The tab's URL names the picture (its media, its name, its cutout), so it closes, moves,
 // splits and comes back after a reload as any tab does. The viewer is the column's
 // (`PortraitView`): its zoom, Fit and 100%, the wheel, a drag and a pinch.
-import { useSearch } from "@tanstack/react-router"
+import { useRouter } from "@tanstack/react-router"
+import { useSyncExternalStore } from "react"
 import { cropKey, parseCropKey } from "@dreamspan/shared/media.ts"
 import { useTitle } from "../shell.tsx"
 import { type Portrait, PortraitView } from "../../ui/Portrait.tsx"
@@ -21,26 +22,26 @@ export const pictureHref = (portrait: Portrait) => {
   return `${PICTURE_PATH}?${params.toString()}`
 }
 
-const text = (value: unknown) => (typeof value === "string" || typeof value === "number" ? String(value) : null)
-
 /** The picture a tab URL names. */
-const pictureOf = (search: Record<string, unknown>): Portrait | null => {
-  const media = text(search["media"])
+const pictureOf = (search: URLSearchParams): Portrait | null => {
+  const media = search.get("media")
   if (!media) return null
-  const crop = text(search["crop"])
+  const crop = search.get("crop")
   const picture = crop === null ? undefined : (parseCropKey(crop) ?? undefined)
   return {
     id: `picture:${media}`,
-    name: text(search["name"]) || "Picture",
+    name: search.get("name") || "Picture",
     mediaId: media,
     picture,
-    ...(text(search["image"]) === "1" ? { image: true as const } : {})
+    ...(search.get("image") === "1" ? { image: true as const } : {})
   }
 }
 
 export function PicturePage() {
-  const search: Record<string, unknown> = useSearch({ strict: false })
-  const portrait = pictureOf(search)
+  const { history } = useRouter()
+  // Parsed locations reserialize search values. The tab's history keeps the original spelling.
+  const search = useSyncExternalStore(history.subscribe, (): string => history.location.search)
+  const portrait = pictureOf(new URLSearchParams(search))
   const tab = useWorkbenchTab()
   const name = portrait?.name ?? "Picture"
   useTitle(name)

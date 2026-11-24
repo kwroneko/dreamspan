@@ -18,8 +18,6 @@ export const WorkbenchContext = createContext<{
   readonly store: WorkbenchStore
   /** Where the focused chat's side panel goes, beside the frames. */
   readonly sideHost: HTMLElement | null
-  /** Where the portrait column goes, left of the frames. */
-  readonly portraitHost: HTMLElement | null
   /** Where the side panel's toggle goes in tab mode: the end of the top-right frame's strip. */
   readonly panelToggleHost: HTMLElement | null
 } | null>(null)
@@ -96,17 +94,6 @@ export function useSidePanelPlace(wide: boolean): { show: boolean; host: HTMLEle
 }
 
 /**
- * Where the portrait column goes in a workbench: the shell's column left of the frames, one for
- * every view (features/chat/portraitSources.ts). Null outside a workbench, where it sits beside
- * its view.
- */
-export function usePortraitHost(): { tab: TabContextValue; host: HTMLElement | null } | null {
-  const tab = useContext(TabContext)
-  const workbench = useContext(WorkbenchContext)
-  return tab ? { tab, host: workbench?.portraitHost ?? null } : null
-}
-
-/**
  * Opening something as a tab from outside the strips (a picture from the portrait column): what
  * a point over the frames would take, a drop there, and an open beside the view's own tab, kept.
  * Null outside a workbench.
@@ -116,7 +103,11 @@ export function useOpenAsTab() {
   if (!tab) return null
   const { store, tabId } = tab
   return {
-    at: dropTargetAt,
+    // An edge too small to split takes nothing (`canDrop`): no shade, and a drop there does nothing.
+    at: (x: number, y: number) => {
+      const target = dropTargetAt(x, y)
+      return target && store.canDrop(target.frameId, target.zone) ? target : null
+    },
     drop: (target: DropTarget, href: string) => store.dropOpen(href, target.frameId, target.zone, target.index),
     open: (href: string) => store.dropOpen(href, store.frameOf(tabId) ?? store.frames()[0]!.id, "center")
   }

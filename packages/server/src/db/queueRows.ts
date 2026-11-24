@@ -5,6 +5,8 @@ import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 
+import type { LibraryPin } from "./libraryAttachments.ts"
+
 export interface QueuedRow {
   readonly id: string
   readonly chat_id: string
@@ -38,6 +40,8 @@ export interface QueuedRow {
   readonly created_at: number
 }
 
+export const queuedLibrary = (row: QueuedRow): ReadonlyArray<LibraryPin> => JSON.parse(row.library_json ?? "[]")
+
 export const toQueued = (row: QueuedRow) =>
   new QueuedMessage({
     id: row.id,
@@ -46,7 +50,9 @@ export const toQueued = (row: QueuedRow) =>
     kind: row.kind,
     content: row.content,
     images: JSON.parse(row.images_json),
-    ...(row.library_json && row.library_json !== "[]" ? { library: JSON.parse(row.library_json) } : {}),
+    ...(row.library_json && row.library_json !== "[]"
+      ? { library: queuedLibrary(row).map(({ kind, refId }) => ({ kind, refId })) }
+      : {}),
     speakerEntityId: row.speaker_entity_id as EntityId | null,
     replySpeakerEntityId: row.reply_speaker_entity_id as EntityId | null,
     direction: row.direction,

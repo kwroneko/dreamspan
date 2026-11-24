@@ -15,7 +15,9 @@ import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { cleanName, renamedTitle } from "@dreamspan/shared/chatName.ts"
+import { remoteOf } from "@dreamspan/shared/cardSources.ts"
 import { composerKey, DraftHistoryPolicy, DraftKey, parseDraftTarget } from "@dreamspan/shared/drafts.ts"
+import { heldRemoteCards } from "./cardOrigins.ts"
 import { legacyPendingDraft } from "./migrationPendingChats.ts"
 import type { Bin } from "./bin.ts"
 import { EDIT_THINKING_FIELD, NotAmendable } from "@dreamspan/shared/chatApi.ts"
@@ -163,19 +165,38 @@ export const makeWriteHandlers = (bin: Bin) =>
     /** The bodies of SaveDraft and SaveComposer: one transaction each, or all in SaveDraftBatch. */
     const saveDraft = ({
       userId,
-      key: asked,
+      key: requestedKey,
       draftId,
       content,
       images,
       expectedRowVersion,
       expectedSession,
-      baseRevision,
+      baseRevision: requestedRevision,
       observedDeletion,
       seed,
       editingFrom
     }: Parameters<WriteHandlers["SaveDraft"]>[0]) =>
       Effect.gen(function* () {
-        let key = asked
+        let key = requestedKey
+        let baseRevision = requestedRevision
+        // Adoption and draft saves share the writer, so either adoption moves this draft
+        // or this save already sees the local ref and uses its normal conflict handling.
+        const remote = key.targetKind === "remote_card" ? remoteOf(`src:${key.targetId}`) : null
+        if (remote) {
+          const [held] = yield* heldRemoteCards(sql, {
+            userId,
+            sourceId: remote.sourceId,
+            items: [{ remoteId: remote.remoteId, sha256: null }]
+          })
+          if (held) {
+            key = new DraftKey({ targetKind: "entity_field", targetId: held.refId, field: key.field })
+            if (baseRevision === null || remoteOf(baseRevision) !== null) {
+              const [ref] = yield* sql<{ head_revision_id: string }>`
+                SELECT head_revision_id FROM entity_refs WHERE id = ${held.refId}`
+              baseRevision = ref?.head_revision_id ?? null
+            }
+          } else baseRevision = null
+        }
         if (images !== undefined) yield* checkImages(userId, images)
         // An edit of a new chat's greeting that was made again (its cast changed in another tab):
         // its draft moved to the greeting made in its place, so a save naming the old greeting

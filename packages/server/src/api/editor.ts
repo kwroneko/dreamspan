@@ -85,6 +85,13 @@ const checkField = (field: string) =>
     ? Effect.fail(new EditRefused({ message: "That isn't a field of a document." }))
     : Effect.void
 
+export const makeSharedNoteRefsHandlers = Effect.map(Reader, (reader) => ({
+  ListSharedNoteRefs: () =>
+    Effect.flatMap(CurrentUser, (user) => reader.ListSharedNoteRefs({ userId: user.id })).pipe(
+      settle("ListSharedNoteRefs")
+    )
+}))
+
 export const makeEditorHandlers = Effect.gen(function* () {
   const notices = yield* Notices
   const hub = yield* ChatHub
@@ -120,7 +127,11 @@ export const makeEditorHandlers = Effect.gen(function* () {
     write: Effect.Effect<Draft, E, R>
   ) =>
     Option.isSome(sources)
-      ? sources.value.cache.withDraftBases([draftBaseKey(user.id, from)], write, (draft) => draft.status === "active")
+      ? sources.value.cache.withDraftBases(
+          [draftBaseKey(user.id, from)],
+          write,
+          (draft) => draft.status === "active" && draft.key.targetKind === "remote_card"
+        )
       : write
   const fromSource = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.catchIf(
@@ -166,27 +177,6 @@ export const makeEditorHandlers = Effect.gen(function* () {
           revisionNumber: 0,
           variants: []
         })
-      }),
-    SaveEditorDraft: (
-      { field, draftId, content, expectedRowVersion, expectedSession }: Parameters<typeof handlers.SaveEditorDraft>[0],
-      from,
-      user
-    ) =>
-      Effect.gen(function* () {
-        yield* checkField(field)
-        return yield* saveRemoteDraft(
-          user,
-          from,
-          writer.SaveDraft({
-            userId: user.id,
-            key: remoteKey(from, field),
-            draftId,
-            content,
-            expectedRowVersion,
-            expectedSession,
-            baseRevision: null
-          })
-        )
       }),
     EditorDraftHistory: ({ field, limit, before }: Parameters<typeof handlers.EditorDraftHistory>[0], from, user) =>
       reader.DraftHistory({
@@ -378,15 +368,18 @@ export const makeEditorHandlers = Effect.gen(function* () {
     SaveEditorDraft: ({ refId, field, scope, draftId, content, expectedRowVersion, expectedSession, baseRevisionId }) =>
       Effect.gen(function* () {
         yield* checkField(field)
-        return yield* writer.SaveDraft({
-          userId: yield* userId,
-          key: draftKey(refId, field, scope),
+        const user = yield* CurrentUser
+        const from = remoteOf(refId)
+        const write = writer.SaveDraft({
+          userId: user.id,
+          key: from ? remoteKey(from, field) : draftKey(refId, field, scope),
           draftId,
           content,
           expectedRowVersion,
           expectedSession,
           baseRevision: baseRevisionId
         })
+        return yield* from ? saveRemoteDraft(user, from, write) : write
       }).pipe(settle("SaveEditorDraft")),
 
     EditorDraftHistory: ({ refId, field, scope, limit, before }) =>
@@ -601,7 +594,8 @@ export const makeEditorHandlers = Effect.gen(function* () {
         return item
       }).pipe(settle("DeleteNote"))
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
-  return remoteAware(handlers)
+  const { SaveEditorDraft, ...otherHandlers } = handlers
+  return { ...remoteAware(otherHandlers), SaveEditorDraft }
 })
 
 /** Workshop conversion is separate from the core handler group (its type-size bound). */

@@ -6,7 +6,8 @@
 // every chosen width, the columns give way toward their minimums (the portrait first, then the
 // others in proportion to how far each is above its own) before the middle goes below its
 // minimum; the chosen widths stay as they were, so a wider window shows them again. Below
-// 1024 px the phone layout takes over.
+// 1024 px the phone layout takes over. Frames side by side in the middle raise its minimum to
+// what they need together (`setMiddleMin`, the workbench).
 import { useSyncExternalStore } from "react"
 
 /** The least the middle column keeps: the messages beside the columns, or a page. */
@@ -76,6 +77,8 @@ export const maxWidth = (
 // --- The columns shown now, and the window's width.
 
 let columns: ReadonlyMap<string, ColumnEntry> = new Map()
+/** What the middle's content needs, when more than MIDDLE_MIN (frames side by side). */
+let middleMin = 0
 let viewport = typeof window === "undefined" ? 1440 : document.documentElement.clientWidth
 const listeners = new Set<() => void>()
 const notify = () => {
@@ -105,6 +108,14 @@ export const setColumn = (id: string, entry: ColumnEntry) => {
   notify()
 }
 
+/** The least the middle's content needs (0: MIDDLE_MIN), so the columns give way to it first. */
+export const setMiddleMin = (px: number) => {
+  const next = Math.max(0, Math.round(px))
+  if (next === middleMin) return
+  middleMin = next
+  notify()
+}
+
 export const removeColumn = (id: string) => {
   if (!columns.has(id)) return
   const next = new Map(columns)
@@ -120,8 +131,9 @@ export const removeColumn = (id: string) => {
 export function useColumnWidth(id: string, entry: ColumnEntry | null) {
   const shown = useSyncExternalStore(subscribe, () => columns)
   const width = useSyncExternalStore(subscribe, () => viewport)
+  const middle = useSyncExternalStore(subscribe, () => middleMin)
   const all = entry ? new Map(shown).set(id, entry) : shown
-  const room = width - MIDDLE_MIN
+  const room = width - Math.max(MIDDLE_MIN, middle)
   const widths = allocate(all, room)
   const min = entry?.min ?? 0
   return {

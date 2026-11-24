@@ -123,7 +123,6 @@ describe("text scans", () => {
   const OLD_SCRIPTS = /<script\b|<[^>]*\son[a-z]+\s*=/i
   const OLD_IMAGE = /!\[.*?\]/
   const OLD_STYLE = /<style\b[^>]*>([\s\S]*?)(?:<\/style\s*>|$)/gi
-  const OLD_FENCED = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\1[`~]*[ \t]*(?=\n|$)|$)/gm
   const PIECES = [
     "<",
     ">",
@@ -142,9 +141,6 @@ describe("text scans", () => {
     " ",
     "<script",
     "a{b}",
-    "```",
-    "~~~",
-    "````~",
     "\r",
     "\u2028",
     "\u2029"
@@ -160,9 +156,7 @@ describe("text scans", () => {
       ).join("")
       expect(panelHasScripts(text)).toBe(OLD_SCRIPTS.test(text))
       expect(hasImageSyntax(text)).toBe(OLD_IMAGE.test(text))
-      expect(extractStyles(text)).toEqual(
-        [...text.replace(OLD_FENCED, "").matchAll(OLD_STYLE)].map((match) => match[1])
-      )
+      expect(extractStyles(text)).toEqual([...text.matchAll(OLD_STYLE)].map((match) => match[1]))
     }
   })
 

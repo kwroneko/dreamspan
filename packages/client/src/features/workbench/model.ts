@@ -606,6 +606,64 @@ export const resizeSplit = (layout: Layout, splitId: string, sizes: ReadonlyArra
   return { ...layout, root: visit(layout.root) }
 }
 
+// --- Room (minframe1, 2026-11-24): repeated splits used to halve a frame until its strip
+// clipped its own buttons. A frame keeps at least the room its strip needs.
+
+/**
+ * The least a frame keeps, in px: its strip's shown tab beside Maximize, the ⋯ menu, the side
+ * panel's toggle and the hidden sidebar's Show, with the strip's padding, and room for the
+ * tab's title; the least height shows its strip, a header and a few lines.
+ */
+export const MIN_FRAME_WIDTH = 320
+export const MIN_FRAME_HEIGHT = 160
+
+export type Axis = "x" | "y"
+
+/** The least room a node takes along an axis: its frames' least sizes and a divider between each. */
+export const minSize = (node: Node, axis: Axis): number => {
+  if (node.type === "frame") return axis === "x" ? MIN_FRAME_WIDTH : MIN_FRAME_HEIGHT
+  const sizes = node.children.map((child) => minSize(child, axis))
+  const along = (node.direction === "row") === (axis === "x")
+  return along ? sizes.reduce((a, b) => a + b, 0) + node.children.length - 1 : Math.max(0, ...sizes)
+}
+
+/** Each frame's size from the shares, the frames taking `width` by `height` between them. */
+export const frameBoxes = (root: Node, width: number, height: number) => {
+  const boxes = new Map<string, { readonly width: number; readonly height: number }>()
+  const walk = (node: Node, w: number, h: number) => {
+    if (node.type === "frame") {
+      boxes.set(node.id, { width: w, height: h })
+      return
+    }
+    node.children.forEach((child, i) => {
+      const share = node.sizes[i] ?? 1 / node.children.length
+      if (node.direction === "row") walk(child, w * share, h)
+      else walk(child, w, h * share)
+    })
+  }
+  walk(root, width, height)
+  return boxes
+}
+
+/**
+ * Whether going from `layout` to `next` leaves each frame it adds, narrows or shortens at least
+ * its least size, the frames taking `width` by `height`. Frames left as they were don't count,
+ * so a layout already too tight (a narrow window) still takes other changes.
+ */
+export const hasRoom = (layout: Layout, next: Layout, width: number, height: number) => {
+  if (next === layout || width <= 0 || height <= 0) return true
+  const before = frameBoxes(layout.root, width, height)
+  const after = frameBoxes(next.root, width, height)
+  // A divider takes a pixel: a frame that much short still fits its strip.
+  const slack = 1.5
+  for (const [id, box] of after) {
+    const was = before.get(id)
+    if ((!was || box.width < was.width - 0.5) && box.width < MIN_FRAME_WIDTH - slack) return false
+    if ((!was || box.height < was.height - 0.5) && box.height < MIN_FRAME_HEIGHT - slack) return false
+  }
+  return true
+}
+
 /** The frames beside one, for "Move to the frame on the right" and its kin. */
 export const neighbours = (layout: Layout, frameId: string) => {
   const result: Partial<Record<"left" | "right" | "up" | "down", string>> = {}
