@@ -1172,7 +1172,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
             const before = yield* lib.ownedRef(input.userId, input.refId)
             const { plan, covered, chatId } = yield* revisionReversal(
               sql,
-              input.userId,
+              input.rolloutId,
               before,
               input.revisionId,
               input.fields

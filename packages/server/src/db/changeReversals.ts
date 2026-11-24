@@ -255,7 +255,7 @@ const outcome = (plan: ReversalPlan, head: string, reversalId: string | null = n
  */
 export const revisionReversal = (
   sql: SqlClient.SqlClient,
-  userId: UserId,
+  rolloutId: string,
   ref: { readonly id: string; readonly entity_id: string; readonly head_revision_id: string },
   revisionId: string,
   names: ReadonlyArray<string> | undefined
@@ -268,9 +268,8 @@ export const revisionReversal = (
     if (parent === undefined) return yield* refuse("That's the item's first revision: it has no change to take back.")
     const [before] = yield* sql<{ doc_json: string }>`SELECT doc_json FROM entity_revisions WHERE id = ${parent}`
     if (!before) return yield* refuse("Its earlier revision is gone.")
-    const [head] = yield* sql<{
-      doc_json: string
-    }>`SELECT doc_json FROM entity_revisions WHERE id = ${ref.head_revision_id}`
+    const [head] = yield* sql<{ doc_json: string; chat_id: string }>`SELECT h.doc_json, r.chat_id
+      FROM entity_revisions h CROSS JOIN rollouts r WHERE h.id = ${ref.head_revision_id} AND r.id = ${rolloutId}`
     const original = JSON.parse(before.doc_json) as Doc
     const changed = JSON.parse(revision.doc_json) as Doc
     const units = changedUnits(original, changed)
@@ -280,9 +279,8 @@ export const revisionReversal = (
       now: JSON.parse(head!.doc_json) as Doc,
       fields: pickedUnits(units, names)
     })
-    const made = yield* sql<EffectRow & { chat_id: string }>`SELECT e.*, r.chat_id FROM rollout_effects e
-      JOIN rollouts r ON r.id = e.rollout_id JOIN chats c ON c.id = r.chat_id
-      WHERE c.owner_user_id = ${userId} AND e.kind = 'library.revise' AND e.target_id = ${ref.entity_id} AND e.undone_at IS NULL
+    const made = yield* sql<EffectRow>`SELECT e.* FROM rollout_effects e JOIN rollouts r ON r.id = e.rollout_id
+      WHERE r.chat_id = ${head!.chat_id} AND e.kind = 'library.revise' AND e.target_id = ${ref.entity_id} AND e.undone_at IS NULL
         AND json_extract(e.undo_json, '$.head') = ${revisionId} AND json_extract(e.undo_json, '$.before') = ${parent}`
     const covered: Array<CoveredEffect> = made.map((row) => ({
       rolloutId: row.rollout_id,
@@ -291,7 +289,7 @@ export const revisionReversal = (
       of: units,
       fields: units
     }))
-    return { plan, covered, chatId: made[0]?.chat_id ?? null }
+    return { plan, covered, chatId: head!.chat_id }
   })
 
 export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef }) =>
