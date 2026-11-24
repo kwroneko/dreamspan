@@ -1474,7 +1474,10 @@ export function SourceSearchOptions({ browse, filtersId }: { browse: SourceBrows
   const { search } = layoutOf(caps)
   if (search.length === 0 && filtersId === undefined) return null
   return (
-    <div data-search-options className="flex max-w-full min-w-0 flex-wrap items-center gap-2">
+    <div
+      data-search-options
+      className="flex max-w-full min-w-0 flex-wrap items-center gap-2 @xl:shrink-0 @xl:flex-nowrap"
+    >
       <SearchOptions browse={browse} filters={search} set={setterOf(browse)} />
       {filtersId !== undefined && <SourceFiltersButton browse={browse} panelId={filtersId} />}
     </div>
