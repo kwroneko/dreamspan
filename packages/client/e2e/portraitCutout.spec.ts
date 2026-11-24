@@ -72,9 +72,13 @@ const stageOf = async (dialog: Locator) => (await dialog.locator("[data-cutout-s
 const expectPreviews = async (dialog: Locator, phone: boolean) => {
   const previews = dialog.getByRole("region", { name: "Previews" })
   await expect(previews.getByRole("heading", { name: "Previews" })).toBeVisible()
-  for (const label of ["Message", "Cast", "Tile"]) {
+  for (const [key, label] of [
+    ["Message", "In messages"],
+    ["Cast", "In the cast"],
+    ["Tile", "Library tile"]
+  ] as const) {
     await expect(previews.getByText(label, { exact: true })).toBeVisible()
-    await expect(previews.locator(`[data-cutout-preview="${label}"] img`)).toBeVisible()
+    await expect(previews.locator(`[data-cutout-preview="${key}"] img`)).toBeVisible()
   }
   const message = (await dialog.locator('[data-cutout-preview="Message"]').boundingBox())!
   const cast = (await dialog.locator('[data-cutout-preview="Cast"]').boundingBox())!
@@ -157,7 +161,7 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   await page.keyboard.press("Home")
   const reset = chooser.getByRole("button", { name: "Reset the cutout", exact: true })
   await reset.hover()
-  await expect(page.getByText("Reset the portrait inside the picture", { exact: true }).last()).toBeVisible()
+  await expect(page.getByText("Put the portrait back at its default place in the full picture", { exact: true }).last()).toBeVisible()
   await reset.click()
   expect((await boxOf(chooser)).width).toBeCloseTo(box.width, 0)
   expect((await boxOf(chooser)).x).toBeCloseTo(box.x, 0)
@@ -478,7 +482,9 @@ test("every choice in the Picture dialog explains where it's shown, and Portrait
   const dialog = page.getByRole("dialog", { name: "Tall's new picture" })
   await expect(dialog.locator("[data-cutout-box]")).toBeVisible()
   const explains = async (name: string, text: string, role: "button" | "slider" = "button") => {
-    await dialog.getByRole(role, { name, exact: true }).hover()
+    // A slider explains itself over its thumb, which covers the range input.
+    const target = dialog.getByRole(role, { name, exact: true })
+    await (role === "slider" ? dialog.locator("[data-cutout-controls] [data-index='0']") : target).hover()
     await expect(page.getByText(text, { exact: true }).last()).toBeVisible()
   }
   await explains("Full picture", "The picture shown when it's opened large, and in exported card files")
