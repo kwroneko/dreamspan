@@ -4923,6 +4923,12 @@ const ReadOpsOwn = RpcGroup.make(
     }),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** A panel's path and state through its slot, within one live fork and one read snapshot. */
+  Rpc.make("PanelContext", {
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.NullOr(ForkId), slotId: SlotId },
+    success: Schema.Struct({ entries: Schema.Array(PathEntry), events: Schema.Array(FoldableEvent) }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** Earlier saved text of an owned human-written version. */
   Rpc.make("VersionAmendments", {
     payload: { userId: UserId, versionId: VersionId },
