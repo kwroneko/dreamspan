@@ -227,7 +227,7 @@ function Pending({
       })
   }, [askedPanel, navigationSearch.panel, navigate])
   const urlPanel = useIsPanelTab(askedPanel) ? askedPanel! : null
-  const { panel, show, wide } = usePanel(urlPanel, view)
+  const { panel, show, close, chatMain, wide } = usePanel(urlPanel, view)
   const place = useSidePanelPlace(wide)
   const title = pendingTitle(state)
   const prefs = viewPrefs.prefs
@@ -475,7 +475,7 @@ function Pending({
         }
       >
         <SlotOutlet slot={chatColumns} props={{ wide }} />
-        <div data-chat-main className="relative flex min-w-0 flex-1 flex-col">
+        <div ref={chatMain} data-chat-main tabIndex={-1} className="relative flex min-w-0 flex-1 flex-col">
           <PendingChatHeader
             pending={pending}
             view={view}
@@ -590,7 +590,7 @@ function Pending({
             host={place.host}
             title={title}
             onTab={show}
-            onClose={() => show(null)}
+            onClose={close}
             pending={pending}
             view={view}
           />

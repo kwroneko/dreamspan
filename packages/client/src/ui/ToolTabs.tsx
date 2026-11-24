@@ -86,6 +86,7 @@ export function ToolTabs({
   label,
   moreLabel = MORE,
   end,
+  trailingControlVisible = false,
   focusOnMount = false,
   onReorder,
   onResetOrder,
@@ -101,6 +102,8 @@ export function ToolTabs({
   moreLabel?: string
   /** After the row: a close button, say. */
   end?: ReactNode
+  /** Remeasure before paint when an adjacent control takes or gives back space. */
+  trailingControlVisible?: boolean
   /** Restore the selected tab after a pending chat becomes a saved chat. */
   focusOnMount?: boolean
   /** Arranges the tools: every tool's value, in the new order. Without it they don't move. */
@@ -152,7 +155,7 @@ export function ToolTabs({
     observer.observe(element)
     read()
     return () => observer.disconnect()
-  }, [key])
+  }, [key, trailingControlVisible])
   const values = tabs.map((tab) => tab.value)
   const active = values.indexOf(value)
   const ready = room !== null && tabs.every((tab) => widths[tab.value] !== undefined)
@@ -428,24 +431,30 @@ export function ToolTabs({
     window.addEventListener("keydown", escape, true)
   }
 
-  // Smooth reflow: a tool that changed place slides there from where it was.
-  const positions = useRef(new Map<string, number>())
+  // Tools slide when they move within the same space. A narrower row can put More
+  // under a tool's old position, so width changes take effect without a slide.
+  const layout = useRef({ room, positions: new Map<string, number>() })
   useLayoutEffect(() => {
-    const before = positions.current
+    const before = layout.current
     const after = new Map<string, number>()
+    const animate = before.room === room && !reducedMotion()
+    const slides: Animation[] = []
     for (const [entry, element] of stripTabs.current) {
       if (!element.isConnected) continue
       const left = element.getBoundingClientRect().left
       after.set(entry, left)
-      const was = before.get(entry)
-      if (was !== undefined && Math.abs(was - left) > 1 && !reducedMotion())
-        element.animate([{ transform: `translateX(${was - left}px)` }, { transform: "none" }], {
-          duration: 180,
-          easing: "ease-out"
-        })
+      const was = before.positions.get(entry)
+      if (animate && was !== undefined && Math.abs(was - left) > 1)
+        slides.push(
+          element.animate([{ transform: `translateX(${was - left}px)` }, { transform: "none" }], {
+            duration: 180,
+            easing: "ease-out"
+          })
+        )
     }
-    positions.current = after
-  }, [key, count, guest?.value])
+    layout.current = { room, positions: after }
+    return () => slides.forEach((slide) => slide.cancel())
+  }, [key, count, guest?.value, room])
 
   const over = drag?.over ?? null
   const from = drag ? values.indexOf(drag.value) : -1
