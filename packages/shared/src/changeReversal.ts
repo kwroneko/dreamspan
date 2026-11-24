@@ -4,6 +4,7 @@
 // reversed on H's text (a three-way merge of B and H on base A). Where that doesn't apply cleanly
 // the field is a conflict, and nothing is written until the user picks for it. Pure, so the
 // writer, the files host and the client compute the same thing.
+import { CARD_SKILLS_NAMESPACE } from "./cardSkills.ts"
 import { canonicalJson } from "./editing.ts"
 import { merge3 } from "./merge.ts"
 
@@ -44,10 +45,32 @@ export const unitPath = (key: string): Path => {
   return Array.isArray(parsed) && parsed.every((s) => typeof s === "string") ? parsed : []
 }
 
+export const CARD_SKILLS_UNIT = unitKey(["extensions", CARD_SKILLS_NAMESPACE, "skills"])
+
+const skillNamespace = (extensions: unknown) =>
+  isObject(extensions) ? own(extensions, CARD_SKILLS_NAMESPACE) : undefined
+const skillValue = (extensions: unknown) => {
+  const namespace = skillNamespace(extensions)
+  return isObject(namespace) ? own(namespace, "skills") : undefined
+}
+
+const withSkills = (extensions: unknown, value: unknown, source: unknown) => {
+  const namespace = skillNamespace(extensions)
+  if (value === undefined && (!isObject(namespace) || !Object.hasOwn(namespace, "skills"))) return extensions
+  const next = isObject(namespace) ? { ...namespace } : {}
+  if (value === undefined) delete next.skills
+  else next.skills = value
+  const result = { ...(isObject(extensions) ? extensions : {}) }
+  if (Object.keys(next).length === 0 && skillNamespace(source) === undefined) delete result[CARD_SKILLS_NAMESPACE]
+  else result[CARD_SKILLS_NAMESPACE] = next
+  return result
+}
+
 /**
  * The fields that differ between two documents, as a revert takes them: each top-level field,
  * except a list whose elements have ids (a lorebook's entries, a preset's prompts), which is
- * element by element (`uid=3`), as History's comparisons list them.
+ * element by element (`uid=3`), as History's comparisons list them. An extensions change that
+ * only writes card skills is scoped to their list.
  */
 export const changedUnits = (before: unknown, after: unknown): ReadonlyArray<string> => {
   const b = isObject(before) ? before : {}
@@ -57,6 +80,8 @@ export const changedUnits = (before: unknown, after: unknown): ReadonlyArray<str
     const x = own(b, key)
     const y = own(a, key)
     if (same(x, y)) return []
+    if (key === "extensions" && !same(skillValue(x), skillValue(y)) && same(x, withSkills(y, skillValue(x), x)))
+      return [CARD_SKILLS_UNIT]
     if (Array.isArray(x) && Array.isArray(y)) {
       const id = identityOf([x, y])
       if (id !== undefined) {
@@ -87,6 +112,7 @@ const unitValue = (doc: unknown, key: string): unknown => {
   const [top, element] = unitPath(key)
   if (top === undefined || !isObject(doc)) return undefined
   const value = own(doc, top)
+  if (key === CARD_SKILLS_UNIT) return skillValue(value)
   if (element === undefined) return value
   if (!Array.isArray(value)) return undefined
   if (element === ORDER_UNIT) {
@@ -108,16 +134,22 @@ export const valuesOfUnits = (doc: unknown, fields: Iterable<string>) =>
 
 /**
  * `doc` with a field set (removed for undefined). An element that isn't in the list goes after
- * the one before it in `order` (the list as the value came from), else first.
+ * the one before it in `source` (the document the value came from), else first.
  */
 const withUnit = (
   doc: Record<string, unknown>,
   key: string,
   value: unknown,
-  order: unknown
+  source: unknown
 ): Record<string, unknown> => {
   const [top, element] = unitPath(key)
   if (top === undefined) return doc
+  const sourceValue = isObject(source) ? own(source, top) : undefined
+  if (key === CARD_SKILLS_UNIT) {
+    const current = own(doc, top)
+    const extensions = withSkills(current, value, sourceValue)
+    return extensions === current ? doc : { ...doc, [top]: extensions }
+  }
   if (element === undefined) {
     const next = { ...doc }
     if (value === undefined) delete next[top]
@@ -137,11 +169,11 @@ const withUnit = (
     if (value === undefined) list.splice(at, 1)
     else list[at] = value
   } else if (value !== undefined) {
-    const source = Array.isArray(order) ? order : []
-    const from = findIn(source, element)
+    const order = Array.isArray(sourceValue) ? sourceValue : []
+    const from = findIn(order, element)
     let place = 0
     for (let i = from - 1; i >= 0; i--) {
-      const prior = source[i]
+      const prior = order[i]
       const id = IDENTITIES.find((k) => isObject(prior) && own(prior, k) !== undefined)
       const there = id === undefined ? -1 : findIn(list, `${id}=${String((prior as Record<string, unknown>)[id])}`)
       if (there >= 0) {
@@ -248,14 +280,16 @@ export const planGroupedReversal = (
       const b = unitValue(patch.original, field)
       const h = unitValue(doc, field)
       const merged = mergeUnit(field, a, h, b)
+      const namespace = field === CARD_SKILLS_UNIT ? skillNamespace(own(doc, "extensions")) : undefined
+      const blocked = b !== undefined && namespace !== undefined && !isObject(namespace)
       const choice = choices?.[field]
       let value = merged.value
-      if (merged.conflicts.length > 0) {
+      if (merged.conflicts.length > 0 || blocked) {
         if (choice === "before") value = b
         else if (choice === "now") {
           kept.add(field)
           fields.delete(field)
-          doc = withUnit(doc, field, unitValue(now, field), own(now, unitPath(field)[0]!))
+          doc = withUnit(doc, field, unitValue(now, field), now)
           continue
         } else {
           // Compute the result of Take before for the preview without committing it.
@@ -264,13 +298,7 @@ export const planGroupedReversal = (
         }
       }
       fields.add(field)
-      const [top] = unitPath(field)
-      doc = withUnit(
-        doc,
-        field,
-        value,
-        top === undefined || !isObject(patch.original) ? undefined : own(patch.original, top)
-      )
+      doc = withUnit(doc, field, value, patch.original)
     }
   }
   return {
@@ -326,6 +354,7 @@ export const combinedFileEdits = (
 
 /** A unit as the assistant names it: "description", "entries uid=3". */
 export const unitName = (unit: string) => {
+  if (unit === CARD_SKILLS_UNIT) return unitPath(unit).join(".")
   const [field, part] = unitPath(unit)
   return part === undefined ? (field ?? "") : `${field} ${part === ORDER_UNIT ? "order" : part}`
 }

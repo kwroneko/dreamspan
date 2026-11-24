@@ -46,7 +46,7 @@ import {
 import { visibleDoc } from "../agent/libraryView.ts"
 import { newWorkshopImportMedia } from "./workshopImportMedia.ts"
 import { insertReversal, recordAssistantRevertUndo, revisionReversal } from "./changeReversals.ts"
-import { changedUnits, unitName, unitPath, valuesOfUnits } from "@dreamspan/shared/changeReversal.ts"
+import { CARD_SKILLS_UNIT, changedUnits, unitName, unitPath, valuesOfUnits } from "@dreamspan/shared/changeReversal.ts"
 import { sharedNote } from "./sharedNotes.ts"
 import { libraryAccess } from "./workshopSight.ts"
 
@@ -1304,10 +1304,10 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               result: JSON.stringify({ reverted: false, note: "That change has nothing left to take back." }),
               effects: []
             }
-            const conflictValue = (field: string, value: unknown) =>
-              before.kind === "card" && unitPath(field)[0] === "extensions"
-                ? (visibleDoc("card", { extensions: value }).extensions ?? null)
-                : (value ?? null)
+            const conflictValue = (field: string, value: unknown) => {
+              if (before.kind !== "card" || unitPath(field)[0] !== "extensions") return value ?? null
+              return field === CARD_SKILLS_UNIT ? null : (visibleDoc("card", { extensions: value }).extensions ?? null)
+            }
             if (plan.conflicts.length > 0)
               return {
                 ...unchanged,

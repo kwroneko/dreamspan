@@ -3,6 +3,7 @@
 // identity, and each field's state from its records.
 import { describe, expect, it } from "vitest"
 import {
+  CARD_SKILLS_UNIT,
   changedUnits,
   combinedFileEdits,
   docOfUnits,
@@ -31,6 +32,16 @@ describe("planReversal", () => {
     expect(plan.doc?.personality).toBe("Loud.")
     expect(plan.before[D]).toBe(now.description)
     expect(plan.after[D]).toBe("One.\nTwo.\nThree, and four.")
+  })
+
+  it("keeps an existing empty skill namespace and an empty namespace saved later", () => {
+    const changed = { extensions: { dreamspan: { skills: [{ use: "installed-skill" }] } } }
+    const empty = { extensions: { dreamspan: {} } }
+    const absent = { extensions: {} }
+    const fields = changedUnits(empty, changed)
+    expect(fields).toEqual([CARD_SKILLS_UNIT])
+    expect(planReversal({ original: empty, changed, now: changed, fields }).doc).toEqual(empty)
+    expect(planReversal({ original: absent, changed, now: empty, fields }).doc).toEqual(empty)
   })
 
   it("leaves a conflict unwritten until chosen", () => {
