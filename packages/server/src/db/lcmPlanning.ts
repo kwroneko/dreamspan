@@ -1,6 +1,6 @@
 import { planningContext, summaryChunkRoom } from "./lcmModelBudget.ts"
 import { resolveSummaryModel } from "../assembler/summaryModel.ts"
-import { workshopTranscript } from "./workshopTranscript.ts"
+import { workshopText, workshopTranscript } from "./workshopTranscript.ts"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { summarySafeText } from "../agent/compaction.ts"
 import { WORKSHOP_SUMMARY_INSTRUCTION } from "@dreamspan/shared/workshopLcm.ts"
@@ -23,6 +23,7 @@ import { WorkerAssembler } from "../assembler/assembler.ts"
 import { AssemblyFailed, generationOf, type ContextSnapshot } from "../assembler/types.ts"
 import { usedEntries } from "./usedEntries.ts"
 import { wireContext } from "../assembler/wire.ts"
+import { prepareTextTokens } from "../assembler/textTokens.ts"
 import { estimateImage } from "../assembler/imageTokens.ts"
 import { sqlSources, readImageTokenFacts } from "./assemblySources.ts"
 import { readDefaults } from "./generationSettings.ts"
@@ -131,11 +132,13 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           sql,
           userId,
           chatId,
-          readPath.flatMap((s) => (s.versionId ? [s.versionId] : []))
+          readPath.flatMap((s) => (s.versionId ? [s.versionId] : [])),
+          prepareTextTokens(assembler.textCounters.list(), usable),
+          usable.context
         )
         const path = readPath.map((slot) => ({
           ...slot,
-          content: slot.content + (slot.versionId ? (transcripts.get(slot.versionId) ?? "") : ""),
+          content: workshopText(slot.content, slot.versionId ? transcripts.get(slot.versionId) : undefined),
           images:
             slot.images?.map((image) => ({
               ...image,
@@ -358,28 +361,37 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         const clipTokens = job.clipTokens
         const transcript = transcriptSummary
           ? yield* Effect.gen(function* () {
+              if (job.level > 1)
+                return children.map((s) => ({
+                  role: "user" as const,
+                  content: summarySafeText(JSON.stringify({ summary: s.id, content: s.content }))
+                }))
+              const { model } = yield* Effect.flatMap(AssemblySources, (base) =>
+                resolveSummaryModel(base, state.modelBindings)
+              ).pipe(Effect.provide(sources.layer))
               const transcripts = yield* workshopTranscript(
                 sql,
                 userId,
                 job.chatId,
-                chain.flatMap((s) => (s.versionId ? [s.versionId] : []))
+                chain.flatMap((s) => (s.versionId ? [s.versionId] : [])),
+                prepareTextTokens(assembler.textCounters.list(), model),
+                model?.context
               )
-              return job.level > 1
-                ? children.map((s) => ({
-                    role: "user" as const,
-                    content: summarySafeText(JSON.stringify({ summary: s.id, content: s.content }))
-                  }))
-                : chain.map((s) => ({
-                    role: "user" as const,
-                    content: summarySafeText(
-                      JSON.stringify({
-                        message: s.position + 1,
-                        version: s.versionId,
-                        text: s.content,
-                        transcript: s.versionId ? (transcripts.get(s.versionId) ?? null) : null
-                      })
-                    )
-                  }))
+              return chain.map((s) => {
+                const material = s.versionId ? transcripts.get(s.versionId) : undefined
+                return {
+                  role: "user" as const,
+                  content: summarySafeText(
+                    JSON.stringify({
+                      message: s.position + 1,
+                      version: s.versionId,
+                      text: s.content,
+                      ...(material?.library ? { library: material.library } : {}),
+                      transcript: material?.transcript ?? null
+                    })
+                  )
+                }
+              })
             })
           : undefined
         const built = yield* assembler

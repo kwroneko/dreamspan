@@ -12,6 +12,7 @@ import { windowPieces } from "./displayPath.ts"
 import { lcmView, placesOf, positionIn } from "./lcmDisplay.ts"
 import { readKnowers } from "./knowers.ts"
 import { knownVersions } from "./lcmAudience.ts"
+import { hasVersionPayload } from "./libraryAttachments.ts"
 
 export interface LcmSlot {
   id: Summary["firstSlotId"]
@@ -47,7 +48,7 @@ const choiceColumns = (sql: SqlClient.SqlClient, includeContent = true) => {
   const live = sql`s.deleted_at IS NULL AND s.purged_at IS NULL AND coalesce(ds.flag,0)=0 AND coalesce(h.flag,s.context_excluded)=0
         AND v.deleted_at IS NULL AND v.purged_at IS NULL AND coalesce(dv.flag,0)=0`
   return sql`p.id, s.parent_slot_id AS parent, s.depth, p.position, s.parent_slot_id AS previous, s.inserted,
-      CASE WHEN ${live} AND v.status NOT IN ('generating','failed') AND (v.content_length > 0 OR EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN v.id END AS versionId,
+      CASE WHEN ${live} AND v.status NOT IN ('generating','failed') AND ${hasVersionPayload(sql)} THEN v.id END AS versionId,
       ${
         includeContent
           ? sql`CASE WHEN ${live} AND v.status NOT IN ('generating','failed') THEN CASE WHEN v.content_length > 0 THEN t.content WHEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id AND a.kind <> 'file') THEN '[Image]' WHEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) THEN '[File]' ELSE '' END ELSE '' END AS content,`
@@ -84,7 +85,7 @@ export const lcmPathColumns = (
   includeContent = true
 ) => sql`p.id, s.parent_slot_id AS parent, s.depth, p.position, s.parent_slot_id AS previous, s.inserted,
       CASE WHEN NOT ${base ? sql`(s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL)` : slotDeletedIn(sql, fork, "s")} AND ${base ? sql`s.context_excluded` : contextExcludedIn(sql, fork)} = 0
-        AND NOT ${base ? sql`(v.deleted_at IS NOT NULL OR v.purged_at IS NOT NULL)` : shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') AND (v.content_length > 0 OR EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN v.id END AS versionId,
+        AND NOT ${base ? sql`(v.deleted_at IS NOT NULL OR v.purged_at IS NOT NULL)` : shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') AND ${hasVersionPayload(sql)} THEN v.id END AS versionId,
       ${
         includeContent
           ? sql`CASE WHEN NOT ${base ? sql`(s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL)` : slotDeletedIn(sql, fork, "s")} AND ${base ? sql`s.context_excluded` : contextExcludedIn(sql, fork)} = 0

@@ -1,7 +1,7 @@
 import { planningContext, summaryChunkRoom } from "./lcmModelBudget.ts"
 import { resolveSummaryModel } from "../assembler/summaryModel.ts"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
-import { workshopTranscript } from "./workshopTranscript.ts"
+import { workshopText, workshopTranscript } from "./workshopTranscript.ts"
 import { prepareTextTokens } from "../assembler/textTokens.ts"
 import { requireSummaries } from "./chatKindPolicy.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
@@ -129,16 +129,18 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           const path = (yield* lcmPath(sql, userId, chatId, at, selected.cursor ?? undefined)).filter(
             (s) => s.position > selected.cursorDepth
           )
+          const model = yield* base.model(state.modelBindings[""] ?? null)
+          const count = yield* prepareTextTokens(assembler.textCounters.list(), model)
           const transcripts = yield* workshopTranscript(
             sql,
             userId,
             chatId,
-            path.flatMap((s) => (s.versionId ? [s.versionId] : []))
+            path.flatMap((s) => (s.versionId ? [s.versionId] : [])),
+            Effect.succeed(count),
+            model?.context
           )
-          const model = yield* base.model(state.modelBindings[""] ?? null)
-          const count = yield* prepareTextTokens(assembler.textCounters.list(), model)
           recentNow = path.reduce(
-            (n, s) => n + count(s.content + (s.versionId ? (transcripts.get(s.versionId) ?? "") : "")) + 3,
+            (n, s) => n + count(workshopText(s.content, s.versionId ? transcripts.get(s.versionId) : undefined)) + 3,
             0
           )
         }
