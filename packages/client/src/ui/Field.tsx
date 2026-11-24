@@ -2,6 +2,7 @@ import { Field as BaseField } from "@base-ui/react/field"
 import { Fieldset as BaseFieldset } from "@base-ui/react/fieldset"
 import { Input as BaseInput } from "@base-ui/react/input"
 import {
+  useCallback,
   useRef,
   useState,
   type ComponentProps,
@@ -238,17 +239,29 @@ export function SecretInput({
   name,
   masked = true,
   onEmptyChange,
+  memory,
+  memoryKey = name,
   placeholder,
   className = ""
 }: {
   name: string
   masked?: boolean
   onEmptyChange?: (empty: boolean) => void
+  /** Optional form-local memory for a field that may unmount or change scope. */
+  memory?: { readonly current: Map<string, string> }
+  memoryKey?: string
   placeholder?: string | undefined
   className?: string
 }) {
+  const restore = useCallback(
+    (input: HTMLInputElement | null) => {
+      if (input && memory) input.value = memory.current.get(memoryKey) ?? ""
+    },
+    [memory, memoryKey]
+  )
   return (
     <Input
+      ref={memory === undefined ? undefined : restore}
       name={name}
       type={masked && !cssMasks() ? "password" : "text"}
       autoComplete="off"
@@ -260,7 +273,11 @@ export function SecretInput({
       data-lpignore="true"
       data-bwignore=""
       data-form-type="other"
-      onValueChange={(value) => onEmptyChange?.(value.trim() === "")}
+      onValueChange={(value) => {
+        if (value === "") memory?.current.delete(memoryKey)
+        else memory?.current.set(memoryKey, value)
+        onEmptyChange?.(value.trim() === "")
+      }}
       className={`${masked ? "[-webkit-text-security:disc]" : ""} ${className}`}
     />
   )
