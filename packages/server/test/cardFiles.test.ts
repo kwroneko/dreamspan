@@ -87,7 +87,8 @@ describe("card files", () => {
       const api = yield* client()
       yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
-        model: { context: 200000, vision: true }
+        model: { context: 200000, vision: true },
+        preset: { openai_max_context: 40_000 }
       })
       assert.strictEqual((yield* post("/files/folder", { path: "/files/cards" })).status, 200)
       const chat = yield* api.CreateWorkshop({ title: "Card files" })
