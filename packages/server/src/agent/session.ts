@@ -1003,8 +1003,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           // A story has no read_run: its server results are paged by read_result, this run's only.
           const storyMore = (end: number) =>
             /^[A-Za-z0-9_.:-]{1,128}$/.test(toolCallId)
-              ? `[Result shortened. read_result with call "${toolCallId}" and offset=${end} continues it.]`
-              : `[Result shortened. read_result with this call's id and offset=${end} continues it.]`
+              ? `[Result shortened. read_result with call "${toolCallId}" and offset=${end} continues it at that body offset.]`
+              : `[Result shortened. read_result with this call's id and offset=${end} continues it at that body offset.]`
           // Page the original, not the envelope this wrapped it in: paging the envelope quoted it twice.
           const pageSource = result !== raw ? raw.text : fullText
           let sentText =

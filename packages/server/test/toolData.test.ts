@@ -15,6 +15,7 @@ import type { ToolContext } from "../src/agent/tools.ts"
 import { budgetResult } from "../src/agent/tools.ts"
 import { toolData, toolDataBody, toolDataPage, toolResultFrame, TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
 import { runTools } from "../src/agent/tools/runs.ts"
+import { readResultTool } from "../src/agent/tools/mcp.ts"
 import { toolSearch } from "../src/agent/tools/loading.ts"
 import { setupTools } from "../src/agent/tools/setup.ts"
 import { decodeToolData } from "@dreamspan/shared/toolData.ts"
@@ -95,6 +96,38 @@ const context = (messages: ReadonlyArray<AgentMessage>) =>
     storyReadOf: () => "conversation"
   }) as unknown as ToolContext
 const read = (ctx: ToolContext, args: unknown) => runTools[0]!.execute(ctx, args as never)
+
+it.effect("story MCP continuations use the offset basis of the first page saved before Resume", () =>
+  Effect.gen(function* () {
+    const body = `${"x".repeat(15_600)}${"body & <tail> ".repeat(200)}`
+    const metadata = "<result_metadata>{}</result_metadata>"
+    const stored = toolData(body, metadata)
+    for (const source of [stored, body]) {
+      const first = toolDataPage(source, {
+        frame: metadata,
+        more: (end) => `[Result shortened. read_result with call "b1" and offset=${end} continues it.]`
+      })
+      const messages = [
+        {
+          role: "toolResult",
+          toolCallId: "b1",
+          toolName: "mcp_big_dump",
+          content: [{ type: "text", text: stored }],
+          details: { sentText: first.text },
+          isError: false,
+          timestamp: 1
+        }
+      ] as ReadonlyArray<AgentMessage>
+      const ctx = {
+        ...context(messages),
+        offer: { tools: [{ name: "mcp_big_dump", mcp: {} }] }
+      } as unknown as ToolContext
+      const out = yield* readResultTool.execute(ctx, { call: "b1", offset: first.end })
+      assert.isUndefined(out.isError, out.text)
+      assert.strictEqual(unquote(out.text), source.slice(first.end))
+    }
+  })
+)
 
 it.effect("accepts old v1 cursors into either the stored envelope or the decoded body", () =>
   Effect.gen(function* () {
