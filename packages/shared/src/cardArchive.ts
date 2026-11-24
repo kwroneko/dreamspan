@@ -25,6 +25,8 @@ export const cardArchiveCriteria = makeRegistry<{
   readonly label: string
   readonly unit: string
   readonly inputLabel: string
+  /** What the rule means by its words, said on hover (what counts as using a card). */
+  readonly explain?: string
   readonly initial: number
   readonly enabled: boolean
   /**
@@ -39,6 +41,7 @@ export const cardArchiveCriteria = makeRegistry<{
     label: "Never used, added more than",
     unit: "days ago",
     inputLabel: "Days",
+    explain: "A card is used once you chat with it, edit it or fork it.",
     initial: 30,
     enabled: true,
     matches: (card, now, n) => card.lastUsedAt === null && card.addedAt < now - n * 86400000
@@ -48,6 +51,7 @@ export const cardArchiveCriteria = makeRegistry<{
     label: "Not used in the last",
     unit: "months",
     inputLabel: "Months",
+    explain: "A card is used once you chat with it, edit it or fork it.",
     initial: 6,
     enabled: false,
     matches: (card, now, n) => {

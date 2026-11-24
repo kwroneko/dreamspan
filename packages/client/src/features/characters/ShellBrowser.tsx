@@ -39,9 +39,9 @@ import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { browseCards, mixesPersonas, useGroupedFamilies } from "./cardBrowse.tsx"
 import { useSidebarBrowse } from "./useSidebarBrowse.ts"
 import { CardBrowseBar } from "./CardBrowseBar.tsx"
+import { CardGridEmpty } from "./CardGridEmpty.tsx"
 import { SourceResults, useSourceBrowse } from "../cardSources/browse.tsx"
 import { SourceChips, SourceFiltersPanel } from "../cardSources/filters.tsx"
-import { NewCardButton } from "../editor/NewCard.tsx"
 import { GroupGrid, useGroupsSwitch } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
 import { characterChatActions, sidebarFoot } from "./homeSlots.ts"
@@ -1196,6 +1196,8 @@ function Browser() {
     )
   }
   const none = !forks.loading && sections.every(([id]) => forks.section(id).total === 0)
+  const sideCards = grid && data && !source ? browseCards(browsable(data), tabs.shown, needle) : []
+  const archivedView = grid && !source && tabs.shown.filter === "archived"
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="@container/leftsearch max-w-controls">
@@ -1272,14 +1274,6 @@ function Browser() {
           onSource={(id) => setBrowse({ source: id })}
           filtersId="side-source-filters"
         />
-      )}
-      {grid && !source && tabs.shown.filter === "personas" && (
-        <div>
-          <NewCardButton persona />
-        </div>
-      )}
-      {grid && !source && tabs.shown.filter === "archived" && (
-        <SlotOutlet slot={archivedCardActions} props={{ place: "sidebar" }} />
       )}
       {/* Below every filter row, directly above the list it navigates: coming or going, it moves only the list. */}
       {!grid && (scope.entity || scope.chat) && (
@@ -1373,14 +1367,22 @@ function Browser() {
             {tabs.characters && (
               <>
                 <CharacterGrid
-                  cards={browseCards(browsable(data), tabs.shown, needle)}
+                  cards={sideCards}
                   sort={tabs.shown.sort}
                   markPersonas={mixesPersonas(tabs.shown)}
                   families={
                     grouped ? { expanded: tabs.shown.family, onToggle: (family) => setBrowse({ family }) } : undefined
                   }
                   className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
-                />
+                >
+                  {!sideCards.length && <CardGridEmpty filter={tabs.shown.filter} needle={needle} place="sidebar" />}
+                </CharacterGrid>
+                {/* With archived cards shown, their actions follow the last tile: no row above the grid. */}
+                {archivedView && sideCards.length > 0 && (
+                  <div className="pt-3">
+                    <SlotOutlet slot={archivedCardActions} props={{ place: "sidebar" }} />
+                  </div>
+                )}
                 <SlotOutlet
                   slot={cardSearchExtras}
                   props={{ data, browse: tabs.shown, search: needle, className: "grid grid-cols-2 gap-2" }}
