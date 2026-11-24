@@ -7,7 +7,6 @@
 // and the first change writes them out.
 import {
   DEFAULT_REPLY_SECTIONS,
-  DEFAULT_SECTION_PAIRS,
   reasoningSendBack,
   type ReplySectionSettings,
   type SectionPair
@@ -20,7 +19,7 @@ import { Field, Input } from "../../ui/Field.tsx"
 import { Card } from "../../ui/Surface.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import { revealAdded } from "../../ui/reveal.ts"
-import { type EditorStore, useValue } from "./store.ts"
+import { type EditorStore, useRevisionDoc, useValue } from "./store.ts"
 
 const PATH = ["reply_sections"]
 
@@ -53,6 +52,7 @@ function PairRow({
   onRemove: () => void
 }) {
   const regex = pair.regex === true
+  const fallback = useRevisionDoc(store)?.reply_sections === undefined ? DEFAULT_REPLY_SECTIONS.pairs[index] : undefined
   return (
     <li className="flex flex-col gap-2 rounded-md border border-border p-3" data-section-pair={index}>
       <div className="flex justify-end">
@@ -77,7 +77,7 @@ function PairRow({
                 field={valueField(PATH)}
                 path={[...PATH, "pairs", index, "open"]}
                 value={pair.open}
-                format={(value) => (typeof value === "string" ? value : (DEFAULT_SECTION_PAIRS[index]?.open ?? ""))}
+                format={(value) => (typeof value === "string" ? value : (fallback?.open ?? ""))}
                 onChange={(value) => onChange({ ...pair, open: value })}
               />
             }
@@ -99,7 +99,7 @@ function PairRow({
                 field={valueField(PATH)}
                 path={[...PATH, "pairs", index, "close"]}
                 value={pair.close}
-                format={(value) => (typeof value === "string" ? value : (DEFAULT_SECTION_PAIRS[index]?.close ?? ""))}
+                format={(value) => (typeof value === "string" ? value : (fallback?.close ?? ""))}
                 onChange={(value) => onChange({ ...pair, close: value })}
               />
             }

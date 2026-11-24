@@ -42,6 +42,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { InlineRename } from "../../ui/InlineRename.tsx"
+import { openOnPlainClick } from "../../ui/links.ts"
 import {
   Block,
   BlockBody,
@@ -989,6 +990,7 @@ export function PromptDocument({
     </div>
   )
   const workspace = usePresetWorkspace()
+  const chat = workspace?.chat
   const slot = (label: string, predicate: (p: PresetContext["notes"][number]["placement"]) => boolean) => {
     const notes = context?.notes.filter((n) => predicate(n.placement)) ?? []
     // Only the places that hold a note show (owner, 2026-11-02: quiet when empty), in both layouts.
@@ -1017,23 +1019,19 @@ export function PromptDocument({
                 {index > 0 && ", "}
                 <Tooltip label={`Opens ${note.title} in the large editor.`}>
                   <Link
-                    to="/library/$refId"
-                    params={{ refId: note.ref }}
-                    search={{ focus: NOTE_FOCUS }}
+                    {...(chat
+                      ? {
+                          to: "/chats/$chatId",
+                          params: { chatId: chat.chatId },
+                          search: { fork: chat.forkId ?? undefined, editor: note.ref, focus: NOTE_FOCUS }
+                        }
+                      : {
+                          to: "/library/$refId",
+                          params: { refId: note.ref },
+                          search: { focus: NOTE_FOCUS }
+                        })}
                     className="underline underline-offset-2"
-                    onClick={(event) => {
-                      if (
-                        !workspace ||
-                        event.button !== 0 ||
-                        event.metaKey ||
-                        event.ctrlKey ||
-                        event.shiftKey ||
-                        event.altKey
-                      )
-                        return
-                      event.preventDefault()
-                      workspace.open(note.ref, NOTE_FOCUS)
-                    }}
+                    onClick={workspace ? openOnPlainClick(() => workspace.open(note.ref, NOTE_FOCUS)) : undefined}
                   >
                     {note.title}
                   </Link>

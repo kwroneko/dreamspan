@@ -964,6 +964,9 @@ main:has(> [data-fill]) {
   }
   .prompt-row-header [data-prompt-column-preview] {
     display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .prompt-row-header [data-prompt-inline-preview] {
     display: none;
@@ -986,7 +989,7 @@ main:has(> [data-fill]) {
   .prompt-row-header [data-prompt-title-row] .truncate {
     white-space: normal;
     overflow: visible;
-    overflow-wrap: normal;
+    overflow-wrap: anywhere;
     word-break: normal;
   }
   .prompt-row-header [data-placeholder-source] {
