@@ -7,9 +7,13 @@ import type { EntityId } from "@dreamspan/shared/chat.ts"
 export const homeIntro = defineSlot<{ data: ShellLibrary }>("home.intro")
 
 /**
- * The Characters page's header, right-aligned before its end controls (owner, 2026-11-24): the
- * editor feature's New card, so a card is made from Home without a visit to the library.
+ * The Characters page's header, just after its title (owner, 2026-11-24: "anchored to
+ * 'characters'"): the editor feature's New card, so a card is made from Home without a visit to
+ * the library.
  */
+export const homeHeaderTitleActions = defineSlot<Record<string, never>>("home.header-title-actions")
+
+/** The Characters page's header, right-aligned before its end controls. Nothing registers here. */
 export const homeHeaderActions = defineSlot<Record<string, never>>("home.header-actions")
 
 /**
