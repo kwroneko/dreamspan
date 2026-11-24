@@ -885,6 +885,8 @@ export interface ModelInput {
    */
   readonly cacheContract?: string | null
   readonly key: string
+  /** Canonical model ID from the model catalog, when available. */
+  readonly catalogKey?: string
   readonly prefill: "none" | "assistant" | "tool_schema"
   readonly continueUnavailable?: string | undefined
   readonly toolLoading?: "auto" | "every" | "dispatcher"

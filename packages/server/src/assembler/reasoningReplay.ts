@@ -108,7 +108,7 @@ const sameWriter = (native: NativeReasoning, model: ModelInput) =>
 /** Signed reasoning from the same writer, bound to its prefix where the provider binds it. */
 const signedTerms = (native: NativeReasoning, model: ModelInput) =>
   sameWriter(native, model)
-    ? { form: "signed" as const, bound: replayTerms({ api: model.api, key: model.key }).prefix }
+    ? { form: "signed" as const, bound: replayTerms(model).prefix }
     : { form: "none" as const, reason: "model" as const }
 
 const signed = (native: NativeReasoning) =>
