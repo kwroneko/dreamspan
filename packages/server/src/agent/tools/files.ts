@@ -11,7 +11,8 @@ import { isUtf8 } from "node:buffer"
 import { lstat, readFile, readdir, rmdir, statfs, type FileHandle } from "node:fs/promises"
 import { join, posix } from "node:path"
 import { Type } from "@earendil-works/pi-ai"
-import { Effect, Semaphore } from "effect"
+import { Effect, Exit, Scope, Semaphore } from "effect"
+import { lockFileTrees, withFileTree } from "../../files/treeLocks.ts"
 import type { User } from "@dreamspan/shared/domain.ts"
 import { ATTACHMENT_COPY_ROOT } from "@dreamspan/shared/files.ts"
 import type { RolloutEffect, RolloutEffectRecord } from "@dreamspan/shared/workshopApi.ts"
@@ -273,13 +274,6 @@ export const makeFileTools = (deps: FileToolDeps) => {
   const accountPermits = (userId: string) => {
     let semaphore = accounts.get(userId)
     if (!semaphore) accounts.set(userId, (semaphore = Semaphore.makeUnsafe(limits.perAccount)))
-    return semaphore
-  }
-  // App-side writes and Undo of one account run one at a time, so a hash check holds until the write.
-  const writeLocks = new Map<string, Semaphore.Semaphore>()
-  const writeLock = (userId: string) => {
-    let semaphore = writeLocks.get(userId)
-    if (!semaphore) writeLocks.set(userId, (semaphore = Semaphore.makeUnsafe(1)))
     return semaphore
   }
 
@@ -861,7 +855,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
     next: (before: Buffer | null) => Buffer,
     kind: "write" | "edit"
   ) =>
-    Semaphore.withPermit(writeLock(env.userId))(
+    withFileTree(
+      env.userId,
       Effect.gen(function* () {
         // A host folder (§3.7) has no quota; its changes are still versioned.
         const counted = root.host !== true
@@ -1583,6 +1578,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
         // Counted from here, so Reset can't empty the home folder under it.
         enter(env.userId)
         let handedOver = false
+        const treeScope = Scope.makeUnsafe()
         return yield* Effect.gen(function* () {
           const start = yield* currentDir(ctx, env)
           const cwd =
@@ -1637,9 +1633,14 @@ export const makeFileTools = (deps: FileToolDeps) => {
           const endOutput = (bytes: number) =>
             Effect.promise(async () => void (await sink?.end(bytes).catch(() => undefined)))
           const notStarted = (why: string) => ({ isError: true, text: `Not started: ${why}.` })
+          const lockTrees = lockFileTrees([
+            env.userId,
+            ...setup.places.flatMap(({ owner }) => (owner ? [owner.userId] : []))
+          ]).pipe(Effect.provideService(Scope.Scope, treeScope))
 
           if (background) {
-            const { before, why } = yield* scanPlaces(setup.places).pipe(
+            const { before, why } = yield* lockTrees.pipe(
+              Effect.andThen(scanPlaces(setup.places)),
               Effect.flatMap((before) => Effect.map(checkStart, (why) => ({ before, why }))),
               Effect.onExit((exit) =>
                 exit._tag === "Success" && exit.value.why === null
@@ -1690,9 +1691,14 @@ export const makeFileTools = (deps: FileToolDeps) => {
                         : "The command couldn't run.\n"
                   }
                 })
-                .finally(() => {
+                .finally(async () => {
                   live.delete(entry)
-                  void setup.close().finally(() => leave(env.userId))
+                  try {
+                    await setup.close()
+                  } finally {
+                    leave(env.userId)
+                    await Effect.runPromise(Scope.close(treeScope, Exit.void))
+                  }
                 })
             }
             jobs.set(job.id, job)
@@ -1717,18 +1723,22 @@ export const makeFileTools = (deps: FileToolDeps) => {
             const before = yield* scanPlaces(setup.places)
             const why = yield* checkStart
             if (why !== null) return { notStarted: why } as const
+            let runningCommand: Promise<RunResult> | undefined
             const result = yield* attempt((signal) => {
               // Stopping the call (Stop) or taking away what it was given stops the command.
               signal.addEventListener("abort", () => entry.controller.abort(), { once: true })
               if (signal.aborted) entry.controller.abort()
-              return entry.controller.signal.aborted ? Promise.resolve(null) : spec(entry.controller.signal)
-            })
+              return entry.controller.signal.aborted
+                ? Promise.resolve(null)
+                : (runningCommand = spec(entry.controller.signal))
+            }).pipe(Effect.ensuring(Effect.promise(async () => void (await runningCommand?.catch(() => undefined)))))
             live.delete(entry)
             if (result === null) return { notStarted: entry.stopped ?? "it was stopped" } as const
             const after = yield* scanPlaces(setup.places)
             return { result, found: diffPlaces(before, after) }
           })
-          const ran = yield* Semaphore.withPermit(instance)(Semaphore.withPermit(accountPermits(env.userId))(run)).pipe(
+          const ran = yield* lockTrees.pipe(
+            Effect.andThen(Semaphore.withPermit(instance)(Semaphore.withPermit(accountPermits(env.userId))(run))),
             Effect.onExit((exit) =>
               Effect.promise(async () => {
                 live.delete(entry)
@@ -1774,6 +1784,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
             ]
           }
         }).pipe(
+          Effect.onExit((exit) => (handedOver ? Effect.void : Scope.close(treeScope, exit))),
           Effect.ensuring(
             Effect.sync(() => {
               slot?.release()
@@ -1916,7 +1927,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
       const segments = host
         ? recipe.path.split("/").filter(Boolean)
         : resolveFilesPath(recipe.path, FILES_MOUNT).segments
-      return yield* Semaphore.withPermit(writeLock(env.userId))(
+      return yield* withFileTree(
+        env.userId,
         Effect.gen(function* () {
           const current = yield* attempt(() => readRegularFile(top, segments, VERSION_MAX_BYTES + 1)).pipe(
             Effect.orElseSucceed(() => null)
@@ -2022,26 +2034,30 @@ export const makeFileTools = (deps: FileToolDeps) => {
         controller: new AbortController(),
         stopped: null
       }
-      const result = yield* Semaphore.withPermit(instance)(
-        Semaphore.withPermit(accountPermits(env.userId))(
-          Effect.suspend(() => {
-            live.add(entry)
-            return attempt((signal) => {
-              signal.addEventListener("abort", () => entry.controller.abort(), { once: true })
-              if (signal.aborted) entry.controller.abort()
-              return selected.run(
-                {
-                  command: script,
-                  cwd: FILES_MOUNT,
-                  mounts: accountMounts(env),
-                  env: commandEnv(),
-                  network: "none",
-                  limits: { ...limits.run, timeoutMs }
-                },
-                entry.controller.signal
-              )
+      const result = yield* withFileTree(
+        env.userId,
+        Semaphore.withPermit(instance)(
+          Semaphore.withPermit(accountPermits(env.userId))(
+            Effect.suspend(() => {
+              live.add(entry)
+              let runningCommand: Promise<RunResult> | undefined
+              return attempt((signal) => {
+                signal.addEventListener("abort", () => entry.controller.abort(), { once: true })
+                if (signal.aborted) entry.controller.abort()
+                return (runningCommand = selected.run(
+                  {
+                    command: script,
+                    cwd: FILES_MOUNT,
+                    mounts: accountMounts(env),
+                    env: commandEnv(),
+                    network: "none",
+                    limits: { ...limits.run, timeoutMs }
+                  },
+                  entry.controller.signal
+                ))
+              }).pipe(Effect.ensuring(Effect.promise(async () => void (await runningCommand?.catch(() => undefined)))))
             })
-          })
+          )
         )
       ).pipe(Effect.ensuring(Effect.sync(() => (live.delete(entry), leave(env.userId)))))
       if (entry.stopped !== null) return { ok: false, lines: [] as Array<string> }

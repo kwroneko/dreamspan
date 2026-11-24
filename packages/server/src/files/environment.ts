@@ -142,6 +142,8 @@ export const scanTree = async (
     const listed = await listFolder(root, [...base, ...segments], maxEntries).catch(() => null)
     if (!listed) continue
     for (const entry of listed.entries) {
+      // Uploads stream into a temporary sibling before taking the tree lock to land the file.
+      if (/^\..*\.[0-9a-f]{12}\.rp-tmp$/u.test(entry.name)) continue
       const path = [...segments, entry.name].join("/")
       entries.set(path, {
         kind: entry.kind,

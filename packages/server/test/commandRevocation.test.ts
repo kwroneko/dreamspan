@@ -304,6 +304,47 @@ const world = (
   return { files, state, versions, changed, quotaCalls, run, context, root, share, idOf, ended, dataDir }
 }
 
+it("does not attribute a second workshop's write to a command already running", async () => {
+  const started = Promise.withResolvers<void>()
+  const finish = Promise.withResolvers<void>()
+  const sandbox: CommandSandbox = {
+    ...heldSandbox().sandbox,
+    run: async ({ command }) => {
+      if (command === "first") {
+        started.resolve()
+        await finish.promise
+      } else {
+        await writeFile(join(w.root("ben"), "made.txt"), "created by the second workshop")
+      }
+      return {
+        exitCode: 0,
+        timedOut: false,
+        outputCapped: false,
+        head: "",
+        tail: "",
+        outputBytes: 0,
+        cwd: null,
+        durationMs: 1
+      }
+    }
+  }
+  const w = world({ sandbox })
+  const first = Effect.runPromise(w.run("ben", "bash", { command: "first" }))
+  await Promise.race([started.promise, first])
+  const second = Effect.runPromise(w.run("ben", "bash", { command: "second" }))
+  try {
+    await Promise.race([second, new Promise((resolve) => setTimeout(resolve, 300))])
+  } finally {
+    finish.resolve()
+  }
+  assert.notInclude((await first).text, "made.txt")
+  assert.include((await second).text, "created /files/made.txt")
+  assert.deepStrictEqual(
+    w.versions.flatMap((version) => version.paths),
+    ["/files/made.txt"]
+  )
+})
+
 it.each([false, true])("refuses a command revoked during its file scan (background: %s)", async (background) => {
   const held = heldSandbox()
   const w = world({ sandbox: held.sandbox })
