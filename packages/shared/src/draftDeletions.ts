@@ -211,19 +211,8 @@ export const reconcileForm = (
     if (Array.isArray(left)) {
       if (!Array.isArray(right)) return clears.some((clear) => prefix(path, clear.path)) ? right : left
       const key = identityKey([left, right])
-      if (key === undefined) {
-        // A set of plain values both changed (ticked fields): the current one, less what this
-        // edit removed, plus what it added.
-        const was = start?.present ? start.value : undefined
-        const plain = (list: unknown) =>
-          Array.isArray(list) && list.every((item) => typeof item === "string" || typeof item === "number")
-        if (plain(left) && plain(right) && plain(was)) {
-          const before = was as ReadonlyArray<unknown>
-          const kept = left.filter((item) => !before.includes(item) || right.includes(item))
-          return [...kept, ...right.filter((item) => !before.includes(item) && !kept.includes(item))]
-        }
-        return initial !== null && !equal(at(initial, path).value, right) ? right : left
-      }
+      // A list without ids both changed is taken whole: its order and its rows' text go together.
+      if (key === undefined) return initial !== null && !equal(at(initial, path).value, right) ? right : left
       // An item another tab deleted, which this edit left as it was, stays deleted: no hole.
       const merged = right
         .map((item) => {
