@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { CodeEditor } from "../../ui/CodeEditor.tsx"
+import { flashItem } from "../../ui/reveal.ts"
 import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { type EditorStore, useComparisonRevision, useRevisionDoc } from "./store.ts"
 import { useFieldTabHref } from "./useFieldTabHref.ts"
@@ -101,7 +102,14 @@ export function CardTextEditor({
         selection={searchMatch}
         highlights={highlights}
         flash={flash}
-        onRevealSelection={scrollToSearchField}
+        onRevealSelection={(host, top) => {
+          scrollToSearchField(host, top)
+          // The lazy editor's frame exists once its selection can be revealed.
+          if (searchMatch?.landed) {
+            const frame = host.closest<HTMLElement>("[data-field-frame]")
+            if (frame) flashItem(frame)
+          }
+        }}
         base={comparison?.revision === revision ? comparison.value : value}
         label={label}
         rows={rows}
