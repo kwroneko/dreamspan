@@ -5,6 +5,8 @@ import type { ChatId, EntityId, VersionId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { DraftKey } from "@dreamspan/shared/drafts.ts"
 import { Effect } from "effect"
+import { DatabaseSync } from "node:sqlite"
+import { databaseFile } from "../src/db/connection.ts"
 import { PENDING_LEFT_MS } from "../src/api/draftChats.ts"
 import { Generator } from "../src/chat/Generator.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
@@ -253,6 +255,82 @@ describe("a pending chat's edges", () => {
       })
     )
   )
+  it.live("an old workshop page's first message, saved after the upgrade, goes to recovered texts", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, writer, userId } = yield* setup
+        const key = new DraftKey({ targetKind: "user_field", targetId: "pending-workshop:new", field: "First message" })
+        yield* writer.SaveDraft({
+          userId,
+          key,
+          draftId: null,
+          content: "Typed on the old workshop page.",
+          expectedRowVersion: null,
+          expectedSession: null,
+          baseRevision: null
+        })
+        const recovered = yield* api.ListRecoveredTexts({ limit: 50, before: null })
+        assert.deepInclude(
+          recovered.map((text) => [text.content, text.sourceLabel]),
+          ["Typed on the old workshop page.", "New workshop"]
+        )
+        assert.isNull(yield* (yield* Reader).GetDraft({ userId, key }))
+      })
+    )
+  )
+  it.live("the old workshop pages' first messages go to recovered texts as the server starts, history and all", () => {
+    const config = testConfig()
+    const layer = () => serverLayer(config, Generator.none)
+    const typed = "Ask the assistant to tidy the harbor lorebook."
+    return Effect.gen(function* () {
+      // Saved before the upgrade, then cleared: the text is only in its history.
+      const { userId, story } = yield* Effect.gen(function* () {
+        const { api, writer, userId } = yield* setup
+        const story = yield* api.CreateChat({ title: "Harbor" })
+        const key = new DraftKey({ targetKind: "user_field", targetId: `before-${story.id}`, field: "First message" })
+        const first = yield* writer.SaveDraft({
+          userId,
+          key,
+          draftId: null,
+          content: typed,
+          expectedRowVersion: null,
+          expectedSession: null,
+          baseRevision: null
+        })
+        yield* writer.SaveDraft({
+          userId,
+          key,
+          draftId: first.id,
+          content: "",
+          expectedRowVersion: first.rowVersion,
+          expectedSession: first.session,
+          baseRevision: null
+        })
+        return { userId, story }
+      }).pipe(Effect.scoped, Effect.provide(layer()))
+      // The key the old Workshop tab used.
+      const db = new DatabaseSync(databaseFile(config.dataDir))
+      db.prepare(`UPDATE drafts SET target_id = ? WHERE target_id = ?`).run(
+        `pending-workshop:${story.id}`,
+        `before-${story.id}`
+      )
+      db.close()
+      yield* Effect.gen(function* () {
+        const api = yield* client()
+        const recovered = yield* api.ListRecoveredTexts({ limit: 50, before: null })
+        assert.deepInclude(
+          recovered.map((text) => [text.content, text.sourceLabel]),
+          [typed, "Workshop about Harbor"]
+        )
+        const key = new DraftKey({
+          targetKind: "user_field",
+          targetId: `pending-workshop:${story.id}`,
+          field: "First message"
+        })
+        assert.isNull(yield* (yield* Reader).GetDraft({ userId, key }))
+      }).pipe(Effect.scoped, Effect.provide(layer()))
+    })
+  })
   it.live("purging a card swapped into a pending chat sweeps it", () =>
     run(
       Effect.gen(function* () {
