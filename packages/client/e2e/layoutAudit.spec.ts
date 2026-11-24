@@ -1133,10 +1133,13 @@ test.describe("synthetic library and every app surface", () => {
           await card.getByRole("button", { name: "Picture", exact: true }).click()
           await expect(page.locator("[data-cutout-box]")).toBeVisible()
           const dialog = page.getByRole("dialog")
-          for (const tab of ["Picture", "Portrait"]) {
+          for (const [tab, slug] of [
+            ["Full picture", "picture"],
+            ["Portrait", "portrait"]
+          ] as const) {
             await dialog.getByRole("button", { name: tab, exact: true }).click()
-            await audit(`dialog-picture-${tab.toLowerCase()}`, '[role="dialog"]')
-            await dialog.screenshot({ path: join(work, `${width}-${theme}-${tab.toLowerCase()}.png`) })
+            await audit(`dialog-picture-${slug}`, '[role="dialog"]')
+            await dialog.screenshot({ path: join(work, `${width}-${theme}-${slug}.png`) })
           }
           return
         }
