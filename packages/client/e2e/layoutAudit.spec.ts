@@ -449,6 +449,27 @@ test("the detector catches geometry defects and respects documented intent", asy
   expect((await layoutAudit(page)).filter((v) => v.kind === "overlay")).toEqual([])
 })
 
+// The owner's "Created after" popover: its heading, then a field labelled the same.
+test("a heading repeated as a field's label or the first sub-heading is reported, list rows aren't", async ({
+  page
+}) => {
+  await page.setContent(`<style>body{margin:20px;font:14px Arial} .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}</style>
+    <div role="dialog" id="pop" aria-labelledby="pop-title" style="padding:12px;width:300px">
+      <h2 id="pop-title">Created after</h2>
+      <label for="d">Created after</label> <button aria-label="About">?</button><input id="d" />
+    </div>
+    <section id="sec" style="padding:12px"><h3>Sites</h3><h4>Sites:</h4><p>Body</p></section>
+    <section id="ok" style="padding:12px"><h3>Tags</h3><label class="sr" for="t">Tags</label><input id="t" /><label for="u">Other</label><input id="u" /></section>
+    <section id="rows" style="padding:12px"><h3>Kind</h3><ul><li><label><input type="checkbox" />Kind</label></li></ul><h4>Lorebooks</h4></section>`)
+  const found = (await layoutAudit(page)).filter((v) => v.kind === "repeat")
+  expect(found.map((v) => v.measurement).sort()).toEqual([
+    'field label repeats the heading "created after" of #pop',
+    'first sub-heading repeats the heading "sites" of #sec'
+  ])
+  await page.locator("#pop").evaluate((el) => el.setAttribute("data-layout-audit-ignore", "repeat: fixture"))
+  expect((await layoutAudit(page)).filter((v) => v.kind === "repeat")).toHaveLength(1)
+})
+
 test("a chat column that stops short of its frame, or a composer short of the column, is reported", async ({
   page
 }) => {

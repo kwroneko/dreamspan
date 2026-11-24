@@ -33,7 +33,8 @@ import { type Write } from "./LcmFields.tsx"
 import { useShowPanel } from "./panels.tsx"
 import { PersonaSwitch } from "./PersonaSwitch.tsx"
 import type { ChatSession } from "./session.ts"
-import { summarizes, useChatKindLook } from "./kindLooks.ts"
+import { kindTitle, summarizes, useChatKindLook } from "./kindLooks.ts"
+import { useTitledAbove } from "../../ui/titledContainer.tsx"
 import { KindBadge } from "./KindBadge.tsx"
 import { ModelSelect } from "../pickers/ModelPicker.tsx"
 import { modelValue, parseModelValue, useModelChoices } from "./modelChoices.ts"
@@ -189,11 +190,13 @@ export function ChatIdentity({ session }: { session: ChatSession }) {
   const cast = view.cast
   const personaId = cast?.playedByMe[0] ?? null
   const persona = personaId === null ? undefined : cast?.cards.find((card) => card.entityId === personaId)
+  // The phone's sheet is titled with the chat's name already (kindTitle): not shown twice there.
+  const named = useTitledAbove(kindTitle(chatDisplayName(view), view.chat?.kind))
   return (
     <section aria-label="This chat" className="flex flex-col gap-4">
       <h2
         title={chatDisplayName(view)}
-        className="line-clamp-2 text-lg leading-snug font-semibold [overflow-wrap:anywhere]"
+        className={named ? "sr-only" : "line-clamp-2 text-lg leading-snug font-semibold [overflow-wrap:anywhere]"}
       >
         {chatDisplayName(view)} <KindBadge kind={view.chat?.kind} />
       </h2>

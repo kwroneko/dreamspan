@@ -404,9 +404,14 @@ describe("v1 as card sources", () => {
       assert.throws(() => familyOf("synthetic", detail, lists))
   })
 
-  it("a filter or sort v1 no longer lists is left out, and a body without filters is refused", () => {
+  it("a filter or sort v1 no longer lists, or one the bar doesn't place, is left out, and a body without filters is refused", () => {
     const caps = capabilitiesOf({
-      filters: [{ name: "nsfw", type: "enum", allowed_values: ["include", "exclude"], default: "exclude" }],
+      filters: [
+        { name: "nsfw", type: "enum", allowed_values: ["include", "exclude"], default: "exclude" },
+        // Never a generic control named after the parameter.
+        { name: "updated_after", type: "date", label: "Updated after" },
+        { name: "constructor", type: "string" }
+      ],
       sorts: ["newest", "popular"],
       modes: [{ name: "fts" }]
     })

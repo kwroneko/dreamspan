@@ -4,6 +4,7 @@ import { Button as BaseButton } from "@base-ui/react/button"
 import { Popover as BasePopover } from "@base-ui/react/popover"
 import { useRef, type ReactNode, type RefObject } from "react"
 import { buttonClass } from "./Button.tsx"
+import { TitledContainer } from "./titledContainer.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 import { WindowClose } from "./WindowClose.tsx"
 import { useAway } from "./away.ts"
@@ -104,7 +105,7 @@ export function Popover({
               </BasePopover.Title>
               <WindowClose onClick={() => onOpenChange(false)} />
             </div>
-            {children}
+            <TitledContainer title={title}>{children}</TitledContainer>
           </BasePopover.Popup>
         </BasePopover.Positioner>
       </BasePopover.Portal>

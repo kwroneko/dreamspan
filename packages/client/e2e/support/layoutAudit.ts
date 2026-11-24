@@ -12,7 +12,7 @@ interface Box {
   height: number
 }
 interface Violation {
-  kind: "inset" | "text" | "gap" | "alignment" | "overlap" | "overlay" | "fill" | "iconrow" | "exception"
+  kind: "inset" | "text" | "gap" | "alignment" | "overlap" | "overlay" | "fill" | "iconrow" | "repeat" | "exception"
   selector: string
   related?: string
   name: string
@@ -197,7 +197,7 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
       for (const el of shown) {
         if (el.hasAttribute("data-layout-audit-ignore")) {
           for (const entry of el.dataset.layoutAuditIgnore!.split(";"))
-            if (!/^(inset|text|gap|alignment|overlap|overlay|fill|iconrow):\s*\S.+/.test(entry.trim()))
+            if (!/^(inset|text|gap|alignment|overlap|overlay|fill|iconrow|repeat):\s*\S.+/.test(entry.trim()))
               add("exception", el, `Invalid exception (rule and reason required): ${entry}`)
         }
         // An icon's paths are drawing primitives, not independent layout boxes.
@@ -807,6 +807,77 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
                 last
               )
         }
+      }
+      // A heading repeated right under itself: a dialog, popover, sheet, panel or section whose
+      // visible heading is also the visible label of a field in it, or its first sub-heading
+      // ("Created after" over a field labelled "Created after"). The heading names the field
+      // already; the field takes it as its accessible name only. Rows of a list (a list's
+      // names, a menu's items) are content, not the container's own labels, so they're skipped.
+      const containerSelector =
+        "[role=dialog], [role=alertdialog], dialog, section, aside, fieldset, details, [role=region], [role=group], [role=radiogroup], [data-titled-container]"
+      const headingSelector = "h1, h2, h3, h4, h5, h6, [role=heading], legend, summary"
+      const rowSelector =
+        "li, ul, ol, table, tr, [role=list], [role=listitem], [role=listbox], [role=option], [role=row], [role=grid], [role=gridcell], [role=tree], [role=treeitem], [role=menu], [role=menuitem], [role=tablist], [role=tab]"
+      const words = (el: HTMLElement) => {
+        let text = ""
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+        for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+          const host = t.parentElement
+          if (!t.textContent?.trim() || !host || host.closest("svg") || !visible(host)) continue
+          text += ` ${t.textContent}`
+        }
+        return text
+          .toLowerCase()
+          .replace(/[^\p{L}\p{N}]+/gu, " ")
+          .trim()
+      }
+      // Between a node and its container (both excluded), no list row and no nested heading owner.
+      const rowBetween = (node: HTMLElement, container: HTMLElement) => {
+        for (const p of ancestors(parent(node))) {
+          if (p === container) return false
+          if (p.matches(rowSelector)) return true
+        }
+        return false
+      }
+      const headingOf = (container: HTMLElement) => {
+        const labelled = container
+          .getAttribute("aria-labelledby")
+          ?.split(/\s+/)
+          .map((id) => (container.getRootNode() as Document | ShadowRoot).getElementById(id))
+          .find((el): el is HTMLElement => !!el && container.contains(el) && visible(el))
+        if (labelled) return labelled
+        return [...container.querySelectorAll<HTMLElement>(headingSelector)].find(
+          (h) =>
+            visible(h) &&
+            parent(h)?.closest(containerSelector) === container &&
+            h.closest(containerSelector) !== h &&
+            !rowBetween(h, container)
+        )
+      }
+      for (const container of shown) {
+        // The shared components (ui/titledContainer.tsx) hide such a label in a production build
+        // and mark it; the caller still has to stop passing the title as its label.
+        if (container.hasAttribute("data-title-repeated"))
+          add("repeat", container, "a label repeats its container's title; the shared component hid it")
+        if (container instanceof SVGElement || !container.matches(containerSelector)) continue
+        const heading = headingOf(container)
+        if (!heading) continue
+        const title = words(heading)
+        if (!title) continue
+        const own = (el: HTMLElement) =>
+          el !== heading && !heading.contains(el) && !el.contains(heading) && visible(el) && !rowBetween(el, container)
+        const labels = [...container.querySelectorAll<HTMLElement>("label")].filter(own)
+        const firstSub = [...container.querySelectorAll<HTMLElement>(headingSelector)].find(
+          (h) => own(h) && !!(heading.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING)
+        )
+        for (const el of firstSub ? [...labels, firstSub] : labels)
+          if (words(el) === title)
+            add(
+              "repeat",
+              el,
+              `${el.localName === "label" ? "field label" : "first sub-heading"} repeats the heading "${title}" of ${path(container)}`,
+              heading
+            )
       }
       return results
     },

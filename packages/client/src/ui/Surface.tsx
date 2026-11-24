@@ -3,6 +3,7 @@ import { CenterHeaderContent } from "./CenterHeader.tsx"
 // empty states, and sections opened on demand.
 import { type ReactNode, useState } from "react"
 import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
+import { TitledContainer, useRepeatsTitle } from "./titledContainer.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
@@ -175,6 +176,8 @@ export function Disclosure({
 }) {
   const [opened, setOpened] = useState(open ?? defaultOpen)
   const [expanded, setExpanded] = useState(open ?? defaultOpen)
+  // A section under a title saying the same: its toggle stays, the repeat is reported (data-title-repeated).
+  const repeats = useRepeatsTitle(title, false, "The section's title")
   const summary = (
     <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-sm font-medium text-muted outline-none select-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
       <svg
@@ -197,6 +200,7 @@ export function Disclosure({
   return (
     <details
       open={open ?? defaultOpen}
+      {...(repeats ? { "data-title-repeated": "" } : {})}
       className={`group ${className}`}
       onToggle={(event) => {
         setExpanded(event.currentTarget.open)
@@ -212,7 +216,9 @@ export function Disclosure({
       >
         {summary}
       </Tooltip>
-      <div className="flex flex-col gap-4 pt-3 pb-2 pl-5">{!lazy || opened || open ? children : null}</div>
+      <div className="flex flex-col gap-4 pt-3 pb-2 pl-5">
+        <TitledContainer title={title}>{!lazy || opened || open ? children : null}</TitledContainer>
+      </div>
     </details>
   )
 }

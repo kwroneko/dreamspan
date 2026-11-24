@@ -16,6 +16,7 @@ import { FieldFrame, framedControl } from "./FieldFrame.tsx"
 import { textareaResize } from "./HeightGrip.tsx"
 import { Icon } from "./Icon.tsx"
 import { Tooltip } from "./Tooltip.tsx"
+import { TitledContainer, useRepeatsTitle } from "./titledContainer.tsx"
 
 // 16px text on touch screens, so iOS doesn't zoom into a focused field.
 const control =
@@ -34,7 +35,7 @@ export function Field({
   error,
   children,
   className = "",
-  labelHidden = false,
+  labelHidden: hideLabel = false,
   labelEnd
 }: {
   label: ReactNode
@@ -54,6 +55,9 @@ export function Field({
   children: ReactNode
   className?: string
 }) {
+  // A label repeating the title of the popover or panel it's in: the title names the field.
+  const repeats = useRepeatsTitle(label, hideLabel, "The field label")
+  const labelHidden = hideLabel || repeats
   const trail = useLabelTrail(!labelHidden)
   const labelRow = about ? (
     <div className={labelHidden ? "sr-only" : "text-sm leading-5"}>
@@ -72,7 +76,11 @@ export function Field({
     <BaseField.Label className={labelHidden ? "sr-only" : "text-sm font-medium text-text"}>{label}</BaseField.Label>
   )
   return (
-    <BaseField.Root invalid={error ? true : undefined} className={`flex min-w-0 flex-col gap-1.5 ${className}`}>
+    <BaseField.Root
+      invalid={error ? true : undefined}
+      {...(repeats ? { "data-title-repeated": "" } : {})}
+      className={`flex min-w-0 flex-col gap-1.5 ${className}`}
+    >
       {labelEnd !== undefined && !labelHidden ? (
         <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-3 gap-y-1">
           {labelRow}
@@ -384,9 +392,17 @@ export function Fieldset({
   children: ReactNode
   className?: string
 }) {
-  const head = <BaseFieldset.Legend className="inline text-sm font-medium text-text">{legend}</BaseFieldset.Legend>
+  const repeats = useRepeatsTitle(legend, false, "The group's legend")
+  const head = (
+    <BaseFieldset.Legend className={repeats ? "sr-only" : "inline text-sm font-medium text-text"}>
+      {legend}
+    </BaseFieldset.Legend>
+  )
   return (
-    <BaseFieldset.Root className={`flex min-w-0 flex-col gap-2 ${className}`}>
+    <BaseFieldset.Root
+      {...(repeats ? { "data-title-repeated": "" } : {})}
+      className={`flex min-w-0 flex-col gap-2 ${className}`}
+    >
       {about ? (
         <LabelWithHelp
           help={
@@ -399,7 +415,7 @@ export function Fieldset({
         head
       )}
       {description && <p className="text-sm text-muted">{description}</p>}
-      {children}
+      <TitledContainer title={legend}>{children}</TitledContainer>
     </BaseFieldset.Root>
   )
 }

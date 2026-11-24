@@ -333,8 +333,10 @@ function CardNotes({ store, call }: { store: EditorStore; call: Caller }) {
         // At the right at every width, with the page-level controls (owner, 2026-11-02).
         <NoteListControls ids={notes.map((entry) => entry.ref.id)} blocks={blocks} />
       )}
+      {/* The card's name heads the page already: here it names the section for assistive technology only. */}
       <NoteSectionHeader
         title={name}
+        titleHidden
         addHint={`Adds a new note to ${name}.`}
         onNew={() => void add()}
         onPick={() => setPicking(true)}

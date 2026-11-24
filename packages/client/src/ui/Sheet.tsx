@@ -3,6 +3,7 @@
 import { Dialog as BaseDialog } from "@base-ui/react/dialog"
 import { type ReactNode, useRef } from "react"
 import { ImageControls } from "./ImageControls.tsx"
+import { TitledContainer } from "./titledContainer.tsx"
 import { WindowClose } from "./WindowClose.tsx"
 import { useAway } from "./away.ts"
 
@@ -47,7 +48,7 @@ export function Sheet({
             )}
             <WindowClose ref={closeRef} onClick={() => onOpenChange(false)} />
           </div>
-          {children}
+          <TitledContainer title={title}>{children}</TitledContainer>
         </BaseDialog.Popup>
       </BaseDialog.Portal>
     </BaseDialog.Root>

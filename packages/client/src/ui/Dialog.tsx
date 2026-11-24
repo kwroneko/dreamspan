@@ -4,6 +4,7 @@ import { AlertDialog as BaseAlertDialog } from "@base-ui/react/alert-dialog"
 import { Dialog as BaseDialog } from "@base-ui/react/dialog"
 import { useRef, type ReactNode } from "react"
 import { Button } from "./Button.tsx"
+import { TitledContainer } from "./titledContainer.tsx"
 import { WindowClose } from "./WindowClose.tsx"
 import { useAway } from "./away.ts"
 
@@ -73,7 +74,7 @@ export function Dialog({
         </div>
         <WindowClose onClick={() => onOpenChange(false)} />
       </div>
-      {children}
+      <TitledContainer title={title}>{children}</TitledContainer>
     </>
   )
   return (
@@ -145,7 +146,7 @@ export function ConfirmDialog({
             <BaseAlertDialog.Title className="text-base font-semibold">{title}</BaseAlertDialog.Title>
             <BaseAlertDialog.Description className="text-sm text-muted">{description}</BaseAlertDialog.Description>
           </div>
-          {children}
+          <TitledContainer title={title}>{children}</TitledContainer>
           <DialogActions>
             <BaseAlertDialog.Close render={<Button hint="Closes this confirmation without applying changes." />}>
               {cancelLabel}
