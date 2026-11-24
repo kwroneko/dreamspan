@@ -302,7 +302,7 @@ describe("workshop preset and lorebook documents", () => {
         const edits =
           kind === "preset"
             ? [
-                [{ add: { identifier: "custom", name: "Custom", content: "Old light." }, before: "main" }],
+                [{ add: { identifier: "custom", name: "Custom", content: "aaa" }, before: "main" }],
                 [{ prompt: "custom", text: "New light." }],
                 [{ prompt: "custom", find: "New", replace: "Bright" }],
                 [
@@ -338,7 +338,7 @@ describe("workshop preset and lorebook documents", () => {
               ]
             : [
                 [
-                  { add: { uid: 10, comment: "Harbor", content: "Old light." } },
+                  { add: { uid: 10, comment: "Harbor", content: "aaa" } },
                   { add: { uid: 11, content: "Second entry." } }
                 ],
                 [{ entry: 10, text: "New light." }],
@@ -387,6 +387,17 @@ describe("workshop preset and lorebook documents", () => {
           assert.isUndefined(result.isError, result.text)
           const current = yield* api.OpenEditor({ refId })
           assert.notDeepEqual(current.doc, documents.at(-1))
+          if (i === 0) {
+            const target = kind === "preset" ? { prompt: "custom" } : { entry: 10 }
+            const overlap = yield* f.run(
+              `edit_${kind}`,
+              { [kind]: refId, changes: [{ ...target, find: "aa", replace: "X" }] },
+              "overlap"
+            )
+            assert.isTrue(overlap.isError)
+            assert.include(overlap.text, "Find must occur exactly once")
+            assert.deepStrictEqual((yield* api.OpenEditor({ refId })).doc, current.doc)
+          }
           documents.push(current.doc)
           assert.strictEqual(current.drafts.find((d) => d.id === draft.id)?.content, draft.content)
           assert.deepStrictEqual(

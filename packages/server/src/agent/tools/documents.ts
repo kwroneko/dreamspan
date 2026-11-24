@@ -67,7 +67,8 @@ export const lorebookEditArguments = Schema.Struct({
 const replace = (current: string, change: Record<string, unknown>) => {
   if (typeof change.text === "string") return change.text
   const find = String(change.find)
-  if (!find || current.split(find).length !== 2)
+  const first = current.indexOf(find)
+  if (!find || first < 0 || current.indexOf(find, first + 1) !== -1)
     throw new Error("Find must occur exactly once. Read the saved document again.")
   return current.replace(find, () => String(change.replace))
 }
