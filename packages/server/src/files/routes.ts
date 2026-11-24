@@ -52,6 +52,7 @@ import { isSafePath } from "../formats/zip.ts"
 import { WorkshopFiles } from "./WorkshopFiles.ts"
 import { BinContentGone } from "./bin.ts"
 import { accountEnv, prepareAccount, resolveFilesPath } from "./environment.ts"
+import { folderShareRefusal } from "./pluginCopies.ts"
 import {
   FilePathRefused,
   listFolder,
@@ -1312,13 +1313,14 @@ export const filesRoutes = Layer.unwrap(
       )
     })
 
-    /** Your own folder to share (§1.4): never the top, never one shared with you. */
-    const ownFolder = (path: string) =>
+    /** Your own folder to share (§1.4). Owners can still manage older offers of excluded folders. */
+    const ownFolder = (path: string, operation: "list" | "share" = "share") =>
       Effect.gen(function* () {
         const placed = yield* place(path)
         if (placed.share) return yield* Effect.fail(new Answer(400, "Only its owner can share this folder."))
-        if (placed.segments.length === 0)
-          return yield* Effect.fail(new Answer(400, "Share a folder inside your files."))
+        const reason = folderShareRefusal(placed.segments)
+        if (reason !== null && (operation === "share" || placed.segments.length === 0))
+          return yield* Effect.fail(new Answer(400, reason))
         const info = yield* Effect.tryPromise(() => statPath(placed.root, placed.segments))
         if (!info) return yield* Effect.fail(new Answer(404, "Not found. It may have been moved or deleted."))
         if (!info.isDirectory()) return yield* Effect.fail(new Answer(400, "Only a folder can be shared."))
@@ -1340,7 +1342,7 @@ export const filesRoutes = Layer.unwrap(
     /** The folder's shares and invitations, as its owner's Share dialog lists them. */
     const shares = Effect.gen(function* () {
       const query = yield* queryOf
-      const placed = yield* ownFolder(query.get("path") ?? "")
+      const placed = yield* ownFolder(query.get("path") ?? "", "list")
       const { checked, invitations } = yield* ownShares(placed.userId)
       return HttpServerResponse.jsonUnsafe(
         [

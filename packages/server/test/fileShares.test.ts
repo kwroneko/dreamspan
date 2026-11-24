@@ -80,6 +80,19 @@ const shareAccepted = (
   })
 
 describe("shared folders", () => {
+  it.live("refuses an invitation for a folder containing the server plugins' working copies", () =>
+    Effect.gen(function* () {
+      const wren = as("wren")
+      const ash = as("ash")
+      yield* ash.listing("/files")
+      assert.strictEqual((yield* wren.upload("/files/Plugins/Server/notes.txt", "Synthetic.")).status, 200)
+      const offer = yield* wren.json("/files/share", { path: "/files/Plugins", handle: "ash", mode: "view" })
+      assert.strictEqual(offer.status, 400)
+      assert.include(yield* Effect.promise(() => offer.text()), "server plugins' working copies")
+      assert.isEmpty((yield* ash.listing("/files")).invitations ?? [])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ authMode: "proxy" }))))
+  )
+
   it.live("isolation, Can view, Can edit, stopping, and the owner's move", () =>
     Effect.gen(function* () {
       const wren = as("wren")
