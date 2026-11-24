@@ -546,35 +546,41 @@ main:has(> [data-fill]) {
   }
 
   /*
-   * Every scrollbar: thin, a muted thumb with no track, a little stronger while the pointer is
-   * over what scrolls (owner, 2026-11-01). WebKit without `scrollbar-color` gets the same look
-   * from its own pseudo-elements. Cards in a scrolling list keep a gap before the bar
+   * Every scrollbar: thin, a muted thumb with no track and no step arrows, a little stronger
+   * while the pointer is over what scrolls (owner, 2026-11-01). Chromium draws step arrows at
+   * both ends of a standard thin scrollbar on some systems, so where the WebKit pseudo-elements
+   * exist they draw the bar (they apply only while the standard properties are unset); elsewhere
+   * the standard properties do. Cards in a scrolling list keep a gap before the bar
    * (`scrollbar-gutter: stable` and a right padding on the list).
    */
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar) transparent;
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: var(--scrollbar) transparent;
+    }
+    *:hover {
+      scrollbar-color: var(--scrollbar-hover) transparent;
+    }
   }
-  *:hover {
-    scrollbar-color: var(--scrollbar-hover) transparent;
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
   }
-  @supports not (scrollbar-color: auto) {
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-    ::-webkit-scrollbar-track {
-      background: transparent;
-    }
-    ::-webkit-scrollbar-thumb {
-      background: var(--scrollbar);
-      border: 2px solid transparent;
-      border-radius: 9999px;
-      background-clip: padding-box;
-    }
-    :hover::-webkit-scrollbar-thumb {
-      background-color: var(--scrollbar-hover);
-    }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar);
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: padding-box;
+  }
+  :hover::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-hover);
   }
 }
 

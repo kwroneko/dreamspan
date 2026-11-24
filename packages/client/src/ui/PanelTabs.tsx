@@ -158,7 +158,7 @@ export function SubjectTabs({
         <BaseTabs.List
           ref={list}
           aria-label={label}
-          className="flex items-center gap-1 overflow-x-auto overscroll-x-contain pb-1 [scrollbar-width:thin]"
+          className="flex items-center gap-1 overflow-x-auto overscroll-x-contain pb-1"
         >
           {tabs.map((tab, index) => {
             const short = compact && tab.avatar !== undefined && !tab.keepLabel && index !== named

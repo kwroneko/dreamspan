@@ -5,6 +5,7 @@ import { CardGroupingControl } from "./cardGrouping.tsx"
 import { useId, useLayoutEffect, useRef } from "react"
 import { Input } from "../../ui/Field.tsx"
 import { type SourceBrowse, SourceSortControl } from "../cardSources/browse.tsx"
+import { SourceSearchOptions } from "../cardSources/filters.tsx"
 import { type CardBrowse, CardFilterControl, CardSortControl, IncludePersonas } from "./cardBrowse.tsx"
 import { browsable, type ShellLibrary, useGroupCount } from "./shellData.tsx"
 
@@ -16,7 +17,8 @@ export function CardGridControls({
   onSearch,
   searchLabel,
   sources,
-  onSource
+  onSource,
+  filtersId
 }: {
   data: ShellLibrary
   browse: CardBrowse
@@ -30,6 +32,11 @@ export function CardGridControls({
    */
   sources?: SourceBrowse | undefined
   onSource?: (id: string) => void
+  /**
+   * The source's filter bar's id: its search options and (on a narrow bar) its Filters button
+   * then follow the search box, on its row (the box shrinks first).
+   */
+  filtersId?: string | undefined
 }) {
   const shown = sources?.info ?? null
   const name = `card-grid-${useId().replace(/[^a-zA-Z0-9-]/g, "")}`
@@ -53,6 +60,7 @@ export function CardGridControls({
           .card-grid-controls { grid-template-columns: minmax(0, 1fr) max-content; }
           .card-grid-filter { grid-column: 1 / -1; }
           .card-grid-search { grid-row: 2; grid-column: 1; max-width: 20rem; }
+          .card-grid-search[data-with-options] { max-width: none; }
           .card-grid-sort { grid-row: 2; grid-column: 2; }
         }
         @container ${name} (min-width: ${Math.max(medium, wide)}px) {
@@ -115,15 +123,22 @@ export function CardGridControls({
             )}
           </div>
         </div>
-        <div className="card-grid-search w-full min-w-0">
+        <div
+          className={`card-grid-search w-full min-w-0 ${shown && sources && filtersId !== undefined ? "flex flex-wrap items-center gap-2" : ""}`}
+          {...(shown && sources && filtersId !== undefined ? { "data-with-options": "" } : {})}
+        >
           {shown && sources ? (
-            <Input
-              type="search"
-              aria-label={`Search ${shown.name}`}
-              placeholder={`Search ${shown.name}`}
-              value={sources.remote.text}
-              onChange={(event) => sources.change({ text: event.currentTarget.value })}
-            />
+            <>
+              <Input
+                type="search"
+                aria-label={`Search ${shown.name}`}
+                placeholder={`Search ${shown.name}`}
+                value={sources.remote.text}
+                onChange={(event) => sources.change({ text: event.currentTarget.value })}
+                {...(filtersId !== undefined ? { className: "min-w-48 flex-1 basis-48 @xl:max-w-xs!" } : {})}
+              />
+              {filtersId !== undefined && <SourceSearchOptions browse={sources} filtersId={filtersId} />}
+            </>
           ) : (
             <Input
               type="search"

@@ -25,6 +25,9 @@ export function Popover({
   initialFocus,
   wide = false,
   tall = false,
+  fit = false,
+  closeButton = true,
+  titleAside,
   keepMounted = false
 }: {
   open: boolean
@@ -49,6 +52,15 @@ export function Popover({
   wide?: boolean
   /** As tall as the room on its side of the trigger allows, less a small margin: a long list. */
   tall?: boolean
+  /** As wide as its content (up to the window), for a small panel of controls. */
+  fit?: boolean
+  /**
+   * A close button beside the title. A filter's panel goes without: its trigger names it, and
+   * Escape or a click outside closes it.
+   */
+  closeButton?: boolean
+  /** Beside the title: an (i) that explains the panel, say. */
+  titleAside?: ReactNode
   /** Stays mounted, hidden, while closed: what its controls opened (a dialog, say) stays open. */
   keepMounted?: boolean
 }) {
@@ -59,7 +71,7 @@ export function Popover({
     ].find(
       (element) =>
         element.tabIndex >= 0 &&
-        !element.matches(":disabled, [data-window-close]") &&
+        !element.matches(":disabled, [data-window-close], [data-about-hint]") &&
         !element.closest("[hidden], [inert]") &&
         element.getClientRects().length > 0
     ) ?? true
@@ -97,13 +109,16 @@ export function Popover({
           <BasePopover.Popup
             ref={content}
             initialFocus={initialFocus ?? focusOnOpen}
-            className={`flex ${tall ? "max-h-[calc(var(--available-height)-0.5rem)]" : wide ? "max-h-[min(36rem,var(--available-height))]" : "max-h-[min(28rem,var(--available-height))]"} ${wide ? "w-[min(30rem,calc(100vw-2rem))]" : "w-[min(22rem,calc(100vw-2rem))]"} origin-[var(--transform-origin)] flex-col gap-2 overflow-hidden rounded-lg border border-border bg-surface p-3 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none`}
+            className={`flex ${tall ? "max-h-[calc(var(--available-height)-0.5rem)]" : wide ? "max-h-[min(36rem,var(--available-height))]" : "max-h-[min(28rem,var(--available-height))]"} ${fit ? "w-max max-w-[calc(100vw-2rem)]" : wide ? "w-[min(30rem,calc(100vw-2rem))]" : "w-[min(22rem,calc(100vw-2rem))]"} origin-[var(--transform-origin)] flex-col gap-2 overflow-hidden rounded-lg border border-border bg-surface p-3 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none`}
           >
-            <div className="flex shrink-0 items-start gap-3">
-              <BasePopover.Title className="min-w-0 flex-1 text-sm font-semibold [overflow-wrap:anywhere]">
+            <div className={`flex shrink-0 gap-1.5 ${closeButton ? "items-start" : "items-center"}`}>
+              <BasePopover.Title
+                className={`min-w-0 text-sm font-semibold [overflow-wrap:anywhere] ${closeButton ? "flex-1" : ""}`}
+              >
                 {title}
               </BasePopover.Title>
-              <WindowClose onClick={() => onOpenChange(false)} />
+              {titleAside}
+              {closeButton && <WindowClose onClick={() => onOpenChange(false)} />}
             </div>
             <TitledContainer title={title}>{children}</TitledContainer>
           </BasePopover.Popup>

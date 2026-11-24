@@ -54,11 +54,11 @@ export async function openPanel(page: Page, scope: Locator, title: string): Prom
   return sheet
 }
 
-/** Closes a panel's popover, or the sheet. */
+/** Closes a panel's popover (it has no close button: Escape, as the archive's), or the sheet. */
 export async function closePanel(page: Page, title: string) {
   const popover = page.getByRole("dialog", { name: title, exact: true })
   if ((await popover.count()) > 0) {
-    await popover.getByRole("button", { name: "Close", exact: true }).click()
+    await page.keyboard.press("Escape")
     await expect(popover).toHaveCount(0)
     return
   }

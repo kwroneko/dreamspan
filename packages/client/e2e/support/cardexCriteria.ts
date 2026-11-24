@@ -79,9 +79,10 @@ export function cardexCriteriaTests() {
             const suggestedTags = controls.getByLabel("Suggested tags", { exact: true })
             await expect(suggestedTags).toHaveCount(0)
             await controls.getByRole("textbox", { name: "Tags", exact: true }).focus()
-            await expect(controls.getByRole("button", { name: "More tags", exact: true })).toBeVisible()
-            await controls.getByRole("button", { name: "More tags", exact: true }).click()
-            await expect(suggestedTags.getByRole("listitem")).toHaveCount(20)
+            // More load as the list scrolls to its end (no More button).
+            await expect(suggestedTags.getByRole("listitem").first()).toBeVisible()
+            await suggestedTags.getByRole("listitem").last().scrollIntoViewIfNeeded()
+            await expect.poll(() => suggestedTags.getByRole("listitem").count()).toBeGreaterThanOrEqual(20)
             // Escape closes the list (and only the list).
             await controls.getByRole("textbox", { name: "Tags", exact: true }).press("Escape")
             await expect(suggestedTags).toHaveCount(0)
@@ -90,22 +91,26 @@ export function cardexCriteriaTests() {
             let panel = await openPanel(page, scope, "Creators")
             await panel.getByRole("searchbox", { name: "Add a creator", exact: true }).fill("/")
             const creatorList = panel.getByRole("list", { name: "Creators", exact: true })
-            await panel.getByRole("button", { name: "More creators", exact: true }).click()
-            await expect(creatorList.getByRole("listitem")).toHaveCount(20)
-            // Two ticked are by any of them; Not by any of turns the same two into those left out.
-            await creatorList.getByRole("checkbox").nth(0).click()
-            await creatorList.getByRole("checkbox").nth(1).click()
+            // More load as the list scrolls to its end.
+            const rows = creatorList.getByRole("button")
+            await expect(rows.first()).toBeVisible()
+            const firstPage = await rows.count()
+            await rows.last().scrollIntoViewIfNeeded()
+            await expect.poll(() => rows.count()).toBeGreaterThan(firstPage)
+            // Two chosen are by any of them; Not by any of turns the same two into those left out.
+            await rows.nth(0).click()
+            await rows.nth(1).click()
             await expect(
               panel.getByRole("list", { name: "Chosen creators", exact: true }).getByRole("listitem")
             ).toHaveCount(2)
-            await panel.getByRole("radio", { name: "Not by any of", exact: true }).click()
+            await panel.getByRole("button", { name: "Not by any of", exact: true }).click()
             await closePanel(page, "Creators")
             await expect(chips.locator("[data-source-chip]").filter({ hasText: /^Not by / })).toHaveCount(2)
             await clear()
             // Sites: included, or left out.
             const pickSite = async (mode: "Include" | "Exclude", site: string) => {
               const sites = await openPanel(page, scope, "Sites")
-              await sites.getByRole("radio", { name: mode, exact: true }).click()
+              await sites.getByRole("button", { name: mode, exact: true }).click()
               await sites.getByRole("checkbox", { name: site, exact: true }).click()
               await closePanel(page, "Sites")
             }
@@ -115,7 +120,7 @@ export function cardexCriteriaTests() {
             await check("Not Chub")
             // Each single choice has a chip and can be cleared again.
             for (const [title, option, chip] of [
-              ["Rating", "Safe", "Rating: Safe"],
+              ["Rating", "Hide NSFW", "Hide NSFW"],
               ["Kind", "Characters with a lorebook", "Kind: Characters with a lorebook"]
             ]) {
               panel = await openPanel(page, scope, title!)
@@ -132,7 +137,8 @@ export function cardexCriteriaTests() {
             await scope.getByRole("button", { name: "Search in: All text", exact: true }).click()
             const parts = page.getByRole("dialog", { name: "Search in", exact: true })
             await parts.getByRole("checkbox").first().click()
-            await parts.getByRole("button", { name: "Close", exact: true }).click()
+            await page.keyboard.press("Escape")
+            await expect(parts).toHaveCount(0)
             await check("Search in: ")
             // The cover default: unticked, its chip goes and cards without one are included.
             controls = await filterControls(page, scope)
