@@ -690,6 +690,7 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
     const start = group ? group.wrap(bwrap, argv) : { file: bwrap, args: argv }
     const child = (() => {
       try {
+        if (signal.aborted) return null
         return spawn(start.file, start.args, {
           stdio: ["ignore", "pipe", "pipe", ...(filterFile ? [filterFile.fd] : []), args.fd, ...passed],
           detached: true,
@@ -700,6 +701,17 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
         void args.close()
       }
     })()
+    if (child === null)
+      return {
+        exitCode: null,
+        timedOut: false,
+        outputCapped: false,
+        head: "",
+        tail: "",
+        outputBytes: 0,
+        cwd: null,
+        durationMs: Date.now() - started
+      }
     // The head fills once; the tail is a list of chunks trimmed from the front, so each chunk
     // is copied once however long the output runs.
     const headChunks: Array<Buffer> = []

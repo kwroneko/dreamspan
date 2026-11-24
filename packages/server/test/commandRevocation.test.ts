@@ -24,6 +24,7 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
+import { vi } from "vitest"
 import type { CapabilityMode } from "@dreamspan/shared/workshopApi.ts"
 import { makeFileTools } from "../src/agent/tools/files.ts"
 import { birthOf } from "../src/files/sharedFolders.ts"
@@ -35,6 +36,7 @@ import {
 } from "../src/agent/capabilities.ts"
 import { QuotaExceeded, type FilesQuota } from "../src/files/quota.ts"
 import { makeCommandOutputs } from "../src/files/commandOutput.ts"
+import * as environment from "../src/files/environment.ts"
 import { linuxBwrap } from "../src/sandbox/linuxBwrap.ts"
 import { noSandbox } from "../src/sandbox/none.ts"
 import type { RolloutTool, ToolContext, ToolOutput } from "../src/agent/tools.ts"
@@ -301,6 +303,36 @@ const world = (
     })
   return { files, state, versions, changed, quotaCalls, run, context, root, share, idOf, ended, dataDir }
 }
+
+it.each([false, true])("refuses a command revoked during its file scan (background: %s)", async (background) => {
+  const held = heldSandbox()
+  const w = world({ sandbox: held.sandbox })
+  const scanStarted = Promise.withResolvers<void>()
+  const finishScan = Promise.withResolvers<void>()
+  const scanTree = environment.scanTree
+  const scan = vi.spyOn(environment, "scanTree").mockImplementationOnce(async (...args) => {
+    scanStarted.resolve()
+    await finishScan.promise
+    return scanTree(...args)
+  })
+  const command = Effect.runPromise(w.run("ben", "bash", { command: "true", run_in_background: background }))
+  try {
+    // Also notice if setup fails before reaching the scan, so this test can't wait forever.
+    assert.strictEqual(await Promise.race([scanStarted.promise, command]), undefined)
+    w.state.grants.set("commands", "off")
+    await Effect.runPromise(w.files.recheckCommands(["ben"]))
+    finishScan.resolve()
+    const result = await Promise.race([command, held.started().then(() => null)])
+    assert.isNotNull(result, "the sandbox must not be invoked")
+    assert.include(result!.text, "Not started: Run commands was turned off")
+    assert.strictEqual(held.runs(), 0)
+  } finally {
+    finishScan.resolve()
+    scan.mockRestore()
+    w.files.stopAll()
+    await command
+  }
+})
 
 it.live.skipIf(!commands)(
   "a command through a folder shared to edit is the owner's: quota, versions with the actor, file managers",

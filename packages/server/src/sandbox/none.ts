@@ -142,6 +142,19 @@ const runWith =
             : `This command's processes can't be held together right now: its cgroup couldn't be opened and there's no PID namespace (${namespace.none}).`
         )
     }
+    if (signal.aborted) {
+      await group?.finish().catch(() => undefined)
+      return {
+        exitCode: null,
+        timedOut: false,
+        outputCapped: false,
+        head: "",
+        tail: "",
+        outputBytes: 0,
+        cwd: null,
+        durationMs: Date.now() - started
+      }
+    }
     const child = spawn(file, args, {
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
