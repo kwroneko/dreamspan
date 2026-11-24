@@ -4,6 +4,7 @@
 // item by kind and name or id, and a revision by number (as list_revisions numbers them), id or
 // "latest". They're loaded with the Versions skill, so the immediate tool list doesn't grow.
 import { Type } from "@earendil-works/pi-ai"
+import { canonicalJson } from "@dreamspan/shared/editing.ts"
 import type { LibraryRef, Revision, RevisionId } from "@dreamspan/shared/library.ts"
 import { unifiedDiff } from "@dreamspan/shared/unifiedDiff.ts"
 import { Effect } from "effect"
@@ -183,7 +184,7 @@ const diffRevisions: RolloutTool<{
       if ("error" in resolved) return { text: resolved.error, isError: true }
       const ref = resolved.ref
       const invalidCursor = { text: "Use the cursor from the previous diff page with the same fields.", isError: true }
-      const cursor = /^([\w-]{1,100}):([\w-]{1,100}):(\d{1,9}):(\d{1,9})$/.exec(args.cursor ?? "")
+      const cursor = /^([\w-]{1,100}):([\w-]{1,100}):(?:([01]):)?(\d{1,9}):(\d{1,9})$/.exec(args.cursor ?? "")
       if (args.cursor !== undefined && cursor === null) return invalidCursor
       const from = yield* findRevision(ctx, ref, cursor?.[1] ?? args.from)
       if ("error" in from) return { text: from.error, isError: true }
@@ -198,13 +199,24 @@ const diffRevisions: RolloutTool<{
       const showBook = yield* mayReadCardBook(ctx, ref, beforeDoc, afterDoc)
       const refusal = yield* cardSightRefusal(ctx, ref)
       if (refusal !== null) return { text: refusal, isError: true }
+      // Only diffs with selected book changes need a visibility marker in their cursor.
+      const hasBookChange =
+        args.kind === "card" &&
+        (args.fields === undefined || args.fields.includes("character_book")) &&
+        canonicalJson(beforeDoc.character_book) !== canonicalJson(afterDoc.character_book)
+      const bookVisibility = hasBookChange ? (showBook ? "1" : "0") : undefined
+      if (cursor && cursor[3] !== bookVisibility)
+        return {
+          text: "The cursor does not match current Lorebooks visibility. Restart the diff without a cursor.",
+          isError: true
+        }
       const before = visibleDoc(args.kind, beforeDoc, showBook)
       const after = visibleDoc(args.kind, afterDoc, showBook)
       const changes = documentDiff(before, after).filter(
         (c) => args.fields === undefined || args.fields.includes(topField(c.field))
       )
       const head = `${args.kind} "${ref.label}" (id ${ref.id}): revision ${from.revision.number ?? from.revision.id} → ${to === null ? "now" : (to.revision.number ?? to.revision.id)}`
-      const start = Number(cursor?.[3] ?? 0)
+      const start = Number(cursor?.[4] ?? 0)
       if (cursor && start >= changes.length) return invalidCursor
       const budget = pageTokens(args.max_tokens)
       const counter = count(ctx)
@@ -218,15 +230,17 @@ const diffRevisions: RolloutTool<{
         if ((yield* counter(noDiff)) <= budget) return { text: noDiff }
         return yield* tooSmallResult()
       }
+      const cursorPrefix =
+        bookVisibility === undefined ? `${from.revision.id}:${toId}` : `${from.revision.id}:${toId}:${bookVisibility}`
       const footer = (at: number, offset: number) =>
-        at < changes.length ? `[Continue with cursor="${from.revision.id}:${toId}:${at}:${offset}"]` : ""
+        at < changes.length ? `[Continue with cursor="${cursorPrefix}:${at}:${offset}"]` : ""
       let heading = cursor ? "" : head
       const render = (parts: ReadonlyArray<string>, next: string) =>
         [heading, ...parts, next].filter(Boolean).join("\n\n")
       const shown: Array<string> = []
       let page = ""
       for (let at = start; at < changes.length; at++) {
-        const offset = at === start ? Number(cursor?.[4] ?? 0) : 0
+        const offset = at === start ? Number(cursor?.[5] ?? 0) : 0
         const current = section(changes[at]!)
         if (offset >= current.length) return invalidCursor
         const text = current.slice(offset)

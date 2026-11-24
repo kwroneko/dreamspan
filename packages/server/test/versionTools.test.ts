@@ -325,6 +325,51 @@ describe("version tools", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("restarts a paged card diff when Lorebooks visibility changes", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const book = (content: string) => loreBook([{ ...newLorebookEntry(1), content }]).document
+      const first = yield* f.save(f.card, { character_book: book("Old chart."), unknown_fields: { label: "Old" } })
+      const last = yield* f.save(f.card, {
+        character_book: book("New chart. ".repeat(160)),
+        unknown_fields: { label: "New" }
+      })
+      let showBook = true
+      const sight: LibrarySight = {
+        inView: () => Effect.succeed(false),
+        gate: (capability) =>
+          Effect.sync(() =>
+            capability === "library.cards" || showBook ? { ok: true } : { ok: false, text: "Lorebooks are off." }
+          )
+      }
+      const options = { sight, countTokens: (text: string) => Effect.succeed(text.length) }
+      const args = {
+        kind: "card",
+        item: f.card,
+        from: first.ref.headRevisionId,
+        to: last.ref.headRevisionId,
+        fields: ["character_book", "unknown_fields"],
+        max_tokens: 300
+      }
+      const page = yield* f.run("diff_revisions", args, "page", options)
+      assert.include(page, "character_book")
+      const cursor = /cursor="([^"]+)"/.exec(page)?.[1]
+      assert.isString(cursor)
+      const continued = yield* f.run("diff_revisions", { ...args, cursor }, "continued", options)
+      assert.include(continued, "New chart.")
+      showBook = false
+      const refused = yield* f.call("diff_revisions", { ...args, cursor }, "revoked", options)
+      assert.isTrue(refused.isError)
+      assert.include(refused.text, "Restart the diff without a cursor")
+      assert.notInclude(refused.text, "New chart.")
+      const restarted = yield* f.run("diff_revisions", args, "restart", options)
+      assert.include(restarted, "unknown_fields.label: Old → New")
+      assert.notInclude(restarted, "New chart.")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("revert_change takes one revision's change back and keeps later edits, with its message", () => {
     const config = testConfig()
     return Effect.gen(function* () {
