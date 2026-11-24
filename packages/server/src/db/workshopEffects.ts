@@ -37,9 +37,10 @@ import { makeLibraryQueries } from "./library.ts"
 import { transaction } from "./tx.ts"
 import { workshopLimits as limits } from "../workshopLimits.ts"
 import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
+import { visibleDoc } from "../agent/libraryView.ts"
 import { newWorkshopImportMedia } from "./workshopImportMedia.ts"
 import { guarded, insertReversal, revisionReversal } from "./changeReversals.ts"
-import { unitName } from "@dreamspan/shared/changeReversal.ts"
+import { unitName, unitPath } from "@dreamspan/shared/changeReversal.ts"
 
 /** The assistant's message for a revision it writes, on one line; none when it gave none. */
 const agentMessage = (message: string | undefined) => message?.replace(/\p{Cc}+/gu, " ").trim() || undefined
@@ -1177,6 +1178,10 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               input.fields
             )
             const unchanged = { result: "", effects: [] }
+            const conflictValue = (field: string, value: unknown) =>
+              before.kind === "card" && unitPath(field)[0] === "extensions"
+                ? (visibleDoc("card", { extensions: value }).extensions ?? null)
+                : (value ?? null)
             if (plan.conflicts.length > 0)
               return {
                 ...unchanged,
@@ -1185,8 +1190,8 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                   note: "Nothing was written: these fields were changed since in the same places. Edit them yourself if they should change.",
                   conflicts: plan.conflicts.map((c) => ({
                     field: unitName(c.field),
-                    now: c.now ?? null,
-                    before_the_change: c.before ?? null
+                    now: conflictValue(c.field, c.now),
+                    before_the_change: conflictValue(c.field, c.before)
                   }))
                 })
               }
