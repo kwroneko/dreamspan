@@ -270,6 +270,9 @@ const connectWith = (baseUrl: string, priceEndpoint: boolean | undefined) =>
     const models_ = () => reader.ListModels({ userId, connectionId: connection.id, includeHidden: true })
     const feedOf = (key: string) => Effect.map(models_(), (all) => all.find((m) => m.key === key)!.upstream.priceFeed)
     return {
+      connection,
+      settings,
+      userId,
       byKey,
       reply,
       feedOf,
@@ -490,6 +493,43 @@ describe("when prices are asked again (PRICES §4.5, §4.6)", () => {
       yield* refresh
       assert.strictEqual(asked(), 2)
     }).pipe(Effect.scoped, Effect.provide(layer({ now: time.now })))
+  })
+
+  it.live("polls the new server after an unsupported connection changes address", () => {
+    const time = clock()
+    return Effect.gen(function* () {
+      const old = yield* mock((request, res) =>
+        request.path.endsWith("/models")
+          ? json(res, 200, { data: [{ id: "m" }] })
+          : request.path === PRICES
+            ? json(res, 404, { error: "not found" })
+            : sse(res, completionChunks(["Hi."], {}))
+      )
+      const fresh = yield* gateway()
+      const { connection, settings, userId, reply, state, timer, feedOf } = yield* connectWith(old.url, true)
+      yield* reply("m")
+      yield* timer
+      assert.lengthOf(
+        old.requests().filter((r) => r.path === PRICES),
+        1
+      )
+      assert.strictEqual((yield* state)?.state, "unsupported")
+
+      const writer = yield* Database.Writer
+      yield* writer.UpdateConnection({
+        userId,
+        connectionId: connection.id,
+        settings: { ...settings, baseUrl: fresh.url },
+        expectedRowVersion: connection.rowVersion
+      })
+      yield* timer
+      assert.lengthOf(
+        fresh.requests().filter((r) => r.path === PRICES),
+        1
+      )
+      assert.strictEqual((yield* state)?.state, "supported")
+      assert.deepStrictEqual((yield* feedOf("m"))?.price, { input: 2, output: 10 })
+    }).pipe(Effect.scoped, Effect.provide(layer({ now: time.now, bindKeysToOrigins: false })))
   })
 
   it.live("asks again when due, with the ETag; a 304 only moves fetchedAt", () => {
