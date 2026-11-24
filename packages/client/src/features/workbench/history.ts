@@ -86,12 +86,29 @@ export const destination = (history: TabHistory, delta: number): TabEntry | unde
   return index < history.floor || index >= history.entries.length ? undefined : history.entries[index]
 }
 
+/** The browser and tab can write the same query in different orders. */
+const canonicalHref = (href: string) => {
+  const queryStart = href.indexOf("?")
+  const hashStart = href.indexOf("#")
+  if (queryStart < 0 || (hashStart >= 0 && hashStart < queryStart)) return href
+  const queryEnd = hashStart < 0 ? href.length : hashStart
+  const params = new URLSearchParams(href.slice(queryStart, queryEnd))
+  params.sort()
+  const search = params.toString()
+  return `${href.slice(0, queryStart)}${search ? `?${search}` : ""}${href.slice(queryEnd)}`
+}
+
 /** Where `href` is beside the entry shown, preferring the browser's direction if both match. */
 export const besideAt = (history: TabHistory, href: string, traversal: number): -1 | 0 | 1 => {
   const preferred = traversal > 0 ? 1 : -1
   const other = preferred === 1 ? -1 : 1
-  if (destination(history, preferred)?.href === href) return preferred
-  if (destination(history, other)?.href === href) return other
+  const canonical = canonicalHref(href)
+  const matches = (delta: -1 | 1) => {
+    const entry = destination(history, delta)
+    return entry !== undefined && canonicalHref(entry.href) === canonical
+  }
+  if (matches(preferred)) return preferred
+  if (matches(other)) return other
   return 0
 }
 
