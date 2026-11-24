@@ -1,3 +1,4 @@
+import { ORDER_UNIT } from "./changeReversal.ts"
 // What a library document's text fields are, by kind: their places, labels and text, in the
 // order the editors show them. The editors' Search and replace (client features/editor/fields.ts,
 // which adds fields that features register) and Search and replace across the library
@@ -102,6 +103,7 @@ export const fieldLabel = (kind: EntityKind, doc: Doc, path: FieldPath, removedF
   const [top, second, ...rest] = path
   const first = LABELS[kind]?.[String(top)] ?? words(String(top))
   if (second === undefined) return first
+  if (second === ORDER_UNIT) return /order$/i.test(first) ? first : `${first} order`
   // A card's embedded book is labelled as a lorebook is: "Lorebook: Entry “Harbour”: Order".
   if (kind === "card" && top === "character_book") {
     const book = (at: Doc | undefined) => (at && (getAt(at, ["character_book"]) as Doc | undefined)) ?? undefined

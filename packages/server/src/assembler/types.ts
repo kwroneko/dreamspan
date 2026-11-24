@@ -376,6 +376,8 @@ export interface ContextSnapshot {
   readonly agentToolState?: Readonly<Record<string, unknown>>
   /** An agent reply's assembly options, for a rebuild. */
   readonly agentAssembly?: AgentAssembly
+  /** One-time workshop events included in this rollout, acknowledged on dispatch. */
+  readonly turnEvents?: ReadonlyArray<string>
   /**
    * An agent reply's lorebooks as assembly read them (attached, the preset's, cards' embedded
    * ones, `card:<entity>` with the card's revision), for its lookup_lore tool.

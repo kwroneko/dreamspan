@@ -59,10 +59,11 @@ export function ItemChangeAction({
   /** The reply, to open the change view when a revert conflicts. */
   reply?: ChangeReply
   /** In the change view: show the conflicts there instead of opening it. */
-  onConflicts?: (outcome: ReversalOutcome) => void
+  onConflicts?: (outcome: ReversalOutcome, reversalId?: string) => void
 }) {
   const action = useAction()
   const [conflicted, setConflicted] = useState(false)
+  const [redoConflict, setRedoConflict] = useState<string | null>(null)
   const [ask, setAsk] = useState<string | null>(null)
   const resolve = useRef<HTMLAnchorElement>(null)
   // A revert that conflicts opens the change view where the row's count would.
@@ -73,9 +74,15 @@ export function ItemChangeAction({
   if (itemUndone(item) || reverted) {
     const reverts = standingReverts(item)
     const redo = async () => {
+      setRedoConflict(null)
       for (const reversalId of reverts) {
         const result = await action.run((client) => client("RedoChange", { reversalId }), CHANGE_KEYS)
-        if (!result.ok || result.value.conflicts.length > 0) return
+        if (!result.ok) return
+        if (result.value.conflicts.length > 0) {
+          if (onConflicts) onConflicts(result.value, reversalId)
+          else setRedoConflict(reversalId)
+          return
+        }
       }
     }
     return (
@@ -105,9 +112,10 @@ export function ItemChangeAction({
             Redo
           </Button>
         )}
-        {action.error && (
+        {(action.error || (redoConflict !== null && reverts.includes(redoConflict))) && (
           <span role="alert" className="text-xs text-danger [overflow-wrap:anywhere]">
-            Not redone: {action.error.message}
+            Not redone:{" "}
+            {action.error?.message ?? "Changed since. Open its change view and choose Redo to resolve the conflict."}
           </span>
         )}
       </span>
@@ -116,10 +124,8 @@ export function ItemChangeAction({
   const pending = item.effects.filter(undoable)
   if (pending.length === 0) return null
   const undoAll = async (binAnyway: boolean) => {
-    // Newest first, as the turn made them: each undo needs the item as the next one left it.
-    // Asked, the made item goes to the bin as it is now.
-    const order = binAnyway ? pending.filter((e) => e.kind === "library.create") : pending
-    for (const effect of order) {
+    // The writer bins the created item with the edits the reply made to it.
+    for (const effect of pending.filter((e) => e.kind === "library.create")) {
       const result = await action.run(
         (client) => client("UndoRolloutEffect", { ...effectKey(effect), ...(binAnyway ? { binAnyway } : {}) }),
         CHANGE_KEYS

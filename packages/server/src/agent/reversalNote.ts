@@ -25,8 +25,13 @@ export const reversalNote = (reader: Reader["Service"]): TurnNote => ({
             ? `The user reverted your change to ${what} (${fields}).`
             : `The user put back your change to ${what} (${fields}).`
         }),
-        ...since.binned.map((name) => `The user undid ${name} (in the bin).`)
+        ...since.binned.map(({ name }) => `The user undid ${name} (in the bin).`)
       ]
-      return lines.length === 0 ? null : lines.join("\n")
+      return lines.length === 0
+        ? null
+        : {
+            text: lines.join("\n"),
+            events: [...since.reversals.map((r) => r.id), ...since.binned.map((b) => b.id)]
+          }
     }).pipe(Effect.orElseSucceed(() => null))
 })

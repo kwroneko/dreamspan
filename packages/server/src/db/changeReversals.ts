@@ -7,8 +7,11 @@
 import {
   changedUnits,
   docOfUnits,
+  matchesReversalHead,
   pickedUnits,
+  planGroupedReversal,
   planReversal,
+  type ReversalPatch,
   revertedFields,
   type ReversalPlan
 } from "@dreamspan/shared/changeReversal.ts"
@@ -52,6 +55,8 @@ interface ReversalRow {
   readonly label: string
   readonly action: "revert" | "redo"
   readonly reverses_id: string | null
+  readonly head_before: string | null
+  readonly head_after: string | null
   readonly fields_json: string
   readonly before_json: string
   readonly after_json: string
@@ -175,6 +180,44 @@ export const withReversions = (sql: SqlClient.SqlClient, effects: ReadonlyArray<
     })
   })
 
+/** Each covered field whose latest action on this effect is still this particular revert. */
+const standingCoverage = (sql: SqlClient.SqlClient, record: ReversalRow, selected?: EffectKey) =>
+  Effect.gen(function* () {
+    const rows = yield* sql<{
+      rollout_id: string
+      tool_call_id: string
+      seq: number
+      of_json: string
+      fields_json: string
+    }>`SELECT x.rollout_id, x.tool_call_id, x.seq, x.of_json, json_group_array(field.value) AS fields_json
+      FROM change_reversal_effects x JOIN rollout_effects e USING (rollout_id, tool_call_id, seq)
+      JOIN change_reversals original ON original.id = x.reversal_id
+      CROSS JOIN json_each(x.fields_json) field
+      WHERE x.reversal_id = ${record.id} AND e.undone_at IS NULL AND NOT EXISTS (
+        SELECT 1 FROM change_reversal_effects y JOIN change_reversals newer ON newer.id = y.reversal_id
+        CROSS JOIN json_each(y.fields_json) taken
+        WHERE y.rollout_id = x.rollout_id AND y.tool_call_id = x.tool_call_id AND y.seq = x.seq
+          AND (newer.created_at, newer.rowid) > (original.created_at, original.rowid)
+          AND taken.value = field.value
+      )
+      GROUP BY x.rollout_id, x.tool_call_id, x.seq`
+    const effects = rows.map((row): CoveredEffect => ({
+      rolloutId: row.rollout_id,
+      toolCallId: row.tool_call_id,
+      seq: row.seq,
+      of: JSON.parse(row.of_json) as Array<string>,
+      fields: JSON.parse(row.fields_json) as Array<string>
+    }))
+    const chosen = selected
+      ? effects.filter(
+          (e) => e.rolloutId === selected.rolloutId && e.toolCallId === selected.toolCallId && e.seq === selected.seq
+        )
+      : effects
+    const covered = new Set(chosen.flatMap((effect) => effect.fields))
+    const fields = (JSON.parse(record.fields_json) as Array<string>).filter((field) => covered.has(field))
+    return { fields, effects }
+  })
+
 /** The approvals a revert never gives (as a restored revision, editorWrites.ts `RestoreRevision`). */
 export const guarded = (kind: EntityKind, head: Doc, next: Doc): Doc => {
   let doc = withoutGrantedAgentEdits(kind, head, next)
@@ -188,12 +231,14 @@ export const guarded = (kind: EntityKind, head: Doc, next: Doc): Doc => {
 interface Options {
   readonly fields?: ReadonlyArray<string> | undefined
   readonly choices?: Readonly<Record<string, "now" | "before">> | undefined
+  readonly expectedHead?: string | undefined
   readonly dryRun?: boolean | undefined
   readonly message?: string | undefined
 }
 
-const outcome = (plan: ReversalPlan, reversalId: string | null = null): ReversalOutcome => ({
+const outcome = (plan: ReversalPlan, head: string, reversalId: string | null = null): ReversalOutcome => ({
   reversalId,
+  head,
   fields: plan.fields,
   conflicts: plan.conflicts.map((c) => ({
     field: c.field,
@@ -266,7 +311,7 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
     /** Takes `plan` into the item as a new revision and records it; a dry run or conflict writes nothing. */
     const apply = (
       userId: UserId,
-      refId: string,
+      ref: Effect.Success<ReturnType<typeof lib.ownedRef>>,
       plan: ReversalPlan,
       options: Options,
       record: Omit<
@@ -276,9 +321,14 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
       defaultMessage: string
     ) =>
       Effect.gen(function* () {
-        if (plan.conflicts.length > 0 || options.dryRun === true || plan.doc === null) return outcome(plan)
-        if (plan.fields.length === 0) return outcome(plan)
-        const ref = yield* lib.ownedRef(userId, refId)
+        const headId = ref.head_revision_id
+        if (
+          plan.doc === null ||
+          options.dryRun === true ||
+          plan.fields.length === 0 ||
+          !matchesReversalHead(headId, options)
+        )
+          return outcome(plan, headId)
         const head = yield* lib.loadDoc(ref.head_revision_id)
         const valid = validateDoc(ref.kind, guarded(ref.kind, head, plan.doc as Doc))
         if (!valid.ok) return yield* refuse(`It can't be reverted: ${valid.problems.join(" ")}`)
@@ -306,7 +356,7 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
           headAfter: change.ref.headRevisionId,
           plan
         })
-        return outcome(plan, id)
+        return outcome(plan, headId, id)
       })
 
     return {
@@ -317,39 +367,35 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
           const first = rows[0]!
           if (rows.some((r) => r.kind !== "library.revise" || r.target_id !== first.target_id))
             return yield* refuse("Only edits of one library item are reverted together.")
-          const recipes = rows.map((r) => JSON.parse(r.undo_json ?? "{}") as Record<string, unknown>)
-          const refId = String(recipes[0]!.refId)
+          const effects = rows.map(toRolloutEffect)
+          const refId = String(effects[0]!.undo?.refId)
           const ref = yield* lib.ownedRef(userId, refId)
           if (ref.entity_id !== first.target_id) return yield* new NotFound({ entity: "ref", id: refId })
-          const original = yield* revisionDoc(ref.entity_id, recipes[0]!.before)
-          const changed = yield* revisionDoc(ref.entity_id, recipes.at(-1)!.head)
-          const now = yield* lib.loadDoc(ref.head_revision_id)
-          const units = changedUnits(original, changed)
-          const fields = options.fields ? units.filter((u) => options.fields!.includes(u)) : units
-          const plan = planReversal({
-            original,
-            changed,
-            now,
-            fields,
-            ...(options.choices ? { choices: options.choices } : {})
-          })
+          if (effects.some((effect) => effect.undo?.refId !== refId))
+            return yield* refuse("Only edits of one library ref are reverted together.")
+          // The ref version orders its writes even when two effect timestamps tie.
+          const ordered = effects.toSorted((a, b) => Number(a.undo!.rowVersion) - Number(b.undo!.rowVersion))
+          const standing = yield* withReversions(sql, ordered)
           const covered: Array<CoveredEffect> = []
-          for (const [at, row] of rows.entries()) {
-            const own = changedUnits(
-              yield* revisionDoc(ref.entity_id, recipes[at]!.before),
-              yield* revisionDoc(ref.entity_id, recipes[at]!.head)
+          const patches: Array<ReversalPatch> = []
+          for (const effect of standing) {
+            const original = yield* revisionDoc(ref.entity_id, effect.undo!.before)
+            const changed = yield* revisionDoc(ref.entity_id, effect.undo!.head)
+            const of = changedUnits(original, changed)
+            const fields = of.filter(
+              (unit) => !effect.reversion?.fields.includes(unit) && (!options.fields || options.fields.includes(unit))
             )
-            covered.push({
-              rolloutId: row.rollout_id,
-              toolCallId: row.tool_call_id,
-              seq: row.seq,
-              of: own,
-              fields: own
-            })
+            patches.push({ original, changed, fields })
+            covered.push({ rolloutId: effect.rolloutId, toolCallId: effect.toolCallId, seq: effect.seq, of, fields })
           }
+          const plan = planGroupedReversal(
+            patches.reverse(),
+            yield* lib.loadDoc(ref.head_revision_id),
+            matchesReversalHead(ref.head_revision_id, options) ? options.choices : undefined
+          )
           return yield* apply(
             userId,
-            ref.id,
+            ref,
             plan,
             options,
             { chatId: first.chat_id, action: "revert", reversesId: null, effects: covered },
@@ -357,7 +403,7 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
           )
         }).pipe(transaction(sql, "RevertLibraryChange")),
 
-      RedoLibraryChange: ({ userId, reversalId, ...options }) =>
+      RedoLibraryChange: ({ userId, reversalId, effect, ...options }) =>
         Effect.gen(function* () {
           const [record] = yield* sql<ReversalRow>`SELECT * FROM change_reversals
             WHERE id = ${reversalId} AND user_id = ${userId} AND action = 'revert' AND target_kind = 'entity'`
@@ -370,38 +416,33 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
           if (!ref?.id) return yield* new NotFound({ entity: "ref", id: record.target_id })
           const head = yield* lib.ownedRef(userId, ref.id)
           if (head.entity_id !== record.target_id) return yield* new NotFound({ entity: "ref", id: ref.id })
-          const recorded = JSON.parse(record.fields_json) as Array<string>
-          const fields = options.fields ? recorded.filter((f) => options.fields!.includes(f)) : recorded
+          const coverage = yield* standingCoverage(sql, record, effect)
+          const fields = options.fields ? coverage.fields.filter((f) => options.fields!.includes(f)) : coverage.fields
           const plan = planReversal({
-            original: docOfUnits(JSON.parse(record.before_json) as Record<string, unknown>),
-            changed: docOfUnits(JSON.parse(record.after_json) as Record<string, unknown>),
+            original:
+              record.head_before === null
+                ? docOfUnits(JSON.parse(record.before_json) as Record<string, unknown>)
+                : yield* revisionDoc(record.target_id, record.head_before),
+            changed:
+              record.head_after === null
+                ? docOfUnits(JSON.parse(record.after_json) as Record<string, unknown>)
+                : yield* revisionDoc(record.target_id, record.head_after),
             now: yield* lib.loadDoc(head.head_revision_id),
             fields,
-            ...(options.choices ? { choices: options.choices } : {})
+            ...(options.choices && matchesReversalHead(head.head_revision_id, options)
+              ? { choices: options.choices }
+              : {})
           })
-          const effects = yield* sql<{
-            rollout_id: string
-            tool_call_id: string
-            seq: number
-            fields_json: string
-            of_json: string
-          }>`SELECT * FROM change_reversal_effects WHERE reversal_id = ${record.id}`
           return yield* apply(
             userId,
-            ref.id,
+            head,
             plan,
             options,
             {
               chatId: record.chat_id,
               action: "redo",
               reversesId: record.id,
-              effects: effects.map((e) => ({
-                rolloutId: e.rollout_id,
-                toolCallId: e.tool_call_id,
-                seq: e.seq,
-                of: JSON.parse(e.of_json) as Array<string>,
-                fields: JSON.parse(e.fields_json) as Array<string>
-              }))
+              effects: coverage.effects
             },
             "Redid the assistant's change"
           )
@@ -451,58 +492,67 @@ export const makeChangeReversalReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
     /** One revert of the account's card file, with the changes it covers: the host's Redo reads it. */
-    FileReversal: ({ userId, reversalId }) =>
+    FileReversal: ({ userId, reversalId, effect }) =>
       Effect.gen(function* () {
         const [record] = yield* sql<ReversalRow>`SELECT * FROM change_reversals
           WHERE id = ${reversalId} AND user_id = ${userId} AND action = 'revert'`
         if (!record) return yield* new NotFound({ entity: "revert", id: reversalId })
-        const effects = yield* sql<{
-          rollout_id: string
-          tool_call_id: string
-          seq: number
-          fields_json: string
-          of_json: string
-        }>`SELECT * FROM change_reversal_effects WHERE reversal_id = ${record.id}`
+        const [host] = yield* sql<{ host: number | null }>`SELECT json_extract(e.undo_json, '$.host') AS host
+          FROM change_reversal_effects x JOIN rollout_effects e USING (rollout_id, tool_call_id, seq)
+          WHERE x.reversal_id = ${record.id} LIMIT 1`
         return {
           id: record.id,
           targetKind: record.target_kind,
           targetId: record.target_id,
+          host: host?.host === 1,
           label: record.label,
-          fields: JSON.parse(record.fields_json) as Array<string>,
           before: JSON.parse(record.before_json) as Record<string, unknown>,
           after: JSON.parse(record.after_json) as Record<string, unknown>,
-          effects: effects.map((e) => ({
-            rolloutId: e.rollout_id,
-            toolCallId: e.tool_call_id,
-            seq: e.seq,
-            of: JSON.parse(e.of_json) as Array<string>,
-            fields: JSON.parse(e.fields_json) as Array<string>
-          }))
+          ...(yield* standingCoverage(sql, record, effect))
         }
       }).pipe(query("FileReversal")),
     /**
-     * The workshop's reverts and redos since its last finished reply (spec/WORKSHOP-CARDS.md §8.2):
+     * The workshop's reversals and bins still unseen by a dispatched request (spec/WORKSHOP-CARDS.md §8.2):
      * what the next turn's tail line tells the assistant, once.
      */
     ChatReversalsSince: ({ userId, chatId }) =>
       Effect.gen(function* () {
-        const [last] = yield* sql<{ at: number | null }>`SELECT max(r.completed_at) AS at FROM rollouts r
-          JOIN chats c ON c.id = r.chat_id WHERE r.chat_id = ${chatId} AND c.owner_user_id = ${userId}`
+        // Preserve the pre-upgrade cutoff for old replies. Later untracked runs, including
+        // subagents, must not hide an event that no tracked request has sent.
+        const [legacy] = yield* sql<{ at: number | null }>`
+          WITH first_tracked AS (
+            SELECT min(r.created_at) AS at FROM rollouts r JOIN rollout_payloads p ON p.rollout_id = r.id
+            WHERE r.chat_id = ${chatId} AND json_type(p.context_snapshot_json, '$.turnEvents') = 'array'
+          )
+          SELECT max(r.completed_at) AS at FROM rollouts r
+          JOIN chats c ON c.id = r.chat_id LEFT JOIN rollout_payloads p ON p.rollout_id = r.id
+          CROSS JOIN first_tracked f
+          WHERE r.chat_id = ${chatId} AND c.owner_user_id = ${userId} AND r.spawned_by_rollout_id IS NULL
+            AND json_type(p.context_snapshot_json, '$.turnEvents') IS NULL
+            AND (f.at IS NULL OR r.completed_at < f.at)`
+        const seen = sql`SELECT j.value FROM rollouts r JOIN chats c ON c.id = r.chat_id
+          JOIN rollout_payloads p ON p.rollout_id = r.id
+          CROSS JOIN json_each(p.context_snapshot_json, '$.turnEvents') j
+          WHERE r.chat_id = ${chatId} AND c.owner_user_id = ${userId} AND p.sent_context_json IS NOT NULL AND j.type = 'text'`
         const rows = yield* sql<ReversalRow & { kind: string }>`SELECT r.*,
             coalesce((SELECT e.kind FROM entities e WHERE e.id = r.target_id AND r.target_kind = 'entity'), 'card') AS kind
           FROM change_reversals r
-          WHERE r.user_id = ${userId} AND r.chat_id = ${chatId} AND r.created_at > ${last?.at ?? 0}
+          WHERE r.user_id = ${userId} AND r.chat_id = ${chatId} AND r.created_at > ${legacy?.at ?? 0}
+            AND r.id NOT IN (${seen})
             -- The assistant's own revert_change is in its transcript already, not the user's to tell.
             AND NOT EXISTS (SELECT 1 FROM entity_revisions v WHERE v.id = r.head_after AND v.origin = 'agent')
           ORDER BY r.created_at, r.rowid`
         // Items the reply made that Undo moved to the bin since.
-        const binned = yield* sql<{ title: string }>`SELECT e.title FROM rollout_effects e
+        const binned = yield* sql<{ id: string; title: string }>`
+          SELECT 'bin:' || json_array(e.rollout_id, e.tool_call_id, e.seq) AS id, e.title FROM rollout_effects e
           JOIN rollouts r ON r.id = e.rollout_id JOIN chats c ON c.id = r.chat_id
           WHERE r.chat_id = ${chatId} AND c.owner_user_id = ${userId} AND e.kind = 'library.create'
-            AND e.undone_at > ${last?.at ?? 0}
+            AND e.undone_at > ${legacy?.at ?? 0}
+            AND ('bin:' || json_array(e.rollout_id, e.tool_call_id, e.seq)) NOT IN (${seen})
           ORDER BY e.undone_at`
         return {
           reversals: rows.map((r) => ({
+            id: r.id,
             action: r.action,
             targetKind: r.target_kind,
             kind: r.kind,
@@ -511,7 +561,7 @@ export const makeChangeReversalReadHandlers = Effect.gen(function* () {
           })),
           binned: binned.flatMap((b) => {
             const name = /^Created the (?:card|lorebook|preset) (.*)$/s.exec(b.title)?.[1]
-            return name ? [name] : []
+            return name ? [{ id: b.id, name }] : []
           })
         }
       }).pipe(query("ChatReversalsSince"))

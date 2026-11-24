@@ -79,7 +79,14 @@ import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput }
 import type { Formats } from "../../importer/Formats.ts"
 import { CARD_FILE_BYTES, makeCardFileTools } from "./cardFiles.ts"
 import { visibleDoc } from "../libraryView.ts"
-import { type ConflictChoice, planReversal, type ReversalPlan, unitPath } from "@dreamspan/shared/changeReversal.ts"
+import {
+  type ConflictChoice,
+  matchesReversalHead,
+  planGroupedReversal,
+  type ReversalPatch,
+  type ReversalPlan,
+  unitPath
+} from "@dreamspan/shared/changeReversal.ts"
 
 /** Where subagents' isolated copies go, under /files (spec/SUBAGENTS.md §3.3). */
 const COPIES = ".subagents"
@@ -98,6 +105,18 @@ export type ApproveCopy = (copy: {
   readonly branch?: string
   readonly again?: boolean
 }) => Effect.Effect<boolean>
+
+export interface WrittenCardFileReversal {
+  readonly before: string
+  readonly after: string
+  readonly name: string
+  readonly plan: ReversalPlan
+}
+
+interface CardFileReversal {
+  readonly patches: ReadonlyArray<ReversalPatch>
+  readonly record: (written: WrittenCardFileReversal) => Effect.Effect<string, unknown>
+}
 
 export interface SubagentWorkspaces {
   readonly id: string
@@ -858,6 +877,100 @@ export const makeFileTools = (deps: FileToolDeps) => {
     )
   }
 
+  type PreviousFile = { bytes: Buffer; info: Stats; sha256: string; byteSize: number }
+
+  /** Keeps the prior version and lands its replacement under the caller's file-tree lock. */
+  const writeWithVersion = (
+    userId: string,
+    full: string,
+    top: string,
+    segments: ReadonlyArray<string>,
+    host: boolean,
+    before: PreviousFile | null,
+    content: Buffer,
+    origin: "agent" | "restore",
+    receipt: { readonly rolloutId: string; readonly toolCallId: string } | null
+  ) =>
+    Effect.gen(function* () {
+      // Host folders keep versions, and their live files are outside account quota.
+      const expected = before?.info ?? null
+      const quota = host ? undefined : deps.quota
+      const reservation = quota
+        ? yield* quota.replacement(userId, expected, before, content.byteLength, "write files")
+        : null
+      let keptBytes = 0
+      let committed = false
+      const replacement = yield* Effect.gen(function* () {
+        if (reservation && !reservation.reserve(content.byteLength))
+          return yield* Effect.fail(new QuotaExceeded(reservation.over(content.byteLength)))
+        let versionId: string | null = null
+        if (before) {
+          if (reservation) {
+            const { sha256: hash, byteSize, info, bytes } = before
+            const saved = yield* deps.holding(
+              [hash],
+              Effect.andThen(
+                storeMedia(deps.dataDir, hash, bytes),
+                reservation.keep(content.byteLength, byteSize, (maxAddedBytes) =>
+                  deps.writer.RecordReplacementVersion({
+                    userId: userId as never,
+                    maxAddedBytes,
+                    version: {
+                      path: full,
+                      inode: info.ino,
+                      sha256: hash,
+                      byteSize,
+                      mime: "application/octet-stream",
+                      origin,
+                      ...receipt
+                    }
+                  })
+                )
+              )
+            )
+            keptBytes = saved.addedBytes
+            versionId = saved.id
+          } else
+            versionId = yield* keepVersion(
+              receipt,
+              userId,
+              full,
+              { bytes: before.bytes, inode: before.info.ino },
+              origin
+            )
+        }
+        const written = yield* attempt(() =>
+          writeRegularFile(top, segments, content, {
+            createFolders: before === null,
+            expected,
+            ...(reservation
+              ? {
+                  stage: reservation.stage,
+                  committing: () => reservation.committing(content.byteLength, keptBytes),
+                  landed: (file) => {
+                    reservation.landed(file)
+                    committed = true
+                  }
+                }
+              : {})
+          })
+        )
+        return { written, versionId }
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (!committed) {
+              reservation?.release()
+              quota?.wrote(userId, keptBytes)
+            }
+          })
+        ),
+        Effect.uninterruptible
+      )
+      deps.onChanged?.(userId, [full])
+      return replacement
+    })
+
   /** Writes `next` over a file read in this run (or a new one), keeping the earlier content. */
   const replaceFile = (
     ctx: ToolContext,
@@ -871,12 +984,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
     withFileTree(
       env.userId,
       Effect.gen(function* () {
-        // A host folder (§3.7) has no quota; its changes are still versioned.
-        const counted = root.host !== true
         const top = root.hostRoot
         const info = yield* attempt(() => statPath(top, segments))
         if (info && !info.isFile()) throw new FilePathRefused(`${full} isn't a regular file.`)
-        let before: { bytes: Buffer; info: Stats; sha256: string; byteSize: number } | null = null
+        let before: PreviousFile | null = null
         if (info) {
           const read = yield* attempt(() => readRegularFile(top, segments, VERSION_MAX_BYTES + 1))
           if (read.truncated) throw new FilePathRefused(`${full} is too large to change with the file tools. Use bash.`)
@@ -888,82 +999,20 @@ export const makeFileTools = (deps: FileToolDeps) => {
           before = { bytes: read.bytes, info: read.info, sha256: hash, byteSize: read.bytes.byteLength }
         } else if (kind === "edit") throw new FilePathRefused(`${full} doesn't exist. Create it with write_file.`)
         const content = next(before?.bytes ?? null)
-        const expected = before?.info ?? null
-        const quota = counted ? deps.quota : undefined
-        const reservation = quota
-          ? yield* quota.replacement(env.userId, expected, before, content.byteLength, "write files")
-          : null
-        let keptBytes = 0
-        let committed = false
-        const { written, versionId } = yield* Effect.gen(function* () {
-          if (reservation && !reservation.reserve(content.byteLength))
-            return yield* Effect.fail(new QuotaExceeded(reservation.over(content.byteLength)))
-          let versionId: string | null = null
-          if (before) {
-            if (reservation) {
-              const { sha256: hash, byteSize, info, bytes } = before
-              const saved = yield* deps.holding(
-                [hash],
-                Effect.andThen(
-                  storeMedia(deps.dataDir, hash, bytes),
-                  reservation.keep(content.byteLength, byteSize, (maxAddedBytes) =>
-                    deps.writer.RecordReplacementVersion({
-                      userId: env.userId as never,
-                      maxAddedBytes,
-                      version: {
-                        path: full,
-                        inode: info.ino,
-                        sha256: hash,
-                        byteSize,
-                        mime: "application/octet-stream",
-                        origin: "agent",
-                        rolloutId: ctx.rolloutId,
-                        toolCallId: ctx.toolCallId
-                      }
-                    })
-                  )
-                )
-              )
-              keptBytes = saved.addedBytes
-              versionId = saved.id
-            } else
-              versionId = yield* keepVersion(
-                ctx,
-                env.userId,
-                full,
-                { bytes: before.bytes, inode: before.info.ino },
-                "agent"
-              )
+        const { written, versionId } = yield* writeWithVersion(
+          env.userId,
+          full,
+          top,
+          segments,
+          root.host === true,
+          before,
+          content,
+          "agent",
+          {
+            rolloutId: ctx.rolloutId,
+            toolCallId: ctx.toolCallId
           }
-          const written = yield* attempt(() =>
-            writeRegularFile(top, segments, content, {
-              createFolders: true,
-              expected,
-              ...(reservation
-                ? {
-                    stage: reservation.stage,
-                    committing: () => reservation.committing(content.byteLength, keptBytes),
-                    landed: (file) => {
-                      reservation.landed(file)
-                      committed = true
-                    }
-                  }
-                : {})
-            })
-          )
-          return { written, versionId }
-        }).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              if (!committed) {
-                reservation?.release()
-                quota?.wrote(env.userId, keptBytes)
-              }
-            })
-          ),
-          Effect.uninterruptible
         )
-        deps.onChanged?.(env.userId, [full])
         const after = sha256(content)
         ctx.cache.set(readKey(full), after)
         const effectKind = before ? (kind === "edit" ? "file.edit" : "file.write") : "file.create"
@@ -2009,6 +2058,24 @@ export const makeFileTools = (deps: FileToolDeps) => {
     )
   }
 
+  const recordedFilePlace = (actor: User, path: string, host: boolean) =>
+    Effect.gen(function* () {
+      const env = accountEnv(deps, actor.id)
+      // A recorded host path still requires admin access and a current allowlist match.
+      if (host) {
+        const allowed =
+          actor.role === "admin" &&
+          deps.hostFolders !== undefined &&
+          (yield* Effect.promise(() => deps.hostFolders!.allows(path).catch(() => false)))
+        if (!allowed) return yield* new EffectUndoRefused({ message: "That folder on the server isn't available now." })
+      }
+      return {
+        env,
+        top: host ? "/" : env.filesRoot,
+        segments: host ? path.split("/").filter(Boolean) : resolveFilesPath(path, FILES_MOUNT).segments
+      }
+    })
+
   /** Puts a file back as it was before the agent's write or edit (§7.1), if it's still as the agent left it. */
   const undoEffect = (actor: User, effect: RolloutEffect) =>
     Effect.gen(function* () {
@@ -2016,22 +2083,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
       const recipe = effect.undo as { path?: unknown; before?: unknown; after?: unknown; host?: unknown } | null
       if (!recipe || typeof recipe.path !== "string" || typeof recipe.after !== "string")
         return yield* new EffectUndoRefused({ message: "This change cannot be undone." })
-      const env = accountEnv(deps, actor.id)
-      // A host folder's file (§3.7): only while the account is an admin and the folder is still
-      // allowed; reached by the no-follow walk from "/".
       const host = recipe.host === true
-      if (host) {
-        const path = recipe.path
-        const allowed =
-          actor.role === "admin" &&
-          deps.hostFolders !== undefined &&
-          (yield* Effect.promise(() => deps.hostFolders!.allows(path).catch(() => false)))
-        if (!allowed) return yield* new EffectUndoRefused({ message: "That folder on the server isn't available now." })
-      }
-      const top = host ? "/" : env.filesRoot
-      const segments = host
-        ? recipe.path.split("/").filter(Boolean)
-        : resolveFilesPath(recipe.path, FILES_MOUNT).segments
+      const { env, top, segments } = yield* recordedFilePlace(actor, recipe.path, host)
       return yield* withFileTree(
         env.userId,
         Effect.gen(function* () {
@@ -2089,8 +2142,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     })
 
   /**
-   * Takes a change back in a card file in Files (spec/WORKSHOP-CARDS.md §8.1): `changed` and
-   * `original` are its fields after and before the change, `fields` which to take back. The file
+   * Takes selected changes back newest first in a card file (spec/WORKSHOP-CARDS.md §8.1). The file
    * as it is now is read with the format worker, the fields are planned three-way, and the result
    * is written in the file's own format, the file as it was kept as a version. A conflict or a dry
    * run writes nothing. `record` stores the reversal (one writer transaction) once written.
@@ -2099,43 +2151,38 @@ export const makeFileTools = (deps: FileToolDeps) => {
     actor: User,
     input: {
       readonly path: string
-      readonly original: Record<string, unknown>
-      readonly changed: Record<string, unknown>
-      readonly fields: ReadonlyArray<string>
+      readonly host: boolean
+      readonly prepare: Effect.Effect<CardFileReversal, unknown>
       readonly choices?: Readonly<Record<string, ConflictChoice>> | undefined
+      readonly expectedHead?: string | undefined
       readonly dryRun?: boolean | undefined
-      readonly record: (written: {
-        readonly before: string
-        readonly after: string
-        readonly name: string
-        readonly plan: ReversalPlan
-      }) => Effect.Effect<string, unknown>
     }
   ) =>
     Effect.gen(function* () {
       const formats = deps.formats
       if (!formats) return yield* new EffectUndoRefused({ message: "Card files can't be read on this server." })
-      const env = accountEnv(deps, actor.id)
-      const segments = resolveFilesPath(input.path, FILES_MOUNT).segments
+      const { env, top, segments } = yield* recordedFilePlace(actor, input.path, input.host)
       return yield* withFileTree(
         env.userId,
         Effect.gen(function* () {
-          const current = yield* attempt(() => readRegularFile(env.filesRoot, segments, CARD_FILE_BYTES + 1)).pipe(
+          const current = yield* attempt(() => readRegularFile(top, segments, CARD_FILE_BYTES + 1)).pipe(
             Effect.orElseSucceed(() => null)
           )
           if (!current || current.truncated)
             return yield* new EffectUndoRefused({ message: "The card file isn't there any more." })
           const info = yield* formats.readCardFile(current.bytes).pipe(Effect.orElseSucceed(() => null))
           if (!info) return yield* new EffectUndoRefused({ message: "The file isn't a card file any more." })
-          const plan = planReversal({
-            original: input.original,
-            changed: input.changed,
-            now: visibleDoc("card", info.doc) as Record<string, unknown>,
-            fields: input.fields,
-            ...(input.choices ? { choices: input.choices } : {})
-          })
+          const beforeHash = sha256(current.bytes)
+          const matches = matchesReversalHead(beforeHash, input)
+          const { patches, record } = yield* input.prepare
+          const plan = planGroupedReversal(
+            patches,
+            visibleDoc("card", info.doc) as Record<string, unknown>,
+            matches ? input.choices : undefined
+          )
           const outcome = (reversalId: string | null) => ({
             reversalId,
+            head: beforeHash,
             fields: plan.fields,
             conflicts: plan.conflicts.map((c) => ({
               field: c.field,
@@ -2143,7 +2190,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
               ...(c.before === undefined ? {} : { before: c.before })
             }))
           })
-          if (plan.doc === null || input.dryRun === true || plan.fields.length === 0) return outcome(null)
+          if (plan.doc === null || input.dryRun === true || plan.fields.length === 0 || !matches) return outcome(null)
           const doc = plan.doc
           const tops = [...new Set(plan.fields.map((f) => unitPath(f)[0]).filter((f) => f !== undefined))]
           const changes = tops.map((field) =>
@@ -2155,14 +2202,24 @@ export const makeFileTools = (deps: FileToolDeps) => {
             .editCardFile(current.bytes, changes)
             .pipe(Effect.mapError(() => new EffectUndoRefused({ message: "The card file couldn't be changed." })))
           if ("error" in edited) return yield* new EffectUndoRefused({ message: edited.error })
-          yield* keepVersion(null, env.userId, input.path, { bytes: current.bytes, inode: current.info.ino }, "restore")
-          deps.quota?.wrote(env.userId, current.bytes.byteLength)
           const next = Buffer.from(edited.bytes)
-          yield* attempt(() => writeRegularFile(env.filesRoot, segments, next))
-          deps.quota?.wrote(env.userId, next.byteLength)
-          deps.onChanged?.(env.userId, [input.path])
-          const id = yield* input.record({
-            before: sha256(current.bytes),
+          yield* writeWithVersion(
+            env.userId,
+            input.path,
+            top,
+            segments,
+            input.host,
+            { ...current, sha256: beforeHash, byteSize: current.bytes.byteLength },
+            next,
+            "restore",
+            null
+          ).pipe(
+            Effect.mapError((error) =>
+              error instanceof QuotaExceeded ? new EffectUndoRefused({ message: error.message }) : error
+            )
+          )
+          const id = yield* record({
+            before: beforeHash,
             after: sha256(next),
             name: edited.after.name,
             plan

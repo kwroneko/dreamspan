@@ -1,3 +1,4 @@
+import { changedEntryOrder, ORDER_UNIT } from "@dreamspan/shared/changeReversal.ts"
 // What the editors call a document's fields: their labels, which hold text to search, and
 // which differ between two versions of a document.
 // The fields themselves are @dreamspan/shared/libraryText.ts's, which the library-wide search reads too.
@@ -65,7 +66,10 @@ export const changedFields = (before: unknown, after: unknown, path: FieldPath =
       const b = named(after as Array<Record<string, unknown>>)
       const ids = [...new Set([...a.keys(), ...b.keys()])]
       const changes = ids.flatMap((id) => changedFields(a.get(id), b.get(id), [...path, id]))
-      // Reordered with nothing else changed: the list's order is the change.
+      const beforeOrder = [...a.keys()]
+      const afterOrder = [...b.keys()]
+      if (changedEntryOrder(beforeOrder, afterOrder))
+        changes.push({ path: [...path, ORDER_UNIT], before: beforeOrder, after: afterOrder })
       return changes.length > 0 ? changes : [{ path, before, after }]
     }
   }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { ORDER_UNIT } from "@dreamspan/shared/changeReversal.ts"
 import { resolution } from "../src/features/editor/conflicts.tsx"
 import { changedFields, fieldLabel, searchable } from "../src/features/editor/fields.ts"
 
@@ -23,11 +24,16 @@ describe("editor fields", () => {
     }
     expect(changedFields(preset, after).map((c) => [c.path, c.before, c.after])).toEqual([
       [["prompts", "identifier=main", "content"], "Be vivid.", "Be terse."],
+      [
+        ["prompts", ORDER_UNIT],
+        ["identifier=main", "identifier=jb"],
+        ["identifier=jb", "identifier=main"]
+      ],
       [["samplers", "temperature"], 1, 0.7]
     ])
     // A list only reordered is one change: its order.
     const reordered = { ...preset, order: [...preset.order].reverse() }
-    expect(changedFields(preset, reordered).map((c) => c.path)).toEqual([["order"]])
+    expect(changedFields(preset, reordered).map((c) => c.path)).toEqual([["order", ORDER_UNIT]])
   })
 
   it("names fields as the editor shows them", () => {

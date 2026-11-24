@@ -4,8 +4,8 @@
 // takes a revert back; Revert all reverts each item; a made item changed since is binned only when
 // asked; the next turn is told once (§8.2).
 import { assert, describe, it } from "@effect/vitest"
-import { Effect } from "effect"
-import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import { Effect, Stream } from "effect"
+import type { EntityId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { unitKey } from "@dreamspan/shared/changeReversal.ts"
 import { newCardDoc, textField } from "@dreamspan/shared/editing.ts"
 import type { Doc, RefId } from "@dreamspan/shared/library.ts"
@@ -13,7 +13,10 @@ import { reversalNote } from "../src/agent/reversalNote.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
-import { client, outcome, serverLayer, testConfig } from "./support/config.ts"
+import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import { eventually, finished, generateReply } from "./support/generation.ts"
+import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -204,7 +207,11 @@ describe("revert a change", () => {
       const [still] = yield* api.ListRevisions({ refId: f.card, limit: 1 })
       assert.strictEqual(still!.id, before!.id)
       // Keep now: the rest is reverted, the description stays.
-      const rest = yield* api.RevertChange({ effects: keys, choices: { [DESCRIPTION]: "now" } })
+      const rest = yield* api.RevertChange({
+        effects: keys,
+        expectedHead: conflict.head,
+        choices: { [DESCRIPTION]: "now" }
+      })
       assert.deepStrictEqual(rest.fields, [PERSONALITY])
       let now = yield* f.doc()
       assert.include(String(now.description), "crabs at noon")
@@ -213,6 +220,7 @@ describe("revert a change", () => {
       const taken = yield* api.RevertChange({
         effects: keys,
         fields: [DESCRIPTION],
+        expectedHead: (yield* api.OpenEditor({ refId: f.card })).ref.headRevisionId,
         choices: { [DESCRIPTION]: "before" }
       })
       assert.deepStrictEqual(taken.fields, [DESCRIPTION])
@@ -222,6 +230,37 @@ describe("revert a change", () => {
       assert.strictEqual(effect!.reversion?.fields.length, 2)
       // Two reverts hold its fields, newest first.
       assert.deepStrictEqual(effect!.reversion?.reversals, [taken.reversalId!, rest.reversalId!])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("refreshes stale choices without writing either field", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      yield* agentEdit(
+        f,
+        [
+          { field: "description", text: "Assistant edit." },
+          { field: "personality", text: "Loud." }
+        ],
+        "c1"
+      )
+      const effects = yield* f.editKeys(["c1"])
+      yield* userEdit(api, f.card, "description", "First conflicting value.")
+      const preview = yield* api.RevertChange({ effects, dryRun: true })
+      yield* userEdit(api, f.card, "description", "New unseen edit.")
+      const stale = yield* api.RevertChange({
+        effects,
+        expectedHead: preview.head,
+        choices: { [DESCRIPTION]: "before" }
+      })
+      assert.isNull(stale.reversalId)
+      assert.notStrictEqual(stale.head, preview.head)
+      assert.strictEqual(stale.conflicts[0]?.now, "New unseen edit.")
+      const now = yield* f.doc()
+      assert.strictEqual(now.description, "New unseen edit.")
+      assert.strictEqual(now.personality, "Loud.")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -243,6 +282,21 @@ describe("revert a change", () => {
       const listed = (yield* f.effects()).filter((e) => e.kind === "library.revise")
       assert.deepStrictEqual(listed.find((e) => e.toolCallId === "c1")!.reversion?.fields, [DESCRIPTION])
       assert.deepStrictEqual(listed.find((e) => e.toolCallId === "c2")!.reversion?.fields, [PERSONALITY])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("keeps a user save between two edits selected for one revert", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const before = yield* f.doc()
+      yield* agentEdit(f, [{ field: "description", text: "First." }], "c1")
+      yield* userEdit(api, f.card, "scenario", "Saved during the reply.")
+      yield* agentEdit(f, [{ field: "personality", text: "Second." }], "c2")
+      const reverted = yield* api.RevertChange({ effects: yield* f.editKeys(["c1", "c2"]) })
+      assert.isString(reverted.reversalId)
+      assert.deepStrictEqual(yield* f.doc(), { ...before, scenario: "Saved during the reply." })
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -279,7 +333,11 @@ describe("revert a change", () => {
         conflict.conflicts.map((c) => c.field),
         [unitKey(["entries", "uid=1"])]
       )
-      const rest = yield* api.RevertChange({ effects: keys, choices: { [unitKey(["entries", "uid=1"])]: "now" } })
+      const rest = yield* api.RevertChange({
+        effects: keys,
+        expectedHead: conflict.head,
+        choices: { [unitKey(["entries", "uid=1"])]: "now" }
+      })
       assert.deepStrictEqual(rest.fields, [unitKey(["entries", "uid=2"])])
       const now = yield* api.OpenEditor({ refId: book.id })
       assert.deepStrictEqual(now.doc.entries, [])
@@ -288,6 +346,43 @@ describe("revert a change", () => {
 })
 
 describe("redo", () => {
+  it.live("redoes only the selected effect's fields from a grouped revert", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      yield* agentEdit(f, [{ field: "description", text: "Assistant description." }], "c1")
+      yield* agentEdit(f, [{ field: "personality", text: "Loud." }], "c2")
+      const reverted = yield* api.RevertChange({ effects: yield* f.editKeys(["c1", "c2"]) })
+      const [effect] = yield* f.editKeys(["c2"])
+      const redone = yield* api.RedoChange({ reversalId: reverted.reversalId!, effect: effect! })
+      assert.deepStrictEqual(redone.fields, [PERSONALITY])
+      const now = yield* f.doc()
+      assert.include(String(now.description), "lighthouse")
+      assert.strictEqual(now.personality, "Loud.")
+      const repeated = yield* api.RedoChange({ reversalId: reverted.reversalId!, effect: effect! })
+      assert.isNull(repeated.reversalId)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("redoes an insertion after its original neighbor", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const book = yield* api.CreateLorebook({ label: "Skerry Lore" })
+      yield* f.run("edit_lorebook", { lorebook: book.id, changes: [{ add: { uid: 1, content: "First." } }] }, "b0")
+      yield* f.run("edit_lorebook", { lorebook: book.id, changes: [{ add: { uid: 2, content: "Second." } }] }, "b1")
+      const reverted = yield* api.RevertChange({ effects: yield* f.editKeys(["b1"]) })
+      yield* api.RedoChange({ reversalId: reverted.reversalId! })
+      const { doc } = yield* api.OpenEditor({ refId: book.id })
+      assert.deepStrictEqual(
+        (doc.entries as Array<{ uid: number }>).map((e) => e.uid),
+        [1, 2]
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("takes a revert back on the item as it is now; the field can be reverted again", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -349,6 +444,29 @@ describe("revert all of this reply", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("bins what the reply made with its current revision and marks its edits together", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const out = yield* f.run("create_card", { name: "Ove Brekke", description: "Creation text." }, "c1")
+      const refId = JSON.parse(out.text).id as RefId
+      yield* f.run("edit_card", { card: refId, changes: [{ field: "description", text: "Expanded text." }] }, "c2")
+      const head = (yield* api.OpenEditor({ refId })).ref.headRevisionId
+      const report = yield* api.UndoRolloutEffects({ chatId: f.chat.id, rolloutId: f.rolloutId })
+      assert.isNull(report.refused)
+      assert.sameMembers(
+        report.undone.map((e) => e.toolCallId),
+        ["c1", "c2"]
+      )
+      const [item] = (yield* api.ListBin({ limit: 50, before: null })).filter((i) => i.title === "Ove Brekke")
+      yield* api.RestoreBinItem({ itemId: item!.id })
+      const restored = yield* api.OpenEditor({ refId })
+      assert.strictEqual(restored.ref.headRevisionId, head)
+      assert.strictEqual(restored.doc.description, "Expanded text.")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("stops at a conflict and says so", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -370,6 +488,32 @@ describe("revert all of this reply", () => {
 })
 
 describe("a made item changed since", () => {
+  it.live("requires confirmation in both Changes actions when a story uses the card", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const out = yield* f.run("create_card", { name: "Ove Brekke", description: "Synthetic." }, "c1")
+      const { id, entityId } = JSON.parse(out.text) as { id: RefId; entityId: EntityId }
+      const story = yield* api.CreateChat({ title: "Story" })
+      yield* api.ChangeCast({ chatId: story.id, slotId: null, change: { _tag: "Join", entityId } })
+      yield* api.SendMessage({
+        chatId: story.id,
+        parentSlotId: null,
+        branch: false,
+        content: "The keeper arrives.",
+        reply: false
+      })
+      assert.strictEqual((yield* api.OpenEditor({ refId: id })).usedByChats, 1)
+      const [key] = yield* f.editKeys(["c1"])
+      assert.strictEqual(yield* outcome(api.UndoRolloutEffect(key!)), "EffectUndoRefused")
+      const report = yield* api.UndoRolloutEffects({ chatId: f.chat.id, rolloutId: f.rolloutId })
+      assert.include(report.refused?.reason, "A chat uses this item")
+      assert.isEmpty(report.undone)
+      assert.isNotNull((yield* api.UndoRolloutEffect({ ...key!, binAnyway: true })).undoneAt)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("is binned only when asked", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -393,6 +537,60 @@ describe("a made item changed since", () => {
 })
 
 describe("the tail line", () => {
+  it.live(
+    "carries a reversal made during a provider request into the following turn",
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const api = yield* client()
+        const f = yield* fixture(config.dataDir, api)
+        yield* agentEdit(f, [{ field: "description", text: "Assistant edit." }], "c1")
+        let answerInFlight: (() => void) | undefined
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((request, res) => {
+              const answer = () => sse(res, completionChunks(["Ready."], {}))
+              const messages = request.body?.messages as ReadonlyArray<{ content?: string }> | undefined
+              if (!answerInFlight && messages?.some((m) => m.content?.includes("Hold this turn."))) {
+                answerInFlight = answer
+                return
+              }
+              answer()
+            })
+          ),
+          (provider) => Effect.promise(() => provider.close())
+        )
+        yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: { context: 200000 }
+        })
+        const events: Array<ChatEvent> = []
+        yield* api.SubscribeChat({ chatId: f.chat.id }).pipe(
+          Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+          Effect.forkScoped
+        )
+        yield* eventually(() => events.length > 0)
+        const send = (content: string, parentSlotId: SlotId | null) =>
+          Effect.gen(function* () {
+            const sent = yield* posted(api.SendMessage({ chatId: f.chat.id, parentSlotId, branch: false, content }))
+            return yield* posted(api.Generate({ chatId: f.chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+          })
+        const inFlight = yield* send("Hold this turn.", f.chat.activeLeafSlotId)
+        yield* eventually(() => answerInFlight !== undefined)
+        const note = "The user reverted your change to Mara Quill (Description)."
+        assert.notInclude(JSON.stringify(mock.requests().at(-1)?.body), note)
+        yield* api.RevertChange({ effects: yield* f.editKeys(["c1"]) })
+        answerInFlight!()
+        yield* eventually(() => finished(events, inFlight.entry.version.id)?.status === "complete")
+        const after = yield* send("Continue.", inFlight.entry.slotId)
+        yield* eventually(() => finished(events, after.entry.version.id)?.status === "complete")
+        assert.include(JSON.stringify(mock.requests().at(-1)?.body), note)
+        assert.isEmpty((yield* (yield* Reader).ChatReversalsSince({ userId: f.user.id, chatId: f.chat.id })).reversals)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    },
+    60_000
+  )
+
   it.live("tells the next turn what the user took back since the last reply, once", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -420,15 +618,41 @@ describe("the tail line", () => {
       yield* api.RevertChange({ effects: yield* f.editKeys(["c1"]) })
       const [made] = (yield* f.effects()).filter((e) => e.toolCallId === "c2")
       yield* api.UndoRolloutEffect({ rolloutId: made!.rolloutId, toolCallId: made!.toolCallId, seq: made!.seq })
+      const pending = yield* line(input)
+      assert.isObject(pending)
+      if (!pending || typeof pending === "string") throw new Error("Expected one-time events")
       assert.strictEqual(
-        yield* line(input),
+        pending.text,
         "The user reverted your change to Mara Quill (Description, Personality).\nThe user undid Ove Brekke (in the bin)."
       )
-      // A reply finishing after them: they were told.
+      assert.lengthOf(pending.events, 2)
+      const at = Date.now() + 1
+      const inFlight = `${f.rolloutId}-next`
+      const afterward = `${f.rolloutId}-afterward`
       yield* fixtureSql(config.dataDir, [
         {
-          sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at,completed_at) VALUES (?,?,'workshop','completed','assistant','interactive',1,1,?)",
-          params: [`${f.rolloutId}-next`, f.chat.id, Date.now() + 1]
+          sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at,completed_at) VALUES (?,?,'workshop','completed','assistant','interactive',?,?,?)",
+          params: [inFlight, f.chat.id, at, at, at]
+        },
+        {
+          sql: "INSERT INTO rollout_payloads(rollout_id, context_snapshot_json, sent_context_json) VALUES (?,?,'{}')",
+          params: [inFlight, JSON.stringify({ turnEvents: [] })]
+        },
+        {
+          sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at) VALUES (?,?,'workshop','running','assistant','interactive',?,?)",
+          params: [afterward, f.chat.id, at + 1, at + 1]
+        },
+        {
+          sql: "INSERT INTO rollout_payloads(rollout_id, context_snapshot_json) VALUES (?,?)",
+          params: [afterward, JSON.stringify({ turnEvents: pending.events })]
+        }
+      ])
+      // Finishing an older request or preparing a new one didn't tell the model.
+      assert.deepStrictEqual(yield* line(input), pending)
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: "UPDATE rollout_payloads SET sent_context_json = '{}' WHERE rollout_id = ?",
+          params: [afterward]
         }
       ])
       assert.isNull(yield* line(input))

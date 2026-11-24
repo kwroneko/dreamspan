@@ -1,5 +1,5 @@
 // The workshop's Changes tab grouped by reply (spec/WORKSHOP.md §3.6) in the browser: two replies
-// that each made several changes show as two groups, newest first; "Undo all of this reply" takes
+// that each made several changes show as two groups, newest first; "Revert all of this reply" takes
 // one reply's changes back newest first, and stops at one changed by hand, saying which it left
 // and why; single Undo still works. Run by workshopChanges.spec.ts and, with
 // LAYOUT_AUDIT_WORKSHOP_ONLY=1, by layoutAudit.spec.ts. Synthetic data and a scripted loopback
@@ -123,9 +123,9 @@ export function workshopChangesTests() {
           await expect(groups.nth(0).locator("[data-effect]")).toHaveCount(2)
           await expect(groups.nth(1).locator("[data-effect]")).toHaveCount(2)
           const undoAll = (n: number) =>
-            groups.nth(n).getByRole("button", { name: "Undo all of this reply", exact: true })
+            groups.nth(n).getByRole("button", { name: "Revert all of this reply", exact: true })
           await expect(undoAll(0)).toHaveAccessibleDescription(
-            "Takes back everything this reply changed, newest first. It stops at a change that can’t be undone."
+            "Takes back everything this reply changed, newest first: edits are reverted, keeping later edits, and new items go to the bin. It stops at a change that can’t be taken back."
           )
           await shot("grouped")
           await expectLayout(page, info, `workshop-changes-grouped-${width}-${theme}`, {
@@ -134,15 +134,15 @@ export function workshopChangesTests() {
 
           // The older reply: both undone, newest first.
           await undoAll(1).click()
-          await expect(groups.nth(1).locator("[data-undo-all-report]")).toHaveText("Undid 2 changes.")
+          await expect(groups.nth(1).locator("[data-undo-all-report]")).toHaveText("Took back 2 changes.")
           await expect(groups.nth(1).locator("[data-effect]").filter({ hasText: "Undone" })).toHaveCount(2)
           await expect(undoAll(1)).toHaveCount(0)
 
           // The newer reply: its newest change is undone, the hand-edited one is refused and why.
           await undoAll(0).click()
           const report = groups.nth(0).locator("[data-undo-all-report]")
-          await expect(report).toContainText("Undid 1 change.")
-          await expect(report).toContainText(`Not undone: ${handEdited.title}.`)
+          await expect(report).toContainText("Took back 1 change.")
+          await expect(report).toContainText(`Not taken back: ${handEdited.title}.`)
           await expect(report).toContainText("Changed since")
           await shot("refused")
           await expectLayout(page, info, `workshop-changes-refused-${width}-${theme}`, {
@@ -151,10 +151,13 @@ export function workshopChangesTests() {
           const after = await effects()
           expect(after.filter((e) => e.undoneAt !== null)).toHaveLength(3)
           expect(after.find((e) => e.toolCallId === handEdited.toolCallId)!.undoneAt).toBeNull()
-          // Single Undo is still there for the change that stands, and refuses with its reason.
+          // Single Undo still asks before binning the edited card, and Cancel leaves it in place.
           const standing = groups.nth(0).locator(`[data-effect="${handEdited.rolloutId}:${handEdited.toolCallId}:0"]`)
           await standing.getByRole("button", { name: "Undo", exact: true }).click()
-          await expect(standing.getByRole("alert")).toContainText("Changed since")
+          const confirm = page.getByRole("alertdialog", { name: "Move it to the bin?" })
+          await expect(confirm).toContainText("It was changed since")
+          await confirm.getByRole("button", { name: "Cancel", exact: true }).click()
+          expect((await effects()).find((e) => e.toolCallId === handEdited.toolCallId)!.undoneAt).toBeNull()
         })
   })
 }
