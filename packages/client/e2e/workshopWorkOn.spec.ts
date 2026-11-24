@@ -393,19 +393,22 @@ test.describe("work on in a workshop", () => {
       // The page goes offline (a laptop asleep); meanwhile its workshop is swept.
       offline = true
       for (const socket of sockets.splice(0)) await socket.close()
-      await admin((api) => api.LeaveDraftChat({ chatId: first as never }))
-      await expect
-        .poll(
-          () =>
-            admin((api) =>
-              Effect.match(api.GetChat({ chatId: first as never }), {
-                onFailure: () => "gone",
-                onSuccess: () => "there"
-              })
-            ),
-          { timeout: 20_000 }
-        )
-        .toBe("gone")
+      // One login for the leave and the wait: the server throttles logins.
+      const swept = await admin((api) =>
+        Effect.gen(function* () {
+          yield* api.LeaveDraftChat({ chatId: first as never })
+          for (let i = 0; i < 80; i++) {
+            const gone = yield* Effect.match(api.GetChat({ chatId: first as never }), {
+              onFailure: () => true,
+              onSuccess: () => false
+            })
+            if (gone) return true
+            yield* Effect.sleep(250)
+          }
+          return false
+        })
+      )
+      expect(swept).toBe(true)
       offline = false
       // Back online: a new workshop opens in its place, with what was handed over and not removed.
       await expect.poll(() => new URL(page.url()).searchParams.get("draft"), { timeout: 30_000 }).not.toBe(first)
