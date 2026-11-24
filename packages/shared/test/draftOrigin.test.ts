@@ -306,7 +306,21 @@ it("a stale bulk edit from a draft kept as text keeps a field changed since", ()
   const want = { ids: ["m1"], ticked, draft: { context: "50000", maxOutput: "900" } }
   const fromB = { ...start, ticked, draft: { context: "24000", maxOutput: "900" } }
   expect(staleMerge(fromA, fromB, start)).toEqual(want)
-  // A save queued before the change, still as text, merges the same way.
-  const queued = { ...fromB, draft: JSON.stringify(fromB.draft) }
-  expect(staleMerge(fromA, queued, start)).toEqual(want)
+})
+
+// Review of 17ff0b861 (3): text typed into a field never turns into the group its JSON reads
+// as, even where the field held a group: in one tab, and from a stale one.
+it("JSON text typed where a group was stays text", () => {
+  const held = { overrides: { sampling: { example: { x: 1 }, sibling: 1 } } }
+  const typed = { overrides: { sampling: { example: '{"x":2}', sibling: 1 } } }
+  const own = reconcileForm(
+    { id: "draft", rowVersion: 3, content: JSON.stringify(held) },
+    { draftId: "draft", expectedRowVersion: 3 },
+    JSON.stringify(typed),
+    JSON.stringify(held)
+  )
+  expect(JSON.parse(own.content)).toEqual(typed)
+  const sinceA = { overrides: { sampling: { example: { x: 1 }, sibling: 2 } } }
+  const fromB = { overrides: { sampling: { example: '{"x":1}', sibling: 1 } } }
+  expect(staleMerge(sinceA, fromB, held)).toEqual({ overrides: { sampling: { example: '{"x":1}', sibling: 2 } } })
 })

@@ -180,8 +180,10 @@ export const reconcileForm = (
     current = form(draft.content)
   if (incoming === null || current === null) return { content, changed: false, intent: before }
   const clears = intendedClears(before, initial, incoming)
-  // What the edit started from at `path`: what it changed there, and what it left alone.
-  // A group kept as its JSON text before it was kept as an object reads as that object.
+  // What the edit started from at `path`: what it changed there, and what it left alone. Where
+  // both sides hold a group the start held as its JSON text (a draft kept before the group was
+  // kept as an object), the start reads that text as the group. Only for comparing: a value is
+  // never changed from text to a group, or back.
   const asGroup = (value: unknown) => (typeof value === "string" ? (form(value) ?? value) : value)
   const origin = (path: ReadonlyArray<string>): Value | null => {
     if (initial === null) return null
@@ -194,9 +196,6 @@ export const reconcileForm = (
     return found
   }
   const merge = (left: unknown, right: unknown, path: ReadonlyArray<string>): unknown => {
-    // One side still the group's JSON text (a save from before it was kept as an object).
-    if (object(left) && !Array.isArray(left)) right = asGroup(right)
-    if (object(right) && !Array.isArray(right)) left = asGroup(left)
     if (equal(left, right)) return right
     // Three ways, where the edit's start is known: what this edit didn't change keeps the
     // current value (another tab's later typing, or its clear), and what only this edit
