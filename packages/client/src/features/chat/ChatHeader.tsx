@@ -1,6 +1,6 @@
 import { isPendingChat } from "./chatStarted.ts"
 import { cardChoiceLabel } from "./CardVersion.tsx"
-import { useSplitChats } from "./splitChats.ts"
+import { seedSplitChats, useSplitChats } from "./splitChats.ts"
 import { kindTitle } from "./kindLooks.ts"
 import { CenterHeader } from "../../ui/CenterHeader.tsx"
 import { SlotOutlet } from "../../slots.tsx"
@@ -12,6 +12,7 @@ import { chatBranchControls, chatHeaderAbout, chatHeaderActions, pendingChatHead
 // top bar (shell.tsx), with ← to the chats. While the chat loads it shows placeholders, not
 // a name it doesn't know yet.
 import type { CastCard, Chat, SlotId } from "@dreamspan/shared/chat.ts"
+import { BRANCH_NAME_MAX_LENGTH } from "@dreamspan/shared/chatApi.ts"
 import type { ChatName } from "@dreamspan/shared/chatName.ts"
 import type { ChatGroup } from "@dreamspan/shared/chatSetupApi.ts"
 import { importState } from "@dreamspan/shared/stImportApi.ts"
@@ -97,6 +98,7 @@ function ChatTitle({
         return
       }
       current = resolved.value
+      seedSplitChats(session.id, forkId, current)
     }
     if (!stillHere()) return
     setGroup(null)
@@ -201,7 +203,7 @@ function ChatTitle({
               data-layout-audit-ignore="inset: The field takes the name's line in place, so the header keeps its height"
               aria-description="Enter renames it, Escape keeps the name. Leave it empty to name it after its characters."
               value={draft}
-              maxLength={200}
+              maxLength={split && split.group.id !== split.group.chatId ? BRANCH_NAME_MAX_LENGTH : 200}
               autoFocus
               readOnly={saving || !typed.ready}
               onFocus={(event) => {
