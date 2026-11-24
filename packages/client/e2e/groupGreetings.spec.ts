@@ -2,6 +2,7 @@ import { join } from "node:path"
 import { expect, test, type Locator, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import { openCastAdd } from "./support/cast.ts"
+import { showActions } from "./support/message.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -27,28 +28,30 @@ const remove = (page: Page, name: string) =>
     await page.getByRole("menuitem", { name: "Remove from chat", exact: true }).click()
   })
 
-// A new chat is a pending chat now (DraftChatPage.tsx); a character joining one before the first
-// send gets no greeting from the server yet, and group-only greetings aren't offered there yet.
-// Until the server greets a joining character on a pending chat, these wait.
+// A new chat is a pending chat (DraftChatPage.tsx), whose greetings follow who's in it, as a
+// group start's (the server's SyncPendingGreetings): a character who joins greets with their own
+// greeting, a message with their other greetings as swipes; with two characters, group-only
+// greetings are swipes too; one who leaves, or whom you play, takes their greeting along, and a
+// group greeting shown then gives way to the card's first, saying so. None of it starts the chat.
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "10000", FAKE_GENERATOR_TOKENS: "10" })
+
+/** A greeting message, by its text now. */
+const greetingOf = (page: Page, from: string) =>
+  page.getByRole("article", { name: "Reply", exact: true }).filter({ hasText: from })
+/** Steps a message's swipes. */
+const step = async (message: Locator, direction: "Next" | "Previous") => {
+  await showActions(message)
+  await message.getByRole("button", { name: `${direction} swipe`, exact: true }).click()
+}
+const FELL_BACK = "selected group greeting is no longer available"
+
 for (const width of [1440, 390]) {
   for (const theme of ["light", "dark"] as const)
-    test.fixme(`group greetings follow pending cast at ${width} (${theme})`, async ({ page }, info) => {
+    test(`group greetings follow a new chat's cast at ${width} (${theme})`, async ({ page }, info) => {
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
-      let holdAdd = false
-      let releaseAdd: (() => void) | undefined
-      await page.routeWebSocket(/\/rpc$/, (socket) => {
-        const upstream = socket.connectToServer()
-        socket.onMessage((data) => {
-          const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string }) : null
-          if (holdAdd && request?.tag === "GetCardForChat") releaseAdd = () => upstream.send(data)
-          else upstream.send(data)
-        })
-        upstream.onMessage((data) => socket.send(data))
-      })
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const name = `Mira ${width} ${theme}`
       const second = `Tobin ${width} ${theme}`
@@ -69,108 +72,72 @@ for (const width of [1440, 390]) {
       }
       await page.goto(`${server().url}/library`)
       await page.getByRole("link", { name: `Start a chat with ${name}`, exact: true }).click()
-      const greeting = page.getByRole("article", { name: `Greeting from ${name}`, exact: true })
-      const next = greeting.getByRole("button", { name: `Next greeting from ${name}` })
-      await next.click()
-      await expect(greeting).toContainText("Mira waves.")
-      await expect(next).toBeDisabled()
-      const add = async (whileLoading?: () => Promise<void>) => {
-        holdAdd = whileLoading !== undefined
-        releaseAdd = undefined
-        await startAdding(page, second)
-        if (whileLoading) {
-          await expect.poll(() => releaseAdd !== undefined).toBe(true)
-          // The greeting is beside the panel, or under the phone's sheet.
-          if (width === 390) await closePanel(page)
-          await whileLoading()
-          holdAdd = false
-          releaseAdd!()
-        }
-        if (width !== 390 || !whileLoading) await closePanel(page)
-        await expect(page.getByRole("article", { name: `Greeting from ${second}`, exact: true })).toBeVisible()
-      }
-      await add(async () => {
-        await greeting.getByRole("button", { name: `Previous greeting from ${name}` }).click()
-        await expect(greeting).toContainText("Mira opens the door.")
-      })
-      // Loading the second card must keep the latest greeting choice.
+      await expect(page).toHaveURL(/[?&]draft=/)
+      const greeting = page.getByRole("article", { name: "Reply", exact: true }).first()
       await expect(greeting).toContainText("Mira opens the door.")
-      await inCast(page, async (tab) => {
-        await expect(tab.getByLabel("Reply from", { exact: true })).toBeVisible()
-      })
-      await next.click()
-      // Ordinary greetings remain selectable alongside the group greetings.
+      // One character: her ordinary greetings only.
+      await expect(greeting).toContainText("1/2")
+      await step(greeting, "Next")
       await expect(greeting).toContainText("Mira waves.")
-      await next.click()
+      const add = async () => {
+        await startAdding(page, second)
+        await closePanel(page)
+        await expect(greetingOf(page, "Tobin nods.")).toBeVisible()
+      }
+      await add()
+      // Her greeting stays what it showed; both now offer their group greetings too.
+      await expect(greeting).toContainText("Mira waves.")
+      await expect(greeting).toContainText("2/3")
+      await step(greeting, "Next")
       await expect(greeting).toContainText("Mira welcomes the crew.")
-      await expect(greeting).toContainText("group greeting")
-      const secondGreeting = page.getByRole("article", { name: `Greeting from ${second}`, exact: true })
-      await secondGreeting.getByRole("button", { name: `Next greeting from ${second}` }).click()
+      const secondGreeting = page.getByRole("article", { name: "Reply", exact: true }).nth(1)
+      await step(secondGreeting, "Next")
       await expect(secondGreeting).toContainText("Tobin greets everyone.")
       if (process.env.SCREENSHOT_DIR)
         await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `group-${width}-${theme}.png`) })
-      // Playing an added card excludes it from the character count and automatic replies.
-      await inCast(page, async (tab) => {
-        await tab.getByLabel("Reply from", { exact: true }).click()
-        await page.getByRole("option", { name: second, exact: true }).click()
-        await tab.getByRole("button", { name: /^Playing as / }).click()
-        await page.getByRole("tab", { name: "All cards", exact: true }).click()
-        const picker = page.getByRole("dialog", { name: "Your persona", exact: true })
-        await expect(picker.getByRole("option", { name, exact: true })).toBeVisible()
-        await expect(picker.getByRole("option", { name: second, exact: true })).toBeVisible()
-        await page.getByRole("combobox", { name: "Find a card to play as" }).fill(second)
-        await expect(picker.getByRole("option", { name, exact: true })).toHaveCount(0)
-        await expectLayout(page, info, "pending-persona-all-cards", {
-          scope: '[role="listbox"][aria-label="Cards"]'
-        })
-        await picker.getByRole("option", { name: second, exact: true }).click()
-        await expect(tab.getByLabel("Reply from", { exact: true })).toHaveCount(0)
-      })
-      await expect(greeting).toContainText("Mira opens the door.")
-      await expect(
-        page.getByRole("status").filter({ hasText: "selected group greeting is no longer available" })
-      ).toBeVisible()
-      await expect(page.getByText("group greeting", { exact: true })).toHaveCount(0)
-      await inCast(page, async (tab) => {
-        await tab.getByRole("button", { name: /^Playing as / }).click()
-        await page.getByRole("button", { name: "No persona", exact: true }).click()
-        // With no persona both are characters again; who replies kept its pick.
-        await expect(tab.getByLabel("Reply from", { exact: true })).toContainText(second)
-      })
-      await next.click()
-      await next.click()
-      await expect(greeting).toContainText("Mira welcomes the crew.")
+      await expectLayout(page, info, "pending-group-greetings")
+      // He leaves: his greeting goes, and hers, a group greeting, falls back to her first.
       await remove(page, second)
       await expect(greeting).toContainText("Mira opens the door.")
-      await expect(
-        page.getByRole("status").filter({ hasText: "selected group greeting is no longer available" })
-      ).toBeVisible()
-      await expect(page.getByText("group greeting", { exact: true })).toHaveCount(0)
+      await expect(greeting).toContainText("1/2")
+      await expect(greetingOf(page, "Tobin")).toHaveCount(0)
+      await expect(page.getByText(FELL_BACK).first()).toBeVisible()
       if (process.env.SCREENSHOT_DIR)
         await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `fallback-${width}-${theme}.png`) })
-      await next.click()
-      await expect(next).toBeDisabled()
+      // He comes back: the group greetings with him.
       await add()
-      await next.click()
+      await expect(greeting).toContainText("1/3")
+      await step(greeting, "Next")
+      await step(greeting, "Next")
       await expect(greeting).toContainText("Mira welcomes the crew.")
-      await inCast(page, async (tab) => {
-        await tab.getByLabel("Reply from", { exact: true }).click()
-        await page.getByRole("option", { name: second, exact: true }).click()
-      })
+      // Played, he's no character: his greeting goes, and hers falls back again.
+      await openPanel(page, "Cast")
+      await page.getByRole("button", { name: /^Playing as / }).click()
+      await page.getByRole("tab", { name: "All cards", exact: true }).click()
+      const search = page.getByRole("combobox", { name: "Find a card to play as" })
+      await search.fill(second)
+      await expect(page.getByRole("option")).toHaveCount(1)
+      await search.press("Enter")
+      await expect(page.getByRole("button", { name: new RegExp(`^Playing as ${second}`) })).toBeVisible()
+      await closePanel(page)
+      await expect(greetingOf(page, "Tobin")).toHaveCount(0)
+      await expect(greeting).toContainText("Mira opens the door.")
+      await expect(greeting).toContainText("1/2")
+      // None of that started it; the first message does, the greeting as shown.
+      await expect(page).toHaveURL(/[?&]draft=/)
       await page.getByLabel("Message", { exact: true }).fill("Hello crew.")
-      await page.getByRole("button", { name: "Send", exact: true }).click()
+      // You speak as the card you play: Send as them.
+      await page
+        .getByTestId("composer-box")
+        .getByRole("button", { name: /^Send\b/ })
+        .click()
       await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
-      await expect(
-        page.getByRole("article", { name: "Reply", exact: true }).filter({ hasText: "Mira welcomes the crew." })
-      ).toBeVisible()
-      await expect(page.getByRole("article", { name: "Reply", exact: true }).last().locator("header")).toContainText(
-        second
-      )
+      await expect(greeting).toContainText("Mira opens the door.")
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
     })
 }
 
-test.fixme("a pending group can restore a removed original member", async ({ page }) => {
+test("a group's new chat can restore a removed original member", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const names = ["Group Mira", "Group Tobin"]
@@ -199,18 +166,20 @@ test.fixme("a pending group can restore a removed original member", async ({ pag
     })
   )
   await page.goto(`${server().url}/groups/${started.chat.id}/new`)
-  const greeting = page.getByRole("article", { name: "Greeting from Group Mira", exact: true })
-  const next = greeting.getByRole("button", { name: "Next greeting from Group Mira" })
-  if (await next.isEnabled()) await next.click()
-  await expect(greeting).toContainText("group greeting")
+  await expect(page).toHaveURL(/[?&]draft=/)
+  // Each member greets at a random greeting of theirs: show Mira's group greeting.
+  const greeting = page.getByRole("article", { name: "Reply", exact: true }).first()
+  await expect(greeting).toContainText("Group Mira")
+  if (!(await greeting.innerText()).includes("Group Mira welcomes everyone.")) await step(greeting, "Next")
+  await expect(greeting).toContainText("Group Mira welcomes everyone.")
   await remove(page, "Group Tobin")
   await expect(greeting).toContainText("Group Mira waves.")
-  await expect(
-    page.getByRole("status").filter({ hasText: "selected group greeting is no longer available" })
-  ).toBeVisible()
+  await expect(page.getByText(FELL_BACK).first()).toBeVisible()
+  await expect(greetingOf(page, "Group Tobin")).toHaveCount(0)
   await startAdding(page, "Group Tobin")
   await closePanel(page)
-  await expect(page.getByRole("article", { name: "Greeting from Group Tobin", exact: true })).toBeVisible()
-  await next.click()
+  await expect(greetingOf(page, "Group Tobin waves.")).toBeVisible()
+  await step(greeting, "Next")
   await expect(greeting).toContainText("Group Mira welcomes everyone.")
+  await expect(page).toHaveURL(/[?&]draft=/)
 })

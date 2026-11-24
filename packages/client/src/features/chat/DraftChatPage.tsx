@@ -22,6 +22,7 @@ import { preloadChatPage } from "./chatPageLoader.ts"
 import { useIsPanelTab } from "./panels.tsx"
 import { carryPanelFocus } from "./ChatPanels.tsx"
 import { seedChat } from "./session.ts"
+import { rememberDraftFor } from "./chatStarted.ts"
 import { ChatSkeleton } from "./SkeletonMessages.tsx"
 
 /** The search param naming the page's pending chat, so a reload reopens it. */
@@ -73,6 +74,7 @@ function DraftChat({
         })
         return
       }
+      rememberDraftFor(value.id, draftFor)
       setChat(value)
       if (value.id !== reopen) onOpened?.(value)
       if (value.id !== reopen)

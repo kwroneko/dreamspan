@@ -66,7 +66,8 @@ import { composerKeyDown, composerSubmitKey } from "./composerKeys.ts"
 import { expandForDisplay } from "./macros.ts"
 import { useIsPanelTab } from "./panels.tsx"
 import { firstId, PendingChat, pendingOptions, pendingTitle } from "./pendingChat.ts"
-import { chatColumns, pendingPersonaPickerRows } from "./presentation.tsx"
+import { chatColumns } from "./presentation.tsx"
+import { PendingPersonaPickerRows } from "./PersonaSwitch.tsx"
 import { seedChat } from "./session.ts"
 import { seedSplitChats } from "./splitChats.ts"
 import { preloadChatPage } from "./chatPageLoader.ts"
@@ -495,7 +496,7 @@ function Pending({
         onPick: (picked) => pending.setPersona(picked.entityId)
       },
       // The same rows as the Cast tab's persona picker, at the top: the persona lock.
-      header: <SlotOutlet slot={pendingPersonaPickerRows} props={{ pending }} />
+      header: <PendingPersonaPickerRows pending={pending} />
     },
     speakerName,
     submitKey: composerSubmitKey(viewPrefs.prefs.enterSends),

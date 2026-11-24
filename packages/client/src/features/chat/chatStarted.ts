@@ -3,6 +3,7 @@
 // controls stay where they are, disabled, saying why (owner: no layout shifts, no buttons that
 // disappear), until its first turn starts it.
 import type { Chat } from "@dreamspan/shared/chat.ts"
+import type { DraftFor } from "@dreamspan/shared/draftChatApi.ts"
 
 /** Why a control that needs a started chat can't be used on a pending one. */
 export const NOT_STARTED = "Available once the chat is started: send a message first."
@@ -12,3 +13,9 @@ export const isPendingChat = (chat: Pick<Chat, "status"> | null | undefined) => 
 
 /** `NOT_STARTED` on a pending chat, else null: a control's disabled reason. */
 export const notStarted = (chat: Pick<Chat, "status"> | null | undefined) => (isPendingChat(chat) ? NOT_STARTED : null)
+
+/** The entry each pending chat opened in this tab is for (DraftChatPage.tsx): a group's or not. */
+const draftEntries = new Map<string, DraftFor>()
+export const rememberDraftFor = (chatId: string, draftFor: DraftFor) => void draftEntries.set(chatId, draftFor)
+/** A group's new chat: its persona pickers have no persona lock, which is a single chat's. */
+export const isGroupDraft = (chatId: string) => draftEntries.get(chatId)?.startsWith("group:") ?? false

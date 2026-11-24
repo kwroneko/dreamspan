@@ -906,6 +906,27 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
             data: toEvent(change)
           })
         }
+        // A pending chat's greetings follow who's in it, as a group start's would (DESIGN §2.1).
+        const greets = ["Join", "Leave", "Swap", "PlayedByMe", "Persona"].includes(change._tag)
+        if (greets && (yield* reader.GetChat({ userId: id, chatId })).status === "pending") {
+          const start = yield* castAt(id, chatId, null, forkId, displayEnd)
+          const playing = new Set<string>(start.playedByMe)
+          const characters = [...new Set(start.participants.filter((entity) => !playing.has(entity)))]
+          const greeters = yield* drawGreeters(
+            reader,
+            id,
+            {
+              cards: characters,
+              persona: start.playedByMe[0] ?? null,
+              greeting: null,
+              frozen: undefined,
+              greeters: characters.map((entityId) => ({ entityId, greeting: 0 }))
+            },
+            (entityId) => reader.GetCardForChat({ userId: id, entityId })
+          )
+          const synced = yield* writer.SyncPendingGreetings({ userId: id, chatId, greeters })
+          if (synced.changed) hub.publish(chatId, { _tag: "Reload" })
+        }
         hub.publish(chatId, { _tag: "State" })
         return yield* castAt(id, chatId, slotId, forkId, displayEnd)
       }).pipe(internal("ChangeCast")),

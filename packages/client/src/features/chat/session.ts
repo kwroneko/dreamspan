@@ -1758,12 +1758,32 @@ export class ChatSession {
     // A pending chat's cast is its start's (DESIGN §2.1): nothing is said yet, so a persona or
     // character picked before the first send applies before the greetings, and `{{user}}` in
     // them follows it, then and once started.
-    const slotId = this.view.chat?.status === "pending" ? null : leafSlotId
+    const pending = this.view.chat?.status === "pending"
+    const slotId = pending ? null : leafSlotId
+    // Its greetings follow who's in it (the server's SyncPendingGreetings): what each showed.
+    // By speaker: a greeting message may be made again (a slot keeps the selection it was made with).
+    const shown = new Map(
+      this.view.entries.map((entry) => [entry.version.speakerEntityId as string | null, entry.version.content])
+    )
     const result = await this.call((client) => client("ChangeCast", { chatId: this.chatId, slotId, forkId, change }))
     // The save's snapshot may predate another pin. Read the current cast after it commits.
     if (result.ok && !this.disposed && forkId === this.view.forkId && leafSlotId === this.view.leafSlotId) {
       this.forgetPositions()
       await this.refreshCast()
+    }
+    if (result.ok && pending && !this.disposed) {
+      const read = await this.call((client) =>
+        client("ReadPath", { chatId: this.chatId, forkId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 60 })
+      )
+      // A group greeting shown that two characters no longer offer gave way to the card's first.
+      if (
+        read.ok &&
+        read.value.entries.some((entry) => {
+          const before = shown.get(entry.version.speakerEntityId)
+          return before !== undefined && before !== entry.version.content
+        })
+      )
+        this.notice("The selected group greeting is no longer available. Using the card’s first greeting.")
     }
     return result
   }

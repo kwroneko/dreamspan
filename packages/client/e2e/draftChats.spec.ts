@@ -4,6 +4,7 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { expect, test, type Page } from "@playwright/test"
 import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
+import { addToCast } from "./support/cast.ts"
 import { showActions } from "./support/message.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
@@ -391,4 +392,79 @@ for (const kind of ["group", "empty"] as const)
     await expect(page).toHaveURL(chatUrl(draft))
     await expect(page.getByRole("article").filter({ hasText: "The first words." })).toBeVisible()
     expect(await listed(draft)).toBe(true)
+  })
+
+for (const width of [1340, 390])
+  test(`a new single chat's persona pickers lock the persona to its character, as before, at ${width}`, async ({
+    page
+  }, info) => {
+    test.setTimeout(120_000)
+    await start(page)
+    await page.setViewportSize({ width, height: 900 })
+    const harbor = await importCard(page, { name: `Harbor ${width}`, first_mes: "Harbor rings the bell." })
+    const partner = await importCard(page, { name: `Navigator ${width}`, first_mes: "Navigator checks the map." })
+    const { pilot, mapmaker } = await admin((api) =>
+      Effect.gen(function* () {
+        const pilot = yield* api.CreateCard({ label: `Pilot ${width}`, name: `Pilot ${width}` })
+        const mapmaker = yield* api.CreateCard({ label: `Mapmaker ${width}`, name: `Mapmaker ${width}` })
+        for (const card of [pilot, mapmaker]) yield* api.SetPersona({ entityId: card.entityId, persona: true })
+        yield* api.ChangeGenerationDefaults({ change: { persona: mapmaker.entityId } })
+        return { pilot, mapmaker }
+      })
+    )
+    const lock = () => admin((api) => api.GetPersonaLock({ entityId: harbor.entityId }))
+    const speaking = (name: string) =>
+      page.getByRole("button", { name: `Speaking as ${name}. Change the speaker`, exact: true })
+    const playing = (name: string) => page.getByRole("button", { name: new RegExp(`^Playing as ${name}\\b`) })
+    const row = (persona: string) =>
+      page.getByRole("checkbox", { name: `Always play as ${persona} with ${harbor.name}`, exact: true })
+    await openDraft(page, `/cards/${harbor.entityId}/chat`)
+    // The composer's picker: the lock row at the top, naming the persona played, off.
+    await speaking(mapmaker.label).click()
+    const picker = page.getByRole("dialog", { name: "Speak as" })
+    await expect(row(mapmaker.label)).toBeVisible()
+    await expect(row(mapmaker.label)).not.toBeChecked()
+    await picker
+      .getByRole("group", { name: "Your persona" })
+      .getByRole("option", { name: pilot.label, exact: true })
+      .click()
+    await expect(speaking(pilot.label)).toBeVisible()
+    // Picking a persona locks nothing; ticking the row does.
+    expect(await lock()).toBeNull()
+    await speaking(pilot.label).click()
+    await expect(row(pilot.label)).not.toBeChecked()
+    await expectLayout(page, info, `draft-persona-lock-composer-${width}`, { scope: '[role="dialog"]' })
+    await row(pilot.label).click()
+    await expect(row(pilot.label)).toBeChecked()
+    await expect.poll(async () => (await lock())?.entityId).toBe(pilot.entityId)
+    await page.keyboard.press("Escape")
+    // The Cast tab's picker: the same row, ticked.
+    await openPanel(page, "Cast")
+    await playing(pilot.label).click()
+    await expect(page.getByRole("dialog", { name: "Your persona" })).toBeVisible()
+    await expect(row(pilot.label)).toBeChecked()
+    await expectLayout(page, info, `draft-persona-lock-cast-${width}`, { scope: '[role="dialog"]' })
+    await page.keyboard.press("Escape")
+    await closePanel(page)
+    expect(draftOf(page)).not.toBeNull()
+    // The next new chat with Harbor starts as Pilot; unticking in the Cast tab clears the lock.
+    await openDraft(page, `/cards/${harbor.entityId}/chat`)
+    await openPanel(page, "Cast")
+    await expect(playing(pilot.label)).toBeVisible()
+    await playing(pilot.label).click()
+    await row(pilot.label).click()
+    await expect(row(pilot.label)).not.toBeChecked()
+    await expect.poll(async () => await lock()).toBeNull()
+    await page.keyboard.press("Escape")
+    // A second character makes it a group: neither picker offers it then.
+    await addToCast(page, partner.name)
+    await playing(pilot.label).click()
+    await expect(page.getByRole("dialog", { name: "Your persona" })).toBeVisible()
+    await expect(page.getByRole("checkbox", { name: /^Always play as / })).toHaveCount(0)
+    await page.keyboard.press("Escape")
+    await closePanel(page)
+    await speaking(pilot.label).click()
+    await expect(page.getByRole("dialog", { name: "Speak as" })).toBeVisible()
+    await expect(page.getByRole("checkbox", { name: /^Always play as / })).toHaveCount(0)
+    await page.keyboard.press("Escape")
   })

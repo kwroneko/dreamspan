@@ -244,6 +244,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   onPick,
   persona = false,
   pending = false,
+  markDefault = pending,
   onNone,
   trigger,
   personas,
@@ -266,6 +267,8 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   persona?: boolean
   /** A chat not made yet: there are no members to join. */
   pending?: boolean
+  /** A new chat, made or not, not started: the account's default persona says "(default)". */
+  markDefault?: boolean
   /** Offered as "No persona". */
   onNone?: () => void
   /** Its button's text in place of the chip ("Switch persona" where the name is already shown). */
@@ -283,7 +286,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
 }) {
   const view = useCast()
   const defaultPersona = useDefaultPersona()
-  const defaultLabel = pending && persona && speaker !== null && speaker === defaultPersona ? " (default)" : ""
+  const defaultLabel = markDefault && persona && speaker !== null && speaker === defaultPersona ? " (default)" : ""
   const [open, setOpen] = useState(false)
   const [making, setMaking] = useOpenPlace(`new-persona:${place}`)
   const [tab, setTab] = useState<SwitcherTab>("personas")

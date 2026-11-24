@@ -10,6 +10,40 @@ import type { ChatSession } from "./session.ts"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { pendingPersonaPickerRows } from "./presentation.tsx"
+import { isGroupDraft, isPendingChat } from "./chatStarted.ts"
+import { remoteOf } from "@dreamspan/shared/cardSources.ts"
+
+/** The persona picker's top rows on the new-chat page's PendingChat: its one character, and who you play. */
+export function PendingPersonaPickerRows({ pending }: { pending: PendingChat }) {
+  const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
+  // The chat's one character now: none once another joins in the Cast tab.
+  return (
+    <SlotOutlet
+      slot={pendingPersonaPickerRows}
+      props={{ card: pending.lockCard(state), persona: pending.playing(state) }}
+    />
+  )
+}
+
+/**
+ * The same rows on a new chat that is a pending chat (DraftChatPage.tsx), until it starts: its
+ * one character in the cast before the greetings, who you play, as the new-chat page's.
+ */
+export function ChatPersonaPickerRows({ session }: { session: ChatSession }) {
+  const chat = useSyncExternalStore(session.subscribe, () => session.snapshot().chat)
+  const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
+  if (!isPendingChat(chat) || cast === null || isGroupDraft(session.chatId)) return null
+  const characters = [...new Set(cast.participants.filter((id) => !cast.playedByMe.includes(id)))]
+  const only = characters.length === 1 ? (cast.cards.find((card) => card.entityId === characters[0]) ?? null) : null
+  const played = cast.playedByMe[0]
+  const persona = played === undefined ? null : (cast.cards.find((card) => card.entityId === played) ?? null)
+  return (
+    <SlotOutlet
+      slot={pendingPersonaPickerRows}
+      props={{ card: only !== null && remoteOf(only.entityId) === null ? only : null, persona }}
+    />
+  )
+}
 
 export function PersonaSwitch({
   session,
@@ -22,6 +56,7 @@ export function PersonaSwitch({
   place: string
 }) {
   const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
+  const chat = useSyncExternalStore(session.subscribe, () => session.snapshot().chat)
   const view = useMemo(() => castView(cast), [cast])
   const listCards = useCallback(() => session.listCards(), [session])
   const [error, setError] = useState<AppError | null>(null)
@@ -42,6 +77,9 @@ export function PersonaSwitch({
           trigger={trigger}
           place={`${place}:${session.chatId}`}
           onPick={(card) => void pick(card)}
+          // A new chat's, as the new-chat page's: the account default says so until it starts.
+          markDefault={isPendingChat(chat)}
+          header={<ChatPersonaPickerRows session={session} />}
         />
       </CastContext>
       {error && (
@@ -72,7 +110,7 @@ export function PendingPersonaSwitch({ pending, trigger }: { pending: PendingCha
         place="pending-cast"
         onPick={(card) => pending.setPersona(card.entityId)}
         onNone={() => pending.setPersona(null)}
-        header={<SlotOutlet slot={pendingPersonaPickerRows} props={{ pending }} />}
+        header={<PendingPersonaPickerRows pending={pending} />}
       />
     </CastContext>
   )

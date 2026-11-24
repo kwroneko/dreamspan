@@ -188,6 +188,167 @@ describe("pending chats", () => {
     )
   )
 
+  it.live(
+    "its greetings follow its cast: a character who joins greets, group greetings come and go, and nothing commits",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const api = yield* client()
+          const userId = (yield* api.Whoami()).id as UserId
+          const writer = yield* Writer
+          const make = (name: string, fields: Record<string, unknown>) =>
+            Effect.map(
+              writer.CreateEntity({
+                userId,
+                kind: "card",
+                label: name,
+                subtitle: "",
+                doc: cardDoc(name, fields),
+                schemaVersion: 1,
+                origin: "user",
+                sourcePath: null
+              }),
+              (made) => made.entityId as EntityId
+            )
+          const mira = yield* make("Mira", {
+            first_mes: "Mira opens the door.",
+            alternate_greetings: ["Mira waves."],
+            group_only_greetings: ["Mira welcomes the crew."]
+          })
+          const tobin = yield* make("Tobin", {
+            first_mes: "Tobin nods.",
+            group_only_greetings: ["Tobin greets everyone."]
+          })
+          const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+          const forkId = draft.currentForkId!
+          const path = () =>
+            Effect.map(
+              api.ReadPath({ chatId: draft.id, forkId: null, leafSlotId: null, range: { _tag: "Bottom" }, limit: 20 }),
+              (read) => read.entries
+            )
+          const contents = (slotId: string) =>
+            Effect.map(api.ListVersions({ slotId: slotId as never }), (versions) =>
+              versions.map((version) => version.content)
+            )
+          const [first] = yield* path()
+          assert.deepStrictEqual(yield* contents(first!.slotId), ["Mira opens the door.", "Mira waves."])
+          // Mira's alternate shown, then Tobin joins: his greeting is a message after hers, and
+          // both offer their group greetings now; hers still shows what it showed.
+          const waves = (yield* api.ListVersions({ slotId: first!.slotId })).find((v) => v.content === "Mira waves.")!
+          yield* api.SelectVersion({
+            slotId: first!.slotId,
+            versionId: waves.id,
+            forkId,
+            expectedVersionId: first!.version.id
+          })
+          yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Join", entityId: tobin } })
+          const joined = yield* path()
+          assert.deepStrictEqual(
+            joined.map((entry) => entry.version.content),
+            ["Mira waves.", "Tobin nods."]
+          )
+          assert.sameMembers(yield* contents(joined[0]!.slotId), [
+            "Mira opens the door.",
+            "Mira waves.",
+            "Mira welcomes the crew."
+          ])
+          assert.sameMembers(yield* contents(joined[1]!.slotId), ["Tobin nods.", "Tobin greets everyone."])
+          // Mira's group greeting shown, then Tobin leaves: his message goes, hers falls back.
+          const crew = (yield* api.ListVersions({ slotId: joined[0]!.slotId })).find(
+            (v) => v.content === "Mira welcomes the crew."
+          )!
+          yield* api.SelectVersion({
+            slotId: joined[0]!.slotId,
+            versionId: crew.id,
+            forkId,
+            expectedVersionId: joined[0]!.version.id
+          })
+          yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Leave", entityId: tobin } })
+          const left = yield* path()
+          assert.deepStrictEqual(
+            left.map((entry) => entry.version.content),
+            ["Mira opens the door."]
+          )
+          assert.deepStrictEqual(yield* contents(left[0]!.slotId), ["Mira opens the door.", "Mira waves."])
+          // Playing a card leaves its greeting out; none of this started the chat.
+          yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Join", entityId: tobin } })
+          assert.strictEqual((yield* path()).length, 2)
+          yield* api.ChangeCast({
+            chatId: draft.id,
+            slotId: null,
+            forkId,
+            change: { _tag: "PlayedByMe", entityIds: [tobin] }
+          })
+          assert.deepStrictEqual(
+            (yield* path()).map((entry) => entry.version.content),
+            ["Mira opens the door."]
+          )
+          assert.strictEqual((yield* api.GetChat({ chatId: draft.id })).status, "pending")
+          assert.notInclude(yield* listed(api), draft.id)
+        })
+      )
+  )
+
+  it.live("a group's: a member who leaves takes their greeting, and a group greeting shown falls back", () =>
+    run(
+      Effect.gen(function* () {
+        const api = yield* client()
+        const userId = (yield* api.Whoami()).id as UserId
+        const writer = yield* Writer
+        const make = (name: string) =>
+          Effect.map(
+            writer.CreateEntity({
+              userId,
+              kind: "card",
+              label: name,
+              subtitle: "",
+              doc: cardDoc(name, { first_mes: `${name} waves.`, group_only_greetings: [`${name} welcomes everyone.`] }),
+              schemaVersion: 1,
+              origin: "user",
+              sourcePath: null
+            }),
+            (made) => made.entityId as EntityId
+          )
+        const mira = yield* make("Mira")
+        const tobin = yield* make("Tobin")
+        const group = yield* api.StartChat({
+          cards: [mira, tobin],
+          persona: null,
+          greeting: 0,
+          first: { _tag: "Send", content: "Hello group.", speakerEntityId: null }
+        })
+        const draft = yield* api.OpenDraftChat({ draftFor: `group:${group.chat.id}` })
+        const forkId = draft.currentForkId!
+        const path = () =>
+          Effect.map(
+            api.ReadPath({ chatId: draft.id, forkId: null, leafSlotId: null, range: { _tag: "Bottom" }, limit: 20 }),
+            (read) => read.entries
+          )
+        const [first] = yield* path()
+        const versions = yield* api.ListVersions({ slotId: first!.slotId })
+        assert.sameMembers(
+          versions.map((v) => v.content),
+          ["Mira waves.", "Mira welcomes everyone."]
+        )
+        const welcome = versions.find((v) => v.content === "Mira welcomes everyone.")!
+        if (first!.version.id !== welcome.id)
+          yield* api.SelectVersion({
+            slotId: first!.slotId,
+            versionId: welcome.id,
+            forkId,
+            expectedVersionId: first!.version.id
+          })
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Leave", entityId: tobin } })
+        const left = yield* path()
+        assert.deepStrictEqual(
+          left.map((entry) => entry.version.content),
+          ["Mira waves."]
+        )
+        assert.strictEqual(left[0]!.versionCount, 1)
+      })
+    )
+  )
+
   it.live("duplicating the greeting commits it", () =>
     run(
       Effect.gen(function* () {

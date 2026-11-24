@@ -438,6 +438,13 @@ function useVersions(session: ChatSession, entry: PathEntry, report: (outcome: O
         )
       : -1
   const stale = multiple && position < 0
+  // A list of another count is gone for good: a new chat's greetings lose and regain swipes as
+  // its cast changes, and a list as long again would be the old one's.
+  const [listedCount, setListedCount] = useState(entry.versionCount)
+  if (listedCount !== entry.versionCount) {
+    setListedCount(entry.versionCount)
+    if (versions !== null && versions.length !== entry.versionCount) setVersions(null)
+  }
   useEffect(() => {
     if (!stale) return
     let live = true

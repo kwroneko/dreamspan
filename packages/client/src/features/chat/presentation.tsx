@@ -43,10 +43,15 @@ export const castSections = defineSlot<{ session: ChatSession }>("chat.cast-sect
 export const pendingCastSections = defineSlot<{ pending: import("./pendingChat.ts").PendingChat }>(
   "chat.pending-cast-sections"
 )
-/** Rows at the top of a chat not made yet's persona picker: the persona lock (DESIGN §2.2). */
-export const pendingPersonaPickerRows = defineSlot<{ pending: import("./pendingChat.ts").PendingChat }>(
-  "chat.pending-persona-picker-rows"
-)
+/**
+ * Rows at the top of a new chat's persona pickers, not started yet: the persona lock (DESIGN
+ * §2.2). `card`: its one character (null: a group's, none, or more than one); `persona`: who the
+ * user plays now (null: no persona).
+ */
+export const pendingPersonaPickerRows = defineSlot<{
+  card: import("@dreamspan/shared/chat.ts").CastCard | null
+  persona: import("@dreamspan/shared/chat.ts").CastCard | null
+}>("chat.pending-persona-picker-rows")
 /**
  * Rows of a character's tab in the chat panel under its actions, saved chat or pending: the
  * persona locked to them (DESIGN §2.2). `persona`: the tab is of the card the user plays.

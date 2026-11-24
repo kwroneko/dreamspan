@@ -1,4 +1,5 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
+import { ChatPersonaPickerRows } from "./PersonaSwitch.tsx"
 import { composerWorkspace } from "./composerWorkspace.ts"
 import {
   ComposerControls,
@@ -660,6 +661,8 @@ export function Composer({
       recent: switcherRecent,
       onPick,
       personas,
+      // The same rows as the Cast tab's persona picker, at the top: a new chat's persona lock.
+      header: <ChatPersonaPickerRows session={session} />,
       onAddToChat: () => {
         // The Cast tab, its Add characters open with the search focused (castAddState.ts).
         requestCastAdd()
