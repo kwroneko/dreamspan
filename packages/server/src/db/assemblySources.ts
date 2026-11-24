@@ -52,6 +52,7 @@ import {
   type ModelInput,
   type CardInput,
   type HistoryEntry,
+  type HistoryLibraryItem,
   type HistoryMerge,
   type NoteInput,
   type LorebookInput,
@@ -758,7 +759,10 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         pins.history.push({
           key: keyOf(leaf, limit, after ?? null),
           older,
-          entries: read.map(({ content: _, replySections: _sections, ...pinned }) => pinned)
+          entries: read.map(({ content: _, replySections: _sections, library, ...pinned }) => ({
+            ...pinned,
+            ...(library ? { library: library.map(({ doc: _, ...item }) => item) } : {})
+          }))
         })
         return { entries: read.map(({ amends: _, ...entry }) => entry), older }
       }),
@@ -1265,28 +1269,48 @@ const replaySources = (
       Effect.gen(function* () {
         const window = yield* pinned(pins.history, keyOf(leaf, limit, after ?? null), "part of the chat")
         const ids = window.entries.map((e) => e.versionId)
+        const needsLibrary = window.entries.some((e) => e.library?.some((item) => item.doc === undefined))
         const rows =
           ids.length === 0
             ? []
-            : yield* sql<{ id: string; content: string; reply_sections: string | null; amends: number }>`
+            : yield* sql<{
+                id: string
+                content: string
+                reply_sections: string | null
+                amends: number
+                library: string
+              }>`
                 SELECT v.id, v.content, v.reply_sections,
-                  (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amends
+                  (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amends,
+                  ${needsLibrary ? libraryDocuments(sql) : sql`'[]'`} AS library
                 FROM version_records v JOIN slots s ON s.id = v.slot_id
                 WHERE s.chat_id = ${chatId} AND ${owned} AND v.id IN ${sql.in(ids)}`
         const byId = new Map(rows.map((row) => [row.id, row]))
-        const entries = yield* Effect.forEach(window.entries, ({ amends, ...entry }) =>
+        const entries = yield* Effect.forEach(window.entries, ({ amends, library, ...entry }) =>
           Effect.gen(function* () {
             const row = byId.get(entry.versionId)
             if (!row) return yield* unpinned("a message")
+            const held = JSON.parse(row.library) as ReadonlyArray<HistoryLibraryItem>
+            const documents: Array<HistoryLibraryItem> = []
+            for (const item of library ?? []) {
+              const doc =
+                item.doc ??
+                held.find((h) => h.refId === item.refId && h.revisionId === item.revisionId && h.kind === item.kind)
+                  ?.doc
+              if (!doc) return yield* unpinned("a message's library attachment")
+              documents.push({ ...item, doc })
+            }
+            const attachments = library ? { library: documents } : {}
             // A reply's sections are the model's, frozen with it; an amend changes only the text.
             const sections = sectionsOf(row.reply_sections)
-            if (row.amends === amends) return { ...entry, content: row.content, ...sections } satisfies HistoryEntry
+            if (row.amends === amends)
+              return { ...entry, content: row.content, ...sections, ...attachments } satisfies HistoryEntry
             // Amended since: its text then is what the next amend replaced.
             const [earlier] = yield* sql<{ content: string }>`
               SELECT content FROM version_history WHERE version_id = ${entry.versionId}
               ORDER BY id LIMIT 1 OFFSET ${amends}`
             if (!earlier) return yield* unpinned("a message's earlier text")
-            return { ...entry, content: earlier.content, ...sections } satisfies HistoryEntry
+            return { ...entry, content: earlier.content, ...sections, ...attachments } satisfies HistoryEntry
           })
         )
         return { entries, older: window.older }

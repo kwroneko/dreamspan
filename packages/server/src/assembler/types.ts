@@ -492,8 +492,11 @@ export interface ContextSnapshot {
   readonly templateWrites?: ReadonlyArray<{ readonly version: string; readonly writes: ReadonlyArray<VariableEffect> }>
 }
 
-/** A message of the path as it was read, but its text, which its version and amend count pin. */
-type PinnedEntry = Omit<HistoryEntry, "content"> & { readonly amends: number }
+/** History pins keep message and attachment identities. Older pins may have embedded documents. */
+type PinnedEntry = Omit<HistoryEntry, "content" | "library"> & {
+  readonly amends: number
+  readonly library?: ReadonlyArray<Omit<HistoryLibraryItem, "doc"> & { readonly doc?: HistoryLibraryItem["doc"] }>
+}
 
 interface FailedSummaryRange {
   readonly id: string
