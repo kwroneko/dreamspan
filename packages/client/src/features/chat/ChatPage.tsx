@@ -243,30 +243,45 @@ export function MessageList({
     },
     [follow]
   )
-  /**
-   * Offsets the list was put at without the user: where it last stood at its end while held
-   * there, as a commit left it (the browser clamps to it when the last rows get shorter, a
-   * reply's steps folding), and the last offset the virtualizer wrote (an end scroll from
-   * estimates, a correction for rows measured above). The scroll event for either can
-   * arrive after rows grew (rows a contribution adds once it has read them), away from the
-   * end: that isn't the user scrolling away.
-   */
-  const endOffset = useRef<number | null>(null)
-  const writtenOffset = useRef<number | null>(null)
+  const scrollPosition = useRef<{ offset: number; maximum: number } | null>(null)
+  const pendingOffset = useRef<number | null>(null)
+  const readScrollPosition = useCallback(
+    (list: HTMLDivElement) => {
+      const offset = list.scrollTop
+      const maximum = list.scrollHeight - list.clientHeight
+      const previous = scrollPosition.current
+      // When rows shrink, the browser clamps the old offset to the new end. Its scroll event
+      // can arrive after rows grew back, so remember that movement until the event arrives.
+      if (
+        follow.stuck &&
+        previous !== null &&
+        maximum < previous.maximum &&
+        previous.offset > maximum &&
+        atOffset(maximum, offset)
+      )
+        pendingOffset.current = offset
+      else if (!atOffset(pendingOffset.current, offset)) pendingOffset.current = null
+      return (scrollPosition.current = { offset, maximum })
+    },
+    [follow]
+  )
   const scrollToFn = useCallback(
     (
       offset: number,
       options: { adjustments?: number; behavior?: ScrollBehavior },
       instance: Virtualizer<HTMLDivElement, Element>
     ) => {
-      writtenOffset.current = offset + (options.adjustments ?? 0)
+      const list = instance.scrollElement
+      if (list === null) return
+      const before = readScrollPosition(list)
       elementScroll(offset, options, instance)
+      const actual = list.scrollTop
+      if (actual !== before.offset) {
+        scrollPosition.current = { offset: actual, maximum: before.maximum }
+        pendingOffset.current = actual
+      }
     },
-    []
-  )
-  const placedOffset = useCallback(
-    (offset: number) => atOffset(endOffset.current, offset) || atOffset(writtenOffset.current, offset),
-    []
+    [readScrollPosition]
   )
   const offsetChanged = useRef<((offset: number, isScrolling: boolean) => void) | null>(null)
   const observeOffset = useCallback(
@@ -276,11 +291,12 @@ export function MessageList({
         // The observer's idle callback can see a native jump before its scroll event.
         // Release bottom-follow before the observer replaces the previous offset.
         if (
+          !isScrolling &&
           follow.stuck &&
           list !== null &&
           offset < (instance.scrollOffset ?? 0) &&
           list.scrollHeight - offset - list.clientHeight > END_PX &&
-          !placedOffset(offset)
+          !atOffset(pendingOffset.current, offset)
         )
           setFollow(instance, false)
         changed(offset, isScrolling)
@@ -292,7 +308,7 @@ export function MessageList({
         stop?.()
       }
     },
-    [follow, setFollow, placedOffset]
+    [follow, setFollow]
   )
   // While the list scrolls, TanStack Virtual measures newly mounted rows only in its resize
   // observer, before the browser paints, but re-renders for a size that moves nothing above the
@@ -358,18 +374,12 @@ export function MessageList({
   const syncOffset = useCallback(() => {
     const list = parent.current
     if (list === null) return
-    const actual = list.scrollTop
+    const { offset: actual } = readScrollPosition(list)
     const expected = virtualizer.scrollOffset ?? 0
     if (Math.abs(expected - actual) < 1) return
     offsetChanged.current?.(actual, false)
-  }, [virtualizer])
+  }, [virtualizer, readScrollPosition])
   useLayoutEffect(syncOffset)
-  useLayoutEffect(() => {
-    const list = parent.current
-    if (list === null || !follow.stuck) return
-    const offset = list.scrollTop
-    if (list.scrollHeight - offset - list.clientHeight <= 1) endOffset.current = offset
-  })
 
   // Contributions can grow below a partly visible earlier row whose text is already
   // above the viewport. Keep the reading row fixed through a resize batch: querying
@@ -660,7 +670,6 @@ export function MessageList({
   useEffect(() => {
     const list = parent.current
     if (list === null) return
-    const atEnd = () => list.scrollHeight - list.scrollTop - list.clientHeight <= END_PX
     const letGo = () => {
       intent.current = performance.now()
       hold(false)
@@ -677,9 +686,12 @@ export function MessageList({
     }
     // Capture runs before the virtualizer's own listener, whose render may follow at once.
     const onScroll = () => {
-      if (!atEnd()) {
+      const { offset, maximum } = readScrollPosition(list)
+      const placed = atOffset(pendingOffset.current, offset)
+      pendingOffset.current = null
+      if (maximum - offset > END_PX) {
         // Rows grew after the list was put somewhere without the user (above): still held.
-        if (follow.stuck && placedOffset(list.scrollTop)) virtualizer.scrollToEnd()
+        if (follow.stuck && placed) virtualizer.scrollToEnd()
         else hold(false)
       }
       // Capture reaching the end before the virtualizer measures its newly mounted rows.
@@ -701,7 +713,7 @@ export function MessageList({
       list.removeEventListener("pointerdown", onPointerDown)
       list.removeEventListener("scroll", onScroll, { capture: true })
     }
-  }, [hold, spacing, follow, virtualizer, placedOffset])
+  }, [hold, spacing, follow, virtualizer, readScrollPosition])
   // The list held at the end stays there when it gets shorter: the composer below growing with
   // a line of text, or a note above it appearing. The browser keeps the scroll position, which
   // left the last message behind the list's edge until something else rendered the list.
@@ -716,14 +728,15 @@ export function MessageList({
     const observer = new ResizeObserver(() => {
       const shorter = list.clientHeight < height
       height = list.clientHeight
+      const { maximum } = readScrollPosition(list)
       if (!shorter || !follow.stuck || !following.current) return
       // Before this frame paints (the virtualizer's own scroll lands a frame later), then theirs.
-      list.scrollTop = list.scrollHeight - list.clientHeight
+      scrollToFn(maximum, {}, virtualizer)
       virtualizer.scrollToEnd()
     })
     observer.observe(list)
     return () => observer.disconnect()
-  }, [follow, virtualizer])
+  }, [follow, virtualizer, readScrollPosition, scrollToFn])
   useEffect(() => {
     const list = parent.current
     if (list === null || entries.length === 0 || !view.follow) return

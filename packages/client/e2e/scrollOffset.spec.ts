@@ -6,7 +6,7 @@ import { Effect } from "effect"
 import type { SlotId } from "@dreamspan/shared/chat.ts"
 import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { createServer } from "vite"
-import { asUser } from "./support/rpc.ts"
+import { asPage, asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -124,3 +124,57 @@ for (const width of [1440, 390])
         )
         .toBeLessThanOrEqual(2)
     })
+
+for (const width of [1440, 390])
+  test(`keeps native focus visible after shrinking the chat viewport at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1100 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const marker = "Earlier message link"
+    const chat = await asPage(page, server(), (api) =>
+      Effect.gen(function* () {
+        const chat = yield* api.CreateChat({ title: "Focus during chat resize" })
+        yield* api.SetLcmEnabled({ chatId: chat.id, enabled: false })
+        yield* api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: null,
+          branch: false,
+          content: [`[${marker}](#earlier)`, ...Array.from({ length: 17 }, (_, i) => `Paragraph ${i + 1}.`)].join(
+            "\n\n"
+          )
+        })
+        return chat
+      })
+    )
+    await page.goto(`${server().url}/chats/${chat.id}`)
+    const list = page.getByTestId("messages")
+    const link = list.getByRole("link", { name: marker })
+    await expect(link).toBeInViewport()
+    await expect(list.getByText("Paragraph 17.")).toBeInViewport()
+    await expect(page.getByText("No model chosen", { exact: true })).toBeVisible()
+    expect(await list.evaluate((element) => element.scrollHeight - element.clientHeight)).toBe(0)
+
+    await link.evaluate((anchor) => {
+      const list = anchor.closest<HTMLElement>('[data-testid="messages"]')!
+      const scrollTo = list.scrollTo
+      list.scrollTo = (...args: unknown[]) => {
+        Reflect.apply(scrollTo, list, args)
+        if (list.scrollTop < 100) return
+        list.scrollTo = scrollTo
+        // After the resize observer moves to the new end, focus before the queued scroll event.
+        queueMicrotask(() => {
+          ;(anchor as HTMLElement).focus()
+          list.dataset.focusOffset = String(list.scrollTop)
+          list.addEventListener(
+            "scroll",
+            () => requestAnimationFrame(() => requestAnimationFrame(() => (list.dataset.focusScrollSettled = "true"))),
+            { once: true }
+          )
+        })
+      }
+    })
+    await page.setViewportSize({ width, height: 760 })
+    await expect(list).toHaveAttribute("data-focus-offset", "0")
+    await expect(list).toHaveAttribute("data-focus-scroll-settled", "true")
+    await expect(link).toBeFocused()
+    await expect(link).toBeInViewport()
+  })
