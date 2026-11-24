@@ -10,13 +10,9 @@ import { asUser } from "./support/rpc.ts"
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 
-const switchTo = async (page: Page, name: string) => {
-  await page.getByRole("button", { name: /^Branch:.*switch branch$/ }).click()
-  const dialog = page.getByRole("dialog", { name: "Branches of this chat" })
-  await dialog
-    .getByRole("list", { name: "Branches" })
-    .getByRole("link", { name: new RegExp(`^${name}`) })
-    .click()
+/** With the message's branch arrows, in the app (no page load). */
+const switchTo = async (page: Page, name: string, arrow: "Next branch" | "Previous branch") => {
+  await page.getByRole("button", { name: arrow, exact: true }).click()
   await expect(page.getByRole("button", { name: new RegExp(`^Branch: ${name}`) })).toBeVisible()
 }
 
@@ -64,12 +60,12 @@ test("a chat note's unsaved dot shows on its branch only, and comes back with it
   await expect(editor.locator('[data-save-state="unsaved"]')).toBeVisible()
   await expect(tab.locator("[data-unsaved-dot]")).toBeVisible()
 
-  await switchTo(page, "Birch")
+  await switchTo(page, "Birch", "Next branch")
   await expect(tab).toBeVisible()
   await expect(tab).not.toHaveAttribute("data-unsaved")
   await expect(page.locator("[data-unsaved-dot]")).toHaveCount(0)
 
-  await switchTo(page, "Alder")
+  await switchTo(page, "Alder", "Previous branch")
   await expect(tab.locator("[data-unsaved-dot]")).toBeVisible()
   await expect(editor.getByRole("textbox", { name: "Text of Weather" })).toContainText("Rain by evening.")
 })
