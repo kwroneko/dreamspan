@@ -6,7 +6,7 @@
 // never opened. Main-thread async file I/O; SQLite only through the writer (file versions).
 import { createHash, randomBytes } from "node:crypto"
 import { constants, type Stats } from "node:fs"
-import { lstat, mkdir, open, readFile, rename, rm, unlink, type FileHandle } from "node:fs/promises"
+import { lstat, mkdir, open, readFile, rename, rm, rmdir, unlink, type FileHandle } from "node:fs/promises"
 import { join } from "node:path"
 import { Transform, Writable } from "node:stream"
 import { pipeline } from "node:stream/promises"
@@ -37,7 +37,8 @@ import {
   type TextFile,
   UploadConflict,
   type FolderListing,
-  type UploadOutcome
+  type UploadOutcome,
+  UploadUndoEntry
 } from "@dreamspan/shared/files.ts"
 import { NodeHttpServerRequest } from "@effect/platform-node"
 import { ByteSize, Cause, Effect, Layer, Option, Schema, Semaphore, Stream } from "effect"
@@ -302,6 +303,29 @@ const answering = <R>(effect: Effect.Effect<HttpServerResponse.HttpServerRespons
   )
 
 const PathBody = Schema.Struct({ path: Schema.String.check(Schema.isMaxLength(4096)) })
+const CreateFolderBody = Schema.Struct({ ...PathBody.fields, upload: Schema.optionalKey(Schema.Boolean) })
+const RemoveBody = Schema.Struct({ ...PathBody.fields, upload: Schema.optionalKey(UploadUndoEntry) })
+
+const pathAtDepth = (path: string, segments: number, depth: number) => {
+  const parts = path.split("/")
+  return parts.slice(0, parts.length - segments + depth + 1).join("/")
+}
+
+const uploadEntry = (path: string, kind: UploadUndoEntry["kind"], info: Stats): UploadUndoEntry => ({
+  path,
+  kind,
+  device: info.dev,
+  inode: info.ino,
+  birth: info.birthtimeMs,
+  changed: kind === "file" ? info.ctimeMs : null
+})
+
+const isUploadEntry = (entry: UploadUndoEntry, info: Stats) =>
+  entry.device === info.dev &&
+  entry.inode === info.ino &&
+  entry.birth === info.birthtimeMs &&
+  (entry.kind === "folder" ? info.isDirectory() : info.isFile() && entry.changed === info.ctimeMs)
+
 const AttachBody = Schema.Struct({ ...PathBody.fields, composer: Schema.optionalKey(AttachmentComposer) })
 const RestoreBody = Schema.Struct({ binItemId: Schema.String.check(Schema.isMaxLength(64)) })
 const SHA256 = /^[0-9a-f]{64}$/
@@ -883,6 +907,38 @@ export const filesRoutes = Layer.unwrap(
         Effect.catch(() => Effect.succeed(null))
       )
 
+    /** Remove a recorded directory only while its identity matches and it is empty. */
+    const removeUploadedFolder = async (
+      userId: string,
+      root: string,
+      segments: ReadonlyArray<string>,
+      entry: UploadUndoEntry
+    ) => {
+      try {
+        const dir = await openFolder(root, segments.slice(0, -1))
+        try {
+          const path = at(dir, segments.at(-1)!)
+          const info = await lstat(path)
+          if (!isUploadEntry(entry, info)) return false
+          const credit = quota.freed(userId, info.blocks * 512)
+          try {
+            await rmdir(path)
+          } catch (error) {
+            quota.unfreed(userId, credit)
+            throw error
+          }
+          return true
+        } finally {
+          await dir.close()
+        }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (code === "ENOENT" || code === "ENOTEMPTY" || code === "EEXIST" || error instanceof FilePathRefused)
+          return false
+        throw error
+      }
+    }
+
     const upload = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
       if (request.headers["content-type"] !== "application/octet-stream")
@@ -909,14 +965,26 @@ export const filesRoutes = Layer.unwrap(
       const parentPath = placed.full.slice(0, placed.full.lastIndexOf("/"))
       const ownerParent = placed.ownerFull.slice(0, placed.ownerFull.lastIndexOf("/"))
       const message = NodeHttpServerRequest.toIncomingMessage(request)
-      // Folders this upload makes take room too (counted until the next measurement).
-      const made = yield* Effect.tryPromise(async () => {
-        for (let i = 0; i < parent.length; i++)
-          if (!(await statPath(root, parent.slice(0, i + 1)).catch(() => null))) return parent.length - i
-        return 0
+      const created: Array<UploadUndoEntry> = []
+      const folders: Array<{ depth: number; entry: UploadUndoEntry }> = []
+      let reported = false
+      const dropUnreportedFolders = Effect.promise(async () => {
+        if (!reported)
+          for (const { depth, entry } of folders.toReversed())
+            await removeUploadedFolder(userId, root, parent.slice(0, depth + 1), entry).catch(() => false)
       })
-      const dir = yield* Effect.tryPromise(() => openFolder(root, parent, { create: true }))
-      quota.wrote(userId, made * FOLDER_BYTES)
+      const dir = yield* Effect.tryPromise(() =>
+        openFolder(root, parent, {
+          create: true,
+          onCreated: (depth, info) => {
+            quota.wrote(userId, FOLDER_BYTES)
+            const path = pathAtDepth(placed.full, segments.length, depth)
+            const entry = uploadEntry(path, "folder", info)
+            created.push(entry)
+            folders.push({ depth, entry })
+          }
+        })
+      ).pipe(Effect.tapError(() => dropUnreportedFolders))
       let cleanUpUpload: (() => Promise<void>) | undefined
       return yield* Effect.gen(function* () {
         const originalName = segments.at(-1)!
@@ -935,8 +1003,10 @@ export const filesRoutes = Layer.unwrap(
         }
         if (existing) {
           if (conflict.value === "ask") return HttpServerResponse.jsonUnsafe({ taken: true }, { status: 409 })
-          if (conflict.value === "skip")
-            return HttpServerResponse.jsonUnsafe({ path: `${parentPath}/${name}`, outcome: "skipped" })
+          if (conflict.value === "skip") {
+            reported = true
+            return HttpServerResponse.jsonUnsafe({ path: `${parentPath}/${name}`, outcome: "skipped", created })
+          }
           if (conflict.value === "replace") {
             if (existing.isDirectory()) return refuse(409, `“${name}” is a folder here. Choose Keep both or Skip.`)
             outcome = "replaced"
@@ -1067,6 +1137,7 @@ export const filesRoutes = Layer.unwrap(
               try {
                 if (outcome === "replaced") await rename(at(dir, temporary), at(dir, name))
                 else {
+                  const staged = await lstat(at(dir, temporary))
                   for (;;) {
                     try {
                       await renameNoReplace(at(dir, temporary), at(dir, name))
@@ -1076,6 +1147,15 @@ export const filesRoutes = Layer.unwrap(
                       name = numberedFileName(originalName, nextNumber++)
                     }
                   }
+                  const info = await lstat(at(dir, name)).catch(() => null)
+                  if (
+                    info?.dev === staged.dev &&
+                    info.ino === staged.ino &&
+                    info.birthtimeMs === staged.birthtimeMs &&
+                    info.mtimeMs === staged.mtimeMs &&
+                    info.size === staged.size
+                  )
+                    created.push(uploadEntry(`${parentPath}/${name}`, "file", info))
                 }
               } catch (error) {
                 quota.unfreed(userId, freeToken)
@@ -1093,39 +1173,56 @@ export const filesRoutes = Layer.unwrap(
             { status: 409 }
           )
         }
+        reported = true
         changedAt({ ...placed, full: `${parentPath}/${name}`, ownerFull: `${ownerParent}/${name}` })
         return HttpServerResponse.jsonUnsafe({
           path: `${parentPath}/${name}`,
           outcome,
-          sha256: digest.digest("hex")
+          sha256: digest.digest("hex"),
+          ...(created.length ? { created } : {})
         } satisfies UploadOutcome)
       }).pipe(
         Effect.ensuring(
-          Effect.promise(async () => {
-            await cleanUpUpload?.()
-            await dir.close()
-          })
+          Effect.promise(() => cleanUpUpload?.() ?? Promise.resolve()).pipe(
+            Effect.ensuring(Effect.promise(() => dir.close())),
+            Effect.ensuring(dropUnreportedFolders)
+          )
         )
       )
     })
 
     const folder = Effect.gen(function* () {
-      const body = yield* jsonBody(PathBody)
+      const body = yield* jsonBody(CreateFolderBody)
       const placed = yield* place(body.path)
       const { userId, root, full, segments } = placed
       if (segments.length === 0 || (placed.share && full.split("/").length <= 5)) return refuse(400, "Name the folder.")
       const problem = nameProblem(segments.at(-1)!)
       if (problem) return refuse(400, problem)
-      const dir = yield* Effect.tryPromise(() => openFolder(root, segments.slice(0, -1)))
+      const created: Array<UploadUndoEntry> = []
       yield* withFileTree(
         userId,
-        stillPlaced(placed).pipe(
-          Effect.andThen(Effect.tryPromise(() => mkdir(at(dir, segments.at(-1)!), { mode: 0o755 })))
-        )
-      ).pipe(Effect.ensuring(Effect.promise(() => dir.close())))
-      quota.wrote(userId, FOLDER_BYTES)
+        Effect.gen(function* () {
+          yield* stillPlaced(placed)
+          const dir = yield* Effect.tryPromise(() =>
+            openFolder(root, segments.slice(0, -1), {
+              create: body.upload === true,
+              onCreated: (depth, info) => {
+                quota.wrote(userId, FOLDER_BYTES)
+                const path = pathAtDepth(full, segments.length, depth)
+                created.push(uploadEntry(path, "folder", info))
+              }
+            })
+          )
+          yield* Effect.tryPromise(async () => {
+            const name = at(dir, segments.at(-1)!)
+            await mkdir(name, { mode: 0o755 })
+            quota.wrote(userId, FOLDER_BYTES)
+            if (body.upload) created.push(uploadEntry(full, "folder", await lstat(name)))
+          }).pipe(Effect.ensuring(Effect.promise(() => dir.close())))
+        })
+      )
       changedAt(placed)
-      return HttpServerResponse.jsonUnsafe({ path: full })
+      return HttpServerResponse.jsonUnsafe({ path: full, ...(created.length ? { created } : {}) })
     })
 
     const move = Effect.gen(function* () {
@@ -1179,38 +1276,50 @@ export const filesRoutes = Layer.unwrap(
     })
 
     const remove = Effect.gen(function* () {
-      const body = yield* jsonBody(PathBody)
+      const body = yield* jsonBody(RemoveBody)
       const placed = yield* place(body.path)
       const { userId, root, segments } = placed
+      const uploaded = body.upload
       if (segments.length === 0) return refuse(400, "The top folder can't be deleted.")
       if (placed.share && placed.full.split("/").length <= 5)
         return refuse(400, "Only its owner can delete a shared folder.")
-      const info = yield* Effect.tryPromise(() => statPath(root, segments))
-      if (!info) return refuse(404, "Not found. It may have been moved or deleted.")
-      // To the bin (§1.3): its bytes stay counted, under the bin, until it's emptied. In a
-      // shared folder, the owner's bin: they can restore it; the caller has no Undo.
-      const user = yield* CurrentUser
-      // Shares of it or of folders in it stop as it goes to the bin: their accounts' commands too.
-      const stopping = (yield* reader.SharedByMe({ userId: userId as never }))
-        .filter((share) => isWithin(share.path, placed.ownerFull))
-        .map((share) => share.granteeUserId)
-      const item = yield* withFileTree(
-        userId,
-        stillPlaced(placed).pipe(
-          Effect.andThen(
-            bin.toBin(
-              userId,
-              root,
-              segments,
-              placed.ownerFull,
-              placed.share ? { userId: user.id, handle: user.handle } : undefined
-            )
+      const skipped = () => ({ response: HttpServerResponse.jsonUnsafe({ binItemId: null }), stopping: [] })
+      if (uploaded && uploaded.path !== placed.full) return skipped().response
+      const removeEntry = Effect.gen(function* () {
+        yield* stillPlaced(placed)
+        const info = yield* Effect.tryPromise(() => statPath(root, segments)).pipe(
+          Effect.catch((error) =>
+            uploaded && unwrap(error) instanceof FilePathRefused ? Effect.succeed(null) : Effect.fail(error)
           )
         )
-      )
-      changedAt(placed)
+        if (uploaded && (!info || !isUploadEntry(uploaded, info))) return skipped()
+        if (!info) return { response: refuse(404, "Not found. It may have been moved or deleted."), stopping: [] }
+        const stopping = (yield* reader.SharedByMe({ userId: userId as never }))
+          .filter((share) => isWithin(share.path, placed.ownerFull))
+          .map((share) => share.granteeUserId)
+        if (uploaded?.kind === "folder") {
+          if (stopping.length > 0) return skipped()
+          const removed = yield* Effect.tryPromise(() => removeUploadedFolder(userId, root, segments, uploaded))
+          if (removed) changedAt(placed)
+          return skipped()
+        }
+        // A deleted file stays charged in the bin until the bin is emptied.
+        const user = yield* CurrentUser
+        const item = yield* bin.toBin(
+          userId,
+          root,
+          segments,
+          placed.ownerFull,
+          placed.share ? { userId: user.id, handle: user.handle } : undefined,
+          uploaded ? (current) => isUploadEntry(uploaded, current) : undefined
+        )
+        if (!item) return skipped()
+        changedAt(placed)
+        return { response: HttpServerResponse.jsonUnsafe({ binItemId: placed.share ? null : item.id }), stopping }
+      })
+      const { response, stopping } = yield* withFileTree(userId, removeEntry)
       if (stopping.length > 0) yield* recheckCommands([...new Set(stopping)])
-      return HttpServerResponse.jsonUnsafe({ binItemId: placed.share ? null : item.id })
+      return response
     })
 
     /** Attach copies running per account, with how many wait (`ATTACH_AT_ONCE`, `ATTACH_WAITING`). */

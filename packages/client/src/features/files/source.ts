@@ -6,6 +6,7 @@ import type { AttachmentComposer } from "@dreamspan/shared/composerApi.ts"
 import {
   AttachedFile,
   Changed,
+  CreatedFolder,
   Deleted,
   FILES_ROUTES,
   FileVersionEntry,
@@ -15,6 +16,7 @@ import {
   type ShareMode,
   TextFile,
   UploadOutcome,
+  type UploadUndoEntry,
   type UploadConflict,
   encodeText
 } from "@dreamspan/shared/files.ts"
@@ -47,9 +49,9 @@ export interface FilesSource {
     conflict: UploadConflict,
     onProgress?: (sent: number) => void
   ) => Promise<UploadOutcome>
-  readonly createFolder: (path: string) => Promise<Changed>
+  readonly createFolder: (path: string, upload?: boolean) => Promise<CreatedFolder>
   readonly move: (from: string, to: string) => Promise<Changed>
-  readonly remove: (path: string) => Promise<Deleted>
+  readonly remove: (path: string, upload?: UploadUndoEntry) => Promise<Deleted>
   readonly restore: (binItemId: string) => Promise<Changed>
   /** The URL a viewer loads the file from, or a download starts at. */
   readonly rawUrl: (path: string, download?: boolean) => string
@@ -165,9 +167,9 @@ export const httpFilesSource: FilesSource = {
       UploadOutcome,
       await send(`${FILES_ROUTES.upload}?${new URLSearchParams({ path, conflict })}`, file, onProgress)
     ),
-  createFolder: async (path) => json(Changed, await post(FILES_ROUTES.folder, { path })),
+  createFolder: async (path, upload) => json(CreatedFolder, await post(FILES_ROUTES.folder, { path, upload })),
   move: async (from, to) => json(Changed, await post(FILES_ROUTES.move, { from, to })),
-  remove: async (path) => json(Deleted, await post(FILES_ROUTES.delete, { path })),
+  remove: async (path, upload) => json(Deleted, await post(FILES_ROUTES.delete, { path, upload })),
   restore: async (binItemId) => json(Changed, await post(FILES_ROUTES.restore, { binItemId })),
   rawUrl: (path, download = false) =>
     `${FILES_ROUTES.raw}?${new URLSearchParams(download ? { path, download: "1" } : { path })}`,

@@ -5,7 +5,13 @@ import { assert, describe, it } from "@effect/vitest"
 import { createHash } from "node:crypto"
 import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { encodeText, type FolderListing, type TextFile } from "@dreamspan/shared/files.ts"
+import {
+  encodeText,
+  type FolderListing,
+  type TextFile,
+  type UploadOutcome,
+  type UploadUndoEntry
+} from "@dreamspan/shared/files.ts"
 import { Effect, Fiber } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
@@ -58,6 +64,57 @@ describe("file routes", () => {
       assert.strictEqual(uploaded.status, 200)
       assert.deepInclude((yield* Effect.promise(() => uploaded.json())) as object, { path: "/files/report (3).txt" })
       assert.strictEqual(yield* body(yield* call("/files/raw?path=/files/report%20(2).txt")), "first copy")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("upload Undo removes only the created entries while they still match", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      yield* upload("/files/existing/keep.txt", "prior content")
+      const added = yield* upload("/files/existing/new/nested/added.txt", "uploaded content")
+      const receipt = ((yield* Effect.promise(() => added.json())) as UploadOutcome).created!
+      assert.deepStrictEqual(
+        receipt.map(({ path, kind }) => [path, kind]),
+        [
+          ["/files/existing/new", "folder"],
+          ["/files/existing/new/nested", "folder"],
+          ["/files/existing/new/nested/added.txt", "file"]
+        ]
+      )
+      const edited = yield* upload("/files/existing/new/edited.txt", "uploaded content")
+      const editedReceipt = ((yield* Effect.promise(() => edited.json())) as UploadOutcome).created![0]!
+      yield* upload(editedReceipt.path, "changed content", "replace")
+      const undo = (entry: UploadUndoEntry) => json("/files/delete", { path: entry.path, upload: entry })
+      assert.strictEqual((yield* undo(editedReceipt)).status, 200)
+      for (const entry of receipt.toReversed()) assert.strictEqual((yield* undo(entry)).status, 200)
+      assert.deepStrictEqual(
+        (yield* list("/files/existing")).entries.map(({ name }) => name),
+        ["keep.txt", "new"]
+      )
+      assert.deepStrictEqual(
+        (yield* list("/files/existing/new")).entries.map(({ name }) => name),
+        ["edited.txt"]
+      )
+
+      const empty = yield* json("/files/folder", { path: "/files/existing/empty/nested", upload: true })
+      const emptyReceipt = (yield* Effect.promise(() => empty.json())) as { created: Array<UploadUndoEntry> }
+      assert.deepStrictEqual(
+        emptyReceipt.created.map(({ path }) => path),
+        ["/files/existing/empty", "/files/existing/empty/nested"]
+      )
+      for (const entry of emptyReceipt.created.toReversed()) assert.strictEqual((yield* undo(entry)).status, 200)
+      assert.deepStrictEqual(
+        (yield* list("/files/existing")).entries.map(({ name }) => name),
+        ["keep.txt", "new"]
+      )
+      const api = yield* client()
+      const me = yield* api.Whoami()
+      yield* api.SetFilesQuota({ userId: me.id, quotaBytes: 1 })
+      assert.strictEqual((yield* upload("/files/refused/empty/upload.txt", "refused")).status, 507)
+      assert.deepStrictEqual(
+        (yield* list("/files")).entries.map(({ name }) => name),
+        ["existing"]
+      )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 

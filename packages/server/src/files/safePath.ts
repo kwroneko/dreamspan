@@ -45,19 +45,24 @@ const refuseLinks = (error: unknown, name: string): never => {
 export const openFolder = async (
   root: string,
   segments: ReadonlyArray<string>,
-  options: { readonly create?: boolean } = {}
+  options: { readonly create?: boolean; readonly onCreated?: (depth: number, info: Stats) => void } = {}
 ): Promise<FileHandle> => {
   let dir = await open(root, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
   try {
-    for (const name of segments) {
+    for (const [depth, name] of segments.entries()) {
       let next: FileHandle
       try {
         next = await open(at(dir, name), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT" || !options.create) refuseLinks(error, name)
-        await mkdir(at(dir, name), { mode: 0o755 }).catch((e: NodeJS.ErrnoException) => {
-          if (e.code !== "EEXIST") throw e
-        })
+        const created = await mkdir(at(dir, name), { mode: 0o755 }).then(
+          () => true,
+          (e: NodeJS.ErrnoException) => {
+            if (e.code !== "EEXIST") throw e
+            return false
+          }
+        )
+        if (created && options.onCreated) options.onCreated(depth, await lstat(at(dir, name)))
         next = await open(at(dir, name), O_RDONLY | O_DIRECTORY | O_NOFOLLOW).catch((e) => refuseLinks(e, name))
       }
       await dir.close()

@@ -349,7 +349,6 @@ export function FileBrowser(props: FileBrowserProps) {
 
   const upload = async (items: ReadonlyArray<UploadItem>) => {
     if (items.length === 0 || readOnly) return
-    const before = new Set(names)
     setFailure(null)
     // The server checks each file after resolving its name conflict, including replacement credit.
     setProgress({ done: 0, total: 1 })
@@ -370,7 +369,7 @@ export function FileBrowser(props: FileBrowserProps) {
           : "There's no room left for these files."
       )
     }
-    const added = report.made.filter((path) => !before.has(nameOf(path)))
+    const added = report.made.toReversed()
     const count = report.written.length
     if (report.failed.length > 0)
       setFailure(
@@ -379,9 +378,14 @@ export function FileBrowser(props: FileBrowserProps) {
           .map((f) => `${f.relative} (${f.message})`)
           .join("; ")}`
       )
-    if (count > 0 || report.skipped > 0)
+    if (count > 0 || report.skipped > 0 || added.length > 0)
       showToast({
-        title: count === 1 ? "Uploaded 1 file" : `Uploaded ${count} files`,
+        title:
+          count === 0 && added.length > 0
+            ? "Uploaded folders"
+            : count === 1
+              ? "Uploaded 1 file"
+              : `Uploaded ${count} files`,
         ...(report.skipped > 0 ? { description: `Skipped ${report.skipped} with taken names.` } : {}),
         actions:
           added.length > 0
@@ -391,7 +395,7 @@ export function FileBrowser(props: FileBrowserProps) {
                   hint: "Deletes what this upload added. Files it replaced stay as they are now.",
                   onClick: () =>
                     void change(async () => {
-                      for (const path of added) await source.remove(path)
+                      for (const entry of added) await source.remove(entry.path, entry)
                     }, "The upload wasn't taken back")
                 }
               ]
