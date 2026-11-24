@@ -105,7 +105,7 @@ const ViewedFork = createContext<{ readonly fork?: ForkId }>({})
 
 /** Where a source's link goes, landing on the item it is, and what its hover says. */
 type SourceTarget =
-  | { readonly to: "chat"; readonly search: Record<string, unknown>; readonly hint: string }
+  | { readonly to: "chat"; readonly chatId: ChatId; readonly search: Record<string, unknown>; readonly hint: string }
   | { readonly to: "library"; readonly ref: string; readonly search: Record<string, unknown>; readonly hint: string }
 
 /**
@@ -131,26 +131,34 @@ const presetTarget = (ref: string, identifier: string): SourceTarget => {
 /** Whose page a source's link opens, at its item: every kind lands on the exact thing it names. */
 const sourceTarget = (
   source: ContextSource,
-  chatId: ChatId,
+  chatId: ChatId | null,
   viewed: { readonly fork?: ForkId }
 ): SourceTarget | null => {
   if (source.slotId)
-    return { to: "chat", search: { ...viewed, slot: source.slotId }, hint: "Opens this message in the chat." }
+    return chatId === null
+      ? null
+      : { to: "chat", chatId, search: { ...viewed, slot: source.slotId }, hint: "Opens this message in the chat." }
   if (source.kind === "summary" && source.summary)
-    return {
-      to: "chat",
-      search: { ...viewed, panel: "summaries", summary: source.summary.id },
-      hint: "Opens this summary in the chat's Summaries tab."
-    }
+    return chatId === null
+      ? null
+      : {
+          to: "chat",
+          chatId,
+          search: { ...viewed, panel: "summaries", summary: source.summary.id },
+          hint: "Opens this summary in the chat's Summaries tab."
+        }
   if (!source.ref) return null
   const ref = source.ref
   // A note is the chat's or a card's, edited where the chat lists them.
   if (source.kind === "note")
-    return {
-      to: "chat",
-      search: { ...viewed, panel: "notes", note: ref },
-      hint: "Opens this note in the chat's Notes tab."
-    }
+    return chatId === null
+      ? null
+      : {
+          to: "chat",
+          chatId,
+          search: { ...viewed, panel: "notes", note: ref },
+          hint: "Opens this note in the chat's Notes tab."
+        }
   // A plugin's kind keeps its plain library link, whatever item it carries.
   const item =
     source.kind === "preset" || source.kind === "lorebook" || source.kind === "card" ? source.item : undefined
@@ -188,7 +196,7 @@ function SourceTitle({
   rewritten = false
 }: {
   source: ContextSource
-  chatId: ChatId
+  chatId: ChatId | null
   rewritten?: boolean
 }) {
   const viewed = useContext(ViewedFork)
@@ -209,7 +217,7 @@ function SourceTitle({
             {target.to === "chat" ? (
               <Link
                 to="/chats/$chatId"
-                params={{ chatId }}
+                params={{ chatId: target.chatId }}
                 search={target.search}
                 className="text-accent underline-offset-2 hover:underline"
               >
@@ -266,7 +274,7 @@ function Box({
   rewritten = false
 }: {
   sources: ReadonlyArray<ContextSource>
-  chatId: ChatId
+  chatId: ChatId | null
   children: ReactNode
   group?: boolean
   /** Its text is where the sources' text was, changed after assembly. */
@@ -353,7 +361,7 @@ const treeOf = (message: ContextMessage): Array<Node> => {
  * part in its own, and the text around them as framing. Text outside every box is the
  * assembler's joins.
  */
-function Parts({ message, chatId }: { message: ContextMessage; chatId: ChatId }) {
+function Parts({ message, chatId }: { message: ContextMessage; chatId: ChatId | null }) {
   const sent = message.sources.filter((source) => !unsent(source))
   if (!message.parts?.length)
     return (
@@ -449,7 +457,7 @@ function Message({
 }: {
   message: ContextMessage
   index: number
-  chatId: ChatId
+  chatId: ChatId | null
   open: boolean
   setOpen: (open: boolean) => void
   /** The reuse line after it, and whether it's the only one. */
@@ -549,7 +557,7 @@ function Message({
 }
 
 /** What this turn left out by its condition, or skipped: the inspector's list, no prompt text. */
-function NotSent({ run }: { run: Pick<RunContext, "notSent" | "messages" | "chatId"> }) {
+function NotSent({ run }: { run: Pick<RunContext, "notSent" | "messages"> & { chatId: ChatId | null } }) {
   const listed =
     run.notSent ??
     run.messages
@@ -712,7 +720,7 @@ function useScrollPane() {
   return { ref, pane: list?.pane ?? null, margin }
 }
 
-function Messages({ run }: { run: Pick<RunContext, "messages" | "chatId"> }) {
+function Messages({ run }: { run: Pick<RunContext, "messages"> & { chatId: ChatId | null } }) {
   "use no memo"
   const { ref: listRef, pane, margin } = useScrollPane()
   const all = () => new Set(run.messages.keys())
@@ -905,12 +913,20 @@ function Inspector({ run }: { run: RunContext }) {
 }
 
 /**
- * The request a chat not sent yet would make first (DESIGN §2.1), in the inspector's terms:
- * built now, never sent, so it has no usage, no continuity and no links into the chat.
+ * A preview of the first or next request, built without sending it. Only a saved chat has
+ * destinations for links to messages, summaries and notes.
  */
-export function DraftRequestView({ request }: { request: DraftRequest }) {
+export function DraftRequestView({
+  request,
+  chatId = null,
+  forkId = null
+}: {
+  request: DraftRequest
+  chatId?: ChatId | null
+  forkId?: ForkId | null
+}) {
   const tokens = request.messages.reduce((sum, m) => sum + m.tokens, 0)
-  const run = { ...request, chatId: "" as ChatId }
+  const run = { ...request, chatId }
   return (
     <div className="flex flex-col gap-4">
       <Card>
@@ -948,11 +964,13 @@ export function DraftRequestView({ request }: { request: DraftRequest }) {
           </ul>
         </Alert>
       )}
-      <NotSent run={run} />
-      <section aria-label="Messages" className="flex flex-col gap-2">
-        <h2 className="text-base font-semibold">Messages</h2>
-        <Messages run={run} />
-      </section>
+      <ViewedFork.Provider value={forkId === null ? {} : { fork: forkId }}>
+        <NotSent run={run} />
+        <section aria-label="Messages" className="flex flex-col gap-2">
+          <h2 className="text-base font-semibold">Messages</h2>
+          <Messages run={run} />
+        </section>
+      </ViewedFork.Provider>
     </div>
   )
 }

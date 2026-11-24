@@ -11,6 +11,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
+import { scrollUntil } from "./support/scrollPane.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { cacheChip, nextReply } from "./support/strip.ts"
 
@@ -216,6 +217,17 @@ test.describe("the strip", () => {
     await expect(
       page.getByText(new RegExp(`^Built now: .*, about ${tokens.toLocaleString("en-US")} tokens\\.`))
     ).toBeVisible()
+    const fork = new URL(page.url()).searchParams.get("fork")
+    expect(fork).toBeTruthy()
+    const request = page.getByRole("region", { name: "Messages", exact: true })
+    const expand = request.getByRole("button", { name: "Expand every turn" })
+    if (await expand.isVisible()) await expand.click()
+    const source = request.getByRole("region", { name: "Message 1", exact: true })
+    const link = await scrollUntil(request, source.getByRole("link").first())
+    const destination = new URL((await link.getAttribute("href"))!, server().url)
+    expect(destination.pathname).toBe(`/chats/${chatId}`)
+    expect(destination.searchParams.get("fork")).toBe(fork)
+    expect(destination.searchParams.get("slot")).toBeTruthy()
   })
 
   test("View request has the link's open menu", async ({ page }) => {
