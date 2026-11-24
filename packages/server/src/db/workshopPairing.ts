@@ -99,8 +99,8 @@ export const storyPositionOf = (sql: SqlClient.SqlClient, userId: string, worksh
 
 /**
  * Records where the story stands on the versions just written in a workshop beside it (§2.2):
- * `workshop.story_at` on each, the paired branch's newest message now. Nothing in other chats
- * (one probe of the chat's kind), nor where the story has no messages: none counts as before them.
+ * `workshop.story_at` on each, the paired branch's newest message now (null for an empty branch).
+ * Nothing in other chats (one probe of the chat's kind).
  */
 export const recordStoryAt = (
   sql: SqlClient.SqlClient,
@@ -115,7 +115,7 @@ export const recordStoryAt = (
     if (chat?.kind !== "workshop") return
     const fork = forkId ?? chat.current_fork_id
     const at = yield* storyPositionOf(sql, chat.owner_user_id, chatId, fork)
-    if (at === null || at.leafSlotId === null || fork === null) return
+    if (at === null || fork === null) return
     // A greeting has none: it counts as before the story's first message (§2.2).
     const written = yield* sql<{ id: string }>`SELECT id FROM versions
       WHERE id IN ${sql.in(versionIds)} AND origin <> 'greeting' ORDER BY ordinal`

@@ -96,13 +96,14 @@ export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
         const [recorded] =
           versionId === undefined
             ? []
-            : yield* sql<{ leaf: string; fork_id: string }>`SELECT json_extract(e.value_json, '$.leaf') AS leaf,
+            : yield* sql<{ leaf: string | null; fork_id: string }>`SELECT json_extract(e.value_json, '$.leaf') AS leaf,
                 e.fork_id FROM state_events e JOIN versions v ON v.id = ${versionId}
               WHERE e.chat_id = ${chatId} AND e.key = 'workshop.story_at'
                 AND (e.version_id = v.id OR e.version_id = v.source_version_id)
               ORDER BY e.version_id = v.id DESC LIMIT 1`
         const now = yield* storyPositionOf(sql, userId, chatId, forkId ?? recorded?.fork_id ?? null)
         if (now === null || !recorded) return now
+        if (recorded.leaf === null) return { ...now, leafSlotId: null }
         // A position the paired branch doesn't show (a message copied with "As it is now", recorded
         // on the original branch past the fork point) falls back to the branch's end now.
         const [fork] = yield* sql<{

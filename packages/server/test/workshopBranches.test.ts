@@ -92,6 +92,28 @@ const setup = Effect.gen(function* () {
 })
 
 layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seconds" })("workshop branches", (it) => {
+  it.effect("keeps an empty story position after the story gets its first message", () =>
+    Effect.gen(function* () {
+      const h = yield* setup
+      const story = yield* h.writer.CreateChat({
+        userId: h.userId,
+        kind: "rp",
+        status: "active",
+        title: "Empty story",
+        participants: [],
+        greeting: null
+      })
+      const workshop = yield* h.api.CreateWorkshop({ attachTo: story.id })
+      const message = yield* h.append(workshop.id, workshop.currentForkId!, "Let's plan the beginning.")
+      const first = yield* h.append(story.id, story.currentForkId!, "The caravan leaves.")
+      const position = { userId: h.userId, chatId: workshop.id, forkId: workshop.currentForkId }
+      assert.strictEqual((yield* h.reader.WorkshopStoryPosition(position))?.leafSlotId, first.slotId)
+      const path = yield* h.reader.GetPath({ ...position, leafSlotId: null, limit: 20 })
+      const versionId = path.entries.find((entry) => entry.slotId === message.slotId)!.version.id
+      assert.strictEqual((yield* h.reader.WorkshopStoryPosition({ ...position, versionId }))?.leafSlotId, null)
+    })
+  )
+
   it.effect("branching the story branches its workshop; the two go on apart; going back finds A's as it was", () =>
     Effect.gen(function* () {
       const h = yield* setup
