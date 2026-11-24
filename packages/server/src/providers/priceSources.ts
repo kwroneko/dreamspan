@@ -32,13 +32,25 @@ export const priceSources = (
   // The endpoint's price counts only while the user has it on (turning it off restores the rest
   // without a refresh, PRICES §3.1); a rate it leaves unknown comes from the next source (§4.3).
   const feed = context.priceEndpoint === true ? upstream.priceFeed : undefined
-  const next = list?.price ?? builtin
-  const filled = (price: Price): Price => ({
-    ...(next?.cacheRead === undefined ? {} : { cacheRead: next.cacheRead }),
-    ...(next?.cacheWrite === undefined ? {} : { cacheWrite: next.cacheWrite }),
-    ...(next?.cacheWriteLong === undefined ? {} : { cacheWriteLong: next.cacheWriteLong }),
-    ...price
-  })
+  const filled = (price: Price): Price => {
+    const currency = price.currency ?? "USD"
+    const [preferred, secondary] = [list?.price, builtin].map((candidate) =>
+      (candidate?.currency ?? "USD") === currency ? candidate : null
+    )
+    const read = preferred?.cacheRead ?? secondary?.cacheRead
+    const write = preferred?.cacheWrite ?? secondary?.cacheWrite
+    const long = preferred?.cacheWriteLong ?? secondary?.cacheWriteLong
+    const base = {
+      ...(read === undefined ? {} : { cacheRead: read }),
+      ...(write === undefined ? {} : { cacheWrite: write }),
+      ...(long === undefined ? {} : { cacheWriteLong: long })
+    }
+    return {
+      ...base,
+      ...price,
+      ...(price.tiers === undefined ? {} : { tiers: price.tiers.map((tier) => ({ ...base, ...tier })) })
+    }
+  }
   const routes = (feed?.routes ?? []).flatMap((route) =>
     route.price === null
       ? []
