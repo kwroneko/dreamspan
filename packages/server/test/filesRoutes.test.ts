@@ -193,6 +193,7 @@ describe("file routes", () => {
       yield* upload("/files/out/Left out of this zip.txt", "My file.")
       const filesDir = join(config.dataDir, "files")
       const out = join(filesDir, accountOf(filesDir), "out")
+      mkdirSync(join(out, "empty"))
       // Names a command (or a prompt-injected assistant) can make: a backslash path, a folder of one.
       writeFileSync(join(out, "..\\..\\AppData\\x.bat"), "Synthetic.")
       mkdirSync(join(out, "a\\b"))
@@ -205,11 +206,15 @@ describe("file routes", () => {
       const names: Array<string> = []
       for (let at = bytes.indexOf(CENTRAL); at !== -1; at = bytes.indexOf(CENTRAL, at + 4)) {
         const length = bytes.readUInt16LE(at + 28)
-        names.push(bytes.subarray(at + 46, at + 46 + length).toString("utf8"))
+        const name = bytes.subarray(at + 46, at + 46 + length).toString("utf8")
+        names.push(name)
+        if (name.endsWith("/")) assert.strictEqual(bytes.readUInt32LE(at + 38) & 0x10, 0x10)
       }
       assert.deepStrictEqual(names.sort(), [
+        "out/",
         "out/Left out of this zip (2).txt",
         "out/Left out of this zip.txt",
+        "out/empty/",
         "out/keep.txt"
       ])
       for (const name of names) assert.notInclude(name, "\\")

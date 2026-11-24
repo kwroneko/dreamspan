@@ -348,7 +348,7 @@ const costsOf = (ended: ReadonlyArray<RequestFigures>) => {
     if (r.cost !== null) {
       costs.set(r.cost.currency, (costs.get(r.cost.currency) ?? 0) + r.cost.amount)
       sources.add(r.cost.formula)
-      if (r.cost.reasoningRate !== undefined && !reasoningRates.has(`${r.cost.currency} ${r.cost.reasoningRate}`))
+      if ((r.reasoning ?? 0) > 0 && (r.output ?? 0) > 0 && r.cost.reasoningRate !== undefined)
         reasoningRates.set(`${r.cost.currency} ${r.cost.reasoningRate}`, r.cost.reasoningRate)
     }
     if (r.reportedCost !== null) {

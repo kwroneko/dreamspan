@@ -14,6 +14,7 @@ import {
   type UsageSource
 } from "@dreamspan/shared/usage.ts"
 import { Option, Predicate, Schema } from "effect"
+import { priceBound } from "./priceSources.ts"
 import type { CostFormula, PriceSources, RequestTarget } from "./registry.ts"
 import { userCostFormula, userGeneralCostFormula } from "./userCosts.ts"
 
@@ -334,19 +335,6 @@ export const pricedCost = (counts: TokenCounts, price: Price): { amount: number;
   }
 }
 
-/** The most a request of this size can cost at a rate table: every cache split and reachable tier. */
-const priceBound = (price: Price, inputTokens: number, outputTokens: number) => {
-  const rates = [price, ...(price.tiers ?? [])]
-  const input = Math.max(
-    ...rates.flatMap((r) => [r.input, r.cacheRead ?? 0, r.cacheWrite ?? 0, r.cacheWriteLong ?? r.input * 2])
-  )
-  const output = Math.max(...rates.flatMap((r) => [r.output, r.reasoning ?? 0]))
-  return {
-    amount: (inputTokens * input + outputTokens * output) / 1e6 + (price.perRequest ?? 0),
-    currency: price.currency ?? "USD"
-  }
-}
-
 /** The cost to record: the first formula, newest registration first, that returns one. */
 export const costOf = (
   formulas: ReadonlyArray<CostFormula>,
@@ -387,11 +375,7 @@ const tableFormula = (
     upperBound: ({ inputTokens, outputTokens, price, sources }) => {
       const found = chosen({ price, ...(sources ? { sources } : {}) }, null)
       if (found === null) return null
-      const all = [found.price, ...(sources && candidates ? candidates(sources) : [])]
-      const bounds = all.map((p) => priceBound(p, inputTokens, outputTokens))
-      // Mixed currency labels can't be compared, so no bound (as user rules do).
-      if (new Set(bounds.map((b) => b.currency)).size > 1) return null
-      return bounds.reduce((a, b) => (b.amount > a.amount ? b : a))
+      return priceBound([found.price, ...(sources && candidates ? candidates(sources) : [])], inputTokens, outputTokens)
     },
     cost: (input) => {
       const found = chosen(input, input.capture.upstream)

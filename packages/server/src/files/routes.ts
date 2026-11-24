@@ -806,7 +806,9 @@ export const filesRoutes = Layer.unwrap(
       const info = yield* Effect.tryPromise(() => statPath(root, segments))
       if (!info?.isDirectory()) return refuse(400, "That isn't a folder.")
       // The archive's own top folder: its name with what an extractor could read as a separator replaced.
-      const top = (segments.at(-1) ?? "Files").replace(new RegExp(UNSAFE_IN_ZIP.source, "g"), "_")
+      const top = (segments.at(-1) ?? "Files")
+        .replace(new RegExp(UNSAFE_IN_ZIP.source, "g"), "_")
+        .replace(/^[a-zA-Z]:/, "_$&")
       async function* entries(): AsyncGenerator<ZipStreamEntry> {
         // Depth first, each folder opened by the no-follow walk; names sorted for a stable archive.
         const queue: Array<ReadonlyArray<string>> = [[]]
@@ -817,6 +819,8 @@ export const filesRoutes = Layer.unwrap(
         while (queue.length) {
           const below = queue.pop()!
           const listed = await listFolder(root, [...segments, ...below], ZIP_MAX_ENTRIES)
+          if (listed.more) throw new Error("too many entries for one zip")
+          yield { name: `${[top, ...below].join("/")}/`, chunks: [] }
           const folders: Array<ReadonlyArray<string>> = []
           for (const entry of listed.entries) {
             if (entry.name.endsWith(".rp-tmp")) continue

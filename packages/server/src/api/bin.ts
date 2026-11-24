@@ -93,11 +93,14 @@ export const makeBinHandlers = Effect.gen(function* () {
     PurgeBinItem: ({ itemId, expectedForkIds }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const chatIds = yield* writer.PurgeBinItem({
-          userId: id,
-          itemId,
-          ...(expectedForkIds ? { expectedForkIds } : {})
-        })
+        const chatIds = yield* files.bin.serial(
+          id,
+          writer.PurgeBinItem({
+            userId: id,
+            itemId,
+            ...(expectedForkIds ? { expectedForkIds } : {})
+          })
+        )
         yield* afterPurge(id, chatIds)
         // A file's content goes from disk once its row has, and attachment copies no message names any more.
         yield* files.bin.sweep(id)
@@ -107,7 +110,10 @@ export const makeBinHandlers = Effect.gen(function* () {
     EmptyBin: ({ itemIds, expectedForkIds }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const result = yield* writer.EmptyBin({ userId: id, itemIds, ...(expectedForkIds ? { expectedForkIds } : {}) })
+        const result = yield* files.bin.serial(
+          id,
+          writer.EmptyBin({ userId: id, itemIds, ...(expectedForkIds ? { expectedForkIds } : {}) })
+        )
         yield* afterPurge(id, result.chatIds)
         yield* files.bin.sweep(id)
         yield* dropAttachmentCopies(id)

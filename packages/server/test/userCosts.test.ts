@@ -170,3 +170,32 @@ it("estimates unknown upstream routes conservatively, and refuses mixed labels",
     )
   )
 })
+
+it("reserves for separately priced reasoning on a route without a user override", () => {
+  const own: CostRule = {
+    ...rule,
+    connectionId: pricing.connectionId as CostRule["connectionId"],
+    upstream: "cheap",
+    currency: "USD"
+  }
+  const p = {
+    ...pricing,
+    settings: { revision: 1, rules: [own] }
+  }
+  const price = { input: 0, output: 1 }
+  const sources = {
+    endpoint: { price, fetchedAt: 1, routes: [{ upstream: "other", price: { ...price, reasoning: 100 } }] },
+    list: null,
+    builtin: null
+  }
+  const reservation = userCostFormula.upperBound!({ pricing: p, inputTokens: 0, outputTokens: 10_000, price, sources })
+  const actual = costOf(builtinCostFormulas, target, {
+    pricing: p,
+    counts: { ...counts, inputUncached: 0, cacheRead: 0, cacheWrite: 0, output: 10_000, reasoning: 10_000 },
+    capture: { ...emptyCapture(), upstream: "other" },
+    price,
+    sources
+  })
+  assert.strictEqual(actual!.amount, 1)
+  assert.deepStrictEqual(reservation, { amount: actual!.amount, currency: "USD" })
+})

@@ -4,7 +4,7 @@
 // Never a third-party server.
 import { assert, describe, it } from "@effect/vitest"
 import type { McpConnectionSettings } from "@dreamspan/shared/mcp.ts"
-import { Effect, Layer } from "effect"
+import { Deferred, Effect, Fiber, Layer } from "effect"
 import { McpConnections } from "../src/mcp/McpConnections.ts"
 import { createServer } from "node:http"
 import { isIPv6, type AddressInfo } from "node:net"
@@ -17,6 +17,7 @@ import { tempDir } from "./support/tempDir.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { approveSignIn, startFakeAuthServer } from "./support/fakeAuthServer.ts"
 import { fakeTool, startFakeMcpServer } from "./support/fakeMcpServer.ts"
+import { eventually } from "./support/generation.ts"
 
 const APP = "http://localhost:5173"
 
@@ -206,6 +207,26 @@ describe("signing in with an MCP server", () => {
         .filter((token): token is string => token !== undefined)
       assert.isNotEmpty(tokens)
       assert.isTrue(tokens.every((token) => other.valid(token) && !auth.valid(token)))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("rejects the callback if the address changes during the code exchange", () =>
+    Effect.gen(function* () {
+      const { api, auth, server, signIn, connectionId } = yield* setup()
+      const release = yield* Deferred.make<void>()
+      auth.state.beforeCodeExchange = () => Effect.runPromise(Deferred.await(release))
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      const finishing = yield* signIn.pipe(Effect.flip, Effect.forkScoped)
+      yield* eventually(() => auth.requests().includes("token:authorization_code"))
+      const connection = yield* api.GetMcpConnection({ connectionId })
+      yield* api.UpdateMcpConnection({
+        connectionId,
+        settings: settings(`${server.streamableUrl}/other`),
+        expectedRowVersion: connection.rowVersion
+      })
+      yield* Deferred.succeed(release, undefined)
+      assert.include(String(yield* Fiber.join(finishing)), "address changed while you were signing in. Start again.")
+      assert.isNull((yield* api.GetMcpConnection({ connectionId })).use.signIn)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 

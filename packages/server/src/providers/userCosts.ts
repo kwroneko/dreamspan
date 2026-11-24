@@ -1,4 +1,5 @@
 import type { CostRule, CostSettings, CostRates } from "@dreamspan/shared/costFormulas.ts"
+import { priceBound } from "./priceSources.ts"
 import type { CostFormula } from "./registry.ts"
 
 export interface UserPricing {
@@ -55,7 +56,8 @@ const userFormula = (id: string, scope: Scope): CostFormula => {
         pricing: input.pricing,
         inputTokens: counts.inputUncached + (counts.cacheRead ?? 0) + (counts.cacheWrite ?? 0),
         outputTokens: counts.output,
-        price: input.price
+        price: input.price,
+        ...(input.sources ? { sources: input.sources } : {})
       })
     },
     cost: ({ counts, capture, pricing }) => {
@@ -87,7 +89,7 @@ const userFormula = (id: string, scope: Scope): CostFormula => {
         }
       }
     },
-    upperBound: ({ inputTokens, outputTokens, pricing, price }) => {
+    upperBound: ({ inputTokens, outputTokens, pricing, price, sources }) => {
       if (!pricing) return null
       // The upstream and cache split are unknown before dispatch. Cover every possible route,
       // every reachable tier and built-in fallback, including a cheaper low-context tier.
@@ -107,18 +109,14 @@ const userFormula = (id: string, scope: Scope): CostFormula => {
       })
       if (!generic) {
         // A route may have no override. No catalog price means no safe admission bound.
-        if (!price) return null
-        currencies.add(price.currency ?? "USD")
-        const rates = [price, ...(price.tiers ?? [])]
-        amounts.push(
-          (inputTokens *
-            Math.max(
-              ...rates.flatMap((r) => [r.input, r.cacheWriteLong ?? r.input * 2, r.cacheRead ?? 0, r.cacheWrite ?? 0])
-            ) +
-            outputTokens * Math.max(...rates.map((r) => r.output))) /
-            1e6 +
-            (price.perRequest ?? 0)
-        )
+        const tables = price ? [price, ...(sources?.endpoint?.routes ?? []).map((route) => route.price)] : []
+        const fallback =
+          scope === "connection" && !sources?.endpoint && !sources?.list && candidates(pricing, "general").length > 0
+            ? userGeneralCostFormula.upperBound!({ inputTokens, outputTokens, pricing, price })
+            : priceBound(tables, inputTokens, outputTokens)
+        if (fallback === null) return null
+        currencies.add(fallback.currency)
+        amounts.push(fallback.amount)
       }
       if (currencies.size !== 1) return null
       return { amount: Math.max(...amounts), currency: possible[0]!.currency }

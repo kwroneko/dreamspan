@@ -319,9 +319,11 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
         return yield* reload(userId, connectionId)
       }).pipe(transaction(sql, "SetMcpLoading")),
 
-    SetMcpOAuth: ({ userId, connectionId, oauth, expectedEnc, at }) =>
+    SetMcpOAuth: ({ userId, connectionId, oauth, expectedEnc, expectedCacheRevision, at }) =>
       Effect.gen(function* () {
-        yield* owned(userId, connectionId)
+        const row = yield* owned(userId, connectionId)
+        if (expectedCacheRevision !== undefined)
+          yield* expectVersion(connectionId, row.cache_revision, expectedCacheRevision)
         // A refresh stores its tokens only over the sign-in it refreshed: a sign-out or a new
         // sign-in meanwhile wins.
         const updated = yield* sql`UPDATE mcp_uses SET ${sql.update({
