@@ -10,7 +10,7 @@ import { matchLorebooks } from "./lorebook.ts"
 import { loreAllowance, loreBudget } from "./budget.ts"
 import { estimateTokens } from "./st.ts"
 import { cardFields } from "./macros.ts"
-import { projectedScript, AssemblySources, type AssemblerStage, need } from "./pipeline.ts"
+import { projectedScript, withLibraryText, AssemblySources, type AssemblerStage, need } from "./pipeline.ts"
 import { characterNoteText, historyLeafOf, type LorebookInput, type LoreRecord, noteCard } from "./types.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
 import { applyScripts, PLACEMENT } from "./regex.ts"
@@ -154,7 +154,7 @@ export const loreActivationStage: AssemblerStage = {
         .toReversed()
         .map((p) => {
           const text = projectedScript(assembly.scripted, p)?.text ?? env.text(p.piece)
-          return `${p.name}: ${text}`
+          return `${p.name}: ${withLibraryText(p, text)}`
         })
       const continuing = need(assembly, "target").continues
       if (continuing?.text) messages.unshift(`${cast.speaker ? modelName(cast.speaker.doc) : ""}: ${continuing.text}`)
@@ -188,7 +188,7 @@ export const loreActivationStage: AssemblerStage = {
         .slice(-6)
         .map((p) => ({
           from: p.name,
-          text: (projectedScript(assembly.scripted, p)?.text ?? env.text(p.piece)).slice(-2_000)
+          text: withLibraryText(p, projectedScript(assembly.scripted, p)?.text ?? env.text(p.piece)).slice(-2_000)
         }))
       const decisionStamp = createHash("sha256")
         .update(

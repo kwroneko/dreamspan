@@ -4456,10 +4456,10 @@ A command stopped by the cap has `memoryCapped`, and its result says it used mor
 **Cards, lorebooks and presets attached to workshop messages** (workshopcards-u2, spec/WORKSHOP-CARDS.md §4.3–§4.4, unit C2). A workshop message can carry library items as well as files. The composer controls that send them are later units (C3, C4).
 - **Sending.** `SendMessage` and `SendOrQueue` take `library: [{ kind: "card" | "lorebook" | "preset", refId }]` (at most 16). `NewVersion.library` and `QueuedMessage.library` carry the same list.
   - The writer checks the list before it writes anything (`checkLibrary`, `db/libraryAttachments.ts`): only a workshop chat takes one, and each item must be a live entry of the sender's, of the kind named. Anything else gets `NotFound`, the same answer as for another user's id.
-  - A queued message keeps the list in `queued_messages.library_json` (migration 0017). It posts without an item deleted in the meantime rather than failing the queue.
+  - The send transaction captures the revision and label in `queued_messages.library_json` before a queued message waits (migration 0019). Older waiting sends capture the head present at upgrade.
 - **Stored.** In `version_library(version_id, ordinal, kind, ref_id, revision_id, name)` (migration 0017). `insertVersion` records each item at its head revision and its label at that time, once per item, in the version insert's transaction.
   - A version made from another copies its source's rows: one `sourceVersionId` without its own `library`, an edit's fork copy (`writes.ts`), an insert copy, a history restore, a bulk restore, and an ST re-import's fork copy.
-  - The message is frozen: later edits to the item never change what it carried.
+  - The message is frozen. Editing, binning or purging the library item leaves sent attachments and waiting sends intact. On purge, migration 0020’s `purged_library_documents` keeps one copy of each held revision until the last message or queue attachment is removed.
 - **What the model reads** (`agent/libraryView.ts`, assembler stage `library-attachments` right after `attachments`). The history read (`assemblySources.ts`) gives `HistoryEntry.library`, with each item's document at its recorded revision. Each item becomes an `<attached_card|lorebook|preset name id revision tokens>` element after the message's text.
   - **Whole** (the document as `read_card` returns it, the card without its skills) when it fits the inline limit. The limit is 8,000 tokens, or a fifth of a smaller window (reference-harness's adaptive share), counted in the model's own tokens.
   - **Otherwise a reference** (`whole="no"`), reference-harness's "structure plus per-field counts":
@@ -4467,8 +4467,8 @@ A command stopped by the cap has `memoryCapped`, and its result says it used mor
     - a lorebook: its entries, each with title, uid, keys and tokens;
     - a preset: its prompts in order, each on or off.
     
-    Indexes stop at 50 rows and count the rest. The reference tells the model to page the item with the read tool (the paged views are unit C2b).
-  - A card's element says it is data, not a character to play. An item's own text can't close its element.
+    Indexes stop at 50 rows and fit the attachment token limit. The reference tells the model to pass its id and revision to the read tool. The reader checks the workshop’s path for that exact attachment and can return a field, lorebook entry, preset prompt or a page of the document.
+  - A card's element says it is data, not a character to play. Its JSON survives prose filtering and escapes literal closing tags reversibly. Leaf workshop summaries receive the attachment elements and revision ids. Reply history stores those identities in request source pins and reloads the documents on replay.
 - Tests: `test/workshopLibraryAttachments.test.ts` covers order and duplicates, whole vs reference, the message frozen after an edit, and the refusals (a story chat, a wrong kind). `test/libraryView.test.ts` covers the limit, skills left out, the summary, the escaping, and lorebook and preset indexes.
 
 **Change rows between a workshop's turns** (workshopcards-u8, spec/WORKSHOP-CARDS.md §7, unit C8). What a turn made or edited in the library shows under the turn, and opens beside the chat.

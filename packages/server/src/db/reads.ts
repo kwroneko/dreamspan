@@ -121,6 +121,7 @@ const pathColumns = (fork: string) => `${shownVersionColumns}, s.parent_slot_id,
   s.row_version + max(coalesce(so.seq, 0), coalesce(ro.seq, 0), coalesce(dso.seq, 0), coalesce(hso.seq, 0))
     AS row_version,
   coalesce(hso.flag, ${contextExcluded()}) AS context_excluded, coalesce(hso.flag, s.hidden_by_user) AS hidden_by_user,
+  EXISTS (SELECT 1 FROM version_library l WHERE l.version_id = v.id) AS has_library,
   (SELECT json_group_array(a.media_id) FROM version_attachments a
     WHERE a.version_id = v.id AND ${imageExcludedSql(fork, "o.id", "a.media_id")}) AS excluded_images,
   ${thinkingHiddenSql(fork, "o.id")} AS hidden_thinking,

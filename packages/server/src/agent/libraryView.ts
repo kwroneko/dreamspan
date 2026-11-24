@@ -4,6 +4,8 @@
 // text), to be read in pages. Pure: the caller passes the model's local token counter, so the
 // same revision and model always render the same bytes.
 import { withoutCardSkills } from "./toolLoading.ts"
+import type { PresetPrompt, PromptOrderEntry } from "@dreamspan/shared/docs/preset.ts"
+import { presetOrder } from "@dreamspan/shared/presetOrder.ts"
 
 type LibraryKind = "card" | "lorebook" | "preset"
 type Doc = Readonly<Record<string, unknown>>
@@ -58,7 +60,7 @@ const bookLines = (book: Doc, count: CountText) => {
     return `- ${entryTitle(entry, index)} (uid ${String(entry.uid)}${keys.length ? `; keys: ${keys.join(", ")}` : ""}${entry.enabled === false ? "; off" : ""}): ${number(tokens(count, text(entry.content)))} tokens`
   })
   const more = entries.length - shown.length
-  return more > 0 ? [...shown, `${more} more entries: read_lorebook with view index and after.`] : shown
+  return more > 0 ? [...shown, `${more} more entries.`] : shown
 }
 
 /**
@@ -73,10 +75,12 @@ export const summaryLines = (kind: LibraryKind, doc: Doc, count: CountText): Rea
       return `${field}: ${number(tokens(count, value))} tokens, ${number(lines(value))} lines`
     })
     const greetings = list(doc.alternate_greetings).map(text)
+    const groupGreetings = list(doc.group_only_greetings).map(text)
     const book = doc.character_book === undefined ? null : record(doc.character_book)
     return [
       ...fields,
       `alternate_greetings: ${greetings.length} (${number(greetings.reduce((sum, g) => sum + tokens(count, g), 0))} tokens)`,
+      `group_only_greetings: ${groupGreetings.length} (${number(groupGreetings.reduce((sum, g) => sum + tokens(count, g), 0))} tokens)`,
       ...(book === null
         ? []
         : [
@@ -86,26 +90,29 @@ export const summaryLines = (kind: LibraryKind, doc: Doc, count: CountText): Rea
     ]
   }
   if (kind === "lorebook") return [`${list(doc.entries).length} entries`, ...bookLines(doc, count)]
-  const prompts = new Map(list(doc.prompts).map((p) => [text(record(p).identifier), record(p)]))
-  const order = list(doc.order).map(record)
-  const shown = order.slice(0, INDEX_PAGE).map((entry) => {
-    const prompt = prompts.get(text(entry.identifier)) ?? {}
-    const name = text(prompt.name) || text(entry.identifier)
-    return `- ${name} (${text(entry.identifier)}; ${entry.enabled === false ? "off" : "on"}): ${number(tokens(count, text(prompt.content)))} tokens`
-  })
-  const more = order.length - shown.length
-  return [
-    `${prompts.size} prompts, ${order.length} in order`,
-    ...shown,
-    ...(more > 0 ? [`${more} more prompts: read_preset with view index and after.`] : [])
+  const saved = list(doc.prompts) as ReadonlyArray<PresetPrompt>
+  const order = list(doc.order) as ReadonlyArray<PromptOrderEntry>
+  const prompts = new Map(saved.map((prompt) => [prompt.identifier, prompt]))
+  const ordered = new Set(order.map((entry) => entry.identifier))
+  const indexed = [
+    ...order,
+    ...presetOrder(saved, order).filter((entry) => prompts.has(entry.identifier) && !ordered.has(entry.identifier))
   ]
+  const shown = indexed.slice(0, INDEX_PAGE).map((entry) => {
+    const prompt = prompts.get(entry.identifier)
+    const name = prompt?.name || entry.identifier
+    return `- ${name} (${entry.identifier}; ${entry.enabled === false ? "off" : "on"}): ${number(tokens(count, text(prompt?.content)))} tokens`
+  })
+  const more = indexed.length - shown.length
+  return [`${prompts.size} prompts, ${order.length} in order`, ...shown, ...(more > 0 ? [`${more} more prompts.`] : [])]
 }
 
 const attribute = (value: string) =>
   value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
 
-/** A card's or book's own text can't close its element early (as story excerpts, `wrapStory`). */
-const fenced = (body: string, tag: string) => body.replaceAll(`</${tag}>`, `</${tag} >`)
+/** Escape a literal closing tag while keeping the JSON field value reversible. */
+const fenced = (body: string, tag: string, lessThan: string) =>
+  body.replace(new RegExp(`</${tag}\\s*>`, "g"), (match) => lessThan + match.slice(1))
 
 const ARTICLE: Record<LibraryKind, string> = { card: "A card", lorebook: "A lorebook", preset: "A prompt preset" }
 const READER: Record<LibraryKind, string> = { card: "read_card", lorebook: "read_lorebook", preset: "read_preset" }
@@ -129,9 +136,27 @@ export const attachedElement = (item: AttachedItem, count: CountText, limit: num
   const doc = visibleDoc(item.kind, item.doc)
   const whole = JSON.stringify(doc)
   const size = count(whole)
-  const open = `<${tag} name="${attribute(item.name)}" id="${attribute(item.refId)}" revision="${attribute(item.revisionId)}" tokens="${number(size)}"`
+  const open = (name: string) =>
+    `<${tag} name="${attribute(name)}" id="${attribute(item.refId)}" revision="${attribute(item.revisionId)}" tokens="${number(size)}"`
   const played = item.kind === "card" ? " It is data, not a character for you to play." : ""
-  if (size <= limit)
-    return `${open}>\n${ARTICLE[item.kind]} the user attached for you to work on.${played}\n${fenced(whole, tag)}\n</${tag}>`
-  return `${open} whole="no">\n${ARTICLE[item.kind]} the user attached for you to work on.${played} It's too long to include whole: read it with ${READER[item.kind]} (it's attached, so that never asks).\n${fenced(summaryLines(item.kind, doc, count).join("\n"), tag)}\n</${tag}>`
+  const intro = `${ARTICLE[item.kind]} the user attached for you to work on.${played}`
+  if (size <= limit) {
+    const inline = `${open(item.name)}>\n${intro}\n${fenced(whole, tag, "\\u003c")}\n</${tag}>`
+    if (count(inline) <= limit) return inline
+  }
+  const instruction = `${intro} It's too long to include whole: read it with ${READER[item.kind]} using the attachment id and revision.`
+  const reference = (name: string, lines: ReadonlyArray<string>) =>
+    `${open(name)} whole="no">\n${[instruction, ...lines].join("\n")}\n</${tag}>`
+  const omitted = "More details are available with the read tool."
+  const name = count(reference(item.name, [omitted])) <= limit ? item.name : "…"
+  const lines: Array<string> = []
+  let rendered = reference(name, [])
+  const details = summaryLines(item.kind, doc, count)
+  for (const [index, line] of details.entries()) {
+    lines.push(fenced(line, tag, "&lt;"))
+    const candidate = reference(name, index + 1 < details.length ? [...lines, omitted] : lines)
+    if (count(candidate) > limit) break
+    rendered = candidate
+  }
+  return rendered
 }

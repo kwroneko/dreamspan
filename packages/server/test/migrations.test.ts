@@ -172,7 +172,9 @@ describe("0002_files", () => {
           "composer_commits",
           "workshop_starts",
           "library_attachments",
-          "pending_chats"
+          "pending_chats",
+          "queue_library_revisions",
+          "retained_library_attachments"
         ]
       )
       // The existing row is kept, an image by default.
@@ -260,8 +262,18 @@ describe("0018_pending_chats", () => {
       assert.deepStrictEqual(
         yield* sql`SELECT source_id, source_label, content, created_at FROM recovered_texts ORDER BY created_at`,
         [
-          { source_id: "pending-chat:e1", source_label: "New chat", content: "Hello, lighthouse keeper.", created_at: 5 },
-          { source_id: "pending-group-chat:e1,e2:Crew", source_label: "New chat", content: "Hello, crew.", created_at: 6 }
+          {
+            source_id: "pending-chat:e1",
+            source_label: "New chat",
+            content: "Hello, lighthouse keeper.",
+            created_at: 5
+          },
+          {
+            source_id: "pending-group-chat:e1,e2:Crew",
+            source_label: "New chat",
+            content: "Hello, crew.",
+            created_at: 6
+          }
         ]
       )
       assert.deepStrictEqual(
@@ -363,10 +375,13 @@ describe("the migrator", () => {
         yield* migrate(upTo(5))
         // One broken row was there already; the new change adds two more of the same kind.
         yield* orphanPins(["old"])
+        // This case exercises one ordinary run. Migration 0019 commits its rebuild separately.
+        const ordinary = upTo(18)
+        const pending = Object.keys(ordinary).filter((key) => Number(key.slice(0, 4)) > 5)
         const exit = yield* Effect.exit(
           migrate({
-            ...migrationDefinitions,
-            [fakeKey("breaks")]: {
+            ...ordinary,
+            ["0019_breaks"]: {
               statements: [
                 "PRAGMA defer_foreign_keys = ON",
                 "INSERT INTO chat_pins (user_id, chat_id) VALUES ('u', 'new1'), ('u', 'new2')"
@@ -377,7 +392,7 @@ describe("the migrator", () => {
         assert.isTrue(Exit.isFailure(exit))
         assert.strictEqual(
           messages(Cause.squash((exit as Exit.Failure<unknown, unknown>).cause)),
-          `Dreamspan won't start: this update's database changes ${[...after5, fakeKey("breaks")].join(", ")} would leave` +
+          `Dreamspan won't start: this update's database changes ${[...pending, "0019_breaks"].join(", ")} would leave` +
             " 2 rows pointing at rows that don't exist: 2 in chat_pins (pointing into chats). " +
             "So these database changes were undone, and the data is not served. " +
             "Nothing else was changed: the data is as the version you ran before left it. Go back to that version, or restore the backup taken before this update, and report this problem."
@@ -486,7 +501,9 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0015_composer_commits",
       "0016_workshop_starts",
       "0017_library_attachments",
-      "0018_pending_chats"
+      "0018_pending_chats",
+      "0019_queue_library_revisions",
+      "0020_retained_library_attachments"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -767,7 +784,8 @@ describe("0018_pending_chats", () => {
   it.effect("adds the pending chat's entry, NULL on every chat there was, and the index that finds them", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0018_pending_chats": _new, ...before } = migrations
+      // Before 0018, as the database was; later migrations run with it through Migrations.
+      const before = Object.fromEntries(Object.entries(migrations).filter(([key]) => Number(key.slice(0, 4)) < 18))
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, title, created_at, last_message_at)
@@ -814,4 +832,113 @@ describe("released migrations", () => {
         module
       )
   })
+})
+
+describe("0019_queue_library_revisions", () => {
+  it.effect("upgrades older queue pins and admits sends consisting solely of library items", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* migrate(upTo(18))
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'workshop', 'active', 0)`
+      yield* sql.withTransaction(
+        Effect.gen(function* () {
+          yield* sql`INSERT INTO version_records
+            (id, slot_id, ordinal, status, writer, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+            VALUES ('reply', 's', 0, 'generating', 'model', 'verbatim', 'generated', 0, 0, 'c')`
+          yield* sql`INSERT INTO slots (id, chat_id, depth, selected_version_id, created_at, fork_id)
+            VALUES ('s', 'c', 0, 'reply', 0, 'c')`
+        })
+      )
+      yield* sql`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('book', 'u', 'lorebook', 0)`
+      yield* sql`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
+        VALUES ('first-revision', 'book', '{}', 'hash', 1, 'user', 0)`
+      yield* sql`INSERT INTO entity_refs (id, entity_id, head_revision_id, label, created_at, updated_at)
+        VALUES ('book-ref', 'book', 'first-revision', 'Synthetic book', 0, 0)`
+      const list = JSON.stringify([
+        { kind: "lorebook", refId: "book-ref" },
+        { kind: "lorebook", refId: "book-ref" }
+      ])
+      yield* sql`INSERT INTO queued_messages
+        (id, chat_id, reply_slot_id, seq, kind, content, created_at, updated_at, library_json)
+        VALUES ('q', 'c', 's', 0, 'message', 'Queued', 0, 0, ${list})`
+      yield* migrate(upTo(19))
+      const [row] = yield* sql<{ library_json: string }>`SELECT library_json FROM queued_messages WHERE id = 'q'`
+      assert.deepStrictEqual(JSON.parse(row!.library_json), [
+        { kind: "lorebook", refId: "book-ref", revisionId: "first-revision", name: "Synthetic book" }
+      ])
+      yield* sql`UPDATE queued_messages SET content = '' WHERE id = 'q'`
+      assert.isTrue(
+        Exit.isFailure(yield* Effect.exit(sql`UPDATE queued_messages SET library_json = '[]' WHERE id = 'q'`))
+      )
+      yield* migrate(migrationDefinitions)
+      assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, [])
+    }).pipe(Effect.provide(layer()))
+  )
+
+  // Prod runs these on real data: every queued send and every message attachment comes through,
+  // each column as it was (a queued send's library list gains its revisions, nothing else).
+  it.effect("keeps every queued send and message attachment of a database at 0018, column for column", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* migrate(upTo(18))
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'workshop', 'active', 0)`
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('story', 'u', 'chat', 'active', 0)`
+      yield* sql.withTransaction(
+        Effect.gen(function* () {
+          for (const [chat, slot, version] of [
+            ["c", "s", "reply"],
+            ["story", "s2", "reply2"]
+          ] as const) {
+            yield* sql`INSERT INTO version_records
+              (id, slot_id, ordinal, status, writer, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+              VALUES (${version}, ${slot}, 0, 'complete', 'model', 'verbatim', 'generated', 0, 0, ${chat})`
+            yield* sql`INSERT INTO slots (id, chat_id, depth, selected_version_id, created_at, fork_id)
+              VALUES (${slot}, ${chat}, 0, ${version}, 0, ${chat})`
+          }
+        })
+      )
+      yield* sql`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('card', 'u', 'card', 0), ('book', 'u', 'lorebook', 0)`
+      yield* sql`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
+        VALUES ('card-1', 'card', '{"name":"Mara"}', 'h1', 1, 'user', 0), ('card-2', 'card', '{"name":"Mara Quill"}', 'h2', 1, 'user', 1),
+          ('book-1', 'book', '{}', 'h3', 1, 'user', 0)`
+      yield* sql`INSERT INTO entity_refs (id, entity_id, head_revision_id, label, created_at, updated_at)
+        VALUES ('card-ref', 'card', 'card-2', 'Mara Quill', 0, 0), ('book-ref', 'book', 'book-1', 'Synthetic book', 0, 0)`
+      // Two messages' attachments, pinned at older and newer revisions.
+      yield* sql`INSERT INTO version_library (version_id, ordinal, kind, ref_id, revision_id, name) VALUES
+        ('reply', 0, 'card', 'card-ref', 'card-1', 'Mara'), ('reply', 1, 'lorebook', 'book-ref', 'book-1', 'Synthetic book'),
+        ('reply2', 0, 'card', 'card-ref', 'card-2', 'Mara Quill')`
+      // Queued sends with every optional column set, with and without library items.
+      yield* sql`INSERT INTO queued_messages
+        (id, chat_id, reply_slot_id, seq, kind, content, raw_content, rewrite_json, speaker_entity_id,
+         reply_speaker_entity_id, direction, row_version, created_at, updated_at, no_reply, fork_id, images_json,
+         round, held, auto_pick, send_group, round_start_slot_id, library_json) VALUES
+        ('q1', 'c', 's', 0, 'message', 'Look at Mara', 'look at mara', '{"applied":[]}', 'card', 'card', NULL, 3, 5, 6, 1, 'c',
+          '[{"mediaId":"m1"}]', 0, 0, 0, 'g1', NULL, '[{"kind":"card","refId":"card-ref"}]'),
+        ('q2', 'c', 's', 1, 'generate', '', NULL, NULL, NULL, NULL, 'Shorter.', 1, 7, 8, 0, 'c', '[]', 1, 1, 1, NULL, 's', '[]'),
+        ('q3', 'story', 's2', 0, 'message', 'On with the story', NULL, NULL, NULL, NULL, NULL, 1, 9, 9, 0, 'story', '[]', 0, 0, 0, NULL, NULL, '[]')`
+      // Every column the table has is one the rows above set, so a column dropped by the rebuild shows.
+      const columns = (yield* sql<{ name: string }>`SELECT name FROM pragma_table_info('queued_messages')`).map(
+        (c) => c.name
+      )
+      const queued = () => sql<Record<string, unknown>>`SELECT * FROM queued_messages ORDER BY id`
+      const attached = () => sql<Record<string, unknown>>`SELECT * FROM version_library ORDER BY version_id, ordinal`
+      const before = yield* queued()
+      const attachedBefore = yield* attached()
+      yield* migrate(migrationDefinitions)
+      const after = yield* queued()
+      assert.strictEqual(after.length, 3)
+      assert.deepStrictEqual(Object.keys(after[0]!), columns)
+      const without = (rows: ReadonlyArray<Record<string, unknown>>) =>
+        rows.map(({ library_json: _library, ...rest }) => rest)
+      assert.deepStrictEqual(without(after), without(before))
+      assert.deepStrictEqual(
+        after.map((row) => JSON.parse(String(row.library_json))),
+        [[{ kind: "card", refId: "card-ref", revisionId: "card-2", name: "Mara Quill" }], [], []]
+      )
+      assert.deepStrictEqual(yield* attached(), attachedBefore)
+      assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, [])
+    }).pipe(Effect.provide(layer()))
+  )
 })
