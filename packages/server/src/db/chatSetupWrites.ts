@@ -1305,9 +1305,13 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 AND NOT EXISTS (SELECT 1 FROM state_events WHERE slot_id = s.id
                   AND (origin <> 'rollout' OR version_id IS NOT ${versionId}))
                 -- A draft of it holding images (a swipe of one's own, an edit, an insertion
-                -- below) keeps it: recovered texts keep no images (rev-dd4b #2).
-                AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.status = 'active'
-                  AND d.images_json IS NOT NULL AND json_array_length(d.images_json) > 0
+                -- below) keeps it: recovered texts keep no images (rev-dd4b #2). So does one
+                -- whose history can restore an image, removed since (rev-dd5 #5).
+                AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.status IN ('active', 'discarded')
+                  AND ((d.status = 'active' AND d.images_json IS NOT NULL AND json_array_length(d.images_json) > 0)
+                    OR EXISTS (SELECT 1 FROM draft_history h WHERE h.draft_id = d.id
+                      AND ((h.images_before_json IS NOT NULL AND json_array_length(h.images_before_json) > 0)
+                        OR (h.images_after_json IS NOT NULL AND json_array_length(h.images_after_json) > 0))))
                   AND ((d.target_kind = 'scratchpad' AND d.target_id = s.id)
                     OR (d.target_kind = 'version_edit' AND d.target_id = ${versionId})
                     OR (d.target_kind = 'insert' AND d.target_id = s.chat_id
