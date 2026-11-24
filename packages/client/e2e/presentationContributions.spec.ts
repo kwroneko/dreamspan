@@ -196,6 +196,35 @@ test("remaining presentation seams update mounted hosts and restore scoped defau
   await expect(page.getByRole("switch", { name: "New chats summarize older messages" })).toBeVisible()
 })
 
+test("restoring a compact card action does not reopen its dialog", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const card = yield* api.CreateCard({ label: "Synthetic fork host", name: "Fork host" })
+      const chat = yield* api.CreateChat({ title: "Synthetic compact card actions" })
+      yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
+      return chat
+    })
+  )
+  await page.goto(`${url}/chats/${chat.id}`)
+  const character = await openPanel(page, "Fork host")
+  const trigger = character.getByRole("button", { name: "Card fork actions", exact: true })
+  const menu = page.getByRole("menu", { name: "Card fork actions", exact: true })
+  const forkAction = menu.getByRole("menuitem", { name: "Fork…", exact: true })
+  const dialog = page.getByRole("dialog", { name: "Fork card", exact: true })
+  for (const mode of ["hide-card-fork", "replace-card-fork"] as const) {
+    await trigger.click()
+    await forkAction.click()
+    await expect(dialog).toBeVisible()
+    await plugin(page, mode)
+    await expect(dialog).toBeHidden()
+    await plugin(page, "close")
+    await expect(dialog).toBeHidden()
+  }
+  await trigger.click()
+  await expect(forkAction).toBeVisible()
+})
+
 test("root comparison names the family and descendant comparison names the parent", async ({ page }) => {
   const { root, child } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {

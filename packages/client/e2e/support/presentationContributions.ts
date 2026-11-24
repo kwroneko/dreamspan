@@ -17,16 +17,31 @@ import {
   timelineSummaries
 } from "../../src/features/chat/presentation.tsx"
 import { timelineTransforms } from "../../src/features/chat/timelineContributions.tsx"
+import { cardContributions } from "../../src/features/cardForks/surfaces.tsx"
 let scope: Scope.Closeable | undefined
 export const close = async () => {
   if (scope) await Effect.runPromise(Scope.close(scope, Exit.void))
   scope = undefined
 }
-export const install = async (mode: "surfaces" | "fields" | "rows" | "hide" | "providers" | "composer" | "account") => {
+export const install = async (
+  mode:
+    | "surfaces"
+    | "fields"
+    | "rows"
+    | "hide"
+    | "providers"
+    | "composer"
+    | "account"
+    | "hide-card-fork"
+    | "replace-card-fork"
+) => {
   await close()
   scope = await Effect.runPromise(Scope.make())
   const own = (dispose: () => void) => Effect.runPromise(Scope.addFinalizer(scope!, Effect.sync(dispose)))
   const text = (name: string) => () => createElement("span", null, `Plugin ${name}`)
+  if (mode === "hide-card-fork") await own(cardContributions.disable("card-forks.fork"))
+  if (mode === "replace-card-fork")
+    await own(cardContributions.register({ ...cardContributions.get("card-forks.fork")! }))
   if (mode === "surfaces") {
     await own(chatBranchControls.register({ id: "chat.branches", order: 10, component: text("branches") }))
     await own(messagePreviews.register({ id: "history.message-preview", order: 10, component: text("preview") }))

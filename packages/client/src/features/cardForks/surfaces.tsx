@@ -3,7 +3,7 @@ import { Icon } from "../../ui/Icon.tsx"
 import { Tooltip, iconButtonClass } from "../../ui/Tooltip.tsx"
 import { useEditorState } from "../editor/store.ts"
 // Card extension points shared by library, editor and character surfaces.
-import { useState, useSyncExternalStore, type ComponentType } from "react"
+import { useEffect, useState, useSyncExternalStore, type ComponentType } from "react"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import type { EditorStore } from "../editor/store.ts"
 import { makeRegistry } from "../../registry.ts"
@@ -80,15 +80,23 @@ export function CardSurface({
 export function PanelCardForks({ store }: { store: EditorStore }) {
   const ref = useEditorState(store).snapshot?.ref
   const entries = cardMenuEntries(useCardContributions())
-  const [open, setOpen] = useState<string | null>(null)
+  const [open, setOpen] = useState<CardContribution | null>(null)
+  useEffect(() => {
+    if (open === null) return
+    const closeIfRemoved = () => {
+      if (cardContributions.get(open.id) !== open) setOpen((current) => (current === open ? null : current))
+    }
+    closeIfRemoved()
+    return cardContributions.subscribe(closeIfRemoved)
+  }, [open])
   if (ref?.kind !== "card") return null
-  const props = (id: string) => ({
+  const props = (entry: CardContribution) => ({
     entityId: ref.entityId,
     store,
-    openDialog: () => setOpen(id),
+    openDialog: () => setOpen(entry),
     closeDialog: () => setOpen(null)
   })
-  const selected = entries.find((entry) => entry.id === open)
+  const selected = open !== null && entries.includes(open) ? open : null
   return (
     <>
       <Menu
@@ -101,9 +109,9 @@ export function PanelCardForks({ store }: { store: EditorStore }) {
           </Tooltip>
         }
       >
-        {entries.map((entry) => (entry.menu ? <entry.menu key={entry.id} {...props(entry.id)} /> : null))}
+        {entries.map((entry) => (entry.menu ? <entry.menu key={entry.id} {...props(entry)} /> : null))}
       </Menu>
-      {selected?.dialog && <selected.dialog {...props(selected.id)} />}
+      {selected?.dialog && <selected.dialog {...props(selected)} />}
     </>
   )
 }
