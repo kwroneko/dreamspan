@@ -704,7 +704,7 @@ export const makeReadHandlers = Effect.gen(function* () {
 
     ListArchiveCandidates: ({ userId, criteria }) =>
       archiveCandidates(sql, userId, criteria).pipe(query("ListArchiveCandidates")),
-    ListLibrary: ({ userId, kind, tag, archived, withFilterData }) =>
+    ListLibrary: ({ userId, kind, tag, archived, withFilterData, globalSharedOnly }) =>
       lib
         .refsWhere(
           // A note an agent reply wrote (its first revision the reply's, as `agentWrittenNotes`
@@ -713,8 +713,11 @@ export const makeReadHandlers = Effect.gen(function* () {
            AND (e.archived_at IS NOT NULL) = ?
            AND (? IS NULL OR EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = ?))
            AND (e.kind <> 'note' OR (SELECT f.origin FROM entity_revisions f WHERE f.entity_id = e.id
-             ORDER BY f.seq LIMIT 1) IS NOT 'generation')`,
-          [userId, kind, archived ? 1 : 0, tag, tag]
+             ORDER BY f.seq LIMIT 1) IS NOT 'generation')
+           AND (? = 0 OR e.kind <> 'note' OR coalesce(
+             (SELECT json_extract(h.doc_json, '$.owner.shared') FROM entity_revisions h WHERE h.id = r.head_revision_id),
+             'global') = 'global')`,
+          [userId, kind, archived ? 1 : 0, tag, tag, globalSharedOnly ? 1 : 0]
         )
         .pipe(
           Effect.flatMap((rows) =>

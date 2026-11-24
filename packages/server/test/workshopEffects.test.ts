@@ -128,6 +128,40 @@ const fixture = (dataDir: string, api: Api) =>
   })
 
 describe("workshop setup effects", () => {
+  it.live("the writer checks a positioned library item's grant before creating a revision", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const card = yield* api.CreateCard({ label: "Grant fixture", name: "Grant fixture" })
+      const saved = yield* api.OpenEditor({ refId: card.id })
+      const revise = (toolCallId: string, expectedRowVersion: number, description: string) =>
+        f.writer.AgentReviseEntity({
+          userId: f.user.id,
+          rolloutId: f.rolloutId,
+          toolCallId,
+          refId: card.id,
+          expectedRowVersion,
+          doc: { ...saved.doc, description },
+          librarySight: {
+            refId: card.id,
+            forkId: f.chat.currentForkId,
+            leafSlotId: null,
+            entities: [],
+            refs: [],
+            card: null
+          }
+        })
+      yield* revise("view-allowed", card.rowVersion, "Allowed.")
+      const current = yield* api.OpenEditor({ refId: card.id })
+      assert.strictEqual(current.doc.description, "Allowed.")
+      yield* api.SetWorkshopGrant({ chatId: f.chat.id, capability: "library.cards", mode: "off" })
+      const rejected = yield* Effect.flip(revise("view-revoked", current.ref.rowVersion, "Revoked."))
+      assert.strictEqual(rejected._tag, "EffectUndoRefused")
+      assert.strictEqual((yield* api.OpenEditor({ refId: card.id })).ref.headRevisionId, current.ref.headRevisionId)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("consumes an approval once, and refuses consumption after Off wins the transaction", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -635,6 +669,19 @@ describe("workshop setup effects", () => {
             (e) => e.role === "toolResult" && e.tool === "create_card" && !e.isError
           )
         )
+        const keeper = (yield* api.ListLibrary({ kind: "card" })).find((r) => r.label === "Resume keeper")!
+        const visible = yield* reader.LibraryAccess({
+          userId: user.id,
+          chatId: chat.id,
+          forkId: chat.currentForkId,
+          leafSlotId: generated.entry.slotId,
+          rolloutId: "next-reply",
+          entities: [],
+          refs: [],
+          card: null
+        })
+        assert.include(visible.inView, keeper.entityId)
+
         const current = yield* reader.GetSlot({ userId: user.id, slotId: generated.entry.slotId })
         const swipe = yield* api.Regenerate({
           slotId: generated.entry.slotId,

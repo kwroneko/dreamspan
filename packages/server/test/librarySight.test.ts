@@ -5,16 +5,19 @@
 // on the next turn. Synthetic data and a scripted loopback provider only.
 import type { ServerResponse } from "node:http"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Stream } from "effect"
+import { Effect, Fiber, Stream } from "effect"
 import type { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
-import type { Chat, VersionId } from "@dreamspan/shared/chat.ts"
+import type { Chat, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { newCardDoc, textField } from "@dreamspan/shared/editing.ts"
 import type { ApprovalAnswer } from "@dreamspan/shared/workshopApi.ts"
-import { Writer } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { makeLibrarySight } from "../src/agent/librarySight.ts"
+import { ExecutionRegistry } from "../src/execution.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 import { ALWAYS_GRANTS, CARD_GRANTS, settingsRegistry, USER_ONLY_SETTINGS } from "../src/db/settings.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -118,18 +121,21 @@ const setup = (tasks: Record<string, ReadonlyArray<Step>>) =>
   })
 
 /** Sends a task and asks for the reply; doesn't wait for it. */
-const task = (api: Api, chat: Chat, content: string) =>
+const task = (api: Api, chat: Chat, content: string, at?: Pick<Chat, "currentForkId" | "activeLeafSlotId">) =>
   Effect.gen(function* () {
-    const current = yield* api.GetChat({ chatId: chat.id })
+    const current = at ?? (yield* api.GetChat({ chatId: chat.id }))
     const sent = yield* posted(
       api.SendMessage({
         chatId: chat.id,
         parentSlotId: current.activeLeafSlotId,
+        forkId: current.currentForkId,
         branch: false,
         content: `${TRIGGER} [${content}]`
       })
     )
-    const generated = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+    const generated = yield* posted(
+      api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, forkId: current.currentForkId, branch: false })
+    )
     return generated.entry.version.id as VersionId
   })
 
@@ -143,6 +149,66 @@ const results = (api: Api, versionId: VersionId, count: number) =>
 const READ_OTHER: Step = ["read_card", { card: "Mara Quill" }, "other"]
 
 describe("library sight", () => {
+  it.live("a reply and its subagent share a class question and its decline", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateWorkshop({})
+      const user = yield* api.Whoami()
+      const parent = "sight-parent"
+      const child = "sight-child"
+      const next = "sight-next"
+      const insert = `INSERT INTO rollouts
+        (id,chat_id,kind,status,role,request_class,created_at,updated_at,spawned_by_rollout_id,spawned_by_call_id,agent_handle)
+        VALUES (?,?,'workshop','running','assistant','interactive',1,1,?,?,?)`
+      yield* fixtureSql(config.dataDir, [
+        { sql: insert, params: [parent, chat.id, null, null, null] },
+        { sql: insert, params: [child, chat.id, parent, "agent-call", "helper-1"] },
+        { sql: insert, params: [next, chat.id, null, null, null] }
+      ])
+      const reader = yield* Reader
+      const writer = yield* Writer
+      const registries = yield* ExecutionRegistry
+      const prompts: Array<ApprovalPrompt> = []
+      const access = (rolloutId: string, toolCallId: string) =>
+        makeLibrarySight({ reader, writer, registries, userId: user.id, chatId: chat.id, rolloutId })(
+          {
+            userId: user.id,
+            chatId: chat.id,
+            forkId: chat.currentForkId,
+            slotId: chat.activeLeafSlotId as SlotId,
+            versionId: "unused" as VersionId,
+            rolloutId,
+            toolCallId,
+            leafSlotId: chat.activeLeafSlotId,
+            reader,
+            writer,
+            viewers: null,
+            cache: new Map()
+          },
+          (prompt) => {
+            if (prompt) prompts.push(prompt)
+          }
+        ).gate("library.cards", "It wants to look through your cards.")
+
+      const first = yield* access(parent, "first").pipe(Effect.forkScoped)
+      const second = yield* access(child, "second").pipe(Effect.forkScoped)
+      yield* eventually(() => prompts.length > 0)
+      yield* answer(api, prompts[0]!, "deny", "Please attach one.")
+      const denied = yield* Fiber.join(first)
+      assert.isFalse(denied.ok)
+      if (!denied.ok) assert.include(denied.text, "Please attach one.")
+      assert.deepStrictEqual(yield* Fiber.join(second), denied)
+      assert.deepStrictEqual(yield* access(parent, "third"), denied)
+      assert.lengthOf(prompts, 1)
+
+      const fresh = yield* access(next, "fresh").pipe(Effect.forkScoped)
+      yield* eventually(() => prompts.length === 2)
+      yield* answer(api, prompts[1]!, "allow")
+      assert.deepStrictEqual(yield* Fiber.join(fresh), { ok: true })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("the assistant's own card never asks; another card asks its class once for the reply", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -217,6 +283,31 @@ describe("library sight", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("turning Cards off during a write approval leaves the pinned card unchanged", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const { api, open } = yield* setup({
+        edit: [["edit_card", { card: "Mara Quill", changes: [{ field: "description", text: "New text." }] }, "edit"]]
+      })
+      const { chat, events } = yield* open([
+        { capability: "library.cards", mode: "allow" },
+        { capability: "library.write", mode: "ask" }
+      ])
+      const before = (yield* api.ListLibrary({ kind: "card" })).find((r) => r.label === "Mara Quill")!
+      const edit = yield* task(api, chat, "edit")
+      const prompt = yield* awaitApproval(events, edit, "edit")
+      assert.strictEqual(prompt.capability, "library.write")
+      yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.cards", mode: "off" })
+      yield* answer(api, prompt, "allow")
+      yield* done(events, edit)
+      const [result] = yield* results(api, edit, 1)
+      assert.isTrue(result!.isError)
+      assert.include(result!.text, "turned off in this workshop")
+      assert.strictEqual((yield* api.OpenEditor({ refId: before.id })).ref.headRevisionId, before.headRevisionId)
+      assert.isEmpty(yield* api.ListRolloutEffects({ chatId: chat.id }))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("Allow always and Allow always for the card hold in new workshops, are listed, and are removed", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -263,13 +354,14 @@ describe("library sight", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("a card in view changed by the user since the last reply is told once on the next turn", () => {
+  it.live("a card changed since the last reply on this branch is told once, even after a sibling replies", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const { api, open, mock } = yield* setup({ hello: [] })
       const { chat, events } = yield* open()
       const first = yield* task(api, chat, "hello")
       yield* done(events, first)
+      const original = yield* api.GetChat({ chatId: chat.id })
       // The user changes the assistant's card in its editor.
       const card = (yield* api.ListLibrary({ kind: "card" })).find((r) => r.label === "Assistant")!
       const field = textField(["description"])
@@ -289,6 +381,16 @@ describe("library sight", () => {
         fields: [{ field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
         message: null
       })
+      const sibling = (yield* api.CreateFork({
+        chatId: chat.id,
+        fromForkId: original.currentForkId,
+        atSlotId: chat.activeLeafSlotId
+      })).fork
+      const other = yield* task(api, chat, "hello", {
+        currentForkId: sibling.id,
+        activeLeafSlotId: sibling.tipSlotId
+      })
+      yield* done(events, other)
       const line = "Changed since you last saw it: Assistant (Description, by the user)."
       const sent = () =>
         JSON.stringify(
@@ -297,10 +399,14 @@ describe("library sight", () => {
             .filter((r) => r.path === "/v1/chat/completions")
             .at(-1)!.body
         )
-      const second = yield* task(api, chat, "hello")
+      const second = yield* task(api, chat, "hello", original)
       yield* done(events, second)
       assert.include(sent(), line)
-      const third = yield* task(api, chat, "hello")
+      const current = (yield* api.ListForks({ chatId: chat.id })).find((fork) => fork.id === original.currentForkId)!
+      const third = yield* task(api, chat, "hello", {
+        currentForkId: current.id,
+        activeLeafSlotId: current.tipSlotId
+      })
       yield* done(events, third)
       // Said once: the turn after it is quiet (the earlier user message keeps its own tail).
       const last = (mock.requests().at(-1)!.body as unknown as Body).messages.at(-1)

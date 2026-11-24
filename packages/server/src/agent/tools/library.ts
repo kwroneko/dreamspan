@@ -26,7 +26,14 @@ const failRead = (error: unknown) =>
   )
 
 const entries = (context: ToolContext, kind: EntityKind, archived = false) =>
-  context.reader.ListLibrary({ userId: context.userId, kind, tag: null, archived, withFilterData: true })
+  context.reader.ListLibrary({
+    userId: context.userId,
+    kind,
+    tag: null,
+    archived,
+    withFilterData: true,
+    ...(kind === "note" ? { globalSharedOnly: true } : {})
+  })
 
 const kindNoun: Record<EntityKind, string> = {
   card: "card",
@@ -35,6 +42,19 @@ const kindNoun: Record<EntityKind, string> = {
   note: "note",
   preset_overlay: "preset overlay"
 }
+
+/** A card outside view needs separate consent for its embedded lorebook. */
+export const mayReadCardBook = Effect.fnUntraced(function* (
+  context: ToolContext,
+  ref: LibraryRef,
+  ...docs: ReadonlyArray<Readonly<Record<string, unknown>>>
+) {
+  const sight = context.sight
+  if (ref.kind !== "card" || !sight || !docs.some((doc) => doc.character_book != null)) return true
+  if (yield* sight.inView(ref.entityId)) return true
+  const allowed = yield* sight.gate("library.lorebooks", `It wants to read the lorebook in “${ref.label}”.`)
+  return allowed.ok
+})
 
 /**
  * A library item by name, library id or entity id, through what the reply may see
@@ -374,7 +394,8 @@ const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Re
           revision: snapshot.ref.headRevisionId
         }
       }
-      const visible = visibleDoc(kind, source.doc)
+      const showBook = source.ref === null || (yield* mayReadCardBook(context, source.ref, source.doc))
+      const visible = visibleDoc(kind, source.doc, showBook)
       const count: CountEffect = context.countTokens
         ? (text) => context.countTokens!(text).pipe(Effect.orElseSucceed(() => Math.ceil(text.length / 4)))
         : estimateCount
@@ -433,7 +454,8 @@ const readNote: RolloutTool<{ readonly note: string }> = {
       if ("error" in found) return { text: found.error, isError: true }
       const snapshot = yield* context.reader.OpenEditor({ userId: context.userId, refId: found.ref.id })
       // A chat's note is story text at a branch's position: only the positioned read shows it.
-      if ((snapshot.doc.owner as { chat?: unknown } | undefined)?.chat !== undefined)
+      const owner = snapshot.doc.owner as { chat?: string; shared?: string } | undefined
+      if (owner?.chat !== undefined || (owner?.shared !== undefined && owner.shared !== "global"))
         return { text: "That note belongs to one chat. Read it with list_chat_notes.", isError: true }
       return {
         frame: toolResultFrame({

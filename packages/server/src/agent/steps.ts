@@ -206,8 +206,14 @@ export const placedSteps = (
  * (spec/WORKSHOP.md §3.6). Earlier messages' calls, and a carried run's history before this turn,
  * are left out. A call sits where its result is, else at its turn. Without `versionId`, every call.
  */
-export const callsFrom = (messages: ReadonlyArray<AgentMessage>, versionId?: string): Map<string, string | null> => {
-  const after = versionId === undefined ? -1 : messageBounds(messages, versionId, true).after
+export const callsFrom = (
+  messages: ReadonlyArray<AgentMessage>,
+  versionId?: string,
+  within?: { readonly final: boolean }
+): Map<string, string | null> => {
+  const bounds = versionId === undefined ? undefined : messageBounds(messages, versionId, within?.final ?? true)
+  const after = bounds?.after ?? -1
+  const through = within ? (bounds?.through ?? messages.length) : messages.length
   const calls = new Map<string, string | null>()
   messages.forEach((m, index) => {
     if (m.role !== "assistant") return
@@ -218,7 +224,8 @@ export const callsFrom = (messages: ReadonlyArray<AgentMessage>, versionId?: str
     }
     for (const part of m.content) {
       const result = part.type === "toolCall" ? results.get(part.id) : undefined
-      if (part.type === "toolCall" && !endsReply(part.name) && (result?.at ?? index) > after)
+      const at = result?.at ?? index
+      if (part.type === "toolCall" && !endsReply(part.name) && at > after && at <= through)
         calls.set(part.id, result?.text ?? null)
     }
   })

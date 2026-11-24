@@ -4,16 +4,20 @@
 // what the caller names from the branch's state (the workshop's own cast, a story's cast and
 // books beside it). Allow always grants are the user's settings (`workshop.cardGrants`,
 // `workshop.alwaysGrants`), written only by the user's answer or Remove.
+import type { ChatId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { capabilityDefaults, libraryClassIds, workshopCapabilities } from "../agent/capabilities.ts"
+import { callsFrom } from "../agent/steps.ts"
 import { inFork } from "./forkState.ts"
 import { lcmPath } from "./lcmPath.ts"
-import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
+import { type LibrarySightPosition, NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { ALWAYS_GRANTS, CARD_GRANTS, putUserSetting, readSetting } from "./settings.ts"
 import { resumeLineage } from "./subagentEffects.ts"
 import { query, transaction } from "./tx.ts"
+import { attributedEffects } from "./versionEffects.ts"
 
 type Sql = SqlClient.SqlClient
 type CardGrants = Readonly<Record<string, Readonly<Record<string, "allow">>>>
@@ -35,8 +39,9 @@ const replyRuns = (sql: Sql, rolloutId: string) =>
         UNION SELECT r.spawned_by_rollout_id, up.depth + 1 FROM up JOIN rollouts r ON r.id = up.id
           WHERE r.spawned_by_rollout_id IS NOT NULL AND up.depth < 16
       ) SELECT id FROM up ORDER BY depth DESC LIMIT 1`
-    const roots = (yield* resumeLineage(sql, top?.id ?? rolloutId)).map((r) => r.id)
-    return yield* descendants(sql, roots)
+    const replyId = top?.id ?? rolloutId
+    const roots = (yield* resumeLineage(sql, replyId)).map((r) => r.id)
+    return { replyId, runs: yield* descendants(sql, roots) }
   })
 
 /** The runs and every subagent run they started, at any depth. */
@@ -52,9 +57,69 @@ const descendants = (sql: Sql, roots: ReadonlyArray<string>) =>
         (rows) => rows.map((r) => r.id)
       )
 
+/** Creations on visible messages, plus changes already made in the live reply. */
+const visibleCreations = Effect.fnUntraced(function* (
+  sql: Sql,
+  chatId: string,
+  versions: string,
+  replyId: string | null
+) {
+  // Find candidates without opening the transcript of every reply in a long chat.
+  const rows = yield* sql<{ rolloutId: string; versionId: string | null }>`
+    WITH RECURSIVE creation_runs(id) AS (
+      SELECT r.id FROM rollouts r JOIN rollout_effects e ON e.rollout_id = r.id
+      WHERE r.chat_id = ${chatId} AND e.kind = 'library.create' AND e.target_kind = 'entity' AND e.undone_at IS NULL
+      UNION SELECT r.spawned_by_rollout_id FROM creation_runs c JOIN rollouts r ON r.id = c.id
+        WHERE r.spawned_by_rollout_id IS NOT NULL
+      UNION SELECT v.rollout_id FROM creation_runs c JOIN versions src ON src.rollout_id = c.id
+        JOIN versions v ON v.source_version_id = src.id WHERE v.origin = 'resumed' AND v.rollout_id IS NOT NULL
+    )
+    SELECT v.rollout_id AS rolloutId,
+      CASE WHEN v.fork_id IS NOT NULL THEN coalesce(v.source_version_id, v.id) ELSE v.id END AS versionId
+    FROM json_each(${versions}) p JOIN versions v ON v.id = p.value
+      JOIN creation_runs c ON c.id = v.rollout_id
+    UNION SELECT id, NULL FROM creation_runs WHERE id = ${replyId}`
+  const byRollout = new Map<string, Array<string | null>>()
+  for (const row of rows) {
+    const messages = byRollout.get(row.rolloutId) ?? []
+    messages.push(row.versionId)
+    byRollout.set(row.rolloutId, messages)
+  }
+  const made = new Set<string>()
+  for (const [rolloutId, visible] of byRollout) {
+    const [run] = yield* sql<{ status: string; transcript: string | null }>`
+      SELECT r.status, p.transcript_json AS transcript FROM rollouts r
+      JOIN rollout_payloads p ON p.rollout_id = r.id WHERE r.id = ${rolloutId}`
+    if (!run?.transcript) continue
+    const transcript = JSON.parse(run.transcript) as ReadonlyArray<AgentMessage>
+    const calls = new Map<string, string | null>()
+    if (rolloutId === replyId) {
+      const turn = transcript.findLastIndex((m) => m.role === "user" || m.role === "rpUser")
+      for (const [id, result] of callsFrom(transcript.slice(turn + 1))) calls.set(id, result)
+    } else {
+      for (const version of visible) {
+        if (version === null) continue
+        for (const [id, result] of callsFrom(transcript, version, { final: run.status === "completed" }))
+          calls.set(id, result)
+      }
+    }
+    for (const effect of yield* attributedEffects(sql, rolloutId, transcript, calls, true))
+      if (effect.targetKind === "entity") made.add(effect.targetId)
+  }
+  if (replyId !== null) {
+    // In-flight calls may have committed their effects before saving their transcript result.
+    const live = yield* descendants(sql, [replyId])
+    const effects = yield* sql<{ target_id: string }>`SELECT target_id FROM rollout_effects
+      WHERE rollout_id IN (SELECT value FROM json_each(${JSON.stringify(live)}))
+        AND kind = 'library.create' AND target_kind = 'entity' AND undone_at IS NULL`
+    for (const effect of effects) made.add(effect.target_id)
+  }
+  return [...made]
+})
+
 /**
  * What's in view on a path up to `leafSlotId` (§2.1, §4.4): the items attached on its messages,
- * those its runs and `runs` (the reply's own) made and didn't undo, and the caller's `entities`
+ * those its calls and the live reply made and didn't undo, and the caller's `entities`
  * and `refs`; only the user's own, with the notes of the cards among them. Run inside `inFork`.
  */
 const pathView = (
@@ -62,7 +127,7 @@ const pathView = (
   userId: string,
   chatId: string,
   leafSlotId: string | null,
-  runs: ReadonlyArray<string>,
+  replyId: string | null,
   entities: ReadonlyArray<string>,
   refs: ReadonlyArray<string>
 ) =>
@@ -81,16 +146,11 @@ const pathView = (
             false
           )
     const versions = JSON.stringify(path.flatMap(({ versionId }) => (versionId ? [versionId] : [])))
-    // The path's runs and their subagents', with the reply's: what made the items it made.
-    const pathRuns = (yield* sql<{ id: string }>`SELECT DISTINCT v.rollout_id AS id FROM versions v
-      WHERE v.id IN (SELECT value FROM json_each(${versions})) AND v.rollout_id IS NOT NULL`).map((r) => r.id)
-    const made = [...new Set([...(yield* descendants(sql, pathRuns)), ...runs])]
+    const made = yield* visibleCreations(sql, chatId, versions, replyId)
     const seen = yield* sql<{ id: string }>`
       SELECT r.entity_id AS id FROM version_library l JOIN entity_refs r ON r.id = l.ref_id
         WHERE l.version_id IN (SELECT value FROM json_each(${versions}))
-      UNION SELECT e.target_id FROM rollout_effects e
-        WHERE e.rollout_id IN (SELECT value FROM json_each(${JSON.stringify(made)}))
-          AND e.kind = 'library.create' AND e.target_kind = 'entity' AND e.undone_at IS NULL
+      UNION SELECT value FROM json_each(${JSON.stringify(made)})
       UNION SELECT r.entity_id FROM entity_refs r WHERE r.id IN (SELECT value FROM json_each(${JSON.stringify(refs)}))
       UNION SELECT value FROM json_each(${JSON.stringify(entities)})`
     const owned = (yield* sql<{ id: string }>`SELECT e.id FROM entities e
@@ -165,50 +225,76 @@ export const writeClassGrant = (sql: Sql, userId: string, capability: string, ca
     })
   })
 
+/** Read the same sight and grants during a tool call or inside its writer transaction. */
+export const libraryAccess = (
+  sql: Sql,
+  {
+    userId,
+    chatId,
+    forkId,
+    leafSlotId,
+    rolloutId,
+    entities,
+    refs,
+    card
+  }: LibrarySightPosition & {
+    readonly userId: UserId
+    readonly chatId: ChatId
+    readonly rolloutId: string
+  }
+) =>
+  Effect.gen(function* () {
+    const [chat] = yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}
+      AND kind = 'workshop' AND deleted_at IS NULL`
+    if (!chat) return yield* new NotFound({ entity: "workshop", id: chatId })
+    const { replyId, runs } = yield* replyRuns(sql, rolloutId)
+    const { inView } = yield* pathView(sql, userId, chatId, leafSlotId, replyId, entities, refs)
+    const chatGrants = yield* sql<{ capability: string; mode: "off" | "ask" | "allow" }>`SELECT capability, mode
+      FROM workshop_grants WHERE chat_id = ${chatId} AND owner_user_id = ${userId} AND target = ''
+        AND capability IN (SELECT value FROM json_each(${JSON.stringify(libraryClassIds)}))
+        AND (expires_at IS NULL OR expires_at > ${Date.now()})`
+    const answers = yield* sql<{ capability: string; status: "used" | "denied"; note: string | null }>`
+      SELECT capability, status, note FROM tool_approvals
+      WHERE rollout_id IN (SELECT value FROM json_each(${JSON.stringify(runs)}))
+        AND capability IN (SELECT value FROM json_each(${JSON.stringify(libraryClassIds)}))
+        AND json_type(prompt_json, '$.scoped') = 'object'
+        AND ((status = 'used' AND answer <> 'deny') OR status = 'denied')
+      ORDER BY answered_at DESC`
+    const [named] =
+      card === null
+        ? []
+        : yield* sql<{ label: string }>`SELECT r.label FROM entities e JOIN entity_refs r ON r.entity_id = e.id
+            WHERE e.id = ${card} AND e.owner_user_id = ${userId} AND e.kind = 'card'`
+    return {
+      inView,
+      replyId,
+      card: card !== null && named ? { entityId: card, name: named.label } : null,
+      chat: chatGrants,
+      cardGrants: card !== null && named ? ((yield* cardGrantsOf(sql, userId))[card] ?? {}) : {},
+      always: yield* alwaysGrantsOf(sql, userId),
+      replyAllowed: [...new Set(answers.filter((a) => a.status === "used").map((a) => a.capability))],
+      replyDeclined: answers.filter((a) => a.status === "denied").map(({ capability, note }) => ({ capability, note }))
+    }
+  }).pipe(inFork(sql, chatId, forkId, leafSlotId))
+
 export const makeWorkshopSightReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
     LibraryGrants: ({ userId }) => libraryGrantsOf(sql, userId).pipe(query("LibraryGrants")),
-    LibraryAccess: ({ userId, chatId, forkId, leafSlotId, rolloutId, entities, refs, card }) =>
-      Effect.gen(function* () {
-        const [chat] = yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}
-          AND kind = 'workshop' AND deleted_at IS NULL`
-        if (!chat) return yield* new NotFound({ entity: "workshop", id: chatId })
-        const reply = yield* replyRuns(sql, rolloutId)
-        const { inView } = yield* pathView(sql, userId, chatId, leafSlotId, reply, entities, refs)
-        const chatGrants = yield* sql<{ capability: string; mode: "off" | "ask" | "allow" }>`SELECT capability, mode
-          FROM workshop_grants WHERE chat_id = ${chatId} AND owner_user_id = ${userId} AND target = ''
-            AND capability IN (SELECT value FROM json_each(${JSON.stringify(libraryClassIds)}))
-            AND (expires_at IS NULL OR expires_at > ${Date.now()})`
-        const allowed = yield* sql<{ capability: string }>`SELECT DISTINCT capability FROM tool_approvals
-          WHERE rollout_id IN (SELECT value FROM json_each(${JSON.stringify(reply)}))
-            AND capability IN (SELECT value FROM json_each(${JSON.stringify(libraryClassIds)}))
-            AND status = 'used' AND answer <> 'deny'`
-        const [named] =
-          card === null
-            ? []
-            : yield* sql<{ label: string }>`SELECT r.label FROM entities e JOIN entity_refs r ON r.entity_id = e.id
-                WHERE e.id = ${card} AND e.owner_user_id = ${userId} AND e.kind = 'card'`
-        return {
-          inView,
-          card: card !== null && named ? { entityId: card, name: named.label } : null,
-          chat: chatGrants,
-          cardGrants: card !== null && named ? ((yield* cardGrantsOf(sql, userId))[card] ?? {}) : {},
-          always: yield* alwaysGrantsOf(sql, userId),
-          replyAllowed: allowed.map((a) => a.capability)
-        }
-      }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("LibraryAccess")),
+    LibraryAccess: (input) => libraryAccess(sql, input).pipe(query("LibraryAccess")),
     ChangedInViewSince: ({ userId, chatId, forkId, leafSlotId, entities }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}
           AND kind = 'workshop' AND deleted_at IS NULL`
         if (!chat) return yield* new NotFound({ entity: "workshop", id: chatId })
-        // What the assistant saw last: the items as they stood when its latest reply here ended.
-        const [last] = yield* sql<{ at: number | null }>`SELECT max(completed_at) AS at FROM rollouts
-          WHERE chat_id = ${chatId}`
-        if (!last?.at) return []
-        const { inView, versions } = yield* pathView(sql, userId, chatId, leafSlotId, [], entities, [])
+        const { inView, versions } = yield* pathView(sql, userId, chatId, leafSlotId, null, entities, [])
         if (inView.length === 0) return []
+        // A reply on another path hasn't seen the items on this path.
+        const [last] = yield* sql<{ at: number | null }>`SELECT max(r.completed_at) AS at
+          FROM versions v JOIN rollouts r ON r.id = v.rollout_id
+          WHERE v.id IN (SELECT value FROM json_each(${versions}))
+            AND r.chat_id = ${chatId} AND r.status = 'completed'`
+        if (last?.at == null) return []
         const rows = yield* sql<{
           kind: string
           label: string

@@ -690,6 +690,20 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
         const note = yield* libraryNote(ctx, args.note)
         if (note.owner.card === undefined || typeof note.saved.doc.link !== "string")
           return yield* fail("That note does not show a shared note.")
+        const entityId = note.saved.doc.link as EntityId
+        const shared = yield* ctx.reader.SharedNoteHead({ userId: ctx.userId, entityId })
+        if (shared !== null) {
+          if (shared.scope !== "global") return yield* fail("That shared note belongs to one chat.")
+          if (ctx.sight && !(yield* ctx.sight.inView(entityId))) {
+            const allowed = yield* ctx.sight.gate("library.notes", "It wants to copy the linked shared note's text.")
+            if (!allowed.ok) return yield* fail(allowed.text)
+          }
+        }
+        const key = `operation:proof:${ctx.toolCallId}`
+        ctx.cache.set(key, {
+          ...(ctx.cache.get(key) as Record<string, unknown>),
+          shared: { entityId, revisionId: shared?.revisionId ?? null }
+        })
         return { noteRefId: note.ref.id }
       }),
     describe: (payload, ctx) =>

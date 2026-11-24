@@ -376,6 +376,17 @@ export class DraftTooLarge extends Schema.TaggedError<DraftTooLarge>()("DraftToo
  * (another tab typed on), it stays active, and nothing else is touched.
  */
 const CommitDraft = Schema.NullOr(Schema.Struct({ draftId: Schema.String, session: Schema.Int }))
+
+const LibrarySightPosition = Schema.Struct({
+  forkId: Schema.NullOr(ForkId),
+  leafSlotId: Schema.NullOr(SlotId),
+  entities: Schema.Array(Schema.String),
+  refs: Schema.Array(Schema.String),
+  card: Schema.NullOr(Schema.String)
+})
+export type LibrarySightPosition = typeof LibrarySightPosition.Type
+const LibraryWriteSight = Schema.Struct({ ...LibrarySightPosition.fields, refId: RefId })
+export type LibraryWriteSight = typeof LibraryWriteSight.Type
 /** An edit's thinking draft, with the thinking as it was typed, which the draft must still hold. */
 const ThinkingDraftCommit = Schema.NullOr(
   Schema.Struct({ draftId: Schema.String, session: Schema.Int, text: Schema.String })
@@ -2937,6 +2948,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       approvalDigest: Schema.optionalKey(Schema.String),
+      librarySight: Schema.optionalKey(LibraryWriteSight),
       expectedRefs: Schema.optionalKey(
         Schema.Array(
           Schema.Struct({
@@ -2965,6 +2977,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       approvalDigest: Schema.optionalKey(Schema.String),
+      librarySight: Schema.optionalKey(LibraryWriteSight),
       expectedRefs: Schema.optionalKey(
         Schema.Array(
           Schema.Struct({
@@ -2988,6 +3001,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       approvalDigest: Schema.optionalKey(Schema.String),
+      librarySight: Schema.optionalKey(LibraryWriteSight),
       expectedRefs: Schema.optionalKey(
         Schema.Array(
           Schema.Struct({
@@ -5385,6 +5399,8 @@ const ReadOpsOwn = RpcGroup.make(
       /** Only entities with this tag, e.g. "persona" for the persona folder. */
       tag: Schema.NullOr(Schema.String),
       withFilterData: Schema.optionalKey(Schema.Boolean),
+      /** The assistant's library tools leave chat-scoped snippets at their owning chat. */
+      globalSharedOnly: Schema.optionalKey(Schema.Boolean),
       archived: Schema.Boolean
     },
     success: Schema.Array(LibraryRef),
@@ -5750,6 +5766,12 @@ const ReadOpsOwn = RpcGroup.make(
   Rpc.make("ListSharedNoteRefs", {
     payload: { userId: UserId },
     success: Schema.Array(LibraryRef),
+    error: StorageError
+  }),
+  /** The linked shared note's scope and head, including when it is in the bin. */
+  Rpc.make("SharedNoteHead", {
+    payload: { userId: UserId, entityId: EntityId },
+    success: Schema.NullOr(Schema.Struct({ revisionId: RevisionId, scope: Schema.String })),
     error: StorageError
   }),
   /**
@@ -6450,20 +6472,18 @@ const ReadOpsOwn = RpcGroup.make(
     payload: {
       userId: UserId,
       chatId: ChatId,
-      forkId: Schema.NullOr(ForkId),
-      leafSlotId: Schema.NullOr(SlotId),
       rolloutId: Schema.String,
-      entities: Schema.Array(Schema.String),
-      refs: Schema.Array(Schema.String),
-      card: Schema.NullOr(Schema.String)
+      ...LibrarySightPosition.fields
     },
     success: Schema.Struct({
       inView: Schema.Array(Schema.String),
+      replyId: Schema.String,
       card: Schema.NullOr(Schema.Struct({ entityId: Schema.String, name: Schema.String })),
       chat: Schema.Array(Schema.Struct({ capability: Schema.String, mode: CapabilityMode })),
       cardGrants: Schema.Record(Schema.String, Schema.Literal("allow")),
       always: Schema.Record(Schema.String, Schema.Literal("allow")),
-      replyAllowed: Schema.Array(Schema.String)
+      replyAllowed: Schema.Array(Schema.String),
+      replyDeclined: Schema.Array(Schema.Struct({ capability: Schema.String, note: Schema.NullOr(Schema.String) }))
     }),
     error: Schema.Union([NotFound, StorageError])
   }),

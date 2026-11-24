@@ -282,6 +282,24 @@ describe("workshop approvals with several messages and carried turns", () => {
           ["k2"]
         )
         const before = yield* api.ListRolloutEffects({ chatId: chat.id })
+        const user = yield* api.Whoami()
+        const reader = yield* Reader
+        const visibleAt = (leafSlotId: typeof last.slotId) =>
+          reader.LibraryAccess({
+            userId: user.id,
+            chatId: chat.id,
+            forkId: chat.currentForkId,
+            leafSlotId,
+            rolloutId: "next-reply",
+            entities: [],
+            refs: [],
+            card: null
+          })
+        const earlier = before.find((effect) => effect.toolCallId === "k1")!.targetId
+        const later = before.find((effect) => effect.toolCallId === "k2")!.targetId
+        assert.sameMembers([...(yield* visibleAt(firstMessage.slotId)).inView], [earlier])
+        assert.sameMembers([...(yield* visibleAt(last.slotId)).inView], [earlier, later])
+
         yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "ask" })
         // The last message's new version keeps its own call (only the answer is written again).
         const lastAgain = yield* api.Regenerate({ slotId: last.slotId, expectedRowVersion: last.rowVersion })

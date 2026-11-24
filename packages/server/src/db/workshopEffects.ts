@@ -1,6 +1,6 @@
 import { checkStoryWrite } from "./storyWriteScope.ts"
 import { displayEndOf } from "./displayPath.ts"
-import type { StoryAt } from "@dreamspan/shared/chat.ts"
+import type { ChatId, StoryAt } from "@dreamspan/shared/chat.ts"
 import { safeAgentDocument, validateAgentDocument } from "./agentDocuments.ts"
 import { historyCurrent, historyFork } from "./historyShared.ts"
 import { nextReceiptTime, pendingOperationResult, unwrapOperationResult } from "./operationReceipts.ts"
@@ -31,16 +31,24 @@ import { SqlClient } from "effect/sql"
 import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { DraftKey } from "@dreamspan/shared/drafts.ts"
 import { toBinItem, type Bin } from "./bin.ts"
-import { NotFound, WriteOps } from "./ops.ts"
+import { type LibraryWriteSight, NotFound, WriteOps } from "./ops.ts"
 import { adoptedKind } from "./cardOrigins.ts"
 import { makeLibraryQueries } from "./library.ts"
 import { transaction } from "./tx.ts"
 import { workshopLimits as limits } from "../workshopLimits.ts"
-import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
+import {
+  capabilityDefaults,
+  classOfKind,
+  libraryClassMode,
+  resolveMode,
+  workshopCapabilities
+} from "../agent/capabilities.ts"
 import { visibleDoc } from "../agent/libraryView.ts"
 import { newWorkshopImportMedia } from "./workshopImportMedia.ts"
 import { insertReversal, recordAssistantRevertUndo, revisionReversal } from "./changeReversals.ts"
 import { changedUnits, unitName, unitPath, valuesOfUnits } from "@dreamspan/shared/changeReversal.ts"
+import { sharedNote } from "./sharedNotes.ts"
+import { libraryAccess } from "./workshopSight.ts"
 
 /** The assistant's message for a revision it writes, on one line; none when it gave none. */
 const agentMessage = (message: string | undefined) => message?.replace(/\p{Cc}+/gu, " ").trim() || undefined
@@ -79,6 +87,8 @@ type Key = {
   readonly rolloutId: string
   readonly toolCallId: string
   readonly approvalDigest?: string
+  readonly refId?: RefId
+  readonly librarySight?: LibraryWriteSight
   readonly cardFileImport?: { readonly maxAddedBytes: number }
   readonly expectedRefs?: ReadonlyArray<{
     readonly refId: RefId
@@ -498,10 +508,11 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
     const owned = (key: Key) =>
       Effect.gen(function* () {
         const [row] = yield* sql<{
+          chat_id: ChatId
           status: string
           chat_kind: string
           kind: string
-        }>`SELECT r.status, c.kind AS chat_kind, r.kind FROM rollouts r JOIN chats c ON c.id = r.chat_id
+        }>`SELECT r.chat_id, r.status, c.kind AS chat_kind, r.kind FROM rollouts r JOIN chats c ON c.id = r.chat_id
       WHERE r.id = ${key.rolloutId} AND c.owner_user_id = ${key.userId} AND r.kind = 'workshop' AND c.deleted_at IS NULL`
         if (!row) return yield* new NotFound({ entity: "workshop rollout", id: key.rolloutId })
         const profile = chatKinds.get(row.chat_kind)
@@ -601,6 +612,30 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
             return yield* new EffectUndoRefused({
               message: "The saved item changed while waiting. Read it again before making this change."
             })
+        }
+        if (key.librarySight) {
+          const subject = yield* lib.ownedRef(key.userId, key.librarySight.refId)
+          if (key.refId !== subject.id) {
+            if (key.refId === undefined || subject.kind !== "card")
+              return yield* refuseOperation("The approved library item changed.")
+            // edit_card_note takes its sight from the owning card.
+            const note = yield* lib.ownedRef(key.userId, key.refId)
+            const { owner } = yield* lib.loadDoc(note.head_revision_id)
+            if (note.kind !== "note" || (owner as { card?: string } | undefined)?.card !== subject.entity_id)
+              return yield* refuseOperation("The approved library item changed.")
+          }
+          const access = yield* libraryAccess(sql, {
+            ...key.librarySight,
+            userId: key.userId,
+            chatId: rollout.chat_id,
+            rolloutId: key.rolloutId
+          })
+          if (
+            !access.inView.includes(subject.entity_id) &&
+            libraryClassMode({ workshopCapabilities, capabilityDefaults }, access, classOfKind(subject.kind)) !==
+              "allow"
+          )
+            return yield* refuseOperation("The workshop no longer has access to this library item.")
         }
         const [used] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM rollout_receipts
           WHERE rollout_id = ${key.rolloutId} AND is_error = 0`
@@ -992,6 +1027,23 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                     )
                 }
                 const before = yield* policy!.before(sql, input.userId, value as never)
+                if (input.operation === "UnlinkNote") {
+                  const checked = (expected?.proof as { shared?: { entityId: string; revisionId: string | null } })
+                    ?.shared
+                  const slot = before as { ref: { head_revision_id: string } }
+                  const doc = yield* lib.loadDoc(slot.ref.head_revision_id)
+                  const link = typeof doc.link === "string" ? doc.link : null
+                  const source = link === null ? null : yield* sharedNote(sql, input.userId, link)
+                  if (
+                    !checked ||
+                    checked.entityId !== link ||
+                    checked.revisionId !== (source?.head ?? null) ||
+                    (source !== null && source.scope !== "global")
+                  )
+                    return yield* refuseOperation(
+                      "The linked shared note changed. Read the note again before unlinking it."
+                    )
+                }
                 let result: unknown
                 if (input.operation === "SetAgentSetting") {
                   const entry = settingsRegistry.get(String(value.key))

@@ -16,7 +16,7 @@ import { withReversions } from "./changeReversals.ts"
 import { childEffects, newestFirst, resumeLineage as lineage } from "./subagentEffects.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { callsFrom } from "../agent/steps.ts"
-import { recoveredOperationText } from "./operationReceipts.ts"
+import { attributedEffects } from "./versionEffects.ts"
 import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
 import { writeClassGrant } from "./workshopSight.ts"
 
@@ -345,55 +345,9 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
         // message's are left out): its own run's, and those of calls it kept from the runs it
         // was resumed from. A kept call carries its result over; a call made again under the
         // same id has a result of its own, so an earlier run's change isn't listed for it.
-        const runs = yield* lineage(sql, version.rollout_id)
         const transcript = JSON.parse(version.transcript ?? "[]") as ReadonlyArray<AgentMessage>
-        const calls = callsFrom(transcript, versionId)
-        const rows = yield* sql<Parameters<typeof toRolloutEffect>[0]>`SELECT e.* FROM rollout_effects e
-          WHERE e.rollout_id IN ${sql.in(runs.map((r) => r.id))}
-          ORDER BY e.created_at DESC, e.rollout_id DESC, e.tool_call_id DESC, e.seq DESC`
-        const earlier = [...new Set(rows.map((r) => r.rollout_id))].filter((id) => id !== version.rollout_id)
-        const results = new Map<string, Map<string, string | null>>()
-        const receipts = new Map<string, Map<string, string>>()
-        // A crash may leave a committed effect and receipt before its transcript result.
-        // Only a matching receipt carried into this run can prove that missing result;
-        // an unrelated call reusing the same id must not inherit the effect.
-        if (earlier.length > 0)
-          for (const receipt of yield* sql<{ rollout_id: string; tool_call_id: string; result_json: string }>`
-            SELECT rollout_id, tool_call_id, result_json FROM rollout_receipts
-            WHERE rollout_id IN ${sql.in(runs.map((run) => run.id))}`) {
-            let calls = receipts.get(receipt.rollout_id)
-            if (!calls) receipts.set(receipt.rollout_id, (calls = new Map()))
-            calls.set(receipt.tool_call_id, receipt.result_json)
-          }
-        if (earlier.length > 0)
-          for (const run of yield* sql<{ rollout_id: string; transcript: string | null }>`SELECT rollout_id,
-              transcript_json AS transcript FROM rollout_payloads WHERE rollout_id IN ${sql.in(earlier)}`)
-            results.set(
-              run.rollout_id,
-              run.transcript === null ? new Map() : callsFrom(JSON.parse(run.transcript) as ReadonlyArray<AgentMessage>)
-            )
-        // The changes of the subagents its kept `agent` calls started (spec/SUBAGENTS.md §8): a
-        // call cut by carrying on from an earlier step leaves its subagents' with the old version.
-        const children = yield* childEffects(
-          sql,
-          runs.map((r) => r.id),
-          { kept: { calls: new Set(calls.keys()), transcript }, undone: true }
-        )
-        const own = rows
-          .filter((row) => {
-            if (!calls.has(row.tool_call_id)) return false
-            if (row.rollout_id === version.rollout_id) return true
-            const there = results.get(row.rollout_id)?.get(row.tool_call_id)
-            if (there !== undefined && there !== null && there === calls.get(row.tool_call_id)) return true
-            const kept = receipts.get(version.rollout_id!)?.get(row.tool_call_id)
-            return (
-              kept !== undefined &&
-              kept === receipts.get(row.rollout_id)?.get(row.tool_call_id) &&
-              recoveredOperationText(JSON.parse(kept) as string) === calls.get(row.tool_call_id)
-            )
-          })
-          .map(toRolloutEffect)
-        return yield* withReversions(sql, children.length === 0 ? own : [...own, ...children].sort(newestFirst))
+        const effects = yield* attributedEffects(sql, version.rollout_id, transcript, callsFrom(transcript, versionId))
+        return yield* withReversions(sql, effects)
       }).pipe(query("VersionEffects"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })
