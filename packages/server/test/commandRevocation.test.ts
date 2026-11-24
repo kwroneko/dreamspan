@@ -334,6 +334,46 @@ it.each([false, true])("refuses a command revoked during its file scan (backgrou
   }
 })
 
+it("reports a background failure that arrives while bash_output is waiting", async () => {
+  const finish = Promise.withResolvers<void>()
+  const w = world({
+    sandbox: {
+      ...heldSandbox().sandbox,
+      run: async (spec) => {
+        await finish.promise
+        const output = Buffer.from("final output\n")
+        spec.onOutput?.(output)
+        return {
+          exitCode: 7,
+          timedOut: false,
+          outputCapped: false,
+          head: output.toString(),
+          tail: "",
+          outputBytes: output.length,
+          cwd: null,
+          durationMs: 1
+        }
+      }
+    }
+  })
+  const started = await Effect.runPromise(w.run("ben", "bash", { command: "true", run_in_background: true }))
+  const setTimeout = globalThis.setTimeout
+  const waiting = vi.spyOn(globalThis, "setTimeout").mockImplementation((callback, delay, ...args) => {
+    if (delay === 1000) finish.resolve()
+    return setTimeout(callback, delay, ...args)
+  })
+  try {
+    const output = await Effect.runPromise(w.run("ben", "bash_output", { id: w.idOf(started.text) }))
+    assert.isTrue(output.isError)
+    assert.include(output.text, "exit: 7")
+    assert.include(output.text, "final output")
+    assert.notInclude(output.text, "still running")
+  } finally {
+    waiting.mockRestore()
+    finish.resolve()
+  }
+})
+
 it.live.skipIf(!commands)(
   "a command through a folder shared to edit is the owner's: quota, versions with the actor, file managers",
   () =>

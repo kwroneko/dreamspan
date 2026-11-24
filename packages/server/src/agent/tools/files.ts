@@ -1791,11 +1791,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const job = jobs.get(id)
         const own = job && job.userId === env.userId ? job : null
         const limit = Number(args.limit ?? 400)
-        const state = own
-          ? own.ended
-            ? `ended ${Math.round((own.ended.at - own.startedAt) / 1000)} s after it started: ${own.ended.text.trimEnd()}`
-            : `still running (for ${Math.round((Date.now() - own.startedAt) / 1000)} s)`
-          : null
+        const stateOf = (job: Job) =>
+          job.ended
+            ? `ended ${Math.round((job.ended.at - job.startedAt) / 1000)} s after it started: ${job.ended.text.trimEnd()}`
+            : `still running (for ${Math.round((Date.now() - job.startedAt) / 1000)} s)`
         if (own && args.offset === undefined) {
           // The rest only once it ended, so the end comes with its last output.
           if (own.ended === null)
@@ -1806,7 +1805,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
           const more = read && read.next < read.size
           return {
             text:
-              `${id}: ${state}\n` +
+              `${id}: ${stateOf(own)}\n` +
               (text === "" ? "No new output.\n" : `New output:\n${headTail(text)}${text.endsWith("\n") ? "" : "\n"}`) +
               (more ? "[More output follows: call bash_output again.]" : ""),
             isError: own.ended?.failed === true
@@ -1817,7 +1816,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const last = page.from + page.lines.length - 1
         return {
           text:
-            `${id}${state ? `: ${state}` : ""}\nLines ${page.lines.length ? `${page.from}–${last}` : "none"} of ${page.totalLines.toLocaleString("en-US")}${page.cut ? " (the output was longer: only its first 16 MiB are kept)" : ""}:\n` +
+            `${id}${own ? `: ${stateOf(own)}` : ""}\nLines ${page.lines.length ? `${page.from}–${last}` : "none"} of ${page.totalLines.toLocaleString("en-US")}${page.cut ? " (the output was longer: only its first 16 MiB are kept)" : ""}:\n` +
             headTail(page.lines.join("\n")) +
             (last < page.totalLines ? `\n[Read on with offset=${last + 1}.]` : "")
         }
