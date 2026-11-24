@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react"
 import { AsyncView } from "../../actions.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { useTitle } from "../shell.tsx"
-import { homeHeaderActions, homeIntro } from "./homeSlots.ts"
+import { homeHeaderActions, homeHeaderTitleActions, homeIntro } from "./homeSlots.ts"
 import { browseCards, mixesPersonas, useGroupedFamilies } from "./cardBrowse.tsx"
 import { useHomeBrowse } from "./useHomeBrowse.ts"
 import type { HomeBrowse } from "./homeSearch.ts"
@@ -143,10 +143,12 @@ export function CharactersPage() {
     <div className="flex flex-col gap-4">
       <CenterHeaderContent>
         <h1 className="text-xl font-semibold">Characters</h1>
-        {/* Right-aligned, just before the header's end controls; hidden with nothing registered.
-            On a phone, where the header's padding is 8 px and no end controls follow, the
-            bordered button's edge lines up with the page's 16 px gutter as ←'s glyph does. */}
-        <div className="ml-auto flex shrink-0 items-center gap-2 empty:hidden max-sm:mr-2">
+        {/* Right after the title at the header's gap; hidden with nothing registered. */}
+        <div className="flex shrink-0 items-center gap-2 empty:hidden">
+          <SlotOutlet slot={homeHeaderTitleActions} props={{}} />
+        </div>
+        {/* Right-aligned, just before the header's end controls; hidden with nothing registered. */}
+        <div className="ml-auto flex shrink-0 items-center gap-2 empty:hidden">
           <SlotOutlet slot={homeHeaderActions} props={{}} />
         </div>
       </CenterHeaderContent>

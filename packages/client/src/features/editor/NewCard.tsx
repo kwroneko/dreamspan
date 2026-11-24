@@ -11,15 +11,18 @@ import type { FormEvent } from "react"
 import { useOpenPlace } from "./durable.tsx"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
+import { Icon } from "../../ui/Icon.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 
-export function NewCardButton({ persona = false }: { persona?: boolean }) {
+/** `icon`: a leading plus, where the button stands alone (the Characters header). */
+export function NewCardButton({ persona = false, icon = false }: { persona?: boolean; icon?: boolean }) {
   // URL state, so a reload opens the form again with its names (a durable draft).
   const [open, setOpen] = useOpenPlace(persona ? "new-persona" : "new-card")
   return (
     <>
       <Button hint={`Opens a form to create a ${persona ? "persona" : "card"}.`} onClick={() => setOpen(true)}>
+        {icon && <Icon name="plus" />}
         New {persona ? "persona" : "card"}
       </Button>
       <NewCardDialog key={persona ? "persona" : "card"} persona={persona} open={open} onOpenChange={setOpen} />

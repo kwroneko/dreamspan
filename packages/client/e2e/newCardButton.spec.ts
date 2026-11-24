@@ -1,6 +1,8 @@
 // New card in the Characters page's header (owner, 2026-11-24: "an easily accessible, obvious yet
-// not annoying 'create card' button"): right-aligned before the split icons, centred on the title
-// in a header that keeps its height, and the Library's own dialog opening the card's editor.
+// not annoying 'create card' button"): right after the title at the header's gap ("anchored to
+// 'characters' on the other side, and also feature an icon before the words"), a plus before its
+// words, centred on the title in a header that keeps its height, and the Library's own dialog
+// opening the card's editor.
 // NEW_CARD_SHOTS=<folder> keeps a dark window screenshot at 1340 and 390 there.
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
@@ -55,27 +57,32 @@ for (const theme of ["light", "dark"] as const)
       expect(rowBox.height, `${what}: header height`).toBeCloseTo(plainHeight, 0)
       // Centred on the header's line, as the title is.
       expect(Math.abs(centre(buttonBox) - centre(titleBox)), `${what}: centred on the title`).toBeLessThan(1)
-      expect(buttonBox.x, `${what}: after the title`).toBeGreaterThan(titleBox.x + titleBox.width)
-      // Right-aligned: the split icons after it at the header's gap, else its edge on the page's
-      // 16 px gutter (the phone header's padding is 8 px; the button takes the other 8).
-      const split = row.getByRole("button", { name: "Split right", exact: true })
-      const end = await row.evaluate((node) => ({
-        right: node.getBoundingClientRect().right,
-        padding: 16,
-        gap: parseFloat(getComputedStyle(node).columnGap)
-      }))
-      if (await split.isVisible()) {
-        const splitBox = await box(split)
-        expect(
-          Math.abs(splitBox.x - (buttonBox.x + buttonBox.width) - end.gap),
-          `${what}: gap to the icons`
-        ).toBeLessThan(1)
-        expect(Math.abs(centre(splitBox) - centre(buttonBox)), `${what}: centred with the icons`).toBeLessThan(1)
-      } else {
-        expect(Math.abs(end.right - end.padding - (buttonBox.x + buttonBox.width)), `${what}: at the end`).toBeLessThan(
-          1
-        )
-      }
+      // Anchored to the title: its left edge at the title's right edge plus the header's gap.
+      const gap = await title.evaluate((node) => parseFloat(getComputedStyle(node.parentElement!).columnGap))
+      expect(gap, `${what}: header gap`).toBeGreaterThan(0)
+      expect(
+        Math.abs(buttonBox.x - (titleBox.x + titleBox.width + gap)),
+        `${what}: just after the title`
+      ).toBeLessThan(1)
+      // The title is whole, and the button inside the header's padding.
+      expect(await title.evaluate((node) => node.scrollWidth <= node.clientWidth), `${what}: title whole`).toBe(true)
+      const rowEnd = await row.evaluate(
+        (node) => node.getBoundingClientRect().right - parseFloat(getComputedStyle(node).paddingRight)
+      )
+      expect(buttonBox.x + buttonBox.width, `${what}: inside the header`).toBeLessThanOrEqual(rowEnd + 0.5)
+      // A plus before the words.
+      const icon = button.locator("svg")
+      await expect(icon).toHaveCount(1)
+      const iconBox = await box(icon)
+      expect(iconBox.width, `${what}: icon size`).toBeCloseTo(16, 0)
+      const words = await button.evaluate((node) => {
+        const range = document.createRange()
+        const text = [...node.childNodes].find((child) => child.nodeType === Node.TEXT_NODE)!
+        range.selectNode(text)
+        return range.getBoundingClientRect().x
+      })
+      expect(iconBox.x + iconBox.width, `${what}: icon before the words`).toBeLessThan(words)
+      expect(Math.abs(centre(iconBox) - centre(buttonBox)), `${what}: icon centred`).toBeLessThan(1)
       await expectLayout(page, info, `characters-${width}-${theme}`)
       await expectLayout(page, info, `characters-header-${width}-${theme}`, { scope: "main [data-center-header]" })
       if (shots && theme === "dark" && (width === 1340 || width === 390))
