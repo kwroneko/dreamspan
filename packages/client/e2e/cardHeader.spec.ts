@@ -169,10 +169,9 @@ const expectInlineNames = async (scope: Locator, full = false) => {
 
 const open = async (page: Page, name: string) => {
   await page.goto(`${server().url}/chats/${chat}?panel=card:${ids[name]}`)
-  // Character tabs pair the display name with its standard version (1c180216).
-  const version = CARDS.find((card) => card.name === name)?.data?.character_version
-  const label = typeof version === "string" && version.trim() ? `${name} · ${version.trim()}` : name
-  const panel = page.getByRole("tabpanel", { name: label, exact: true })
+  // A character's tab says its name only; its version joins only when two characters' tabs
+  // would read alike (c32d4320f, 89c3c57ce), and these cards' names all differ.
+  const panel = page.getByRole("tabpanel", { name, exact: true })
   await expect(panel.locator("[data-card-tokens]")).toBeVisible({ timeout: 30_000 })
   return panel
 }

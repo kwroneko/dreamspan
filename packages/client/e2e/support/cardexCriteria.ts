@@ -230,11 +230,30 @@ export function cardexCriteriaTests() {
             const sidebarBar = ":has(> [data-shell-list])"
             // Audit the bar, and with a panel open: its popover, or the sheet that covers the page.
             for (const title of ["", "Sources", "Authors", "Tokens", "Created"]) {
-              if (title) await openPanel(page, scope, title)
+              const opened = title ? await openPanel(page, scope, title) : null
+              // The author rows load after the panel opens: audit them, not an empty list.
+              if (opened && title === "Authors")
+                await expect(
+                  opened.getByRole("list", { name: "Authors", exact: true }).getByRole("button").first()
+                ).toBeVisible()
               const inSheet = await page.locator("[data-filter-sheet]").isVisible()
               await expectLayout(page, info, `cardex-panel-${place}-${title || "folded"}-${width}-${theme}`, {
                 scope: inSheet ? "[data-filter-sheet]" : title ? "body" : place === "home" ? "main" : sidebarBar
               })
+              if (title === "Authors" && process.env.CARDEX_SHOTS) {
+                const shots = process.env.CARDEX_SHOTS
+                await page.screenshot({ path: `${shots}/authors-${place}-${width}-${theme}.png` })
+                // The sheet over the sidebar at its narrowest and its default width.
+                if (place === "sidebar" && width === 1440) {
+                  for (const sidebar of [220, 320]) {
+                    await page.evaluate(
+                      (w) => document.documentElement.style.setProperty("--sidebar-width", `${w}px`),
+                      sidebar
+                    )
+                    await page.screenshot({ path: `${shots}/authors-sheet-${sidebar}-${theme}.png` })
+                  }
+                }
+              }
               if (title) await closePanel(page, title)
             }
             // Every sort and every available direction remains reachable in both toolbars.

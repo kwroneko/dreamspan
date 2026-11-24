@@ -43,22 +43,27 @@ function ToastList() {
       data-toast
       // A toast past the limit stays in Base UI's list, inert until one above it goes: hidden
       // meanwhile, where it used to show as a toast whose buttons did nothing.
-      className="relative flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 text-sm text-text shadow-lg outline-none transition-opacity duration-150 data-ending-style:opacity-0 data-limited:hidden data-starting-style:opacity-0 motion-reduce:transition-none"
+      className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 text-sm text-text shadow-lg outline-none transition-opacity duration-150 data-ending-style:opacity-0 data-limited:hidden data-starting-style:opacity-0 motion-reduce:transition-none"
     >
-      {/* Room on the right for the corner's × (its 28px, less the padding it overlaps). */}
-      <div className="flex min-w-0 flex-col gap-0.5 pr-6">
-        <BaseToast.Title className="font-medium [overflow-wrap:anywhere]" />
-        <BaseToast.Description className="truncate text-muted" />
+      {/* The text and the × share a row, so no title, however long, runs under it. The ×
+          (28px) reaches 4px into the padding: 8px from the card's top and right edges, its
+          middle level with the title's first line, and it adds no height to the row. */}
+      <div className="flex min-w-0 items-start gap-2">
+        <div data-toast-text className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <BaseToast.Title className="font-medium [overflow-wrap:anywhere]" />
+          <BaseToast.Description className="truncate text-muted" />
+        </div>
+        <Tooltip label="Dismiss">
+          <BaseToast.Close
+            aria-label="Dismiss"
+            data-toast-close
+            // `size-7!`: the shared icon-button class's size-8 would otherwise win.
+            className={`${iconButtonClass()} -my-1 -mr-1 size-7!`}
+          >
+            <Icon name="close" />
+          </BaseToast.Close>
+        </Tooltip>
       </div>
-      <Tooltip label="Dismiss">
-        <BaseToast.Close
-          aria-label="Dismiss"
-          data-toast-close
-          className={`${iconButtonClass()} absolute top-1.5 right-1.5 size-7`}
-        >
-          <Icon name="close" />
-        </BaseToast.Close>
-      </Tooltip>
       {(toast.data?.actions.length ?? 0) > 0 && (
         <div className="flex flex-wrap gap-2">
           {toast.data!.actions.map((action) => (
