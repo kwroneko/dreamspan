@@ -18,7 +18,7 @@ import { PluginId, PluginPins, PluginData, PluginRejected } from "@dreamspan/sha
 import { ExternalMediaPrefs, ExternalMediaTarget } from "@dreamspan/shared/externalMedia.ts"
 import {
   MediaApprovalHost,
-  MediaChoice,
+  MediaApprovalDecision,
   MediaHost,
   MediaHosts,
   MediaKind,
@@ -838,8 +838,7 @@ const SavedMediaWriteOps = RpcGroup.make(
   Rpc.make("DecideMediaApproval", {
     payload: {
       userId: UserId,
-      refIds: Schema.NullOr(Schema.Array(RefId)),
-      decisions: Schema.Array(Schema.Struct({ host: Schema.String, choice: MediaChoice })),
+      decisions: Schema.Array(MediaApprovalDecision),
       at: Schema.Int
     },
     success: MediaHosts,

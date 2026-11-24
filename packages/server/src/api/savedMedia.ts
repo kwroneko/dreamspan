@@ -261,11 +261,10 @@ export const makeSavedMediaHandlers = Effect.gen(function* () {
           Effect.andThen(reader.ListMediaApproval({ userId: user.id, refIds }))
         )
       ).pipe(internal("listing media to approve")),
-    DecideMediaApproval: ({ refIds, decisions }) =>
+    DecideMediaApproval: ({ decisions }) =>
       Effect.flatMap(CurrentUser, (user) =>
         writer.DecideMediaApproval({
           userId: user.id,
-          refIds,
           decisions: decisions.filter((decision) => isHostName(normalizeHost(decision.host))),
           at: Date.now()
         })

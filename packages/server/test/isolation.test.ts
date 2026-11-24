@@ -1919,8 +1919,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
       Effect.gen(function* () {
         const theirs = yield* owner.api.GetMediaHosts()
         yield* actor.api.DecideMediaApproval({
-          refIds: [owner.editor.cardRefId],
-          decisions: [{ host: "isolation.test", choice: "approve" }]
+          decisions: [{ host: "isolation.test", choice: "approve", urls: [] }]
         })
         assert.deepStrictEqual(yield* owner.api.GetMediaHosts(), theirs)
       })
