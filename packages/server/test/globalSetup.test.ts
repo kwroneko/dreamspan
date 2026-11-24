@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { existsSync, writeFileSync } from "node:fs"
+import { existsSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { makeSetup } from "./support/globalSetup.ts"
 
@@ -15,7 +15,8 @@ const keepingTmpdir = async (body: () => Promise<void>) => {
   try {
     await body()
   } finally {
-    process.env.TMPDIR = before
+    if (before === undefined) delete process.env.TMPDIR
+    else process.env.TMPDIR = before
   }
 }
 
@@ -44,12 +45,67 @@ describe("the server tests' global setup", () => {
       const live = project()
       const server = project()
       const liveDone = await makeSetup(null, holder)(live)
+      const runDir = process.env.TMPDIR!
       const serverDone = await makeSetup(async () => void builds++, holder)(server)
       assert.strictEqual(builds, 1)
       assert.deepStrictEqual(live.provided, server.provided)
       liveDone()
       serverDone()
-      assert.isFalse(existsSync(process.env.TMPDIR!))
+      assert.isFalse(existsSync(runDir))
+    }))
+
+  it("retries a rejected shared build while the live project still holds the run", () =>
+    keepingTmpdir(async () => {
+      const holder = {}
+      const live = project()
+      const liveDone = await makeSetup(null, holder)(live)
+      const runDir = process.env.TMPDIR!
+      try {
+        const failed = new Error("build failed")
+        let builds = 0
+        const reject = makeSetup(async (bundleDir) => {
+          builds++
+          writeFileSync(join(bundleDir, "partial-build"), "")
+          throw failed
+        }, holder)
+        const outcomes = await Promise.allSettled([reject(project()), reject(project())])
+        assert.deepStrictEqual(outcomes, [
+          { status: "rejected", reason: failed },
+          { status: "rejected", reason: failed }
+        ])
+        assert.strictEqual(builds, 1)
+        const server = project()
+        const done = await makeSetup(async (bundleDir) => {
+          assert.isFalse(existsSync(join(bundleDir, "partial-build")))
+        }, holder)(server)
+        assert.deepStrictEqual(server.provided, live.provided)
+        done()
+        liveDone()
+        assert.isFalse(existsSync(runDir))
+      } finally {
+        rmSync(runDir, { recursive: true, force: true })
+      }
+    }))
+
+  it("cleans up when the only project's build fails and allows a fresh run", () =>
+    keepingTmpdir(async () => {
+      const holder = {}
+      const failed = new Error("build failed")
+      let runDir: string | undefined
+      try {
+        const [failure] = await Promise.allSettled([
+          makeSetup(async () => {
+            runDir = process.env.TMPDIR!
+            throw failed
+          }, holder)(project())
+        ])
+        assert.deepStrictEqual(failure, { status: "rejected", reason: failed })
+        assert.isFalse(existsSync(runDir!))
+        const done = await makeSetup(async () => {}, holder)(project())
+        done()
+      } finally {
+        if (runDir) rmSync(runDir, { recursive: true, force: true })
+      }
     }))
 
   it("fails the run when a test leaves a temporary entry behind", () =>
