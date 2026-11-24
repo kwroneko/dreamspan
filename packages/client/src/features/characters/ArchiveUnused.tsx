@@ -1,9 +1,9 @@
 import { useDurableForm, useOpenPlace } from "../editor/durable.tsx"
-import { useAtomValue } from "@effect/atom-react"
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { type ReactNode, useRef, useState, type RefObject } from "react"
 import { AsyncResult, Atom } from "effect/reactivity"
-import { ArchiveCriteria, cardArchiveCriteria, type ArchiveCandidate } from "@dreamspan/shared/cardArchive.ts"
-import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
+import { ArchiveCriteria, cardArchiveCriteria } from "@dreamspan/shared/cardArchive.ts"
+import { ErrorAlert, FailureView, useAction } from "../../actions.tsx"
 import { sourcesAtom } from "../cardSources/remote.ts"
 import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
@@ -12,6 +12,7 @@ import { Icon } from "../../ui/Icon.tsx"
 import { Checkbox } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { AmountInput } from "../../ui/Field.tsx"
+import { Loading } from "../../ui/Spinner.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { WindowedList } from "../../ui/WindowedList.tsx"
@@ -46,19 +47,21 @@ function MatchCount({ id, amount }: { id: string; amount: number }) {
 }
 
 function Selection({
-  cards,
+  query,
   criteria,
   close,
   refusedAction
 }: {
-  cards: ReadonlyArray<ArchiveCandidate>
+  query: ReturnType<typeof candidates>
   criteria: ArchiveCriteria
   close: () => void
   /** The rules form's "Use this tab's version" (durable.tsx), first in the Save row. */
   refusedAction: ReactNode
 }) {
+  const result = useAtomValue(query)
+  const refresh = useAtomRefresh(query)
   const [omitted, setOmitted] = useState<ReadonlySet<string>>(new Set())
-  const selected = cards.filter((card) => !omitted.has(card.entityId))
+  const selected = AsyncResult.isSuccess(result) ? result.value.filter((card) => !omitted.has(card.entityId)) : []
   const action = useAction()
   const archive = async () => {
     const result = await action.run(
@@ -87,60 +90,70 @@ function Selection({
   }
   return (
     <>
-      <p className="text-sm text-muted">
-        {cards.length.toLocaleString()} matches · {selected.length.toLocaleString()} selected
-      </p>
-      <WindowedList
-        items={cards}
-        itemKey={(card) => card.entityId}
-        listLabel="Matching cards"
-        className="max-h-72 min-h-0 overflow-y-auto rounded-md border border-border p-2 [scrollbar-gutter:stable]"
-        renderItem={(card) => (
-          <div className="flex min-w-0 items-center gap-3 rounded-md p-2">
-            <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="md" />
-            <div className="min-w-0 flex-1">
-              <Checkbox
-                checked={!omitted.has(card.entityId)}
-                disabled={action.pending}
-                hint={`Include ${card.name} in this archive`}
-                hintInline={false}
-                onCheckedChange={(checked) =>
-                  setOmitted((old) => {
-                    const next = new Set(old)
-                    if (checked) next.delete(card.entityId)
-                    else next.add(card.entityId)
-                    return next
-                  })
-                }
-              >
-                <span className="[overflow-wrap:anywhere]">{card.name}</span>
-              </Checkbox>
-              <p className="mt-1 text-xs text-muted">
-                Added {date(card.addedAt)} ·{" "}
-                {card.lastUsedAt === null ? "Never used" : `Last used ${date(card.lastUsedAt)}`}
-                {card.userMessages !== undefined &&
-                  ` · ${card.userMessages === 1 ? "1 message" : `${card.userMessages.toLocaleString()} messages`} of yours`}
-              </p>
-            </div>
-          </div>
-        )}
-      />
+      {AsyncResult.match(result, {
+        onInitial: () => <Loading label="Finding cards…" onRetry={refresh} />,
+        onFailure: (failure) => <FailureView cause={failure.cause} onRetry={refresh} />,
+        onSuccess: ({ value: cards }) => (
+          <>
+            <p className="text-sm text-muted">
+              {cards.length.toLocaleString()} matches · {selected.length.toLocaleString()} selected
+            </p>
+            <WindowedList
+              items={cards}
+              itemKey={(card) => card.entityId}
+              listLabel="Matching cards"
+              className="max-h-72 min-h-0 overflow-y-auto rounded-md border border-border p-2 [scrollbar-gutter:stable]"
+              renderItem={(card) => (
+                <div className="flex min-w-0 items-center gap-3 rounded-md p-2">
+                  <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="md" />
+                  <div className="min-w-0 flex-1">
+                    <Checkbox
+                      checked={!omitted.has(card.entityId)}
+                      disabled={action.pending}
+                      hint={`Include ${card.name} in this archive`}
+                      hintInline={false}
+                      onCheckedChange={(checked) =>
+                        setOmitted((old) => {
+                          const next = new Set(old)
+                          if (checked) next.delete(card.entityId)
+                          else next.add(card.entityId)
+                          return next
+                        })
+                      }
+                    >
+                      <span className="[overflow-wrap:anywhere]">{card.name}</span>
+                    </Checkbox>
+                    <p className="mt-1 text-xs text-muted">
+                      Added {date(card.addedAt)} ·{" "}
+                      {card.lastUsedAt === null ? "Never used" : `Last used ${date(card.lastUsedAt)}`}
+                      {card.userMessages !== undefined &&
+                        ` · ${card.userMessages === 1 ? "1 message" : `${card.userMessages.toLocaleString()} messages`} of yours`}
+                    </p>
+                  </div>
+                </div>
+              )}
+            />
+          </>
+        )
+      })}
       <ErrorAlert error={action.error} />
       <DialogActions>
         {refusedAction}
         <Button hint="Close without archiving cards" onClick={close}>
           Cancel
         </Button>
-        <Button
-          variant="primary"
-          disabled={!selected.length || action.pending}
-          hint={
-            selected.length ? "Archive the selected cards, keeping favourites" : "Select at least one matching card"
-          }
-          onClick={() => void archive()}
-        >
-          Archive {selected.length.toLocaleString()} cards
-        </Button>
+        {AsyncResult.isSuccess(result) && (
+          <Button
+            variant="primary"
+            disabled={!selected.length || action.pending}
+            hint={
+              selected.length ? "Archive the selected cards, keeping favourites" : "Select at least one matching card"
+            }
+            onClick={() => void archive()}
+          >
+            Archive {selected.length.toLocaleString()} cards
+          </Button>
+        )}
       </DialogActions>
     </>
   )
@@ -224,17 +237,13 @@ function ArchiveDialog({ close, trigger }: { close: () => void; trigger: RefObje
           )
         })}
       </div>
-      <AsyncView atom={candidates(key)} loading="Finding cards…">
-        {(cards) => (
-          <Selection
-            key={key}
-            cards={cards}
-            criteria={criteria}
-            close={closeDialog}
-            refusedAction={form.refusedAction}
-          />
-        )}
-      </AsyncView>
+      <Selection
+        key={key}
+        query={candidates(key)}
+        criteria={criteria}
+        close={closeDialog}
+        refusedAction={form.refusedAction}
+      />
     </Dialog>
   )
 }
