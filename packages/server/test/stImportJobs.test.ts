@@ -64,6 +64,38 @@ const until = (check: () => boolean, ms = 120_000) =>
   })
 
 describe("ST import jobs", () => {
+  it.live("re-imports a folder after its default persona is refiled", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const root = onDisk(stFolder())
+      const api = yield* client()
+      const writer = yield* Writer
+      const { id: userId } = yield* api.Whoami()
+      const run = () =>
+        Effect.gen(function* () {
+          const { importId } = yield* api.StartStPathImport({ path: root, prefix: "" })
+          yield* until(() => (row(config.dataDir, importId)?.status ?? "running") !== "running")
+          const { job } = yield* api.GetStImport({ importId })
+          assert.strictEqual(job.status, "complete")
+          assert.strictEqual(job.filesDone, job.filesTotal)
+        })
+      yield* run()
+      const { persona } = yield* api.GetGenerationDefaults()
+      assert.isNotNull(persona)
+      yield* writer.SetEntityTags({ userId, entityId: persona!, tags: [] })
+
+      const alternate = (yield* api.CreateCard({ label: "Alternate", name: "Alternate" })).entityId
+      yield* writer.SetEntityTags({ userId, entityId: alternate, tags: ["persona"] })
+      yield* api.ChangeGenerationDefaults({ change: { persona: alternate } })
+      yield* run()
+      assert.strictEqual((yield* api.GetGenerationDefaults()).persona, alternate)
+
+      yield* api.ChangeGenerationDefaults({ change: { persona: null } })
+      yield* run()
+      assert.isNull((yield* api.GetGenerationDefaults()).persona)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live(
     "a path import runs to its end with no client calls after it starts, and is kept and listed",
     () => {

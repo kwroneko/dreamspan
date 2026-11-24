@@ -1057,10 +1057,9 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
     StImportDefaultPersona: ({ userId, importId, entityId }) =>
       Effect.gen(function* () {
         yield* current(userId, importId, importId)
-        if (!(yield* ownedPersona(sql, userId, entityId)))
-          return yield* new NotFound({ entity: "persona", id: entityId })
         const previous = yield* readSetting(sql, "user", userId, DEFAULT_PERSONA)
         if (previous.value !== null) return false
+        if (!(yield* ownedPersona(sql, userId, entityId))) return false
         yield* putUserSetting(sql, userId, DEFAULT_PERSONA, entityId)
         return true
       }).pipe(transaction(sql, "StImportDefaultPersona")),
