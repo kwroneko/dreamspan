@@ -43,10 +43,10 @@ function ToastList() {
       data-toast
       // A toast past the limit stays in Base UI's list, inert until one above it goes: hidden
       // meanwhile, where it used to show as a toast whose buttons did nothing.
-      className="relative flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 text-sm text-text shadow-lg outline-none transition-opacity duration-150 data-ending-style:opacity-0 data-limited:hidden data-starting-style:opacity-0 motion-reduce:transition-none"
+      className="relative flex min-h-12 flex-col gap-2 rounded-lg border border-border bg-surface p-3 text-sm text-text shadow-lg outline-none transition-opacity duration-150 data-ending-style:opacity-0 data-limited:hidden data-starting-style:opacity-0 motion-reduce:transition-none"
     >
-      {/* Room on the right for the corner's × (its 28px, less the padding it overlaps). */}
-      <div className="flex min-w-0 flex-col gap-0.5 pr-6">
+      {/* End the title block before the corner's dismiss control. */}
+      <div className="mr-8 flex min-w-0 flex-col gap-0.5">
         <BaseToast.Title className="font-medium [overflow-wrap:anywhere]" />
         <BaseToast.Description className="truncate text-muted" />
       </div>
@@ -54,7 +54,7 @@ function ToastList() {
         <BaseToast.Close
           aria-label="Dismiss"
           data-toast-close
-          className={`${iconButtonClass()} absolute top-1.5 right-1.5 size-7`}
+          className={`${iconButtonClass()} absolute top-2 right-2 size-7!`}
         >
           <Icon name="close" />
         </BaseToast.Close>
