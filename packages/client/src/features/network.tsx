@@ -148,6 +148,7 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
             Discard changes
           </Button>
         )}
+        {form.refusedAction}
       </div>
     </form>
   )

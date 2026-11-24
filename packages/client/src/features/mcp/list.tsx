@@ -274,6 +274,7 @@ function NewServerForm({
               Cancel
             </Link>
           </Tooltip>
+          {form.refusedAction}
         </div>
       </form>
     </Card>

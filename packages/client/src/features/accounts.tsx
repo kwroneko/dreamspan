@@ -164,6 +164,7 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (open: boolean) => v
         </Field>
         <ErrorAlert error={action.error} title="No user created" />
         <DialogActions>
+          {form.refusedAction}
           <Button hint="Closes this dialog without applying changes." onClick={close}>
             Cancel
           </Button>

@@ -296,6 +296,7 @@ function OwnServer({ connection }: McpSectionProps) {
               Discard changes
             </Button>
           )}
+          {form.refusedAction}
         </div>
       </form>
     </Card>

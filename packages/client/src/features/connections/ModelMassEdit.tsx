@@ -15,7 +15,6 @@ import { Alert } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useDurableForm } from "../editor/durable.tsx"
-import { UserDraftRefused } from "../editor/userDraft.tsx"
 import { MassRow, MixedMarker } from "../editor/LorebookMassEdit.tsx"
 import { CopySettingsButton } from "./CopySettings.tsx"
 import {
@@ -299,7 +298,7 @@ export function ModelMassEditDialog({
         <ErrorAlert error={save.error} title="Not saved" />
       </div>
       <DialogActions>
-        <UserDraftRefused draft={form.draft} />
+        {form.refusedAction}
         <Button variant="ghost" hint="Closes this without changing any model." onClick={close}>
           Cancel
         </Button>

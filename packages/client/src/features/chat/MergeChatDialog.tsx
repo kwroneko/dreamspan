@@ -867,6 +867,7 @@ export function MergeChatDialog({
       )}
       <ErrorAlert error={writer.error && writer.error.tag !== "MergeChanged" ? writer.error : null} />
       <DialogActions>
+        {typed.refusedAction}
         <Button hint={joining ? "Closes this without joining." : "Closes this without merging."} onClick={cancel}>
           Cancel
         </Button>
