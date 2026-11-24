@@ -153,6 +153,12 @@ describe("ST 1.19 message formatting", () => {
     expect(fixMarkdown("say `x*` then *go")).toBe("say `x*` then *go*")
     expect(fixMarkdown("* spaced * `* keep *`")).toBe("*spaced* `* keep *`")
   })
+  it("matches inline code delimiters as complete runs of equal length", () => {
+    expect(fixMarkdown("word ```*``")).toBe("word ```*``*")
+    expect(fixMarkdown("word ```*```")).toBe("word ```*```")
+    const unfinished = "word " + "`".repeat(8192) + "*unfinished"
+    expect(fixMarkdown(unfinished)).toBe(unfinished + "*")
+  })
   it.each([false, true])("fixes every message, streaming=%s, without changing its source", (streaming) => {
     const text = '*unfinished\n\n"unfinished'
     expect(render(text, streaming)).toContain("<em>unfinished</em>")

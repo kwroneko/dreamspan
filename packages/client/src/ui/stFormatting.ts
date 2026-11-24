@@ -27,9 +27,24 @@ function codeRanges(text: string): Array<[number, number]> {
   let lineStart = 0
   let prose = 0 // start of the prose since the last fence, scanned for inline code
   const inline = (from: number, to: number) => {
-    const part = text.slice(from, to)
-    for (const match of part.matchAll(/(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g))
-      ranges.push([from + match.index, from + match.index + match[0].length])
+    const runs = [...text.slice(from, to).matchAll(/`+|\n[ \t]*\n/g)]
+    const next = new Map<number, number>()
+    const closes: Array<number | undefined> = []
+    for (let i = runs.length - 1; i >= 0; i--) {
+      const run = runs[i]![0]
+      if (run[0] === "\n") next.clear()
+      else {
+        closes[i] = next.get(run.length)
+        next.set(run.length, i)
+      }
+    }
+    for (let i = 0; i < runs.length; i++) {
+      const close = closes[i]
+      if (close === undefined) continue
+      const end = runs[close]!
+      ranges.push([from + runs[i]!.index, from + end.index + end[0].length])
+      i = close
+    }
   }
   while (lineStart <= text.length) {
     const next = text.indexOf("\n", lineStart)
