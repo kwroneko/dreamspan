@@ -7,7 +7,7 @@
 // side by side, `c` above each other). A tab is its URL, with `~` before it for a preview tab
 // and `^` for a pinned one; the focused tab is `=` (with the same marks): the browser's own URL,
 // so the focused tab's navigation never changes the param. Ids are made afresh on reading.
-import { allTabs, focusedTab, type Layout, newId, type Node } from "./model.ts"
+import { allTabs, focusedTab, type Layout, MAX_SAVED_TABS, newId, type Node } from "./model.ts"
 import { compactHref } from "./kinds.ts"
 
 export const WORKBENCH_PARAM = "wb"
@@ -26,25 +26,38 @@ export const encodeLayout = (
   limit = WB_LIMIT
 ): string | null => {
   const tabs = allTabs(layout)
-  if (tabs.length === 0 || (tabs.length === 1 && mark(tabs[0]!) === "~")) return null
-  const focused = focusedTab(layout)?.id
-  // Tabs whose presentation params are left out, so the param fits `limit` encoded.
-  const bare = new Set<string>()
+  const focused = focusedTab(layout)
+  if (!focused || (tabs.length === 1 && mark(focused) === "~") || persist(focused.href) === null) return null
+  const hidden = new Map<string, string>()
+  for (const tab of tabs) {
+    if (tab.id === focused.id) continue
+    const href = persist(tab.href)
+    if (href !== null) hidden.set(tab.id, strip(href))
+  }
+  const evictionOrder = leastRecent([...hidden.keys()], layout.recent)
+  const excess = Math.max(0, hidden.size + 1 - MAX_SAVED_TABS)
+  for (const id of evictionOrder.slice(0, excess)) hidden.delete(id)
   const text = () => JSON.stringify(node(layout.root))
-  const node = (n: Node): unknown => {
-    if (n.type === "split")
+  const node = (n: Node): Array<unknown> | null => {
+    if (n.type === "split") {
+      const children = n.children.flatMap((child, i) => {
+        const encoded = node(child)
+        return encoded === null ? [] : [{ encoded, size: n.sizes[i]! }]
+      })
+      if (children.length <= 1) return children[0]?.encoded ?? null
+      const total = children.length === n.children.length ? 1 : children.reduce((sum, child) => sum + child.size, 0)
       return [
         n.direction === "row" ? "r" : "c",
-        n.sizes.map((s) => Math.round(s * 1000) / 1000),
-        ...n.children.map(node)
+        children.map(({ size }) => Math.round((size / total) * 1000) / 1000),
+        ...children.map(({ encoded }) => encoded)
       ]
+    }
     const tabs = n.tabs.flatMap((t) => {
-      if (t.id === focused) return [{ id: t.id, text: `=${mark(t)}` }]
-      const href = persist(t.href)
-      if (href === null) return []
-      const kept = strip(href)
-      return [{ id: t.id, text: `${mark(t)}${bare.has(t.id) ? compactHref(kept) : kept}` }]
+      if (t.id === focused.id) return [{ id: t.id, text: `=${mark(t)}` }]
+      const href = hidden.get(t.id)
+      return href === undefined ? [] : [{ id: t.id, text: `${mark(t)}${href}` }]
     })
+    if (tabs.length === 0) return null
     const active = Math.max(
       0,
       tabs.findIndex((t) => t.id === n.active)
@@ -57,17 +70,33 @@ export const encodeLayout = (
   // than the focused one lose their place params, least recently focused first, until it fits;
   // the focused frame's hidden tabs only after all of those.
   for (const id of droppable(layout)) {
-    bare.add(id)
+    const href = hidden.get(id)
+    if (href === undefined) continue
+    const compact = compactHref(href)
+    if (compact === href) continue
+    hidden.set(id, compact)
     json = text()
-    if (encodedLength(json) <= limit) break
+    if (encodedLength(json) <= limit) return json
   }
-  return json
+  // The essentials still don't fit: omit least-recent tabs from the saved URL.
+  for (const id of evictionOrder.slice(excess)) {
+    hidden.delete(id)
+    json = text()
+    if (encodedLength(json) <= limit) return json
+  }
+  return null
 }
 
 /** The param's budget, encoded: the whole URL stays well under 8 KB with the page's own params. */
 export const WB_LIMIT = 4096
 
 const encodedLength = (json: string) => new URLSearchParams({ [WORKBENCH_PARAM]: json }).toString().length
+
+const leastRecent = (ids: Array<string>, recent: ReadonlyArray<string>) => {
+  const ranks = new Map(recent.map((id, i) => [id, i]))
+  const rank = (id: string) => ranks.get(id) ?? Number.MAX_SAFE_INTEGER
+  return ids.sort((a, b) => rank(b) - rank(a))
+}
 
 /**
  * Tabs outside the focused frame, least recently focused first (never-focused ones before them);
@@ -81,12 +110,7 @@ const droppable = (layout: Layout) => {
     if (n.type === "frame") (n.id === layout.focused ? inside : outside).push(...n.tabs.map((t) => t.id))
     else n.children.forEach(walk)
   })(layout.root)
-  const rank = (id: string) => {
-    const at = layout.recent.indexOf(id)
-    return at < 0 ? Number.POSITIVE_INFINITY : at
-  }
-  const order = (ids: Array<string>) => ids.sort((a, b) => rank(b) - rank(a))
-  return [...order(outside), ...order(inside)]
+  return [...leastRecent(outside, layout.recent), ...leastRecent(inside, layout.recent)]
 }
 
 /**

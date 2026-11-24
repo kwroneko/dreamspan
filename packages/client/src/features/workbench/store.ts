@@ -10,7 +10,7 @@
 import type { RouterHistory } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import type { DropZone } from "./dropOpen.ts"
-import { affinityOf, itemKey, persistHref, shellKeys } from "./kinds.ts"
+import { affinityOf, itemKey, shellKeys } from "./kinds.ts"
 import {
   affinityFrame,
   allTabs,
@@ -40,7 +40,6 @@ import {
   pinTab,
   resizeSplit,
   restoreLayout,
-  saveLayout,
   setTabHref,
   splitFrame,
   type Direction
@@ -121,7 +120,7 @@ export class WorkbenchStore {
 
   readonly userId: string
   private readonly browser: RouterHistory
-  private readonly save: (json: string) => void
+  private readonly save: (layout: Layout) => void
   /** Frames side by side (not a phone): only then do kinds open where their kind shows. */
   private readonly wide: () => boolean
 
@@ -129,7 +128,7 @@ export class WorkbenchStore {
     userId: string,
     browser: RouterHistory,
     saved: unknown,
-    save: (json: string) => void,
+    save: (layout: Layout) => void,
     wide: () => boolean = () => typeof matchMedia === "function" && matchMedia("(min-width: 1024px)").matches
   ) {
     this.userId = userId
@@ -207,7 +206,7 @@ export class WorkbenchStore {
   }
   private flush() {
     this.saveTimer = null
-    this.save(JSON.stringify(saveLayout(this.layout, persistHref)))
+    this.save(this.layout)
   }
 
   // --- Each tab's history.
