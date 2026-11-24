@@ -214,6 +214,11 @@ describe("a new workshop's pending chat", () => {
 
         yield* writer.SweepPendingChat({ userId, chatId: second.chatId })
         const third = yield* open(second.chatId)
+        // Tabs already open at the upgrade can still send a bare carry from the original sweep.
+        assert.deepStrictEqual(
+          yield* api.SetComposerLibrary({ ...third, add: [book.id], remove: [], carriedFrom: first.chatId }),
+          []
+        )
         assert.deepStrictEqual(yield* api.SetComposerLibrary({ ...third, ...add }), [])
       })
     )

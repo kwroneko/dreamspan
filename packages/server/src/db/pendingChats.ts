@@ -60,10 +60,12 @@ const noteSweptLibrary = (sql: SqlClient.SqlClient, userId: UserId, chatId: stri
   })
 /** What swept chat `chatId`'s composer held. Null when there's no receipt (another user's, or expired). */
 export const sweptComposerLibrary = (sql: SqlClient.SqlClient, userId: UserId, chatId: string) =>
-  sql<{ label: string }>`SELECT label FROM swept_pending_chats
+  sql<{ label: string; swept_at: number }>`SELECT label, swept_at FROM swept_pending_chats
     WHERE chat_id = ${SWEPT_LIBRARY + chatId} AND user_id = ${userId}
       AND swept_at >= ${Date.now() - SWEPT_KEPT_MS}`.pipe(
-    Effect.map(([row]) => (row === undefined ? null : (JSON.parse(row.label) as ReadonlyArray<string>)))
+    Effect.map(([row]) =>
+      row === undefined ? null : { refs: JSON.parse(row.label) as ReadonlyArray<string>, sweptAt: row.swept_at }
+    )
   )
 
 /** The label a late save to the removed reply's `targetId` (a slot or a version) is filed under. */

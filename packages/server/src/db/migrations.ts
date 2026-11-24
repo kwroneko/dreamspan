@@ -323,6 +323,21 @@ export const migrationDefinitions = {
       ) STRICT, WITHOUT ROWID`,
       "CREATE INDEX composer_library_handovers_chat ON composer_library_handovers(chat_id, ref_id)"
     ]
+  },
+  "0030_composer_library_carry_cutover": {
+    statements: [
+      `CREATE TABLE composer_library_carry_cutover (before_ms INTEGER PRIMARY KEY) STRICT`,
+      // 0028's ledger time has second precision. Include its final partial second, bounded
+      // by this migration's actual time when both run in the same second. Only databases with
+      // pre-cutover sweep receipts need the bound.
+      `INSERT INTO composer_library_carry_cutover (before_ms)
+        SELECT before_ms FROM (
+          SELECT min((unixepoch(created_at) + 1) * 1000, CAST(unixepoch('subsec') * 1000 AS INTEGER)) AS before_ms
+          FROM effect_sql_migrations WHERE migration_id = 28
+        ) WHERE EXISTS (
+          SELECT 1 FROM swept_pending_chats WHERE chat_id GLOB 'swept-library:*' AND swept_at < before_ms
+        )`
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

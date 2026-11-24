@@ -69,7 +69,14 @@ const useLibraryAttachKinds = () => {
   return [...snapshot.entries].sort((a, b) => a.order - b.order)
 }
 
-type LibraryTransfer = { readonly carriedFrom: string } | { readonly handover: ComposerLibraryHandover }
+type LibraryTransfer =
+  | { readonly carriedFrom: string; readonly handover?: ComposerLibraryHandover }
+  | { readonly handover: ComposerLibraryHandover }
+
+interface RetainedAttachment {
+  readonly refId: string
+  readonly handover?: ComposerLibraryHandover
+}
 
 export interface ComposerLibrary {
   readonly items: ReadonlyArray<ComposerLibraryItem>
@@ -95,14 +102,23 @@ const HANDOVER_RETRY_MS = 2_000
  * What was handed over to new chat `chatId`'s composer in this browser tab and not sent
  * or removed since, kept for a reload: a chat opened in its place after a sweep (its composer
  * and attachments gone with it) gets them too, though the URL no longer names them (rev-dd4a #2).
+ * Keep the URL operation so both replays honor the same last destination (rev-dd8 #1).
  * Read (`next` undefined) or kept (empty: none).
  */
-const handedOver = (chatId: string, next?: ReadonlyArray<string>): ReadonlyArray<string> => {
+const handedOver = (chatId: string, next?: ReadonlyArray<RetainedAttachment>): ReadonlyArray<RetainedAttachment> => {
   const key = `dreamspan.handover:${chatId}`
   try {
     if (next === undefined) {
       const kept: unknown = JSON.parse(sessionStorage.getItem(key) ?? "[]")
-      return Array.isArray(kept) ? kept.filter((id): id is string => typeof id === "string") : []
+      if (!Array.isArray(kept)) return []
+      return (kept as ReadonlyArray<string | RetainedAttachment>).flatMap((item) => {
+        if (typeof item === "string") return [{ refId: item }]
+        if (typeof item?.refId !== "string") return []
+        const { refId, handover } = item
+        if (typeof handover?.originChatId === "string" && typeof handover.operationId === "string")
+          return [{ refId, handover }]
+        return [{ refId }]
+      })
     }
     if (next.length === 0) sessionStorage.removeItem(key)
     else sessionStorage.setItem(key, JSON.stringify(next))
@@ -251,9 +267,16 @@ export function useComposerLibrary(
       return null
     }
     setError(null)
-    if (change?.transfer !== undefined) {
-      const retained = handedOver(session.chatId).filter((id) => !change.add.some((refId) => refId === id))
-      const accepted = outcome.value.filter((item) => change.add.includes(item.refId)).map((item) => item.refId)
+    const transfer = change?.transfer
+    if (change !== undefined && transfer !== undefined) {
+      const previous = handedOver(session.chatId)
+      const retained = previous.filter((item) => !change.add.some((refId) => refId === item.refId))
+      const accepted = outcome.value
+        .filter((item) => change.add.includes(item.refId))
+        .map(({ refId }) => {
+          const handover = transfer.handover ?? previous.find((item) => item.refId === refId)?.handover
+          return handover === undefined ? { refId } : { refId, handover }
+        })
       handedOver(session.chatId, [...retained, ...accepted])
     }
     return outcome.value
@@ -314,9 +337,23 @@ export function useComposerLibrary(
         const replaced = replacedDraftOf(session.chatId)
         const carried = replaced === null ? [] : handedOver(replaced)
         if (replaced !== null && carried.length > 0) {
-          handedOver(session.chatId, [...new Set([...handedOver(session.chatId), ...carried])])
+          const retained = new Map(handedOver(session.chatId).map((item) => [item.refId, item]))
+          for (const item of carried) retained.set(item.refId, item)
+          handedOver(session.chatId, [...retained.values()])
           handedOver(replaced, [])
-          void addHeld(carried, { carriedFrom: replaced })
+
+          const batches = new Map<string, { refIds: string[]; transfer: LibraryTransfer }>()
+          for (const { refId, handover } of carried) {
+            const key = handover === undefined ? "" : `${handover.originChatId}:${handover.operationId}`
+            const batch = batches.get(key)
+            if (batch === undefined)
+              batches.set(key, {
+                refIds: [refId],
+                transfer: handover === undefined ? { carriedFrom: replaced } : { carriedFrom: replaced, handover }
+              })
+            else batch.refIds.push(refId)
+          }
+          for (const { refIds, transfer } of batches.values()) void addHeld(refIds, transfer)
         }
       }
       return items
@@ -347,7 +384,7 @@ export function useComposerLibrary(
     remove: (refId) => {
       handedOver(
         session.chatId,
-        handedOver(session.chatId).filter((id) => id !== refId)
+        handedOver(session.chatId).filter((item) => item.refId !== refId)
       )
       void run(() => call("SetComposerLibrary", { add: [], remove: [refId as RefId] }))
     },
