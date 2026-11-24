@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { expect, it, vi } from "vitest"
 import { Effect } from "effect"
@@ -81,6 +81,19 @@ it("verifies an approved build once and verifies again after any file, commit or
   await saveFiles(data, "", id, files(id, "export const activate = () => { void 0 }"), false, "Later work")
   expect((await readClientBuild(data, "", id, commit)).bytes).toEqual(bytes)
   expect(verifies.count).toBe(before + 1)
+
+  const metadata = join(data, "plugins/instance", id, ".git", "extra")
+  await mkdir(join(metadata, ...Array(16).fill("nested")), { recursive: true })
+  const beforeLimits = verifies.count
+  await expect(readClientBuild(data, "", id, commit)).rejects.toThrow("Git metadata limit exceeded")
+  expect(verifies.count).toBe(beforeLimits)
+  await rm(metadata, { recursive: true })
+
+  const extra = join(folder, "extra")
+  await mkdir(extra)
+  for (let index = 0; index < 1040; index++) await writeFile(join(extra, String(index)), "")
+  await expect(readClientBuild(data, "", id, commit)).rejects.toThrow("Plugin build directory limit exceeded")
+  expect(verifies.count).toBe(beforeLimits)
 }, 90_000)
 
 it(
