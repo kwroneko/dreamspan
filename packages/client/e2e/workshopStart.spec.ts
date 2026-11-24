@@ -237,7 +237,8 @@ test.describe("a workshop made by its first message", () => {
       await expect(side.getByTestId("composer-controls").getByRole("button", { name: /^Generate/ })).toBeVisible()
       // The new message and its answer sit below the greeting: the greeting is where it was
       // once the list keeps its top (the list may scroll to the newest at this height).
-      await side.getByTestId("side-chat-messages").evaluate((list) => list.scrollTo({ top: 0 }))
+      await side.getByTestId("side-chat-messages").hover()
+      await page.mouse.wheel(0, -100_000)
       await page.waitForTimeout(500)
       await expect.poll(places, { timeout: 30_000 }).toEqual(before)
       await shot("after")

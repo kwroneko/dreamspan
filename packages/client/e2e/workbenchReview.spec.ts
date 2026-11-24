@@ -63,17 +63,13 @@ test("two views keep their composer labels, drafts and panels independent while 
   await expectTextBox(b, "Right view draft")
   await expect(page.locator("[data-tab] [data-unsaved-dot]")).toHaveCount(0)
   const rightTop = await right.getByTestId("messages").evaluate((element) => element.scrollTop)
-  const leftTop = await left.getByTestId("messages").evaluate((element) => element.scrollTop)
-  await left.getByTestId("messages").evaluate((element) => {
-    element.scrollTop -= 300
-  })
-  await expect
-    .poll(() => left.getByTestId("messages").evaluate((element) => element.scrollTop))
-    .toBeLessThan(leftTop - 100)
+  const leftList = left.getByTestId("messages")
+  const leftTop = await leftList.evaluate((element) => element.scrollTop)
+  await leftList.hover()
+  await page.mouse.wheel(0, -300)
+  await expect.poll(() => leftList.evaluate((element) => element.scrollTop)).toBeLessThan(leftTop - 100)
   expect(await right.getByTestId("messages").evaluate((element) => element.scrollTop)).toBeCloseTo(rightTop, 0)
-  await left.getByTestId("messages").evaluate((element) => {
-    element.scrollTop = element.scrollHeight
-  })
+  await page.mouse.wheel(0, 300)
   await right.getByRole("button", { name: "Send", exact: true }).click()
   await expect(left.getByRole("article").filter({ hasText: "Right view draft" })).toHaveCount(1)
   await expect(right.getByRole("article").filter({ hasText: "Right view draft" })).toHaveCount(1)

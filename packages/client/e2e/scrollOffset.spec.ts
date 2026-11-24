@@ -64,7 +64,7 @@ test("development scroll synchronization does not emit lifecycle errors", async 
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
-    test(`preserves a native jump before its scroll event: ${width} ${theme}`, async ({ page }) => {
+    test(`preserves a wheel jump before its scroll event: ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
       // Native scroll events are deferred. Hold that notification while a chat update
@@ -105,10 +105,12 @@ for (const width of [1440, 390])
       const list = page.getByTestId("messages")
       await expect(list.locator("article").last()).toBeInViewport()
       await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
-      await list.evaluate((element) => {
+      await list.hover()
+      await page.evaluate(() => {
         ;(window as unknown as { __holdMessageScroll: boolean }).__holdMessageScroll = true
-        element.scrollTop = 0
       })
+      await page.mouse.wheel(0, -100_000)
+      await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBe(0)
       await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         api.RenameChat({ chatId: chat.id, name: "Updated during the native jump" })
       )
@@ -126,8 +128,8 @@ for (const width of [1440, 390])
     })
 
 for (const width of [1440, 390])
-  test(`keeps native focus visible after shrinking the chat viewport at ${width}px`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 1100 })
+  test(`keeps keyboard focus visible after shrinking the chat viewport at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1200 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const marker = "Earlier message link"
     const chat = await asPage(page, server(), (api) =>
@@ -138,9 +140,11 @@ for (const width of [1440, 390])
           chatId: chat.id,
           parentSlotId: null,
           branch: false,
-          content: [`[${marker}](#earlier)`, ...Array.from({ length: 17 }, (_, i) => `Paragraph ${i + 1}.`)].join(
-            "\n\n"
-          )
+          content: [
+            `[${marker}](#earlier)`,
+            ...Array.from({ length: 17 }, (_, i) => `Paragraph ${i + 1}.`),
+            "[Later message link](#later)"
+          ].join("\n\n")
         })
         return chat
       })
@@ -148,33 +152,16 @@ for (const width of [1440, 390])
     await page.goto(`${server().url}/chats/${chat.id}`)
     const list = page.getByTestId("messages")
     const link = list.getByRole("link", { name: marker })
+    const later = list.getByRole("link", { name: "Later message link" })
     await expect(link).toBeInViewport()
-    await expect(list.getByText("Paragraph 17.")).toBeInViewport()
+    await expect(later).toBeInViewport()
     await expect(page.getByText("No model chosen", { exact: true })).toBeVisible()
     expect(await list.evaluate((element) => element.scrollHeight - element.clientHeight)).toBe(0)
 
-    await link.evaluate((anchor) => {
-      const list = anchor.closest<HTMLElement>('[data-testid="messages"]')!
-      const scrollTo = list.scrollTo
-      list.scrollTo = (...args: unknown[]) => {
-        Reflect.apply(scrollTo, list, args)
-        if (list.scrollTop < 100) return
-        list.scrollTo = scrollTo
-        // After the resize observer moves to the new end, focus before the queued scroll event.
-        queueMicrotask(() => {
-          ;(anchor as HTMLElement).focus()
-          list.dataset.focusOffset = String(list.scrollTop)
-          list.addEventListener(
-            "scroll",
-            () => requestAnimationFrame(() => requestAnimationFrame(() => (list.dataset.focusScrollSettled = "true"))),
-            { once: true }
-          )
-        })
-      }
-    })
     await page.setViewportSize({ width, height: 760 })
-    await expect(list).toHaveAttribute("data-focus-offset", "0")
-    await expect(list).toHaveAttribute("data-focus-scroll-settled", "true")
+    await expect(link).not.toBeInViewport()
+    await expect(later).toBeInViewport()
+    await later.press("Shift+Tab")
     await expect(link).toBeFocused()
     await expect(link).toBeInViewport()
   })
