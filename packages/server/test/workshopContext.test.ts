@@ -179,9 +179,10 @@ describe("workshop context", () => {
   })
 
   // The card-file tools grew the fixed prefix. Use larger older results so turn three can
-  // reach the elision target while keeping the newest result. At 48k, 49k and 50k, turn two
-  // carries intact and turn three elides with every enabled tool definition sent.
-  for (const window of [24_000, 49_000])
+  // reach the elision target while keeping the newest result. At 50k, 51k and 52k, turn two
+  // carries intact and turn three elides with every enabled tool definition sent (48k to 50k
+  // before C9's version tools joined every-tool mode; 54k no longer elides).
+  for (const window of [24_000, 51_000])
     it.live(`elision and protected newest results with a ${window} window`, () => {
       const config = testConfig()
       return Effect.gen(function* () {
