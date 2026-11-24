@@ -128,7 +128,7 @@ export const register = () => [
   assistantToolsSections.register({ id: "subagent-limits", order: 20, component: SubagentLimitsSection }),
   // The kinds of subagents, built in, from plugins and the user's own (spec/SUBAGENTS.md §10).
   assistantToolsSections.register({ id: "subagent-types", order: 30, component: SubagentTypesSection }),
-  // Beside the model chip, while subagents are allowed here (spec/SUBAGENTS.md §5.1a).
+  // Right after the model chip, whose extension it is, while subagents are allowed here (spec/SUBAGENTS.md §5.1a).
   composerControls.register({
     id: SUBAGENT_MODELS_CHIP,
     order: 25,
@@ -150,10 +150,11 @@ export const register = () => [
       view.cast.agentTools != null,
     component: ({ session }) => <StorySubagentModelsChip session={session} />
   }),
-  // First, where Next stands in a story chat: what the reply may do, before the model and preset.
+  // What the reply may do: the first of a workshop's own chips, after the ones every chat has
+  // (model, preset, the request's size and cache), so those stand where they do in a story.
   composerControls.register({
     id: CAPABILITY_CHIP,
-    order: 12,
+    order: 100,
     placement: "strip",
     available: ({ view }) => kindShows(view.chat?.kind, CAPABILITY_CHIP),
     component: CapabilityChip

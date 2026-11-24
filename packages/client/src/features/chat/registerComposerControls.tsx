@@ -189,7 +189,9 @@ export const registerComposerControls = () => [
     component: DraftContextChip
   }),
   // The strip reads as a sentence: who replies, with which model and preset (and the other
-  // choices, 11 to 79), then what that next request is (its size, then its cache), at the end.
+  // choices, 11 to 79), then what that next request is (its size, then its cache). A chat kind's
+  // own chips (a workshop's: 100 on) come after these, so the shared ones keep their places; only
+  // the subagents' models (25) sit inside, after the model they extend.
   composerControls.register({
     id: "composer.next",
     order: 10,

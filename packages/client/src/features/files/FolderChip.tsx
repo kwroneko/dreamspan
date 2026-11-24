@@ -1,5 +1,5 @@
 // The working-folder chip (spec/FILES-AND-ENVIRONMENT.md §2.2; owner: "we have space next to model
-// and preset"): in a workshop's next-reply strip after Model and Preset, the folder the assistant's
+// and preset"): in a workshop's next-reply strip after the chips every chat has, the folder the assistant's
 // commands start in on this branch, by its last name ("All files" at the top). Its popover, the
 // strip's usual full-width rows: the full path, the assistant card's remembered folder when it
 // differs, the folders picked last, the folders of Files one level at a time, New folder here and
