@@ -2,8 +2,10 @@ import { mkdir, readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, test } from "@playwright/test"
+import { Effect } from "effect"
+import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
-import { saveRevision } from "./support/saveRevision.ts"
+import { expectSaveState, saveCluster, saveRevision, UNSAVED } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
@@ -12,6 +14,48 @@ const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMI
 const screens = process.env.SCREENSHOT_DIR ?? join(tmpdir(), "rp-revision-text-screens")
 const before = "A quiet harbor.\nThe lamp burns.\n" + "Keep this unchanged line.\n".repeat(90) + "End of original."
 const after = before.replace("burns", "flickers").replace("End of original.", "End of revision.")
+
+test("revision message and failure fit the minimum-width preset panel", async ({ page }) => {
+  const chat = await admin((api) =>
+    Effect.gen(function* () {
+      const preset = yield* api.CreatePreset({ label: "Narrow save panel" })
+      yield* api.ChangeGenerationDefaults({ change: { preset: preset.id } })
+      return yield* api.CreateChat({ title: "Narrow save panel" })
+    })
+  )
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      if (typeof data === "string" && data.includes('"CommitEditorDrafts"')) {
+        const frame = JSON.parse(data)
+        frame.payload.refId = "00000000-0000-0000-0000-000000000000"
+        upstream.send(JSON.stringify(frame))
+      } else upstream.send(data)
+    })
+  })
+  await page.goto(`${server().url}/chats/${chat.id}?cpw=260`)
+  const panel = await openPanel(page, "Prompt preset")
+  const cluster = saveCluster(panel)
+  const sidePanel = page.getByRole("complementary", { name: "Chat panel" })
+  expect((await sidePanel.boundingBox())!.width).toBeCloseTo(260)
+  await panel.getByRole("switch", { name: "Send Main Prompt", exact: true }).click()
+  await expectSaveState(panel, UNSAVED)
+  const buttons = await cluster.boundingBox()
+  await cluster.getByRole("button", { name: "Save with message…", exact: true }).click()
+  const input = panel.getByRole("textbox", { name: "Revision message", exact: true })
+  await expect.soft(input).toBeInViewport({ ratio: 1, timeout: 1000 })
+  expect(await cluster.boundingBox()).toEqual(buttons)
+  await input.fill("Describe the revision")
+  await input.press("Enter")
+  await expectSaveState(panel, "failed")
+  await input.press("Escape")
+  const failure = cluster.getByRole("status")
+  await expect(failure).toContainText("Couldn't save:")
+  await expect(failure).toBeInViewport({ ratio: 1 })
+  expect(await cluster.boundingBox()).toEqual(buttons)
+})
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)

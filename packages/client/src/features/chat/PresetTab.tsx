@@ -48,7 +48,10 @@ function PresetColumn({ store }: { store: EditorStore }) {
   return (
     <SearchNavigation value={searchMatch}>
       <div className="flex min-h-full flex-col gap-3">
-        <div data-editor-header className="flex items-start justify-between gap-2">
+        <div
+          data-editor-header
+          className="relative flex items-start justify-between gap-2 [&_[data-save-state]]:static [&_[data-save-state]>[data-layout-overlay]]:max-w-full"
+        >
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <span className="min-w-0 font-medium">
               <RefName store={store}>
