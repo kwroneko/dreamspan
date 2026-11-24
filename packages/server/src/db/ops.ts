@@ -258,6 +258,7 @@ import {
   SubagentPick,
   SubagentPicks,
   SubagentSettings,
+  SubagentSettingsRejected,
   SubagentTypes
 } from "@dreamspan/shared/subagents.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@dreamspan/shared/regexScripts.ts"
@@ -4336,7 +4337,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       types: Schema.optionalKey(SubagentTypes)
     },
     success: Schema.Void,
-    error: StorageError
+    error: Schema.Union([SubagentSettingsRejected, StorageError])
   }),
   /**
    * A subagent carried on with its resumed reply (spec/SUBAGENTS.md §8), in one transaction: a

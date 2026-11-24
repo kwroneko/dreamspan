@@ -6,7 +6,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { Chat } from "@dreamspan/shared/chat.ts"
-import { Reader } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import type { SubagentModelsAt } from "../src/db/subagentSettings.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
@@ -245,4 +245,26 @@ describe("subagent models", () => {
       assert.deepStrictEqual(settings.models.picks, ["same"])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
+
+  it.live("the writer checks alias patches against the settings it actually merges", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const writer = yield* Writer
+      const userId = (yield* api.GetSession()).user.id
+      const rename = (pick: string) =>
+        writer.ChangeSubagentSettings({ userId, rows: { [pick]: { alias: "shared", note: "" } } })
+      const results = yield* Effect.all([rename("c first"), rename("c second")].map(Effect.result), { concurrency: 2 })
+      assert.lengthOf(
+        results.filter((result) => result._tag === "Success"),
+        1
+      )
+      const failed = results.find((result) => result._tag === "Failure")
+      assert.strictEqual(failed?.failure._tag, "SubagentSettingsRejected")
+      const saved = yield* api.GetSubagentSettings({})
+      assert.lengthOf(
+        Object.values(saved.models.rows).filter((row) => row.alias === "shared"),
+        1
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
 })

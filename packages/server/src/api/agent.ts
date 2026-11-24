@@ -48,7 +48,7 @@ import { ExecutionRegistry, toolForKind } from "../execution.ts"
 import { internal } from "./internal.ts"
 import { mayUse, stopSubagent, typesFor } from "../agent/subagents.ts"
 import { checkTypeEdit, subagentToolCatalog as toolCatalog } from "../agent/subagentTypeEdits.ts"
-import { rowProblems, SAME, SubagentSettingsRejected, type SubagentTypeEdit } from "@dreamspan/shared/subagents.ts"
+import { SubagentSettingsRejected, type SubagentTypeEdit } from "@dreamspan/shared/subagents.ts"
 
 /** What a resume needs of the stopped run's frozen snapshot. */
 interface Frozen {
@@ -486,11 +486,6 @@ export const makeAgentHandlers = Effect.gen(function* () {
     ChangeSubagentSettings: ({ picks, rows, limits }) =>
       Effect.gen(function* () {
         const userId = (yield* CurrentUser).id
-        if (rows !== undefined) {
-          const current = yield* reader.SubagentSettings({ userId })
-          const problems = rowProblems({ ...current.models.rows, ...rows, [SAME]: { alias: "same", note: "" } })
-          if (problems.length) return yield* new SubagentSettingsRejected({ message: problems.join(" ") })
-        }
         yield* writer.ChangeSubagentSettings({
           userId,
           ...(picks === undefined ? {} : { picks: [...new Set(picks)] }),

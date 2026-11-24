@@ -14,9 +14,11 @@ import {
   parseModelPick,
   resolveLimits,
   resolveModels,
+  rowProblems,
   rowsFor,
   SAME,
   SUMMARY,
+  SubagentSettingsRejected,
   type SubagentCaps,
   type ResolvedLimits,
   type SubagentLimits,
@@ -210,10 +212,15 @@ export const makeSubagentSettingWriteHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         if (picks !== undefined || rows !== undefined) {
           const current = (yield* readSetting(sql, "user", userId, MODELS_KEY)).value as SubagentModels | null
-          yield* putUserSetting(sql, userId as UserId, MODELS_KEY, {
+          const next = {
             picks: picks ?? current?.picks ?? resolveModels(null).picks,
             rows: normalized({ ...current?.rows, ...rows })
-          } satisfies SubagentModels)
+          } satisfies SubagentModels
+          if (rows !== undefined) {
+            const problems = rowProblems(resolveModels(next).rows)
+            if (problems.length > 0) return yield* new SubagentSettingsRejected({ message: problems.join(" ") })
+          }
+          yield* putUserSetting(sql, userId as UserId, MODELS_KEY, next)
         }
         if (limits !== undefined) yield* putUserSetting(sql, userId as UserId, LIMITS_KEY, limits ?? {})
         if (types !== undefined) yield* putUserSetting(sql, userId as UserId, TYPES_KEY, types)
