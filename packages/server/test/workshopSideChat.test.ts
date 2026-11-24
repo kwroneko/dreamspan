@@ -599,6 +599,57 @@ describe("side chat", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("deleting a story stops its workshop's active reply and closes the subscription", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => provider()),
+        (running) => Effect.promise(() => running.close())
+      )
+      const api = yield* client()
+      const { chat: story } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {}
+      })
+      const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
+      let streaming = false
+      let aborted = false
+      mock.setHandler((_request, res) => {
+        res.on("close", () => {
+          aborted = true
+        })
+        res.writeHead(200, { "content-type": "text/event-stream" })
+        res.flushHeaders()
+        streaming = true
+      })
+      const events: Array<ChatEvent> = []
+      let ended = false
+      yield* api.SubscribeChat({ chatId: workshop.id }).pipe(
+        Stream.runForEach((batch) => Effect.sync(() => void events.push(...batch))),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            ended = true
+          })
+        ),
+        Effect.forkScoped
+      )
+      yield* eventually(() => events.length > 0)
+      const sent = yield* posted(
+        api.SendMessage({
+          chatId: workshop.id,
+          parentSlotId: workshop.activeLeafSlotId,
+          branch: false,
+          content: "Review the story."
+        })
+      )
+      yield* posted(api.Generate({ chatId: workshop.id, parentSlotId: sent.entry.slotId, branch: false }))
+      yield* eventually(() => streaming)
+      yield* api.DeleteChat({ chatId: story.id })
+      yield* eventually(() => aborted && ended, 5_000)
+      assert.isTrue(events.some((event) => event._tag === "Deleted"))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("reads edits and shared summary revisions at an unchanged tip", () => {
     const config = testConfig()
     return Effect.gen(function* () {

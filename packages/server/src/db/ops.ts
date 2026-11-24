@@ -348,6 +348,11 @@ const MergeAndFlow = Schema.Struct({ outcome: MergeOutcome, change: RefChange })
 
 /** A chat's `card.binding` for one card where it's read (the state fold's), null for none. */
 const CardBinding = Schema.Struct({ ref: Schema.NullOr(Schema.String), revision: Schema.NullOr(Schema.String) })
+
+/** A chat or branch deletion also returns its workshop targets for live-session cleanup. */
+export class DeletedChatItem extends BinItem.extend<DeletedChatItem>("DeletedChatItem")({
+  workshops: Schema.Array(Schema.Struct({ chatId: ChatId, forkIds: Schema.NullOr(Schema.Array(ForkId)) }))
+}) {}
 /** Every card's binding at a position, by entity id. */
 const CardBindings = Schema.Record(Schema.String, CardBinding)
 
@@ -1170,7 +1175,7 @@ const WriteOpsChatOwn = RpcGroup.make(
       expectedForkIds: Schema.Array(ForkId),
       title: Schema.String
     },
-    success: BinItem,
+    success: DeletedChatItem,
     error: Schema.Union([NotFound, StorageError, BinChanged])
   }),
   Rpc.make("SetSplitChat", {
@@ -1676,7 +1681,7 @@ const WriteOpsChatOwn = RpcGroup.make(
   }),
   Rpc.make("DeleteChat", {
     payload: { userId: UserId, chatId: ChatId },
-    success: BinItem,
+    success: DeletedChatItem,
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
@@ -1705,7 +1710,7 @@ const WriteOpsChatOwn = RpcGroup.make(
    */
   Rpc.make("DeleteFork", {
     payload: { userId: UserId, forkId: ForkId },
-    success: BinItem,
+    success: DeletedChatItem,
     error: Schema.Union([NotFound, CannotDeleteLastFork, StorageError])
   }),
   // --- Parallel threads (spec/THREADS.md §5; db/threadWrites.ts)

@@ -8,10 +8,31 @@ import { NotFound, type ServerError } from "@dreamspan/shared/errors.ts"
 import { Cause, Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
+import { Generations } from "../chat/Generations.ts"
 import { Reader, Writer } from "../db/Database.ts"
+import type { DeletedChatItem } from "../db/ops.ts"
 import { WorkshopFiles } from "../files/WorkshopFiles.ts"
 import { BinContentGone } from "../files/bin.ts"
 import { internal, toServerError } from "./internal.ts"
+
+/** Finish live sessions affected by the writer's workshop companion deletions. */
+export const notifyWorkshopDeletions = (userId: UserId, workshops: DeletedChatItem["workshops"]) =>
+  Effect.gen(function* () {
+    const generations = yield* Generations
+    const hub = yield* ChatHub
+    const reader = yield* Reader
+    for (const { chatId, forkIds } of workshops) {
+      yield* Effect.forEach(generations.runningIn(chatId, forkIds ?? undefined), (versionId) =>
+        Effect.ignore(generations.stop(userId, versionId))
+      )
+      if (forkIds === null) hub.close(chatId, { _tag: "Deleted" })
+      else {
+        hub.publish(chatId, { _tag: "Reload" })
+        const chat = yield* reader.GetChat({ userId, chatId }).pipe(Effect.option)
+        if (chat._tag === "Some") hub.publish(chatId, { _tag: "Chat", chat: chat.value })
+      }
+    }
+  })
 
 export const makeBinHandlers = Effect.gen(function* () {
   const reader = yield* Reader

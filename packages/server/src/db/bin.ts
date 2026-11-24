@@ -6,6 +6,7 @@ import { readBinLimits } from "./binLimits.ts"
 import { Buffer } from "node:buffer"
 import { BinChanged, BinItem, type BinLimits, CannotDeleteLastFork, RecoveredText } from "@dreamspan/shared/bin.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
 import { composerKey, type DraftKey, excerpt, parseDraftTarget } from "@dreamspan/shared/drafts.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Data, Effect } from "effect"
@@ -733,6 +734,20 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         SELECT c.id FROM c JOIN bin_items b ON b.id = c.id ORDER BY c.depth, b.deleted_at, b.id`,
       (rows) => rows.map((row) => row.id)
     )
+
+  /** Workshop chats or branch groups binned by this deletion, before eviction can remove them. */
+  const deletedWorkshops = (main: string) =>
+    Effect.gen(function* () {
+      const ids = yield* companionsOf(main)
+      if (ids.length === 0) return []
+      const rows = yield* sql<{ chat_id: ChatId; forks: string | null }>`
+        SELECT chat_id, CASE WHEN kind = 'branch' THEN origin_json -> '$.forkIds' END AS forks
+        FROM bin_items WHERE id IN ${sql.in(ids)} AND chat_id IS NOT NULL AND kind IN ('chat', 'branch')`
+      return rows.map((row) => ({
+        chatId: row.chat_id,
+        forkIds: row.forks === null ? null : (JSON.parse(row.forks) as ReadonlyArray<ForkId>)
+      }))
+    })
 
   /**
    * The workshop branches that go with story fork `forkId` (their own branches included) go to
@@ -1789,6 +1804,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
   const drafts = makeDraftStore(sql, recover, now)
 
   return {
+    deletedWorkshops,
     drafts,
     insertItem,
     assetRestorers,
