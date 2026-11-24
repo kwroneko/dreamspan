@@ -8,7 +8,12 @@ import type { groupFamilies } from "./cardFamilies.ts"
 export const cardGrouping = makeRegistry<{
   readonly id: string
   readonly group: typeof groupFamilies
-  readonly control: ComponentType<{ browse: CardBrowse; onChange: (change: Partial<CardBrowse>) => void }>
+  /** Disabled with `disabledReason` where nothing is grouped, kept in its place (no gap, no shift). */
+  readonly control: ComponentType<{
+    browse: CardBrowse
+    onChange: (change: Partial<CardBrowse>) => void
+    disabledReason?: string | undefined
+  }>
 }>()
 
 export const useCardGrouping = () =>
@@ -16,11 +21,13 @@ export const useCardGrouping = () =>
 
 export function CardGroupingControl({
   browse,
-  onChange
+  onChange,
+  disabledReason
 }: {
   browse: CardBrowse
   onChange: (change: Partial<CardBrowse>) => void
+  disabledReason?: string | undefined
 }) {
   const part = useCardGrouping()
-  return part ? <part.control browse={browse} onChange={onChange} /> : null
+  return part ? <part.control browse={browse} onChange={onChange} disabledReason={disabledReason} /> : null
 }

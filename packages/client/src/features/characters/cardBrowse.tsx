@@ -7,7 +7,7 @@ import { useCardGrouping } from "./cardGrouping.tsx"
 // in its own params (`useHomeBrowse`), the left panel's and the Cast tab's as layout params
 // carried over the tab's navigation (`useSidebarBrowse`, `useCardBrowse`). Absent, each is its
 // default. The Cast tab's filter starts at All on each visit.
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { useLayoutParam, writeLayoutParams } from "../../tabLayoutParams.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -248,11 +248,18 @@ export function CardFilterControl({
   )
 }
 
+/** Why Include personas does nothing under a filter that already settles whether personas are listed. */
+const PERSONAS_FIXED: Partial<Record<CardFilter, string>> = {
+  personas: "This list is your personas.",
+  groups: "Groups are chats, not cards.",
+  archived: "Archived always lists personas with the characters."
+}
+
 /**
- * Include personas: the persona folder's cards among the characters, marked. Only where a
- * filter lists characters (not Personas, not Groups). Under those two it stays in place but
- * invisible (visibility: hidden also drops it from the tab order and the accessibility tree), so
- * the controls around it don't shift.
+ * Include personas: the persona folder's cards among the characters, marked. It works where a
+ * filter lists characters; under Personas, Groups and Archived (and a card source) it stays in its
+ * place, disabled with the reason on hover, so no blank gap opens between buttons and nothing
+ * shifts (spec/DESIGN.md, general UI rules).
  */
 export function IncludePersonas({
   browse,
@@ -264,19 +271,17 @@ export function IncludePersonas({
   /** Shown but unavailable (a card source lists no personas): why, on hover. */
   disabledReason?: string | undefined
 }) {
-  const hidden =
-    disabledReason === undefined &&
-    (browse.filter === "personas" || browse.filter === "groups" || browse.filter === "archived")
-  const disabled = disabledReason !== undefined
+  const reason = disabledReason ?? PERSONAS_FIXED[browse.filter]
+  const disabled = reason !== undefined
   return (
     <IconButton
       label="Include personas"
-      hint={disabledReason ?? (browse.withPersonas ? "Click to hide personas" : "Click to show personas")}
+      hint={reason ?? (browse.withPersonas ? "Click to hide personas" : "Click to show personas")}
       icon={browse.withPersonas && !disabled ? "user" : "user-x"}
       aria-pressed={browse.withPersonas && !disabled}
       disabled={disabled}
       focusableWhenDisabled
-      className={`${hidden ? "invisible" : ""} ${browse.withPersonas || disabled ? "" : "text-text!"} data-disabled:pointer-events-auto! data-disabled:opacity-50 aria-pressed:bg-surface-raised aria-pressed:text-accent`}
+      className={`${browse.withPersonas || disabled ? "" : "text-text!"} data-disabled:pointer-events-auto! data-disabled:opacity-50 aria-pressed:bg-surface-raised aria-pressed:text-accent`}
       onClick={() => onChange({ withPersonas: !browse.withPersonas })}
     />
   )
@@ -284,30 +289,38 @@ export function IncludePersonas({
 
 /**
  * Group forks: a card and the cards forked from it as one tile, which expands to them
- * (cardFamilies.ts). Each place's own (`CardBrowse.grouped`), off until chosen. Kept in place but
- * invisible where no cards are grouped (Groups), so the controls around it don't shift.
+ * (cardFamilies.ts). Each place's own (`CardBrowse.grouped`), off until chosen. Where no cards are
+ * grouped (Groups, a card source) it stays in its place, disabled with the reason on hover.
  */
 export function GroupFamiliesToggle({
   browse,
-  onChange
+  onChange,
+  disabledReason
 }: {
   browse: CardBrowse
   onChange: (change: Partial<CardBrowse>) => void
+  /** Shown but unavailable (a card source lists each card on its own): why, on hover. */
+  disabledReason?: string | undefined
 }) {
-  const on = browse.grouped
+  const reason = disabledReason ?? (browse.filter === "groups" ? "Groups are chats, not cards." : undefined)
+  const disabled = reason !== undefined
+  const on = browse.grouped && !disabled
   return (
     <IconButton
       label="Group forks"
       hint={
-        on
+        reason ??
+        (on
           ? "Click to list every card on its own"
-          : "Click to show a card and its forks as one tile, which opens to list them"
+          : "Click to show a card and its forks as one tile, which opens to list them")
       }
       icon="family"
       aria-pressed={on}
+      disabled={disabled}
+      focusableWhenDisabled
       data-group-families
-      className={`${browse.filter === "groups" ? "invisible" : ""} ${on ? "" : "text-text!"} aria-pressed:bg-surface-raised aria-pressed:text-accent`}
-      onClick={() => onChange({ grouped: !on })}
+      className={`${on || disabled ? "" : "text-text!"} data-disabled:pointer-events-auto! data-disabled:opacity-50 aria-pressed:bg-surface-raised aria-pressed:text-accent`}
+      onClick={() => onChange({ grouped: !browse.grouped })}
     />
   )
 }
@@ -375,6 +388,20 @@ export function SortDirection({
   )
 }
 
+/**
+ * A sort's choices scrolling on their own where they don't fit, the direction staying beside them
+ * in view. `data-scroll-keep`: the scrollbar's room is kept while it doesn't show, so its coming
+ * (a source's longer list of sorts) moves nothing below (CardGridControls).
+ */
+export const SortScroller = ({ scrolls, children }: { scrolls: boolean; children: ReactNode }) =>
+  scrolls ? (
+    <div data-scroll-keep className="min-w-0 overflow-x-auto [&>*]:w-max">
+      {children}
+    </div>
+  ) : (
+    children
+  )
+
 /** The sort choice and its direction. `compact`: a small menu button, for a narrow panel. */
 export function CardSortControl({
   sort,
@@ -382,7 +409,8 @@ export function CardSortControl({
   onChange,
   compact = false,
   label = "Sort by",
-  className = ""
+  className = "",
+  scrolls = false
 }: {
   sort: CardSort
   reversed: boolean
@@ -390,6 +418,8 @@ export function CardSortControl({
   compact?: boolean
   label?: string
   className?: string
+  /** Too narrow a place scrolls the choices alone; the direction stays beside them, in view. */
+  scrolls?: boolean
 }) {
   const direction = (
     <SortDirection
@@ -399,7 +429,7 @@ export function CardSortControl({
     />
   )
   return (
-    <div className={`flex shrink-0 items-center gap-1 ${className}`}>
+    <div className={`flex ${scrolls ? "min-w-0" : "shrink-0"} items-center gap-1 ${className}`}>
       {compact ? (
         <Menu
           hint="Chooses how cards are sorted."
@@ -424,12 +454,14 @@ export function CardSortControl({
           ))}
         </Menu>
       ) : (
-        <Segmented
-          label={label}
-          value={sort}
-          onValueChange={(s) => onChange({ sort: s })}
-          options={SORTS.map((s) => ({ value: s, label: SORT_LABELS[s].label, description: SORT_LABELS[s].hint }))}
-        />
+        <SortScroller scrolls={scrolls}>
+          <Segmented
+            label={label}
+            value={sort}
+            onValueChange={(s) => onChange({ sort: s })}
+            options={SORTS.map((s) => ({ value: s, label: SORT_LABELS[s].label, description: SORT_LABELS[s].hint }))}
+          />
+        </SortScroller>
       )}
       {direction}
     </div>

@@ -12,7 +12,18 @@ interface Box {
   height: number
 }
 interface Violation {
-  kind: "inset" | "text" | "gap" | "alignment" | "overlap" | "overlay" | "fill" | "iconrow" | "repeat" | "exception"
+  kind:
+    | "inset"
+    | "text"
+    | "gap"
+    | "alignment"
+    | "overlap"
+    | "overlay"
+    | "fill"
+    | "iconrow"
+    | "repeat"
+    | "blank"
+    | "exception"
   selector: string
   related?: string
   name: string
@@ -637,6 +648,53 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
               t.el,
               `first shown control at ${t.x.toFixed(2)}, ${t.y.toFixed(2)}px from its tile's corner; ${ux}, ${uy}px on the grid's other tiles`
             )
+      }
+      // A blank between buttons (owner, 2026-11-23: "We *cannot* have random blank gaps appear
+      // between buttons. That is a hard rule."): a box kept in the flow but not painted
+      // (visibility: hidden, Tailwind's `invisible`) with a shown control on each side of it on its
+      // line. A control that does nothing in a view stays shown, disabled with why, instead.
+      const paintedControls = shown.filter((el) => !(el instanceof SVGElement) && el.matches(controls))
+      for (const el of nodes) {
+        if (el instanceof SVGElement || css(el).visibility !== "hidden") continue
+        const up = parent(el)
+        if (!up || css(up).visibility === "hidden" || ["absolute", "fixed"].includes(css(el).position)) continue
+        const r = rect(el)
+        if (r.width < 1 || r.height < 1 || !visible(el, false)) continue
+        // Inside a control (a sizer in a tab's label) it's that control's room, not a gap beside it.
+        if ([...ancestors(up)].some((p) => p.matches(controls))) continue
+        // A sizer stacked under shown content (the same grid cell) keeps no blank of its own.
+        const covered = [...up.children].some((sibling) => {
+          if (sibling === el || !(sibling instanceof HTMLElement) || !visible(sibling)) return false
+          const b = rect(sibling)
+          const w = Math.min(r.right, b.right) - Math.max(r.left, b.left)
+          const h = Math.min(r.bottom, b.bottom) - Math.max(r.top, b.top)
+          return w > 0 && h > 0 && w * h >= (r.width * r.height) / 2
+        })
+        if (covered) continue
+        // Its line: the ancestors still under twice its height.
+        let row: HTMLElement = up
+        for (const p of ancestors(up)) {
+          if (p === document.body || rect(p).height >= r.height * 2) break
+          row = p
+        }
+        const middle = r.top + r.height / 2
+        const onLine = paintedControls.filter((c) => {
+          const b = rect(c)
+          return row.contains(c) && !el.contains(c) && b.top <= middle && b.bottom >= middle
+        })
+        const before = onLine
+          .filter((c) => rect(c).right <= r.left + tolerance)
+          .sort((a, b) => rect(b).right - rect(a).right)[0]
+        const after = onLine
+          .filter((c) => rect(c).left >= r.right - tolerance)
+          .sort((a, b) => rect(a).left - rect(b).left)[0]
+        if (before && after)
+          add(
+            "blank",
+            el,
+            `a hidden box ${r.width.toFixed(0)} × ${r.height.toFixed(0)}px keeps a blank between ${path(before)} and ${path(after)}`,
+            after
+          )
       }
       // Icon buttons side by side in one row (an editor's tools, a message's actions, a panel's
       // header) share one square: the same width and height, and one gap between neighbours.

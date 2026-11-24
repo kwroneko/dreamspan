@@ -25,7 +25,7 @@ import { Segmented } from "../../ui/Segmented.tsx"
 import { Alert, Badge, EmptyState } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { RemoteBrowse } from "../characters/homeSearch.ts"
-import { SortDirection, type SortOrder } from "../characters/cardBrowse.tsx"
+import { SortDirection, type SortOrder, SortScroller } from "../characters/cardBrowse.tsx"
 import { TILE_CLASS, TILE_SURFACE_CLASS, TileFace, useOpenCharacter } from "../characters/shellData.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
@@ -308,7 +308,16 @@ const orderOf = (id: string): SortOrder =>
   /name|title|alpha/i.test(id) ? "name" : /date|added|created|updated|new|time/i.test(id) ? "date" : "count"
 
 /** The source's sorts and the direction button, in the place of the local sort (§3.2). */
-export function SourceSortControl({ browse, compact = false }: { browse: SourceBrowse; compact?: boolean }) {
+export function SourceSortControl({
+  browse,
+  compact = false,
+  scrolls = false
+}: {
+  browse: SourceBrowse
+  compact?: boolean
+  /** Too narrow a place scrolls the choices alone; the direction stays beside them, in view. */
+  scrolls?: boolean
+}) {
   const sorts = browse.caps?.sorts ?? []
   const current = sorts.find((s) => s.id === browse.query?.sort) ?? sorts[0]
   const name = browse.info?.name ?? ""
@@ -321,7 +330,9 @@ export function SourceSortControl({ browse, compact = false }: { browse: SourceB
     />
   )
   return (
-    <div className="flex shrink-0 items-center gap-1">
+    // Scrolling (Home), the direction aligns with the choices' row, as the local sort's does, whatever
+    // the explanation under them on a narrow screen.
+    <div className={`flex ${scrolls ? "min-w-0 items-start [&>button]:mt-[3px]" : "shrink-0 items-center"} gap-1`}>
       {compact || sorts.length === 0 ? (
         <Menu
           hint={`Chooses how ${name} sorts its cards.`}
@@ -351,17 +362,19 @@ export function SourceSortControl({ browse, compact = false }: { browse: SourceB
           ))}
         </Menu>
       ) : (
-        <Segmented
-          label="Sort by"
-          inlineDescription={false}
-          value={current?.id ?? null}
-          onValueChange={(sort) => browse.change({ sort, reverse: false })}
-          options={sorts.map((s) => ({
-            value: s.id,
-            label: s.label,
-            description: `Sorts ${name}'s cards by ${s.label.toLowerCase()}.`
-          }))}
-        />
+        <SortScroller scrolls={scrolls}>
+          <Segmented
+            label="Sort by"
+            inlineDescription={false}
+            value={current?.id ?? null}
+            onValueChange={(sort) => browse.change({ sort, reverse: false })}
+            options={sorts.map((s) => ({
+              value: s.id,
+              label: s.label,
+              description: `Sorts ${name}'s cards by ${s.label.toLowerCase()}.`
+            }))}
+          />
+        </SortScroller>
       )}
       {direction}
     </div>
