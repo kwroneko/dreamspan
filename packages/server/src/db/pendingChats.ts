@@ -190,7 +190,10 @@ export const fileLegacyWorkshopDrafts = (sql: SqlClient.SqlClient, bin: Pick<Bin
           new DraftKey({ targetKind: "user_field", targetId: row.target_id, field: row.field }),
           lost,
           "discard",
-          yield* legacyWorkshopLabel(sql, row.user_id, row.target_id)
+          yield* legacyWorkshopLabel(sql, row.user_id, row.target_id),
+          // Each text is there to see after the upgrade, however small the section's limit:
+          // their drafts go now, so an eviction here would lose them (rev-dfu1 #2).
+          { evict: false }
         )
       yield* sql`DELETE FROM drafts WHERE id = ${row.id}`
     }
