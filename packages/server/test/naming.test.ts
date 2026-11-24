@@ -76,6 +76,13 @@ describe("naming", () => {
         "EditRefused"
       )
       assert.strictEqual((yield* api.GetChat({ chatId: made.id })).title, "Beta")
+      // An automatic title changed meanwhile (a new chat's first turn retitles it) is nobody's
+      // rename: the name meant for it still goes on (rev-dd4a #6).
+      const fresh = yield* api.CreateChat({ title: "Mira, Nov 24" })
+      assert.strictEqual(
+        (yield* api.RenameChat({ chatId: fresh.id, name: "Alpha", from: "New chat" })).title,
+        "Alpha"
+      )
     }).pipe(Effect.scoped, Effect.provide(layer))
   )
 

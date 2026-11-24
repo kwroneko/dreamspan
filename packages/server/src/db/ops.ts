@@ -1678,7 +1678,7 @@ const WriteOpsChatOwn = RpcGroup.make(
   /**
    * Names chats (DESIGN §2.1): each title becomes `renamedTitle(its title, name)`, and the
    * chat's row version moves on. With `from`, a chat is renamed only while its title is
-   * still that (a group read before; one renamed meanwhile keeps its name). Returns the
+   * still that or still automatic (a group read before; one renamed meanwhile keeps its name). Returns the
    * chats renamed; NotFound when one isn't the user's live chat.
    */
   Rpc.make("RenameChats", {

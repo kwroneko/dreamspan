@@ -966,7 +966,9 @@ export const makeWriteHandlers = (bin: Bin) =>
           const renamed: Array<ReturnType<typeof toChat>> = []
           for (const { chatId, from } of chats) {
             const chat = yield* ownedChat(userId, chatId)
-            if (from !== null && chat.title !== from) continue
+            // Another rename came first. An automatic title is nobody's rename: a new chat's,
+            // retitled by its cast or by its first turn, still takes the name meant for it.
+            if (from !== null && chat.title !== from && chat.title_source !== "auto") continue
             const [row] = yield* sql<ChatRow>`
               UPDATE chats SET title = ${renamedTitle(chat.title, name)}, title_source = 'user',
                 row_version = row_version + 1

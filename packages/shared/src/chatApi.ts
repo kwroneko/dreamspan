@@ -586,7 +586,7 @@ export class ChatApi extends RpcGroup.make(
    * Names a chat (DESIGN §2.1): its title becomes the name, and a chat imported from ST keeps
    * the day ST started it. An empty name gives back the automatic one. Open tabs get `Chat`.
    * A chat of a group leaves it for a group of its own name (RenameGroup renames them all).
-   * With `from`, only while its title is still that: a rename retried after another one is left
+   * With `from`, only while its title is still that or automatic: a rename retried after another one is left
    * undone, `EditRefused` (rev-dd4a #4); one the title already has (a retry of one applied, its
    * answer lost) comes back as done.
    */

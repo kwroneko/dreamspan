@@ -72,6 +72,8 @@ export interface ChatRow {
   readonly created_at: number
   readonly last_message_at: number | null
   readonly cover_media_id?: string | null
+  /** Where a `SELECT *` read it: whether the title is automatic or a name given. */
+  readonly title_source?: "auto" | "user"
 }
 
 export const toChat = (row: ChatRow) =>
