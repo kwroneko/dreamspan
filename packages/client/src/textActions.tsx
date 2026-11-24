@@ -75,7 +75,8 @@ export const editorTextActions = (
   selection: string,
   source?: "snippet",
   keepUnavailable = false,
-  scope: Partial<Pick<TextActionContext, "ownVersion">> = {}
+  scope: Partial<Pick<TextActionContext, "ownVersion">> = {},
+  keepSelection = false
 ) =>
   [...entries.filter((a) => a.editor === "selection"), ...entries.filter((a) => a.editor !== "selection")].flatMap(
     (action) => {
@@ -84,9 +85,11 @@ export const editorTextActions = (
         ...(source ? { source } : {}),
         ...scope
       }
-      if (action.editor === "selection" ? selection.length === 0 : action.editor !== "text") return []
+      if (action.editor === "selection" ? selection.length === 0 && !keepSelection : action.editor !== "text") return []
       if (action.applies?.(context) === false) return []
-      return action.available(context) || (keepUnavailable && action.editor === "text") ? [{ action, context }] : []
+      return action.available(context) || (keepUnavailable && (action.editor === "text" || keepSelection))
+        ? [{ action, context }]
+        : []
     }
   )
 
@@ -107,6 +110,7 @@ export function EditorTextActions({
   source,
   scope,
   size = "strip",
+  keepSelection = false,
   className = ""
 }: {
   text: string
@@ -121,10 +125,15 @@ export function EditorTextActions({
    * square (ui/Tooltip.tsx `iconButtonClass`), with no gap of their own, as its neighbours have.
    */
   size?: "strip" | "row"
+  /**
+   * The selection's actions stay in place, disabled while nothing is selected, so nothing beside
+   * them moves as a selection comes and goes (the message editor's row; owner, 2026-11-24).
+   */
+  keepSelection?: boolean
   className?: string
 }) {
   const snapshot = useSyncExternalStore(textActions.subscribe, textActions.snapshot, textActions.snapshot)
-  const offered = editorTextActions(snapshot.entries, text, selection, source, true, scope)
+  const offered = editorTextActions(snapshot.entries, text, selection, source, true, scope, keepSelection)
   if (offered.length === 0) return null
   return (
     <div
