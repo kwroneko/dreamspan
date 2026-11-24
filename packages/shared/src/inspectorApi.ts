@@ -7,7 +7,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, ContextIssue, EntityId, ForkId, SlotId, VersionId } from "./chat.ts"
 import { StartChatInput } from "./chatStart.ts"
 import { NotFound, ServerError } from "./errors.ts"
-import { LlmRequestId, RequestStatus, UsageSource } from "./usage.ts"
+import { LlmRequestId, RequestStatus, TokenCounts, totalInputTokens, UsageSource } from "./usage.ts"
 import { RefId } from "./library.ts"
 import { ScriptRef } from "./regexScripts.ts"
 import { ThinkingSends } from "./thinkingSends.ts"
@@ -187,12 +187,13 @@ export const InspectorUsage = Schema.Struct({
   estimatedInput: Schema.optionalKey(Schema.NullOr(Schema.Int)),
   status: RequestStatus,
   ...RequestTimes,
-  counts: Schema.Struct({
-    inputUncached: Schema.NullOr(Schema.Int),
-    cacheRead: Schema.NullOr(Schema.Int),
-    cacheWrite: Schema.NullOr(Schema.Int),
-    output: Schema.NullOr(Schema.Int)
-  }),
+  counts: TokenCounts.mapFields((fields) => ({
+    inputTotal: fields.inputTotal,
+    inputUncached: fields.inputUncached,
+    cacheRead: fields.cacheRead,
+    cacheWrite: fields.cacheWrite,
+    output: fields.output
+  })),
   usageSource: UsageSource,
   cost: Schema.NullOr(Schema.Struct({ amount: Schema.Number, currency: Schema.String }))
 })
@@ -214,6 +215,7 @@ export const RequestFigures = Schema.Struct({
   firstReplyAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   /** `estimated`: the app counted the tokens; `none`: nobody did (the counts are null). */
   usageSource: UsageSource,
+  inputTotal: Schema.optionalKey(Schema.Int),
   /** Input not read from the cache, read from it and written to it (`cacheWriteLong`: the long-lived part of the writes). */
   inputUncached: Schema.NullOr(Schema.Int),
   cacheRead: Schema.NullOr(Schema.Int),
@@ -284,6 +286,7 @@ export const VersionMetrics = Schema.Struct({
   /** The sum of what the provider said it charged, over `reportedRequests` requests; null when none said. */
   reportedCost: Schema.NullOr(Schema.Number),
   reportedRequests: Schema.Int,
+  inputTotal: Schema.optionalKey(Schema.Int),
   /** Input token counts summed over the ended requests; null when none ended or any of them has none. */
   inputUncached: Schema.NullOr(Schema.Int),
   cacheRead: Schema.NullOr(Schema.Int),
@@ -299,6 +302,7 @@ export const versionMetricsOf = (versionId: VersionId, requests: ReadonlyArray<R
   const sum = (values: ReadonlyArray<number>) => (values.length === 0 ? null : values.reduce((a, b) => a + b, 0))
   const counted = ended.filter((r) => r.output !== null)
   const last = requests.at(-1)!
+  const inputTotal = ended.some((r) => r.inputTotal !== undefined) ? total(ended, totalInputTokens) : null
   return {
     versionId,
     requests: requests.length,
@@ -318,6 +322,7 @@ export const versionMetricsOf = (versionId: VersionId, requests: ReadonlyArray<R
     outputUnknown: ended.length - counted.length,
     estimated: counted.some((r) => r.usageSource === "estimated"),
     ...costsOf(ended),
+    ...(inputTotal === null ? {} : { inputTotal }),
     inputUncached: total(ended, (r) => r.inputUncached),
     cacheRead: total(ended, (r) => r.cacheRead),
     cacheWrite: total(ended, (r) => r.cacheWrite),

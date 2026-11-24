@@ -171,6 +171,30 @@ describe("capability shims", () => {
     assert.isUndefined(after.shims)
     assert.isUndefined(after.fixed)
   })
+
+  it("applies a stateful model pattern consistently across lookups", () => {
+    for (const model of [/^synthetic-model/g, /^synthetic-model/y]) {
+      const shims = [
+        {
+          id: "synthetic-prefill",
+          label: "No prefill",
+          models: "Synthetic model",
+          providers: ["openrouter"],
+          model,
+          capabilities: { prefill: "none" },
+          fixed: ["prefill"]
+        }
+      ] as const
+      model.lastIndex = 3
+      for (let i = 0; i < 2; i++) {
+        const upstream = shimmedUpstream(shims, "openrouter", "synthetic-model", { prefill: "assistant" })
+        assert.deepEqual(upstream.shims, [{ id: "synthetic-prefill", label: "No prefill" }])
+        assert.deepEqual(upstream.fixed, ["prefill"])
+        assert.strictEqual(upstream.prefill, "none")
+        assert.strictEqual(model.lastIndex, 3)
+      }
+    }
+  })
 })
 
 describe("model lists with their own fields (F2)", () => {

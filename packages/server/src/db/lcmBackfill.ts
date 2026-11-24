@@ -6,6 +6,7 @@ import { viewAt } from "./forkState.ts"
 // left is estimated again from the chat when it is shown.
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
+import { requestInputTokens } from "./requestInput.ts"
 
 export const BACKFILL_KIND = "lcm-backfill"
 
@@ -72,7 +73,7 @@ export const backfillOf = (sql: SqlClient.SqlClient, chatId: string, forkId?: st
 export const spentSince = (sql: SqlClient.SqlClient, chatId: string, since: number, forkId?: string | null) =>
   sql<{ tokens: number; cost: number | null; currency: string | null }>`
     SELECT coalesce(sum(CASE WHEN reserved_tokens IS NOT NULL AND usage_source IS NOT 'reported' THEN reserved_tokens
-      ELSE coalesce(input_uncached, 0) + coalesce(cache_read, 0) + coalesce(cache_write, 0) + coalesce(output, 0) END), 0) AS tokens,
+      ELSE ${requestInputTokens(sql)} + coalesce(output, 0) END), 0) AS tokens,
       sum(CASE WHEN reserved_cost IS NOT NULL AND usage_source IS NOT 'reported' THEN reserved_cost ELSE coalesce(cost, reserved_cost) END) AS cost, max(coalesce(cost_currency, reserved_currency)) AS currency
     FROM llm_requests WHERE chat_id = ${chatId} AND started_at >= ${since}
       AND (${forkId ?? null} IS NULL OR EXISTS(SELECT 1 FROM rollouts fr WHERE fr.id=llm_requests.rollout_id AND (fr.fork_id IS NULL OR fr.fork_id=${forkId ?? null}))) AND status <> 'running'

@@ -446,6 +446,7 @@ export const ActivityRow = Schema.Struct({
   startedAt: Schema.Number,
   endedAt: Schema.NullOr(Schema.Number),
   requests: Schema.Int,
+  inputTotal: Schema.optionalKey(Schema.Int),
   input: Schema.NullOr(Schema.Int),
   cacheRead: Schema.NullOr(Schema.Int),
   cacheWrite: Schema.NullOr(Schema.Int),

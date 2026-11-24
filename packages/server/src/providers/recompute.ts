@@ -21,6 +21,7 @@ type Update = Parameters<Writer["Service"]["RecomputeCosts"]>[0]["rows"][number]
 const PAGE = 500
 
 const countsOf = (row: Row): TokenCounts => ({
+  ...(row.inputTotal === undefined ? {} : { inputTotal: row.inputTotal }),
   inputUncached: row.inputUncached,
   cacheRead: row.cacheRead,
   cacheWrite: row.cacheWrite,

@@ -60,6 +60,21 @@ const keyString = (key: CacheKey) => [key.user, key.source, key.kind, key.id].jo
 const sha256 = (data: string | Uint8Array) => createHash("sha256").update(data).digest("hex")
 const BLOB = /^[0-9a-f]{64}$/
 
+const missingFile = (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT"
+
+const serializeByKey = () => {
+  const pending = new Map<string, Promise<unknown>>()
+  return async <A>(key: string, work: () => Promise<A>): Promise<A> => {
+    const operation = (pending.get(key) ?? Promise.resolve()).catch(() => undefined).then(work)
+    pending.set(key, operation)
+    try {
+      return await operation
+    } finally {
+      if (pending.get(key) === operation) pending.delete(key)
+    }
+  }
+}
+
 /** A blob's path relative to the data folder, as the thumbnail workers take it. */
 export const blobPath = (sha: string) => `cache/sources/blobs/${sha.slice(0, 2)}/${sha}`
 
@@ -79,11 +94,14 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
   /** How many entries name each blob, and the bytes of the blob with its derivatives. */
   const blobRefs = new Map<string, number>()
   const blobBytes = new Map<string, number>()
+  const derivativeBytes = new Map<string, Map<string, number>>()
   const pins = new Map<string, number>()
   /** Entry files' own sizes, roughly: their JSON. */
   const entryBytes = new Map<string, number>()
   /** When an entry's file was last touched, so reads don't rewrite it each time. */
   const touched = new Map<string, number>()
+  const withEntry = serializeByKey()
+  const withBlob = serializeByKey()
 
   const entryFile = (k: string) => join(entriesDir, `${sha256(k)}.json`)
 
@@ -107,25 +125,29 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
 
   const release = async (sha: string | null) => {
     if (sha === null) return
-    const count = (blobRefs.get(sha) ?? 1) - 1
-    if (count > 0) {
-      blobRefs.set(sha, count)
-      return
-    }
-    blobRefs.delete(sha)
-    blobBytes.delete(sha)
-    await removeBlobFiles(sha)
+    await withBlob(sha, async () => {
+      const count = (blobRefs.get(sha) ?? 1) - 1
+      if (count > 0) {
+        blobRefs.set(sha, count)
+        return
+      }
+      blobRefs.delete(sha)
+      blobBytes.delete(sha)
+      derivativeBytes.delete(sha)
+      await removeBlobFiles(sha)
+    })
   }
 
-  const drop = async (k: string) => {
-    const entry = index.get(k)
-    if (!entry) return
-    index.delete(k)
-    entryBytes.delete(k)
-    touched.delete(k)
-    await rm(entryFile(k), { force: true })
-    await release(entry.blob)
-  }
+  const drop = (k: string, expected?: CacheEntry) =>
+    withEntry(k, async () => {
+      const entry = index.get(k)
+      if (!entry || (expected && entry !== expected)) return
+      await rm(entryFile(k), { force: true })
+      index.delete(k)
+      entryBytes.delete(k)
+      touched.delete(k)
+      await release(entry.blob)
+    })
 
   /** Active drafts from the last sweep, plus saves the sweep may not have seen yet. */
   let keeping = new Set<string>()
@@ -137,36 +159,47 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
   /** Expired unpinned entries go; then, past the cap, the least recently used, unpinned first. */
   const enforce = async () => {
     const t = now()
-    for (const [k, entry] of [...index]) if (!pinned(k) && expired(entry, t)) await drop(k)
+    for (const [k, entry] of [...index]) if (!pinned(k) && expired(entry, t)) await drop(k, entry)
     if (usedBytes() <= cap()) return
     const order = [...index].sort(([, a], [, b]) => a.used - b.used)
-    for (const [k] of order) {
+    for (const [k, entry] of order) {
       if (usedBytes() <= cap()) return
-      if (!pinned(k)) await drop(k)
+      if (!pinned(k)) await drop(k, entry)
     }
     // Pinned entries still count toward the hard cap.
-    for (const [k] of order) {
+    for (const [k, entry] of order) {
       if (usedBytes() <= cap()) return
-      await drop(k)
+      await drop(k, entry)
     }
   }
 
   const writeAtomically = async (path: string, data: string | Uint8Array) => {
     const temp = `${path}.${randomUUID()}.tmp`
-    await writeFile(temp, data)
-    await rename(temp, path)
+    try {
+      await writeFile(temp, data)
+      await rename(temp, path)
+    } catch (error) {
+      await rm(temp, { force: true })
+      throw error
+    }
   }
 
-  const storeBlob = async (bytes: Uint8Array) => {
+  /** Reserve a reference before publishing the entry so eviction cannot remove the bytes. */
+  const retainBlob = async (bytes: Uint8Array) => {
     const sha = sha256(bytes)
-    const dir = join(blobsDir, sha.slice(0, 2))
-    await mkdir(dir, { recursive: true })
-    const path = join(dir, sha)
-    const present = await stat(path).then(
-      () => true,
-      () => false
-    )
-    if (!present) await writeAtomically(path, bytes)
+    await withBlob(sha, async () => {
+      const dir = join(blobsDir, sha.slice(0, 2))
+      await mkdir(dir, { recursive: true })
+      const path = join(dir, sha)
+      try {
+        await stat(path)
+      } catch (error) {
+        if (!missingFile(error)) throw error
+        await writeAtomically(path, bytes)
+      }
+      blobRefs.set(sha, (blobRefs.get(sha) ?? 0) + 1)
+      if (!blobBytes.has(sha)) blobBytes.set(sha, bytes.byteLength)
+    })
     return sha
   }
 
@@ -176,7 +209,7 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
       const entry = index.get(k)
       if (!entry) return null
       if (expired(entry) && !pinned(k)) {
-        await drop(k)
+        await drop(k, entry)
         return null
       }
       const t = now()
@@ -193,43 +226,95 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
   const put = (key: CacheKey, content: { readonly value?: unknown; readonly bytes?: Uint8Array }) =>
     Effect.promise(async () => {
       const k = keyString(key)
-      const t = now()
-      const blob = content.bytes === undefined ? null : await storeBlob(content.bytes)
-      const entry: CacheEntry = {
-        key,
-        value: content.value ?? null,
-        blob,
-        blobSize: content.bytes?.byteLength ?? 0,
-        created: t,
-        used: t
-      }
-      const json = JSON.stringify(entry)
-      await mkdir(entriesDir, { recursive: true })
-      await writeAtomically(entryFile(k), json)
-      const previous = index.get(k)
-      index.set(k, entry)
-      entryBytes.set(k, json.length)
-      touched.set(k, t)
-      if (blob !== null) {
-        blobRefs.set(blob, (blobRefs.get(blob) ?? 0) + 1)
-        if (!blobBytes.has(blob)) blobBytes.set(blob, entry.blobSize)
-      }
-      if (previous) await release(previous.blob)
+      const entry = await withEntry(k, async () => {
+        const t = now()
+        const blob = content.bytes === undefined ? null : await retainBlob(content.bytes)
+        const entry: CacheEntry = {
+          key,
+          value: content.value ?? null,
+          blob,
+          blobSize: content.bytes?.byteLength ?? 0,
+          created: t,
+          used: t
+        }
+        try {
+          const json = JSON.stringify(entry)
+          await mkdir(entriesDir, { recursive: true })
+          await writeAtomically(entryFile(k), json)
+          entryBytes.set(k, json.length)
+        } catch (error) {
+          await release(blob)
+          throw error
+        }
+        const previous = index.get(k)
+        index.set(k, entry)
+        touched.set(k, t)
+        if (previous) await release(previous.blob)
+        return entry
+      })
       await enforce()
       return entry
     })
 
-  const readBlob = (sha: string) => Effect.promise(() => readFile(join(options.dataDir, blobPath(sha))))
+  const readBlob = (sha: string) =>
+    Effect.promise(async () => {
+      try {
+        return await readFile(join(options.dataDir, blobPath(sha)))
+      } catch (error) {
+        if (missingFile(error)) return null
+        throw error
+      }
+    })
+
+  /** A format worker can create sibling files while the entry itself is being evicted. */
+  const withBlobFile = <A, E, R>(sha: string, use: Effect.Effect<A, E, R>) =>
+    Effect.acquireUseRelease(
+      Effect.promise(() =>
+        withBlob(sha, async () => {
+          const count = blobRefs.get(sha)
+          if (count === undefined) return false
+          blobRefs.set(sha, count + 1)
+          return true
+        })
+      ),
+      (retained) => (retained ? use : Effect.succeed(null)),
+      (retained) => Effect.promise(() => (retained ? release(sha) : Promise.resolve()))
+    )
+
+  const getBlob = (key: CacheKey) =>
+    Effect.gen(function* () {
+      const entry = yield* get(key)
+      if (!entry?.blob) return null
+      const bytes = yield* readBlob(entry.blob)
+      if (bytes !== null) return { entry, bytes }
+      yield* Effect.promise(() => drop(keyString(key), entry))
+      return null
+    })
+
+  const countDerivative = (sha: string, path: string, size: number) => {
+    const total = blobBytes.get(sha)
+    if (total === undefined) return
+    const files = derivativeBytes.get(sha) ?? new Map<string, number>()
+    const previous = files.get(path) ?? 0
+    if (size === 0) files.delete(path)
+    else files.set(path, size)
+    if (files.size === 0) derivativeBytes.delete(sha)
+    else derivativeBytes.set(sha, files)
+    blobBytes.set(sha, total + size - previous)
+  }
 
   /** A thumbnail was made beside a blob: it counts towards the cap with it. */
   const noteDerivative = (sha: string, path: string) =>
-    Effect.promise(async () => {
-      const size = await stat(join(options.dataDir, path)).then(
-        (s) => s.size,
-        () => 0
-      )
-      if (blobBytes.has(sha)) blobBytes.set(sha, blobBytes.get(sha)! + size)
-    })
+    Effect.promise(() =>
+      withBlob(sha, async () => {
+        const fullPath = join(options.dataDir, path)
+        const size = await stat(fullPath).then(
+          (s) => s.size,
+          () => 0
+        )
+        countDerivative(sha, fullPath, size)
+      })
+    )
 
   /** Keeps an entry past its age while held; the returned effect lets go. */
   const pin = (key: CacheKey) => {
@@ -264,7 +349,7 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
   const clearUser = (user: string, source: string | null) =>
     Effect.promise(async () => {
       for (const [k, entry] of [...index])
-        if (entry.key.user === user && (source === null || entry.key.source === source)) await drop(k)
+        if (entry.key.user === user && (source === null || entry.key.source === source)) await drop(k, entry)
     })
 
   /** Rebuilds the index from the entry files, and removes blobs no entry names and stray temporary files. */
@@ -298,9 +383,10 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
       for (const name of await readdir(dir).catch(() => [] as Array<string>)) {
         const sha = name.slice(0, 64)
         if (!BLOB.test(sha) || !blobRefs.has(sha)) await unlink(join(dir, name)).catch(() => undefined)
-        else if (name !== sha && !name.endsWith(".tmp"))
-          blobBytes.set(sha, (blobBytes.get(sha) ?? 0) + (await stat(join(dir, name))).size)
-        else if (name.endsWith(".tmp")) await unlink(join(dir, name)).catch(() => undefined)
+        else if (name !== sha && !name.endsWith(".tmp")) {
+          const path = join(dir, name)
+          countDerivative(sha, path, (await stat(path)).size)
+        } else if (name.endsWith(".tmp")) await unlink(join(dir, name)).catch(() => undefined)
       }
     }
   }
@@ -323,11 +409,13 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
 
   return {
     get,
+    getBlob,
     // Preview reads must not refresh timestamps, evict, or write anything, even on a miss.
     peek: (key: CacheKey) => Effect.sync(() => index.get(keyString(key)) ?? null),
     put,
     readBlob,
-    remove: (key: CacheKey) => Effect.promise(() => drop(keyString(key))),
+    withBlobFile,
+    remove: (key: CacheKey, expected: CacheEntry) => Effect.promise(() => drop(keyString(key), expected)),
     noteDerivative,
     pin,
     withDraftBases,

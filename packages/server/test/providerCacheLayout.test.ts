@@ -1,9 +1,11 @@
 // Where cache markers go by default, per provider (liveapi F3, F4, F5, F8), and the documented
 // minimum cacheable sizes the estimate respects (F6). Real requests through a mock provider.
 import { assert, describe, it } from "@effect/vitest"
+import { totalInputTokens } from "@dreamspan/shared/usage.ts"
 import { Effect } from "effect"
 import { applyRouterCacheControl } from "../src/providers/breakpoints.ts"
 import { documentedCacheMinimum, documentedCachePolicy } from "../src/providers/cachePolicy.ts"
+import { pricedCost } from "../src/providers/usage.ts"
 import { Reader } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { generateReply } from "./support/generation.ts"
@@ -122,14 +124,27 @@ describe("default cache markers", () => {
         )
       )
       const api = yield* client()
-      yield* generateReply(api, {
+      const { version } = yield* generateReply(api, {
         connection: { kind: "openrouter", baseUrl: mock.url, apiKey: "synthetic-key" },
         modelKey: "google/gemini-3.5-flash-lite",
         model: {},
         content: "Read me the lantern entry."
       })
       const [row] = yield* api.ListLlmRequests({ limit: 1, before: null })
-      assert.deepInclude(row!.counts, { inputUncached: 7, cacheRead: 4746, cacheWrite: 4746 })
+      assert.deepInclude(row!.counts, { inputTotal: 4753, inputUncached: 7, cacheRead: 4746, cacheWrite: 4746 })
+      const inspector = yield* api.GetRunContext({ versionId: version.id })
+      assert.strictEqual(totalInputTokens(inspector.requests[0]!.counts), 4753)
+      const [metrics] = yield* api.GetVersionMetrics({ versionIds: [version.id] })
+      assert.strictEqual(metrics?.inputTotal, 4753)
+      const priced = pricedCost(row!.counts, {
+        input: 1,
+        cacheRead: 2,
+        cacheWrite: 3,
+        output: 4,
+        tiers: [{ inputTokensAbove: 8000, input: 10, output: 40 }]
+      })
+      assert.strictEqual(priced?.rates.input, 1)
+      assert.strictEqual(priced?.amount, (7 + 4746 * 2 + 4746 * 3 + 5 * 4) / 1e6)
       const body = mock.requests().at(-1)!.body!
       const at = markedAt(body.messages as Array<WireMessage>)
       assert.strictEqual(at.length, 1)

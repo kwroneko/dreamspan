@@ -19,6 +19,7 @@ import {
   toModel
 } from "./providers.ts"
 import { query } from "./tx.ts"
+import { recordedPromptTotal } from "./requestInput.ts"
 
 export const makeProviderReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -126,6 +127,7 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
         upstream: string | null
         started_at: number
         cost_formula: string
+        input_total: number | null
         input_uncached: number | null
         cache_read: number | null
         cache_write: number | null
@@ -134,7 +136,7 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
         reasoning: number | null
       }>`
         SELECT r.id, r.connection_id, c.kind, r.model_id, r.model_key, r.upstream, r.started_at, r.cost_formula,
-          r.input_uncached, r.cache_read, r.cache_write, r.cache_write_long, r.output, r.reasoning
+          ${recordedPromptTotal(sql, "r.")} AS input_total, r.input_uncached, r.cache_read, r.cache_write, r.cache_write_long, r.output, r.reasoning
         FROM llm_requests r INDEXED BY llm_requests_owner JOIN connections c ON c.id = r.connection_id
         WHERE r.owner_user_id = ${userId}
           AND (r.started_at > ${afterAt} OR (r.started_at = ${afterAt} AND r.id > ${afterId}))
@@ -153,6 +155,7 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
             upstream: row.upstream,
             startedAt: row.started_at,
             formula: row.cost_formula,
+            ...(row.input_total === null ? {} : { inputTotal: row.input_total }),
             inputUncached: row.input_uncached,
             cacheRead: row.cache_read,
             cacheWrite: row.cache_write,
@@ -211,7 +214,7 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
       ),
 
     ListLlmRequests: ({ userId, limit, before }) =>
-      sql<LlmRequestRow>`SELECT * FROM llm_requests
+      sql<LlmRequestRow>`SELECT *, ${recordedPromptTotal(sql)} AS input_total FROM llm_requests
         WHERE owner_user_id = ${userId}
           AND (started_at < ${before?.startedAt ?? Number.MAX_SAFE_INTEGER}
             OR (started_at = ${before?.startedAt ?? Number.MAX_SAFE_INTEGER} AND id < ${before?.id ?? ""}))

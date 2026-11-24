@@ -28,7 +28,7 @@ const tone = (status: string) =>
 
 /** Total input, cache included, as the request inspector counts it. */
 const inputOf = (row: ActivityRow) =>
-  row.input === null ? null : row.input + (row.cacheRead ?? 0) + (row.cacheWrite ?? 0)
+  row.inputTotal ?? (row.input === null ? null : row.input + (row.cacheRead ?? 0) + (row.cacheWrite ?? 0))
 
 function Row({ row, session, onJump }: { row: ActivityRow; session: ChatSession; onJump: (slot: SlotId) => void }) {
   const status = statusOf(row.status)

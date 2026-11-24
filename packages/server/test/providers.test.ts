@@ -701,11 +701,11 @@ describe("usage ledger", () => {
                 ...unknownCounts,
                 inputUncached: i === 0 ? 99999 : 50,
                 cacheRead: 100,
-                cacheWrite: 50,
+                cacheWrite: i === 1 ? 100 : 50,
                 output: 1
               },
               usageSource: i === 33 ? "estimated" : "reported",
-              rawUsage: null,
+              rawUsage: i === 1 ? { prompt_tokens: 150 } : null,
               reportedCost: null,
               cost: null,
               error: null
@@ -718,7 +718,7 @@ describe("usage ledger", () => {
           modelKey: "synthetic",
           tokenizer: "o200k_base"
         })
-        assert.deepStrictEqual(calibration, { ratio: 2, samples: 32 })
+        assert.deepStrictEqual(calibration, { ratio: (31 * 200 + 150) / 3200, samples: 32 })
       }).pipe(Effect.provide(database()))
   )
 
