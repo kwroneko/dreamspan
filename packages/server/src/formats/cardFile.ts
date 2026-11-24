@@ -154,22 +154,27 @@ export const readCardFile = (bytes: Uint8Array, limits: Limits = defaultLimits):
 }
 
 /** One card's fields with the changes made, or why they can't be. */
-const applied = (fields: Json, changes: ReadonlyArray<CardFileChange>): { fields: Json } | { error: string } => {
+const applied = (
+  fields: Json,
+  changes: ReadonlyArray<CardFileChange>,
+  v1: boolean
+): { fields: Json } | { error: string } => {
   const out: Json = { ...fields }
   for (const change of changes) {
-    const field = ALIASES[change.field] ?? change.field
+    const canonical = ALIASES[change.field] ?? change.field
     if (change.items !== undefined) {
-      if (field !== "alternate_greetings") return { error: "Only alternate_greetings takes a list of items." }
-      out[field] = [...change.items]
+      if (canonical !== "alternate_greetings") return { error: "Only alternate_greetings takes a list of items." }
+      out[canonical] = [...change.items]
       continue
     }
-    if (!(TEXT_FIELDS as ReadonlyArray<string>).includes(field))
+    if (!(TEXT_FIELDS as ReadonlyArray<string>).includes(canonical))
       return { error: `The text field ${change.field} cannot be edited by this tool.` }
+    const field = v1 && canonical === "creator_notes" && out.creatorcomment != null ? "creatorcomment" : canonical
     if (change.text !== undefined) out[field] = change.text
     else {
       const current = typeof out[field] === "string" ? (out[field] as string) : ""
       if (!change.find || current.split(change.find).length !== 2)
-        return { error: `Find must occur exactly once in ${field}. Read the card file again.` }
+        return { error: `Find must occur exactly once in ${canonical}. Read the card file again.` }
       out[field] = current.replace(change.find, () => change.replace ?? "")
     }
   }
@@ -193,9 +198,10 @@ export const editCardFile = (
   if (before === null || located === null) return { error: "The file isn't a character card." }
   const roots: Array<Json> = []
   for (const root of located.roots) {
-    const result = applied(fieldsOf(root), changes)
+    const fields = fieldsOf(root)
+    const result = applied(fields, changes, fields === root)
     if ("error" in result) return result
-    roots.push(fieldsOf(root) === root ? result.fields : { ...root, data: result.fields })
+    roots.push(fields === root ? result.fields : { ...root, data: result.fields })
   }
   let written: Uint8Array
   try {

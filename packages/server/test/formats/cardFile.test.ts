@@ -86,6 +86,15 @@ describe("card files", () => {
     expect(edited).toEqual({ ...v1, name: "Gull Keeper" })
   })
 
+  it("edits the creator notes key used by a V1 card", () => {
+    const original = { name: "Gull", creatorcomment: "Original notes", creator_notes: "Preserved fallback" }
+    for (const change of [{ text: "Updated notes" }, { find: "Original", replace: "Updated" }]) {
+      const { bytes, after } = ok(editCardFile(json(original), [{ field: "creator_notes", ...change }]))
+      expect(after.doc.creator_notes).toBe("Updated notes")
+      expect(JSON.parse(Buffer.from(bytes).toString("utf8"))).toEqual({ ...original, creatorcomment: "Updated notes" })
+    }
+  })
+
   it("a CHARX keeps its other entries", () => {
     const icon = png()
     const before = writeZip([
@@ -110,7 +119,9 @@ describe("card files", () => {
     ])
     const limits = { ...defaultLimits, maxZipTotalBytes: 1024 }
     expect(readCardFile(before, limits)).toMatchObject({ format: "charx" })
-    expect(editCardFile(before, [edit[0]!], limits)).toEqual({ error: "The archive holds more than 1 KB uncompressed." })
+    expect(editCardFile(before, [edit[0]!], limits)).toEqual({
+      error: "The archive holds more than 1 KB uncompressed."
+    })
   })
 
   it("other files aren't cards, and a bad edit changes nothing", () => {
