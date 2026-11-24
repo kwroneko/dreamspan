@@ -303,6 +303,28 @@ describe("the store", () => {
     stop()
   })
 
+  it.each(["forward", "go"] as const)("browser %s restores the later visit to the same URL", async (action) => {
+    const cardex = "/?show=src.cardex"
+    const { browser, store, stop } = startStore(cardex)
+    const tab = focusedTab(store.layout)!.id
+    const view = mount(store, tab)
+    try {
+      await pushIn(view.history, "/")
+      view.history.push(cardex, { visit: 2 })
+      await settle()
+      browser.back()
+      expect(view.history.location.href).toBe("/")
+      if (action === "forward") browser.forward()
+      else browser.go(1)
+      expect(view.history.location.href).toBe(cardex)
+      expect(store.shownEntry(tab)?.state?.visit).toBe(2)
+      expect(store.stepLabel(tab, 1)).toBeNull()
+    } finally {
+      view.stop()
+      stop()
+    }
+  })
+
   it("a reload gives each tab its history back from session storage; closing a tab drops it", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
     let saved: unknown = null

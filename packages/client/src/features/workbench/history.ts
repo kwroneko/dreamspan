@@ -86,10 +86,12 @@ export const destination = (history: TabHistory, delta: number): TabEntry | unde
   return index < history.floor || index >= history.entries.length ? undefined : history.entries[index]
 }
 
-/** Where `href` is in the history right beside the entry shown (-1 back, 1 forward), else 0. */
-export const besideAt = (history: TabHistory, href: string): -1 | 0 | 1 => {
-  if (destination(history, -1)?.href === href) return -1
-  if (destination(history, 1)?.href === href) return 1
+/** Where `href` is beside the entry shown, preferring the browser's direction if both match. */
+export const besideAt = (history: TabHistory, href: string, traversal: number): -1 | 0 | 1 => {
+  const preferred = traversal > 0 ? 1 : -1
+  const other = preferred === 1 ? -1 : 1
+  if (destination(history, preferred)?.href === href) return preferred
+  if (destination(history, other)?.href === href) return other
   return 0
 }
 
