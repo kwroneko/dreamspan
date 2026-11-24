@@ -151,6 +151,38 @@ test.describe("work on in a workshop", () => {
       await shot("sent")
     })
 
+  test("a reload before the new workshop's composer has the item keeps it", async ({ page }) => {
+    await setUp(page, 1340, "dark")
+    const book = await admin((api) => api.CreateLorebook({ label: "Tide tables" }))
+    // The first SetComposerLibrary never reaches the server (a slow connection, say).
+    let held = true
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        if (held && typeof data === "string" && data.includes('"SetComposerLibrary"')) return
+        upstream.send(data)
+      })
+      upstream.onMessage((data) => socket.send(data))
+    })
+    await page.goto(`${server().url}/library/${book.id}`)
+    await page.getByRole("button", { name: "Work on in a workshop" }).click()
+    await page
+      .getByRole("menu", { name: "Work on in a workshop" })
+      .getByRole("menuitem", { name: "A new workshop" })
+      .click()
+    await expect(page).toHaveURL(/[?&]draft=/)
+    await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
+    // Not on the server yet: the URL still says what to hand over.
+    await page.waitForTimeout(1000)
+    expect(page.url()).toContain("workshopAttach=")
+    held = false
+    await page.reload()
+    const tiles = page.getByLabel("Attachments", { exact: true }).locator("[data-library-tile]")
+    await expect(tiles).toHaveCount(1)
+    await expect(tiles.first()).toHaveAttribute("data-library-tile", book.id)
+    await expect(page).not.toHaveURL(/workshopAttach=/)
+  })
+
   test("a card's More menu has it as a submenu", async ({ page }) => {
     await setUp(page, 1340, "dark")
     const card = await admin((api) =>

@@ -24,15 +24,24 @@ export function StartWorkshopPage() {
   const draft = typeof search[DRAFT_PARAM] === "string" ? (search[DRAFT_PARAM] as string) : ""
   const composers = useLiveLibraryComposers()
   const composer = draft === "" ? undefined : composers.find((live) => live.chatId === draft)
-  // Handed over once, when the new workshop's composer is there.
+  // Handed over once, when the new workshop's composer is there. The URL keeps them until the
+  // server has them on its draft, so a reload before that hands them over again.
   const handed = useRef(false)
+  const shown = useRef(true)
+  useEffect(() => {
+    shown.current = true
+    return () => {
+      shown.current = false
+    }
+  }, [])
   useEffect(() => {
     if (handed.current || composer === undefined) return
     const ids = attachParam.split(",").filter((id) => id !== "")
     if (ids.length === 0) return
     handed.current = true
-    composer.add(ids)
-    setAttach("", true)
+    void composer.add(ids).then((ok) => {
+      if (ok && shown.current) setAttach("", true)
+    })
   }, [composer, attachParam, setAttach])
   return (
     <TitledDraftChatPage

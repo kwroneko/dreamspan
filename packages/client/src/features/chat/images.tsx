@@ -1071,7 +1071,7 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
   )
   useLayoutEffect(() => {
     liveRef.current = {
-      add: (refIds) => library?.add(refIds),
+      add: (refIds) => library?.add(refIds) ?? Promise.resolve(false),
       // Once its tab is shown, the frame showing it is the focused one.
       focus: () => requestAnimationFrame(() => focusComposer())
     }
