@@ -5,7 +5,13 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { ServerResponse } from "node:http"
 import { Effect } from "effect"
-import { encodeEventStreamMessage, eventStreamMessages, parseAwsKey, signV4 } from "../src/providers/bedrock.ts"
+import {
+  bedrockKind,
+  encodeEventStreamMessage,
+  eventStreamMessages,
+  parseAwsKey,
+  signV4
+} from "../src/providers/bedrock.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { anthropicSse, startMockProvider, type Handler, type Recorded } from "./support/mockProvider.ts"
@@ -130,6 +136,32 @@ describe("AWS event streams", () => {
     await assertRejects(collect(chunks(corrupted, 64)), /checksum/)
     await assertRejects(collect(chunks(joined.subarray(0, joined.length - 3), 64)), /mid-message/)
   })
+
+  const translated = async (...events: ReadonlyArray<readonly [string, unknown]>) => {
+    const body = Buffer.concat(
+      events.map(([type, payload]) =>
+        encodeEventStreamMessage(
+          { ":event-type": type, ":message-type": "event" },
+          new TextEncoder().encode(JSON.stringify(payload))
+        )
+      )
+    )
+    const baseUrl = bedrockKind.defaultBaseUrl!
+    const fetch = bedrockKind.transport!(async () => new Response(body), { baseUrl, apiKey: "synthetic", settings: {} })
+    return (await fetch(`${baseUrl}/v1/messages`, { body: JSON.stringify({ model: MODEL, stream: true }) })).text()
+  }
+
+  it("skips metadata and continues to the buffered model event", async () => {
+    const event = JSON.stringify({ type: "message_stop" })
+    assert.strictEqual(
+      await translated(["metadata", {}], ["metadata", {}], ["chunk", { bytes: Buffer.from(event).toString("base64") }]),
+      `event: message_stop\ndata: ${event}\n\n`
+    )
+  }, 2_000)
+
+  it("rejects a chunk envelope without a bytes string", async () => {
+    await assertRejects(translated(["chunk", { bytes: 1 }]), /chunk.*bytes/)
+  }, 2_000)
 })
 
 const assertRejects = async (promise: Promise<unknown>, pattern: RegExp) => {
