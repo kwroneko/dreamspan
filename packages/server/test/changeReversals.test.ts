@@ -204,7 +204,11 @@ describe("revert a change", () => {
       const [still] = yield* api.ListRevisions({ refId: f.card, limit: 1 })
       assert.strictEqual(still!.id, before!.id)
       // Keep now: the rest is reverted, the description stays.
-      const rest = yield* api.RevertChange({ effects: keys, choices: { [DESCRIPTION]: "now" } })
+      const rest = yield* api.RevertChange({
+        effects: keys,
+        expectedHead: conflict.head,
+        choices: { [DESCRIPTION]: "now" }
+      })
       assert.deepStrictEqual(rest.fields, [PERSONALITY])
       let now = yield* f.doc()
       assert.include(String(now.description), "crabs at noon")
@@ -213,6 +217,7 @@ describe("revert a change", () => {
       const taken = yield* api.RevertChange({
         effects: keys,
         fields: [DESCRIPTION],
+        expectedHead: (yield* api.OpenEditor({ refId: f.card })).ref.headRevisionId,
         choices: { [DESCRIPTION]: "before" }
       })
       assert.deepStrictEqual(taken.fields, [DESCRIPTION])
@@ -222,6 +227,37 @@ describe("revert a change", () => {
       assert.strictEqual(effect!.reversion?.fields.length, 2)
       // Two reverts hold its fields, newest first.
       assert.deepStrictEqual(effect!.reversion?.reversals, [taken.reversalId!, rest.reversalId!])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("refreshes stale choices without writing either field", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      yield* agentEdit(
+        f,
+        [
+          { field: "description", text: "Assistant edit." },
+          { field: "personality", text: "Loud." }
+        ],
+        "c1"
+      )
+      const effects = yield* f.editKeys(["c1"])
+      yield* userEdit(api, f.card, "description", "First conflicting value.")
+      const preview = yield* api.RevertChange({ effects, dryRun: true })
+      yield* userEdit(api, f.card, "description", "New unseen edit.")
+      const stale = yield* api.RevertChange({
+        effects,
+        expectedHead: preview.head,
+        choices: { [DESCRIPTION]: "before" }
+      })
+      assert.isNull(stale.reversalId)
+      assert.notStrictEqual(stale.head, preview.head)
+      assert.strictEqual(stale.conflicts[0]?.now, "New unseen edit.")
+      const now = yield* f.doc()
+      assert.strictEqual(now.description, "New unseen edit.")
+      assert.strictEqual(now.personality, "Loud.")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -294,7 +330,11 @@ describe("revert a change", () => {
         conflict.conflicts.map((c) => c.field),
         [unitKey(["entries", "uid=1"])]
       )
-      const rest = yield* api.RevertChange({ effects: keys, choices: { [unitKey(["entries", "uid=1"])]: "now" } })
+      const rest = yield* api.RevertChange({
+        effects: keys,
+        expectedHead: conflict.head,
+        choices: { [unitKey(["entries", "uid=1"])]: "now" }
+      })
       assert.deepStrictEqual(rest.fields, [unitKey(["entries", "uid=2"])])
       const now = yield* api.OpenEditor({ refId: book.id })
       assert.deepStrictEqual(now.doc.entries, [])

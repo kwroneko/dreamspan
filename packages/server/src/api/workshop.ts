@@ -144,6 +144,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
   type ReversalInput = {
     readonly fields?: ReadonlyArray<string>
     readonly choices?: Readonly<Record<string, "now" | "before">>
+    readonly expectedHead?: string
     readonly dryRun?: boolean
     readonly message?: string
   }
@@ -194,6 +195,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
           path,
           patches: selected.map(({ patch }) => patch).reverse(),
           choices: options.choices,
+          expectedHead: options.expectedHead,
           dryRun: options.dryRun,
           record: (written) =>
             writer.RecordFileReversal({
@@ -224,6 +226,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
           path: record.targetId,
           patches: [{ original: docOfUnits(record.before), changed: docOfUnits(record.after), fields }],
           choices: options.choices,
+          expectedHead: options.expectedHead,
           dryRun: options.dryRun,
           record: (written) =>
             writer.RecordFileReversal({

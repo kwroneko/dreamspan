@@ -7,6 +7,7 @@
 import {
   changedUnits,
   docOfUnits,
+  matchesReversalHead,
   pickedUnits,
   planGroupedReversal,
   planReversal,
@@ -190,12 +191,14 @@ export const guarded = (kind: EntityKind, head: Doc, next: Doc): Doc => {
 interface Options {
   readonly fields?: ReadonlyArray<string> | undefined
   readonly choices?: Readonly<Record<string, "now" | "before">> | undefined
+  readonly expectedHead?: string | undefined
   readonly dryRun?: boolean | undefined
   readonly message?: string | undefined
 }
 
-const outcome = (plan: ReversalPlan, reversalId: string | null = null): ReversalOutcome => ({
+const outcome = (plan: ReversalPlan, head: string, reversalId: string | null = null): ReversalOutcome => ({
   reversalId,
+  head,
   fields: plan.fields,
   conflicts: plan.conflicts.map((c) => ({
     field: c.field,
@@ -268,7 +271,7 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
     /** Takes `plan` into the item as a new revision and records it; a dry run or conflict writes nothing. */
     const apply = (
       userId: UserId,
-      refId: string,
+      ref: Effect.Success<ReturnType<typeof lib.ownedRef>>,
       plan: ReversalPlan,
       options: Options,
       record: Omit<
@@ -278,9 +281,14 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
       defaultMessage: string
     ) =>
       Effect.gen(function* () {
-        if (plan.conflicts.length > 0 || options.dryRun === true || plan.doc === null) return outcome(plan)
-        if (plan.fields.length === 0) return outcome(plan)
-        const ref = yield* lib.ownedRef(userId, refId)
+        const headId = ref.head_revision_id
+        if (
+          plan.doc === null ||
+          options.dryRun === true ||
+          plan.fields.length === 0 ||
+          !matchesReversalHead(headId, options)
+        )
+          return outcome(plan, headId)
         const head = yield* lib.loadDoc(ref.head_revision_id)
         const valid = validateDoc(ref.kind, guarded(ref.kind, head, plan.doc as Doc))
         if (!valid.ok) return yield* refuse(`It can't be reverted: ${valid.problems.join(" ")}`)
@@ -308,7 +316,7 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
           headAfter: change.ref.headRevisionId,
           plan
         })
-        return outcome(plan, id)
+        return outcome(plan, headId, id)
       })
 
     return {
@@ -340,10 +348,14 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
             patches.push({ original, changed, fields })
             covered.push({ rolloutId: effect.rolloutId, toolCallId: effect.toolCallId, seq: effect.seq, of, fields })
           }
-          const plan = planGroupedReversal(patches.reverse(), yield* lib.loadDoc(ref.head_revision_id), options.choices)
+          const plan = planGroupedReversal(
+            patches.reverse(),
+            yield* lib.loadDoc(ref.head_revision_id),
+            matchesReversalHead(ref.head_revision_id, options) ? options.choices : undefined
+          )
           return yield* apply(
             userId,
-            ref.id,
+            ref,
             plan,
             options,
             { chatId: first.chat_id, action: "revert", reversesId: null, effects: covered },
@@ -371,7 +383,9 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
             changed: docOfUnits(JSON.parse(record.after_json) as Record<string, unknown>),
             now: yield* lib.loadDoc(head.head_revision_id),
             fields,
-            ...(options.choices ? { choices: options.choices } : {})
+            ...(options.choices && matchesReversalHead(head.head_revision_id, options)
+              ? { choices: options.choices }
+              : {})
           })
           const effects = yield* sql<{
             rollout_id: string
@@ -382,7 +396,7 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
           }>`SELECT * FROM change_reversal_effects WHERE reversal_id = ${record.id}`
           return yield* apply(
             userId,
-            ref.id,
+            head,
             plan,
             options,
             {

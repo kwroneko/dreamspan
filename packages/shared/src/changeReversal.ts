@@ -140,6 +140,15 @@ interface ReversalConflict {
 /** For a conflicting field: keep it as it is now, or take it as it was before the change. */
 export type ConflictChoice = "now" | "before"
 
+/** Choices only apply to the head the user saw. */
+export const matchesReversalHead = (
+  head: string,
+  options: {
+    readonly expectedHead?: string | undefined
+    readonly choices?: Readonly<Record<string, ConflictChoice>> | undefined
+  }
+) => options.expectedHead === head || (options.expectedHead === undefined && options.choices === undefined)
+
 export interface ReversalPlan {
   /** The document with the fields taken back; null when a conflict is left. */
   readonly doc: Record<string, unknown> | null

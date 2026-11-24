@@ -170,12 +170,14 @@ function Resolve({
   item,
   kind,
   conflicts,
+  head,
   fields,
   onDone
 }: {
   item: ItemChange
   kind: EntityKind
   conflicts: Conflicts
+  head: string
   /** The fields the revert was for (one field's Revert); all of the change's when absent. */
   fields: ReadonlyArray<string> | undefined
   onDone: () => void
@@ -184,21 +186,25 @@ function Resolve({
   const [choices, setChoices] = useState<Record<string, "now" | "before">>(() =>
     Object.fromEntries(conflicts.map((c) => [c.field, "now"]))
   )
-  const [left, setLeft] = useState(conflicts)
+  const [preview, setPreview] = useState({ head, conflicts })
+  const left = preview.conflicts
   const revertRest = async () => {
     const result = await action.run(
       (client) =>
         client("RevertChange", {
           effects: liveKeys(item),
           choices,
+          expectedHead: preview.head,
           message: revertMessage(item),
           ...(fields ? { fields } : {})
         }),
       CHANGE_KEYS
     )
     if (!result.ok) return
-    if (result.value.conflicts.length > 0) setLeft(result.value.conflicts)
-    else onDone()
+    if (result.value.head !== preview.head || result.value.conflicts.length > 0) {
+      setPreview({ head: result.value.head, conflicts: result.value.conflicts })
+      setChoices(Object.fromEntries(result.value.conflicts.map((c) => [c.field, "now"])))
+    } else onDone()
   }
   return (
     <section
@@ -208,8 +214,9 @@ function Resolve({
     >
       <h2 className="text-sm font-semibold">Changed since</h2>
       <p className="text-xs text-muted">
-        {left.length === 1 ? "This field was" : "These fields were"} changed after this reply, so the change can’t be
-        taken out by itself. Choose for each, then revert the rest.
+        {left.length === 0
+          ? "The item changed again. Review its current state before reverting."
+          : `${left.length === 1 ? "This field was" : "These fields were"} changed after this reply, so the change can’t be taken out by itself. Choose for each, then revert the rest.`}
       </p>
       {left.map((conflict) => {
         const path = unitPath(conflict.field)
@@ -272,7 +279,11 @@ const useReplyItem = (reply: ChangeReply, match: (item: ItemChange) => boolean) 
 }
 
 /** What a revert that conflicts shows: its conflicts, and the fields it was for. */
-type Resolving = { readonly conflicts: Conflicts; readonly fields: ReadonlyArray<string> | undefined } | null
+type Resolving = {
+  readonly conflicts: Conflicts
+  readonly head: string
+  readonly fields: ReadonlyArray<string> | undefined
+} | null
 
 /** The conflicts to show: those a revert found, or on `resolve=1`, a dry run's. */
 const useResolving = (item: ItemChange | undefined, asked: boolean) => {
@@ -285,7 +296,7 @@ const useResolving = (item: ItemChange | undefined, asked: boolean) => {
       .run((client) => client("RevertChange", { effects: liveKeys(item), dryRun: true }), [])
       .then((result) => {
         if (result.ok && result.value.conflicts.length > 0)
-          setResolving({ conflicts: result.value.conflicts, fields: undefined })
+          setResolving({ conflicts: result.value.conflicts, head: result.value.head, fields: undefined })
       })
     // Once per open: the item's later changes don't ask again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -409,7 +420,7 @@ function ReplyParts({
   const { item, gone } = useReplyItem(reply, match)
   const [resolving, setResolving] = useResolving(item, asked)
   const show = (outcome: ReversalOutcome, fields?: ReadonlyArray<string>) =>
-    setResolving({ conflicts: outcome.conflicts, fields })
+    setResolving({ conflicts: outcome.conflicts, head: outcome.head, fields })
   return children({
     item,
     gone: gone && !item,
@@ -421,6 +432,7 @@ function ReplyParts({
           item={item}
           kind={kind}
           conflicts={resolving.conflicts}
+          head={resolving.head}
           fields={resolving.fields}
           onDone={() => setResolving(null)}
         />

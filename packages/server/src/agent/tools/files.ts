@@ -81,6 +81,7 @@ import { CARD_FILE_BYTES, makeCardFileTools } from "./cardFiles.ts"
 import { visibleDoc } from "../libraryView.ts"
 import {
   type ConflictChoice,
+  matchesReversalHead,
   planGroupedReversal,
   type ReversalPatch,
   type ReversalPlan,
@@ -2106,6 +2107,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
       readonly path: string
       readonly patches: ReadonlyArray<ReversalPatch>
       readonly choices?: Readonly<Record<string, ConflictChoice>> | undefined
+      readonly expectedHead?: string | undefined
       readonly dryRun?: boolean | undefined
       readonly record: (written: {
         readonly before: string
@@ -2130,13 +2132,16 @@ export const makeFileTools = (deps: FileToolDeps) => {
             return yield* new EffectUndoRefused({ message: "The card file isn't there any more." })
           const info = yield* formats.readCardFile(current.bytes).pipe(Effect.orElseSucceed(() => null))
           if (!info) return yield* new EffectUndoRefused({ message: "The file isn't a card file any more." })
+          const beforeHash = sha256(current.bytes)
+          const matches = matchesReversalHead(beforeHash, input)
           const plan = planGroupedReversal(
             input.patches,
             visibleDoc("card", info.doc) as Record<string, unknown>,
-            input.choices
+            matches ? input.choices : undefined
           )
           const outcome = (reversalId: string | null) => ({
             reversalId,
+            head: beforeHash,
             fields: plan.fields,
             conflicts: plan.conflicts.map((c) => ({
               field: c.field,
@@ -2144,7 +2149,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
               ...(c.before === undefined ? {} : { before: c.before })
             }))
           })
-          if (plan.doc === null || input.dryRun === true || plan.fields.length === 0) return outcome(null)
+          if (plan.doc === null || input.dryRun === true || plan.fields.length === 0 || !matches) return outcome(null)
           const doc = plan.doc
           const tops = [...new Set(plan.fields.map((f) => unitPath(f)[0]).filter((f) => f !== undefined))]
           const changes = tops.map((field) =>
@@ -2163,7 +2168,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
           deps.quota?.wrote(env.userId, next.byteLength)
           deps.onChanged?.(env.userId, [input.path])
           const id = yield* input.record({
-            before: sha256(current.bytes),
+            before: beforeHash,
             after: sha256(next),
             name: edited.after.name,
             plan
