@@ -206,25 +206,30 @@ const runWith =
     const onAbort = () => kill()
     signal.addEventListener("abort", onAbort, { once: true })
     if (signal.aborted) kill()
-    const exitCode = await new Promise<number | null>((done) => {
-      child.once("error", () => done(null))
+    const closed = new Promise<number | null>((done) => {
       child.once("close", (code) => done(code))
     })
-    clearTimeout(timer)
-    signal.removeEventListener("abort", onAbort)
-    // What it started in the background goes with it: its process group, and its cgroup (a PID
-    // namespace's processes went with its first).
-    if (child.pid !== undefined)
-      try {
-        process.kill(-child.pid, "SIGKILL")
-      } catch {
-        // The group is gone already.
+    const cleaned = new Promise<void>((done) => {
+      child.once("error", () => done())
+      child.once("exit", () => done())
+    }).then(async () => {
+      clearTimeout(timer)
+      signal.removeEventListener("abort", onAbort)
+      // A helper can keep the output pipes open. Stop the process group and cgroup as soon
+      // as the child exits so those pipes close and the remaining output can be read.
+      if (child.pid !== undefined)
+        try {
+          process.kill(-child.pid, "SIGKILL")
+        } catch {
+          // The group is gone already.
+        }
+      if (group) {
+        await group.kill()
+        return (await group.finish().catch(() => ({ memoryCapped: false }))).memoryCapped
       }
-    let memoryCapped = false
-    if (group) {
-      await group.kill()
-      memoryCapped = (await group.finish().catch(() => ({ memoryCapped: false }))).memoryCapped
-    }
+      return false
+    })
+    const [exitCode, memoryCapped] = await Promise.all([closed, cleaned])
     const head = Buffer.concat(headChunks)
     const joined = Buffer.concat(tailChunks)
     const tail = joined.subarray(Math.max(0, joined.length - KEEP_TAIL))
