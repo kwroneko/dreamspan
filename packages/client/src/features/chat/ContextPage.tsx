@@ -181,7 +181,9 @@ const sourceTarget = (
   if (item?.kind === "field")
     return { to: "library", ref, search: { at: [item.field] }, hint: "Opens this field in the card editor." }
   if (source.kind === "card") return { to: "library", ref, search: {}, hint: "Opens this card in the card editor." }
-  return { to: "library", ref, search: {}, hint: "Opens this context source." }
+  // Older captures only named the book's ref; a standalone lorebook ignores the card's focus.
+  const search = source.kind === "lorebook" && item === undefined ? { focus: CARD_LOREBOOK_FOCUS } : {}
+  return { to: "library", ref, search, hint: "Opens this context source." }
 }
 
 /** A box whose text isn't its source's text verbatim: a transform changed it after assembly. */
