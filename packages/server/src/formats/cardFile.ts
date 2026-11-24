@@ -8,7 +8,7 @@ import { ReportBuilder } from "@dreamspan/shared/importReport.ts"
 import { Predicate } from "effect"
 import { cardFromJson } from "./card.ts"
 import { cardTextChunk, decodeText, isPng, readChunks } from "./png.ts"
-import { defaultLimits, type Limits, parseJson } from "./safety.ts"
+import { defaultLimits, FormatError, type Limits, parseJson } from "./safety.ts"
 import { extract, isZip, readZip, writeZip } from "./zip.ts"
 
 export type CardFileFormat = "png" | "json" | "charx"
@@ -113,7 +113,7 @@ const locate = (bytes: Uint8Array, limits: Limits): Located | null => {
             const entry = entries.get(name)!
             return name === cardName
               ? { name, data: Buffer.from(JSON.stringify(edited, null, indentOf(text)), "utf8"), deflate: true }
-              : { name, data: extract(bytes, entry, limits, { used: 0 }), deflate: entry.method === 8 }
+              : { name, data: extract(bytes, entry, limits, budget), deflate: entry.method === 8 }
           })
         )
     }
@@ -197,7 +197,13 @@ export const editCardFile = (
     if ("error" in result) return result
     roots.push(fieldsOf(root) === root ? result.fields : { ...root, data: result.fields })
   }
-  const written = located.write(roots)
+  let written: Uint8Array
+  try {
+    written = located.write(roots)
+  } catch (error) {
+    if (error instanceof FormatError) return { error: error.message }
+    throw error
+  }
   const after = readCardFile(written, limits)
   if (after === null) return { error: "The edited card could not be read back." }
   return { bytes: written, before, after }

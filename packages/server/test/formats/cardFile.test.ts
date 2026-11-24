@@ -102,6 +102,17 @@ describe("card files", () => {
     ).toEqual(Buffer.from(icon))
   })
 
+  it("limits the total uncompressed bytes read when editing a CHARX", () => {
+    const before = writeZip([
+      { name: "card.json", data: json({ spec: "chara_card_v3", data: { name: "Wren" } }), deflate: true },
+      { name: "first.txt", data: Buffer.alloc(650), deflate: true },
+      { name: "second.txt", data: Buffer.alloc(650), deflate: true }
+    ])
+    const limits = { ...defaultLimits, maxZipTotalBytes: 1024 }
+    expect(readCardFile(before, limits)).toMatchObject({ format: "charx" })
+    expect(editCardFile(before, [edit[0]!], limits)).toEqual({ error: "The archive holds more than 1 KB uncompressed." })
+  })
+
   it("other files aren't cards, and a bad edit changes nothing", () => {
     expect(readCardFile(png())).toBeNull()
     expect(readCardFile(json({ hello: "world" }))).toBeNull()
