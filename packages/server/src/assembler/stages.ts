@@ -873,7 +873,7 @@ const resolveStage: AssemblerStage = {
           }
         }
         const piece = env.message(
-          entry.content || !entry.images?.length ? entry : { ...entry, content: "[Image]" },
+          entry.content || !entry.images?.length || entry.attachments?.length ? entry : { ...entry, content: "[Image]" },
           messages,
           at
         )
@@ -2831,7 +2831,7 @@ const attachmentsStage = sync("attachments", (assembly) => {
       piece: env.verbatim(
         `attachments:${entry.versionId}`,
         { kind: "message", slot: entry.slotId, version: entry.versionId },
-        text && text !== "[Image]" ? `${text}\n${lines}` : lines
+        text ? `${text}\n${lines}` : lines
       )
     }
   })

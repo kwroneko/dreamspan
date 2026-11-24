@@ -53,7 +53,7 @@ describe("workshop attachments", () => {
           Effect.promise(() =>
             startMockProvider((r, res) => {
               const body = r.body as unknown as { messages: Array<{ role: string; content?: unknown }> }
-              if (JSON.stringify(body.messages).includes("ATTACH TURN")) requests.push(body)
+              if (JSON.stringify(body.messages).includes("notes.txt")) requests.push(body)
               sse(res, completionChunks(["Read it."], {}))
             })
           ),
@@ -123,7 +123,7 @@ describe("workshop attachments", () => {
             chatId: chat.id,
             parentSlotId: chat.activeLeafSlotId,
             branch: false,
-            content: "ATTACH TURN: read my notes.",
+            content: "[Image]",
             images: [asImage(notes), asImage(picture)],
             imageDraftIds: ["n", "p"],
             composer: { draftId: draft.id, session: draft.session }
@@ -139,8 +139,9 @@ describe("workshop attachments", () => {
         const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
         yield* eventually(() => finished(events, reply.entry.version.id) !== undefined, 60_000)
         assert.strictEqual(finished(events, reply.entry.version.id)!.status, "complete")
-        const user = requests[0]!.messages.find((m) => text(m).includes("ATTACH TURN"))!
+        const user = requests[0]!.messages.find((m) => text(m).includes("notes.txt"))!
         const content = text(user)
+        assert.include(content, "[Image]\\n<attachment")
         assert.include(
           content,
           '<attachment filename=\\"notes.txt\\" type=\\"text/plain\\" size=\\"9 B\\" path=\\"/files/thesis/Attachments/notes.txt\\"/>'
