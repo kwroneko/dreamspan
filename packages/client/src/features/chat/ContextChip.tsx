@@ -4,8 +4,9 @@
 // (`/request/next`, NextRequestPage.tsx). The server works the size out with each pushed
 // estimate, from the request view the tab shows (`NextContext.size`, `GetNextRequest`), counted
 // locally: nothing is sent. What's typed is added once typing pauses (`restedText.ts`), so
-// keystrokes neither render this chip nor count anything. A chat not sent yet's chip
-// (draftRequest.tsx) shows the same popover for its first request.
+// keystrokes neither render this chip nor count anything. A new chat, pending until its first
+// turn, names its first request instead; the card-source start's chip (draftRequest.tsx) shows
+// the same popover for its first request.
 import type { ChatId } from "@dreamspan/shared/chat.ts"
 import type { TokenizerInfo } from "@dreamspan/shared/generation.ts"
 import { useNavigate } from "@tanstack/react-router"
@@ -82,7 +83,8 @@ export const ContextChip = memo(function ContextChip({
     <ContextPopover
       open={open}
       onOpenChange={setOpen}
-      request="next"
+      // A chat pending until its first turn (a new chat, DraftChatPage.tsx) has sent nothing yet.
+      request={view.chat?.status === "pending" ? "first" : "next"}
       tokens={tokens}
       maximum={maximum}
       reserve={reserve}
