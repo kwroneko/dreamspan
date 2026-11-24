@@ -29,21 +29,25 @@ export const PictureCrop = Schema.Struct({
 )
 export type PictureCrop = typeof PictureCrop.Type
 
+/** Allow one storage step for independently snapped picture and portrait coordinates. */
+export const pictureContainsCrop = (picture: PictureCrop, crop: PictureCrop) => {
+  const tolerance = 1 / CUTOUT_STEPS
+  return (
+    crop.x >= picture.x - tolerance &&
+    crop.y >= picture.y - tolerance &&
+    crop.x + crop.width <= picture.x + picture.width + tolerance &&
+    crop.y + crop.height <= picture.y + picture.height + tolerance
+  )
+}
+
 /** Portrait coordinates remain relative to the kept original. The optional picture bounds them. */
 export const AvatarCrop = Schema.Struct({
   ...PictureCrop.fields,
   picture: Schema.optionalKey(PictureCrop)
 }).check(
-  Schema.makeFilter((crop) => {
-    const p = crop.picture ?? WHOLE_PICTURE
-    return (
-      (crop.x >= p.x - 0.0001 &&
-        crop.y >= p.y - 0.0001 &&
-        crop.x + crop.width <= p.x + p.width + 0.0001 &&
-        crop.y + crop.height <= p.y + p.height + 0.0001) ||
-      "The portrait must lie inside the picture"
-    )
-  })
+  Schema.makeFilter(
+    (crop) => pictureContainsCrop(crop.picture ?? WHOLE_PICTURE, crop) || "The portrait must lie inside the picture"
+  )
 )
 export type AvatarCrop = typeof AvatarCrop.Type
 export const WHOLE_PICTURE: PictureCrop = { x: 0, y: 0, width: 1, height: 1 }

@@ -5,8 +5,8 @@
 // `portrait.cutout-chooser` (portraitParts.ts), so a plugin can replace it.
 import {
   type AvatarCrop,
-  cropPixels,
   defaultCrop,
+  pictureContainsCrop,
   PORTRAIT_RATIO,
   snapCrop,
   WHOLE_PICTURE
@@ -153,16 +153,9 @@ export function CutoutChooser({
     if (!image || !crop || next === tab) return
     if (tab === "picture") {
       setPicture(crop)
-      const kept =
-        portrait &&
-        portrait.x >= crop.x &&
-        portrait.y >= crop.y &&
-        portrait.x + portrait.width <= crop.x + crop.width &&
-        portrait.y + portrait.height <= crop.y + crop.height
-          ? portrait
-          : defaultPortrait(crop, image)
+      const kept = portrait && pictureContainsCrop(crop, portrait) ? portrait : defaultPortrait(crop, image)
       setPortrait(kept)
-      setBox(cropPixels(kept, image.width, image.height))
+      setBox(boxFrom(kept, image))
     } else {
       setPortrait(crop)
       setBox(boxFrom(picture, image))
@@ -181,14 +174,7 @@ export function CutoutChooser({
     if (!image || !crop) return
     const cut = tab === "picture" ? crop : picture
     const kept = tab === "portrait" ? crop : portrait
-    const chosen =
-      kept &&
-      kept.x >= cut.x &&
-      kept.y >= cut.y &&
-      kept.x + kept.width <= cut.x + cut.width &&
-      kept.y + kept.height <= cut.y + cut.height
-        ? kept
-        : defaultPortrait(cut, image)
+    const chosen = kept && pictureContainsCrop(cut, kept) ? kept : defaultPortrait(cut, image)
     onSave({
       ...snapCrop({ x: chosen.x, y: chosen.y, width: chosen.width, height: chosen.height }),
       ...(cut.x || cut.y || cut.width !== 1 || cut.height !== 1 ? { picture: snapCrop(cut) } : {})

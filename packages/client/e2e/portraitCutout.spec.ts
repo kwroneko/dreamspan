@@ -5,10 +5,12 @@
 // at 390 with touch. CUTOUT_SHOTS=<dir> saves the chooser's screenshots in both themes.
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
+import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import { openPanel } from "./support/panel.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { SHAPES, shapeCard } from "./support/shapes.ts"
+import { SHAPES, shapeCard, type Shape } from "./support/shapes.ts"
 import { cardFieldsTab } from "./support/cardEditor.ts"
+import { asUser } from "./support/rpc.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "20" })
 test.setTimeout(240_000)
@@ -26,6 +28,47 @@ const shoot = async (page: Page, name: string) => {
 const tall = SHAPES.find((shape) => shape.name === "Tall")!
 const wide = SHAPES.find((shape) => shape.name === "Wide")!
 const file = (name: string, bytes: Buffer) => ({ name, mimeType: "image/png", buffer: bytes })
+
+const importPicture = async (page: Page, shape: Shape) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const response = await page.request.post(`${server().url}/library/import?name=${shape.name}.png`, {
+    data: shapeCard(shape, 0),
+    headers: { origin: server().url, "content-type": "application/octet-stream" }
+  })
+  expect(response.ok()).toBeTruthy()
+  return ((await response.json()) as { library: { ref: LibraryRef } }).library.ref
+}
+
+const openPicture = async (page: Page, ref: LibraryRef, name: string) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${server().url}/library/${ref.id}`)
+  await cardFieldsTab(page, "Metadata")
+  await page.getByRole("tabpanel", { name: "Metadata" }).getByRole("button", { name: "Picture", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: `${name}'s picture` })
+  await expect(dialog.locator("[data-cutout-box]")).toBeVisible()
+  return dialog
+}
+
+test("opening the Portrait tab preserves a saved fractional crop", async ({ page }) => {
+  const name = "Fractional"
+  const ref = await importPicture(page, { name, width: 1000, height: 1000 })
+  const crop = {
+    x: 0.1004,
+    y: 0.3004,
+    width: 0.2,
+    height: 0.3,
+    picture: { x: 0.1004, y: 0.2004, width: 0.6, height: 0.6 }
+  }
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.SetCardAvatarCrop({ refId: ref.id, crop, expectedRowVersion: ref.rowVersion })
+  )
+  const dialog = await openPicture(page, ref, name)
+  await dialog.getByRole("button", { name: "Portrait", exact: true }).click()
+  await dialog.getByRole("button", { name: "Save cutout", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  const saved = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.OpenEditor({ refId: ref.id }))
+  expect(saved.doc).toMatchObject({ avatar_crop: crop })
+})
 
 let setup: Promise<{ refId: string; chat: string }> | null = null
 /** Tall's card (its editor's ref) and a chat with it, a greeting and a reply on screen. */
