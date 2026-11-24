@@ -133,8 +133,27 @@ export class Draft extends Schema.Class<Draft>("Draft")({
   /** Texts this write sent to recovered texts; reads return zero. */
   recovered: Schema.Int,
   displaced: Schema.NullOr(DraftDisplacement),
+  /**
+   * A form's save this write refused, its tab being out of date: the draft kept its current
+   * value, and the refused version is one step behind it in its history. Absent otherwise.
+   */
+  refused: Schema.optionalKey(DraftDisplacement),
   historyLength: Schema.Int
 }) {}
+
+/**
+ * A form's draft: one JSON object holding several fields. A save of one typed on a version
+ * that isn't the current one is refused, never merged (owner, 2026-11-24); text is saved on top.
+ */
+export const isFormContent = (content: string) => {
+  if (!content.startsWith("{")) return false
+  try {
+    const value: unknown = JSON.parse(content)
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+  } catch {
+    return false
+  }
+}
 
 /** One restorable state in a draft's history. Seq 0 is the text the draft started with. */
 export class DraftState extends Schema.Class<DraftState>("DraftState")({

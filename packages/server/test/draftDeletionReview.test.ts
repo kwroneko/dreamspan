@@ -96,8 +96,10 @@ it.live("deleting one text field in a JSON user draft must defeat an older form 
       content: JSON.stringify({ name: "", baseUrl: "https://example.invalid" })
     })
     assert.strictEqual(JSON.parse(cleared.content).name, "")
+    // A stale form is refused whole (owner, 2026-11-24): the deletion stands, the copy is offered back.
     const replay = yield* api.SaveUserDraft(stale)
-    assert.deepStrictEqual(JSON.parse(replay.content), { name: "", baseUrl: "https://example.invalid/last-keystroke" })
+    assert.deepStrictEqual(JSON.parse(replay.content), { name: "", baseUrl: "https://example.invalid" })
+    assert.strictEqual(replay.refused?.content, stale.content)
     // Fresh deliberate typing is allowed, and its new protected value survives another old form.
     const fresh = yield* api.SaveUserDraft({
       ...stale,
@@ -139,14 +141,12 @@ it.live("clearing nested or removed form inputs protects only those inputs", () 
         expectedRowVersion: first.rowVersion,
         expectedSession: first.session
       }
-      yield* api.SaveUserDraft({ ...base, content: JSON.stringify({ ...cleared, notes: "kept" }) })
-      const replay = yield* api.SaveUserDraft({
-        ...base,
-        content: JSON.stringify({ info: { name: "deleted nested name" }, notes: "last keystroke" })
-      })
-      const value = JSON.parse(replay.content) as { info: { name?: string | null }; notes: string }
-      assert.notStrictEqual(value.info.name, "deleted nested name")
-      assert.strictEqual(value.notes, "last keystroke")
+      const clear = yield* api.SaveUserDraft({ ...base, content: JSON.stringify({ ...cleared, notes: "kept" }) })
+      const stale = JSON.stringify({ info: { name: "deleted nested name" }, notes: "last keystroke" })
+      const replay = yield* api.SaveUserDraft({ ...base, content: stale })
+      // Refused whole (owner, 2026-11-24): the clear stands, and the stale copy is offered back.
+      assert.strictEqual(replay.content, clear.content)
+      assert.strictEqual(replay.refused?.content, stale)
     }
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
