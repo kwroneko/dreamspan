@@ -726,6 +726,13 @@ export class ChatSession {
         // A dropped socket ends the stream: subscribe again, and its Hello reloads.
         Effect.tapError(() => Effect.sync(() => this.activity(null))),
         Effect.retry({ schedule: Schedule.spaced("1 second"), while: (error) => !this.notFound(error) }),
+        // A new chat swept while this tab was away (its Deleted went out meanwhile): as if it
+        // came now, so the page opens another for the same entry.
+        Effect.catch((error) =>
+          this.notFound(error) && this.view.chat?.status === "pending"
+            ? Effect.sync(() => this.update({ deleted: true, loading: false }))
+            : Effect.fail(error)
+        ),
         Effect.catchCause((cause) =>
           Effect.sync(() => {
             if (!Cause.hasInterruptsOnly(cause)) this.update({ error: describeCause(cause).message, loading: false })

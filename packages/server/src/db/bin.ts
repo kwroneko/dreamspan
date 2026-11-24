@@ -1424,7 +1424,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       // typing filed while the card's name can still be read: no draft outlives its card.
       const pending = yield* sql.unsafe<{ id: string; owner_user_id: UserId }>(
         `SELECT DISTINCT c.id, c.owner_user_id FROM chats c JOIN state_events ev ON ev.chat_id = c.id
-         WHERE c.status = 'pending' AND ev.key = 'participant.join' /* chat:includes-pending: sweeps them */
+         WHERE c.status = 'pending' AND ev.key IN ('participant.join', 'card.swap') /* chat:includes-pending: sweeps them */
            AND ev.value_json ->> '$.entity' IN (SELECT target_id FROM bin_items WHERE kind = 'entity' AND (${where}))`,
         params
       )

@@ -5,6 +5,7 @@ import type { Chat, ChatId, EntityId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { DraftChatApi } from "@dreamspan/shared/draftChatApi.ts"
 import { startingPersona } from "@dreamspan/shared/personaLock.ts"
+import { foldState } from "@dreamspan/shared/state.ts"
 import { Effect, Option } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Reader, Writer } from "../db/Database.ts"
@@ -60,9 +61,33 @@ export const makeDraftChatHandlers = Effect.gen(function* () {
           draftFor === "empty"
             ? ["empty", ""]
             : [draftFor.slice(0, draftFor.indexOf(":")), draftFor.slice(draftFor.indexOf(":") + 1)]
-        const group = kind === "group" ? yield* reader.GroupChats({ userId: id, chatId: of as ChatId }) : null
+        // A new chat's own cast, not started yet (New chat with this cast there), has no group:
+        // its characters, who the user plays left out.
+        const unstarted = kind === "group" ? pending.find((chat) => chat.chatId === of) : undefined
+        const group =
+          kind === "group" && unstarted === undefined
+            ? yield* reader.GroupChats({ userId: id, chatId: of as ChatId })
+            : null
+        const own =
+          unstarted === undefined
+            ? null
+            : foldState(
+                yield* reader.StateEventsAt({
+                  userId: id,
+                  chatId: of as ChatId,
+                  slotId: null,
+                  forkId: null,
+                  displayEnd: true
+                })
+              )
         const cards: ReadonlyArray<EntityId> =
-          kind === "card" ? [of as EntityId] : group !== null ? group.group.members.map((m) => m.entityId) : []
+          kind === "card"
+            ? [of as EntityId]
+            : group !== null
+              ? group.group.members.map((m) => m.entityId)
+              : own !== null
+                ? (own.participants.filter((entity) => !own.playedByMe.includes(entity)) as unknown as ReadonlyArray<EntityId>)
+                : []
         // Who the user plays, once, as the page started it: the persona locked to a single card,
         // else the account default, either only while it is still a live persona (DESIGN §2.2).
         const defaults = yield* reader.GetGenerationDefaults({ userId: id })
