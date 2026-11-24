@@ -371,6 +371,49 @@ describe("agent note tools", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("lists a trailing inserted reply's note and permissions at the display end", () => {
+    const config = testConfig()
+    const model = scriptedModel()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider(model.handler)),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, events, chat, mira } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [{ key: "agent.enabled", value: { on: true } }]
+      })
+      const reader = yield* Reader
+      const userId = (yield* api.Whoami()).id
+      const at = { chatId: chat.id, forkId: chat.currentForkId!, slotId: version.slotId }
+      const { entry } = yield* reader.GetSlot({ userId, slotId: at.slotId, forkId: at.forkId })
+      model.run([
+        ["write_note", { title: "Injury", content: "A grey bandage." }],
+        ["edit_note", { note: "Injury", find: "grey", replace: "red" }]
+      ])
+      const inserted = yield* api.InsertMessage({
+        chatId: chat.id,
+        forkId: at.forkId,
+        anchor: at.slotId,
+        expectedRowVersion: entry.rowVersion,
+        body: { _tag: "Generate", speaker: mira.entityId }
+      })
+      yield* eventually(() => finished(events, inserted.entry.version.id) !== undefined)
+      const notes = yield* api.ListChatNotes(at)
+      assert.deepStrictEqual(
+        notes.map((note) => [note.doc.content, note.active]),
+        [["A red bandage.", true]]
+      )
+      assert.deepStrictEqual(
+        (yield* api.GetAgentPermissions(at)).notes.map((note) => [note.title, note.on]),
+        [["Injury", true]]
+      )
+      assert.isEmpty(yield* reader.ChatNoteEntries({ ...at, userId, cards: [] }))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("edit_card changes a costume through notes: the field once, the tail after, a swipe undoing both", () => {
     const config = testConfig()
     const model = scriptedModel()
