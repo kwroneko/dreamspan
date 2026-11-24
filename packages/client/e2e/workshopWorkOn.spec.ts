@@ -11,6 +11,7 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { startWorkshopProvider } from "./support/workshopProvider.ts"
+import { pendingSideChat } from "./support/workshopSideChat.ts"
 
 const shots = process.env.SCREENSHOT_DIR
 
@@ -294,6 +295,48 @@ test.describe("work on in a workshop", () => {
     const message = page.getByRole("article").filter({ hasText: "Read the tides." })
     const sent = message.getByLabel("Attached from your library").locator("[data-library-tile]")
     await expect(sent).toHaveCount(1)
+  })
+
+  test("a swept side workshop keeps a manual attachment when its open panel reconnects", async ({ page }) => {
+    await setUp(page, 1340, "dark")
+    const { story, side, book } = await admin((api) =>
+      Effect.gen(function* () {
+        const story = yield* api.CreateChat({ title: "Lighthouse story" })
+        const side = yield* api.OpenDraftChat({ draftFor: `side:${story.id}:${story.currentForkId ?? ""}` })
+        const book = yield* api.CreateLorebook({ label: "Lighthouse logs" })
+        const draft = yield* api.OpenComposer({ chatId: side.id, forkId: null })
+        yield* api.SetComposerLibrary({ chatId: side.id, draftId: draft.id, add: [book.id], remove: [] })
+        return { story, side, book }
+      })
+    )
+    let offline = false
+    const sockets: Array<{ close: () => Promise<void> }> = []
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      if (offline) return void socket.close()
+      sockets.push(socket)
+      socket.connectToServer()
+    })
+    await page.goto(`${server().url}/chats/${story.id}?panel=workshop&side.draft=${side.id}`)
+    const pending = pendingSideChat(page)
+    const tile = pending.locator(`[data-library-tile="${book.id}"]`)
+    await expect(pending).toHaveAttribute("data-side-chat", side.id)
+    await expect(tile).toBeVisible()
+
+    offline = true
+    for (const socket of sockets.splice(0)) await socket.close()
+    await admin((api) => api.LeaveDraftChat({ chatId: side.id }))
+    await expect
+      .poll(() =>
+        admin((api) =>
+          Effect.match(api.GetChat({ chatId: side.id }), { onFailure: (error) => error._tag, onSuccess: () => "open" })
+        )
+      )
+      .toBe("NotFound")
+    offline = false
+
+    await expect(pending).not.toHaveAttribute("data-side-chat", side.id, { timeout: 30_000 })
+    await expect(tile).toBeVisible()
+    expect(new URL(page.url()).searchParams.get("side.draft")).toBe(await pending.getAttribute("data-side-chat"))
   })
 
   test("a new workshop swept while its handover was retrying hands it to the one opened in its place (rev-dd3 #5)", async ({

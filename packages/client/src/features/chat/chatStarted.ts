@@ -2,7 +2,7 @@
 // started chat on it (branches, pins, the bin, threads, merges, summaries, export). Those
 // controls stay where they are, disabled, saying why (owner: no layout shifts, no buttons that
 // disappear), until its first turn starts it.
-import type { Chat } from "@dreamspan/shared/chat.ts"
+import type { Chat, ChatId } from "@dreamspan/shared/chat.ts"
 import type { DraftFor } from "@dreamspan/shared/draftChatApi.ts"
 
 /** Why a control that needs a started chat can't be used on a pending one. */
@@ -21,6 +21,10 @@ export const rememberDraftFor = (chatId: string, draftFor: DraftFor) => void dra
 export const draftEntryOf = (chatId: string) => draftEntries.get(chatId) ?? null
 /** A group's new chat: its persona pickers have no persona lock, which is a single chat's. */
 export const isGroupDraft = (chatId: string) => draftEntries.get(chatId)?.startsWith("group:") ?? false
+
+/** The predecessor to reopen when a pending chat is swept while shown. */
+export const reopenSweptDraft = (draftFor: DraftFor, shownId: ChatId | null) =>
+  draftFor.startsWith("workshop:") || draftFor.startsWith("side:") ? shownId : null
 
 /**
  * The pending chat each one opened in this tab took the place of (DraftChatPage.tsx): the one

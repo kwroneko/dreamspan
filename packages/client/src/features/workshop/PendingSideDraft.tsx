@@ -11,7 +11,7 @@ import { Button } from "../../ui/Button.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useCaller } from "../editor/caller.ts"
 import { chatPlaceKey } from "../chat/chatPlace.ts"
-import { rememberDraftFor } from "../chat/chatStarted.ts"
+import { rememberDraftFor, reopenSweptDraft } from "../chat/chatStarted.ts"
 import { carryLeftover, fileLeftover } from "../chat/composerDraft.ts"
 import { SkeletonMessages } from "../chat/SkeletonMessages.tsx"
 import { SIDE_CHAT_SCOPE } from "./sideChat.ts"
@@ -115,11 +115,11 @@ export function PendingSideDraft({
       onDeleted: () => {
         if (started.current) return
         replacing.current = true
-        setReopen(null)
+        setReopen(reopenSweptDraft(draftFor, shownId.current))
         setAttempt((n) => n + 1)
       }
     }),
-    [onCreated]
+    [draftFor, onCreated]
   )
   if (chat !== null)
     return (

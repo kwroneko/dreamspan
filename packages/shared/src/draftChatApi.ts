@@ -28,7 +28,8 @@ export class DraftChatApi extends RpcGroup.make(
    * Each call makes a fresh one with fresh greetings, and sweeps the user's pending chats that
    * no tab has had open for a minute (their typing to recovered texts). `reopen`: the one the
    * page's URL names, returned as it is when it is still the user's (committed or pending for
-   * the same entry), instead of a fresh one.
+   * the same entry), instead of a fresh one. For a swept workshop, it follows any replacement
+   * or opens one with the swept workshop's attachments.
    */
   Rpc.make("OpenDraftChat", {
     payload: { draftFor: DraftFor, reopen: Schema.optionalKey(ChatId) },

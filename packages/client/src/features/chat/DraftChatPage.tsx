@@ -22,7 +22,7 @@ import { useIsPanelTab } from "./panels.tsx"
 import { carryPanelFocus } from "./ChatPanels.tsx"
 import { seedChat } from "./session.ts"
 import { carryLeftover, fileLeftover } from "./composerDraft.ts"
-import { rememberDraftFor, rememberReplaced } from "./chatStarted.ts"
+import { rememberDraftFor, rememberReplaced, reopenSweptDraft } from "./chatStarted.ts"
 import { ChatSkeleton } from "./SkeletonMessages.tsx"
 import { FinishMeantTitle, meantTitle } from "./meantTitle.tsx"
 
@@ -172,8 +172,7 @@ function DraftChat({
         // Swept while open (no tab had it for a while; a reconnect after a long sleep, say): a
         // fresh one for the same entry, with no notice. The chat shown stays until it's here.
         replacing.current = true
-        const workshop = draftFor.startsWith("workshop:") || draftFor.startsWith("side:")
-        setReopen(workshop ? shownId.current : null)
+        setReopen(reopenSweptDraft(draftFor, shownId.current))
         setAttempt((n) => n + 1)
       }
     }),

@@ -38,41 +38,67 @@ export const composerLibrary = (sql: SqlClient.SqlClient) => {
       yield* owned(userId, chatId, draftId, true)
       return yield* list(userId, draftId)
     })
-  // One move consumes the swept source's item in the same transaction that attaches it.
-  const move = (userId: UserId, source: string, chatId: string, refId: string) =>
+  const append = (draftId: string, refId: string, kind: string) =>
+    sql`INSERT INTO composer_library (draft_id, ref_id, kind, position)
+      VALUES (${draftId}, ${refId}, ${kind},
+        (SELECT coalesce(max(position), 0) + 1 FROM composer_library WHERE draft_id = ${draftId}))
+      ON CONFLICT DO NOTHING`
+
+  const attachLive = (userId: UserId, draftId: string, refId: string) =>
     Effect.gen(function* () {
-      const [moved] = yield* sql`DELETE FROM swept_composer_library
-        WHERE chat_id = ${source} AND user_id = ${userId} AND ref_id = ${refId}
-        RETURNING ref_id`
-      if (moved === undefined) return false
+      const [ref] = yield* sql<{ kind: string }>`SELECT e.kind FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+        WHERE r.id = ${refId} AND e.owner_user_id = ${userId} AND e.kind IN ('card', 'lorebook', 'preset')
+          AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL`
+      if (!ref) return yield* new NotFound({ entity: "ref", id: refId })
+      yield* append(draftId, refId, ref.kind)
+    })
+
+  // An owned attachment can move while its item is in the bin or archived. The source,
+  // destination and all handover aliases change together in the caller's transaction.
+  const move = (userId: UserId, source: string, chatId: string, draftId: string, refId: string) =>
+    Effect.gen(function* () {
+      const [ref] = yield* sql<{ kind: string }>`SELECT e.kind FROM swept_composer_library s
+        JOIN entity_refs r ON r.id = s.ref_id JOIN entities e ON e.id = r.entity_id
+        WHERE s.chat_id = ${source} AND s.user_id = ${userId} AND s.ref_id = ${refId}
+          AND e.owner_user_id = ${userId} AND e.kind IN ('card', 'lorebook', 'preset') AND e.purged_at IS NULL`
+      if (ref === undefined) return false
+      yield* append(draftId, refId, ref.kind)
+      yield* sql`DELETE FROM swept_composer_library
+        WHERE chat_id = ${source} AND user_id = ${userId} AND ref_id = ${refId}`
       yield* sql`UPDATE composer_library_handovers SET chat_id = ${chatId}
         WHERE chat_id = ${source} AND user_id = ${userId} AND ref_id = ${refId}`
       return true
     })
 
-  const applyUrl = (userId: UserId, chatId: string, handover: ComposerLibraryHandover, refId: string) =>
+  const applyUrl = (
+    userId: UserId,
+    chatId: string,
+    draftId: string,
+    handover: ComposerLibraryHandover,
+    refId: string
+  ) =>
     Effect.gen(function* () {
       const { originChatId, operationId } = handover
       const [applied] = yield* sql<{ chat_id: string }>`SELECT chat_id FROM composer_library_handovers
         WHERE origin_chat_id = ${originChatId} AND user_id = ${userId}
           AND operation_id = ${operationId} AND ref_id = ${refId}`
-      if (applied !== undefined) return yield* move(userId, applied.chat_id, chatId, refId)
-      if (originChatId !== chatId) {
-        const moved = yield* move(userId, originChatId, chatId, refId)
-        if (!moved && !(yield* recentlySweptWorkshop(sql, userId, originChatId))) return false
+      if (applied !== undefined) {
+        yield* move(userId, applied.chat_id, chatId, draftId, refId)
+        return
+      }
+      const moved = originChatId !== chatId && (yield* move(userId, originChatId, chatId, draftId, refId))
+      if (!moved) {
+        if (originChatId !== chatId && !(yield* recentlySweptWorkshop(sql, userId, originChatId))) return
+        yield* attachLive(userId, draftId, refId)
       }
       yield* sql`INSERT INTO composer_library_handovers (origin_chat_id, user_id, operation_id, ref_id, chat_id)
         VALUES (${originChatId}, ${userId}, ${operationId}, ${refId}, ${chatId})`
-      return true
     })
 
-  const sweptForReplacement = (userId: UserId, source: string) =>
+  const sweptRefs = (userId: UserId, source: string) =>
     sql<{ refId: RefId }>`SELECT s.ref_id AS refId FROM swept_composer_library s
-      JOIN entity_refs r ON r.id = s.ref_id JOIN entities e ON e.id = r.entity_id
       WHERE s.chat_id = ${source} AND s.user_id = ${userId}
-        AND e.owner_user_id = ${userId} AND e.kind IN ('card', 'lorebook', 'preset')
-        AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL
-      ORDER BY s.position, s.ref_id LIMIT ${MAX_ITEMS}`.pipe(Effect.map((rows) => rows.map((row) => row.refId)))
+      ORDER BY s.position, s.ref_id`
 
   const set = (
     userId: UserId,
@@ -89,25 +115,14 @@ export const composerLibrary = (sql: SqlClient.SqlClient) => {
       for (const refId of add) {
         if (carriedFrom !== undefined) {
           // A carry needs the swept workshop's item even when a client also supplies a URL.
-          if (remove.includes(refId) || !(yield* move(userId, carriedFrom, chatId, refId))) continue
+          if (!remove.includes(refId)) yield* move(userId, carriedFrom, chatId, draftId, refId)
         } else if (handover !== undefined) {
-          if (status !== "pending" || remove.includes(refId) || !(yield* applyUrl(userId, chatId, handover, refId)))
-            continue
-        }
-        const [ref] = yield* sql<{
-          kind: string
-        }>`SELECT e.kind FROM entity_refs r JOIN entities e ON e.id = r.entity_id
-          WHERE r.id = ${refId} AND e.owner_user_id = ${userId} AND e.kind IN ('card', 'lorebook', 'preset')
-            AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL`
-        if (!ref) return yield* new NotFound({ entity: "ref", id: refId })
-        // After the last one there: several at once keep the order they were picked in.
-        yield* sql`INSERT INTO composer_library (draft_id, ref_id, kind, position)
-          VALUES (${draftId}, ${refId}, ${ref.kind},
-            (SELECT coalesce(max(position), 0) + 1 FROM composer_library WHERE draft_id = ${draftId}))
-          ON CONFLICT DO NOTHING`
+          if (status === "pending" && !remove.includes(refId)) yield* applyUrl(userId, chatId, draftId, handover, refId)
+        } else yield* attachLive(userId, draftId, refId)
       }
       const items = yield* list(userId, draftId)
-      if (items.length > MAX_ITEMS)
+      // Restoring binned items can put a composer over the limit. The user can still remove them.
+      if (add.length > 0 && items.length > MAX_ITEMS)
         return yield* new StorageError({
           reason: "constraint",
           operation: "SetComposerLibrary",
@@ -136,5 +151,5 @@ export const composerLibrary = (sql: SqlClient.SqlClient) => {
       yield* sql`DELETE FROM composer_library WHERE draft_id = ${draftId} AND ref_id IN ${sql.in(sent.map((item) => item.refId))}`
       return pins
     })
-  return { read, set, sweptForReplacement, takeForSend }
+  return { read, set, sweptRefs, move, takeForSend }
 }
