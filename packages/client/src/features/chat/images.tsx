@@ -785,10 +785,10 @@ function ImageScope({
   }
   // The Files tab's Attach to message (§6.1).
   useEffect(
-    () => onAttachRequest(session.chatId, (path) => add([], [path])),
-    // `add` reads its state through refs and the queue; one subscription per chat.
+    () => onAttachRequest(session, view.forkId, (path) => add([], [path])),
+    // `add` reads its state through refs and the queue; one subscription per view and fork.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.chatId, ready]
+    [session, view.forkId, ready]
   )
   const capture = () => {
     const captured = entries.filter((entry) => entry.mediaId && entry.saved && !entry.sending)

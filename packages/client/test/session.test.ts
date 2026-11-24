@@ -15,6 +15,7 @@ import type { ChatEvent, PathWindow } from "@dreamspan/shared/chatApi.ts"
 import { Cast } from "@dreamspan/shared/chatSetupApi.ts"
 import { AtomRegistry } from "effect/reactivity"
 import { describe, expect, it, vi } from "vitest"
+import { onAttachRequest, requestAttach } from "../src/features/chat/fileAttachments.ts"
 import { AUTO_POLICY, planReply, replyPolicies } from "../src/features/chat/replyPolicy.ts"
 
 // rpc.ts reads the page's location when imported.
@@ -979,4 +980,27 @@ describe("ChatSession", () => {
     s.dispose()
     registry.dispose()
   })
+})
+
+it("dispatches a Files attachment only to the initiating chat view and fork", () => {
+  const forkId = "fork" as ForkId
+  const otherFork = "other" as ForkId
+  const registry = AtomRegistry.make()
+  const left = new ChatSession(chatId, forkId, registry, "user")
+  const right = new ChatSession(chatId, forkId, registry, "user")
+  const attachLeft = vi.fn()
+  const attachRight = vi.fn()
+  const unbindLeft = onAttachRequest(left, forkId, attachLeft)
+  const unbindRight = onAttachRequest(right, forkId, attachRight)
+  try {
+    requestAttach(left, otherFork, "/files/wrong.txt")
+    requestAttach(left, forkId, "/files/notes.txt")
+    expect(attachLeft.mock.calls).toEqual([["/files/notes.txt"]])
+    expect(attachRight).not.toHaveBeenCalled()
+  } finally {
+    unbindLeft()
+    unbindRight()
+    left.dispose()
+    right.dispose()
+  }
 })

@@ -50,20 +50,23 @@ export const useFileAttachments = () => {
 /** A file dragged from the Files panel carries its path in this type (`FILE_DRAG`). */
 export const FILE_PATH_MIME = "application/x-rp-file-path"
 
-const requests = new Map<string, Set<(path: string) => void>>()
+type AttachRequest = {
+  readonly forkId: ChatView["forkId"]
+  readonly listener: (path: string) => void
+}
+const requests = new WeakMap<ChatSession, AttachRequest>()
 
-/** Asks the chat's composer to attach a file of Files (the Files tab's Attach to message). */
-export const requestAttach = (chatId: string, path: string) => {
-  for (const listener of requests.get(chatId) ?? []) listener(path)
+/** Asks the initiating view's composer to attach a file from its Files tab. */
+export const requestAttach = (session: ChatSession, forkId: ChatView["forkId"], path: string) => {
+  const request = requests.get(session)
+  if (request?.forkId === forkId) request.listener(path)
 }
 
 /** The composer's side of `requestAttach`; returns the unsubscribe. */
-export const onAttachRequest = (chatId: string, listener: (path: string) => void) => {
-  const listeners = requests.get(chatId) ?? new Set()
-  listeners.add(listener)
-  requests.set(chatId, listeners)
+export const onAttachRequest = (session: ChatSession, forkId: ChatView["forkId"], listener: (path: string) => void) => {
+  const request = { forkId, listener }
+  requests.set(session, request)
   return () => {
-    listeners.delete(listener)
-    if (listeners.size === 0) requests.delete(chatId)
+    if (requests.get(session) === request) requests.delete(session)
   }
 }
