@@ -1,4 +1,4 @@
-import { EntityId, ForkId, SlotId } from "./chat.ts"
+import { EntityId, ForkId, MessageLibrary, SlotId } from "./chat.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Chat } from "./chat.ts"
@@ -176,7 +176,11 @@ export const WorkshopStartFields = {
   ...WorkshopCreationFields,
   requestId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
   first: Schema.Union([
-    Schema.TaggedStruct("Send", { content: Schema.String }),
+    Schema.TaggedStruct("Send", {
+      content: Schema.String,
+      /** Cards, lorebooks and presets the first message carries (spec/WORKSHOP-CARDS.md §4.1 point 3). */
+      library: Schema.optionalKey(MessageLibrary)
+    }),
     Schema.TaggedStruct("Generate", { direction: Schema.String })
   ]),
   /** The picked speaker, if still in the new workshop's cast. Otherwise use its persona. */

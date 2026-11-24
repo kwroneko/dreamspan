@@ -11,8 +11,8 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { displayEndOf } from "./displayPath.ts"
 import { chatFork } from "./snippets.ts"
-import { stateEventsThrough } from "./stateRead.ts"
-import { agentWrittenNotes, notesNamed } from "./agentNotes.ts"
+import { stateEventRowsThrough } from "./stateRead.ts"
+import { agentWrittenNotes, notesCreated } from "./agentNotes.ts"
 
 const ownerOf = (doc: Doc) => doc.owner as { card?: string; chat?: string } | undefined
 const keyOf = (doc: Doc, events: ReadonlyArray<FoldableEvent> = []) => {
@@ -62,7 +62,7 @@ export const replacementConflict = Effect.fnUntraced(function* (
       AND (${owner.chat ?? null} IS NULL OR c.id = ${owner.chat ?? null})`
   for (const view of forks) {
     const tip = (yield* displayEndOf(sql, view.chat_id, view)) as SlotId | null
-    const rows = yield* stateEventsThrough(sql, view.chat_id, tip, view.id)
+    const rows = yield* stateEventRowsThrough(sql, view.chat_id, tip, view.id)
     const events = rows.map(
       (row) => ({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }) as FoldableEvent
     )
@@ -72,7 +72,7 @@ export const replacementConflict = Effect.fnUntraced(function* (
     if (owner.card && (!cards.has(owner.card) || (entity !== null && state.noteRevisions[entity] !== undefined)))
       continue
     const key = keyOf(doc, events)
-    const named = notesNamed(rows)
+    const named = yield* notesCreated(sql, rows, byAgent)
     for (const note of heads) {
       const noteOwner = ownerOf(note.doc)
       if (noteOwner?.chat !== view.chat_id && !(noteOwner?.card && cards.has(noteOwner.card))) continue

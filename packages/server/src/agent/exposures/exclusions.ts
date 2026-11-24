@@ -310,7 +310,8 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SetCardSourceRating: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetComposerChoice: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetComposerImage: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
-  SetComposerLibrary: "Not exposed: what's attached to the user's message is the user's choice (spec/WORKSHOP-CARDS.md §4.1).",
+  SetComposerLibrary:
+    "Not exposed: what's attached to the user's message is the user's choice (spec/WORKSHOP-CARDS.md §4.1).",
   SetConnectionCredential: "User-only security, consent, account, credential or network configuration.",
   SetConnectionHeaders: "User-only security, consent, account, credential or network configuration.",
   SetConnectionKey: "User-only security, consent, account, credential or network configuration.",

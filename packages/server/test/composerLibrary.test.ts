@@ -102,4 +102,24 @@ describe("composer library items", () => {
       assert.deepStrictEqual(yield* api.SetComposerLibrary({ ...key, add: [], remove: [wren.id] }), [])
     }).pipe(Effect.provide(serverLayer(testConfig())))
   )
+
+  it.live("go with a new workshop's first message (Work on in a workshop → A new workshop)", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const wren = yield* api.CreateCard({ label: "Wren Hollow", name: "Wren Hollow", description: "Keeps maps." })
+      const started = yield* api.StartWorkshop({
+        requestId: "start-with-wren",
+        first: { _tag: "Send", content: "Tighten her.", library: [{ kind: "card", refId: wren.id }] },
+        speaker: null
+      })
+      const path = yield* api.ReadPath({
+        chatId: started.chat.id,
+        leafSlotId: started.slotId,
+        range: { _tag: "Bottom" },
+        limit: 20
+      })
+      const first = path.entries.find((row) => row.slotId === started.slotId)!
+      assert.deepStrictEqual(first.version.library, [{ kind: "card", refId: wren.id, name: "Wren Hollow" }])
+    }).pipe(Effect.provide(serverLayer(testConfig())))
+  )
 })

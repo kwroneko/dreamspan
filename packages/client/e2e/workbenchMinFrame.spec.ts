@@ -192,7 +192,7 @@ test("a window narrowed below the frames' least widths scrolls the frames, clipp
   // The row scrolls, with a scrollbar that takes room (a track), not one drawn over the frames.
   const center = page.locator("[data-workbench]")
   expect(await center.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
-  expect(await center.evaluate((el) => el.offsetHeight - el.clientHeight)).toBeGreaterThanOrEqual(8)
+  expect(await center.evaluate((el: HTMLElement) => el.offsetHeight - el.clientHeight)).toBeGreaterThanOrEqual(8)
 
   // A tab moved to a frame partly out of view scrolls that frame into view.
   await center.evaluate((el) => el.scrollTo({ left: 0 }))

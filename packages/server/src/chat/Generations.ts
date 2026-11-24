@@ -67,6 +67,7 @@ interface Running {
    * the first rewrite says whether any script applies; nothing is sent until then.
    */
   shown: { text: string; reasoning: string; sections: string }
+  sequence: number
   mode: "pending" | "direct" | "rewrite"
   /** Texts changed since the last rewrite started, and whether one is running. */
   dirty: boolean
@@ -99,6 +100,7 @@ export class Generations extends Context.Service<
     readonly live: (chatId: ChatId) => Array<{
       readonly versionId: VersionId
       readonly text: string
+      readonly sequence: number
       readonly waitingCache?: boolean
       readonly reasoning?: string
       readonly sections?: string
@@ -362,6 +364,7 @@ export class Generations extends Context.Service<
           versionId,
           offset,
           text: next.slice(offset),
+          sequence: ++entry.sequence,
           ...(offset < previous.length ? { replace: true } : {})
         })
       }
@@ -547,6 +550,7 @@ export class Generations extends Context.Service<
                     entry.held = null
                     entry.steps = null
                     entry.shown = { text: "", reasoning: "", sections: "" }
+                    entry.sequence = 0
                     entry.mode = liveRewrites.list().length > 0 ? "pending" : "direct"
                     entry.dirty = false
                     entry.savedAt = Date.now()
@@ -674,6 +678,7 @@ export class Generations extends Context.Service<
               reasoning: request.initial?.reasoning ?? "",
               sections: sectionsDisplay(request.initial?.sections)
             },
+            sequence: 0,
             mode: liveRewrites.list().length > 0 ? "pending" : "direct",
             dirty: false,
             pumping: false,
@@ -719,6 +724,7 @@ export class Generations extends Context.Service<
               versionId: entry.request.versionId,
               // What subscribers were sent: a new one goes on from there.
               text: entry.shown.text,
+              sequence: entry.sequence,
               waitingCache: entry.waitingCache,
               ...(entry.shown.reasoning ? { reasoning: entry.shown.reasoning } : {}),
               ...(entry.shown.sections ? { sections: entry.shown.sections } : {}),

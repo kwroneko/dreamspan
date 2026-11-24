@@ -28,7 +28,14 @@ import type { RemoteBrowse } from "../characters/homeSearch.ts"
 import { SortDirection, type SortOrder, SortScroller } from "../characters/cardBrowse.tsx"
 import { TILE_CLASS, TILE_SURFACE_CLASS, TileFace, useCharacterNavigation } from "../characters/shellData.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
-import { OPEN_BESIDE_HINT, OPEN_NEW_TAB_HINT, PAGE_BESIDE_HINT, openBeside, openPageBeside, useCanOpenBeside } from "../../ui/openBeside.ts"
+import {
+  OPEN_BESIDE_HINT,
+  OPEN_NEW_TAB_HINT,
+  PAGE_BESIDE_HINT,
+  openBeside,
+  openPageBeside,
+  useCanOpenBeside
+} from "../../ui/openBeside.ts"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { canHideCreator, CreatorHeader, hideCreator, showCreator, shownCreator } from "./creator.tsx"
 import {

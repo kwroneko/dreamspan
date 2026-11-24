@@ -259,12 +259,11 @@ export const LcmSettingsView = Schema.Struct({
 export type LcmSettingsView = typeof LcmSettingsView.Type
 
 /** A summary style registered on the server: what "Written as" names it and says on hover. */
-export const SummaryStyleInfo = Schema.Struct({
+const SummaryStyleInfo = Schema.Struct({
   id: Schema.String,
   label: Schema.String,
   description: Schema.NullOr(Schema.String)
 })
-export type SummaryStyleInfo = typeof SummaryStyleInfo.Type
 
 /** A change would leave a target at or above its maximum in the chat's own settings. */
 export class LcmSettingsInvalid extends Schema.TaggedError<LcmSettingsInvalid>()("LcmSettingsInvalid", {

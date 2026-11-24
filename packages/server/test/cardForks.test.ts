@@ -191,12 +191,15 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         const api = yield* client()
         const parent = yield* card(api, "Lio", { nickname: "Lio", character_version: "dawn", scenario: "Calm seas." })
         const note = yield* api.CreateCardNote({ cardRefId: parent.ref.id, title: "Ship" })
+        yield* draft(api, parent.ref.id, textField(["name"]), "Leo")
+        yield* draft(api, parent.ref.id, textField(["nickname"]), "Captain Lio")
         yield* draft(api, parent.ref.id, textField(["scenario"]), "Storm season.")
         yield* commit(api, parent.ref.id)
+        yield* card(api, "Lio", { character_version: "noir" })
         const before = yield* api.OpenEditor({ refId: parent.ref.id })
         const forked = yield* api.ForkCard({
           refId: parent.ref.id,
-          name: "Lio",
+          name: "Leo",
           nickname: "Captain Lio",
           characterVersion: "noir"
         })
@@ -230,9 +233,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
             restored.doc.nickname,
             restored.doc.character_version
           ],
-          ["Calm seas.", before.doc.description, "Lio", "Captain Lio", "noir"]
+          ["Calm seas.", before.doc.description, "Leo", "Captain Lio", "noir"]
         )
-        assert.deepStrictEqual([restored.ref.label, restored.ref.subtitle, restored.revisionNumber], ["Lio", "noir", 5])
+        assert.deepStrictEqual([restored.ref.label, restored.ref.subtitle, restored.revisionNumber], ["Leo", "noir", 5])
         const [top] = yield* api.ListRevisions({ refId: forked.id, limit: 1 })
         assert.deepStrictEqual([top!.parents, top!.entry], [[opened.ref.headRevisionId], undefined])
         const unchanged = yield* api.OpenEditor({ refId: parent.ref.id })

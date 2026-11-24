@@ -16,7 +16,7 @@ import { internal } from "./internal.ts"
  * How long a pending chat no tab has open is kept before the next new chat sweeps it: a reload
  * or a deploy drops every socket, and its tab comes back within this (db/pendingChats.ts).
  */
-export const PENDING_KEPT_MS = 60_000
+const PENDING_KEPT_MS = 60_000
 /** How long after its page left a pending chat is swept, unless another tab still has it. */
 export const PENDING_LEFT_MS = 3_000
 

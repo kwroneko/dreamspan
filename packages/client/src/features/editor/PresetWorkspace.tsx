@@ -13,6 +13,7 @@ import {
   useSyncExternalStore
 } from "react"
 import { useSession } from "../../session.ts"
+import { Alert } from "../../ui/Surface.tsx"
 import { UnsavedTracker } from "../../ui/UnsavedChanges.tsx"
 import { CastContext, type CastView } from "../chat/cast.ts"
 import type { ChatSession, ChatView } from "../chat/session.ts"
@@ -20,7 +21,7 @@ import { useTabRegion, useWorkbench, useWorkbenchTab } from "../workbench/tab.ts
 import { useCaller } from "./caller.ts"
 import { browserEnv } from "./backup.ts"
 import { EditorStore } from "./store.ts"
-import { boundEditorSurroundings, workspaceViews } from "./workspaceViews.ts"
+import { boundEditorSurroundings, NOTE_FOCUS, workspaceViews } from "./workspaceViews.ts"
 /** The chat the workspace is in, for what a card's save offers after it (a rename in the history). */
 interface WorkspaceChat {
   readonly chatId: string
@@ -168,11 +169,11 @@ const subscribeLive = (listener: () => void) => {
 }
 const useLiveChat = (chatId: string, sourceId: string | undefined, forkId: string | undefined) =>
   useSyncExternalStore(subscribeLive, () => {
+    const matches = (live: LiveChat | null | undefined): live is LiveChat =>
+      live?.session.id === chatId && (forkId === undefined || live.workspace.chat?.forkId === forkId)
     const source = sourceId ? liveShown.get(sourceId) : undefined
-    if (source?.session.id === chatId) return source
-    // Older links have no source tab; match their branch before falling back to another view.
-    const candidates = [...liveShown.values()].filter((live) => live?.session.id === chatId)
-    return candidates.findLast((live) => live?.workspace.chat?.forkId === forkId) ?? candidates.at(-1) ?? null
+    if (matches(source)) return source
+    return [...liveShown.values()].findLast(matches) ?? null
   })
 
 /**
@@ -251,12 +252,17 @@ export function ChatBoundEditor({
   }) => ReactNode
 }) {
   const search = useSearch({ strict: false }) as { chatTab?: unknown; chatFork?: unknown }
-  const live = useLiveChat(
-    chatId,
-    typeof search.chatTab === "string" ? search.chatTab : undefined,
-    typeof search.chatFork === "string" ? search.chatFork : undefined
-  )
+  const fork = typeof search.chatFork === "string" ? search.chatFork : undefined
+  const live = useLiveChat(chatId, typeof search.chatTab === "string" ? search.chatTab : undefined, fork)
   const views = useSyncExternalStore(workspaceViews.subscribe, workspaceViews.snapshot, workspaceViews.snapshot)
+  if (!live && focus === NOTE_FOCUS && fork !== undefined)
+    return (
+      <Region label="Note editor" className="flex min-h-0 flex-1 flex-col">
+        <BoundScroll>
+          <Alert tone="warning">Open the chat branch to edit this note.</Alert>
+        </BoundScroll>
+      </Region>
+    )
   if (!live) return children({ store: undefined, context: undefined, current: undefined, session: undefined })
   const registered = focus === undefined ? undefined : views.entries.find((v) => v.id === focus)
   const content = registered ? (

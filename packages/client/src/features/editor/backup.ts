@@ -217,10 +217,6 @@ export const copiesOf = async (userId: string, refId: string): Promise<ReadonlyA
 /** Where the first message typed in a chat with this card, not made yet, is kept. */
 export const pendingChatCopy = (entityId: string) => `pending-chat:${entityId}`
 
-/** Where the first message typed in a new chat of a group is kept: per group, its name and characters. */
-export const pendingGroupChatCopy = (name: string, memberIds: ReadonlyArray<string>) =>
-  `pending-group-chat:${[...memberIds].sort().join(",")}:${name}`
-
 /** All the user's copies. */
 export const copiesOfUser = async (userId: string): Promise<ReadonlyArray<Copy>> => {
   const copies: Array<Copy> = []

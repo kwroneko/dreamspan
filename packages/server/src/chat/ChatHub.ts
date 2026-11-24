@@ -18,7 +18,7 @@ const BATCH_MS = 16
 /** Batches a subscriber may fall behind by, about eight seconds of a busy chat, before it starts over. */
 const BACKLOG = 512
 /** The longest grace `held` is asked for: when each chat was last left is forgotten after this. */
-export const HELD_MAX_MS = 10 * 60_000
+const HELD_MAX_MS = 10 * 60_000
 
 /**
  * Queues a batch for a subscriber. One that has fallen a whole backlog behind (a stalled
@@ -50,7 +50,11 @@ const coalesce = (events: ReadonlyArray<ChatEvent>): Array<ChatEvent> => {
     const index = lastDelta.get(key)
     const previous = index === undefined ? undefined : out[index]
     if (previous?._tag === event._tag && previous.offset + previous.text.length === event.offset) {
-      out[index!] = { ...previous, text: previous.text + event.text }
+      out[index!] = {
+        ...previous,
+        text: previous.text + event.text,
+        ...(event.sequence === undefined ? {} : { sequence: event.sequence })
+      }
     } else {
       lastDelta.set(key, out.length)
       out.push(event)

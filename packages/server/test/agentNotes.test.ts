@@ -353,6 +353,12 @@ describe("agent note tools", () => {
         "Injury"
       )
 
+      const injury = (yield* api.ListChatNotes(at)).find((note) => note.doc.title === "Injury")!.ref.entityId
+      for (const active of [false, true]) {
+        yield* api.ChangeCast({ ...at, change: { _tag: "Note", entityId: injury, active } })
+        assert.strictEqual((yield* api.ListChatNotes(at)).find((note) => note.ref.entityId === injury)?.active, active)
+      }
+
       // The first version shown again: the agent's note isn't listed there, for the user or the agent.
       yield* api.SelectVersion({ slotId: version.slotId, versionId: version.id, expectedVersionId: swipe.version.id })
       assert.deepStrictEqual(yield* listed(), ["Locked"])
@@ -360,6 +366,51 @@ describe("agent note tools", () => {
         (yield* api.GetAgentPermissions(at)).notes.map((n) => n.title),
         ["Locked"]
       )
+      const context = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: version.slotId })
+      assert.notInclude(context.presetContext?.notes.map((note) => note.title) ?? [], "Injury")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("lists a trailing inserted reply's note and permissions at the display end", () => {
+    const config = testConfig()
+    const model = scriptedModel()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider(model.handler)),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, events, chat, mira } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [{ key: "agent.enabled", value: { on: true } }]
+      })
+      const reader = yield* Reader
+      const userId = (yield* api.Whoami()).id
+      const at = { chatId: chat.id, forkId: chat.currentForkId!, slotId: version.slotId }
+      const { entry } = yield* reader.GetSlot({ userId, slotId: at.slotId, forkId: at.forkId })
+      model.run([
+        ["write_note", { title: "Injury", content: "A grey bandage." }],
+        ["edit_note", { note: "Injury", find: "grey", replace: "red" }]
+      ])
+      const inserted = yield* api.InsertMessage({
+        chatId: chat.id,
+        forkId: at.forkId,
+        anchor: at.slotId,
+        expectedRowVersion: entry.rowVersion,
+        body: { _tag: "Generate", speaker: mira.entityId }
+      })
+      yield* eventually(() => finished(events, inserted.entry.version.id) !== undefined)
+      const notes = yield* api.ListChatNotes(at)
+      assert.deepStrictEqual(
+        notes.map((note) => [note.doc.content, note.active]),
+        [["A red bandage.", true]]
+      )
+      assert.deepStrictEqual(
+        (yield* api.GetAgentPermissions(at)).notes.map((note) => [note.title, note.on]),
+        [["Injury", true]]
+      )
+      assert.isEmpty(yield* reader.ChatNoteEntries({ ...at, userId, cards: [] }))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -451,6 +502,11 @@ describe("agent note tools", () => {
       assert.strictEqual(top(later.request), top(after.request))
       assert.include(later.request.join("\n"), "[Mira's current description: She wears a muddy ball gown.]")
       assert.notInclude(later.request.join("\n"), "red ball gown")
+
+      const at = { chatId: chat.id, slotId: later.version.slotId }
+      const replacement = (yield* api.ListChatNotes(at)).find((note) => note.doc.replaces !== undefined)!
+      for (const active of [false, true])
+        yield* api.ChangeCast({ ...at, change: { _tag: "Note", entityId: replacement.ref.entityId, active } })
 
       // A swipe of the reply that made the change: the description is whole again, and no costume note.
       model.run([])

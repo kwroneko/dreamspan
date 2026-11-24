@@ -89,6 +89,7 @@ import {
   slotPlace
 } from "./displayPath.ts"
 import { noteHistory } from "./noteHistory.ts"
+import { withoutOrphanNoteActivations } from "./agentNotes.ts"
 import { withoutPurged } from "./stateRefs.ts"
 
 /** Stored image facts for assembly and its draft preview, always inside a reader worker. */
@@ -628,16 +629,21 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           key: string
           scope: string | null
           value_json: string
+          version_id: string | null
+          origin: string
+          origin_ref: string | null
           depth: number | null
         }>`
           ${shown === null ? pathEvents(sql, chatId, at) : displayEvents(sql, chatId, shown.pieces)}
-          SELECT e.id, e.key, e.scope, e.value_json, ${sql.literal(shown === null ? "e.slot_depth" : "e.position")} AS depth
+          SELECT e.id, e.key, e.scope, e.value_json, e.version_id, e.origin, e.origin_ref,
+            ${sql.literal(shown === null ? "e.slot_depth" : "e.position")} AS depth
           FROM path_events e LEFT JOIN slots s ON s.id = e.slot_id
           WHERE ${owned} AND ${eventApplies(sql, eventFork, "e")}
             AND (e.slot_id IS NULL OR NOT ${slotDeletedIn(sql, eventFork, "s")})
             AND ${applies}
           ORDER BY ${sql.literal(shown === null ? eventOrder("e") : eventOrder("e", "e.position"))}`
-        const events = yield* Effect.forEach(rows, (row) =>
+        const applicable = yield* withoutOrphanNoteActivations(sql, rows)
+        const events = yield* Effect.forEach(applicable, (row) =>
           decodeEvent({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }).pipe(
             Effect.map((event) => ({ ...event, depth: row.depth, id: row.id })),
             Effect.mapError(() => invalid("A state event"))

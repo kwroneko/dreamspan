@@ -11,6 +11,19 @@ const chatId = "chat" as ChatId
 const versionId = "v" as VersionId
 
 describe("ChatHub", () => {
+  it.live("coalesces a rewrite and append with the latest sequence", () =>
+    Effect.gen(function* () {
+      const hub = yield* ChatHub
+      const queue = yield* hub.subscribe(chatId, () => ({ _tag: "Hello", live: [] }))
+      yield* Queue.take(queue)
+      hub.publish(chatId, { _tag: "Delta", versionId, offset: 4, text: "a", replace: true, sequence: 1 })
+      hub.publish(chatId, { _tag: "Delta", versionId, offset: 5, text: "b", sequence: 2 })
+      assert.deepStrictEqual(yield* Queue.take(queue), [
+        { _tag: "Delta", versionId, offset: 4, text: "ab", replace: true, sequence: 2 }
+      ])
+    }).pipe(Effect.scoped, Effect.provide(ChatHub.layer))
+  )
+
   it.live("a subscriber a whole backlog behind gets a fresh Hello instead of the backlog", () =>
     Effect.gen(function* () {
       const hub = yield* ChatHub
