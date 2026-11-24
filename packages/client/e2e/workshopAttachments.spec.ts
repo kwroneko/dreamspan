@@ -24,7 +24,7 @@ test.beforeAll(async () => {
     // The answer says which attachment lines the request carried.
     answer: (body) => {
       const text = JSON.stringify(body.messages)
-      const seen = ["notes", "outline"].filter((name) => text.includes(`path=\\"/files/`) && text.includes(name))
+      const seen = ["notes", "outline"].filter((name) => text.includes(`path=\\"/attachments/`) && text.includes(name))
       return seen.length === 2 && text.includes('<attachment filename=\\"notes.txt\\"')
         ? "I can see notes.txt and outline.md."
         : "No attachments came through."

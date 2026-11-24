@@ -12,6 +12,11 @@ export const isMediaPath = (path: string) => /^media\/[0-9a-f]{2}\/[0-9a-f]{64}$
 /** Whether a path is a card source's cached image (`sources/cache.ts`), which thumbnails are made from too. */
 export const isSourceCachePath = (path: string) => /^cache\/sources\/blobs\/[0-9a-f]{2}\/[0-9a-f]{64}$/.test(path)
 
+/** Whether the account holds these bytes through a copy attached from Files. */
+export const attachmentHeldBy = (sql: SqlClient.SqlClient, column: string, userId: string) =>
+  sql`EXISTS (SELECT 1 FROM file_versions f WHERE f.media_id = ${sql.literal(column)}
+    AND f.owner_user_id = ${userId} AND f.origin = 'attachment')`
+
 /**
  * Whether `userId` holds the media in `column` (an SQL expression): a reference of theirs
  * (`media_refs`), or a copy they attached from Files (a `file_versions` row of origin
@@ -19,12 +24,11 @@ export const isSourceCachePath = (path: string) => /^cache\/sources\/blobs\/[0-9
  */
 export const mediaHeldBy = (sql: SqlClient.SqlClient, column: string, userId: string) =>
   sql`(EXISTS (SELECT 1 FROM media_refs r WHERE r.media_id = ${sql.literal(column)} AND r.owner_user_id = ${userId})
-    OR EXISTS (SELECT 1 FROM file_versions f WHERE f.media_id = ${sql.literal(column)}
-      AND f.owner_user_id = ${userId} AND f.origin = 'attachment'))`
+    OR ${attachmentHeldBy(sql, column, userId)})`
 
 /**
  * Whether `userId` attached the media in `column` from the Files path `path` (an attachment's
- * `path` is the model's pointer to the file, so it must be where the copy came from).
+ * `path` points to the original in Files, so it must be where the copy came from).
  */
 export const attachedFrom = (sql: SqlClient.SqlClient, column: string, userId: string, path: string) =>
   sql`EXISTS (SELECT 1 FROM file_versions f WHERE f.media_id = ${sql.literal(column)}

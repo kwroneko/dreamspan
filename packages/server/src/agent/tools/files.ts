@@ -12,6 +12,7 @@ import { join, posix } from "node:path"
 import { Type } from "@earendil-works/pi-ai"
 import { Effect, Semaphore } from "effect"
 import type { User } from "@dreamspan/shared/domain.ts"
+import { ATTACHMENT_COPY_ROOT } from "@dreamspan/shared/files.ts"
 import type { RolloutEffect, RolloutEffectRecord } from "@dreamspan/shared/workshopApi.ts"
 import { foldState, type ChatState } from "@dreamspan/shared/state.ts"
 import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
@@ -567,6 +568,22 @@ export const makeFileTools = (deps: FileToolDeps) => {
         })
       )
 
+  /** A copy as sent is addressed by id, with the account's attachment hold checked in the reader. */
+  const readPlace = (ctx: ToolContext, env: AccountEnv, input: string) =>
+    Effect.gen(function* () {
+      const full = input.trim()
+      if (full.startsWith(`${ATTACHMENT_COPY_ROOT}/`)) {
+        const mediaId = full.slice(ATTACHMENT_COPY_ROOT.length + 1)
+        const copy = yield* deps.reader
+          .GetMediaFile({ userId: ctx.userId, mediaId, attachmentOnly: true })
+          .pipe(Effect.mapError(() => new FilePathRefused("That attachment copy isn't available.")))
+        return { full, hostRoot: join(deps.dataDir, "media"), segments: copy.path.split("/").slice(1), mime: copy.mime }
+      }
+      const cwd = yield* currentDir(ctx, env)
+      const file = resolveIn(ctx, input, cwd, yield* rootsOf(env, ctx))
+      return { full: file.full, hostRoot: file.root.hostRoot, segments: file.segments, mime: null }
+    })
+
   // --- read_file
   const readTool: RolloutTool<Record<string, unknown>> = {
     source: import.meta.url,
@@ -578,7 +595,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     storyRead: "account",
     titleField: "path",
     description:
-      "Read a file in your files (/files), or in the app's source (/app-source, read-only), with line numbers. Paths are absolute (/files/...) or relative to the working directory. offset and limit are lines (default: the first 2000). Images come back as images when the model can see them; other binary files are described. Read a file before you change it with write_file or edit_file.",
+      "Read a file in your files (/files), the app's source (/app-source, read-only), or a message attachment (/attachments, read-only), with line numbers. Paths are absolute (/files/...) or relative to the working directory. offset and limit are lines (default: the first 2000). Images come back as images when the model can see them; other binary files are described. Read a file before you change it with write_file or edit_file.",
     parameters: Type.Object(
       {
         path: Type.String({ maxLength: 4096 }),
@@ -590,14 +607,11 @@ export const makeFileTools = (deps: FileToolDeps) => {
     summarize: (args) => String(args.path ?? ""),
     execute: wrap("files", (ctx, args, env) =>
       Effect.gen(function* () {
-        const cwd = yield* currentDir(ctx, env)
-        const { full, root, segments } = resolveIn(ctx, String(args.path), cwd, yield* rootsOf(env, ctx))
-        const { bytes, info, truncated } = yield* attempt(() =>
-          readRegularFile(root.hostRoot, segments, READ_MAX_BYTES)
-        )
-        if (!truncated) ctx.cache.set(readKey(full), sha256(bytes))
+        const { full, hostRoot, segments, mime } = yield* readPlace(ctx, env, String(args.path))
+        const { bytes, info, truncated } = yield* attempt(() => readRegularFile(hostRoot, segments, READ_MAX_BYTES))
+        if (!truncated && mime === null) ctx.cache.set(readKey(full), sha256(bytes))
         const extension = posix.extname(full).toLowerCase()
-        const image = IMAGE_TYPES[extension]
+        const image = mime === null ? IMAGE_TYPES[extension] : Object.values(IMAGE_TYPES).includes(mime) ? mime : null
         if (image && !truncated && bytes.byteLength <= 5 * 2 ** 20)
           return ctx.vision
             ? {
@@ -607,7 +621,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
             : { text: `${full}: ${image}, ${info.size.toLocaleString("en-US")} bytes. This model can't see images.` }
         if (isBinary(bytes))
           return {
-            text: `${full}: a binary file (${extension || "no extension"}), ${info.size.toLocaleString("en-US")} bytes. Use bash to work with it.`
+            text: `${full}: a binary file (${mime ?? (extension || "no extension")}), ${info.size.toLocaleString("en-US")} bytes.${mime === null ? " Use bash to work with it." : ""}`
           }
         const lines = bytes.toString("utf8").split("\n")
         const from = Number(args.offset ?? 1)

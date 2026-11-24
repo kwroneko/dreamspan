@@ -5683,7 +5683,7 @@ const ReadOpsOwn = RpcGroup.make(
   }),
   /** A stored file the user holds a reference to. */
   Rpc.make("GetMediaFile", {
-    payload: { userId: UserId, mediaId: Schema.String },
+    payload: { userId: UserId, mediaId: Schema.String, attachmentOnly: Schema.optionalKey(Schema.Boolean) },
     success: StoredFile,
     error: Schema.Union([NotFound, StorageError])
   }),
