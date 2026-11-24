@@ -1112,14 +1112,14 @@ const make = (options: CardSourcesOptions = {}) =>
           if (ref === null) return yield* new NotFound({ entity: "image", id: key })
           const entryKey = cacheKey(user, sourceId, "image", sha(ref))
           let entry = yield* cache.get(entryKey)
-          let bytes: Uint8Array
+          let bytes: Uint8Array | undefined
           if (!entry) {
             bytes = yield* ask(user, sourceId, `image:${ref}`, (http) => adapter.image(http, ref))
             const { mime } = describeImage(bytes)
             if (!IMAGES.has(mime))
               return yield* new SourceFailed({ sourceId, reason: "bad_response", message: "not an image" })
             entry = yield* cache.put(entryKey, { bytes, value: { mime } })
-          } else bytes = yield* cache.readBlob(entry.blob!)
+          }
           const blob = entry.blob!
           const { mime } = entry.value as { mime: string }
           if (width !== null) {
@@ -1132,7 +1132,7 @@ const make = (options: CardSourcesOptions = {}) =>
               return { bytes: thumbnail, mime: "image/webp", etag: `"${thumb.value.path.split("/").pop()!}"` }
             }
           }
-          return { bytes, mime, etag: `"${blob}"` }
+          return { bytes: bytes ?? (yield* cache.readBlob(blob)), mime, etag: `"${blob}"` }
         }),
       origin: (user, entityId) =>
         Effect.gen(function* () {

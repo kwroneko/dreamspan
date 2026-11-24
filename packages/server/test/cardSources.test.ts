@@ -11,11 +11,12 @@ import { textField } from "@dreamspan/shared/editing.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect, Exit, Fiber, Layer } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
+import { rename } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { CardSourceAdapter } from "../src/sources/adapter.ts"
 import { cardexAdapter } from "../src/sources/cardex.ts"
-import { makeSourceCache } from "../src/sources/cache.ts"
+import { blobPath, makeSourceCache } from "../src/sources/cache.ts"
 import * as CardSources from "../src/sources/CardSources.ts"
 import { isPrivateAddress, makeSourceHttp } from "../src/sources/guard.ts"
 import { makeCoalescer, makeLimiter } from "../src/sources/limiter.ts"
@@ -107,6 +108,38 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       assert.strictEqual(made.status, 404)
       const anonymous = yield* Effect.promise(() => fetch(`${url}/sources/cardex/image?k=${item.thumb}`))
       assert.strictEqual(anonymous.status, 401)
+    })
+  )
+
+  it.effect("serves a cached source thumbnail without opening its original", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const { items } = yield* api.SourceSearch({
+        sourceId: "cardex",
+        query: { ...emptySourceQuery, text: "Amber" },
+        page: null
+      })
+      const url = `${yield* base}/sources/cardex/image?k=${items[0]!.thumb}`
+      yield* Effect.promise(async () => {
+        const original = await fetch(url, { headers: alice })
+        assert.strictEqual(original.status, 200)
+        await original.arrayBuffer()
+        const blob = join(config.dataDir, blobPath(original.headers.get("etag")!.slice(1, -1)))
+        const thumbnail = () => fetch(`${url}&w=96`, { headers: alice })
+        const first = await thumbnail()
+        assert.strictEqual(first.headers.get("content-type"), "image/webp")
+        const expected = await first.arrayBuffer()
+
+        await rename(blob, `${blob}.held`)
+        try {
+          const cached = await thumbnail()
+          assert.strictEqual(cached.status, 200)
+          assert.strictEqual(cached.headers.get("etag"), first.headers.get("etag"))
+          assert.deepStrictEqual(await cached.arrayBuffer(), expected)
+        } finally {
+          await rename(`${blob}.held`, blob)
+        }
+      })
     })
   )
 
