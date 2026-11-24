@@ -230,7 +230,36 @@ export const StParserSource = Schema.Struct({ module: Schema.String, exportName:
 export type StParserSource = typeof StParserSource.Type
 const parser = Schema.NullOr(StParserSource)
 
+/** A character card attached as a file (spec/WORKSHOP-CARDS.md §4.5, formats/cardFile.ts). */
+export const CardFileInfo = Schema.Struct({
+  format: Schema.Literals(["png", "json", "charx"]),
+  spec: Schema.String,
+  specVersion: Schema.String,
+  name: Schema.String,
+  doc: Schema.Record(Schema.String, Schema.Unknown)
+})
+export type CardFileInfo = typeof CardFileInfo.Type
+export const CardFileChange = Schema.Struct({
+  field: Schema.String,
+  text: Schema.optionalKey(Schema.String),
+  find: Schema.optionalKey(Schema.String),
+  replace: Schema.optionalKey(Schema.String),
+  items: Schema.optionalKey(Schema.Array(Schema.String))
+})
+export const CardFileEdited = Schema.Union([
+  Schema.Struct({ bytes: Transferable.Uint8Array, before: CardFileInfo, after: CardFileInfo }),
+  Schema.Struct({ error: Schema.String })
+])
+export type CardFileEdited = typeof CardFileEdited.Type
+
 export class FormatOps extends RpcGroup.make(
+  /** What a file is when it's a character card, else null (§4.5): by its bytes, never its name. */
+  Rpc.make("ReadCardFile", { payload: { bytes: Transferable.Uint8Array }, success: Schema.NullOr(CardFileInfo) }),
+  /** The card file with `changes` made in its own format, every other field and byte kept. */
+  Rpc.make("EditCardFile", {
+    payload: { bytes: Transferable.Uint8Array, changes: Schema.Array(CardFileChange) },
+    success: CardFileEdited
+  }),
   /** Decode uploaded image pixels before storing them; runs in the bounded format pool. */
   Rpc.make("ValidateImage", { payload: { bytes: Transferable.Uint8Array }, success: Schema.Boolean }),
   /** Each text's tokens in a local encoding (tokenizer.ts), on the interactive lane. */

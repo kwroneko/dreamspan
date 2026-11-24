@@ -708,7 +708,14 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           const slots = yield* sql<{ id: string; parent: string | null; depth: number; selected: string }>`
             SELECT id, parent_slot_id AS parent, depth, selected_version_id AS selected FROM slots
             WHERE chat_id = ${chatId} ORDER BY depth`
-          type Row = { id: string; ordinal: number; speaker: string | null; ref: string | null; content: string; frozen: string | null }
+          type Row = {
+            id: string
+            ordinal: number
+            speaker: string | null
+            ref: string | null
+            content: string
+            frozen: string | null
+          }
           const versionsOf = (slotId: string) =>
             sql<Row>`
               SELECT id, ordinal, speaker_entity_id AS speaker, greeting_ref AS ref, content, frozen_macros AS frozen
@@ -852,7 +859,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               [...(before?.versions ?? new Map<number, Row>()).entries()].map(([card, version]) => ({
                 index: greeter?.greetingIndexes.indexOf(card) ?? -1,
                 text: version.content,
-                frozen: version.frozen === null ? null : (JSON.parse(version.frozen) as { readonly [x: string]: string }),
+                frozen:
+                  version.frozen === null ? null : (JSON.parse(version.frozen) as { readonly [x: string]: string }),
                 card
               }))
             if (greeter === undefined || options.length === 0) {
@@ -868,7 +876,11 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             const versions = options.map((option) => {
               const old = before?.versions.get(option.card)
               const frozen =
-                old === undefined ? option.frozen : old.frozen === null ? null : (JSON.parse(old.frozen) as { readonly [x: string]: string })
+                old === undefined
+                  ? option.frozen
+                  : old.frozen === null
+                    ? null
+                    : (JSON.parse(old.frozen) as { readonly [x: string]: string })
               return greetingVersionOf(greeter, { ...option, frozen })
             })
             const inserted = yield* graph.insertSlot(
@@ -888,7 +900,9 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             for (const [card, drafts] of before?.edits ?? new Map<number, Array<SweptDraft>>()) {
               const version = made.find((row) => refIndex(row.ref) === card)
               if (version === undefined) lost.push(...drafts)
-              else for (const draft of drafts) yield* sql`UPDATE drafts SET target_id = ${version.id} WHERE id = ${draft.id}`
+              else
+                for (const draft of drafts)
+                  yield* sql`UPDATE drafts SET target_id = ${version.id} WHERE id = ${draft.id}`
             }
             for (const draft of before?.scratchpads ?? [])
               yield* sql`UPDATE drafts SET target_id = ${inserted.slotId} WHERE id = ${draft.id}`

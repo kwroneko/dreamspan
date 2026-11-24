@@ -48,7 +48,12 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
             Effect.andThen(bin.deleteChatGroup(userId, chatId, forkId, expectedForkIds, title))
           )
         ),
-      DeleteChat: ({ userId, chatId }) => deletingChat("DeleteChat", userId, refusePending(sql, chatId).pipe(Effect.andThen(bin.deleteChat(userId, chatId)))),
+      DeleteChat: ({ userId, chatId }) =>
+        deletingChat(
+          "DeleteChat",
+          userId,
+          refusePending(sql, chatId).pipe(Effect.andThen(bin.deleteChat(userId, chatId)))
+        ),
       DeleteMessage: ({ userId, slotId, forkId }) =>
         deleting(
           "DeleteMessage",
@@ -63,7 +68,8 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
           const rows = yield* bin.loadItems(userId, itemIds)
           return rows.map(toBinItem)
         }).pipe(transaction(sql, "DeleteMessages")),
-      DeleteFork: ({ userId, forkId }) => deletingChat(
+      DeleteFork: ({ userId, forkId }) =>
+        deletingChat(
           "DeleteFork",
           userId,
           refusePendingOf(sql, "branch", forkId).pipe(Effect.andThen(bin.deleteFork(userId, forkId)))

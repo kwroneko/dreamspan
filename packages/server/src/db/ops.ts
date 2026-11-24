@@ -3086,7 +3086,17 @@ const WriteOpsLibraryOwn = RpcGroup.make(
         byteSize: Schema.Int,
         width: Schema.NullOr(Schema.Int),
         height: Schema.NullOr(Schema.Int)
-      })
+      }),
+      /** What the format worker read when it's a character card (spec/WORKSHOP-CARDS.md §4.5). */
+      card: Schema.optionalKey(
+        Schema.Struct({
+          format: Schema.Literals(["png", "json", "charx"]),
+          spec: Schema.String,
+          specVersion: Schema.String,
+          name: Schema.String,
+          docJson: Schema.String
+        })
+      )
     },
     success: Schema.NullOr(Schema.Struct({ mediaId: Schema.String, mime: Schema.String, addedBytes: Schema.Int })),
     error: Schema.Union([NotFound, StorageError])

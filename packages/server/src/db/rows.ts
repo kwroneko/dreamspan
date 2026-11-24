@@ -187,7 +187,9 @@ export const attachmentJson = (alias: string) =>
   `json(CASE WHEN ${alias}.path IS NULL AND ${alias}.kind <> 'file'
     THEN json_object('mediaId', ${alias}.media_id, 'altText', coalesce(${alias}.alt_text, ''))
     ELSE json_patch(json_object('mediaId', ${alias}.media_id, 'altText', coalesce(${alias}.alt_text, '')),
-      json_object('kind', CASE WHEN ${alias}.kind = 'file' THEN 'file' END, 'name', ${alias}.name, 'path', ${alias}.path)) END)`
+      json_object('kind', CASE WHEN ${alias}.kind = 'file' THEN 'file' END, 'name', ${alias}.name, 'path', ${alias}.path,
+        'card', json((SELECT json_object('name', c.name, 'format', c.format) FROM media_card_files c
+          WHERE c.media_id = ${alias}.media_id)))) END)`
 
 /** A version's library items (`version_library`) as `VersionLibrary` holds them, in their sent order. */
 export const libraryJson = (alias: string) =>

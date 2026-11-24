@@ -27,7 +27,7 @@ import {
   type StPersona,
   type StSettings
 } from "./ops.ts"
-import type { ThumbnailFailed, ThumbnailResult } from "./ops.ts"
+import type { CardFileChange, CardFileEdited, CardFileInfo, ThumbnailFailed, ThumbnailResult } from "./ops.ts"
 import type { LocalEncoding } from "./tokenizer.ts"
 import type { AvatarCrop } from "@dreamspan/shared/media.ts"
 import type { MEDIA_WIDTHS } from "@dreamspan/shared/media.ts"
@@ -47,6 +47,13 @@ export class Formats extends Context.Service<
   Formats,
   {
     readonly validateImage: (bytes: Uint8Array) => Effect.Effect<boolean, FormatWorkerFailed>
+    /** What a file is when it's a character card, else null (spec/WORKSHOP-CARDS.md §4.5). */
+    readonly readCardFile: (bytes: Uint8Array) => Effect.Effect<CardFileInfo | null, FormatWorkerFailed>
+    /** The card file with `changes` made in its own format, or why they can't be. */
+    readonly editCardFile: (
+      bytes: Uint8Array,
+      changes: ReadonlyArray<typeof CardFileChange.Type>
+    ) => Effect.Effect<CardFileEdited, FormatWorkerFailed>
     readonly listExports: Effect.Effect<ReadonlyArray<ExportFormatInfo>, FormatWorkerFailed>
     /** Each text's tokens in a local encoding, on the interactive lane with thumbnails (tokenizer.ts). */
     readonly countTokens: (
@@ -216,6 +223,9 @@ export const layer = (options: FormatsOptions) =>
           const lane = yield* ThumbnailLane
           return Formats.of({
             validateImage: (bytes) => workerFailures(client.ValidateImage({ bytes: new Uint8Array(bytes) })),
+            readCardFile: (bytes) => workerFailures(client.ReadCardFile({ bytes: new Uint8Array(bytes) })),
+            editCardFile: (bytes, changes) =>
+              workerFailures(client.EditCardFile({ bytes: new Uint8Array(bytes), changes })),
             listExports: workerFailures(client.ListExportFormats()),
             previewStSettings: (text, surface) => workerFailures(client.PreviewStSettings({ text, surface })),
             thumbnail: lane.thumbnail,

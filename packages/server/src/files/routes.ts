@@ -178,6 +178,18 @@ const ATTACH_WAITING = 32
 /** An attached image is decoded (and can be sent as an image) up to this size, as message images are. */
 const IMAGE_CHECK_BYTES = 16 * 1024 * 1024
 
+/** A card file is read up to this size (spec/WORKSHOP-CARDS.md §4.5); a larger one is a plain file. */
+const CARD_FILE_BYTES = 32 * 1024 * 1024
+/** The first bytes of a PNG, a zip (CHARX) or JSON: the only files read as possible cards. */
+const looksLikeCard = (head: Uint8Array) => {
+  const text = Buffer.from(head.subarray(0, 64)).toString("utf8").replace(/^﻿/, "").trimStart()
+  return (
+    (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) ||
+    (head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04) ||
+    text.startsWith("{")
+  )
+}
+
 /** Thrown when a file changes while it's copied for an attachment. */
 const changedWhileCopied = () =>
   new Answer(409, "The file changed while it was being attached. Attach it again once it's saved.")
@@ -1371,6 +1383,15 @@ export const filesRoutes = Layer.unwrap(
           }
           const named = typeOf(name)
           const mime = image?.mime ?? (named.startsWith("image/") ? "application/octet-stream" : named)
+          // A character card, by its bytes (spec/WORKSHOP-CARDS.md §4.5): a PNG with a card's chunks,
+          // card JSON or a CHARX. It stays a file; the line the model reads names it as a card.
+          const card =
+            copied.size <= CARD_FILE_BYTES && looksLikeCard(copied.head)
+              ? yield* Effect.tryPromise(() => readFile(copied.temporary)).pipe(
+                  Effect.flatMap((bytes) => formats.readCardFile(bytes)),
+                  Effect.orElseSucceed(() => null)
+                )
+              : null
           const record = (adding: number) =>
             Effect.gen(function* () {
               const usage = yield* quota
@@ -1400,7 +1421,18 @@ export const filesRoutes = Layer.unwrap(
                           byteSize: copied.size,
                           width: image?.width ?? null,
                           height: image?.height ?? null
-                        }
+                        },
+                        ...(card
+                          ? {
+                              card: {
+                                format: card.format,
+                                spec: card.spec,
+                                specVersion: card.specVersion,
+                                name: card.name,
+                                docJson: JSON.stringify(card.doc)
+                              }
+                            }
+                          : {})
                       })
                       .pipe(
                         Effect.catchTag("NotFound", () =>
@@ -1438,7 +1470,8 @@ export const filesRoutes = Layer.unwrap(
             name,
             path: full,
             mime: recorded.mime,
-            size: copied.size
+            size: copied.size,
+            ...(card ? { card: { name: card.name, format: card.format } } : {})
           }
           return HttpServerResponse.jsonUnsafe(attached, { headers: { "cache-control": "no-store" } })
         }).pipe(Effect.ensuring(Effect.promise(() => rm(copied.temporary, { force: true }))))

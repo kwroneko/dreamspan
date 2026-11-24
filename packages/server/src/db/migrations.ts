@@ -193,6 +193,21 @@ export const migrationDefinitions = {
         PRIMARY KEY (draft_id, ref_id)
       ) STRICT, WITHOUT ROWID`
     ]
+  },
+  // A character card attached as a file (spec/WORKSHOP-CARDS.md §4.5): what the format worker
+  // read from the copy's bytes when it was attached, once per content. The tile shows its name;
+  // the model's `<attachment>` line names it and carries its fields (`doc_json`, our card document).
+  "0023_card_files": {
+    statements: [
+      `CREATE TABLE media_card_files (
+        media_id TEXT PRIMARY KEY REFERENCES media_assets(id) ON DELETE CASCADE,
+        format TEXT NOT NULL CHECK (format IN ('png', 'json', 'charx')),
+        spec TEXT NOT NULL,
+        spec_version TEXT NOT NULL,
+        name TEXT NOT NULL,
+        doc_json TEXT NOT NULL
+      ) STRICT`
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 
