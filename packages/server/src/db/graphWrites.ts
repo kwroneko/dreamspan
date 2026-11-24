@@ -1,4 +1,4 @@
-import { requireSummaries } from "./chatKindPolicy.ts"
+import { kindAllows } from "./chatKindPolicy.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
 // What the writer's chat operations share (writes.ts, chatSetupWrites.ts): ownership
@@ -260,7 +260,9 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
         return yield* new NotFound({ entity: "workshop pairing", id: chatId })
       if (data.key === "lcm.settings" && (slotId !== null || versionId !== null || scope !== null))
         return yield* new NotFound({ entity: "chat-wide settings", id: chatId })
-      if (data.key === "lcm.settings" && data.value.enabled) yield* requireSummaries(sql, chatId)
+      // A pending chat keeps the settings it will start with (DESIGN §2.1): only its kind is checked here.
+      if (data.key === "lcm.settings" && data.value.enabled && !(yield* kindAllows(sql, chatId, "allowsSummaries")))
+        return yield* new NotFound({ entity: "summarizable chat", id: chatId })
       const fork = forkId ?? (yield* forkAt(sql, chatId, slotId))
       if (fork === null) return yield* new NotFound({ entity: "fork", id: chatId })
       const [owned] = yield* sql<{

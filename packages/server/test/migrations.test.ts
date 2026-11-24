@@ -167,7 +167,8 @@ describe("0002_files", () => {
           "share_birth",
           "guidance_target",
           "reasoning_stats",
-          "native_reasoning"
+          "native_reasoning",
+          "pending_chats"
         ]
       )
       // The existing row is kept, an image by default.
@@ -449,7 +450,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0010_share_birth",
       "0011_guidance_target",
       "0012_reasoning_stats",
-      "0013_native_reasoning"
+      "0013_native_reasoning",
+      "0014_pending_chats"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -525,6 +527,7 @@ describe("0005_preview_macro", () => {
         "0011_guidance_target": _later11,
         "0012_reasoning_stats": _later12,
         "0013_native_reasoning": _later13,
+        "0014_pending_chats": _later14,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -564,6 +567,7 @@ describe("0006_persona_locks", () => {
         "0011_guidance_target": _later11,
         "0012_reasoning_stats": _later12,
         "0013_native_reasoning": _later13,
+        "0014_pending_chats": _later14,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -614,6 +618,7 @@ describe("0007_contract_records", () => {
         "0011_guidance_target": _later11,
         "0012_reasoning_stats": _later12,
         "0013_native_reasoning": _later13,
+        "0014_pending_chats": _later14,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -643,6 +648,7 @@ describe("0008_attachment_paths", () => {
         "0011_guidance_target": _later11,
         "0012_reasoning_stats": _later12,
         "0013_native_reasoning": _later13,
+        "0014_pending_chats": _later14,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -669,6 +675,7 @@ describe("0009_share_invitations", () => {
         "0011_guidance_target": _later11,
         "0012_reasoning_stats": _later12,
         "0013_native_reasoning": _later13,
+        "0014_pending_chats": _later14,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -699,6 +706,7 @@ describe("0010_share_birth", () => {
         "0011_guidance_target": _later11,
         "0012_reasoning_stats": _later12,
         "0013_native_reasoning": _later13,
+        "0014_pending_chats": _later14,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -728,6 +736,7 @@ describe("0011_guidance_target", () => {
         "0011_guidance_target": _new,
         "0012_reasoning_stats": _later12,
         "0013_native_reasoning": _later13,
+        "0014_pending_chats": _later14,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -747,7 +756,12 @@ describe("0012_reasoning_stats", () => {
   it.effect("adds the reasoning estimate mark and first reasoning/reply times, frozen once closed", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0012_reasoning_stats": _new, "0013_native_reasoning": _later13, ...before } = migrations
+      const {
+        "0012_reasoning_stats": _new,
+        "0013_native_reasoning": _later13,
+        "0014_pending_chats": _later14,
+        ...before
+      } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* Effect.scoped(Layer.build(Migrations))
@@ -774,7 +788,7 @@ describe("0013_native_reasoning", () => {
   it.effect("adds a reply's provider reasoning record, nullable, JSON only, and outside the version view", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0013_native_reasoning": _new, ...before } = migrations
+      const { "0013_native_reasoning": _new, "0014_pending_chats": _later14, ...before } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       yield* Effect.scoped(Layer.build(Migrations))
       const columns = yield* sql<{ name: string; notnull: number }>`PRAGMA table_info(version_texts)`
@@ -787,6 +801,28 @@ describe("0013_native_reasoning", () => {
         view.map((c) => c.name),
         "native_reasoning"
       )
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
+describe("0014_pending_chats", () => {
+  it.effect("adds the pending chat's entry, NULL on every chat there was, and the index that finds them", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { "0014_pending_chats": _new, ...before } = migrations
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, title, created_at, last_message_at)
+        VALUES ('c', 'u', 'rp', 'active', 'Mira, Nov 24', 1, 2)`
+      yield* Effect.scoped(Layer.build(Migrations))
+      // Existing data is kept as it was: the chat is active, with no entry.
+      assert.deepStrictEqual(yield* sql`SELECT id, status, title, created_at, last_message_at, draft_for FROM chats`, [
+        { id: "c", status: "active", title: "Mira, Nov 24", created_at: 1, last_message_at: 2, draft_for: null }
+      ])
+      const plan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+        SELECT id FROM chats WHERE owner_user_id = 'u' AND draft_for = 'empty' AND status = 'pending'
+        ORDER BY created_at DESC`
+      assert.isTrue(plan.some((row) => row.detail.includes("chats_pending")))
     }).pipe(Effect.provide(layer()))
   )
 })
@@ -808,7 +844,8 @@ describe("released migrations", () => {
       "migrationShareBirth.ts",
       "migrationGuidanceTarget.ts",
       "migrationReasoningStats.ts",
-      "migrationNativeReasoning.ts"
+      "migrationNativeReasoning.ts",
+      "migrationPendingChats.ts"
     ]
     for (const module of modules)
       assert.deepStrictEqual(

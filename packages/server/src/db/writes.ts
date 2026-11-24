@@ -1,3 +1,4 @@
+import { refusePending, refusePendingOf } from "./chatKindPolicy.ts"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { displayEndOf, pathPieces, positionOf } from "./displayPath.ts"
 import { presenceBefore } from "./participation.ts"
@@ -860,6 +861,7 @@ export const makeWriteHandlers = (bin: Bin) =>
 
       SetForkPinned: ({ userId, forkId, pinned }) =>
         Effect.gen(function* () {
+          yield* refusePendingOf(sql, "branch", forkId)
           const fork = yield* ownedForkById(userId, forkId)
           if ((fork.pinned_at !== null) !== pinned)
             yield* sql`UPDATE forks SET pinned_at = ${pinned ? Date.now() : null}, row_version = row_version + 1
@@ -869,6 +871,8 @@ export const makeWriteHandlers = (bin: Bin) =>
 
       CreateFork: ({ userId, chatId, fromForkId, atSlotId, notes, name }) =>
         Effect.gen(function* () {
+          // A pending chat (DESIGN §2.1) has no branches until it is committed.
+          yield* refusePending(sql, chatId)
           const from = yield* ownedFork(userId, chatId, fromForkId)
           if (atSlotId !== null)
             yield* found(

@@ -1,3 +1,4 @@
+import { listed } from "./listedChats.ts"
 import { operationInfo } from "./operationPolicies.ts"
 import { archiveCandidates } from "./cardArchive.ts"
 import { LibraryRef } from "@dreamspan/shared/library.ts"
@@ -834,7 +835,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         // ref's head of a card in the chat (the derived label and subtitle caches, and the
         // nickname), or any revision a binding in the chat pins.
         const rows = yield* sql<ChatRow>`
-          SELECT * FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL
+          SELECT * FROM chats WHERE owner_user_id = ${userId} AND ${listed(sql, "chats")}
             AND (${before?.id ?? null} IS NULL
               OR (${ranked} * (last_message_at IS NOT NULL), coalesce(last_message_at, created_at), id)
                 < (${ranked * (before?.empty === true ? 0 : 1)}, ${before?.at ?? null}, ${before?.id ?? null}))

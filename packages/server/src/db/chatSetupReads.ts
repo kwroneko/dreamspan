@@ -1,3 +1,4 @@
+import { listed } from "./listedChats.ts"
 import { eventAppliesSql, eventOrder } from "./forkState.ts"
 import { cardNames } from "@dreamspan/shared/cardNames.ts"
 // Read handlers for chat setup, speakers and the send queue (DESIGN §2.1, §2.2). They run
@@ -112,7 +113,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
                 OR e.version_id = ${sql.literal(selectedInSql("c.current_fork_id", "s"))}
                 OR e.version_id = ${sql.literal(shownInSql("c.current_fork_id", "s"))})
             ORDER BY ${sql.literal(eventOrder("e"))})) AS events
-        FROM chats c WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL
+        FROM chats c WHERE c.owner_user_id = ${userId} AND ${listed(sql, "c")}
         ORDER BY c.last_message_at IS NOT NULL DESC, coalesce(c.last_message_at, c.created_at) DESC, c.id DESC`
       if (chats.length === 0) return []
       const cards = yield* sql<CardSummaryRow & { entity_id: string; label: string; subtitle: string }>`
@@ -257,7 +258,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
                 (c.last_message_at IS NOT NULL) || printf('%016d', coalesce(c.last_message_at, c.created_at)) || c.id), 18))
             FROM card_chat_membership s CROSS JOIN chats c ON c.id = s.chat_id
             WHERE s.entity_id = +cards.entity_id
-              AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL) AS used
+              AND c.owner_user_id = ${userId} AND ${listed(sql, "c")}) AS used
         FROM cards LEFT JOIN card_summaries cs ON cs.revision_id = cards.head_revision_id
         ORDER BY cards.label COLLATE NOCASE, cards.entity_id`.pipe(
         Effect.map((rows) =>

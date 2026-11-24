@@ -55,6 +55,7 @@ import { type CardSummaryRow, cardSummary, cardSummaryBook } from "./cards.ts"
 import type { ReadOps } from "./ops.ts"
 import type { ForkRow } from "./rows.ts"
 import { query } from "./tx.ts"
+import { listed, listedOr } from "./listedChats.ts"
 import { threadLabels } from "./threadReads.ts"
 import { placesOf, shownSplits, threadCandidates } from "./threads.ts"
 
@@ -98,7 +99,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       SELECT f.id, f.chat_id, s.messages,
         s.fork_id IS NULL OR NOT ${sql.literal(summaryValidSql("s", "c", String(userStamp)))} AS stale
       FROM chats c CROSS JOIN forks f ON f.chat_id = c.id LEFT JOIN fork_summaries s ON s.fork_id = f.id
-      WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL LIMIT 5001`
+      WHERE c.owner_user_id = ${userId} AND ${listed(sql, "c")} AND f.deleted_at IS NULL LIMIT 5001`
       if (rows.length > 5000) return false
       const stale = rows.filter((row) => row.stale !== 0)
       if (stale.length > 2 || stale.some((row) => (row.messages ?? 0) > 5000)) return false
@@ -220,7 +221,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             CASE WHEN s.fork_id IS NOT NULL
               THEN '[' || s.cast_json || ',' || s.joined_json || ',' || s.departed_json || ',' || s.activity_json || ',' || s.added_json || ',' || s.threads_json || ']' END AS lists
           FROM chats c CROSS JOIN forks f ON f.chat_id = c.id LEFT JOIN fork_summaries s ON s.fork_id = f.id
-          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL
+          WHERE c.owner_user_id = ${userId} AND ${listedOr(sql, "c", chatId ?? null)} AND f.deleted_at IS NULL
             AND (${chatId ?? null} IS NULL OR c.id = ${chatId ?? null})`
       const records = joinedRows as unknown as ReadonlyArray<ForkRow>
       const chatById = new Map(
@@ -397,7 +398,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         deleted_at: number | null
       }>`
         SELECT f.id, f.chat_id, f.parent_fork_id, f.deleted_at FROM forks f JOIN chats c ON c.id = f.chat_id
-        WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL
+        WHERE c.owner_user_id = ${userId} AND ${listedOr(sql, "c", chatId ?? null)}
           AND (${chatId ?? null} IS NULL OR c.id = ${chatId ?? null})`
       const groups = splitGroups(ancestry, markers)
       const ancestors = new Map(ancestry.map((f) => [f.id, f]))
@@ -851,7 +852,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               WHERE ts.id = f.tip_slot_id) AS tip_at
           FROM chats c CROSS JOIN forks f ON f.chat_id = c.id
           LEFT JOIN fork_summaries s ON s.fork_id = f.id
-          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL
+          WHERE c.owner_user_id = ${userId} AND ${listedOr(sql, "c", chatId ?? null)} AND f.deleted_at IS NULL
             AND (${only} = '' OR c.id = ${only})
             AND (s.fork_id IS NULL OR NOT ${sql.literal(summaryValidSql("s", "c", String(userStamp)))})
           ORDER BY c.id, f.id`).filter((row) => !importState(row.title).unfinished)

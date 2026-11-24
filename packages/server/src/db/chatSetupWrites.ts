@@ -1,3 +1,4 @@
+import { refusePending } from "./chatKindPolicy.ts"
 import { composerKey, Draft } from "@dreamspan/shared/drafts.ts"
 import { composerImages } from "./composerImages.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
@@ -662,6 +663,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       SendToThreads: ({ userId, chatId, images, imageDraftIds, commitDraft, targets }) =>
         Effect.gen(function* () {
           yield* graph.ownedChat(userId, chatId)
+          yield* refusePending(sql, chatId)
           const forks = yield* Effect.forEach(targets, (target) => graph.ownedFork(userId, chatId, target.forkId))
           if (
             new Set(forks.map((fork) => fork.id)).size !== forks.length ||

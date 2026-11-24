@@ -1,3 +1,4 @@
+import { listed } from "./listedChats.ts"
 // Shared named notes (DESIGN §4.1): note entities with a global or chat-scoped `owner.shared`, the text
 // a note slot can link to. Queries both workers use.
 import type { EntityId } from "@dreamspan/shared/chat.ts"
@@ -24,7 +25,7 @@ export const linkCounts = (sql: SqlClient.SqlClient, userId: UserId, entities: R
       SELECT e.id, json_extract(b.doc_json, '$.link')
       FROM entities e JOIN state_events ev ON ev.key = 'note.binding'
         AND json_extract(ev.value_json, '$.note') = e.id AND ev.superseded_by_changeset IS NULL
-      JOIN chats c ON c.id = ev.chat_id AND c.deleted_at IS NULL
+      JOIN chats c ON c.id = ev.chat_id AND ${listed(sql, "c")}
       LEFT JOIN slots s ON s.id = ev.slot_id
       JOIN entity_revisions b ON b.id = json_extract(ev.value_json, '$.revision') AND b.entity_id = e.id
       WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL

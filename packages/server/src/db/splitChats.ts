@@ -1,10 +1,11 @@
 import type { SqlClient } from "effect/sql"
 import { Effect } from "effect"
+import { committed } from "./listedChats.ts"
 
 export const splitChatMarkers = (sql: SqlClient.SqlClient, userId: string) =>
   Effect.map(
     sql<{ id: string }>`SELECT f.id FROM forks f JOIN chats c ON c.id = f.chat_id
-    WHERE c.owner_user_id = ${userId} AND f.split_chat = 1`,
+    WHERE c.owner_user_id = ${userId} AND ${committed(sql, "c")} AND f.split_chat = 1`,
     (rows) => new Set(rows.map((r) => r.id))
   )
 

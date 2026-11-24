@@ -1,3 +1,4 @@
+import { refusePending, refusePendingOf } from "./chatKindPolicy.ts"
 import { putUserSetting } from "./settings.ts"
 // Recycle bin write handlers (DESIGN §6.2), in the writer worker.
 import { readBinLimits } from "./binLimits.ts"
@@ -28,21 +29,44 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
           yield* putUserSetting(sql, userId, "bin.limits", limits)
           return limits
         }).pipe(transaction(sql, "ChangeBinLimit")),
+      // A pending chat (DESIGN §2.1) puts nothing in the bin: it is left, not deleted, and its
+      // greetings are picked, not binned.
       DeleteChatGroup: ({ userId, chatId, forkId, expectedForkIds, title }) =>
-        deleting("DeleteChatGroup", userId, bin.deleteChatGroup(userId, chatId, forkId, expectedForkIds, title)),
-      DeleteChat: ({ userId, chatId }) => deleting("DeleteChat", userId, bin.deleteChat(userId, chatId)),
+        deleting(
+          "DeleteChatGroup",
+          userId,
+          refusePending(sql, chatId).pipe(
+            Effect.andThen(bin.deleteChatGroup(userId, chatId, forkId, expectedForkIds, title))
+          )
+        ),
+      DeleteChat: ({ userId, chatId }) =>
+        deleting("DeleteChat", userId, refusePending(sql, chatId).pipe(Effect.andThen(bin.deleteChat(userId, chatId)))),
       DeleteMessage: ({ userId, slotId, forkId }) =>
-        deleting("DeleteMessage", userId, bin.deleteMessage(userId, slotId, forkId)),
+        deleting(
+          "DeleteMessage",
+          userId,
+          refusePendingOf(sql, "slot", slotId).pipe(Effect.andThen(bin.deleteMessage(userId, slotId, forkId)))
+        ),
       DeleteMessages: ({ userId, forkId, slotIds }) =>
         Effect.gen(function* () {
+          yield* refusePendingOf(sql, "branch", forkId)
           const itemIds = yield* bin.deleteMessages(userId, forkId, slotIds)
           yield* bin.evictDeleted(userId, itemIds)
           const rows = yield* bin.loadItems(userId, itemIds)
           return rows.map(toBinItem)
         }).pipe(transaction(sql, "DeleteMessages")),
-      DeleteFork: ({ userId, forkId }) => deleting("DeleteFork", userId, bin.deleteFork(userId, forkId)),
+      DeleteFork: ({ userId, forkId }) =>
+        deleting(
+          "DeleteFork",
+          userId,
+          refusePendingOf(sql, "branch", forkId).pipe(Effect.andThen(bin.deleteFork(userId, forkId)))
+        ),
       DeleteVersion: ({ userId, versionId, forkId }) =>
-        deleting("DeleteVersion", userId, bin.deleteVersion(userId, versionId, forkId)),
+        deleting(
+          "DeleteVersion",
+          userId,
+          refusePendingOf(sql, "version", versionId).pipe(Effect.andThen(bin.deleteVersion(userId, versionId, forkId)))
+        ),
       DeleteEntity: ({ userId, entityId }) => deleting("DeleteEntity", userId, bin.deleteEntity(userId, entityId)),
       DeleteConnection: ({ userId, connectionId }) =>
         deleting("DeleteConnection", userId, bin.deleteConnection(userId, connectionId)),
