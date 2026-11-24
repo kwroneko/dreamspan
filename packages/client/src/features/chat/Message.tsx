@@ -1234,7 +1234,7 @@ export const Message = memo(function Message({
               editControls
             ) : revealed && !editing ? (
               // The footer's width before the versions: the pinned buttons that fit, then More actions.
-              <MessageActions context={actionContext} className="-ml-1.5 flex sm:hidden" />
+              <MessageActions context={actionContext} locked={actionsLocked} className="-ml-1.5 flex sm:hidden" />
             ) : (
               <span className="flex-1" />
             )}
