@@ -58,17 +58,21 @@ function ChatTitle({
   session,
   view,
   name,
-  request
+  request,
+  onEditing
 }: {
   session: ChatSession
   view: ChatView
   name: ChatName | null
   request: number
+  /** Whether the name's field is open: a narrow header gives it the buttons' room. */
+  onEditing: (editing: boolean) => void
 }) {
   const split = useSplitChats(view.chat?.id ?? null, view.forkId)
   // Renaming in place, and the group's dialog, are URL places (editor/durable.tsx): a reload
   // opens them again, with the name as typed.
   const [editing, setEditing] = useOpenPlace(`chat-name:${session.id}`)
+  useEffect(() => onEditing(editing), [editing, onEditing])
   /** The name the box opens with: this chat's, or its group's (after a reload, the chat's). */
   const [opened, setInitial] = useState<string | null>(null)
   const initial = opened ?? name?.name ?? ""
@@ -342,6 +346,7 @@ export function ChatHeader({
 }) {
   const characters = castCharacters(view)
   const [renameRequest, setRenameRequest] = useState(0)
+  const [renaming, setRenaming] = useState(false)
   const split = useSplitChats(view.chat?.id ?? null, view.forkId)
   const baseName =
     view.chat && view.cast && split
@@ -360,9 +365,10 @@ export function ChatHeader({
         split?.group.picture && name ? { id: split.group.id, name: name.name, mediaId: split.group.picture } : null
       }
       loading={loading}
+      renaming={renaming}
       title={
         <>
-          <ChatTitle session={session} view={view} name={name} request={renameRequest} />
+          <ChatTitle session={session} view={view} name={name} request={renameRequest} onEditing={setRenaming} />
           {view.chat && <ChatBadges chat={view.chat} />}
           {view.chat && <SlotOutlet slot={chatHeaderAbout} props={{ view }} />}
         </>
@@ -432,7 +438,8 @@ export function ChatHeaderFrame({
   loading,
   title,
   about,
-  actions
+  actions,
+  renaming = false
 }: {
   characters: ReadonlyArray<CastCard>
   /** The chat's own picture, shown in place of its characters' faces. */
@@ -441,6 +448,8 @@ export function ChatHeaderFrame({
   title: ReactNode
   about: string | null
   actions: ReactNode
+  /** The chat's name is being renamed: a narrow header gives its field the buttons' room. */
+  renaming?: boolean
 }) {
   const navigate = useNavigate()
   return (
@@ -533,7 +542,12 @@ export function ChatHeaderFrame({
             </div>
           )
         )}
-        <div className="flex min-w-24 flex-1 flex-col @max-[40rem]/header:max-w-[calc(100%_-_9rem)] @max-[40rem]/header:flex-initial">
+        {/* While the name is renamed, a narrow header gives its field the room of the branch and
+            the buttons, none of which can act until the name is saved or kept: Save and Cancel
+            take the buttons' place at the right edge. */}
+        <div
+          className={`flex min-w-24 flex-1 flex-col ${renaming ? "" : "@max-[40rem]/header:max-w-[calc(100%_-_9rem)] @max-[40rem]/header:flex-initial"}`}
+        >
           <div className="flex min-w-0 items-center gap-2">{title}</div>
           {about !== null && (
             <p className="truncate text-xs text-muted" title={about}>
@@ -544,7 +558,9 @@ export function ChatHeaderFrame({
         {/* The chat's name gives up room before a short branch name does; only a long branch name
             is cut short. The buttons keep their size. */}
         {actions && (
-          <div className="flex min-w-0 items-center justify-end gap-0.5 *:shrink-0 @max-[40rem]/header:min-w-fit @max-[40rem]/header:flex-1 sm:gap-1">
+          <div
+            className={`flex min-w-0 items-center justify-end gap-0.5 *:shrink-0 @max-[40rem]/header:min-w-fit @max-[40rem]/header:flex-1 sm:gap-1 ${renaming ? "@max-[40rem]/header:hidden" : ""}`}
+          >
             {actions}
           </div>
         )}

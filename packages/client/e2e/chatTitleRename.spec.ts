@@ -26,7 +26,7 @@ test.beforeAll(async () => {
   )
 })
 
-for (const width of [1340, 390])
+for (const width of [1340, 600, 390])
   test(`${width} dark: the chat title's rename has Save and Cancel and keeps the header's height`, async ({
     page
   }, info) => {
@@ -47,6 +47,7 @@ for (const width of [1340, 390])
     const save = header.getByRole("button", { name: "Save the name", exact: true })
     const cancel = header.getByRole("button", { name: "Cancel renaming", exact: true })
     const original = (await title.textContent())!.trim()
+    const buttons = await header.getByRole("button").evaluateAll((all) => all.map((b) => b.getAttribute("aria-label")))
 
     // Cancel restores the name.
     await title.click()
@@ -62,6 +63,8 @@ for (const width of [1340, 390])
     const fieldBox = (await field.boundingBox())!
     const saveBox = (await save.boundingBox())!
     expect(saveBox.x - (fieldBox.x + fieldBox.width)).toBeLessThanOrEqual(8)
+    // A narrow header gives the field the branch's and the buttons' room.
+    if (before.width < 640) expect(fieldBox.width).toBeGreaterThanOrEqual(before.width * 0.6)
     await field.fill("Unwanted name")
     await save.hover()
     await expect(page.getByText("Save the name (Enter)", { exact: true }).filter({ visible: true })).toBeVisible()
@@ -75,6 +78,9 @@ for (const width of [1340, 390])
     await cancel.click()
     await expect(field).toHaveCount(0)
     await expect(title).toHaveText(original)
+    // The branch and the buttons are back.
+    for (const label of buttons)
+      if (label) await expect(header.getByRole("button", { name: label, exact: true })).toBeVisible()
     expect((await header.boundingBox())!.height).toBe(before.height)
 
     // Save keeps the typed name.
