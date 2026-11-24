@@ -435,22 +435,22 @@ describe("card-source tools", () => {
         direct.items.map((i) => i.remoteId)
       )
       assert.notInclude(JSON.stringify(page), "thumb")
-      // The user's Safe rating: no mature card, and the assistant can't widen it.
+      // Hide NSFW excludes rated cards, and the assistant can't widen the user's rating.
       yield* f.api.SetCardSourceRating({ sourceId: "cardex", rating: "exclude" })
       const before = archive.hits()
       assert.include(
-        yield* f.refused("search_card_source", { rating: "Everything" }, "wider"),
+        yield* f.refused("search_card_source", { rating: "Show NSFW" }, "wider"),
         "only the user can change it"
       )
       assert.strictEqual(archive.hits(), before)
       const safe = yield* f.ok("search_card_source", {}, "safe")
-      assert.strictEqual(safe.rating, "Safe")
+      assert.strictEqual(safe.rating, "Hide NSFW")
       assert.isTrue((safe.cards as Array<{ rating?: string }>).every((c) => c.rating === undefined))
       const mature = archive.cards.find((c) => c.nsfw)!
-      assert.include(yield* f.refused("open_remote_card", { card: mature.slug }, "mature"), "Safe cards only")
-      // Everything: the assistant may narrow to Safe.
+      assert.include(yield* f.refused("open_remote_card", { card: mature.slug }, "mature"), "Hide NSFW cards only")
+      // With Show NSFW selected, the assistant may narrow to Hide NSFW.
       yield* f.api.SetCardSourceRating({ sourceId: "cardex", rating: "include" })
-      const narrowed = yield* f.ok("search_card_source", { rating: "Safe" }, "narrowed")
+      const narrowed = yield* f.ok("search_card_source", { rating: "Hide NSFW" }, "narrowed")
       assert.isTrue(narrowed.narrowed)
       assert.isTrue((narrowed.cards as Array<{ rating?: string }>).every((c) => c.rating === undefined))
     }).pipe(Effect.scoped, Effect.provide(layer))
@@ -713,7 +713,7 @@ describe("adding is bound to the card and version opened", () => {
     }).pipe(Effect.scoped, Effect.provide(layer))
   })
 
-  it.live("under a Safe rating, a rated card is neither recorded as viewed nor added", () => {
+  it.live("with Hide NSFW, a rated card is neither recorded as viewed nor added", () => {
     const { config, layer } = layerFor()
     return Effect.gen(function* () {
       const f = yield* fixture(config.dataDir)
@@ -724,14 +724,14 @@ describe("adding is bound to the card and version opened", () => {
           p.recent.find((r) => r.remoteId === mature.slug)
         )
       yield* f.api.SetCardSourceRating({ sourceId: "cardex", rating: "exclude" })
-      assert.include(yield* f.refused("open_remote_card", { card: mature.slug }, "mature"), "Safe cards only")
+      assert.include(yield* f.refused("open_remote_card", { card: mature.slug }, "mature"), "Hide NSFW cards only")
       assert.isUndefined(yield* recentOf())
-      // Viewed before the user chose Safe: still not added under it.
+      // Viewed before the user chose Hide NSFW: adding it is still refused.
       yield* f.api.SetCardSourceRating({ sourceId: "cardex", rating: "include" })
       yield* f.ok("open_remote_card", { card: mature.slug }, "mature-open")
       assert.isString((yield* recentOf())?.rating)
       yield* f.api.SetCardSourceRating({ sourceId: "cardex", rating: "exclude" })
-      assert.include(yield* f.refused("adopt_remote_card", { card: mature.slug }, "mature-add"), "Safe cards only")
+      assert.include(yield* f.refused("adopt_remote_card", { card: mature.slug }, "mature-add"), "Hide NSFW cards only")
     }).pipe(Effect.scoped, Effect.provide(layer))
   })
 })
