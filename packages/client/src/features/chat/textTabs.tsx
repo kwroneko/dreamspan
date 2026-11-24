@@ -107,7 +107,8 @@ function SummaryText({ target, summary }: { target: SummaryTabTarget; summary: S
   // The same draft as the summary's edit in the panel, when that's open.
   const store = useSharedSummaryDraft(host, userId, summary)
   const view = useSyncExternalStore(store.subscribe, store.snapshot)
-  const { base, problem, retry } = useSummaryBase(host, summary, store)
+  useEffect(() => store.update(summary), [store, summary])
+  const { base, problem, retry } = useSummaryBase(host, store)
   return (
     <>
       <SlotOutlet
@@ -134,12 +135,13 @@ function SummaryText({ target, summary }: { target: SummaryTabTarget; summary: S
 export function SummaryTextPage() {
   const target = useTarget(summaryTabTarget)
   const call = useCaller()
-  const [summary, setSummary] = useState<Summary | null>(null)
+  const [loaded, setLoaded] = useState<{ forkId: string | null; summary: Summary } | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   const [attempt, setAttempt] = useState(0)
   const chat = useChatName(target?.chatId ?? "")
   const forkId = target?.forkId ?? null
   const summaryId = target?.summaryId ?? ""
+  const summary = loaded?.forkId === forkId && loaded.summary.id === summaryId ? loaded.summary : null
   useEffect(() => {
     if (!summaryId) return
     let live = true
@@ -148,7 +150,7 @@ export function SummaryTextPage() {
     ).then((result) => {
       if (!live) return
       if (result.ok) {
-        setSummary(result.value)
+        setLoaded({ forkId, summary: result.value })
         setError(null)
       } else setError(result.error)
     })
@@ -174,15 +176,15 @@ export function SummaryTextPage() {
 }
 
 function InstructionText({ target, settings }: { target: InstructionTabTarget; settings: LcmSettingsView }) {
-  const saved = settings.resolved.tail ?? BUILTIN_SUMMARY_INSTRUCTION
+  const resolved = settings.resolved.tail ?? BUILTIN_SUMMARY_INSTRUCTION
   // The same draft as the box under This chat → Summary settings.
-  const draft = useUserDraft(instructionTarget(target.chatId, target.forkId), INSTRUCTION_FIELD, saved)
+  const draft = useUserDraft(instructionTarget(target.chatId, target.forkId), INSTRUCTION_FIELD, resolved)
   return (
     <>
       <CodeEditor
         label="This chat's summarization instruction"
         value={draft.text}
-        base={saved}
+        base={draft.saved}
         rows={5}
         fill
         minHeight="100%"
@@ -191,7 +193,7 @@ function InstructionText({ target, settings }: { target: InstructionTabTarget; s
       />
       <p className="text-xs text-muted" aria-live="polite">
         {"{{words}} is the summary length."}
-        {draft.text !== saved && " Not saved yet: Save instruction under This chat → Summary settings uses it."}
+        {draft.text !== draft.saved && " Not saved yet: Save instruction under This chat → Summary settings uses it."}
       </p>
       <UserDraftNotices draft={draft} />
     </>

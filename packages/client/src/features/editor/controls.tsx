@@ -350,6 +350,8 @@ export function FieldTabEditor({
   const list = parsed?.kind === "value" ? parsed.path : null
   const items = useValue<unknown>(store, list ?? path)
   const index = path.at(-1)
+  const missing =
+    list !== null && (!Array.isArray(items) || typeof index !== "number" || typeof items[index] !== "string")
   const write = (next: string) => {
     if (list === null) return store.setText(path, next)
     if (!Array.isArray(items) || typeof index !== "number" || index >= items.length) return
@@ -366,9 +368,9 @@ export function FieldTabEditor({
         fill
         minHeight="100%"
         expand={false}
-        readOnly={readOnly}
+        readOnly={readOnly || missing}
         tools={<FieldEditHistory store={store} field={field} label={label} />}
-        status={<FieldStatus store={store} field={field} />}
+        status={missing ? "This greeting was removed." : <FieldStatus store={store} field={field} />}
         onChange={write}
         onBlur={() => void store.save(field)}
       />

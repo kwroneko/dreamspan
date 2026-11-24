@@ -13,7 +13,7 @@ const LIST = "1.5em"
 
 const QUOTE_MARK = /^ {0,3}> ?/
 const LIST_MARK = /^(\s*)([-*+]|\d{1,9}[.)])(?:[ \t]+|$)/
-const FENCE = /^\s{0,3}(`{3,}|~{3,})/
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/
 
 type Part = typeof QUOTE | typeof LIST
 
@@ -68,9 +68,11 @@ export function blockLines(doc: Text): DecorationSet {
     const line = doc.line(number)
     const text = line.text
     const fenced = FENCE.exec(text)
-    if (fence !== null || fenced) {
-      if (fence === null) fence = fenced![1]![0]!
-      else if (fenced && fenced[1]![0] === fence) fence = null
+    const marks = fenced?.[1]
+    const info = fenced?.[2] ?? ""
+    if (fence !== null || (marks && (marks[0] === "~" || !info.includes("`")))) {
+      if (fence === null) fence = marks!
+      else if (marks?.startsWith(fence) && /^[ \t]*$/.test(info)) fence = null
       items = []
       previousBlank = false
       continue

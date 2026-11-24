@@ -162,7 +162,8 @@ export function InPlaceText({
   onCaretPlaced,
   onFirstFocus,
   onShown,
-  selection
+  selection,
+  selectionScopeFocused
 }: {
   draft: MessageDraft
   base: string
@@ -176,6 +177,7 @@ export function InPlaceText({
   /** Its text is drawn, before the frame is painted: the rendered text it replaces can go. */
   onShown: () => void
   selection: EditSelection
+  selectionScopeFocused: boolean
 }) {
   const { text, added } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   // The editor may mount after the saved text loads: it still opens at the first caret.
@@ -222,6 +224,7 @@ export function InPlaceText({
             // Text just added to your version: marked and scrolled to, focus left where it is.
             flash: added,
             onSelectionChange: selection.set,
+            selectionScopeFocused,
             onChange: (value) => draft.setText(value)
           }}
         />
@@ -334,6 +337,7 @@ export function EditControls({
     <div
       role="group"
       aria-label="Edit"
+      data-message-edit-controls={footer || undefined}
       className={
         footer
           ? // As tall as the footer's own buttons: opening the edit leaves the row as it was. A

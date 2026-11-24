@@ -13,7 +13,7 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser, type Client } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, startServer, withAdmin } from "./support/server.ts"
 import { noteText } from "./support/notes.ts"
-import { openPanel } from "./support/panel.ts"
+import { openPanel, openSummarySettings, panelTab } from "./support/panel.ts"
 import { level1 } from "./support/summaries.ts"
 import { textBoxValue } from "./support/textbox.ts"
 
@@ -64,6 +64,60 @@ const openCard = async (page: Page, name: string) => {
   await page.goto(`${server().url}/library/${card.id}`)
   return card
 }
+
+test("a reused card field preview binds to the new card's store", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { chat, a, b } = await admin((api) =>
+    Effect.gen(function* () {
+      const a = yield* api.CreateCard({ label: "Preview Alpha", name: "Preview Alpha" })
+      const b = yield* api.CreateCard({ label: "Preview Beta", name: "Preview Beta" })
+      const chat = yield* api.CreateChat({ title: "Card previews" })
+      for (const card of [a, b])
+        yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
+      return { chat, a, b }
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chat.id}?panel=card:${a.entityId}`)
+  const panel = page.getByRole("tabpanel", { name: "Definition", exact: true })
+  const link = panel.getByRole("link", { name: "Open Description in a tab", exact: true })
+  await link.click()
+  const frame = page.locator("[data-frame]")
+  const preview = frame.locator("[data-tab][data-preview]")
+  await expect(preview).toContainText("Preview Alpha · Description")
+  const tabId = (await preview.getAttribute("data-tab"))!
+
+  await panelTab(page, "Preview Beta")
+  await link.click()
+  await expect(preview).toHaveAttribute("data-tab", tabId)
+  await expect(preview).toContainText("Preview Beta · Description")
+  await expect(page).toHaveURL(new RegExp(`/library/${b.id}/field`))
+  const field = frame.getByRole("textbox", { name: "Description", exact: true })
+  await field.fill("Written only to Beta.")
+  await expect
+    .poll(() => textBoxValue(panel.getByRole("textbox", { name: "Description", exact: true })))
+    .toBe("Written only to Beta.")
+  await panelTab(page, "Preview Alpha")
+  await expect.poll(() => textBoxValue(panel.getByRole("textbox", { name: "Description", exact: true }))).toBe("")
+})
+
+test("a removed alternate greeting is read-only in its open field tab", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await openCard(page, "Greeting tab")
+  await page.getByRole("tab", { name: "Greetings", exact: true }).click()
+  await page.getByRole("button", { name: "Add a greeting", exact: true }).click()
+  const label = "Alternate greeting 1"
+  const card = page.locator("[data-frame]").first()
+  await card.getByRole("textbox", { name: label, exact: true }).fill("A greeting to remove.")
+  await card.getByRole("link", { name: `Open ${label} in a tab`, exact: true }).click({ button: "right" })
+  await page.getByRole("menuitem", { name: "Open beside", exact: true }).click()
+  const field = page.locator("[data-field-tab]")
+  const box = field.getByRole("textbox", { name: label, exact: true })
+  await expect.poll(() => textBoxValue(box)).toBe("A greeting to remove.")
+  await card.getByRole("button", { name: "Remove alternate greeting 1", exact: true }).click()
+  await expect(box).not.toBeEditable()
+  await expect(field.getByText("This greeting was removed.", { exact: true })).toBeVisible()
+})
 
 test("1440: the expand button opens the field as a tab beside, the same text live both ways and after a reload", async ({
   page
@@ -297,6 +351,11 @@ test("1440: a summary's text and a chat's own note open beside the chat, live bo
   await expect.poll(() => textBoxValue(inPanel)).toContain("Typed in its tab.")
   await append(inPanel, " Typed in the panel.")
   await expect.poll(() => textBoxValue(own)).toContain("Typed in the panel.")
+  await summary.panel.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(inPanel).toHaveCount(0)
+  await expect.poll(() => textBoxValue(own)).toBe(`${LONG} Typed in its tab. Typed in the panel.`)
+  await expect(texts.getByText("Unchanged.", { exact: true })).toBeVisible()
+  await expect(texts.locator(".rp-line-added, .rp-line-modified, .rp-line-deleted")).toHaveCount(0)
 
   // The chat's own note: a plain click opens it where the summary's tab is, the chat keeping its frame.
   const note = await ownNote(page)
@@ -329,6 +388,40 @@ test("1440: a summary's text and a chat's own note open beside the chat, live bo
   await expect
     .poll(() => textBoxValue(frames.nth(1).locator("[data-field-tab]").getByRole("textbox", { name: SUMMARY_BOX })))
     .toContain("Typed in its tab. Typed in the panel.")
+})
+
+test("an open instruction tab follows the panel's save and reset", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const chat = await admin((api) => api.CreateChat({ title: "Instruction tab" }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  const settings = await openSummarySettings(page)
+  const label = "This chat's summarization instruction"
+  const panelBox = settings.getByRole("textbox", { name: label, exact: true })
+  await expect(panelBox).toBeEditable()
+  const defaultInstruction = await textBoxValue(panelBox)
+  const save = settings.getByRole("button", { name: "Save instruction", exact: true })
+  await panelBox.fill("First saved instruction.")
+  await save.click()
+  const reset = settings.getByRole("button", { name: "Use account default", exact: true })
+  await expect(reset).toBeEnabled()
+
+  await settings.getByRole("link", { name: `Open ${label} in a tab`, exact: true }).click({ button: "right" })
+  await page.getByRole("menuitem", { name: "Open beside", exact: true }).click()
+  const field = page.locator("[data-field-tab]")
+  const box = field.getByRole("textbox", { name: label, exact: true })
+  await expect.poll(() => textBoxValue(box)).toBe("First saved instruction.")
+
+  await box.fill("Second saved instruction.")
+  await save.click()
+  await expect(save).toBeDisabled()
+  await expect.poll(() => textBoxValue(box)).toBe("Second saved instruction.")
+  await expect(field.getByText(/Not saved yet/)).toHaveCount(0)
+
+  await reset.click()
+  await expect(reset).toHaveCount(0)
+  await expect.poll(() => textBoxValue(box)).toBe(defaultInstruction)
+  await expect(field.getByText(/Not saved yet/)).toHaveCount(0)
 })
 
 test("390: a summary's text and a chat's own note are full pages, and Back returns to the chat", async ({

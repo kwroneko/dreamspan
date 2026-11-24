@@ -1,6 +1,7 @@
 // Synthetic replies only: keyboard controls must preserve drafts and share visible actions.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
+import { typeInto } from "./support/composer.ts"
 import { startContinueProvider } from "./support/continueProvider.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -19,6 +20,68 @@ const admin = <A>(use: (api: Client) => Effect.Effect<A, unknown>) => {
   cookie ??= loginCookie(server(), ADMIN.handle, ADMIN.password)
   return cookie.then((value) => withCookie(server(), value, use))
 }
+
+test("composer undo belongs to the branch draft where the text was typed", async ({ page }) => {
+  const { chat, root, fork } = await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Composer undo" })
+      const root = chat.currentForkId!
+      const sent = yield* api.SendMessage({
+        chatId: chat.id,
+        forkId: root,
+        parentSlotId: null,
+        branch: false,
+        content: "The fork point",
+        reply: false
+      })
+      if (sent._tag !== "Posted") throw new Error("Expected a posted message")
+      const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: root, atSlotId: sent.entry.slotId })
+      yield* api.NameFork({ forkId: fork.id, name: "Existing draft branch" })
+      yield* typeInto(api, chat.id, fork.id, "abcdef")
+      return { chat, root, fork }
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chat.id}?fork=${root}`)
+  const box = page.getByTestId("composer")
+  await expect(box).toBeEditable()
+  await box.focus()
+  await page.keyboard.insertText("abc")
+  await expectTextBox(box, "abc")
+
+  await page.getByRole("button", { name: /^Branch:.*switch branch$/ }).click()
+  await page
+    .getByRole("dialog", { name: "Branches of this chat" })
+    .getByRole("link", { name: /^Existing draft branch/ })
+    .click()
+  await expectTextBox(box, "abcdef")
+  await box.press("ControlOrMeta+z")
+  await expectTextBox(box, "abcdef")
+  expect((await admin((api) => api.OpenComposer({ chatId: chat.id, forkId: fork.id }))).content).toBe("abcdef")
+})
+
+test("quick guidance toggles keep the selection when focus returns to the composer", async ({ page }) => {
+  const chat = await admin((api) => api.CreateChat({ title: "Composer selection" }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  const box = page.getByTestId("composer")
+  const toggle = page.getByRole("switch", { name: "Guidance", exact: true })
+  await expect(toggle).toBeEnabled()
+  await box.fill("Selected draft text")
+  await box.press("ControlOrMeta+a")
+  await box.evaluate(async (editor) => {
+    const toggle = document.querySelector<HTMLButtonElement>('button[role="switch"][aria-label="Guidance"]')!
+    for (const type of ["pointerdown", "pointerup"])
+      editor.dispatchEvent(new PointerEvent(type, { bubbles: true, composed: true, pointerId: 1 }))
+    toggle.focus()
+    toggle.click()
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    editor.focus()
+  })
+  await expect(toggle).toHaveAttribute("aria-checked", "true")
+  await page.keyboard.insertText("Replacement")
+  await expectTextBox(box, "Replacement")
+})
 
 const setup = (human = false) =>
   admin((api) =>

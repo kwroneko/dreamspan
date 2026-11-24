@@ -146,7 +146,7 @@ const editGuidance = (session: ChatSession, entry: PathEntry) => {
 export function MessageDirection({ entry, session }: { entry: PathEntry; session: ChatSession }) {
   const { version } = entry
   if (version.writer !== "model" || !version.direction) return null
-  return <GuidanceLine text={version.direction} onEdit={() => editGuidance(session, entry)} />
+  return <GuidanceLine key={version.id} text={version.direction} onEdit={() => editGuidance(session, entry)} />
 }
 
 /**
@@ -160,20 +160,23 @@ function GuidanceLine({ text, onEdit }: { text: string; onEdit: () => void }) {
   const body = useRef<HTMLParagraphElement>(null)
   useLayoutEffect(() => {
     const element = body.current
-    if (!element || open) return
-    const measure = () => setLong(element.scrollHeight > element.clientHeight + 1)
+    if (!element) return
+    const measure = () => {
+      const foldedHeight = 3 * parseFloat(getComputedStyle(element).lineHeight)
+      setLong(element.scrollHeight > foldedHeight + 1)
+    }
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(element)
     return () => observer.disconnect()
-  }, [text, open])
+  }, [text])
   return (
     <div data-testid="message-direction" className="flex items-start gap-1 text-xs text-muted">
       <div className="flex min-w-0 flex-1 flex-col items-start pt-2">
         <p ref={body} className={`w-full wrap-break-word ${open ? "" : "line-clamp-3"}`}>
           <span className="font-medium">Guidance:</span> {text}
         </p>
-        {(long || open) && (
+        {long && (
           <Tooltip label={open ? "Fold this guidance back to three lines." : "Show all of this guidance."}>
             <button
               type="button"

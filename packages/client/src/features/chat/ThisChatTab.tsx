@@ -10,9 +10,10 @@ import { chatSettingSections, summarySettingFields } from "./presentation.tsx"
 // A change is a state event at the leaf shown, so from there on, on this branch.
 // The context assembler reads them; this only writes them.
 import type { CastChange } from "@dreamspan/shared/chatSetupApi.ts"
-import { BUILTIN_SUMMARY_INSTRUCTION, type LcmSettingsChange, resolveLcm } from "@dreamspan/shared/lcmSettings.ts"
+import type { ForkId } from "@dreamspan/shared/chat.ts"
+import { BUILTIN_SUMMARY_INSTRUCTION, resolveLcm } from "@dreamspan/shared/lcmSettings.ts"
 import type { LcmSettingsView } from "@dreamspan/shared/lcm.ts"
-import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react"
+import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useAction } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -64,17 +65,18 @@ function Instruction({
   /** The instruction's own tab (textTabs.tsx), the same draft. */
   tab: InstructionTabTarget
 }) {
-  const saved = view.resolved.tail ?? BUILTIN_SUMMARY_INSTRUCTION
-  const draft = useUserDraft(targetId, INSTRUCTION_FIELD, saved)
+  const resolved = view.resolved.tail ?? BUILTIN_SUMMARY_INSTRUCTION
+  const draft = useUserDraft(targetId, INSTRUCTION_FIELD, resolved)
   const expandTab = useFieldTabLink(instructionTabHref(tab))
-  const { text, setText } = draft
-  const base = saved
+  const { text, setText, saved, setSaved } = draft
+  useEffect(() => setSaved(resolved), [resolved, setSaved])
   const [problem, setProblem] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const own = view.resolved.from.tail === "chat"
-  const save = async (change: LcmSettingsChange) => {
+  const save = async (tail: string | null) => {
     setPending(true)
-    const message = await write(change)
+    const message = await write({ tail })
+    if (message === null) setSaved(tail ?? resolveLcm(null, view.account).tail ?? BUILTIN_SUMMARY_INSTRUCTION)
     setPending(false)
     setProblem(message)
     return message === null
@@ -84,7 +86,7 @@ function Instruction({
       <CodeEditor
         label="This chat's summarization instruction"
         value={text}
-        base={base}
+        base={saved}
         rows={5}
         onChange={setText}
         tools={<UserDraftUndo draft={draft} place="strip" />}
@@ -95,15 +97,7 @@ function Instruction({
           hint="Saves this chat’s summarization instruction."
           disabled={disabled || text === saved || text.trim() === ""}
           pending={pending}
-          onClick={() =>
-            void draft.commit(text, async () => {
-              setPending(true)
-              const message = await write({ tail: text })
-              setPending(false)
-              setProblem(message)
-              return message === null
-            })
-          }
+          onClick={() => void draft.commit(text, () => save(text))}
         >
           Save instruction
         </Button>
@@ -112,7 +106,7 @@ function Instruction({
             variant="ghost"
             disabled={disabled || pending}
             hint="Go back to your default instruction."
-            onClick={() => void draft.discard(() => save({ tail: null }))}
+            onClick={() => void draft.discard(() => save(null))}
           >
             Use account default
           </Button>
@@ -136,17 +130,20 @@ function Instruction({
 function useLcmSettings(session: ChatSession) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
   const [error, setError] = useState<AppError | null>(null)
-  const [settings, setSettings] = useState<LcmSettingsView | null>(null)
+  const [loaded, setLoaded] = useState<{ forkId: ForkId | null; settings: LcmSettingsView } | null>(null)
+  const settings = loaded?.forkId === view.forkId ? loaded.settings : null
   const [reads, setReads] = useState(0)
+  const writes = useRef(0)
   useEffect(() => {
     let live = true
+    const afterWrites = writes.current
     void session
       .call((client) =>
         client("GetLcmSettings", { chatId: session.id, forkId: view.forkId, leafSlotId: view.leafSlotId })
       )
       .then((result) => {
-        if (!live) return
-        if (result.ok) setSettings(result.value)
+        if (!live || afterWrites !== writes.current) return
+        if (result.ok) setLoaded({ forkId: view.forkId, settings: result.value })
         else setError(result.error)
       })
     return () => {
@@ -158,6 +155,7 @@ function useLcmSettings(session: ChatSession) {
     const result = await session.call((client) =>
       client("ChangeLcmSettings", { chatId: session.id, forkId: view.forkId, change })
     )
+    if (result.ok) writes.current++
     reread()
     if (result.ok) return null
     return result.error.message
