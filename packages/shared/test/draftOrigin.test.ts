@@ -255,3 +255,36 @@ it("a stale model bulk edit keeps a field and its tick added since", () => {
     draft: { context: "50000", maxOutput: "900" }
   })
 })
+
+// Review of 15a906b99 (1, P1): a keyed list merges to its items only, never a hole.
+it("a stale edit of one script keeps another script's deletion, with no empty slot", () => {
+  const start = {
+    scripts: [
+      { id: "a", name: "First" },
+      { id: "b", name: "Second" }
+    ]
+  }
+  const merged = staleMerge(
+    { scripts: [{ id: "b", name: "Second" }] },
+    {
+      scripts: [
+        { id: "a", name: "First" },
+        { id: "b", name: "Second, renamed" }
+      ]
+    },
+    start
+  )
+  expect(merged).toEqual({ scripts: [{ id: "b", name: "Second, renamed" }] })
+})
+
+// Review of 15a906b99 (2, P1): a bulk draft kept as text before it became an object.
+it("a stale bulk edit from a draft kept as text keeps a field changed since", () => {
+  const start = { ids: ["m1"], ticked: ["context"], draft: JSON.stringify({ context: "24000", maxOutput: "" }) }
+  const fromA = { ...start, draft: { context: "50000", maxOutput: "" } }
+  const want = { ids: ["m1"], ticked: ["context", "maxOutput"], draft: { context: "50000", maxOutput: "900" } }
+  const fromB = { ...start, ticked: ["context", "maxOutput"], draft: { context: "24000", maxOutput: "900" } }
+  expect(staleMerge(fromA, fromB, start)).toEqual(want)
+  // A save queued before the change, still as text, merges the same way.
+  const queued = { ...fromB, draft: JSON.stringify(fromB.draft) }
+  expect(staleMerge(fromA, queued, start)).toEqual(want)
+})
