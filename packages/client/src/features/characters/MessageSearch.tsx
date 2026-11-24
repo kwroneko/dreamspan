@@ -13,12 +13,13 @@ import {
   MESSAGE_SORTS,
   type MessageCursor,
   type MessageHit,
+  type MessageSearchPage,
   type MessageSort,
   messageCountText
 } from "@dreamspan/shared/messageSearch.ts"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
@@ -201,36 +202,49 @@ function Count({ search }: { search: Search }) {
 }
 
 function Pages({ search }: { search: Search }) {
-  const [cursors, setCursors] = useState<ReadonlyArray<MessageCursor | null>>([null])
+  const [pages, setPages] = useState<{
+    firstPage?: MessageSearchPage
+    cursors: ReadonlyArray<MessageCursor | null>
+  }>({ cursors: [null] })
+  const { firstPage, cursors } = pages
+  const restart = useCallback((firstPage: MessageSearchPage) => setPages({ firstPage, cursors: [null] }), [])
+  const onMore = (next: MessageCursor) => setPages((current) => ({ ...current, cursors: [...current.cursors, next] }))
   return (
     <ul aria-label="Messages found" className="flex flex-col gap-1">
-      {cursors.map((cursor, i) => (
-        <Page
-          key={cursor === null ? "first" : `${cursor.phase ?? "together"}/${cursor.chat ?? ""}/${cursor.before}`}
-          search={search}
-          cursor={cursor}
-          first={i === 0}
-          last={i === cursors.length - 1}
-          onMore={(next) => setCursors([...cursors, next])}
-        />
-      ))}
+      {cursors.map((cursor, i) => {
+        const props = { search, first: i === 0, last: i === cursors.length - 1, onMore }
+        return cursor === null && firstPage !== undefined ? (
+          <PageRows key="first" page={firstPage} {...props} />
+        ) : (
+          <Page
+            key={
+              cursor === null
+                ? "first"
+                : `${cursor.chatOrder ?? cursor.phase ?? "together"}/${cursor.chat ?? ""}/${cursor.before}`
+            }
+            cursor={cursor}
+            restart={restart}
+            {...props}
+          />
+        )
+      })}
     </ul>
   )
 }
 
-function Page({
-  search,
-  cursor,
-  first,
-  last,
-  onMore
-}: {
+interface PageRowsProps {
   search: Search
-  cursor: MessageCursor | null
   first: boolean
   last: boolean
   onMore: (next: MessageCursor) => void
-}) {
+}
+
+function Page({
+  cursor,
+  restart,
+  ...props
+}: PageRowsProps & { cursor: MessageCursor | null; restart: (firstPage: MessageSearchPage) => void }) {
+  const { search } = props
   const { text } = search
   // Keep loaded pages fixed. Refreshing the first page while retaining older cursors
   // would drop its former last row whenever a new reply arrives. `search` is fixed per list (its key).
@@ -247,21 +261,28 @@ function Page({
     [text, cursor, search.sort, search.reversed, search.filter, search.entity]
   )
   const result = useAtomValue(atom)
+  const page = AsyncResult.isSuccess(result) ? result.value : null
+  useEffect(() => {
+    if (page?.restarted) restart(page)
+  }, [page, restart])
   if (AsyncResult.isFailure(result))
     return <li className="p-2 text-sm text-danger">The search couldn't be finished. Try again in a moment.</li>
-  if (!AsyncResult.isSuccess(result))
+  if (!page)
     return (
       <li className="flex items-center gap-2 p-2 text-sm text-muted">
         <Spinner /> Searching your messages…
       </li>
     )
-  const page = result.value
+  return page.restarted ? null : <PageRows page={page} {...props} />
+}
+
+function PageRows({ page, search, first, last, onMore }: PageRowsProps & { page: MessageSearchPage }) {
   return (
     <>
       {first && page.hits.length === 0 && page.next === null && (
         <li className="p-2 text-sm text-muted">
           No message {search.filter === "all" && search.entity === null ? "in your chats" : "in these chats"} has “
-          {text}”.
+          {search.text}”.
         </li>
       )}
       {page.hits.map((hit) => (

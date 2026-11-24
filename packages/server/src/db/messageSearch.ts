@@ -14,6 +14,7 @@
 // (`chatSpan`), within the same SCAN, and at most CHAT_VISITS chats a page.
 // CountMessages counts the matches that may be shown, capped (MESSAGE_COUNT_CAP, COUNT_SCAN).
 import { importState, unfinishedTitle } from "@dreamspan/shared/stImportApi.ts"
+import { createHash } from "node:crypto"
 import { chatName } from "@dreamspan/shared/chatName.ts"
 import type { ChatId, EntityId, ForkId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
@@ -171,9 +172,12 @@ const searchMessages = (
         (yield* sql<{ id: string }>`SELECT id FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL
           ORDER BY title, id`).map((row) => row.id)
       // A chat at a time, in that order, each newest first between its first and last version.
+      const chatOrder = createHash("sha256").update(JSON.stringify(order)).digest("base64url")
+      const restarted = cursor !== null && cursor.chatOrder !== chatOrder
+      const at = restarted ? null : cursor
       const match = matchAll(parsed)
-      let chat = cursor?.chat ?? 0
-      let before = cursor?.before ?? Number.MAX_SAFE_INTEGER
+      let chat = Math.max(0, at?.chat ?? 0)
+      let before = at?.before ?? Number.MAX_SAFE_INTEGER
       let scanned = 0
       let visits = 0
       while (chat < order.length && hits.length < limit && scanned < SCAN && visits < CHAT_VISITS) {
@@ -207,7 +211,11 @@ const searchMessages = (
         chat++
         before = Number.MAX_SAFE_INTEGER
       }
-      return { hits, next: chat >= order.length ? null : { before, chat } } satisfies MessageSearchPage
+      return {
+        hits,
+        next: chat >= order.length ? null : { before, chat, chatOrder },
+        ...(restarted ? { restarted: true as const } : {})
+      } satisfies MessageSearchPage
     }
     const only = chatList === null ? null : JSON.stringify(chatList)
     const down = sort !== "oldest"
@@ -226,7 +234,15 @@ const searchMessages = (
           scanned++
           before = row.seq
           if (row.eligible !== 1) continue
-          const hit = yield* hitOf(sql, userId, chats, row, words, sort === "best" && phase === 1 ? null : phrase, allowed)
+          const hit = yield* hitOf(
+            sql,
+            userId,
+            chats,
+            row,
+            words,
+            sort === "best" && phase === 1 ? null : phrase,
+            allowed
+          )
           if (hit !== null) hits.push(hit)
           if (hits.length === limit) break
         }
@@ -454,7 +470,9 @@ export const makeMessageSearchHandlers = Effect.gen(function* () {
       readonly chats?: ReadonlyArray<string> | null
       readonly forks?: ReadonlyArray<ForkId>
     }) =>
-      searchMessages(sql, userId, text, cursor, limit, sort ?? "best", chats ?? null, forks).pipe(query("SearchMessages")),
+      searchMessages(sql, userId, text, cursor, limit, sort ?? "best", chats ?? null, forks).pipe(
+        query("SearchMessages")
+      ),
     CountMessages: ({
       userId,
       text,
