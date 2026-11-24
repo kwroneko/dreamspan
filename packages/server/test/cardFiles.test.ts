@@ -409,6 +409,7 @@ describe("card files", () => {
         })
         yield* attachUpload("/files", "wren.png", png(cardChunk("ccv3", v3Card("Wren Hollow"))))
         for (const filesOff of [false, true]) {
+          const firstRequest = mock.requests().length
           const chat = yield* api.CreateWorkshop({ title: "Card import consent" })
           if (filesOff) yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "files", mode: "off" })
           const events: Array<ChatEvent> = []
@@ -434,6 +435,16 @@ describe("card files", () => {
             yield* api.AnswerToolApproval({ rolloutId, toolCallId, digest, answer: "deny" })
           }
           yield* eventually(() => finished(events, id) !== undefined)
+          const offered = mock.requests()[firstRequest]?.body?.tools as
+            Array<{ function: { name: string } }> | undefined
+          assert.strictEqual(
+            offered?.some((tool) => tool.function.name === "read_file"),
+            !filesOff
+          )
+          assert.strictEqual(
+            offered?.some((tool) => tool.function.name === "import_card_file"),
+            !filesOff
+          )
           if (filesOff) assert.isUndefined(importApproval(events, id, "import_wren"))
           assert.isFalse((yield* api.ListLibrary({ kind: "card" })).some((ref) => ref.label === "Wren Hollow"))
         }

@@ -21,7 +21,7 @@ import type { User, UserId } from "@dreamspan/shared/domain.ts"
 import { hasServerCode, pluginAccessGrows } from "@dreamspan/shared/pluginConsent.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { AppConfig } from "../config.ts"
-import { ExecutionRegistry } from "../execution.ts"
+import { ExecutionRegistry, toolForKind } from "../execution.ts"
 import { Commands } from "../commands.ts"
 import { ProviderRegistry } from "../providers/registry.ts"
 import { DecisionEngine } from "../decision/engine.ts"
@@ -32,6 +32,8 @@ import { Network } from "../net/Network.ts"
 import { checkPlugin, readBuild, readClientBuild, readRuntimeBuild } from "./check.ts"
 import { declaredHandles, type RegistrationRegistry } from "./handles.ts"
 import { makePluginAuthoring } from "../agent/tools/plugins.ts"
+import { offeredByGrants } from "../agent/approvals.ts"
+import type { ToolContext } from "../agent/tools.ts"
 import type { RolloutEffect } from "@dreamspan/shared/workshopApi.ts"
 import { repoTask } from "./repoTask.ts"
 import type { Activate, ServerHost } from "../../../plugin-api/src/server.ts"
@@ -49,7 +51,10 @@ const attempt = <A>(run: () => Promise<A>) =>
 export class PluginHost extends Context.Service<
   PluginHost,
   {
-    readonly builtinParts: (actor: User) => Effect.Effect<ReadonlyArray<typeof BuiltinPart.Type>, unknown>
+    readonly builtinParts: (
+      actor: User,
+      run?: Pick<ToolContext, "chatId" | "offer">
+    ) => Effect.Effect<ReadonlyArray<typeof BuiltinPart.Type>, unknown>
     readonly copyBuiltin: (
       actor: User,
       input: { registry: string; id: string; pluginId: string }
@@ -443,7 +448,7 @@ export class PluginHost extends Context.Service<
           return result
         })
       const service: PluginHost["Service"] = PluginHost.of({
-        builtinParts: (actor) =>
+        builtinParts: (actor, run) =>
           Effect.gen(function* () {
             const plugins = yield* service.list(actor)
             const parts: Array<typeof BuiltinPart.Type> = builtinCopies.map((p) => ({
@@ -460,8 +465,12 @@ export class PluginHost extends Context.Service<
                 .map(({ scope, id }) => ({ scope, id }))
             }))
             parts.push(...unavailableDisplayBodies)
-            for (const tool of execution.rolloutTools.list()) {
-              if (parts.some((p) => p.registry === "rolloutTools" && p.id === tool.id) || !tool.source) continue
+            const registered = [
+              ...execution.rolloutTools.list().filter((tool) => tool.source),
+              ...execution.operationTools.list()
+            ]
+            for (const tool of registered) {
+              if (parts.some((p) => p.registry === "rolloutTools" && p.id === tool.id)) continue
               parts.push({
                 registry: "rolloutTools",
                 id: tool.id,
@@ -471,7 +480,18 @@ export class PluginHost extends Context.Service<
                 replacedBy: []
               })
             }
-            return parts
+            if (!run?.offer) return parts
+            const { kind, tools } = run.offer
+            const candidates = tools.flatMap(({ name }) => {
+              const tool = toolForKind(execution, kind, name)
+              return tool ? [tool] : []
+            })
+            const current = yield* offeredByGrants(
+              { registries: execution, reader, userId: actor.id, chatId: run.chatId },
+              candidates
+            )
+            const offered = new Set(current.tools.map((tool) => tool.id))
+            return parts.filter((part) => part.registry !== "rolloutTools" || offered.has(part.id))
           }),
         copyBuiltin: (actor, input) =>
           Semaphore.withPermit(lock)(

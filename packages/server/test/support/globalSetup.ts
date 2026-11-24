@@ -31,6 +31,7 @@ const BUNDLES = "bundles"
 interface Run {
   readonly dir: string
   readonly bundleDir: string
+  readonly previousTmpdir: string | undefined
   /** The bundle build, started by the first project that builds; the live project doesn't. */
   built?: Promise<void>
   users: number
@@ -55,26 +56,41 @@ export const makeSetup =
   async (project: Pick<TestProject, "provide">) => {
     if (holder.rpTestRun === undefined) {
       const dir = mkdtempSync(join(tmpdir(), "rp-test-run-"))
-      process.env.TMPDIR = dir
       const bundleDir = join(dir, BUNDLES)
       mkdirSync(bundleDir)
-      holder.rpTestRun = { dir, bundleDir, users: 0 }
+      holder.rpTestRun = { dir, bundleDir, previousTmpdir: process.env.TMPDIR, users: 0 }
+      process.env.TMPDIR = dir
     }
     const run = holder.rpTestRun
     run.users++
-    if (build !== null) {
-      run.built ??= build(run.bundleDir)
-      await run.built
-    }
-    project.provide("bundleDir", run.bundleDir)
-    return () => {
+    const release = () => {
       if (--run.users > 0) return
       delete holder.rpTestRun
+      if (run.previousTmpdir === undefined) delete process.env.TMPDIR
+      else process.env.TMPDIR = run.previousTmpdir
       const left = readdirSync(run.dir).filter((name) => name !== BUNDLES)
       rmSync(run.dir, { recursive: true, force: true })
       if (left.length > 0) {
         throw new Error(`the tests left ${left.length} temporary entries behind: ${left.slice(0, 20).join(", ")}`)
       }
+    }
+    try {
+      if (build !== null) {
+        run.built ??= Promise.resolve()
+          .then(() => build(run.bundleDir))
+          .catch((error) => {
+            delete run.built
+            rmSync(run.bundleDir, { recursive: true, force: true })
+            mkdirSync(run.bundleDir)
+            throw error
+          })
+        await run.built
+      }
+      project.provide("bundleDir", run.bundleDir)
+      return release
+    } catch (error) {
+      release()
+      throw error
     }
   }
 
@@ -88,8 +104,6 @@ const buildBundles = async (bundleDir: string) => {
     output: { file: join(bundleDir, "lcmFixture.mjs"), format: "esm" },
     logLevel: "warn"
   })
-  // This helper is also used by Playwright, where Vitest's inject() is unavailable.
-  process.env.RP_TEST_LCM_FIXTURE_WORKER = join(bundleDir, "lcmFixture.mjs")
   // Bundled native dependencies stay external. These throwaway bundles are outside the
   // repository's node_modules ancestry; production bundles live inside it.
   mkdirSync(join(bundleDir, "node_modules"))
@@ -98,6 +112,8 @@ const buildBundles = async (bundleDir: string) => {
       fileURLToPath(new URL(`../../../../node_modules/${name}`, import.meta.url)),
       join(bundleDir, `node_modules/${name}`)
     )
+  // This helper is also used by Playwright, where Vitest's inject() is unavailable.
+  process.env.RP_TEST_LCM_FIXTURE_WORKER = join(bundleDir, "lcmFixture.mjs")
 }
 
 export default makeSetup(buildBundles)

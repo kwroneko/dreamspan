@@ -198,6 +198,8 @@ export interface RolloutTool<A = never> {
   /** User-facing, the chat settings' tools list: what it lets the model do, as a checkbox label. */
   readonly explanation?: string
   readonly capability?: string
+  /** Additional grants that must be on to offer this tool. The tool checks them when it runs. */
+  readonly requiredCapabilities?: ReadonlyArray<string>
   /**
    * The library classes this tool asks for what's outside view (spec/WORKSHOP-CARDS.md §2.2),
    * through `ToolContext.sight`: shown in the capability chip wherever the tool is offered. They

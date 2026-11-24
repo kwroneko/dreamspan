@@ -6,7 +6,7 @@ import { readFile, writeFile } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import { join } from "node:path"
 import { builtinReplacement, builtinCopyStem } from "@dreamspan/shared/builtinParts.ts"
-import { builtinCopies, builtinCopyListing, missingBuiltinAdapter } from "../src/plugins/builtins.ts"
+import { builtinCopies, missingBuiltinAdapter, type BuiltinCopyCatalogPage } from "../src/plugins/builtins.ts"
 import { prepareBuiltinCopy, compareBuiltin, copyBuiltin } from "../src/plugins/copy.ts"
 import { rewriteImports } from "../src/plugins/importPolicy.ts"
 import { saveFiles, pluginFolder, commitFiles } from "../src/plugins/repo.ts"
@@ -17,7 +17,7 @@ import { setPresence } from "../src/agent/tools/presence.ts"
 import { presenceContext } from "../src/agent/tools/presenceAdapter.ts"
 import { appSource } from "../src/plugins/reference.ts"
 import { frozenTool, type ToolContext } from "../src/agent/tools.ts"
-import { ExecutionRegistry } from "../src/execution.ts"
+import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import { installPluginToolDefinitions } from "./support/pluginToolDefinitions.ts"
 import { declaredHandles } from "../src/plugins/handles.ts"
 import { PluginManifest } from "@dreamspan/shared/plugins.ts"
@@ -26,6 +26,10 @@ import { pluginConsent, pluginAccessGrows } from "@dreamspan/shared/pluginConsen
 import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { PLUGIN_TOOLS } from "../src/agent/tools/plugins.ts"
 import { FILE_TOOLS } from "../src/agent/tools/files.ts"
+import { TOOL_RESULT_CHARS, toolDataBody } from "../src/agent/toolData.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { client, serverLayer, testConfig } from "./support/config.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 
 it("all built-in tools, including generated tools, declare shipped source; only allowlisted adapters copy", async () => {
   await Effect.runPromise(
@@ -59,7 +63,13 @@ it("every unavailable story tool refuses both declared replacement and disable",
         const copied = builtinCopies.filter((part) => part.registry === "rolloutTools").map((part) => part.id)
         expect(ids).toEqual(expect.arrayContaining([...copied, ...PLUGIN_TOOLS, ...FILE_TOOLS]))
         expect(unavailable).toHaveLength(ids.length - copied.length)
-        for (const id of FILE_TOOLS) expect(missingBuiltinAdapter(id), id).toContain("your files")
+        const commandIds = ["bash", "bash_output", "bash_stop"]
+        for (const id of FILE_TOOLS) {
+          const reason = missingBuiltinAdapter(id)
+          if (id === "import_card_file") expect(reason).toMatch(/importing.*library.*approval/i)
+          else if (commandIds.includes(id)) expect(reason, id).toMatch(/running and managing.*commands/i)
+          else expect(reason, id).toContain("your files")
+        }
         for (const original of unavailable) {
           expect(builtinReplacement(`rolloutTools:${original.id}`)).toBeUndefined()
           const registry = makeRegistry([original])
@@ -398,41 +408,117 @@ for (const part of builtinCopies.filter(
     }
   )
 
-it("the assistant catalog keeps every new part within its unchanged result budget", async () => {
-  await Effect.runPromise(
+const catalogFixture = (config: ReturnType<typeof testConfig>) =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const execution = yield* ExecutionRegistry
+    const reader = yield* Reader
+    const writer = yield* Writer
+    const user = yield* api.Whoami()
+    const chat = yield* api.CreateWorkshop({})
+    const rolloutId = `copy-list-${chat.id}`
+    yield* fixtureSql(config.dataDir, [
+      {
+        sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at) VALUES (?,?,'workshop','running','assistant','interactive',1,1)",
+        params: [rolloutId, chat.id]
+      }
+    ])
+    const tool = execution.rolloutTools.get("plugin_copy_builtin")!
+    const context: ToolContext = {
+      userId: user.id,
+      chatId: chat.id,
+      forkId: chat.currentForkId,
+      slotId: "unused" as never,
+      versionId: "unused" as never,
+      rolloutId,
+      toolCallId: "list",
+      leafSlotId: null,
+      reader,
+      writer,
+      viewers: null,
+      cache: new Map()
+    }
+    const list = (ids?: ReadonlyArray<string>, nextRegistry?: string) => {
+      const offer = ids && {
+        kind: chat.kind,
+        tools: ids.map((id) => frozenTool(toolForKind(execution, chat.kind, id)!)),
+        loaded: new Set(ids),
+        cardSkills: []
+      }
+      return tool
+        .execute({ ...context, ...(offer ? { offer } : {}) }, (nextRegistry ? { registry: nextRegistry } : {}) as never)
+        .pipe(
+          Effect.map((result) => {
+            expect(result.isError, result.text).toBeUndefined()
+            return result.text
+          })
+        )
+    }
+    return { api, chat, list }
+  })
+
+it("lists shipped operation tools and limits workshop rows to the run's offer and live grants", () => {
+  const config = testConfig()
+  return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const registry = yield* installPluginToolDefinitions
-        const parts = [
-          ...builtinCopies.map((p) => ({
-            registry: p.registry,
-            id: p.id,
-            label: p.label,
-            copyable: true,
-            reason:
-              "An editable copy starts off. Copied macros can reduce prompt cache reuse: their text is treated as changing on every reply.",
-            replacedBy: []
-          })),
-          ...registry.rolloutTools
-            .list()
-            .filter((t) => !builtinCopies.some((p) => p.registry === "rolloutTools" && p.id === t.id))
-            .map((t) => ({
-              registry: "rolloutTools",
-              id: t.id,
-              label: t.label,
-              copyable: false,
-              reason: missingBuiltinAdapter(t.id),
-              replacedBy: []
-            }))
-        ]
-        const text = JSON.stringify(builtinCopyListing(parts))
-        expect(text.length).toBeLessThan(14500)
-        const listed = builtinCopyListing(parts)
-          .filter((g) => g.copyable)
-          .flatMap((g) => g.parts.map((p) => `${g.registry}:${p.id}`))
-        expect(listed.toSorted()).toEqual(builtinCopies.map((p) => `${p.registry}:${p.id}`).toSorted())
-        for (const part of parts.filter((p) => !p.copyable)) expect(text).toContain(JSON.stringify(part.id))
-      }).pipe(Effect.provide(ExecutionRegistry.layer))
+        const { api, chat, list } = yield* catalogFixture(config)
+        const settings = (yield* api.ListBuiltinParts())
+          .filter((part) => part.registry === "rolloutTools")
+          .map((part) => part.id)
+        expect(settings).toContain("list_card_sources")
+        expect(settings).toContain("list_files")
+        const ids = ["plugin_copy_builtin", "list_card_sources", "read_file"]
+        const before = toolDataBody(yield* list(ids))
+        expect(before).toContain('"list_card_sources"')
+        expect(before).toContain('"read_file"')
+        expect(before).not.toContain('"list_files"')
+        yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "files", mode: "off" })
+        const after = toolDataBody(yield* list(ids))
+        expect(after).toContain('"list_card_sources"')
+        expect(after).not.toContain('"read_file"')
+        expect(after).toContain('"display.regex"')
+      }).pipe(Effect.provide(serverLayer(config)))
+    )
+  )
+})
+
+it("the assistant catalog keeps every part within its quoted result budget", () => {
+  const config = testConfig()
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { api, list } = yield* catalogFixture(config)
+        const parts = yield* api.ListBuiltinParts()
+        const groups: BuiltinCopyCatalogPage["groups"] = []
+        const seen = new Set<string>()
+        let fromRegistry: string | null = null
+        do {
+          const quoted = yield* list(undefined, fromRegistry ?? undefined)
+          expect(quoted.length).toBeLessThanOrEqual(TOOL_RESULT_CHARS)
+          const page = JSON.parse(toolDataBody(quoted)) as BuiltinCopyCatalogPage
+          if (fromRegistry !== null) expect(page.groups[0]?.registry).toBe(fromRegistry)
+          for (const registry of new Set(page.groups.map((group) => group.registry))) {
+            expect(seen.has(registry)).toBe(false)
+            seen.add(registry)
+          }
+          groups.push(...page.groups)
+          fromRegistry = page.nextRegistry
+        } while (fromRegistry !== null)
+        const listed = groups.flatMap((group) =>
+          group.copyable
+            ? group.parts.map(({ id, label }) => ({ registry: group.registry, id, details: label, copyable: true }))
+            : group.ids.map((id) => ({ registry: group.registry, id, details: group.reason, copyable: false }))
+        )
+        const expected = parts.map(({ registry, id, label, reason, copyable }) => ({
+          registry,
+          id,
+          details: copyable ? label : reason,
+          copyable
+        }))
+        expect(listed).toHaveLength(expected.length)
+        expect(listed).toEqual(expect.arrayContaining(expected))
+      }).pipe(Effect.provide(serverLayer(config)))
     )
   )
 })

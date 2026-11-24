@@ -1,5 +1,7 @@
 import { macroParts } from "@dreamspan/shared/macros/catalog.ts"
+import type { BuiltinPart } from "@dreamspan/shared/plugins.ts"
 import { FILE_TOOLS } from "../agent/tools/files.ts"
+import { toolData, TOOL_RESULT_CHARS } from "../agent/toolData.ts"
 // Shipped-source allowlist. Never interpret a manifest's base.path as a filesystem path.
 const baseCopies = [
   {
@@ -187,6 +189,10 @@ export const missingBuiltinAdapter = (id: string): string => {
   if (id === "lookup_lore") return "Not yet: needs support for looking up lore the character can know."
   if (id.startsWith("plugin_") || id === "app_source")
     return "Not yet: needs support for checking saved code, approving versions and undoing changes."
+  if (id === "import_card_file")
+    return "Copying this tool needs support for importing cards into your library with your approval."
+  if (["bash", "bash_output", "bash_stop"].includes(id))
+    return "Copying this tool needs support for running and managing background commands."
   // Before the read_ rule: read_file and read_card_file read the user's files, not the library.
   if ((FILE_TOOLS as ReadonlyArray<string>).includes(id))
     return "Not yet: needs support for working in your files and undoing file changes."
@@ -195,24 +201,46 @@ export const missingBuiltinAdapter = (id: string): string => {
   return "Not yet: needs support for approvals and undoing saved changes."
 }
 
-/** Keep every supported identity inside the existing tool-result budget. */
-export const builtinCopyListing = (
-  parts: ReadonlyArray<typeof import("@dreamspan/shared/plugins.ts").BuiltinPart.Type>
-) =>
-  [...new Set(parts.map((p) => p.registry))].flatMap((registry) =>
-    [true, false].flatMap((copyable) => {
-      const group = parts.filter((p) => p.registry === registry && p.copyable === copyable)
-      return group.length
-        ? [
-            {
-              registry,
-              copyable,
-              parts: group.map((p) => (copyable ? { id: p.id, label: p.label } : { id: p.id, reason: p.reason }))
-            }
-          ]
-        : []
-    })
+const builtinCopyGroups = (registry: string, parts: ReadonlyArray<typeof BuiltinPart.Type>) => {
+  const available = parts.filter((part) => part.copyable).map(({ id, label }) => ({ id, label }))
+  const unavailable = Map.groupBy(
+    parts.filter((part) => !part.copyable),
+    (part) => part.reason
   )
+  return [
+    ...(available.length ? [{ registry, copyable: true as const, parts: available }] : []),
+    ...[...unavailable].map(([reason, rows]) => ({
+      registry,
+      copyable: false as const,
+      reason,
+      ids: rows.map((part) => part.id)
+    }))
+  ]
+}
+
+export interface BuiltinCopyCatalogPage {
+  readonly groups: ReturnType<typeof builtinCopyGroups>
+  readonly nextRegistry: string | null
+}
+
+/** Page at registry boundaries using the size of the quoted result sent to the model. */
+export const builtinCopyPage = (parts: ReadonlyArray<typeof BuiltinPart.Type>, fromRegistry?: string) => {
+  const registries = [...Map.groupBy(parts, (part) => part.registry)]
+  const start = fromRegistry === undefined ? 0 : registries.findIndex(([registry]) => registry === fromRegistry)
+  if (start < 0) return undefined
+  const encode = (page: BuiltinCopyCatalogPage) => toolData(JSON.stringify(page))
+  let groups: BuiltinCopyCatalogPage["groups"] = []
+  let text: string | undefined
+  for (let index = start; index < registries.length; index++) {
+    const [registry, rows] = registries[index]!
+    const combined = [...groups, ...builtinCopyGroups(registry, rows)]
+    const candidate = encode({ groups: combined, nextRegistry: registries[index + 1]?.[0] ?? null })
+    if (candidate.length > TOOL_RESULT_CHARS) return text
+    groups = combined
+    text = candidate
+  }
+  return text ?? encode({ groups: [], nextRegistry: null })
+}
 
 /** Rendering controls keep their own registrations while data policies become copyable. */
 export const unavailableDisplayBodies = [
