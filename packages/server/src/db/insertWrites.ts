@@ -16,6 +16,7 @@ import { InsertRefused } from "@dreamspan/shared/messagesApi.ts"
 import { InsertResult, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
 import { type ChatRow, toChat, toVersion } from "./rows.ts"
 import { transaction } from "./tx.ts"
+import { copyLibrary } from "./libraryAttachments.ts"
 
 /**
  * The columns a duplicate takes from the version it copies (spec §2.2): what it says and who
@@ -140,6 +141,7 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
               FROM version_records WHERE id = ${source.id}`
             yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text, name, path)
               SELECT ${versionId}, ordinal, media_id, kind, alt_text, name, path FROM version_attachments WHERE version_id = ${source.id}`
+            yield* copyLibrary(sql, source.id, versionId)
             yield* sql`INSERT INTO slots ${sql.insert({
               id: slotId,
               chat_id: chatId,

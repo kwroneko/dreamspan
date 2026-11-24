@@ -84,6 +84,24 @@ export const migrationDefinitions = {
         PRIMARY KEY (user_id, request_id)
       ) STRICT, WITHOUT ROWID`
     ]
+  },
+  // spec/WORKSHOP-CARDS.md §4.4: library items a workshop message carries, at the revision each
+  // was sent at, and the same list on a message waiting in the queue.
+  "0017_library_attachments": {
+    statements: [
+      `CREATE TABLE version_library (
+        version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('card', 'lorebook', 'preset')),
+        ref_id TEXT NOT NULL REFERENCES entity_refs(id) ON DELETE CASCADE,
+        revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        PRIMARY KEY (version_id, ordinal)
+      ) STRICT, WITHOUT ROWID`,
+      `CREATE INDEX version_library_ref ON version_library(ref_id)`,
+      `CREATE INDEX version_library_revision ON version_library(revision_id)`,
+      `ALTER TABLE queued_messages ADD COLUMN library_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(library_json))`
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

@@ -3,6 +3,7 @@ import { Effect } from "effect"
 import { currentForkSql, replacedIn, selectedInSql } from "./forkState.ts"
 import type { SqlClient } from "effect/sql"
 import { contextExcludedIn } from "./lcmVisibility.ts"
+import { copyLibrary } from "./libraryAttachments.ts"
 
 type Row = Record<string, string | number | null>
 
@@ -48,6 +49,7 @@ export const forkImportSlot = (sql: SqlClient.SqlClient, source: string, parent:
         SELECT ${versionId}, content, replaced_at, images_json, reasoning_json, sections_json FROM version_history WHERE version_id = ${shownId} ORDER BY id`
       yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text, name, path)
         SELECT ${versionId}, ordinal, media_id, kind, alt_text, name, path FROM version_attachments WHERE version_id = ${shownId}`
+      yield* copyLibrary(sql, String(shownId), versionId)
     }
     // The copy's chain is the database's to assign (schema/chains.ts), as are its events'.
     const { shown_excluded, shown_version_id, chain_id: _chain, ...position } = slot!

@@ -38,12 +38,14 @@ import { separateThreads } from "./threads.ts"
 import type { StoredRewrite } from "@dreamspan/shared/regexScripts.ts"
 import { transaction as runTransaction } from "./tx.ts"
 import { checkAutoTurn, claimAutoTurn } from "./autoGuard.ts"
+import { checkLibrary } from "./libraryAttachments.ts"
 
 const userMessage = (
   content: string,
   speakerEntityId: EntityId | null,
   images?: import("@dreamspan/shared/chat.ts").MessageImages,
-  rewrite?: StoredRewrite
+  rewrite?: StoredRewrite,
+  library?: import("@dreamspan/shared/chat.ts").MessageLibrary
 ) =>
   new NewVersion({
     speakerEntityId,
@@ -53,8 +55,13 @@ const userMessage = (
     macroMode: "verbatim",
     origin: "user_written",
     ...(images === undefined ? {} : { images }),
+    ...(library === undefined || library.length === 0 ? {} : { library }),
     ...(rewrite === undefined ? {} : { rewrite })
   })
+
+/** A queued message's library items (spec/WORKSHOP-CARDS.md §4.4), recorded when it posts. */
+const queuedLibrary = (row: QueuedRow): import("@dreamspan/shared/chat.ts").MessageLibrary =>
+  JSON.parse(row.library_json ?? "[]")
 
 /** A queued message's rewrite, as SendOrQueue stored it, for the version it posts as. */
 const queuedRewrite = (row: QueuedRow): StoredRewrite | undefined =>
@@ -240,7 +247,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                   entry.content,
                   yield* liveSpeaker(owner, entry.speaker_entity_id),
                   JSON.parse(entry.images_json),
-                  queuedRewrite(entry)
+                  queuedRewrite(entry),
+                  queuedLibrary(entry)
                 )
               )
               posted.push(message.slotId)
@@ -264,7 +272,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               entry.content,
               yield* liveSpeaker(owner, entry.speaker_entity_id),
               JSON.parse(entry.images_json),
-              queuedRewrite(entry)
+              queuedRewrite(entry),
+              queuedLibrary(entry)
             )
           )
           posted.push(message.slotId)
@@ -283,7 +292,13 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         if (first!.kind === "message") {
           const message = yield* append(
             replyParent,
-            userMessage(first!.content, speaker, JSON.parse(first!.images_json), queuedRewrite(first!))
+            userMessage(
+              first!.content,
+              speaker,
+              JSON.parse(first!.images_json),
+              queuedRewrite(first!),
+              queuedLibrary(first!)
+            )
           )
           posted.push(message.slotId)
           yield* keepGroup(first!, chatId, message.slotId)
@@ -464,6 +479,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       noReply,
       images,
       imageDraftIds,
+      library,
       direction,
       commitDraft,
       rewrite,
@@ -492,6 +508,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             : []
         for (const id of round ?? []) yield* graph.checkSpeaker(userId, id)
         yield* graph.checkImages(userId, images ?? [], chatId)
+        if (kind === "message") yield* checkLibrary(sql, userId, chatId, library ?? [])
         yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
         yield* graph.checkSpeaker(userId, speakerEntityId)
         if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)
@@ -541,6 +558,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                   }
                 : {}),
               images_json: JSON.stringify(images ?? []),
+              library_json: JSON.stringify(kind === "message" ? (library ?? []) : []),
               speaker_entity_id: speakerEntityId,
               reply_speaker_entity_id: kind === "message" ? replySpeakerEntityId : null,
               no_reply: kind === "message" && noReply === true ? 1 : 0,
@@ -579,7 +597,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           branch,
           version:
             kind === "message"
-              ? userMessage(content, speakerEntityId, images, rewrite)
+              ? userMessage(content, speakerEntityId, images, rewrite, library)
               : reply(speakerEntityId, direction, autoPick === true),
           commitDraft
         })

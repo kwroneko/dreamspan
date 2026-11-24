@@ -710,6 +710,19 @@ export interface HistoryAttachment {
   readonly excluded: boolean
 }
 
+/**
+ * A library item a workshop message carries (spec/WORKSHOP-CARDS.md §4.3): the card, lorebook or
+ * preset as it was at the revision recorded when the message was sent, for its `<attached_…>`
+ * element. Frozen with the version, so later edits to the item never change this message.
+ */
+export interface HistoryLibraryItem {
+  readonly kind: "card" | "lorebook" | "preset"
+  readonly refId: string
+  readonly revisionId: string
+  readonly name: string
+  readonly doc: Readonly<Record<string, unknown>>
+}
+
 /** Where the history before the target ends: the message right before it as its fork shows it. */
 export const historyLeafOf = (target: Target) =>
   target.historyLeaf === undefined ? target.parentSlotId : target.historyLeaf
@@ -758,6 +771,8 @@ export interface HistoryEntry {
   readonly images?: ReadonlyArray<HistoryImage>
   /** Its attachments saved in Files, images among them (§6.1); absent in older snapshots. */
   readonly attachments?: ReadonlyArray<HistoryAttachment>
+  /** Library items a workshop message carries (spec/WORKSHOP-CARDS.md §4.3); absent without any. */
+  readonly library?: ReadonlyArray<HistoryLibraryItem>
   readonly slotId: string
   readonly versionId: string
   /** Its position: the depth, or the display position in a fork with insertions (spec/MESSAGE-INSERT.md §3.2). */

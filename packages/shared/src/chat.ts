@@ -176,6 +176,17 @@ export const MessageImages = Schema.Array(
 ).check(Schema.isMaxLength(32))
 export type MessageImages = typeof MessageImages.Type
 
+/**
+ * Library items attached to a workshop message (spec/WORKSHOP-CARDS.md §4): cards, lorebooks and
+ * presets the assistant may read and change from that message on. The server records the
+ * revision each was at when sent (`version_library`). `RefId` is library.ts's, declared again
+ * here because library.ts imports this module.
+ */
+export const MessageLibrary = Schema.Array(
+  Schema.Struct({ kind: Schema.Literals(["card", "lorebook", "preset"]), refId: idSchema("RefId", "ref") })
+).check(Schema.isMaxLength(16))
+export type MessageLibrary = typeof MessageLibrary.Type
+
 /** The images of a set of attachments, leaving out files of other types. */
 export const imagesOnly = <A extends { readonly kind?: "file" }>(attachments: ReadonlyArray<A>): ReadonlyArray<A> =>
   attachments.filter((a) => a.kind !== "file")
@@ -387,6 +398,8 @@ export class NewVersion extends Schema.Class<NewVersion>("NewVersion")({
   writer: Writer,
   content: Schema.String,
   images: Schema.optionalKey(MessageImages),
+  /** Library items a workshop message carries (spec/WORKSHOP-CARDS.md §4); absent: none, or its source's. */
+  library: Schema.optionalKey(MessageLibrary),
   status: VersionStatus,
   macroMode: MacroMode,
   origin: VersionOrigin,
@@ -469,6 +482,8 @@ export class QueuedMessage extends Schema.Class<QueuedMessage>("QueuedMessage")(
   kind: Schema.Literals(["message", "generate"]),
   content: Schema.String,
   images: Schema.optionalKey(MessageImages),
+  /** Library items the message carries once it posts (a workshop's, spec/WORKSHOP-CARDS.md §4). */
+  library: Schema.optionalKey(MessageLibrary),
   speakerEntityId: Schema.NullOr(EntityId),
   /** For `message`: who replies to it once it posts, as for a send made then. */
   replySpeakerEntityId: Schema.NullOr(EntityId),
