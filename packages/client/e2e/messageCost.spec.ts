@@ -184,7 +184,9 @@ test("a reply's cost sits in its header, opens the panel, and never adds a line"
     ["Priced by", "the provider's charge"],
     ["Input tokens", "120 (20 uncached, 100 cache read, 0 cache write)"],
     ["Cached", "83% of input"],
-    ["Output tokens", "6, reasoning included"]
+    // The Generation panel reports reasoning separately when it occurs (972e6a189).
+    ["Output tokens", "6"],
+    ["Reasoning", "none"]
   ] as const)
     await expect(panel.locator("dt", { hasText: label }).locator("+ dd")).toHaveText(value)
   await expect(panel).not.toContainText("Provider charged")
