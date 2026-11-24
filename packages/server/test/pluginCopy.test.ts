@@ -24,6 +24,8 @@ import { PluginManifest } from "@dreamspan/shared/plugins.ts"
 import { Schema } from "effect"
 import { pluginConsent, pluginAccessGrows } from "@dreamspan/shared/pluginConsent.ts"
 import { makeRegistry } from "@dreamspan/shared/registry.ts"
+import { PLUGIN_TOOLS } from "../src/agent/tools/plugins.ts"
+import { FILE_TOOLS } from "../src/agent/tools/files.ts"
 
 it("all built-in tools, including generated tools, declare shipped source; only allowlisted adapters copy", async () => {
   await Effect.runPromise(
@@ -50,11 +52,14 @@ it("every unavailable story tool refuses both declared replacement and disable",
         const unavailable = execution.rolloutTools
           .list()
           .filter((tool) => !builtinCopies.some((part) => part.registry === "rolloutTools" && part.id === tool.id))
-        // 37 was the list before sandbox1's file and command tools (read_file, list_files,
-        // search_files, write_file, edit_file, bash, and files4a's bash_output and bash_stop),
-        // subagents1's agent tool, subagents5's message_agent and subagents8's ask_helper arrived:
-        // they declare shipped source like every other built-in, but have no copyable adapter yet.
-        expect(unavailable).toHaveLength(48)
+        // Derived rather than counted: every registered tool is either an allowlisted copy or
+        // checked below, and the tools workshops offer by name (the plugin, file and command
+        // tools) are all registered, so a new tool can't skip the refusal checks.
+        const ids = execution.rolloutTools.list().map((tool) => tool.id)
+        const copied = builtinCopies.filter((part) => part.registry === "rolloutTools").map((part) => part.id)
+        expect(ids).toEqual(expect.arrayContaining([...copied, ...PLUGIN_TOOLS, ...FILE_TOOLS]))
+        expect(unavailable).toHaveLength(ids.length - copied.length)
+        for (const id of FILE_TOOLS) expect(missingBuiltinAdapter(id), id).toContain("your files")
         for (const original of unavailable) {
           expect(builtinReplacement(`rolloutTools:${original.id}`)).toBeUndefined()
           const registry = makeRegistry([original])

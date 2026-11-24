@@ -37,6 +37,21 @@ describe("the server tests' global setup", () => {
       assert.isFalse(existsSync(runDir))
     }))
 
+  it("builds the bundles even when a project that needs none sets up first", () =>
+    keepingTmpdir(async () => {
+      let builds = 0
+      const holder = {}
+      const live = project()
+      const server = project()
+      const liveDone = await makeSetup(null, holder)(live)
+      const serverDone = await makeSetup(async () => void builds++, holder)(server)
+      assert.strictEqual(builds, 1)
+      assert.deepStrictEqual(live.provided, server.provided)
+      liveDone()
+      serverDone()
+      assert.isFalse(existsSync(process.env.TMPDIR!))
+    }))
+
   it("fails the run when a test leaves a temporary entry behind", () =>
     keepingTmpdir(async () => {
       const done = await makeSetup(async () => {}, {})(project())

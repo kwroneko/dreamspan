@@ -1,4 +1,5 @@
 import { macroParts } from "@dreamspan/shared/macros/catalog.ts"
+import { FILE_TOOLS } from "../agent/tools/files.ts"
 // Shipped-source allowlist. Never interpret a manifest's base.path as a filesystem path.
 const baseCopies = [
   {
@@ -186,7 +187,10 @@ export const missingBuiltinAdapter = (id: string): string => {
   if (id === "lookup_lore") return "Not yet: needs support for looking up lore the character can know."
   if (id.startsWith("plugin_") || id === "app_source")
     return "Not yet: needs support for checking saved code, approving versions and undoing changes."
-  if (id.startsWith("read_") || id === "list_library")
+  // Before the read_ rule: read_file and read_card_file read the user's files, not the library.
+  if ((FILE_TOOLS as ReadonlyArray<string>).includes(id))
+    return "Not yet: needs support for working in your files and undoing file changes."
+  if (id.startsWith("read_") || id === "list_library" || id === "diff_revisions")
     return "Not yet: needs support for reading your saved library items."
   return "Not yet: needs support for approvals and undoing saved changes."
 }
