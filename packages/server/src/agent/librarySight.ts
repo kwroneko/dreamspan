@@ -66,17 +66,14 @@ const fixedView = (context: ToolContext) =>
           })
         )
       : null
+    const storyCast = story ? [...story.participants, ...story.playedByMe] : []
     const fixed = {
-      entities: [
-        ...own.participants,
-        ...own.playedByMe,
-        ...(story ? [...story.participants, ...story.playedByMe] : [])
-      ],
+      entities: [...own.participants, ...own.playedByMe, ...storyCast],
       refs: story
         ? [
             ...story.lorebooks,
             ...story.listedLorebooks.map((book) => book.ref),
-            ...Object.values(story.lorebookBindings).filter((ref): ref is string => typeof ref === "string")
+            ...storyCast.map((id) => story.lorebookBindings[id]).filter((ref): ref is string => typeof ref === "string")
           ]
         : [],
       // The workshop's assistant: its cast member who isn't the user's persona (§2.4 [character]).
