@@ -16,9 +16,21 @@ const variants: Record<Variant, string> = {
   danger: "bg-danger text-danger-contrast hover:opacity-90"
 }
 
+/**
+ * "chip": a small pill for an action beside a heading (owner, 2026-11-24: "more like a chip").
+ * A 12 px icon's box insets its glyph by the same amount on both sides, so with the left padding
+ * equal to the gap, edge-to-glyph and glyph-to-text are the same space.
+ */
+type Size = "default" | "chip"
+
+const sizes: Record<Size, string> = {
+  default: "h-9 gap-2 rounded-md px-3 text-sm",
+  chip: "h-6 gap-1.5 rounded-full pr-2.5 pl-1.5 text-xs"
+}
+
 /** For links that look like buttons. */
-export const buttonClass = (variant: Variant = "secondary") =>
-  `inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium whitespace-nowrap outline-none transition-colors select-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1 focus-visible:ring-offset-canvas disabled:pointer-events-none disabled:opacity-50 data-disabled:pointer-events-none data-disabled:opacity-50 ${variants[variant]}`
+export const buttonClass = (variant: Variant = "secondary", size: Size = "default") =>
+  `inline-flex shrink-0 items-center justify-center ${sizes[size]} font-medium whitespace-nowrap outline-none transition-colors select-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1 focus-visible:ring-offset-canvas disabled:pointer-events-none disabled:opacity-50 data-disabled:pointer-events-none data-disabled:opacity-50 ${variants[variant]}`
 
 /**
  * A `Button` that's a link, for what opens in the center column (owner, 2026-11-05: it opens
@@ -90,6 +102,7 @@ export const tooltipPopupClass =
  */
 export function Button({
   variant = "secondary",
+  size = "default",
   pending = false,
   className = "",
   children,
@@ -98,13 +111,14 @@ export function Button({
   ...props
 }: ComponentProps<typeof BaseButton> & {
   variant?: Variant | undefined
+  size?: Size | undefined
   pending?: boolean | undefined
   hint?: ReactNode
 }) {
   const id = useId()
   const button = (
     <BaseButton
-      className={`${buttonClass(variant)} ${pending || props.focusableWhenDisabled ? "data-disabled:pointer-events-auto!" : ""} ${className}`}
+      className={`${buttonClass(variant, size)} ${pending || props.focusableWhenDisabled ? "data-disabled:pointer-events-auto!" : ""} ${className}`}
       disabled={disabled || pending}
       aria-busy={pending || undefined}
       focusableWhenDisabled={pending}
