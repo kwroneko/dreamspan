@@ -149,7 +149,7 @@ test("the first send keeps its timeline when the header read fails", async ({ pa
     })
   })
   await page.goto(`${server().url}/cards/${wren.entityId}/chat`)
-  await expect(page.getByRole("article", { name: "Greeting from Panel Wren" })).toBeVisible()
+  await expect(greeting(page, "Wren waves.")).toBeVisible()
   await page.evaluate(() => {
     const state = { showedSkeleton: false }
     Object.assign(window, { firstSend: state })

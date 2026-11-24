@@ -71,6 +71,7 @@ import { historyLines } from "./historyLines.ts"
 import { LET_GO } from "./composition.ts"
 import { flashWhenShown } from "./jumpFlash.ts"
 import { kindRootProps, summarizes, useChatKindLook } from "./kindLooks.ts"
+import { composerChoice } from "./speaker.ts"
 
 interface ReadingPosition {
   key: string
@@ -839,6 +840,8 @@ export interface DraftHost {
   readonly onStarted: (view: ChatView) => void
   /** The server swept the chat while it was open (it had no tab for a while): open another. */
   readonly onDeleted: () => void
+  /** Opened with Guidance on (New chat with this cast from a chat that had it on): its composer starts so. */
+  readonly guidance?: boolean
 }
 
 export function OpenChat({
@@ -937,6 +940,21 @@ function ChatSurface({
   useEffect(() => {
     if (draft !== null && started) draft.onStarted(session.snapshot())
   }, [draft, started, session])
+  // A new chat asked for with Guidance on turns it on in its composer, once its choice is read.
+  useEffect(() => {
+    if (draft?.guidance !== true) return
+    const choices = composerChoice(session)
+    let done = false
+    const apply = () => {
+      const state = choices.snapshot()
+      if (done || state.draftId === null || !state.loaded) return
+      done = true
+      if (!state.guidance) void choices.change({ guidance: true })
+    }
+    const unsubscribe = choices.subscribe(apply)
+    apply()
+    return unsubscribe
+  }, [draft, session])
   const navigate = useNavigate()
   const router = useRouter()
   const { panel, show, withPanel, wide, userId } = usePanel(urlPanel, view)

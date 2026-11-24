@@ -51,6 +51,8 @@ function DraftChat({
   // Null once the server swept it, so the next attempt opens a fresh one.
   const [reopen, setReopen] = useState(named)
   const started = useRef(false)
+  // Opening another after the shown one was deleted.
+  const replacing = useRef(false)
   useEffect(preloadChatPage, [])
   useEffect(() => {
     let live = true
@@ -61,7 +63,14 @@ function DraftChat({
     opening.set(key, run)
     void run.then((opened) => {
       opening.delete(key)
-      if (!live || !opened.ok) return
+      if (!live) return
+      // A replacement that failed (its card purged, say): the chat it replaces is gone, so the
+      // error and Try again show instead of it.
+      if (!opened.ok) {
+        if (replacing.current) setChat(null)
+        return
+      }
+      replacing.current = false
       const value = opened.value
       // The chat the URL names was started meanwhile (in another tab, say): it's that chat now.
       if (value.status !== "pending") {
@@ -90,6 +99,16 @@ function DraftChat({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per entry and attempt
   }, [draftFor, reopen, attempt])
+  // The tab was sent to another of this entry's new chats (a workbench tab keeps its page, by
+  // path): that one opens here, rather than the composer staying on the first.
+  const [followed, setFollowed] = useState(named)
+  if (named !== followed) {
+    setFollowed(named)
+    if (named !== null && chat !== null && named !== chat.id) {
+      setChat(null)
+      setReopen(named)
+    }
+  }
   // Leaving the page leaves its chat: the server sweeps it unless another tab has it open.
   const chatId = chat?.id ?? null
   useEffect(() => {
@@ -98,8 +117,11 @@ function DraftChat({
       if (!started.current) void call((client) => client("LeaveDraftChat", { chatId }))
     }
   }, [chatId, call])
+  // A new chat asked for with Guidance on (New chat with this cast) starts with it on, once.
+  const [guidance] = useState(search.guidance === "on" && named === null)
   const host = useMemo<DraftHost>(
     () => ({
+      guidance,
       onStarted: (view) => {
         if (started.current || view.chat === null) return
         started.current = true
@@ -127,11 +149,12 @@ function DraftChat({
         if (started.current) return
         // Swept while open (no tab had it for a while; a reconnect after a long sleep, say): a
         // fresh one for the same entry, with no notice. The chat shown stays until it's here.
+        replacing.current = true
         setReopen(null)
         setAttempt((n) => n + 1)
       }
     }),
-    [navigate]
+    [navigate, guidance]
   )
   const fork = typeof search.fork === "string" && search.fork !== "" ? (search.fork as ForkId) : null
   const slot = typeof search.slot === "string" ? (search.slot as SlotId) : null

@@ -253,4 +253,45 @@ describe("a pending chat's edges", () => {
       })
     )
   )
+  it.live("purging a card swapped into a pending chat sweeps it", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make, writer, userId } = yield* setup
+        const mira = yield* make("Mira")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        // Fork for this chat: the fork takes Mira's place by a card.swap.
+        const other = yield* api.ForkCardForChat({
+          chatId: draft.id,
+          slotId: null,
+          entityId: mira,
+          name: "Mira, for here",
+          nickname: "",
+          characterVersion: ""
+        })
+        const item = yield* writer.DeleteEntity({ userId, entityId: other.entityId })
+        yield* api.PurgeBinItem({ itemId: item.id })
+        assert.strictEqual((yield* Effect.flip(api.GetChat({ chatId: draft.id })))._tag, "NotFound")
+      })
+    )
+  )
+
+  it.live("a new chat with a pending chat's cast opens with its characters", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make } = yield* setup
+        const mira = yield* make("Mira")
+        const tobin = yield* make("Tobin")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        yield* api.ChangeCast({
+          chatId: draft.id,
+          slotId: null,
+          forkId: draft.currentForkId!,
+          change: { _tag: "Join", entityId: tobin }
+        })
+        const again = yield* api.OpenDraftChat({ draftFor: `group:${draft.id}` })
+        const greeters = (yield* path(api, again.id)).map((entry) => entry.version.speakerEntityId)
+        assert.deepStrictEqual(greeters, [mira, tobin])
+      })
+    )
+  )
 })
