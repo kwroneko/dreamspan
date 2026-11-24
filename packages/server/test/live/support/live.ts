@@ -139,6 +139,12 @@ export const startRecorder = (keys: ReadonlyArray<string>) =>
           done: false
         }
         exchanges.push(exchange)
+        const decoder = new TextDecoder()
+        let body = ""
+        const finish = () => {
+          exchange.body = redact(body)
+          keep(exchange)
+        }
         const controller = new AbortController()
         res.on("close", () => {
           if (!exchange.done) {
@@ -177,28 +183,29 @@ export const startRecorder = (keys: ReadonlyArray<string>) =>
                 out[name] = value
             })
             res.writeHead(upstream.status, out)
-            const decoder = new TextDecoder()
             if (upstream.body) {
               const reader = upstream.body.getReader()
               for (;;) {
                 const { done, value } = await reader.read()
                 if (done) break
-                exchange.body += redact(decoder.decode(value, { stream: true }))
+                body += decoder.decode(value, { stream: true })
                 res.write(value)
               }
             }
+            body += decoder.decode()
             exchange.done = true
             res.end()
-            keep(exchange)
+            finish()
           })
           .catch((error: unknown) => {
+            body += decoder.decode()
             if (!exchange.aborted) {
               exchange.status = exchange.status || 599
-              exchange.body += redact(String(error))
+              body += String(error)
               exchange.done = true
               res.destroy()
             }
-            keep(exchange)
+            finish()
           })
       })
     })
