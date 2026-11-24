@@ -43,7 +43,7 @@ export type OutsideStep = string | TableRebuild
  * full-text indexes are carried, what it checks), so the fingerprint of every released migration
  * with a rebuild step changes too (db/releases.ts `fingerprint`).
  */
-export const TABLE_REBUILD_VERSION = 2
+export const TABLE_REBUILD_VERSION = 3
 
 /** SQLite's own words for a failed statement: the deepest cause under the client's error and its reason. */
 const reason = (error: unknown) => {
@@ -53,6 +53,33 @@ const reason = (error: unknown) => {
 }
 
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`
+
+const unquote = (name: string) => {
+  const first = name[0]
+  if (first === "[") return name.slice(1, -1)
+  return first === '"' || first === "'" || first === "`" ? name.slice(1, -1).replaceAll(first + first, first) : name
+}
+
+/** SQLite folds only ASCII letters in identifiers. */
+const nameKey = (name: string) => name.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+
+/** FTS5 arguments, split at commas outside quoted names, option values and comments. */
+const ftsArguments = (create: string) => {
+  const tokens =
+    create
+      .match(
+        /"(?:[^"]|"")*"|'(?:[^']|'')*'|`(?:[^`]|``)*`|\[[^\]]*\]|--[^\r\n]*|\/\*[\s\S]*?\*\/|[^\s(),="'`\[/\-]+|[(),=/-]/g
+      )
+      ?.filter((token) => !token.startsWith("--") && !token.startsWith("/*")) ?? []
+  const start = tokens.indexOf("(")
+  if (start < 2 || nameKey(tokens[start - 2]!) !== "using" || nameKey(unquote(tokens[start - 1]!)) !== "fts5") return []
+  const args: Array<Array<string>> = [[]]
+  for (const token of tokens.slice(start + 1, tokens.lastIndexOf(")"))) {
+    if (token === ",") args.push([])
+    else args.at(-1)!.push(token)
+  }
+  return args
+}
 
 interface Column {
   readonly name: string
@@ -109,18 +136,27 @@ export const rebuildTable = (rebuild: TableRebuild) =>
     })
 
     // Full-text indexes that read this table (external content): which of them the copy keeps valid.
-    const fts = yield* sql<{ name: string; sql: string }>`SELECT name, sql FROM sqlite_master
-      WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%USING fts5%'`
-    const readers = fts.flatMap((index) => {
-      const options = index.sql.slice(index.sql.indexOf("(") + 1, index.sql.lastIndexOf(")"))
-      const option = (key: string) => new RegExp(`\\b${key}\\s*=\\s*['"]?([A-Za-z0-9_]+)`, "i").exec(options)?.[1]
+    const virtual = yield* sql<{ name: string; sql: string }>`SELECT name, sql FROM sqlite_master
+      WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'`
+    const contentNames = new Map(before.map(({ name }) => [nameKey(name), name]))
+    const actualName = (name: string) => contentNames.get(nameKey(name)) ?? name
+    const readers = virtual.flatMap((index) => {
+      const options = new Map<string, string>()
+      const columns: Array<string> = []
+      for (const [name, next, value] of ftsArguments(index.sql)) {
+        if (name === undefined) continue
+        if (next === "=" && value !== undefined) options.set(nameKey(name), unquote(value))
+        else if (next === undefined || nameKey(unquote(next)) !== "unindexed") columns.push(unquote(name))
+      }
       // SQLite's names are case-insensitive, so `content=Version_Texts` reads version_texts.
-      if (option("content")?.toLowerCase() !== table.toLowerCase()) return []
-      const columns = options
-        .split(",")
-        .map((part) => part.trim())
-        .filter((part) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(part))
-      return [{ name: index.name, rowid: option("content_rowid") ?? "rowid", columns }]
+      if (nameKey(options.get("content") ?? "") !== nameKey(table)) return []
+      return [
+        {
+          name: index.name,
+          rowid: actualName(options.get("content_rowid") ?? "rowid"),
+          columns: columns.map(actualName)
+        }
+      ]
     })
     const unchanged = (name: string) =>
       newNames.has(name) && oldNames.has(name) && (rebuild.columns?.[name] ?? quote(name)) === quote(name)
