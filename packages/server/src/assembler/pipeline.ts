@@ -535,6 +535,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
         preset: { ref: preset.ref, revision: preset.revision, scope: preset.scope },
         cards,
         ...(presence ? { presence } : {}),
+        ...(assembly.knowledge ? { contextView: assembly.knowledge.view } : {}),
         // Keep the character identity even when the request's history ends before a join.
         ...(assembly.knowledge?.viewer
           ? {

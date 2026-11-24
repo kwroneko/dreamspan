@@ -1,8 +1,7 @@
 // Whose view a reply's context was written from, for the request inspector (spec/CHARACTER-
 // CONTEXT.md §9.2 unit CU5; DESIGN §7.4): in a separate context, the speaker and the messages left
 // out because it wasn't present for them; a narrator's reply, that it saw the whole chat. Read
-// from the context snapshot alone (`inputs.viewer`, `inputs.presence`, the `knowers` pins), so an
-// old reply shows what it was built from, not what the chat says now.
+// from the context snapshot alone so the inspector follows the view used for the reply.
 import type { SlotId } from "@dreamspan/shared/chat.ts"
 import type { SeparateContext } from "@dreamspan/shared/inspectorApi.ts"
 import { Effect } from "effect"
@@ -13,13 +12,18 @@ import { cardSummary, type CardSummaryRow } from "./cards.ts"
 /** At most this many left-out messages are listed; the rest are counted. */
 const LISTED = 200
 
-type Inputs = Pick<ContextSnapshot["inputs"], "viewer" | "viewerAliases" | "speaker" | "presence" | "cards">
+type Inputs = Pick<
+  ContextSnapshot["inputs"],
+  "contextView" | "viewer" | "viewerAliases" | "speaker" | "presence" | "cards"
+>
 
 /** Who the snapshot's context was written for, if anyone; null: one shared context. */
 export const viewOf = (snapshot: { readonly inputs: Inputs }) => {
-  const { viewer, speaker, presence } = snapshot.inputs
-  const narrator = !viewer && speaker !== null && (presence?.narrators ?? []).includes(speaker as never)
-  return viewer ? { viewer, narrator: false } : narrator ? { viewer: speaker!, narrator: true } : null
+  const { contextView, viewer, speaker, presence } = snapshot.inputs
+  if (viewer) return { viewer, narrator: false }
+  if (contextView === "separate" && speaker !== null && presence?.narrators?.some((id) => id === speaker))
+    return { viewer: speaker, narrator: true }
+  return null
 }
 
 /** The versions the viewer didn't know among those the context read, from the `knowers` pins. */
