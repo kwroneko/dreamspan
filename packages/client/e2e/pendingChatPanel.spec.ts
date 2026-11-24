@@ -126,6 +126,53 @@ test("the first send opens the saved chat with no loading skeleton or placeholde
   expect(await page.evaluate(() => (window as unknown as { seen: Array<string> }).seen)).toEqual([])
 })
 
+test("the first send keeps its timeline when the header read fails", async ({ page }) => {
+  const { wren } = await setup(page)
+  let failed = false
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request = typeof data === "string" ? (JSON.parse(data) as { id?: string; tag?: string }) : null
+      if (!failed && request?.tag === "GetSplitChats") {
+        failed = true
+        socket.send(
+          JSON.stringify({
+            _tag: "Exit",
+            requestId: request.id,
+            exit: {
+              _tag: "Failure",
+              cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Header interrupted" } }]
+            }
+          })
+        )
+      } else upstream.send(data)
+    })
+  })
+  await page.goto(`${server().url}/cards/${wren.entityId}/chat`)
+  await expect(page.getByRole("article", { name: "Greeting from Panel Wren" })).toBeVisible()
+  await page.evaluate(() => {
+    const state = { showedSkeleton: false }
+    Object.assign(window, { firstSend: state })
+    const selector = '[data-testid="messages-loading"]'
+    new MutationObserver((records) => {
+      for (const record of records)
+        for (const node of record.addedNodes)
+          if (node instanceof Element && (node.matches(selector) || node.querySelector(selector)))
+            state.showedSkeleton = true
+    }).observe(document.body, { childList: true, subtree: true })
+  })
+  await page.getByLabel("Message", { exact: true }).fill("Hello after the header failure.")
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await expect(page).toHaveURL(/\/chats\/[^/?]+/)
+  await expect(page.getByRole("article", { name: "Your message" })).toContainText("Hello after the header failure.")
+  expect(failed).toBe(true)
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { firstSend: { showedSkeleton: boolean } }).firstSend.showedSkeleton
+    )
+  ).toBe(false)
+})
+
 test("a character added in the pending Cast tab is in the chat the first send makes", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const { wren } = await setup(page)
