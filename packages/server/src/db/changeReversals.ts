@@ -55,6 +55,8 @@ interface ReversalRow {
   readonly label: string
   readonly action: "revert" | "redo"
   readonly reverses_id: string | null
+  readonly head_before: string | null
+  readonly head_after: string | null
   readonly fields_json: string
   readonly before_json: string
   readonly after_json: string
@@ -379,8 +381,14 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
           const recorded = JSON.parse(record.fields_json) as Array<string>
           const fields = options.fields ? recorded.filter((f) => options.fields!.includes(f)) : recorded
           const plan = planReversal({
-            original: docOfUnits(JSON.parse(record.before_json) as Record<string, unknown>),
-            changed: docOfUnits(JSON.parse(record.after_json) as Record<string, unknown>),
+            original:
+              record.head_before === null
+                ? docOfUnits(JSON.parse(record.before_json) as Record<string, unknown>)
+                : yield* revisionDoc(record.target_id, record.head_before),
+            changed:
+              record.head_after === null
+                ? docOfUnits(JSON.parse(record.after_json) as Record<string, unknown>)
+                : yield* revisionDoc(record.target_id, record.head_after),
             now: yield* lib.loadDoc(head.head_revision_id),
             fields,
             ...(options.choices && matchesReversalHead(head.head_revision_id, options)

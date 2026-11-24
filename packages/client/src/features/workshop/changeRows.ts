@@ -4,7 +4,7 @@
 import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import type { Doc } from "@dreamspan/shared/library.ts"
 import type { FieldChange } from "../editor/fields.ts"
-import { combinedFileEdits } from "@dreamspan/shared/changeReversal.ts"
+import { combinedFileEdits, ORDER_UNIT } from "@dreamspan/shared/changeReversal.ts"
 import type { RolloutEffect } from "./effects.ts"
 
 /** One item a turn changed. */
@@ -199,7 +199,7 @@ export const liveKeys = (item: ItemChange) =>
 /** A comparison row's field, as a revert takes it: the top-level key, or a list element by id. */
 export const unitOfPath = (path: ReadonlyArray<string | number>) =>
   JSON.stringify(
-    typeof path[1] === "string" && /^(?:id|identifier|uid)=/.test(path[1])
+    typeof path[1] === "string" && (path[1] === ORDER_UNIT || /^(?:id|identifier|uid)=/.test(path[1]))
       ? [String(path[0]), path[1]]
       : [String(path[0])]
   )

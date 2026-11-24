@@ -13,6 +13,8 @@ const isObject = (u: unknown): u is Record<string, unknown> => typeof u === "obj
 const own = (object: Record<string, unknown>, key: string) => (Object.hasOwn(object, key) ? object[key] : undefined)
 const same = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b)
 
+export const ORDER_UNIT = "@order"
+
 const IDENTITIES = ["id", "identifier", "uid"] as const
 
 /** The key that names every element of these lists, as History's comparisons split them. */
@@ -26,6 +28,14 @@ const identityOf = (lists: ReadonlyArray<ReadonlyArray<unknown>>) =>
       })
     )
   )
+
+const namedEntries = (list: ReadonlyArray<unknown>, identity: string) =>
+  new Map(list.map((entry) => [`${identity}=${String((entry as Record<string, unknown>)[identity])}`, entry]))
+
+const commonOrder = (order: ReadonlyArray<string>, other: ReadonlySet<string>) => order.filter((key) => other.has(key))
+
+export const changedEntryOrder = (before: ReadonlyArray<string>, after: ReadonlyArray<string>) =>
+  !same(commonOrder(before, new Set(after)), commonOrder(after, new Set(before)))
 
 /** A field's key: its path as JSON, `["description"]` or `["entries","uid=3"]`. */
 export const unitKey = (path: Path) => JSON.stringify(path)
@@ -50,13 +60,14 @@ export const changedUnits = (before: unknown, after: unknown): ReadonlyArray<str
     if (Array.isArray(x) && Array.isArray(y)) {
       const id = identityOf([x, y])
       if (id !== undefined) {
-        const named = (list: ReadonlyArray<unknown>) =>
-          new Map(list.map((e) => [`${id}=${String((e as Record<string, unknown>)[id])}`, e]))
-        const xs = named(x)
-        const ys = named(y)
-        const changed = [...new Set([...xs.keys(), ...ys.keys()])].filter((k) => !same(xs.get(k), ys.get(k)))
-        // Reordered with nothing else changed: the list's order is the change.
-        if (changed.length > 0) return changed.map((k) => unitKey([key, k]))
+        const xs = namedEntries(x, id)
+        const ys = namedEntries(y, id)
+        if (xs.size === x.length && ys.size === y.length) {
+          const keys = [...new Set([...xs.keys(), ...ys.keys()])]
+          const changed = keys.filter((k) => !same(xs.get(k), ys.get(k))).map((k) => unitKey([key, k]))
+          if (changedEntryOrder([...xs.keys()], [...ys.keys()])) changed.unshift(unitKey([key, ORDER_UNIT]))
+          if (changed.length > 0) return changed
+        }
       }
     }
     return [unitKey([key])]
@@ -78,6 +89,10 @@ const unitValue = (doc: unknown, key: string): unknown => {
   const value = own(doc, top)
   if (element === undefined) return value
   if (!Array.isArray(value)) return undefined
+  if (element === ORDER_UNIT) {
+    const identity = identityOf([value])
+    return identity === undefined ? undefined : [...namedEntries(value, identity).keys()]
+  }
   const at = findIn(value, element)
   return at < 0 ? undefined : value[at]
 }
@@ -101,6 +116,13 @@ const withUnit = (
     return next
   }
   const list = Array.isArray(own(doc, top)) ? [...(own(doc, top) as Array<unknown>)] : []
+  if (element === ORDER_UNIT) {
+    if (!Array.isArray(value)) return doc
+    const positions = (value as Array<string>).map((key) => findIn(list, key)).filter((i) => i >= 0)
+    const entries = positions.map((i) => list[i])
+    positions.sort((a, b) => a - b).forEach((at, i) => (list[at] = entries[i]))
+    return { ...doc, [top]: list }
+  }
   const at = findIn(list, element)
   if (at >= 0) {
     if (value === undefined) list.splice(at, 1)
@@ -176,6 +198,14 @@ export const planReversal = (
   }
 ): ReversalPlan => planGroupedReversal([input], input.now, input.choices)
 
+/** Merge the relative order of surviving shared entries, independently of their values. */
+const mergeUnit = (field: string, changed: unknown, now: unknown, original: unknown) => {
+  if (unitPath(field)[1] !== ORDER_UNIT || !Array.isArray(changed) || !Array.isArray(now) || !Array.isArray(original))
+    return merge3(changed, now, original)
+  const shared = new Set(commonOrder(changed, new Set(now)).filter((key) => original.includes(key)))
+  return merge3(commonOrder(changed, shared), commonOrder(now, shared), commonOrder(original, shared))
+}
+
 /** Apply the selected inverse patches newest first, on a tentative document. */
 export const planGroupedReversal = (
   patches: ReadonlyArray<ReversalPatch>,
@@ -192,7 +222,7 @@ export const planGroupedReversal = (
       const a = unitValue(patch.changed, field)
       const b = unitValue(patch.original, field)
       const h = unitValue(doc, field)
-      const merged = merge3(a, h, b)
+      const merged = mergeUnit(field, a, h, b)
       const choice = choices?.[field]
       let value = merged.value
       if (merged.conflicts.length > 0) {
@@ -277,7 +307,10 @@ export const combinedFileEdits = (
 }
 
 /** A unit as the assistant names it: "description", "entries uid=3". */
-export const unitName = (unit: string) => (JSON.parse(unit) as Array<string>).join(" ")
+export const unitName = (unit: string) => {
+  const [field, part] = unitPath(unit)
+  return part === undefined ? (field ?? "") : `${field} ${part === ORDER_UNIT ? "order" : part}`
+}
 
 /** The units a list of names given by the assistant picks: by its name or its top-level field. */
 export const pickedUnits = (units: ReadonlyArray<string>, names: ReadonlyArray<string> | undefined) =>

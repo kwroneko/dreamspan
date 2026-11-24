@@ -6,6 +6,7 @@ import {
   changedUnits,
   combinedFileEdits,
   docOfUnits,
+  ORDER_UNIT,
   planReversal,
   planGroupedReversal,
   revertedFields,
@@ -69,6 +70,20 @@ describe("planReversal", () => {
         { uid: 3, content: "User's." }
       ]
     })
+  })
+
+  it("reverts entry order together with an entry edit, keeping unrelated entries", () => {
+    const one = { uid: 1, content: "One" }
+    const two = { uid: 2, content: "Two" }
+    const three = { uid: 3, content: "Three" }
+    const extra = { uid: 4, content: "Added later" }
+    const edited = { ...two, content: "Edited" }
+    const original = { entries: [one, two, three] }
+    const changed = { entries: [three, edited, one] }
+    const fields = changedUnits(original, changed)
+    expect(fields).toEqual([unitKey(["entries", ORDER_UNIT]), unitKey(["entries", "uid=2"])])
+    const now = { entries: [three, extra, edited, one] }
+    expect(planReversal({ original, changed, now, fields }).doc).toEqual({ entries: [one, extra, two, three] })
   })
 
   it("replays separate file patches around an intervening save to the same field", () => {

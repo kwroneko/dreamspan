@@ -343,6 +343,24 @@ describe("revert a change", () => {
 })
 
 describe("redo", () => {
+  it.live("redoes an insertion after its original neighbor", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const book = yield* api.CreateLorebook({ label: "Skerry Lore" })
+      yield* f.run("edit_lorebook", { lorebook: book.id, changes: [{ add: { uid: 1, content: "First." } }] }, "b0")
+      yield* f.run("edit_lorebook", { lorebook: book.id, changes: [{ add: { uid: 2, content: "Second." } }] }, "b1")
+      const reverted = yield* api.RevertChange({ effects: yield* f.editKeys(["b1"]) })
+      yield* api.RedoChange({ reversalId: reverted.reversalId! })
+      const { doc } = yield* api.OpenEditor({ refId: book.id })
+      assert.deepStrictEqual(
+        (doc.entries as Array<{ uid: number }>).map((e) => e.uid),
+        [1, 2]
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("takes a revert back on the item as it is now; the field can be reverted again", () => {
     const config = testConfig()
     return Effect.gen(function* () {
