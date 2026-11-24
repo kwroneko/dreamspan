@@ -1,6 +1,6 @@
 import { useDurableForm, useOpenPlace } from "../editor/durable.tsx"
 import { useAtomValue } from "@effect/atom-react"
-import { useRef, useState, type RefObject } from "react"
+import { type ReactNode, useRef, useState, type RefObject } from "react"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { ArchiveCriteria, cardArchiveCriteria, type ArchiveCandidate } from "@dreamspan/shared/cardArchive.ts"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
@@ -48,11 +48,14 @@ function MatchCount({ id, amount }: { id: string; amount: number }) {
 function Selection({
   cards,
   criteria,
-  close
+  close,
+  refusedAction
 }: {
   cards: ReadonlyArray<ArchiveCandidate>
   criteria: ArchiveCriteria
   close: () => void
+  /** The rules form's "Use this tab's version" (durable.tsx), first in the Save row. */
+  refusedAction: ReactNode
 }) {
   const [omitted, setOmitted] = useState<ReadonlySet<string>>(new Set())
   const selected = cards.filter((card) => !omitted.has(card.entityId))
@@ -124,6 +127,7 @@ function Selection({
       />
       <ErrorAlert error={action.error} />
       <DialogActions>
+        {refusedAction}
         <Button hint="Close without archiving cards" onClick={close}>
           Cancel
         </Button>
@@ -221,7 +225,15 @@ function ArchiveDialog({ close, trigger }: { close: () => void; trigger: RefObje
         })}
       </div>
       <AsyncView atom={candidates(key)} loading="Finding cards…">
-        {(cards) => <Selection key={key} cards={cards} criteria={criteria} close={closeDialog} />}
+        {(cards) => (
+          <Selection
+            key={key}
+            cards={cards}
+            criteria={criteria}
+            close={closeDialog}
+            refusedAction={form.refusedAction}
+          />
+        )}
       </AsyncView>
     </Dialog>
   )

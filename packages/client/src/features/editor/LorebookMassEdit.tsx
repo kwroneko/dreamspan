@@ -285,6 +285,7 @@ export function MassEditDialog({
         }}
       />
       <DialogActions>
+        {form.refusedAction}
         <Button variant="ghost" hint="Closes this without changing any entry." onClick={close}>
           Cancel
         </Button>

@@ -650,6 +650,19 @@ export class ImportLeaseLost extends Schema.TaggedError<ImportLeaseLost>()("Impo
   recordId: Schema.String
 }) {}
 
+const StImportJobProgress = {
+  id: Schema.String,
+  filesTotal: Schema.Int,
+  filesDone: Schema.Int,
+  bytesTotal: Schema.Number,
+  bytesDone: Schema.Number,
+  currentFile: Schema.NullOr(Schema.String),
+  countsJson: Schema.String,
+  attention: Schema.Int,
+  reportJson: Schema.optionalKey(Schema.String),
+  notSentJson: Schema.optionalKey(Schema.String)
+}
+
 /** A chat-owned note an ST chat brings, which the writer stores as a note entity. */
 export const StImportNote = Schema.Struct({
   /** Which of the chat file's notes it is, by which a re-import finds it; only a summary's doc keeps it. */
@@ -3054,7 +3067,17 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       persona: Schema.optionalKey(EntityId),
       candidates: StartChatFields.greeters
     },
-    success: Schema.Struct({ pending: Schema.Boolean, changed: Schema.Boolean, fellBack: Schema.Boolean }),
+    success: Schema.Struct({
+      pending: Schema.Boolean,
+      changed: Schema.Boolean,
+      fellBack: Schema.Boolean,
+      /**
+       * The persona asked for is the story's (the account's story persona, or a card of the story)
+       * and the chat is a workshop beside it, not started yet: nothing was written, as a workshop
+       * beside a story never plays one (workfix1).
+       */
+      refusedPersona: Schema.optionalKey(Schema.Boolean)
+    }),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("AgentStartChat", {
@@ -3699,31 +3722,29 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     error: Schema.Union([ImportLeaseLost, StorageError])
   }),
   /**
-   * Makes `importId` the user's current run, and drops what the user's earlier runs held for a
-   * confirmed re-import (`StImportStage`).
+   * Switches the import lease, records any replaced upload's final report and starts the
+   * new job in one transaction. Drops stages held by earlier runs.
    */
   Rpc.make("StImportBegin", {
-    payload: { userId: UserId, importId: Schema.String },
-    success: Schema.Void,
-    error: StorageError
-  }),
-  // --- ST import jobs (stImportJobs.ts): what the import page lists.
-  /** A new job, running; an upload of the user's still running ends as interrupted (a new run fences it). */
-  Rpc.make("StImportJobStart", {
     payload: {
       userId: UserId,
-      id: Schema.String,
-      mode: Schema.Literals(["path", "upload"]),
-      source: Schema.String,
-      root: Schema.NullOr(Schema.String),
-      prefix: Schema.String,
-      filesTotal: Schema.Int,
-      bytesTotal: Schema.Number,
-      at: Schema.Number
+      importId: Schema.String,
+      job: Schema.optionalKey(
+        Schema.Struct({
+          mode: Schema.Literals(["path", "upload"]),
+          source: Schema.String,
+          root: Schema.NullOr(Schema.String),
+          prefix: Schema.String,
+          filesTotal: Schema.Int,
+          bytesTotal: Schema.Number
+        })
+      ),
+      previousUpload: Schema.optionalKey(Schema.Struct(StImportJobProgress))
     },
     success: Schema.Void,
     error: StorageError
   }),
+  // --- ST import jobs (stImportJobs.ts): what the import page lists.
   /**
    * A running job's progress, and with `end` its outcome. Only a job still running changes,
    * so a job ended elsewhere (cancelled, interrupted) stays as it ended. `report`, when
@@ -3732,17 +3753,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
   Rpc.make("StImportJobUpdate", {
     payload: {
       userId: UserId,
-      id: Schema.String,
       at: Schema.Number,
-      filesTotal: Schema.Int,
-      filesDone: Schema.Int,
-      bytesTotal: Schema.Number,
-      bytesDone: Schema.Number,
-      currentFile: Schema.NullOr(Schema.String),
-      countsJson: Schema.String,
-      attention: Schema.Int,
-      reportJson: Schema.optionalKey(Schema.String),
-      notSentJson: Schema.optionalKey(Schema.String),
+      ...StImportJobProgress,
       end: Schema.optionalKey(
         Schema.Struct({
           status: Schema.Literals(["complete", "failed", "cancelled", "interrupted"]),

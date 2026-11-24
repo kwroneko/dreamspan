@@ -31,7 +31,8 @@ import { Cause, Context, Effect, Exit, Layer, Option, Schedule, Schema, Semaphor
 import { Notices } from "../chat/Notices.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { readStFolderFile, scanStFolder, statStFolderFile } from "./stFolderDisk.ts"
-import { StImports } from "./StImports.ts"
+import { StImports, type StImportStartOptions } from "./StImports.ts"
+import type { StPlanExpect } from "./stPlanExpect.ts"
 import { StImportPlans, stFolderPlanFiles } from "./StImportPlans.ts"
 import type { StImportPlanChanged } from "@dreamspan/shared/stReimportPlan.ts"
 import { visibleReport } from "./stReport.ts"
@@ -148,7 +149,7 @@ export class StImportJobs extends Context.Service<
       const lives = new Map<string, Live>()
       /** A path job's chats linked after its own run ended: the run that re-read the folder for them. */
       const helpers = new Map<string, string>()
-      // Starting, and linking (which starts a run), one at a time: each fences the run before it.
+      // Serialize job transitions that may replace, finish or remove the current upload.
       const starting = yield* Semaphore.make(1)
 
       /** Storage failing is the server's fault: logged, and said plainly. */
@@ -182,7 +183,28 @@ export class StImportJobs extends Context.Service<
       const publish = (live: { readonly user: User; readonly id: string }, status: StImportStatus) =>
         notices.publish(live.user.id, { _tag: "StImportChanged", importId: live.id, status })
 
-      /** Writes the job's progress, with the report so far when `report`, and `end` if it ended. */
+      const progress = (live: Live, withReport: boolean) =>
+        Effect.gen(function* () {
+          const report = yield* Effect.option(imports.report(live.user, live.id))
+          if (Option.isSome(report)) {
+            live.counts = JSON.stringify(report.value.counts)
+            live.attention = attentionOf(report.value, live.notSent.length)
+          }
+          return {
+            id: live.id,
+            filesTotal: live.filesTotal,
+            filesDone: live.filesDone,
+            bytesTotal: live.bytesTotal,
+            bytesDone: live.bytesDone,
+            currentFile: live.currentFile,
+            countsJson: live.counts,
+            attention: live.attention,
+            ...(withReport && Option.isSome(report) ? { reportJson: encodeReport(report.value) } : {}),
+            notSentJson: encodeNotSent(live.notSent)
+          }
+        })
+
+      /** Persists a checkpoint or the final report. */
       const write = (
         live: Live,
         options: {
@@ -191,25 +213,12 @@ export class StImportJobs extends Context.Service<
         }
       ) =>
         Effect.gen(function* () {
-          const report = yield* Effect.option(imports.report(live.user, live.id))
-          if (Option.isSome(report)) {
-            live.counts = JSON.stringify(report.value.counts)
-            live.attention = attentionOf(report.value, live.notSent.length)
-          }
+          const snapshot = yield* progress(live, options.report)
           live.lastWrite = Date.now()
           yield* writer.StImportJobUpdate({
+            ...snapshot,
             userId: live.user.id,
-            id: live.id,
             at: live.lastWrite,
-            filesTotal: live.filesTotal,
-            filesDone: live.filesDone,
-            bytesTotal: live.bytesTotal,
-            bytesDone: live.bytesDone,
-            currentFile: live.currentFile,
-            countsJson: live.counts,
-            attention: live.attention,
-            ...(options.report && Option.isSome(report) ? { reportJson: encodeReport(report.value) } : {}),
-            notSentJson: encodeNotSent(live.notSent),
             ...(options.end === undefined ? {} : { end: options.end })
           })
         }).pipe(Effect.catch((error) => Effect.logWarning("saving an ST import's progress failed", error)))
@@ -233,7 +242,7 @@ export class StImportJobs extends Context.Service<
           yield* write(live, { report: true, end: { status, error } })
           lives.delete(live.id)
           publish(live, status)
-        })
+        }).pipe(Effect.uninterruptible)
 
       const notSent = (live: Live, path: string, message: string) => {
         if (live.notSent.length < MAX_NOT_SENT) live.notSent.push(new StNotSent({ path, message }))
@@ -250,61 +259,56 @@ export class StImportJobs extends Context.Service<
             })
         })
 
-      /** Save the old upload's final report before a new session replaces it. */
-      const supersede = (user: User) =>
-        Effect.gen(function* () {
-          for (const live of [...lives.values()]) {
-            if (live.user.id !== user.id || live.mode !== "upload") continue
-            yield* end(live, "interrupted", "Another import started before its files had all arrived.")
-          }
-        })
-
-      const begin = (
+      /** Drain the current upload and publish the handover only after the writer commits it. */
+      const startRun = (
         user: User,
-        importId: string,
-        mode: "path" | "upload",
-        source: string,
-        root: string | null,
-        prefix: string,
-        files: number,
-        bytes: number
+        unsupported: ReadonlyArray<string>,
+        expect: StPlanExpect | undefined,
+        job?: StImportStartOptions["job"],
+        run?: (live: Live) => Effect.Effect<void>
       ) =>
-        Effect.gen(function* () {
-          const now = Date.now()
-          const live: Live = {
-            id: importId,
-            user,
-            mode,
-            filesTotal: files,
-            filesDone: 0,
-            bytesTotal: bytes,
-            bytesBase: 0,
-            bytesDone: 0,
-            currentFile: null,
-            currentBytes: 0,
-            notSent: [],
-            counts: "{}",
-            attention: 0,
-            cancelled: false,
-            ended: false,
-            lastActivity: now,
-            lastWrite: now,
-            lastReport: now
-          }
-          yield* writer.StImportJobStart({
-            userId: user.id,
-            id: importId,
-            mode,
-            source,
-            root,
-            prefix,
-            filesTotal: files,
-            bytesTotal: bytes,
-            at: now
-          })
-          lives.set(importId, live)
-          publish(live, "running")
-          return live
+        Effect.suspend(() => {
+          const previous = [...lives.values()].find((live) => live.user.id === user.id && live.mode === "upload")
+          const start = Effect.gen(function* () {
+            const previousUpload = previous === undefined ? undefined : yield* progress(previous, true)
+            const importId = yield* imports.start(user, unsupported, expect, {
+              ...(job === undefined ? {} : { job }),
+              ...(previousUpload === undefined ? {} : { previousUpload })
+            })
+            if (previous !== undefined) {
+              previous.ended = true
+              lives.delete(previous.id)
+              publish(previous, "interrupted")
+            }
+            if (job !== undefined) {
+              const now = Date.now()
+              const live: Live = {
+                id: importId,
+                user,
+                mode: job.mode,
+                filesTotal: job.filesTotal,
+                filesDone: 0,
+                bytesTotal: job.bytesTotal,
+                bytesBase: 0,
+                bytesDone: 0,
+                currentFile: null,
+                currentBytes: 0,
+                notSent: [],
+                counts: "{}",
+                attention: 0,
+                cancelled: false,
+                ended: false,
+                lastActivity: now,
+                lastWrite: now,
+                lastReport: now
+              }
+              lives.set(importId, live)
+              publish(live, "running")
+              if (run !== undefined) yield* run(live)
+            }
+            return importId
+          }).pipe(Effect.uninterruptible)
+          return previous === undefined ? start : imports.withFilesPaused(user, previous.id, start)
         })
 
       /**
@@ -447,20 +451,20 @@ export class StImportJobs extends Context.Service<
           return yield* starting.withPermits(1)(
             Effect.gen(function* () {
               yield* busy(user)
-              yield* supersede(user)
-              const importId = yield* imports.start(user, plan.unsupported, expect)
-              const live = yield* begin(
+              return yield* startRun(
                 user,
-                importId,
-                "path",
-                root,
-                root,
-                prefix,
-                files.length,
-                files.reduce((sum, file) => sum + file.size, 0)
-              ).pipe(stored("Starting the import"))
-              yield* Effect.forkIn(runPath(live, root, files), scope)
-              return importId
+                plan.unsupported,
+                expect,
+                {
+                  mode: "path",
+                  source: root,
+                  root,
+                  prefix,
+                  filesTotal: files.length,
+                  bytesTotal: files.reduce((sum, file) => sum + file.size, 0)
+                },
+                (live) => Effect.asVoid(Effect.forkIn(Effect.interruptible(runPath(live, root, files)), scope))
+              )
             })
           )
         })
@@ -477,12 +481,14 @@ export class StImportJobs extends Context.Service<
             const expect =
               choice === undefined ? undefined : yield* plans.confirm(user, choice.planId, null, null, choice.skip)
             yield* busy(user)
-            yield* supersede(user)
-            const importId = yield* imports.start(user, unsupported, expect)
-            yield* begin(user, importId, "upload", info.source, null, "", info.files, info.bytes).pipe(
-              stored("Starting the import")
-            )
-            return importId
+            return yield* startRun(user, unsupported, expect, {
+              mode: "upload",
+              source: info.source,
+              root: null,
+              prefix: "",
+              filesTotal: info.files,
+              bytesTotal: info.bytes
+            })
           })
         )
 
@@ -535,31 +541,54 @@ export class StImportJobs extends Context.Service<
         })
 
       const finishUpload = (user: User, importId: string, sent: ReadonlyArray<StNotSent>) =>
+        starting
+          .withPermit(
+            imports.withFilesPaused(
+              user,
+              importId,
+              Effect.gen(function* () {
+                const live = lives.get(importId)
+                if (live === undefined || live.user.id !== user.id) {
+                  // Already over (cancelled, or ended by another run): nothing to finish.
+                  yield* reader.GetStImportJob({ userId: user.id, id: importId })
+                  return
+                }
+                const known = new Set(live.notSent.map((entry) => entry.path))
+                for (const entry of sent) if (!known.has(entry.path)) notSent(live, entry.path, entry.message)
+                live.filesDone = live.filesTotal
+                live.bytesDone = live.bytesTotal
+                yield* end(live, "complete", null)
+              })
+            )
+          )
+          .pipe(stored("Finishing the import"))
+
+      const stopUpload = (live: Live, status: "cancelled" | "interrupted", error: string | null) =>
         Effect.gen(function* () {
-          const live = lives.get(importId)
-          if (live === undefined || live.user.id !== user.id) {
-            // Already over (cancelled, or ended by another run): nothing to finish.
-            yield* reader.GetStImportJob({ userId: user.id, id: importId })
-            return
-          }
-          const known = new Set(live.notSent.map((entry) => entry.path))
-          for (const entry of sent) if (!known.has(entry.path)) notSent(live, entry.path, entry.message)
-          live.filesDone = live.filesTotal
-          live.bytesDone = live.bytesTotal
-          yield* end(live, "complete", null)
-        }).pipe(stored("Finishing the import"))
+          yield* end(live, status, error)
+          imports.end(live.user, live.id)
+        }).pipe(Effect.uninterruptible)
 
       // An upload whose files stopped arriving is over: its tab was closed, or it lost the server.
       const sweep = Effect.gen(function* () {
         const now = Date.now()
         for (const live of [...lives.values()]) {
           if (live.mode !== "upload" || now - live.lastActivity < UPLOAD_IDLE_MS) continue
-          yield* end(
-            live,
-            "interrupted",
-            "Its files stopped arriving for 10 minutes: the tab sending them was closed or lost the server. Import the folder again to go on."
+          yield* starting.withPermit(
+            imports.withFilesPaused(
+              live.user,
+              live.id,
+              Effect.suspend(() =>
+                live.ended || Date.now() - live.lastActivity < UPLOAD_IDLE_MS
+                  ? Effect.void
+                  : stopUpload(
+                      live,
+                      "interrupted",
+                      "Its files stopped arriving for 10 minutes: the tab sending them was closed or lost the server. Import the folder again to go on."
+                    )
+              )
+            )
           )
-          imports.end(live.user, live.id)
         }
       })
       yield* Effect.forkIn(Effect.repeat(sweep, Schedule.spaced(SWEEP_MS)), scope)
@@ -581,28 +610,28 @@ export class StImportJobs extends Context.Service<
         }).pipe(stored("Reading the import"))
 
       const cancel = (user: User, importId: string) =>
-        Effect.gen(function* () {
-          const live = lives.get(importId)
-          if (live === undefined || live.user.id !== user.id) {
-            // A finished import has nothing to stop.
-            yield* reader.GetStImportJob({ userId: user.id, id: importId })
-            return
-          }
-          live.cancelled = true
-          // An upload stops now: the files still on their way are refused. A path import
-          // stops after the file it's on.
-          if (live.mode === "upload") {
-            yield* imports.stopAfterChatWrite(user, importId)
-            yield* end(live, "cancelled", null)
-            imports.end(user, importId)
-          }
-        }).pipe(stored("Cancelling the import"))
+        starting
+          .withPermit(
+            Effect.gen(function* () {
+              const live = lives.get(importId)
+              if (live === undefined || live.user.id !== user.id) {
+                // A finished import has nothing to stop.
+                yield* reader.GetStImportJob({ userId: user.id, id: importId })
+                return
+              }
+              live.cancelled = true
+              // A path import stops after the file it's on.
+              if (live.mode === "upload")
+                yield* imports.withFilesPaused(user, importId, stopUpload(live, "cancelled", null))
+            })
+          )
+          .pipe(stored("Cancelling the import"))
 
       /** A run that knows the folder again, for linking a chat of an import whose run is gone. */
       const rebuild = (user: User, root: string, card: EntityId | "none") =>
         Effect.gen(function* () {
-          const helper = yield* imports.start(user, [])
           const scanned = yield* scanStFolder(root)
+          const helper = yield* startRun(user, [], undefined)
           const cards = new Set(card === "none" ? [] : imports.sourcesOf(user, helper, card))
           // What a chat links to: the settings, personas, lorebooks, presets, groups, and the chosen card.
           const context = stPlan(scanned.files, "").send.filter(
@@ -638,6 +667,7 @@ export class StImportJobs extends Context.Service<
               const report = detail.reportJson === null ? null : decodeReport(detail.reportJson)
               if (file?.kind !== "chat" || report === null || !report.links.some((choice) => choice.path === path))
                 return yield* new StFolderUnreadable({ message: "That chat isn't waiting for a card in this import." })
+              const entry = { path, ...(yield* statStFolderFile(root, path)) }
               const own = imports.exists(user, importId)
               let run = importId
               if (!own) {
@@ -648,8 +678,6 @@ export class StImportJobs extends Context.Service<
                   helpers.set(importId, run)
                 }
               }
-              const seen = yield* statStFolderFile(root, path)
-              const entry = { path, ...seen }
               let result = yield* sendWithRestart(user, run, root, entry, { card, orphan: false }, () => Effect.void)
               // A branch whose parent never came: on its own, as at the end of an import.
               if (result.outcome === "deferred")

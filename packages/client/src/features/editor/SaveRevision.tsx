@@ -156,6 +156,7 @@ export function SaveRevision({
             ))}
           </ul>
           <DialogActions>
+            {picking.refusedAction}
             <Button onClick={cancel} disabled={pending} hint="Saves nothing; your text stays as it is.">
               Cancel
             </Button>

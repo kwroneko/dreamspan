@@ -1,10 +1,5 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
-import {
-  mapEditingOrigin,
-  editingOrigin,
-  reconcileDeletedFields,
-  reconcileForm
-} from "@dreamspan/shared/draftDeletions.ts"
+import { mapEditingOrigin, editingOrigin, reconcileDeletedFields } from "@dreamspan/shared/draftDeletions.ts"
 // Private non-secret text drafts. Explicit Save stays separate from saving the draft.
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import type { UserId } from "@dreamspan/shared/domain.ts"
@@ -15,7 +10,8 @@ import {
   deletedSince,
   type Draft,
   type DraftDisplacement,
-  type DraftState
+  type DraftState,
+  isUserDraftForm
 } from "@dreamspan/shared/drafts.ts"
 import type { UserDraftSave } from "@dreamspan/shared/editorApi.ts"
 import { useAction } from "../../actions.tsx"
@@ -27,6 +23,7 @@ import { Popover } from "../../ui/Popover.tsx"
 import { iconButtonClass } from "../../ui/Tooltip.tsx"
 import { chromeButton } from "../../ui/FieldFrame.tsx"
 import { copiesOf, dropCopy, keepCopy, makeCopy, pendingOf, type Copy } from "./backup.ts"
+import { clearRefusedDraft, keepRefusedDraft, readRefusedDraft } from "./refusedDraft.ts"
 
 import { readTypedBackup, keepTypedBackup, dropTypedBackup } from "./typedBackup.ts"
 
@@ -64,6 +61,9 @@ export class UserDraftStore {
   private base = baseOf(null)
   private editingFrom: EditingOrigin | null = null
   private lastPersistAcknowledged = false
+  /** The last save was a form's, refused as out of date (`Draft.refused`). */
+  private lastPersistRefused = false
+  private refusedEdit: { edit: number; content: string } | null = null
   private edits = 0
   private acknowledgedEdit = -1
   private pendingTypes = new Set<{
@@ -83,6 +83,11 @@ export class UserDraftStore {
     error: null as string | null,
     history: null as ReadonlyArray<DraftState> | null,
     displaced: null as DraftDisplacement | null,
+    /**
+     * This tab's version of a form, refused as out of date: the field shows the current one,
+     * and this one is in the field's history; `restoreTabVersion` brings it back.
+     */
+    refused: null as DraftDisplacement | null,
     recovered: 0,
     remote: null as Draft | null,
     /** When the server's draft, as opened, was last written: its text against a newer browser copy. */
@@ -91,11 +96,13 @@ export class UserDraftStore {
   private userId: UserId
   private targetId: string
   private field: string
+  private readonly isForm: boolean
   private run: Run
   constructor(userId: UserId, targetId: string, field: string, run: Run) {
     this.userId = userId
     this.targetId = targetId
     this.field = field
+    this.isForm = isUserDraftForm(targetId, field)
     this.run = run
   }
   subscribe = (listener: () => void) => {
@@ -113,6 +120,7 @@ export class UserDraftStore {
     if (this.state.saved !== saved) this.update({ saved })
   }
   private address = () => ({ ownerId: this.userId, targetId: this.targetId, field: this.field })
+  private refusalKey = () => `dreamspan.refusedDraft:${JSON.stringify(this.address())}`
   private payload = (content: string, seed = false, editingFrom = this.editingFrom) => ({
     ...this.address(),
     content,
@@ -141,6 +149,7 @@ export class UserDraftStore {
     // A repeated Save of an acknowledged edit is not a new clear of remote typing.
     if (!seed && edit <= this.acknowledgedEdit) editingFrom = content
     this.lastPersistAcknowledged = false
+    this.lastPersistRefused = false
     // Refile on our own preceding acknowledgement, never a fresh read of another tab's base.
     const { copy, kept } = this.remember(
       content,
@@ -157,6 +166,8 @@ export class UserDraftStore {
       return false
     }
     this.lastPersistAcknowledged = true
+    this.lastPersistRefused = result.value.refused !== undefined
+    if (this.lastPersistRefused && !seed) this.refusedEdit = { edit, content }
     this.draft = result.value
     // A deletion may have won while this request was in flight. Recovery acknowledges
     // the copy into the bin, not as new field text; never rebase later typing onto it unseen.
@@ -184,14 +195,27 @@ export class UserDraftStore {
     // Later typing is descended from this acknowledged text. Refile its browser copy
     // now, even if another queued operation delays its own save or the page closes.
     if (accepted && this.copy !== null && this.state.text !== null) await this.remember(this.state.text, true).kept
+    // A form refused as out of date (owner, 2026-11-24): the field now shows the current version,
+    // and this tab's one is offered back. Another tab's draft seen meanwhile is the one shown.
+    const refused = !seed && showing && this.edits === edit ? (result.value.refused ?? null) : null
+    if (refused !== null) keepRefusedDraft(this.refusalKey(), result.value, refused)
+    if (
+      refused !== null &&
+      this.state.remote?.id === result.value.id &&
+      this.state.remote.rowVersion <= result.value.rowVersion
+    )
+      this.update({ remote: null })
     this.update({
-      error: accepted
-        ? null
-        : deletedSince(result.value, copy.save.kind === "userDraft" ? copy.save.payload : null) ||
-            reconcileDeletedFields(result.value, copy.save.kind === "userDraft" ? copy.save.payload : null, content)
-              .changed
-          ? "This text was deleted elsewhere. Find your copy in recovered texts."
-          : "This text changed elsewhere. Review the updated text.",
+      ...(refused === null ? {} : { refused }),
+      error:
+        accepted || result.value.refused !== undefined
+          ? null
+          : deletedSince(result.value, copy.save.kind === "userDraft" ? copy.save.payload : null) ||
+              (this.isForm &&
+                reconcileDeletedFields(result.value, copy.save.kind === "userDraft" ? copy.save.payload : null, content)
+                  .changed)
+            ? "This text was deleted elsewhere. Find your copy in recovered texts."
+            : "This text changed elsewhere. Review the updated text.",
       displaced: result.value.displaced ?? this.state.displaced,
       recovered: this.state.recovered + result.value.recovered
     })
@@ -234,26 +258,15 @@ export class UserDraftStore {
           dropTypedBackup(copy)
           continue
         }
-        const copyBase = save?.kind === "userDraft" ? save.payload : null
-        const formCopy =
-          this.draft === null
-            ? null
-            : reconcileForm(
-                this.draft,
-                copyBase,
-                copy.content,
-                copyBase?.editingFrom,
-                save?.kind !== "userDraft" || save.payload.seed !== true
-              )
         const safeCopy =
-          this.draft === null
+          this.draft === null || !this.isForm
             ? { content: copy.content, changed: false, rejected: false }
             : reconcileDeletedFields(
                 this.draft,
                 save?.kind === "userDraft" && save.payload.seed !== true ? save.payload : null,
-                formCopy?.content ?? copy.content
+                copy.content
               )
-        const copiedFormChanged = safeCopy.changed || formCopy?.changed === true
+        const copiedFormChanged = safeCopy.changed
         if (safeCopy.rejected) {
           await keepCopy(copy)
           dropTypedBackup(copy)
@@ -311,6 +324,8 @@ export class UserDraftStore {
         const replay = await this.run((client) => client("SaveUserDraft", save.payload))
         if (replay.ok) {
           this.draft = replay.value
+          const refused = this.edits === 0 && save.payload.seed !== true ? replay.value.refused : undefined
+          if (refused !== undefined) keepRefusedDraft(this.refusalKey(), replay.value, refused)
           if (this.edits === 0) {
             this.base = baseOf(replay.value)
             this.editingFrom = replay.value.status === "active" ? replay.value.content : null
@@ -318,6 +333,8 @@ export class UserDraftStore {
             this.update({ text: replay.value.status === "active" ? replay.value.content : null })
           }
           this.update({
+            // A form copy typed on an older version is refused: offered back, the field showing the current one.
+            ...(refused === undefined ? {} : { refused }),
             displaced: replay.value.displaced ?? this.state.displaced,
             recovered: this.state.recovered + replay.value.recovered
           })
@@ -332,7 +349,12 @@ export class UserDraftStore {
               expectedSession: save.payload.expectedSession
             }
             this.copy = copiedFormChanged ? null : copy
-            this.editingFrom = save.payload.editingFrom ?? formCopy?.intent ?? safeCopy.content
+            const exact =
+              this.draft !== null &&
+              save.payload.seed !== true &&
+              save.payload.draftId === this.draft.id &&
+              save.payload.expectedRowVersion === this.draft.rowVersion
+            this.editingFrom = save.payload.editingFrom ?? (exact ? this.draft!.content : safeCopy.content)
             if (safeCopy.changed && this.draft !== null) {
               this.editingFrom = mapEditingOrigin(
                 this.editingFrom,
@@ -348,7 +370,12 @@ export class UserDraftStore {
       this.update({
         ready: true,
         savedAt: this.draft?.updatedAt ?? null,
-        text: this.state.text ?? (this.draft?.status === "active" ? this.draft.content : null)
+        text: this.state.text ?? (this.draft?.status === "active" ? this.draft.content : null),
+        refused:
+          this.state.refused ??
+          (this.edits === 0 && (this.state.text === null || this.state.text === this.draft?.content)
+            ? readRefusedDraft(this.refusalKey(), this.draft)
+            : null)
       })
     })
   }
@@ -394,6 +421,11 @@ export class UserDraftStore {
       // observation never replaces the original text base. Loading may acknowledge
       // local text into recovered texts instead of reopening a deleted field.
       if (!load) this.observedDeletion = observeDeletion(remote)
+      // A form on its old version would be refused: keeping it is choosing it over the remote one.
+      if (!load && this.isForm && remote.status === "active" && this.state.text !== null) {
+        this.base = baseOf(remote)
+        this.editingFrom = remote.content
+      }
       if (this.state.text !== null && !(await this.persist(this.state.text)) && !this.lastPersistAcknowledged)
         return false
       if (this.edits !== edits) return false
@@ -456,7 +488,9 @@ export class UserDraftStore {
     const initial = this.state.text ?? saved
     this.editingFrom = editingOrigin(this.editingFrom, initial, content)
     this.edits++
-    this.update({ text: content, history: null })
+    // Editing the version shown is going on from it: a refused one stays in the field's history.
+    clearRefusedDraft(this.refusalKey())
+    this.update({ text: content, history: null, refused: null })
     void this.remember(content, true).kept
     const pending = { initial, content, editingFrom: this.editingFrom, edit: this.edits }
     this.pendingTypes.add(pending)
@@ -464,7 +498,10 @@ export class UserDraftStore {
       try {
         if (pending.edit <= this.acknowledgedEdit) return
         if (this.draft === null || this.draft.status !== "active") {
-          if (!(await this.persist(pending.initial, true, pending.initial, pending.edit))) return
+          // A starting snapshot refused (another tab's form is there now): the typed edit is
+          // still sent on the old base, so it is refused too, filed to history and offered back.
+          if (!(await this.persist(pending.initial, true, pending.initial, pending.edit)) && !this.lastPersistRefused)
+            return
         }
         await this.persist(pending.content, false, pending.editingFrom, pending.edit)
       } finally {
@@ -482,6 +519,8 @@ export class UserDraftStore {
     const edit = this.edits
     const editingFrom = this.editingFrom
     const operation = this.queue.then(async () => {
+      // An autosave can replace the displayed form and base while this Save is queued.
+      if (this.refusedEdit?.edit === edit && this.refusedEdit.content === content) return false
       if (!(await this.persist(content, false, editingFrom, edit))) return false
       const draft = this.draft!
       if (!(await save())) return false
@@ -513,11 +552,13 @@ export class UserDraftStore {
         if (this.copy !== null && this.state.text !== null) await this.remember(this.state.text, true).kept
       }
       if (this.state.text === content) this.editingFrom = null
+      clearRefusedDraft(this.refusalKey())
       this.update({
         text: this.state.text === content ? null : this.state.text,
         error: ended.ok ? null : ended.error.message,
         recovered: this.state.recovered + (ended.ok ? ended.value.recovered : 0),
-        history: null
+        history: null,
+        refused: null
       })
       return true
     })
@@ -651,6 +692,10 @@ export function useUserDraft(targetId: string, field: string, initialSaved: stri
     showHistory: store.history,
     restore: store.restore,
     acknowledge: store.acknowledge,
+    /** Brings back this tab's refused version: it becomes the draft, the one it replaces one step back. */
+    restoreTabVersion: () => {
+      if (state.refused) store.type(state.refused.content, saved)
+    },
     loadRemote: async () => {
       if (await store.resolveRemote(true)) window.location.reload()
     },
@@ -730,11 +775,30 @@ export function UserDraftUndo({ draft, place }: { draft: UserDraft; place?: "com
   )
 }
 
+/**
+ * A form's own version, refused because another tab had saved a newer one (owner, 2026-11-24):
+ * the form shows that one, and this action brings this tab's back. Shown only while there is one,
+ * beside the form's other draft actions (its notices, or the dialog's Save row).
+ */
+export function UserDraftRefused({ draft }: { draft: Pick<UserDraft, "refused" | "restoreTabVersion"> }) {
+  if (!draft.refused) return null
+  return (
+    <Button
+      variant="ghost"
+      hint="Another tab saved newer changes, so they're shown here. Brings back this tab's changes instead; the newer ones stay in the undo history."
+      onClick={draft.restoreTabVersion}
+    >
+      Use this tab's version
+    </Button>
+  )
+}
+
 /** What a draft needs to tell the user: a failed save, recovered text, another device's edit. */
 export function UserDraftNotices({ draft }: { draft: UserDraft }) {
-  if (!draft.error && draft.recovered === 0 && !draft.remote && !draft.displaced) return null
+  if (!draft.error && draft.recovered === 0 && !draft.remote && !draft.displaced && !draft.refused) return null
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+      <UserDraftRefused draft={draft} />
       {draft.error && (
         <span role="alert" className="text-danger">
           {draft.error}

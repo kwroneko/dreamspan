@@ -141,6 +141,55 @@ const chipTokens = async (page: Page) =>
     /^Context: about ([\d,]+)/.exec((await contextChip(page).getAttribute("aria-label")) ?? "")![1]!.replaceAll(",", "")
   )
 
+test("a workshop's first Cache chip leaves the capabilities and working folder in place", async ({ page }) => {
+  await admin((api) =>
+    Effect.gen(function* () {
+      const connection = yield* api.CreateConnection({
+        kind: "openai-chat",
+        settings: {
+          name: "Synthetic workshop cache",
+          baseUrl: `${provider.url}/v1`,
+          compat: {},
+          cacheTtlS: 300,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        },
+        apiKey: "sk-synthetic-workshop-cache"
+      })
+      const model = yield* api.AddUserModel({ connectionId: connection.id, key: "gpt-4o", overrides: {} })
+      yield* api.SetGenerationDefaults({
+        defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+      })
+    })
+  )
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/new/workshop`)
+  await expect(page).toHaveURL(/\/new\/workshop\?.*draft=/)
+  const strip = nextReply(page)
+  const capabilities = strip.getByRole("button", { name: /^What the assistant may do: \d/ })
+  const folder = strip.getByRole("button", { name: /^Working folder: / }).filter({ hasText: "All files" })
+  await expect(capabilities).toBeVisible()
+  await expect(folder).toBeVisible()
+  await expect(contextChip(page)).toBeVisible()
+  await expect(cacheChip(page)).toHaveCount(0)
+  // Measure from the context chip's right edge, since its token count can change its width.
+  const offsets = async () => {
+    const context = (await contextChip(page).boundingBox())!
+    const right = context.x + context.width
+    const [capabilityBox, folderBox] = await Promise.all([capabilities.boundingBox(), folder.boundingBox()])
+    return [capabilityBox!.x - right, folderBox!.x - right]
+  }
+  const before = await offsets()
+  await page
+    .getByRole("textbox", { name: "Message", exact: true })
+    .fill(" The ledger records another shipment.".repeat(480))
+  await page.getByRole("button", { name: /^Send/ }).click()
+  await expect(page).toHaveURL(/\/chats\//)
+  await expect(cacheChip(page)).toHaveText(/^Cache warm \d+:\d\d$/)
+  expect(await offsets()).toEqual(before)
+})
+
 test.describe("a model added by hand gets a working cache chip, or none", () => {
   for (const [label, connection, key, warm] of [
     ["Anthropic", { provider: "anthropic", kind: "anthropic", baseUrl: "" }, "synthetic-custom-claude", true],

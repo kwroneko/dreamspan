@@ -5,7 +5,6 @@ import {
   beforeDeletion,
   deletionMap,
   reconcileDeletedFields,
-  reconcileForm,
   trackDeletions,
   type DeletionBase
 } from "@dreamspan/shared/draftDeletions.ts"
@@ -13,6 +12,7 @@ import type { UserId } from "@dreamspan/shared/domain.ts"
 import {
   applyPatch,
   composerKey,
+  deletedSince,
   diffPatch,
   Draft,
   DraftHistoryPolicy,
@@ -23,6 +23,7 @@ import {
   invertPatch,
   isDestructive,
   isEmptyPatch,
+  isUserDraftForm,
   parseDraftTarget,
   type Patch,
   type ObservedDeletion
@@ -200,10 +201,16 @@ const imageJson = (images: MessageImages) =>
   )
 const imageFields = (json: string | null) => (json === null ? {} : { images: JSON.parse(json) as MessageImages })
 
-const toDraft = (row: DraftRow, recovered = 0, displaced: DraftDisplacement | null = null) =>
+const toDraft = (
+  row: DraftRow,
+  recovered = 0,
+  displaced: DraftDisplacement | null = null,
+  refused?: DraftDisplacement
+) =>
   new Draft({
     recovered,
     displaced,
+    ...(refused === undefined ? {} : { refused }),
     id: row.id,
     key: { targetKind: row.target_kind, targetId: row.target_id, field: row.field },
     content: row.content,
@@ -553,10 +560,14 @@ export const makeDraftStore = (
     kind: "edit" | "restore" | "revision",
     now: number,
     displaced: boolean,
-    imagesJson: string | null
+    imagesJson: string | null,
+    trim = true
   ) =>
     Effect.gen(function* () {
-      const form = draft.target_kind === "user_field" ? formChange(draft.content, content) : null
+      const form =
+        draft.target_kind === "user_field" && isUserDraftForm(draft.target_id, draft.field)
+          ? formChange(draft.content, content)
+          : null
       const keep = displaced || form?.destructive === true
       const [last] =
         yield* sql<EntryRow>`SELECT * FROM draft_history WHERE draft_id = ${draft.id} ORDER BY seq DESC LIMIT 1`
@@ -603,7 +614,7 @@ export const makeDraftStore = (
         images_after_json: imagesJson,
         displaced: keep ? 1 : 0
       })}`
-      return yield* retain(draft, content)
+      return trim ? yield* retain(draft, content) : 0
     })
 
   /** The draft the client named, as it saw it: another draft at its key, or a newer version, is stale. */
@@ -632,7 +643,7 @@ export const makeDraftStore = (
       const deletions = trackDeletions(
         toDraft(draft),
         content,
-        draft.target_kind === "user_field",
+        draft.target_kind === "user_field" && isUserDraftForm(draft.target_id, draft.field),
         deliberate,
         formEdit
       )
@@ -731,6 +742,7 @@ export const makeDraftStore = (
   ) =>
     Effect.gen(function* () {
       const ended = base !== null && base.session !== null && base.session !== draft.session
+      const form = draft.target_kind === "user_field" && isUserDraftForm(draft.target_id, draft.field)
       // Deliberate deletion wins over writes typed before it, including keepalive and
       // Browser recovery retries. Sending a composer ends its session without deleting
       // its separately typed `next` text; manual deletion always wins.
@@ -745,15 +757,53 @@ export const makeDraftStore = (
       const barrier = deletionMap(toDraft(draft))[""]
       const deleted = barrier !== undefined && beforeDeletion(draft.id, barrier, deletionBase)
       const original = content
-      const formEdit =
-        draft.target_kind === "user_field"
-          ? reconcileForm(toDraft(draft), deletionBase, content, options.editingFrom, options.deliberate ?? true)
-          : null
-      const reconciled = reconcileDeletedFields(
-        toDraft(draft),
-        options.deliberate === false ? null : deletionBase,
-        formEdit?.content ?? content
-      )
+      // What the edit's input clears are measured from: the text it says it was edited from,
+      // or, typed on exactly this version, this version's text.
+      const editedFrom =
+        options.deliberate === false
+          ? null
+          : (options.editingFrom ??
+            (deletionBase.draftId === draft.id && deletionBase.expectedRowVersion === draft.row_version
+              ? draft.content
+              : null))
+      // A form typed on a version that isn't the current one (owner, 2026-11-24): refused, never
+      // merged. The draft keeps its value; the refused version goes into its history one step
+      // behind it (marked displaced, so it reaches the recovered texts if the session ends
+      // without it), and the answer names it, so its tab can show the current one and offer it back.
+      if (
+        !deleted &&
+        form &&
+        draft.status === "active" &&
+        (base === null || ended || draft.text_version > base.rowVersion) &&
+        content !== draft.content
+      ) {
+        const at = now()
+        let recovered = 0
+        // A form's starting snapshot (`seed`) was never typed: nothing to keep.
+        if (options.deliberate !== false) {
+          // The refused snapshot is only an intermediate history state. Trim against
+          // the actual current snapshot after both entries are in place.
+          yield* record(draft, content, diffPatch(draft.content, content), "edit", at, true, draft.images_json, false)
+          recovered = yield* record(
+            { ...draft, content },
+            draft.content,
+            diffPatch(content, draft.content),
+            "restore",
+            at,
+            true,
+            draft.images_json
+          )
+        }
+        const refused = new DraftDisplacement({ at, content })
+        return {
+          draft: toDraft((yield* byId(draft.id))!, recovered, null, refused),
+          recovered: recovered > 0,
+          accepted: false
+        }
+      }
+      const reconciled = form
+        ? reconcileDeletedFields(toDraft(draft), options.deliberate === false ? null : deletionBase, content)
+        : { content, changed: false, rejected: false }
       if (deleted || reconciled.rejected || (ended && options.ended === "recover" && options.next !== true)) {
         // A different session's text cannot account for an old composer copy.
         const kept =
@@ -767,7 +817,7 @@ export const makeDraftStore = (
         return { draft: toDraft(draft, recovered ? 1 : 0), recovered, accepted: false }
       }
       let recoveredInput = false
-      if (reconciled.changed || formEdit?.changed) {
+      if (reconciled.changed) {
         if (toBin(draft) && content.trim() !== "") {
           yield* recover(draft.user_id, toDraft(draft).key, [content], "discard")
           recoveredInput = true
@@ -817,7 +867,7 @@ export const makeDraftStore = (
         changed,
         imagesJson,
         options.deliberate ?? true,
-        formEdit === null ? undefined : { before: formEdit.intent, content: original }
+        draft.target_kind === "user_field" ? { before: editedFrom, content: original } : undefined
       )
       return {
         draft: toDraft((yield* byId(draft.id))!, recovered + Number(recoveredInput), displaced),
@@ -945,7 +995,7 @@ export const makeDraftStore = (
         const deletions = trackDeletions(
           { ...toDraft(created), content: "", rowVersion: created.row_version - 1 },
           options.content,
-          true,
+          isUserDraftForm(options.key.targetId, options.key.field),
           true,
           { before: options.editingFrom, content: options.content }
         )
@@ -1336,7 +1386,11 @@ export const makeDraftStore = (
           WHERE chat_id = ${chatId} AND operation_id = ${base.operationId}`
         if (receipt !== undefined) {
           let displaced: DraftDisplacement | null = null
-          if (draft !== null && receipt.displaced_json !== null) {
+          if (
+            draft !== null &&
+            receipt.displaced_json !== null &&
+            !deletedSince(toDraft(draft), { draftId: base.draftId, expectedRowVersion: base.rowVersion })
+          ) {
             const kept = JSON.parse(receipt.displaced_json) as { session: number; seq: number; at: number }
             const [entry] = yield* sql<EntryRow>`SELECT * FROM draft_history
               WHERE draft_id = ${draft.id} AND seq = ${kept.seq + 1} AND displaced = 1`

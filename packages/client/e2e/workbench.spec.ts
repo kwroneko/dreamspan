@@ -13,6 +13,7 @@ import { expectTextBox, replaceEditorText, textBoxValue } from "./support/textbo
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { gotoWithLayout, storedLayout } from "./support/workbench.ts"
+import { urlOpenedInNewTab } from "./support/browserTab.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -177,9 +178,9 @@ test("old editor links and modified opener clicks keep their browser navigation"
   await page.getByRole("tab", { name: "Harbour walk", exact: true }).click()
   const original = page.url()
   for (const click of [{ button: "middle" as const }, { modifiers: ["Control" as const] }]) {
-    const opened = context.waitForEvent("page")
-    await sidebarChat(page, "Lighthouse night").click(click)
-    const other = await opened
+    const url = await urlOpenedInNewTab(page, () => sidebarChat(page, "Lighthouse night").click(click))
+    const other = await context.newPage()
+    await other.goto(url)
     await expect(other).toHaveURL(new RegExp(`/chats/${fixtures.chatB}`))
     await expect(said(other, "The lamp turns")).toBeVisible()
     await expect(page).toHaveURL(original)

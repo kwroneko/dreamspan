@@ -55,3 +55,18 @@ export const dropImage = (id: string) => transaction("readwrite", (store) => sto
 export const adoptImages = async (from: string, to: string) => {
   for (const entry of await readImages(from)) await keepImage({ ...entry, scope: to })
 }
+/**
+ * A group's old new-chat page kept its attachments under `<prefix>pending-group-chat:<sorted
+ * character ids>:<group name>`: one whose characters are all in `cast` is that group's.
+ */
+export const isGroupCopyOf = (prefix: string, scope: string, cast: ReadonlySet<string>) => {
+  const head = `${prefix}pending-group-chat:`
+  if (!scope.startsWith(head)) return false
+  const ids = scope.slice(head.length).split(":")[0]!.split(",").filter(Boolean)
+  return ids.length > 0 && ids.every((id) => cast.has(id))
+}
+/** Moves what every scope `from` picks holds to `to`, as `adoptImages` does. */
+export const adoptImagesWhere = async (from: (scope: string) => boolean, to: string) => {
+  const all = (await transaction("readonly", (store) => store.getAll())) as ImageDraftEntry[]
+  for (const entry of all) if (entry.scope !== to && from(entry.scope)) await keepImage({ ...entry, scope: to })
+}

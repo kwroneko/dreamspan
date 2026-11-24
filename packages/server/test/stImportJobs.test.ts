@@ -8,15 +8,19 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
 import { dirname, join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
+import { vi } from "vitest"
 import type { Notice } from "@dreamspan/shared/noticeApi.ts"
 import { classifyStPath } from "@dreamspan/shared/stFolder.ts"
-import { Effect, Stream } from "effect"
-import { Writer } from "../src/db/Database.ts"
+import { Deferred, Effect, Fiber, Stream } from "effect"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { StorageError } from "../src/db/ops.ts"
 import { databaseFile } from "../src/db/connection.ts"
 import { Report } from "../src/importer/stReport.ts"
+import { StImports } from "../src/importer/StImports.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 import { card, encode, header, jsonl, message, stFolder } from "./support/stFolder.ts"
-import { jobEnded, sendStFile } from "./support/stUpload.ts"
+import { jobEnded, sendFile, sendStFile } from "./support/stUpload.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 const onDisk = (files: ReadonlyMap<string, Uint8Array>) => {
@@ -294,6 +298,122 @@ describe("ST import jobs", () => {
     180_000
   )
 
+  it.live("cancelling drains an admitted preset and refuses files arriving during the final write", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const imports = yield* StImports
+      const writer = yield* Writer
+      const files = stFolder()
+      const preset = "OpenAI Settings/Default.json"
+      const { importId } = yield* api.StartStImport({ unsupported: [] })
+      yield* sendStFile(importId, "settings.json", files.get("settings.json")!)
+
+      const admitted = yield* Deferred.make<void>()
+      const releasePreset = yield* Deferred.make<void>()
+      const finalWrite = yield* Deferred.make<void>()
+      const releaseWrite = yield* Deferred.make<void>()
+      const builtin = imports.handlers.get("preset")!
+      yield* imports.handlers.register({
+        id: "preset",
+        run: (call) =>
+          Effect.andThen(Deferred.succeed(admitted, undefined), Deferred.await(releasePreset)).pipe(
+            Effect.andThen(builtin.run(call))
+          )
+      })
+      const update = writer.StImportJobUpdate
+      const pause = vi.spyOn(imports, "withFilesPaused")
+      const file = vi.spyOn(imports, "file")
+      const write = vi
+        .spyOn(writer, "StImportJobUpdate")
+        .mockImplementation((input) =>
+          input.end?.status === "cancelled"
+            ? Deferred.succeed(finalWrite, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseWrite)),
+                Effect.andThen(update(input))
+              )
+            : update(input)
+        )
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          pause.mockRestore()
+          file.mockRestore()
+          write.mockRestore()
+        })
+      )
+      const sending = yield* Effect.forkScoped(sendStFile(importId, preset, files.get(preset)!))
+      yield* Effect.addFinalizer(() => Deferred.succeed(releasePreset, undefined))
+      yield* Deferred.await(admitted)
+      const cancelling = yield* Effect.forkScoped(api.CancelStImport({ importId }))
+      yield* Effect.addFinalizer(() => Deferred.succeed(releaseWrite, undefined))
+      yield* Effect.promise(() => vi.waitFor(() => assert.isTrue(pause.mock.calls.some(([, id]) => id === importId))))
+      yield* Deferred.succeed(releasePreset, undefined)
+      assert.strictEqual((yield* Fiber.join(sending)).outcome, "added")
+      yield* Deferred.await(finalWrite)
+      const latePath = "worlds/Hollow.json"
+      const late = yield* Effect.forkScoped(sendFile(importId, latePath, files.get(latePath)!))
+      yield* Effect.promise(() =>
+        vi.waitFor(() => assert.isTrue(file.mock.calls.some(([, , path]) => path === latePath)))
+      )
+      yield* Deferred.succeed(releaseWrite, undefined)
+      yield* Fiber.join(cancelling)
+      assert.strictEqual((yield* Fiber.join(late)).status, 404)
+      const { job, report } = yield* api.GetStImport({ importId })
+      assert.strictEqual(job.status, "cancelled")
+      assert.strictEqual(job.filesDone, 2)
+      assert.strictEqual(report!.counts.preset?.added, 1)
+      assert.isUndefined(report!.counts.lorebook)
+      assert.isFalse(report!.issues.some((issue) => issue.code === "st.preset_missing"))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("a failed replacement leaves the current upload running and able to finish", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const reader = yield* Reader
+      const files = stFolder()
+      const { importId } = yield* api.StartStImport({ unsupported: [] })
+      yield* sendStFile(importId, "settings.json", files.get("settings.json")!)
+      const replacement = api.StartStImport({ unsupported: [] })
+      const read = vi
+        .spyOn(reader, "StImportSources")
+        .mockImplementationOnce(() =>
+          Effect.fail(
+            new StorageError({
+              operation: "StImportSources",
+              reason: "other",
+              message: "Synthetic source read failure"
+            })
+          )
+        )
+      const readFailure = yield* Effect.flip(replacement).pipe(Effect.ensuring(Effect.sync(() => read.mockRestore())))
+      assert.strictEqual(readFailure._tag, "ServerError")
+      assert.strictEqual((yield* api.GetStImport({ importId })).job.status, "running")
+
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: `CREATE TRIGGER reject_replacement BEFORE INSERT ON st_import_jobs
+            BEGIN SELECT RAISE(ABORT, 'Synthetic job insert failure'); END`
+        }
+      ])
+      const insertFailure = yield* Effect.flip(replacement)
+      assert.strictEqual(insertFailure._tag, "ServerError")
+      const jobs = yield* api.ListStImports()
+      assert.deepStrictEqual(
+        jobs.map((job) => [job.id, job.status]),
+        [[importId, "running"]]
+      )
+
+      const preset = "OpenAI Settings/Default.json"
+      assert.strictEqual((yield* sendStFile(importId, preset, files.get(preset)!)).outcome, "added")
+      yield* api.FinishStImport({ importId, notSent: [] })
+      const { job, report } = yield* api.GetStImport({ importId })
+      assert.strictEqual(job.status, "complete")
+      assert.strictEqual(report!.counts.preset?.added, 1)
+      assert.isFalse(report!.issues.some((issue) => issue.code === "st.preset_missing"))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live(
     "a job running when the server stopped is interrupted at the next start, with what it had",
     () => {
@@ -304,16 +424,17 @@ describe("ST import jobs", () => {
           const api = yield* client()
           const user = yield* api.Whoami()
           const writer = yield* Writer
-          yield* writer.StImportJobStart({
+          yield* writer.StImportBegin({
             userId: user.id,
-            id,
-            mode: "path",
-            source: "/somewhere/ST",
-            root: "/somewhere/ST",
-            prefix: "",
-            filesTotal: 10,
-            bytesTotal: 1000,
-            at: Date.now()
+            importId: id,
+            job: {
+              mode: "path",
+              source: "Synthetic ST folder",
+              root: null,
+              prefix: "",
+              filesTotal: 10,
+              bytesTotal: 1000
+            }
           })
           const report = new Report()
           report.issue("settings.json", "warning", "st.preset_missing", "The selected preset wasn't imported.")

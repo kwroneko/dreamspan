@@ -767,23 +767,20 @@ export const layer = Layer.unwrap(
             limits.deadline - Date.now(),
             Effect.gen(function* () {
               const body = yield* readBody(message, limits)
-              const answer = yield* stImports
-                .file(user, importId, path, body, {
+              const answer = yield* stImports.file(
+                user,
+                importId,
+                path,
+                body,
+                {
                   part,
                   ...(modifiedAt === undefined ? {} : { modifiedAt }),
                   last: query.get("last") !== "0",
                   card: card as EntityId | "none" | null,
                   orphan: query.get("orphan") === "1"
-                })
-                .pipe(
-                  Effect.tapError((error) =>
-                    error._tag === "StImportFailed"
-                      ? stImportJobs.arrived(user, importId, path, body.byteLength, { failed: error.message })
-                      : Effect.void
-                  )
-                )
-              // The job's progress, recorded as files arrive.
-              yield* stImportJobs.arrived(user, importId, path, body.byteLength, answer)
+                },
+                (outcome) => stImportJobs.arrived(user, importId, path, body.byteLength, outcome)
+              )
               return yield* HttpServerResponse.schemaJson(StFileResult)(answer)
             })
           )

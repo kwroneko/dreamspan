@@ -50,7 +50,7 @@ const SCOPED: Readonly<Record<string, number>> = {
   "db/assemblyReads.ts": 7,
   "db/assemblySources.ts": 4,
   "db/awayMarks.ts": 1,
-  "db/bin.ts": 23,
+  "db/bin.ts": 22,
   "db/binForks.ts": 2,
   "db/changeReversals.ts": 4,
   "db/chatKindPolicy.ts": 6,
@@ -133,7 +133,7 @@ const SCOPED: Readonly<Record<string, number>> = {
   "db/workshopEffects.ts": 3,
   "db/workshopForks.ts": 1,
   "db/workshopGrants.ts": 6,
-  "db/workshopPairing.ts": 3,
+  "db/workshopPairing.ts": 2,
   "db/workshopTranscript.ts": 1,
   "db/workshopWrites.ts": 2,
   "db/writes.ts": 12

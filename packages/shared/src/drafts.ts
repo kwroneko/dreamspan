@@ -133,8 +133,66 @@ export class Draft extends Schema.Class<Draft>("Draft")({
   /** Texts this write sent to recovered texts; reads return zero. */
   recovered: Schema.Int,
   displaced: Schema.NullOr(DraftDisplacement),
+  /**
+   * A form's save this write refused, its tab being out of date: the draft kept its current
+   * value, and the refused version is one step behind it in its history. Absent otherwise.
+   */
+  refused: Schema.optionalKey(DraftDisplacement),
   historyLength: Schema.Int
 }) {}
+
+// Private draft addresses used by compound forms. Classify by address so old browser
+// copies and closing-page saves follow the same policy, even when a text box contains JSON.
+export const isUserDraftForm = (targetId: string, field: string): boolean => {
+  if (targetId.startsWith("bin-capacity:")) return true // The field is the bin section's label.
+  switch (field) {
+    case "Settings":
+      return targetId === "network" || targetId.startsWith("connection:") || targetId.startsWith("mcp:")
+    case "Names":
+      return (
+        targetId === "card:new" ||
+        targetId === "persona:new" ||
+        (targetId.startsWith("ref:") && targetId.endsWith(":fork")) ||
+        (targetId.startsWith("chat:") && targetId.endsWith(":new-fork"))
+      )
+    case "Custom settings":
+      return targetId.startsWith("model:")
+    case "Non-secret settings":
+      return targetId === "credential:new"
+    case "Pricing rules":
+      return targetId === "cost-settings"
+    case "Global regex scripts":
+      return targetId === "global-regex"
+    case "Workshop preset":
+      return targetId.startsWith("workshop-convert:")
+    case "Merge choices":
+      return targetId.startsWith("merge:")
+    case "New user":
+      return targetId === "new-user"
+    case "Title and framing line":
+      return targetId.startsWith("merge-chat:")
+    case "Type":
+      return targetId.startsWith("subagent-type:")
+    case "Limits":
+      return targetId === "subagent-limits"
+    case "Models":
+      return targetId === "subagent-models"
+    case "Skill":
+      return targetId.startsWith("card-skill:")
+    case "Rules":
+      return targetId === "archive-unused"
+    case "Edit models":
+      return targetId.startsWith("model-mass-edit:")
+    case "Mass edit":
+      return targetId.startsWith("mass-edit:")
+    case "Cache size limit":
+      return targetId === "source-cache-cap"
+    case "Changed meanwhile":
+      return targetId.startsWith("save-conflict:")
+    default:
+      return false
+  }
+}
 
 /** One restorable state in a draft's history. Seq 0 is the text the draft started with. */
 export class DraftState extends Schema.Class<DraftState>("DraftState")({

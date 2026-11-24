@@ -5,11 +5,12 @@ import { classifyStPath } from "@dreamspan/shared/stFolder.ts"
 import { Effect } from "effect"
 import { Reader } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
+import { slowIt } from "./support/slow.ts"
 import { stFolder } from "./support/stFolder.ts"
 import { sendStFile } from "./support/stUpload.ts"
 
 describe("ST import warning timing", () => {
-  it.live(
+  slowIt.live(
     "withholds advisories in live and checkpoint reports until a late selected preset arrives",
     () =>
       Effect.gen(function* () {

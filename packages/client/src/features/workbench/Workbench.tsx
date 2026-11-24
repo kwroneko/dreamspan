@@ -8,7 +8,7 @@
 // Each tab renders its own router (TabHost) into an element of its own, which is put in its
 // frame while shown and taken out of the page while not: its state, scroll and drafts stay,
 // and nothing hidden is left in the page to find or to focus.
-import { createMemoryHistory, RouterProvider, useRouter } from "@tanstack/react-router"
+import { RouterProvider, useRouter } from "@tanstack/react-router"
 import {
   createContext,
   type ReactNode,
@@ -58,12 +58,16 @@ import { type DropZone, dropZone } from "./dropOpen.ts"
 import { dragPayloadOf, isAppDrag } from "../../ui/appDrags.ts"
 import { OPEN_BESIDE } from "./OpenBeside.tsx"
 import { WorkbenchStore } from "./store.ts"
+import { restoreScroll, scrollMarks } from "./scrollMarks.ts"
+import { DISABLED_HOVER, tabStripStart } from "./stripParts.ts"
 import { decodeLayout, encodeLayout, WORKBENCH_PARAM } from "./layoutParam.ts"
 import { persistHref } from "./kinds.ts"
 import { readLayoutParam, withoutLayoutParams, writeLayoutParam } from "../../tabLayoutParams.ts"
 import { TabContext, useTabShown, useWorkbenchTab, WorkbenchContext } from "./tab.tsx"
 
 const TAB_MIME = "application/x-rp-workbench-tab"
+// During dragover, the browser exposes the types but protects their payloads.
+const TAB_SOURCE = `${TAB_MIME};source=`
 
 /** A drag a frame takes: a tab, or something of the app's that opens as one (ui/appDrags.ts). */
 const opensHere = (dataTransfer: DataTransfer | null) =>
@@ -271,14 +275,27 @@ function TabHost({ tab, store, target }: { tab: Tab; store: WorkbenchStore; targ
     element.dataset["workbenchTab"] = tab.id
     return element
   })
-  const [history] = useState(() => {
-    const from = store.takeOpenedFrom(tab.id)
-    return createMemoryHistory(
-      from ? { initialEntries: [from, tab.href], initialIndex: 1 } : { initialEntries: [tab.href] }
-    )
-  })
+  // The tab's own back and forward (history.ts); an entry left takes the tab's scroll with it.
+  const [history] = useState(() => store.createHistory(tab.id, () => scrollMarks(container)))
   const [router] = useState(() => buildRouter({ history, layouts: { app: CenterPage } }))
   useLayoutEffect(() => store.attach(tab.id, history), [store, tab.id, history])
+  // Back or forward to an entry: its scroll comes back unless a chat restores its reading place.
+  useEffect(() => {
+    let stop = () => {}
+    const unsubscribe = history.subscribe(({ action }) => {
+      stop()
+      if (action.type !== "GO" && action.type !== "BACK" && action.type !== "FORWARD") return
+      const entry = store.shownEntry(tab.id)
+      const { chatReading, __TSR_key: key } = history.location.state
+      // Once the router has rendered that entry's page, not the one that left.
+      const ready = () => router.state.status === "idle" && router.state.resolvedLocation?.state.__TSR_key === key
+      if (entry?.scroll && chatReading === undefined) stop = restoreScroll(container, entry.scroll, ready)
+    })
+    return () => {
+      unsubscribe()
+      stop()
+    }
+  }, [history, router, store, tab.id, container])
   useLayoutEffect(
     () =>
       history.block({
@@ -395,37 +412,44 @@ function useRoom(store: WorkbenchStore, center: HTMLElement | null, wide: boolea
 }
 
 /**
- * Where the frames scroll (a window too narrow for them), the focused frame stays in view: a
- * tab moved or opened there, or focus moving to it, scrolls the row just enough to show it.
+ * Keep the focused frame in view when focus, its tab or the scrollport's size changes.
  */
 function useFocusedInView(center: HTMLElement | null, frameId: string | null, tabId: string | null) {
   useLayoutEffect(() => {
     if (!center || !frameId) return
-    if (center.scrollWidth <= center.clientWidth && center.scrollHeight <= center.clientHeight) return
-    const frame = [...center.querySelectorAll<HTMLElement>("[data-frame]")].find((f) => f.dataset["frame"] === frameId)
-    if (!frame) return
-    const box = frame.getBoundingClientRect()
-    const view = center.getBoundingClientRect()
-    const inner = {
-      left: view.left + center.clientLeft,
-      top: view.top + center.clientTop,
-      right: view.left + center.clientLeft + center.clientWidth,
-      bottom: view.top + center.clientTop + center.clientHeight
+    const reveal = () => {
+      if (center.scrollWidth <= center.clientWidth && center.scrollHeight <= center.clientHeight) return
+      const frame = [...center.querySelectorAll<HTMLElement>("[data-frame]")].find(
+        (f) => f.dataset["frame"] === frameId
+      )
+      if (!frame) return
+      const box = frame.getBoundingClientRect()
+      const view = center.getBoundingClientRect()
+      const inner = {
+        left: view.left + center.clientLeft,
+        top: view.top + center.clientTop,
+        right: view.left + center.clientLeft + center.clientWidth,
+        bottom: view.top + center.clientTop + center.clientHeight
+      }
+      // Just enough: the near edge first, the far one when the frame fits.
+      const dx =
+        box.left < inner.left
+          ? box.left - inner.left
+          : box.right > inner.right
+            ? Math.min(box.right - inner.right, box.left - inner.left)
+            : 0
+      const dy =
+        box.top < inner.top
+          ? box.top - inner.top
+          : box.bottom > inner.bottom
+            ? Math.min(box.bottom - inner.bottom, box.top - inner.top)
+            : 0
+      if (dx !== 0 || dy !== 0) center.scrollBy({ left: dx, top: dy, behavior: "instant" })
     }
-    // Just enough: the near edge first, the far one when the frame fits.
-    const dx =
-      box.left < inner.left
-        ? box.left - inner.left
-        : box.right > inner.right
-          ? Math.min(box.right - inner.right, box.left - inner.left)
-          : 0
-    const dy =
-      box.top < inner.top
-        ? box.top - inner.top
-        : box.bottom > inner.bottom
-          ? Math.min(box.bottom - inner.bottom, box.top - inner.top)
-          : 0
-    if (dx !== 0 || dy !== 0) center.scrollBy({ left: dx, top: dy, behavior: "instant" })
+    const observer = new ResizeObserver(reveal)
+    observer.observe(center)
+    reveal()
+    return () => observer.disconnect()
   }, [center, frameId, tabId])
 }
 
@@ -523,6 +547,9 @@ function NodeView({
   return <SplitView split={node} layout={layout} store={store} slotRef={slotRef} />
 }
 
+const splitChildSizes = (element: HTMLElement, dimension: "width" | "height") =>
+  Array.from(element.children, (child) => child.getBoundingClientRect()[dimension])
+
 function SplitView({
   split,
   layout,
@@ -535,16 +562,22 @@ function SplitView({
   slotRef: SlotRef
 }) {
   const row = split.direction === "row"
+  const dimension = row ? "width" : "height"
   const [element, setElement] = useState<HTMLDivElement | null>(null)
-  const [size, setSize] = useState(0)
+  const [rendered, setRendered] = useState<ReadonlyArray<number>>([])
   useLayoutEffect(() => {
     if (!element) return
-    const measure = () => setSize(row ? element.clientWidth : element.clientHeight)
+    const measure = () => {
+      const sizes = splitChildSizes(element, dimension)
+      setRendered((before) =>
+        sizes.length === before.length && sizes.every((value, i) => value === before[i]) ? before : sizes
+      )
+    }
     const observer = new ResizeObserver(measure)
-    observer.observe(element)
+    for (const child of element.children) observer.observe(child, { box: "border-box" })
     measure()
     return () => observer.disconnect()
-  }, [element, row])
+  }, [dimension, element, split.children])
   const axis = row ? "x" : "y"
   // Each child keeps the least its frames need (`minSize`): a frame never shows narrower than
   // its strip, and a window too small for them all scrolls the center instead.
@@ -557,19 +590,30 @@ function SplitView({
     >
       {split.children.map((child, index) => {
         const share = split.sizes[index] ?? 1 / split.children.length
-        const next = split.sizes[index + 1] ?? 0
-        const pair = (share + next) * size
+        const width = rendered[index] ?? 0
+        const pair = width + (rendered[index + 1] ?? 0)
         // A divider stops where either side would go below its least size.
         const min = minSize(child, axis)
         const nextChild = split.children[index + 1]
         const nextMin = nextChild ? minSize(nextChild, axis) : 0
         const resize = (px: number) => {
-          if (size <= 0 || pair < min + nextMin) return
-          const clamped = Math.max(min, Math.min(pair - nextMin, px))
-          const sizes = [...split.sizes]
-          sizes[index] = clamped / size
-          sizes[index + 1] = share + next - clamped / size
-          store.resize(split.id, sizes)
+          if (!element) return
+          // Minima can push a child away from its saved share. Start with the rendered sizes
+          // so the adjacent pair has its actual room and the other dividers stay put.
+          const sizes = splitChildSizes(element, dimension)
+          const current = sizes[index] ?? 0
+          const available = current + (sizes[index + 1] ?? 0)
+          if (available < min + nextMin) return
+          const clamped = Math.max(min, Math.min(available - nextMin, px))
+          if (clamped === current) return
+          sizes[index] = clamped
+          sizes[index + 1] = available - clamped
+          // The divider borders occupy space outside the amount distributed by flex-grow.
+          const shares = sizes.map((size, i) => {
+            const style = getComputedStyle(element.children[i]!)
+            return size - Number.parseFloat(row ? style.borderLeftWidth : style.borderTopWidth)
+          })
+          store.resize(split.id, shares)
         }
         return (
           <div
@@ -587,7 +631,7 @@ function SplitView({
                     : "Drag to change how tall the frames are; double-click to make them equal."
                 }
                 axis={row ? "x" : "y"}
-                width={share * size}
+                width={width}
                 min={min}
                 max={Math.max(min, pair - nextMin)}
                 direction={1}
@@ -629,7 +673,8 @@ function useFrameEvents(
       event.preventDefault()
       const zone = dropZone(element, event)
       // An edge too small to split shows as refused, and a drop there does nothing.
-      const blocked = !store.canDrop(frameId, zone)
+      const tabId = event.dataTransfer?.types.find((type) => type.startsWith(TAB_SOURCE))?.slice(TAB_SOURCE.length)
+      const blocked = !store.canDrop(frameId, zone, tabId)
       if (event.dataTransfer) event.dataTransfer.dropEffect = blocked ? "none" : "move"
       setOver((before) => (before?.zone === zone && before.blocked === blocked ? before : { zone, blocked }))
     }
@@ -640,14 +685,14 @@ function useFrameEvents(
       if (!isTab(event)) return
       event.preventDefault()
       setOver(null)
-      if (!store.canDrop(frameId, dropZone(element, event))) return
+      const zone = dropZone(element, event)
       const payload = dragPayloadOf(event.dataTransfer)
       if (payload) {
-        if (payload.href) store.dropOpen(payload.href, frameId, dropZone(element, event))
+        if (payload.href) store.dropOpen(payload.href, frameId, zone)
         return
       }
       const tabId = event.dataTransfer?.getData(TAB_MIME)
-      if (tabId) onDrop(tabId, dropZone(element, event))
+      if (tabId) onDrop(tabId, zone)
     }
     element.addEventListener("pointerdown", focus, true)
     element.addEventListener("focusin", focus)
@@ -829,6 +874,8 @@ function TabStrip({
           <SlotOutlet slot={sidebarToggle} props={{ place: "strip" }} />
         </div>
       )}
+      {/* The shown tab's back and forward, and whatever else is registered there (stripParts.ts). */}
+      {!phone && <SlotOutlet slot={tabStripStart} props={{ frameId: frame.id, tabId: frame.active }} />}
       <div
         role="tablist"
         aria-label="Open tabs"
@@ -975,6 +1022,7 @@ function TabButton({
               draggable={draggable}
               onDragStart={(event) => {
                 event.dataTransfer.setData(TAB_MIME, tab.id)
+                event.dataTransfer.setData(`${TAB_SOURCE}${tab.id}`, "")
                 event.dataTransfer.effectAllowed = "move"
               }}
               onClick={() => store.focusTab(tab.id)}
@@ -1289,9 +1337,6 @@ const useRoomToSplit = (tab: ReturnType<typeof useWorkbenchTab>, direction: Dire
     const frame = tab ? frameOfTab(tab.store.layout, tab.tabId) : undefined
     return frame !== undefined && tab !== null && tab.store.canSplit(frame.id, direction)
   })
-
-/** A disabled split button keeps its look on hover: it only explains (owner: disabled with a reason, not hidden). */
-const DISABLED_HOVER = "data-disabled:hover:bg-transparent data-disabled:hover:text-muted"
 
 export function SplitButtons(): ReactNode {
   const tab = useWorkbenchTab()

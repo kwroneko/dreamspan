@@ -1,6 +1,8 @@
 import { assert, it } from "@effect/vitest"
+import { NewVersion } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
+import { Writer } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 it.live("a deletion barrier must remain at the source when a saved edit moves history", () =>
   Effect.gen(function* () {
@@ -96,8 +98,10 @@ it.live("deleting one text field in a JSON user draft must defeat an older form 
       content: JSON.stringify({ name: "", baseUrl: "https://example.invalid" })
     })
     assert.strictEqual(JSON.parse(cleared.content).name, "")
+    // A stale form is refused whole (owner, 2026-11-24): the deletion stands, the copy is offered back.
     const replay = yield* api.SaveUserDraft(stale)
-    assert.deepStrictEqual(JSON.parse(replay.content), { name: "", baseUrl: "https://example.invalid/last-keystroke" })
+    assert.deepStrictEqual(JSON.parse(replay.content), { name: "", baseUrl: "https://example.invalid" })
+    assert.strictEqual(replay.refused?.content, stale.content)
     // Fresh deliberate typing is allowed, and its new protected value survives another old form.
     const fresh = yield* api.SaveUserDraft({
       ...stale,
@@ -125,7 +129,7 @@ it.live("clearing nested or removed form inputs protects only those inputs", () 
     const api = yield* client()
     const ownerId = (yield* api.Whoami()).id
     for (const [index, cleared] of [{ info: { name: "" } }, { info: { name: null } }, { info: {} }, {}].entries()) {
-      const address = { ownerId, targetId: `nested-form:${index}`, field: "Settings" }
+      const address = { ownerId, targetId: `connection:nested-form:${index}`, field: "Settings" }
       const first = yield* api.SaveUserDraft({
         ...address,
         draftId: null,
@@ -139,14 +143,12 @@ it.live("clearing nested or removed form inputs protects only those inputs", () 
         expectedRowVersion: first.rowVersion,
         expectedSession: first.session
       }
-      yield* api.SaveUserDraft({ ...base, content: JSON.stringify({ ...cleared, notes: "kept" }) })
-      const replay = yield* api.SaveUserDraft({
-        ...base,
-        content: JSON.stringify({ info: { name: "deleted nested name" }, notes: "last keystroke" })
-      })
-      const value = JSON.parse(replay.content) as { info: { name?: string | null }; notes: string }
-      assert.notStrictEqual(value.info.name, "deleted nested name")
-      assert.strictEqual(value.notes, "last keystroke")
+      const clear = yield* api.SaveUserDraft({ ...base, content: JSON.stringify({ ...cleared, notes: "kept" }) })
+      const stale = JSON.stringify({ info: { name: "deleted nested name" }, notes: "last keystroke" })
+      const replay = yield* api.SaveUserDraft({ ...base, content: stale })
+      // Refused whole (owner, 2026-11-24): the clear stands, and the stale copy is offered back.
+      assert.strictEqual(replay.content, clear.content)
+      assert.strictEqual(replay.refused?.content, stale)
     }
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
@@ -227,6 +229,61 @@ it.live("replaying a form initialization cannot delete the keystrokes already sa
       oldSeed.content,
       content,
       "initialization cannot overwrite protected fields even on a newer base"
+    )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
+it.live("an empty reply of several dropped files what was typed into its own swipe", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const writer = yield* Writer
+    const userId = (yield* api.Whoami()).id
+    const chat = yield* api.CreateChat({ title: "Synthetic empty reply" })
+    const running = yield* writer.AppendMessage({
+      userId,
+      chatId: chat.id,
+      parentSlotId: null,
+      branch: false,
+      version: new NewVersion({
+        content: "",
+        speakerEntityId: null,
+        writer: "model",
+        status: "generating",
+        origin: "generated",
+        macroMode: "verbatim"
+      }),
+      commitDraft: null
+    })
+    // "Write your own swipe" on the reply while it's being written, then cleared: the text is
+    // only in its draft's history.
+    const target = { _tag: "Write", slotId: running.slotId } as const
+    const typed = "A swipe of my own, typed while the reply was still coming."
+    const first = yield* api.SaveMessageDraft({
+      target,
+      draftId: null,
+      expectedRowVersion: null,
+      expectedSession: null,
+      content: typed
+    })
+    yield* api.SaveMessageDraft({
+      target,
+      draftId: first.id,
+      expectedRowVersion: first.rowVersion,
+      expectedSession: first.session,
+      content: ""
+    })
+    yield* writer.FinishGeneration({
+      userId,
+      versionId: running.version.id,
+      content: "",
+      status: "complete",
+      error: null,
+      discardEmpty: true
+    })
+    const recovered = yield* api.ListRecoveredTexts({ limit: 10, before: null })
+    assert.include(
+      recovered.map((text) => text.content),
+      typed
     )
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )

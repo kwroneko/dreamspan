@@ -36,6 +36,8 @@ const previous: Array<{
   : []
 const sizes = (process.env.BIGCHAT_SIZES ?? "0.25,0.5,1").split(",").map(Number)
 for (const size of sizes) {
+  const branches = Math.round(400 * size)
+  const messages = Math.round(3000 * size)
   it.live(
     `import and live operations at ${size} of 400 branches / 3000 messages / 40 swipes`,
     () => {
@@ -52,8 +54,8 @@ for (const size of sizes) {
             uniqueVersions: restored.versions
           }
         : writeStBranchFamily(root, {
-            branches: Math.round(400 * size),
-            messages: Math.round(3000 * size),
+            branches,
+            messages,
             swipes: 40,
             swipeShare: 0.6,
             bodyRepeats: 1,
@@ -63,8 +65,8 @@ for (const size of sizes) {
       writeFileSync(join(root, "characters/Alice.png"), card("Alice", "Hello."))
       const result: Record<string, unknown> = {
         size,
-        branches: 400 * size,
-        longestPath: 3000 * size,
+        branches,
+        longestPath: messages,
         bytes: fixture.bytes,
         lines: fixture.messageLines,
         slots: fixture.uniqueMessages,
@@ -131,7 +133,7 @@ for (const size of sizes) {
         if (!restored) {
           assert.strictEqual(counts![0]!.slots, fixture.uniqueMessages)
           assert.strictEqual(counts![0]!.versions, fixture.uniqueVersions)
-          assert.strictEqual(counts![0]!.forks, 400 * size + 1)
+          assert.strictEqual(counts![0]!.forks, branches + 1)
         }
         // Free the physical duplicate prefixes before measuring live work.
         rmSync(root, { recursive: true, force: true })
@@ -172,7 +174,7 @@ for (const size of sizes) {
         const chat = yield* api.GetChat({ chatId })
         const main = (
           restored
-            ? shell.forks.find((fork) => !fork.original && fork.messages >= 3000 * size)!.forkId
+            ? shell.forks.find((fork) => !fork.original && fork.messages >= messages)!.forkId
             : chat.currentForkId!
         ) as ForkId
         let visibleRows: ShellForks | undefined

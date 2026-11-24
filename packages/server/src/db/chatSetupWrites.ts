@@ -2,7 +2,7 @@ import type { StoredStateEventData } from "@dreamspan/shared/state.ts"
 import { refusePending } from "./chatKindPolicy.ts"
 import { fileTyped, pendingRow, type SweptDraft, sweepPendingChat, titleFor } from "./pendingChats.ts"
 import { presenceAt, presenceJson } from "./participation.ts"
-import { composerKey, Draft } from "@dreamspan/shared/drafts.ts"
+import { composerKey, Draft, DraftKey } from "@dreamspan/shared/drafts.ts"
 import { composerImages } from "./composerImages.ts"
 import { composerLibrary } from "./composerLibrary.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
@@ -44,6 +44,7 @@ import type { StoredRewrite } from "@dreamspan/shared/regexScripts.ts"
 import { transaction as runTransaction } from "./tx.ts"
 import { checkAutoTurn, claimAutoTurn } from "./autoGuard.ts"
 import { pinLibrary, type LibraryPin, type VersionWithLibraryPins } from "./libraryAttachments.ts"
+import { personaInStory } from "./workshopDefaults.ts"
 
 const userMessage = (
   content: string,
@@ -677,6 +678,12 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             WHERE id = ${chatId}`
           const forkOf = forkId ?? current?.fork ?? null
           if (forkOf === null) return yield* new NotFound({ entity: "fork", id: chatId })
+          // A workshop beside a story never plays the story's persona or one of its cards: their
+          // descriptions and books would bring the story's roleplay into it (workfix1). Its first
+          // send keeps the persona chosen here, so the choice is refused, as its making refuses it.
+          const story = (chat.draft_for ?? "").startsWith("side:") ? chat.draft_for!.split(":")[1]! : null
+          if (persona !== undefined && story !== null && (yield* personaInStory(sql, userId, story, persona)))
+            return { pending: true, changed: false, fellBack: false, refusedPersona: true }
           const fork = { id: forkOf, chatId }
           // The change is the chat's start's: nothing is said yet (DESIGN §2.1).
           for (const event of events) yield* graph.insertStateEvent(userId, chatId, null, null, null, event, forkOf)
@@ -835,19 +842,24 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             const entity = characters[i]!
             const greeter = byId.get(entity)
             const wanted = wantedOf.get(entity)
-            if (greeter === undefined || wanted === undefined) continue
-            const offered = new Map(wanted.options.map((option) => [cardIndex(entity, option), option]))
+            if (greeter === undefined) continue
+            // None drawn for it (its card moved to the bin since): it keeps the greetings it has,
+            // except that a group-only one goes once it is the chat's only character.
+            if (wanted === undefined && characters.length > 1) continue
+            const groupOnly = new Set(greeter.greetingIndexes.slice(greeter.greetings.length))
+            const offered =
+              wanted === undefined ? null : new Map(wanted.options.map((option) => [cardIndex(entity, option), option]))
             const versions = yield* versionsOf(slot.id)
             const have = new Set(versions.map((version) => refIndex(version.ref)))
             let ordinal = Math.max(-1, ...versions.map((version) => version.ordinal)) + 1
-            for (const [index, option] of offered)
+            for (const [index, option] of offered ?? [])
               if (!have.has(index)) {
                 yield* graph.insertVersion(slot.id, ordinal++, greetingVersionOf(greeter, option), at, forkOf, userId)
                 changed = true
               }
             const removed = versions.filter((version) => {
               const index = refIndex(version.ref)
-              return index !== null && !offered.has(index)
+              return index !== null && (offered === null ? groupOnly.has(index) : !offered.has(index))
             })
             if (removed.length === 0) continue
             const stays = versions
@@ -1278,6 +1290,28 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               yield* sql`UPDATE forks SET tip_slot_id = ${safe.parent_slot_id}, row_version = row_version + 1 WHERE tip_slot_id = ${row.slot_id}`
               yield* sql`UPDATE rollouts SET slot_id = ${safe.parent_slot_id} WHERE slot_id = ${row.slot_id}`
               yield* sql`UPDATE queued_messages SET reply_slot_id = ${safe.parent_slot_id} WHERE reply_slot_id = ${row.slot_id}`
+              // Its drafts go with it (a swipe of one's own typed while it was written, an edit
+              // of it): what each holds and its history protects goes to recovered texts first.
+              const typed = yield* sql<{
+                id: string
+                target_kind: DraftKey["targetKind"]
+                target_id: string
+                field: string
+                content: string
+              }>`SELECT id, target_kind, target_id, field, content FROM drafts
+                WHERE user_id = ${userId} AND status IN ('active', 'discarded') AND (
+                  (target_kind = 'scratchpad' AND target_id = ${row.slot_id})
+                  OR (target_kind = 'version_edit' AND target_id = ${versionId}))`
+              for (const draft of typed) {
+                const lost = yield* bin.drafts.unsaved(draft.id, draft.content, [])
+                if (lost.length > 0)
+                  yield* bin.recover(
+                    userId,
+                    new DraftKey({ targetKind: draft.target_kind, targetId: draft.target_id, field: draft.field }),
+                    lost,
+                    "discard"
+                  )
+              }
               yield* sql`DELETE FROM slots WHERE id = ${row.slot_id}`
               const queue = safe.parent_slot_id ? yield* afterReply(safe.parent_slot_id, "reply") : nothing
               const [parent] = safe.parent_slot_id

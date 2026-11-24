@@ -4,6 +4,7 @@
 import { Effect } from "effect"
 import { expect, type Page, test } from "@playwright/test"
 import type { ForkId } from "@dreamspan/shared/chat.ts"
+import { urlOpenedInNewTab } from "./support/browserTab.ts"
 import { openPanel } from "./support/panel.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { asUser } from "./support/rpc.ts"
@@ -122,9 +123,11 @@ test("a preset note link opened in a browser tab keeps the branch draft", async 
   const noteText = (tab: Page) =>
     tab.getByRole("region", { name: "Note editor", exact: true }).getByRole("textbox", { name: "Text of Fog" })
   for (const click of [{ modifiers: ["Control" as const] }, { button: "middle" as const }]) {
-    await page.bringToFront()
-    const [other] = await Promise.all([context.waitForEvent("page", { timeout: 10_000 }), link.click(click)])
-    await expect(noteText(other)).toHaveText("Branch draft.")
+    const url = await urlOpenedInNewTab(page, () => link.click(click))
+    const other = await context.newPage()
+    await other.goto(url)
+    // The opened tab shows the branch draft, not the saved text, within 10 s.
+    await expect(noteText(other)).toHaveText("Branch draft.", { timeout: 10_000 })
     await other.close()
   }
   const href = new URL((await link.getAttribute("href"))!, page.url())

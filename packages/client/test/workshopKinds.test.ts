@@ -26,6 +26,7 @@ import { panelTabs } from "../src/features/chat/panels.tsx"
 import { registerComposerControls } from "../src/features/chat/registerComposerControls.tsx"
 import { registerPanels } from "../src/features/chat/registerPanels.tsx"
 import type { ChatView } from "../src/features/chat/session.ts"
+import { register as registerFiles } from "../src/features/files/index.tsx"
 import {
   chipLabel,
   chipText,
@@ -68,7 +69,8 @@ describe("chat kind looks", () => {
     for (const close of dispose.reverse()) close()
   })
 
-  it("gives a workshop the capability chip in place of who replies; a story chat's strip is unchanged", () => {
+  it("puts workshop capabilities and the working folder after context and before Cache", () => {
+    dispose.push(...registerFiles())
     expect(strip("rp")).toEqual([
       "composer.next",
       "composer.model",
@@ -77,11 +79,12 @@ describe("chat kind looks", () => {
       "composer.cache"
     ])
     expect(strip("workshop")).toEqual([
-      "workshop.capabilities",
       "composer.model",
       "workshop.subagent-models",
       "composer.preset",
       "composer.context",
+      "workshop.capabilities",
+      "workshop.folder",
       "composer.cache"
     ])
   })
@@ -210,10 +213,10 @@ describe("chat kind looks", () => {
           try {
             expect(strip("synthetic/assistant")).toEqual([
               "composer.next",
-              "workshop.capabilities",
               "composer.model",
               "composer.preset",
-              "composer.context"
+              "composer.context",
+              "workshop.capabilities"
             ])
             expect(kindHides("synthetic/assistant", "composer.cache")).toBe(true)
             expect(kindTitle("Harbor", "synthetic/assistant")).toBe("Assistant · Harbor")

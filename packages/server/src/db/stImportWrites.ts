@@ -1092,31 +1092,9 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         if (stored.tail === undefined) yield* putUserSetting(sql, userId, "generation.lcm", { ...stored, tail: prompt })
       }).pipe(transaction(sql, "StImportSummarySettings")),
 
-    StImportBegin: ({ userId, importId }) =>
-      Effect.gen(function* () {
-        const at = Date.now()
-        const payload = JSON.stringify({ importId })
-        const updated = yield* sql`UPDATE jobs SET payload_json = ${payload}, updated_at = ${at}
-          WHERE owner_user_id = ${userId} AND kind = ${ST_IMPORT_RUN} RETURNING id`
-        if (updated.length === 0) {
-          yield* sql`INSERT INTO jobs ${sql.insert({
-            id: uuidv7(),
-            owner_user_id: userId,
-            kind: ST_IMPORT_RUN,
-            status: "processing",
-            payload_json: payload,
-            created_at: at,
-            updated_at: at
-          })}`
-        }
-        // What the runs before held for a confirmed re-import goes with them.
-        yield* sql`DELETE FROM st_import_stage WHERE owner_user_id = ${userId}`
-      }).pipe(transaction(sql, "StImportBegin")),
-
     StImportStartChat: (input) =>
       Effect.gen(function* () {
-        // A confirmed import starts a new chat only while its run goes on: a Stop before then
-        // leaves nothing. Once started, the chat's batches go in whatever comes.
+        // A confirmed import claims a new chat while its run has the lease.
         if (input.once === true) yield* stagingCurrent(input.userId, input.lease, input.source)
         return yield* startChat(input, input.once === true)
       }).pipe(

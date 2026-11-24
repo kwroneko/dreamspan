@@ -977,7 +977,7 @@ function ChatSurface({
   }, [draft, session])
   const navigate = useNavigate()
   const router = useRouter()
-  const { panel, show, withPanel, wide, userId } = usePanel(urlPanel, view)
+  const { panel, show, close, chatMain, withPanel, wide, userId } = usePanel(urlPanel, view)
   const entry = useLocation({ select: (location) => location.state })
   const shown = useRef({ fork, slot, index: entry.__TSR_index })
   const [originalTarget] = useState({ fork, slot })
@@ -1148,7 +1148,7 @@ function ChatSurface({
           }
         >
           <SlotOutlet slot={chatColumns} props={{ wide }} />
-          <div data-chat-main className="relative flex min-w-0 flex-1 flex-col">
+          <div ref={chatMain} data-chat-main tabIndex={-1} className="relative flex min-w-0 flex-1 flex-col">
             <ChatHeader
               session={session}
               view={view}
@@ -1223,7 +1223,7 @@ function ChatSurface({
               host={place.host}
               title={title}
               onTab={show}
-              onClose={() => show(null)}
+              onClose={close}
               session={session}
               view={view}
               focus={focus}

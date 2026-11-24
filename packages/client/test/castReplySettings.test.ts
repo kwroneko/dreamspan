@@ -4,16 +4,19 @@
 // row is shown, leaves the other mounted beside it. Synthetic data only.
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, expect, it } from "vitest"
-import { ReplySettingsRow } from "../src/features/chat/CastTab.tsx"
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
+import { CastTab } from "../src/features/chat/CastTab.tsx"
 import { castSections } from "../src/features/chat/presentation.tsx"
 import { OneReplySection, ReplyOrderSection } from "../src/features/chat/ReplyOrder.tsx"
 import type { ChatSession } from "../src/features/chat/session.ts"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-const cast = { participants: [], playedByMe: [], absent: [] }
-const snapshot = { cast }
+vi.mock("../src/features/chat/panels.tsx", () => ({ useShowPanel: () => () => {} }))
+vi.mock("../src/features/chat/PersonaSwitch.tsx", () => ({ PersonaSwitch: () => null }))
+
+const cast = { cards: [], participants: [], playedByMe: [], absent: [] }
+const snapshot = { cast, entries: [], newer: null }
 const session = { subscribe: () => () => {}, snapshot: () => snapshot } as unknown as ChatSession
 
 let undo: Array<() => void> = []
@@ -27,7 +30,7 @@ beforeEach(() => {
   host = document.createElement("div")
   document.body.append(host)
   root = createRoot(host)
-  act(() => root.render(createElement(ReplySettingsRow, { session })))
+  act(() => root.render(createElement(CastTab, { session })))
 })
 afterEach(() => {
   act(() => root.unmount())
@@ -50,6 +53,25 @@ it("shows Who replies and One reply at a time side by side in Cast's row", () =>
   expect(whoReplies()).not.toBeNull()
   expect(oneReply()).not.toBeNull()
   expect(row().textContent).toContain("One reply at a time")
+})
+
+it("places the reply settings row between earlier and later Cast sections", () => {
+  act(() => {
+    undo.push(
+      castSections.register({
+        id: "test.later",
+        order: 10,
+        component: () => createElement("p", null, "Later contribution")
+      }),
+      castSections.register({
+        id: "test.earlier",
+        order: 0,
+        component: () => createElement("p", null, "Earlier contribution")
+      })
+    )
+  })
+  expect(row().previousElementSibling?.textContent).toBe("Earlier contribution")
+  expect(row().nextElementSibling?.textContent).toBe("Later contribution")
 })
 
 it("keeps One reply at a time when a plugin replaces Who replies", () => {

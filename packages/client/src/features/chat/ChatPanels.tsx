@@ -10,7 +10,7 @@ import { useSession } from "../../session.ts"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { Away } from "../../ui/away.ts"
-import { useTabShown } from "../workbench/tab.tsx"
+import { useTabShown, useWorkbenchTab } from "../workbench/tab.tsx"
 import { useWorkspaceChanges } from "../editor/PresetWorkspace.tsx"
 import { UnsavedBranchShown, UnsavedScope, useUnsavedTabs } from "../../ui/UnsavedChanges.tsx"
 import { SubjectTabs } from "../../ui/PanelTabs.tsx"
@@ -31,7 +31,9 @@ import {
   usePanelTabs
 } from "./panels.tsx"
 import type { PendingChat } from "./pendingChat.ts"
+import { chatHeaderActions, pendingChatHeaderActions } from "./presentation.tsx"
 import { isPendingChat, NOT_STARTED } from "./chatStarted.ts"
+import { composerTextbox } from "./composerFocus.ts"
 /** Panel URL values are open strings, validated against the descriptors at use. */
 export type PanelTab = string
 declare module "@tanstack/react-router" {
@@ -165,6 +167,20 @@ export function PanelToggles({
   )
 }
 
+/**
+ * The header's panel toggle isn't there: a plugin or setting disabled `chat.panel` in the
+ * header's slot. Disabling leaves out only that button (as for any other part); the panel still
+ * opens from the chat (a portrait, a link), so it then carries its own Hide panel.
+ */
+function useHeaderToggleGone(pending: boolean) {
+  const slot = pending ? pendingChatHeaderActions : chatHeaderActions
+  return useSyncExternalStore(
+    slot.subscribe,
+    () => !slot.snapshot().entries.some((entry) => entry.id === "chat.panel"),
+    () => false
+  )
+}
+
 /** What the panel's tabs show: a saved chat's session, or a chat not made yet (pendingChat.ts). */
 export type SidePanelContent =
   | {
@@ -192,7 +208,7 @@ export function ChatSidePanel({
   /** The chat's title, so a phone's sheet says which chat it's about. */
   title: string
   onTab: (tab: PanelTab) => void
-  onClose: () => void | Promise<void>
+  onClose: (restoreFocus?: boolean) => void | Promise<void>
   /** Beside the workbench's frames rather than beside the chat (features/workbench). */
   host?: HTMLElement | null
 } & SidePanelContent) {
@@ -245,40 +261,56 @@ export function ChatSidePanel({
   const tools = inOrder(usualTools, tabOrder)
   const reordered = tools.some((t, index) => t.value !== usualTools[index]!.value)
   const cast = all.filter((t) => t.descriptor.placement === "cast")
+  // A phone's sheet has its own Close.
+  const ownClose = useHeaderToggleGone("pending" in content) && wide
   const nav = (
     <div ref={navRef} data-chat-panel-tabs className="flex shrink-0 flex-col">
-      <div className="flex h-shell-header shrink-0 items-center border-b border-border px-2 py-2 *:min-w-0 *:flex-1">
-        <ToolTabs
-          tabs={tools.map((t) => ({
-            value: t.value,
-            dirty: dirty.has(t.value) || editorChanges.some((ref) => t.descriptor.holdsEditor?.(ref, t.value)),
-            label: t.label,
-            icon: t.descriptor.icon,
-            savedOnly: t.descriptor.savedOnly,
-            // A tab with nothing to show before the first send says so where it's described.
-            description:
-              "pending" in content && !t.descriptor.pending
-                ? `${t.descriptor.description ?? t.label} Available once the chat is saved.`
-                : t.descriptor.savedOnly && isPendingChat(content.view.chat)
-                  ? `${t.descriptor.description ?? t.label} ${NOT_STARTED}`
-                  : t.descriptor.description
-          }))}
-          value={tab}
-          onValueChange={onTab}
-          label="Chat panel"
-          focusOnMount={restoreFocus && tools.some((tab) => tab.value === focusTab)}
-          moreLabel="More tools"
-          onReorder={(values) => {
-            const order = storedOrder(tabOrder, values)
-            if (inOrder(usualTools, order).some((tool, index) => tool.value !== values[index])) {
-              showToast({ title: `This tab order can't be saved. Only ${MAX_STORED} positions can be stored.` })
-              return
-            }
-            viewPrefs.change({ panelTabOrder: order })
-          }}
-          onResetOrder={() => viewPrefs.change({ panelTabOrder: [] })}
-          reordered={reordered}
-        />
+      <div className="flex h-shell-header shrink-0 items-center gap-1 border-b border-border px-2 py-2">
+        <div className="min-w-0 flex-1">
+          <ToolTabs
+            tabs={tools.map((t) => ({
+              value: t.value,
+              dirty: dirty.has(t.value) || editorChanges.some((ref) => t.descriptor.holdsEditor?.(ref, t.value)),
+              label: t.label,
+              icon: t.descriptor.icon,
+              savedOnly: t.descriptor.savedOnly,
+              // A tab with nothing to show before the first send says so where it's described.
+              description:
+                "pending" in content && !t.descriptor.pending
+                  ? `${t.descriptor.description ?? t.label} Available once the chat is saved.`
+                  : t.descriptor.savedOnly && isPendingChat(content.view.chat)
+                    ? `${t.descriptor.description ?? t.label} ${NOT_STARTED}`
+                    : t.descriptor.description
+            }))}
+            value={tab}
+            onValueChange={onTab}
+            label="Chat panel"
+            focusOnMount={restoreFocus && tools.some((tab) => tab.value === focusTab)}
+            moreLabel="More tools"
+            trailingControlVisible={ownClose}
+            onReorder={(values) => {
+              const order = storedOrder(tabOrder, values)
+              if (inOrder(usualTools, order).some((tool, index) => tool.value !== values[index])) {
+                showToast({ title: `This tab order can't be saved. Only ${MAX_STORED} positions can be stored.` })
+                return
+              }
+              viewPrefs.change({ panelTabOrder: order })
+            }}
+            onResetOrder={() => viewPrefs.change({ panelTabOrder: [] })}
+            reordered={reordered}
+          />
+        </div>
+        {ownClose && (
+          <IconButton
+            label="Hide panel"
+            hint="Click to hide the chat panel"
+            icon="panel"
+            aria-expanded
+            aria-pressed
+            className="shrink-0 bg-surface-raised text-text"
+            onClick={(event) => void onClose(event.detail === 0)}
+          />
+        )}
       </div>
       <div className="border-b border-border px-2 pt-1">
         <SubjectTabs
@@ -492,6 +524,9 @@ const followed = (tab: PanelTab | null, cast: ChatView["cast"], follows: Readonl
 export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   const navigate = useNavigate()
   const router = useRouter()
+  const workbenchTab = useWorkbenchTab()
+  const chatMain = useRef<HTMLDivElement>(null)
+  const restoreFocusOnClose = useRef(false)
   const [pathname] = useState(() => router.state.location.pathname)
   const wide = useWide()
   const userId = useSession().user.id
@@ -503,6 +538,18 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   const follow = useCastFollow(asked, view)
   const candidate = follow.tab ?? asked
   const panel = usePanelHere(candidate === "display" ? "interface" : candidate, view)
+  useLayoutEffect(() => {
+    if (panel !== null || !restoreFocusOnClose.current) return
+    restoreFocusOnClose.current = false
+    if (document.activeElement !== document.body) return
+    const main = chatMain.current
+    if (!main) return
+    composerTextbox(main)?.focus({ preventScroll: true })
+    if (document.activeElement === document.body) main.focus({ preventScroll: true })
+    // The panel can outlive the chat's visibility when one of its editors covers the chat.
+    if (document.activeElement === document.body && workbenchTab)
+      document.querySelector<HTMLElement>(`[data-tab="${CSS.escape(workbenchTab.tabId)}"] [role="tab"]`)?.focus()
+  }, [panel, workbenchTab])
   usePlaceNotice(
     follow.tab === null && urlPanel !== null && urlPanel !== "display" && view.cast !== null && panel !== urlPanel
       ? "This panel is no longer available in this chat."
@@ -563,6 +610,10 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
     },
     [navigate, userId]
   )
+  const close = (restoreFocus = false) => {
+    restoreFocusOnClose.current = restoreFocus
+    return show(null)
+  }
   // A phone's sheet covers everything: once this chat's tab is behind another (an editor opened
   // from it, or a resize below the breakpoint while it was) the sheet closes rather than coming
   // back over the chat, as opening a large editor from it closes it. The layout says so, not
@@ -578,5 +629,5 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
     const shown = latest.current.panel
     return { ...latest.current.router.state.location.search, ...search, panel: shown ?? undefined }
   }, [])
-  return { panel, show, withPanel, wide, userId }
+  return { panel, show, close, chatMain, withPanel, wide, userId }
 }

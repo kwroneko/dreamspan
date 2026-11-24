@@ -245,4 +245,32 @@ test.describe("a workshop made by its first message", () => {
         scope: width === 390 ? '[role="dialog"]' : 'aside[aria-label="Chat panel"]'
       })
     })
+
+  test("a second workshop started in the tab keeps the first in its picker", async ({ page }) => {
+    test.setTimeout(120_000)
+    const story = await makeStory(server, "Harbor two")
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/chats/${story.id}?panel=workshop`)
+    const panel = sidePanel(page)
+    const pending = pendingSideChat(page)
+    const started = async () => {
+      await expect(pending).toBeVisible({ timeout: 30_000 })
+      const id = await sideChatId(pending)
+      await panel.getByLabel("Message", { exact: true }).fill(QUESTION)
+      await panel.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+      const side = panel.locator(`[data-side-chat="${id}"]`)
+      await expect(side.getByRole("article").filter({ hasText: SIDE_ANSWER })).toHaveCount(1, { timeout: 60_000 })
+      await expect(pending).toHaveCount(0)
+      return id
+    }
+    await started()
+    await panel.getByRole("button", { name: /^Workshop: / }).click()
+    await page.getByRole("menuitem", { name: /^New workshop/ }).click()
+    await started()
+    await panel.getByRole("button", { name: /^Workshop: / }).click()
+    const items = page.getByRole("menuitem")
+    // Both workshops, then New workshop.
+    await expect(items).toHaveCount(3)
+  })
 })

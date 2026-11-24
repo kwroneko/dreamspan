@@ -27,8 +27,8 @@ const shot = async (page: Page, name: string, hovered = false) => {
   await page.screenshot({ path: join(shots, `${name}.png`) })
 }
 
-/** The least width a frame keeps (Workbench.tsx `MIN_WIDTH`). */
-const MIN_FRAME = 320
+/** The least width a frame keeps (model.ts `MIN_FRAME_WIDTH`; 320 before the strip's back and forward). */
+const MIN_FRAME = 344
 const NO_ROOM = "Not enough room to split this pane"
 
 let chat: string
@@ -69,7 +69,13 @@ const expectWholeStrips = async (page: Page) => {
     expect(box.width, `frame ${i} width`).toBeGreaterThanOrEqual(MIN_FRAME - 1)
     const strip = frame.locator("[data-tab-strip]")
     const stripBox = (await strip.boundingBox())!
-    for (const button of await strip.locator("[data-strip-actions] button").all()) {
+    // The strip's buttons: its back and forward at the start, its actions at the end.
+    const buttons = [
+      ...(await strip.locator("[data-strip-history] button").all()),
+      ...(await strip.locator("[data-strip-actions] button").all())
+    ]
+    expect(buttons.length, `frame ${i} buttons`).toBeGreaterThanOrEqual(3)
+    for (const button of buttons) {
       const b = (await button.boundingBox())!
       const label = (await button.getAttribute("aria-label")) ?? "button"
       expect(b.x, `frame ${i} ${label} left`).toBeGreaterThanOrEqual(stripBox.x - 0.5)
@@ -140,9 +146,14 @@ test("repeated rightward splits stop where a frame would get too narrow", async 
     await shot(page, "header-split-disabled-1340-dark", true)
     await page.keyboard.press("Escape")
   }
-  // A tab dragged onto that frame's right edge shows the edge refused, and dropping does nothing.
+  // Leave a tab behind in the source so the drop would add a frame.
   const count = await frames(page).count()
-  const source = frames(page).first().locator("[data-tab] [role=tab]").first()
+  const left = frames(page).first()
+  await left.getByRole("tab", { name: /Harbour walk/ }).dblclick()
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Home", exact: true }).click()
+  const sourceTabs = left.locator("[data-tab-strip]")
+  await expect(sourceTabs.getByRole("tab")).toHaveCount(2)
+  const source = sourceTabs.getByRole("tab", { name: "Characters", exact: true })
   const body = (await frames(page).last().locator("[data-frame-body]").boundingBox())!
   const from = (await source.boundingBox())!
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
@@ -235,4 +246,80 @@ test("a divider stops where a frame would go below its least width", async ({ pa
   await page.mouse.up()
   expect((await frames(page).first().boundingBox())!.width).toBeGreaterThanOrEqual(MIN_FRAME - 1)
   await expectWholeStrips(page)
+})
+
+test("an edge drop fits when moving the tab closes its source frame", async ({ page }) => {
+  await fresh(page, 1340)
+  await gotoWithLayout(page, server().url, "/", ["r", [0.5, 0.5], [0, "="], [0, "/library"]])
+  const left = frames(page).first()
+  const from = (await frames(page)
+    .last()
+    .getByRole("tab", { name: /Library/ })
+    .boundingBox())!
+  const target = (await left.locator("[data-frame-body]").boundingBox())!
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(target.x + 20, target.y + target.height / 2, { steps: 12 })
+  await expect(left.locator('[data-drop-zone="left"]')).toBeVisible()
+  await page.mouse.up()
+
+  await expect(frames(page)).toHaveCount(2)
+  await expect(
+    frames(page)
+      .first()
+      .getByRole("tab", { name: /Library/ })
+  ).toBeVisible()
+  await expect(frames(page).last().getByRole("tab", { name: "Characters", exact: true })).toBeVisible()
+  await expectWholeStrips(page)
+})
+
+test("a divider moves when a restored frame is clamped to its minimum", async ({ page }) => {
+  await fresh(page, 1920)
+  await gotoWithLayout(page, server().url, "/", ["r", [0.01, 0.35, 0.64], [0, "="], [0, "/library"], [0, "/library"]])
+  await expect(frames(page)).toHaveCount(3)
+  const [first, second, third] = await frames(page).all()
+  const firstBefore = (await first!.boundingBox())!.width
+  const secondBefore = (await second!.boundingBox())!.width
+  const thirdBefore = (await third!.boundingBox())!.x
+  expect(firstBefore).toBe(MIN_FRAME)
+  expect(secondBefore).toBeGreaterThan(MIN_FRAME + 80)
+  const handle = page.getByRole("separator", { name: "Resize frames side by side" }).first()
+  const box = (await handle.boundingBox())!
+  const x = box.x + box.width / 2
+  const y = box.y + box.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x + 80, y, { steps: 10 })
+  await page.mouse.up()
+
+  await expect.poll(async () => Math.abs((await first!.boundingBox())!.width - firstBefore - 80)).toBeLessThanOrEqual(1)
+  expect(Math.abs((await second!.boundingBox())!.width - secondBefore + 80)).toBeLessThanOrEqual(1)
+  expect(Math.abs((await third!.boundingBox())!.x - thirdBefore)).toBeLessThanOrEqual(1)
+})
+
+test("narrowing the window keeps the same focused frame within the scrollport", async ({ page }) => {
+  await fresh(page, 1920)
+  await gotoWithLayout(page, server().url, "/", [
+    "r",
+    [0.25, 0.25, 0.25, 0.25],
+    [0, "/library"],
+    [0, "/library"],
+    [0, "/library"],
+    [0, "="]
+  ])
+  const focused = frames(page).last()
+  await expect(focused).toHaveAttribute("data-focused", "")
+  await page.setViewportSize({ width: 1024, height: 1000 })
+
+  const center = page.locator("[data-workbench]")
+  await expect
+    .poll(() =>
+      center.evaluate((element) => {
+        const view = element.getBoundingClientRect()
+        const frame = element.querySelector("[data-frame][data-focused]")!.getBoundingClientRect()
+        return Math.max(view.left - frame.left, frame.right - (view.left + element.clientWidth))
+      })
+    )
+    .toBeLessThanOrEqual(0.5)
+  await expect(focused).toHaveAttribute("data-focused", "")
 })

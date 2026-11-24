@@ -75,13 +75,21 @@ const copyTarget = (chatId: string) => `${COPIES}${chatId}`
 type ComposerSave = typeof ComposerBeacon.Type
 
 /**
- * Text typed into a composer after its chat was swept (its saving stopped), by that chat, with
- * the save the server filed last: carried into the fresh chat the tab opens in its place
- * (`carryLeftover`), or filed to the recovered texts once as the tab leaves (`takeLeftover`).
+ * Text typed into a composer after its chat was swept (its saving stopped), by that chat: the
+ * save that files it (the swept chat's, under its own operation, so the server files it once),
+ * kept in this browser as that save's copy until the server has it, so a reload or a closed
+ * page loses nothing (the pagehide keepalive sends it; an opening composer replays it once
+ * stale, as any other draft's copy). Carried into the fresh chat the tab opens in its place
+ * (`carryLeftover`), or filed to the recovered texts once as the tab leaves (`fileLeftover`).
  */
-const leftovers = new Map<string, { readonly content: string; readonly save: ComposerSave }>()
+export interface Leftover {
+  readonly content: string
+  readonly save: ComposerSave
+  readonly copy: Copy
+}
+const leftovers = new Map<string, Leftover>()
 /** Text carried into a fresh chat's composer, by that chat: its box starts with it. */
-const carried = new Map<string, string>()
+const carried = new Map<string, Leftover>()
 
 /** The text typed after `chatId` was swept, taken: none when nothing was typed since. */
 export const takeLeftover = (chatId: string) => {
@@ -90,10 +98,26 @@ export const takeLeftover = (chatId: string) => {
   return left
 }
 
+/**
+ * The tab leaves the swept `chatId`: what was typed after the sweep, if anything, is sent once
+ * to the swept chat, which the server files to the recovered texts. Its copy in this browser
+ * goes only once the server has it.
+ */
+export const fileLeftover = (chatId: string, save: (payload: ComposerSave) => Promise<{ readonly ok: boolean }>) => {
+  const left = takeLeftover(chatId)
+  if (left === null) return
+  void save(left.save).then(
+    (saved) => {
+      if (saved.ok) void dropCopy(left.copy)
+    },
+    () => {}
+  )
+}
+
 /** The tab opened `to` in place of the swept `from`: what was typed after the sweep goes there. */
 export const carryLeftover = (from: string, to: string) => {
   const left = takeLeftover(from)
-  if (left !== null) carried.set(to, left.content)
+  if (left !== null) carried.set(to, left)
 }
 
 const shown = (draft: Draft | null) => (draft?.status === "active" ? draft.content : "")
@@ -351,14 +375,17 @@ export class ComposerDraft {
     // Opened in place of a swept chat: what was typed there after the sweep starts this box.
     const left = carried.get(this.chatId)
     carried.delete(this.chatId)
-    if (left !== undefined)
+    if (left !== undefined) {
       this.type(
         this.text === ""
-          ? left
+          ? left.content
           : `${this.text}
 
-${left}`
+${left.content}`
       )
+      // This box's own copy holds it now (`type` kept it first, so the store keeps one of them).
+      void dropCopy(left.copy)
+    }
     if (this.unsaved) this.schedule(0)
   }
 
@@ -500,9 +527,27 @@ ${left}`
 
   /** What's in the box past what the sweep filed, kept for the tab's fresh chat. */
   private remember() {
-    if (this.stopped === null) return
-    if (this.text.trim() === "" || this.text === this.filed) leftovers.delete(this.chatId)
-    else leftovers.set(this.chatId, { content: this.text, save: this.stopped })
+    const stopped = this.stopped
+    if (stopped === null) return
+    const previous = leftovers.get(this.chatId) ?? null
+    if (this.text.trim() === "" || this.text === this.filed) {
+      leftovers.delete(this.chatId)
+      if (previous !== null) void dropCopy(previous.copy)
+      return
+    }
+    // In this browser at once, under a save of its own: the text replaces the one kept before.
+    const { operationId: _filed, ...base } = stopped
+    const copy = makeCopy(
+      this.userId,
+      copyTarget(this.chatId),
+      stopped.draftId,
+      { kind: "composer", payload: { ...base, content: this.text } },
+      this.env.now()
+    )
+    const save = pendingOf(copy)
+    if (save?.kind !== "composer") return
+    leftovers.set(this.chatId, { content: this.text, save: save.payload, copy })
+    void keepCopy(copy, previous?.copy ?? null)
   }
 
   private cancelTimer() {
@@ -754,6 +799,8 @@ ${left}`
    * the text.
    */
   beacon() {
+    // Its chat was swept: what was typed since goes to the swept chat, which files it.
+    if (this.stopped !== null) return this.beaconLeftover()
     const sending = this.sending
     const saves = [
       ...(sending !== null && !sending.saved && sending.copy !== null ? [sending.copy] : []),
@@ -787,6 +834,22 @@ ${left}`
           if (now === null || (now !== mine && !now.ancestors.includes(mine.key))) return
           await this.settle(mine, await this.request(mine))
         })
+    })
+  }
+
+  /**
+   * The text typed after the sweep, as the page goes: its save, which the server files to the
+   * recovered texts once (by its operation). Answered, its copy here goes; the text stays
+   * kept for the tab, in case the page stays (the back-forward cache), and a later send of it
+   * files nothing more.
+   */
+  private beaconLeftover() {
+    const left = leftovers.get(this.chatId)
+    if (left === undefined) return
+    const body = JSON.stringify({ drafts: [], composers: [left.save] })
+    if (new Blob([body]).size > KEEPALIVE_LIMIT) return
+    void this.env.keepalive("/library/drafts", body).then((ok) => {
+      if (typeof ok === "boolean" ? ok : ok.ok) void dropCopy(left.copy)
     })
   }
 }

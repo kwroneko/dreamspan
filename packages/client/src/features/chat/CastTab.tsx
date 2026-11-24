@@ -256,7 +256,7 @@ function You({
 }
 
 /** The `castSections` entries Cast lays out in its reply settings row, in this order. */
-export const REPLY_SETTINGS = ["cast.reply-order", "cast.one-reply", "cast.auto-replies"]
+const REPLY_SETTINGS = ["cast.reply-order", "cast.one-reply", "cast.auto-replies"]
 
 /**
  * Cast's reply settings row (owner, 2026-11-03): Who replies, One reply at a time and Auto
@@ -265,7 +265,7 @@ export const REPLY_SETTINGS = ["cast.reply-order", "cast.one-reply", "cast.auto-
  * is a flex item here (an error takes a line of its own with `order-last basis-full`); with none
  * shown, the row is hidden.
  */
-export function ReplySettingsRow({ session }: { session: ChatSession }) {
+function ReplySettingsRow({ session }: { session: ChatSession }) {
   return (
     <section
       aria-label="Who replies"
@@ -373,9 +373,12 @@ export function CastTab({ session }: { session: ChatSession }) {
           </ul>
         )}
       </div>
-      <ReplySettingsRow session={session} />
-      {/* Add characters, and what a plugin adds (castSections). */}
-      <SlotOutlet slot={castSections} except={REPLY_SETTINGS} props={{ session }} />
+      <SlotOutlet
+        slot={castSections}
+        except={REPLY_SETTINGS}
+        props={{ session }}
+        insert={{ order: 5, element: <ReplySettingsRow session={session} /> }}
+      />
       {AsyncResult.isFailure(infoResult) && (
         <p className="text-sm text-muted">The cards' details couldn't be read; editing them may not work.</p>
       )}

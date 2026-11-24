@@ -9,7 +9,7 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
 const title = "Group: Misaka Mikoto: 2024-08-25@03h30m53s"
-const token = "x".repeat(90)
+const token = "x".repeat(200)
 let chatId = ""
 let characterId = ""
 
@@ -35,7 +35,7 @@ test.beforeAll(async () => {
         yield* api.SetChatPin({ chatId: started.chat.id, leaf: null, pinned: true })
         if (name !== title) continue
         chatId = started.chat.id
-        for (const name of [title, token]) {
+        for (const name of [title, token.slice(0, 90)]) {
           const peer = (yield* api.CreateFork({
             chatId: started.chat.id,
             fromForkId: original.id,
@@ -170,9 +170,24 @@ for (const width of [1440, 390])
         }
         await button.scrollIntoViewIfNeeded()
         await button.hover()
-        await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(
-          measurement.title.replace(/opens here$/, "").trim()
-        )
+        const tooltip = page.locator('[data-layout-overlay="Tooltip floats above the page"] > *')
+        await expect(tooltip).toContainText(measurement.title.replace(/opens here$/, "").trim())
+        if (measurement.title === token) {
+          await expect
+            .poll(() =>
+              tooltip.evaluate((node) => {
+                const text = document.createRange()
+                text.selectNodeContents(node)
+                const bounds = node.getBoundingClientRect()
+                return Array.from(text.getClientRects()).every(
+                  (line) =>
+                    line.left >= Math.max(0, bounds.left - 1) &&
+                    line.right <= Math.min(window.innerWidth, bounds.right + 1)
+                )
+              })
+            )
+            .toBe(true)
+        }
         await page.mouse.move(0, 0)
         if (actions.length === 2 && process.env.SCREENSHOT_DIR) {
           await mkdir(process.env.SCREENSHOT_DIR, { recursive: true })

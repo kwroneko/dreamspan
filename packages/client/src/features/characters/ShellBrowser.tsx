@@ -603,11 +603,15 @@ export function ForkRow({
         onOpenChange={setMenu}
         trigger={
           <Tooltip
-            label={`${nameless ? "Still loading" : title}. ${
-              perFork
-                ? `Opens this ${fork.thread ? "thread" : "branch"}${here ? ", shown now" : ""}.${opensHere ? ` ${OPENS_HERE_HINT}` : ""}`
-                : "Opens the chat on the branch you last used."
-            }${canBeside ? " Right-click to open it beside." : ""}`}
+            label={
+              <span className="[overflow-wrap:anywhere]">
+                {`${nameless ? "Still loading" : title}. ${
+                  perFork
+                    ? `Opens this ${fork.thread ? "thread" : "branch"}${here ? ", shown now" : ""}.${opensHere ? ` ${OPENS_HERE_HINT}` : ""}`
+                    : "Opens the chat on the branch you last used."
+                }${canBeside ? " Right-click to open it beside." : ""}`}
+              </span>
+            }
           >
             <Link
               {...forkLink(fork)}

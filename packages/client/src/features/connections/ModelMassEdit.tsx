@@ -53,14 +53,12 @@ const isTickList = (value: unknown): value is ReadonlyArray<FieldId> => Array.is
 /** What the dialog keeps as typed: the models it edits, the ticked fields, and the form's draft. */
 interface MassForm {
   readonly ids: ReadonlyArray<ModelId>
-  /**
-   * The ticked fields, each `true`: kept by name, so ticks from two tabs merge one by one (a
-   * list: a draft kept before that change).
-   */
+  /** The ticked fields, each `true` (a list: a draft kept before 2026-11-24). */
   readonly ticked: Readonly<Partial<Record<FieldId, true>>> | ReadonlyArray<FieldId>
   /**
-   * The form's draft, once edited; until then, what the models share. Kept as an object, so a
-   * save from another tab merges field by field (text: a draft kept before that change).
+   * The form's draft, once edited; until then (null), what the models share now. An object
+   * (text: a draft kept before 2026-11-24). A save from an out-of-date tab is refused whole,
+   * never merged (userDraft.tsx `refused`).
    */
   readonly draft: Draft | string | null
 }
@@ -160,8 +158,8 @@ export function ModelMassEditDialog({
   const tick = (field: FieldId, on: boolean) =>
     form.edit({
       ids: chosen,
-      // The values the tick starts from, so a later edit in another tab merges against them.
-      draft: kept ?? values,
+      // A tick alone keeps no values: until a field is edited, they are what the models share now.
+      draft: kept,
       ticked: ticks(FIELD_IDS.filter((id) => (id === field ? on : ticked.has(id))))
     })
 
@@ -300,6 +298,7 @@ export function ModelMassEditDialog({
         <ErrorAlert error={save.error} title="Not saved" />
       </div>
       <DialogActions>
+        {form.refusedAction}
         <Button variant="ghost" hint="Closes this without changing any model." onClick={close}>
           Cancel
         </Button>

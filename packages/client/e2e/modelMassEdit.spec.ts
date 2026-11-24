@@ -200,14 +200,19 @@ test("copy settings from a model fills and ticks its fields; an unticked one isn
   }
 })
 
-// Review of 15a906b99 (3): two tabs on one bulk edit, one a step behind. An untick in one and a
-// tick in the other both stand, and Save uses both.
-test("an untick in one tab and a tick in another, a step behind, both stand", async ({ page }) => {
+// Two tabs on one bulk edit, one a step behind (owner, 2026-11-24): the stale tab's save is
+// refused, never merged. It shows the current values, and "Use this tab's version" brings its
+// own back, which the other tab then sees too.
+test("a stale tab's save is refused; it shows the current values and can bring its own back", async ({
+  page
+}, info) => {
   test.setTimeout(120_000)
   const id = await connectionWithModels()
-  const before = await listed(id)
   const other = await page.context().newPage()
-  // The other tab's draft saves wait until released: it types on the start it saw.
+  await other.setViewportSize({ width: 1920, height: 1080 })
+  await other.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" })
+  // The other tab's draft saves wait until released, and it hears nothing of this tab's saves
+  // meanwhile: it types on the start it saw.
   let hold = false
   const held: Array<() => void> = []
   await other.routeWebSocket(/\/rpc$/, (socket) => {
@@ -217,7 +222,10 @@ test("an untick in one tab and a tick in another, a step behind, both stand", as
       if (hold && request?.tag === "SaveUserDraft") held.push(() => upstream.send(data))
       else upstream.send(data)
     })
-    upstream.onMessage((data) => socket.send(data))
+    upstream.onMessage((data) => {
+      if (hold && typeof data === "string" && data.includes('"UserDraftChanged"')) return
+      socket.send(data)
+    })
   })
   // This tab's draft saves, as the server answers them.
   const asked = new Set<string>()
@@ -244,36 +252,60 @@ test("an untick in one tab and a tick in another, a step behind, both stand", as
     dialogs.push(tab.getByRole("dialog", { name: "Edit 100 models", exact: true }))
   }
   const [mine, theirs] = dialogs as [ReturnType<Page["getByRole"]>, ReturnType<Page["getByRole"]>]
-  // The start both tabs share: Temperature and Top P ticked.
-  await mine.getByRole("textbox", { name: "Temperature", exact: true }).fill("0.55")
-  await mine.getByRole("textbox", { name: "Top P", exact: true }).fill("0.8")
-  await expect(tick(other, "Top P")).toBeChecked()
-  await expect(theirs.getByRole("textbox", { name: "Top P", exact: true })).toHaveValue("0.8")
+  const temperature = (dialog: typeof mine) => dialog.getByRole("textbox", { name: "Temperature", exact: true })
+  const topP = (dialog: typeof mine) => dialog.getByRole("textbox", { name: "Top P", exact: true })
+  const use = theirs.getByRole("button", { name: "Use this tab's version", exact: true })
+  // The start both tabs share: Temperature 0.55, ticked.
+  await temperature(mine).fill("0.55")
+  await expect(temperature(theirs)).toHaveValue("0.55")
+  await expect(tick(other, "Temperature")).toBeChecked()
+  await expect(use).toHaveCount(0)
   hold = true
-  // The other tab ticks Reasoning, its save held; this one unticks Temperature, saved.
-  await tick(other, "Reasoning").click()
+  // The other tab types Top P 0.8, its save held; this one types Temperature 0.65, saved.
+  await topP(theirs).fill("0.8")
   await expect.poll(() => held.length).toBeGreaterThan(0)
   const answeredBefore = answered
-  await tick(page, "Temperature").click()
-  await expect(tick(page, "Temperature")).not.toBeChecked()
+  await temperature(mine).fill("0.65")
   await expect.poll(() => answered).toBeGreaterThan(answeredBefore)
   hold = false
   for (const send of held.splice(0)) send()
-  // Both stand, in both tabs.
-  for (const tab of [page, other]) {
-    await expect(tick(tab, "Reasoning")).toBeChecked()
-    await expect(tick(tab, "Temperature")).not.toBeChecked()
-    await expect(tick(tab, "Top P")).toBeChecked()
-  }
+  // Refused: the other tab shows this tab's values, nothing of its own merged in.
+  await expect(use).toBeVisible()
+  await expect(temperature(theirs)).toHaveValue("0.65")
+  await expect(tick(other, "Top P")).not.toBeChecked()
+  await expect(topP(theirs)).not.toHaveValue("0.8")
+  await expect(temperature(mine)).toHaveValue("0.65")
+  await expect(tick(page, "Top P")).not.toBeChecked()
+  await use.hover()
+  await expect(other.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(
+    "Brings back this tab's changes"
+  )
+  await other.screenshot({ path: info.outputPath("refused-1920-dark.png") })
+  if (process.env.SCREENSHOT_DIR)
+    await other.screenshot({ path: `${process.env.SCREENSHOT_DIR}/mass-edit-refused-1920-dark.png` })
+  await expectLayout(other, info, "model-mass-edit-refused-1920-dark", { scope: "[role=dialog]" })
+  // Reloading the dialog keeps this tab's offer, scoped to the same active draft.
+  await other.reload()
+  await expect(use).toBeVisible()
+  await expect(temperature(theirs)).toHaveValue("0.65")
+  await expect(temperature(mine)).toHaveValue("0.65")
+  await expect(mine.getByRole("button", { name: "Use this tab's version", exact: true })).toHaveCount(0)
+  // Its own version back: Top P 0.8 and Temperature 0.55, both ticked; the other tab sees it.
+  await use.click()
+  await expect(use).toHaveCount(0)
+  await expect(topP(theirs)).toHaveValue("0.8")
+  await expect(temperature(theirs)).toHaveValue("0.55")
+  await expect(tick(other, "Top P")).toBeChecked()
+  await expect(topP(mine)).toHaveValue("0.8")
+  await expect(temperature(mine)).toHaveValue("0.55")
+  await expect(tick(page, "Top P")).toBeChecked()
   await mine.getByRole("button", { name: "Save", exact: true }).click()
   await expect(page.getByText("100 models changed")).toBeVisible()
   const after = await listed(id)
   for (const [key, model] of after) {
     if (!key.startsWith("synthetic/claude-0")) continue
     expect(model.overrides.settings?.samplers?.top_p).toBe(0.8)
-    expect(model.overrides.settings?.samplers?.temperature).toBe(
-      before.get(key)!.overrides.settings?.samplers?.temperature
-    )
+    expect(model.overrides.settings?.samplers?.temperature).toBe(0.55)
   }
   await other.close()
 })

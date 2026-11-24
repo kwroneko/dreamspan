@@ -15,7 +15,7 @@ import { type ComponentProps, useCallback, useEffect } from "react"
 import { usePlaceOwner } from "../../placeOwner.tsx"
 import type { DurableFields, DurableText } from "../../ui/durableFields.tsx"
 import { usePlaceList, writePlaceValue } from "../../usePlaceParam.ts"
-import { useUserDraft } from "./userDraft.tsx"
+import { UserDraftRefused, useUserDraft } from "./userDraft.tsx"
 
 /** One text kept as typed under `key`; `saved` is the text it starts from. */
 export function useDurableText(key: string, field: string, saved: string) {
@@ -55,6 +55,12 @@ export function useDurableForm<T extends object>(key: string, field: string, sav
     commit: (save: (values: T) => Promise<boolean>) => draft.commit(draft.text, () => save(values)),
     /** Ends the workspace without saving: the text stays recoverable in the bin. An untouched form ends nothing. */
     discard: () => (draft.text === JSON.stringify(saved) ? Promise.resolve(true) : draft.discard()),
+    /**
+     * "Use this tab's version" while this tab's form was refused as out of date (owner,
+     * 2026-11-24), nothing otherwise. Every form puts it first in its Save row, before Cancel,
+     * so Cancel and Save never move.
+     */
+    refusedAction: <UserDraftRefused draft={draft} />,
     draft
   }
 }

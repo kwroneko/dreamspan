@@ -25,7 +25,7 @@ const showInFiles = (path: string) => filesHref(parentOf(path), nameOf(path))
 export const register = () => [
   filesSources.register(httpFilesSource),
   userNoticeReceivers.register(filesNoticeReceiver),
-  // The working-folder chip, workshops only: the last of a workshop's own chips, after the ones every chat has.
+  // The workshop's working folder goes after capabilities, before the optional Cache chip.
   composerControls.register({
     id: FOLDER_CHIP,
     order: 120,

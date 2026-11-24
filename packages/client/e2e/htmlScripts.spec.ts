@@ -12,6 +12,7 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox, textBoxValue } from "./support/textbox.ts"
+import { urlOpenedInNewTab } from "./support/browserTab.ts"
 
 const server = serverPerFile(withAdmin)
 
@@ -159,11 +160,7 @@ for (const width of [1440, 390])
       expect(elsewhere).toEqual([])
 
       // The bridge: a clicked link opens in a new tab; a click copies.
-      const opened = page.context().waitForEvent("page")
-      await inside.locator("#out").click()
-      const tab = await opened
-      await tab.waitForURL("https://example.com/out")
-      await tab.close()
+      expect(await urlOpenedInNewTab(page, () => inside.locator("#out").click())).toBe("https://example.com/out")
       await inside.locator("#copy").click()
       await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("HP 12/20")
       await expectLayout(page, info, `html-scripts-on-${width}-${theme}`, { scope: "[data-testid=messages]" })
@@ -276,11 +273,7 @@ test("a panel with scripts can't navigate away from its document or get it again
   // Forms: sandboxed without allow-forms, neither submits.
   await expect(inside(3).locator("body")).toHaveAttribute("data-forms", /kept/)
   // The SVG link opens in a new tab through the bridge; a middle click and a link to a frame page do nothing.
-  const opened = page.context().waitForEvent("page")
-  await inside(4).locator("#svgout text").click()
-  const tab = await opened
-  await tab.waitForURL("https://example.com/svg")
-  await tab.close()
+  expect(await urlOpenedInNewTab(page, () => inside(4).locator("#svgout text").click())).toBe("https://example.com/svg")
   await inside(4).locator("#svgout text").click({ button: "middle" })
   await inside(4).locator("#svgself text").click()
   await page.waitForTimeout(1500)

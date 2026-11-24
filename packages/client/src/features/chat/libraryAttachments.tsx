@@ -72,8 +72,8 @@ export interface ComposerLibrary {
   readonly ready: boolean
   readonly busy: boolean
   readonly error: string | null
-  /** By id: the server knows each one's kind. */
-  readonly add: (refIds: ReadonlyArray<string>) => void
+  /** By id: the server knows each one's kind. True once the server has them. */
+  readonly add: (refIds: ReadonlyArray<string>) => Promise<boolean>
   readonly remove: (refId: string) => void
   /** What a send carries: the items shown now. */
   readonly capture: () => MessageLibrary
@@ -92,7 +92,8 @@ export interface LiveLibraryComposer {
   readonly title: string
   /** Its workbench tab, null outside a workbench. */
   readonly tabId: string | null
-  readonly add: (refIds: ReadonlyArray<string>) => void
+  /** True once the server has them on the composer's draft. */
+  readonly add: (refIds: ReadonlyArray<string>) => Promise<boolean>
   readonly focus: () => void
 }
 
@@ -112,7 +113,10 @@ export const useLiveLibraryComposers = () => useSyncExternalStore(subscribeLive,
 
 /** Lists this composer while it's mounted and takes library items (`composer` null: it takes none). */
 export function useLiveLibraryComposer(composer: Omit<LiveLibraryComposer, "add" | "focus"> | null) {
-  const handle = useRef<Pick<LiveLibraryComposer, "add" | "focus">>({ add: () => {}, focus: () => {} })
+  const handle = useRef<Pick<LiveLibraryComposer, "add" | "focus">>({
+    add: () => Promise.resolve(false),
+    focus: () => {}
+  })
   const chatId = composer?.chatId
   const title = composer?.title
   const tabId = composer?.tabId
@@ -153,19 +157,28 @@ export function useComposerLibrary(
   // Added before the draft was known (a new workshop's page handing over what it was opened
   // with): attached once it is, after its first read.
   const early = useRef<ReadonlyArray<RefId>>([])
+  /** Those adds, told once the server has them. */
+  const earlyDone = useRef<Array<(ok: boolean) => void>>([])
   useEffect(() => {
     shown.current = items
   }, [items])
+  /** Runs `work` after the calls before it: true when the server answered with the list. */
   const run = (work: () => Promise<ReadonlyArray<ComposerLibraryItem> | null>) => {
-    queue.current = queue.current.then(async () => {
+    const done = queue.current.then(async () => {
       setBusy(true)
       try {
         const next = await work()
         if (next !== null) setItems(next)
+        return next !== null
       } finally {
         setBusy(false)
       }
     })
+    queue.current = done.then(
+      () => undefined,
+      () => undefined
+    )
+    return done.catch(() => false)
   }
   const call = async (
     rpc: "GetComposerLibrary" | "SetComposerLibrary",
@@ -192,15 +205,19 @@ export function useComposerLibrary(
   useEffect(() => {
     if (!takes || draftId === null) return
     let live = true
-    run(async () => {
+    void run(async () => {
       const read = await call("GetComposerLibrary")
       if (live) setReady(true)
       return live ? read : null
     })
     if (early.current.length > 0) {
       const waiting = early.current
+      const told = earlyDone.current
       early.current = []
-      run(() => call("SetComposerLibrary", { add: waiting, remove: [] }))
+      earlyDone.current = []
+      void run(() => call("SetComposerLibrary", { add: waiting, remove: [] })).then((ok) => {
+        for (const tell of told) tell(ok)
+      })
     }
     return () => {
       live = false
@@ -218,20 +235,20 @@ export function useComposerLibrary(
       const fresh = [...new Set(added as ReadonlyArray<RefId>)].filter(
         (refId) => !shown.current.some((there) => there.refId === refId)
       )
-      if (fresh.length === 0) return
+      if (fresh.length === 0) return Promise.resolve(true)
       if (draftId === null) {
         early.current = [...new Set([...early.current, ...fresh])]
-        return
+        return new Promise<boolean>((resolve) => earlyDone.current.push(resolve))
       }
       if (shown.current.length + fresh.length > MAX) {
         setError(`A message can carry at most ${MAX} cards, lorebooks and presets.`)
-        return
+        return Promise.resolve(false)
       }
-      run(() => call("SetComposerLibrary", { add: fresh, remove: [] }))
+      return run(() => call("SetComposerLibrary", { add: fresh, remove: [] }))
     },
-    remove: (refId) => run(() => call("SetComposerLibrary", { add: [], remove: [refId as RefId] })),
+    remove: (refId) => void run(() => call("SetComposerLibrary", { add: [], remove: [refId as RefId] })),
     capture: () => shown.current.map(({ kind, refId }) => ({ kind, refId })),
-    reload: () => run(() => call("GetComposerLibrary"))
+    reload: () => void run(() => call("GetComposerLibrary"))
   }
 }
 

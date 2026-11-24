@@ -10,7 +10,20 @@
 import type { RouterHistory } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import type { DropZone } from "./dropOpen.ts"
-import { affinityOf, itemKey, shellKeys } from "./kinds.ts"
+import {
+  besideAt,
+  current,
+  decodeHistory,
+  decodeOrder,
+  destination,
+  encodeHistory,
+  freshHistory,
+  matchSaved,
+  replace,
+  type ScrollMark,
+  type TabHistory
+} from "./history.ts"
+import { affinityOf, defaultTitle, itemKey, shellKeys } from "./kinds.ts"
 import {
   affinityFrame,
   allTabs,
@@ -31,6 +44,7 @@ import {
   initialLayout,
   type Layout,
   type LayoutAction,
+  minSize,
   moveTab,
   moveToNewFrame,
   neighbours,
@@ -46,6 +60,8 @@ import {
   type Direction
 } from "./model.ts"
 import { layoutKeys, readLayoutParam, withoutLayoutParams } from "../../tabLayoutParams.ts"
+import { middleWidthGrowth } from "../../ui/columnLayout.ts"
+import { tabRouterHistory } from "./tabRouterHistory.ts"
 
 export type HistoryState = Record<string, unknown>
 type Action = "PUSH" | "REPLACE"
@@ -66,6 +82,45 @@ export interface TabMeta {
 }
 
 const HOME = "/"
+
+/** The browser tab's session storage, or null where it can't be used (spec/TAB-HISTORY.md §6). */
+const session = (): Storage | null => {
+  try {
+    return typeof sessionStorage === "undefined" ? null : sessionStorage
+  } catch {
+    return null
+  }
+}
+const readSession = (key: string) => {
+  try {
+    return session()?.getItem(key) ?? null
+  } catch {
+    return null
+  }
+}
+const writeSession = (key: string, value: string | null) => {
+  try {
+    if (value === null) session()?.removeItem(key)
+    else session()?.setItem(key, value)
+  } catch {
+    // Full or refused: the history lasts as long as the page.
+  }
+}
+/** The keys in session storage that start with `prefix`. */
+const sessionKeys = (prefix: string) => {
+  const keys: Array<string> = []
+  try {
+    const store = session()
+    if (!store) return keys
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i)
+      if (key?.startsWith(prefix)) keys.push(key)
+    }
+  } catch {
+    // As above.
+  }
+  return keys
+}
 
 /**
  * The sidebar's keys (`shellSearchKeys`) that differ from `before` in `after`, with their new
@@ -120,6 +175,15 @@ export class WorkbenchStore {
   private readonly unsavedTabs = new Set<string>()
   /** The frames' room in px (Workbench.tsx), 0 while unmeasured or on a phone: no split is refused. */
   private room = { width: 0, height: 0 }
+  /** Each tab's back and forward (history.ts), kept in session storage per browser tab. */
+  private readonly tabHistories = new Map<string, TabHistory>()
+  /** The place a tab's view names for the entry it shows (Home's search), for the hovers. */
+  private readonly places = new Map<string, string>()
+  private readonly historyListeners = new Set<() => void>()
+  /** Tabs whose history changed since it was last written. */
+  private readonly unwritten = new Set<string>()
+  private writeTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly historyKey: string
 
   readonly userId: string
   private readonly browser: RouterHistory
@@ -144,13 +208,40 @@ export class WorkbenchStore {
     this.layout = restored ? openTab(restored, href, itemKey) : initialLayout(href)
     const tab = focusedTab(this.layout)
     if (tab) this.initialState.set(tab.id, clean(browser.location.state))
+    this.historyKey = `dreamspan.tabHistory.${userId}.`
+    this.restoreHistories()
+  }
+
+  /**
+   * A reload made the tab ids afresh: each restored tab takes the saved history of its place in
+   * the saved order (same item, in layout order), its URL the layout's; the rest are dropped.
+   */
+  private restoreHistories() {
+    const order = decodeOrder(readSession(`${this.historyKey}order`))
+    const tabs = allTabs(this.layout)
+    const matches = matchSaved(order, tabs, itemKey)
+    const saved = new Map<string, TabHistory>()
+    for (const [tabId, savedId] of matches) {
+      const history = decodeHistory(readSession(`${this.historyKey}${savedId}`))
+      if (history) saved.set(tabId, history)
+    }
+    for (const key of sessionKeys(this.historyKey)) writeSession(key, null)
+    for (const tab of tabs) {
+      const history = saved.get(tab.id)
+      if (!history) continue
+      const shown = current(history)
+      this.tabHistories.set(tab.id, shown.href === tab.href ? history : replace(history, { href: tab.href }))
+      this.unwritten.add(tab.id)
+    }
   }
 
   /** Follows the browser's history; the returned function stops. */
   start() {
     this.unsubscribe = this.browser.subscribe(({ location, action }) => {
       if (this.mirroring) return
-      this.fromBrowser(location.href, clean(location.state), action.type === "PUSH" ? "PUSH" : "REPLACE")
+      const traversal =
+        action.type === "GO" ? action.index : action.type === "BACK" ? -1 : action.type === "FORWARD" ? 1 : 0
+      this.fromBrowser(location.href, clean(location.state), action.type === "PUSH" ? "PUSH" : "REPLACE", traversal)
     })
     // The focused tab's URL, as its view settled it: the browser shows the same.
     this.mirror("REPLACE")
@@ -162,6 +253,7 @@ export class WorkbenchStore {
         clearTimeout(this.saveTimer)
         this.flush()
       }
+      this.writeHistories()
     }
     window.addEventListener("pagehide", leave)
     return () => {
@@ -171,6 +263,7 @@ export class WorkbenchStore {
         clearTimeout(this.saveTimer)
         this.flush()
       }
+      this.writeHistories()
     }
   }
 
@@ -189,7 +282,10 @@ export class WorkbenchStore {
   }
   /** Whether `next` leaves the frames it adds or shrinks room for their strips (`hasRoom`). */
   private fits(next: Layout) {
-    return hasRoom(this.layout, next, this.room.width, this.room.height)
+    const { width, height } = this.room
+    const minimum = minSize(next.root, "x")
+    const extra = width > 0 && minimum > width ? middleWidthGrowth(minimum) : 0
+    return hasRoom(this.layout, next, width + extra, height)
   }
   /** Whether splitting a frame leaves both halves room for their strips. */
   canSplit = (frameId: string, direction: Direction) =>
@@ -197,9 +293,14 @@ export class WorkbenchStore {
   /** Whether a tab moved to a new frame beside one (its own by default) leaves room for both. */
   canMoveToSplit = (tabId: string, direction: Direction, frameId?: string, before = false) =>
     this.fits(moveToNewFrame(this.layout, tabId, direction, { ...(frameId ? { frameId } : {}), before }))
-  /** Whether a drop on a frame's zone fits: into it always, into a new frame on a side as `canSplit`. */
-  canDrop = (frameId: string, zone: DropZone) =>
-    zone === "center" || this.canSplit(frameId, zone === "left" || zone === "right" ? "row" : "column")
+  /** An edge drop must leave room after any empty source frame closes. */
+  canDrop = (frameId: string, zone: DropZone, tabId?: string) => {
+    if (zone === "center") return true
+    const direction = zone === "left" || zone === "right" ? "row" : "column"
+    return tabId
+      ? this.canMoveToSplit(tabId, direction, frameId, zone === "left" || zone === "top")
+      : this.canSplit(frameId, direction)
+  }
 
   private set(next: Layout, action: Action = "REPLACE", saveAfter = 0) {
     if (next === this.layout) return
@@ -211,9 +312,15 @@ export class WorkbenchStore {
     }
     // Closed views must not keep their pictures, reading state or deferred navigation alive.
     const live = new Set(allTabs(this.layout).map((tab) => tab.id))
-    for (const values of [this.meta, this.initialState, this.openedFrom, this.unsavedTabs]) {
+    for (const values of [this.meta, this.initialState, this.openedFrom, this.unsavedTabs, this.places]) {
       for (const id of values.keys()) if (!live.has(id)) values.delete(id)
     }
+    for (const id of this.tabHistories.keys())
+      if (!live.has(id)) {
+        this.tabHistories.delete(id)
+        this.unwritten.delete(id)
+        writeSession(`${this.historyKey}${id}`, null)
+      }
     for (const listener of this.listeners) listener()
     this.schedule(saveAfter)
     const after = focusedTab(this.layout)
@@ -231,6 +338,10 @@ export class WorkbenchStore {
   private flush() {
     this.saveTimer = null
     this.save(this.layout)
+    // Which saved history is which tab's after a reload (the layout's ids are made afresh).
+    const order = allTabs(this.layout).map((tab) => [tab.id, itemKey(tab.href)])
+    writeSession(`${this.historyKey}order`, JSON.stringify(order))
+    this.writeHistories()
   }
 
   // --- Each tab's history.
@@ -252,11 +363,115 @@ export class WorkbenchStore {
     }
   }
 
-  /** The entry before a new tab's own in its history: where it was opened from. */
-  takeOpenedFrom(tabId: string) {
-    const from = this.openedFrom.get(tabId)
-    this.openedFrom.delete(tabId)
-    return from
+  /**
+   * The router history a tab's view runs on: its own back and forward (spec/TAB-HISTORY.md), from
+   * session storage after a reload, else at its URL after the entry it was opened from (so a
+   * page's own Back returns there). `scroll` takes the tab's scroll positions as it leaves an entry.
+   */
+  createHistory(tabId: string, scroll: () => ReadonlyArray<ScrollMark>): RouterHistory {
+    if (!this.tabHistories.has(tabId)) {
+      const href = findTab(this.layout, tabId)?.href ?? HOME
+      this.tabHistories.set(tabId, freshHistory(href, this.openedFrom.get(tabId)))
+      this.openedFrom.delete(tabId)
+      this.historyChanged(tabId)
+    }
+    return tabRouterHistory({
+      get: () => this.tabHistories.get(tabId) ?? freshHistory(HOME),
+      set: (next) => this.setHistory(tabId, next),
+      leaving: () => {
+        const label = this.places.get(tabId) ?? this.metaOf(tabId)?.title
+        return { scroll: scroll(), ...(label !== undefined ? { label } : {}) }
+      }
+    })
+  }
+
+  private setHistory(tabId: string, next: TabHistory) {
+    if (!findTab(this.layout, tabId)) return
+    // Another item's entry: what the view named for the last one isn't this one's (the same
+    // item's view stays and names its new place itself).
+    const before = this.tabHistories.get(tabId)
+    if (!before || itemKey(current(before).href) !== itemKey(current(next).href)) this.places.delete(tabId)
+    this.tabHistories.set(tabId, next)
+    this.historyChanged(tabId)
+  }
+
+  private historyChanged(tabId: string) {
+    this.unwritten.add(tabId)
+    this.writeTimer ??= setTimeout(() => this.writeHistories(), 150)
+    for (const listener of this.historyListeners) listener()
+  }
+
+  private writeHistories() {
+    if (this.writeTimer) clearTimeout(this.writeTimer)
+    this.writeTimer = null
+    for (const id of this.unwritten) {
+      const history = this.tabHistories.get(id)
+      writeSession(`${this.historyKey}${id}`, history ? encodeHistory(history) : null)
+    }
+    this.unwritten.clear()
+  }
+
+  subscribeHistory = (listener: () => void) => {
+    this.historyListeners.add(listener)
+    return () => void this.historyListeners.delete(listener)
+  }
+
+  /** What the arrow `delta` steps from the tab would go to, as its hover names it; null: nowhere. */
+  stepLabel = (tabId: string, delta: -1 | 1) => {
+    const history = this.tabHistories.get(tabId)
+    const entry = history && destination(history, delta)
+    return entry ? (entry.label ?? defaultTitle(entry.href)) : null
+  }
+
+  /** The place the view names for the entry it shows (Home's search); undefined: its title. */
+  setPlace(tabId: string, label: string | undefined) {
+    if (label === undefined) this.places.delete(tabId)
+    else this.places.set(tabId, label)
+  }
+
+  /** The entry the tab shows: its history state and the scroll positions taken when it was left. */
+  shownEntry = (tabId: string) => {
+    const history = this.tabHistories.get(tabId)
+    return history ? current(history) : undefined
+  }
+
+  /**
+   * ← or → in the tab's frame: the tab shows the entry `delta` steps away, focused. An item another
+   * tab of its frame shows is revealed there instead, as a link to it would (one tab per item).
+   */
+  step(tabId: string, delta: -1 | 1) {
+    const history = this.tabHistories.get(tabId)
+    const entry = history && destination(history, delta)
+    const router = this.histories.get(tabId)
+    if (!entry || !router) return
+    const frame = frameOfTab(this.layout, tabId)
+    const twin = frame?.tabs.find((t) => t.id !== tabId && itemKey(t.href) === itemKey(entry.href))
+    if (twin) {
+      this.focusTab(twin.id)
+      return
+    }
+    if (focusedTab(this.layout)?.id !== tabId) this.focusTab(tabId)
+    // The tab's own subscriber takes it from here (fromTab): the tab's URL, and the browser's
+    // replaced rather than pushed, so the browser's Back is as it was.
+    router.go(delta)
+  }
+
+  /**
+   * The browser went back or forward to `href`: when that's the entry right beside the one the
+   * tab shows, the tab moves there instead of writing over the entry it shows.
+   */
+  private traverse(tabId: string, href: string, traversal: number) {
+    const history = this.tabHistories.get(tabId)
+    const router = this.histories.get(tabId)
+    const delta = history ? besideAt(history, href, traversal) : 0
+    if (!router || delta === 0) return false
+    this.applying = true
+    try {
+      router.go(delta)
+    } finally {
+      this.applying = false
+    }
+    return true
   }
 
   /** Whether a navigation inside a tab leaves for another item: it opens there instead. */
@@ -327,17 +542,17 @@ export class WorkbenchStore {
     if (focused) this.mirror(action)
   }
 
-  private fromBrowser(browserHref: string, state: HistoryState, action: Action) {
+  private fromBrowser(browserHref: string, state: HistoryState, action: Action, traversal: number) {
     const href = withoutLayoutParams(browserHref)
     const focused = focusedTab(this.layout)
     if (focused && itemKey(focused.href) === itemKey(href)) {
       // The tab first, so the browser's URL (Back's place) isn't copied back over it.
-      this.apply(focused.id, href, state, action)
+      if (!traversal || !this.traverse(focused.id, href, traversal)) this.apply(focused.id, href, state, action)
       this.set(setTabHref(this.layout, focused.id, href))
       return
     }
     // The browser has its entry already: the URL is corrected in place, not pushed again.
-    this.open(href, { state, mirror: "REPLACE" })
+    this.open(href, { state, mirror: "REPLACE", traversal })
   }
 
   /** The browser's URL: the focused tab's, with the sidebar's place as the browser has it. */
@@ -396,10 +611,16 @@ export class WorkbenchStore {
    */
   open(
     link: string,
-    options: Omit<OpenOptions, "affinity"> & { state?: HistoryState; mirror?: Action; affinity?: boolean } = {}
+    options: Omit<OpenOptions, "affinity"> & {
+      state?: HistoryState
+      mirror?: Action
+      affinity?: boolean
+      /** The browser's history delta: a tab whose entry beside is this moves there. */
+      traversal?: number
+    } = {}
   ) {
     const href = withoutLayoutParams(link)
-    const { state, mirror = "PUSH", affinity = true, near, ...rest } = options
+    const { state, mirror = "PUSH", affinity = true, near, traversal = 0, ...rest } = options
     const { layout: next, tabId } = openTabAt(this.layout, href, itemKey, {
       ...rest,
       ...(affinity && this.wide() ? { affinity: affinityOf } : {}),
@@ -408,8 +629,9 @@ export class WorkbenchStore {
       id: rest.id ?? newId("t")
     })
     // A tab already mounted (the item's own, or the preview taking it) navigates in place.
-    if (findTab(this.layout, tabId)) this.apply(tabId, href, state ?? {}, "PUSH")
-    else {
+    if (findTab(this.layout, tabId)) {
+      if (!traversal || !this.traverse(tabId, href, traversal)) this.apply(tabId, href, state ?? {}, "PUSH")
+    } else {
       if (state && Object.keys(state).length > 0) this.initialState.set(tabId, state)
       // Back inside the new tab (an Import page's own Back) returns to where it was opened.
       const from = focusedTab(this.layout)
