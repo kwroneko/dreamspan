@@ -3,11 +3,12 @@ import { TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
 import { assert, it } from "@effect/vitest"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import type { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
+import { newCardDoc } from "@dreamspan/shared/editing.ts"
 import { Effect, Stream } from "effect"
 import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
-import { Reader } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import { loadedSet } from "../src/agent/toolLoading.ts"
 import { liveSuffix } from "../src/agent/messages.ts"
 import { dispatcherMessages } from "../src/agent/dispatcher.ts"
@@ -572,5 +573,100 @@ it.live("review: refuses malformed completed JSON instead of executing its repai
     const badOutput = entries.find((e) => e.role === "toolResult" && e.toolCallId === "bad-output")
     assert.isTrue(badOutput?.role === "toolResult" && badOutput.isError)
     assert.lengthOf(yield* api.ListVersionEffects({ versionId: reply.entry.version.id }), 0)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("refuses coercible card skills in direct calls and when replaying them on Resume", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const api = yield* client()
+    const me = yield* api.Whoami()
+    const card = (yield* (yield* Writer).CreateEntity({
+      userId: me.id,
+      kind: "card",
+      label: "Skill validation card",
+      subtitle: "",
+      schemaVersion: 1,
+      origin: "user",
+      sourcePath: null,
+      doc: newCardDoc("Skill validation card")
+    })).ref
+    const valid = { name: "valid", description: "Check spelling.", instructions: "List typos." }
+    const invalid = [
+      { ...valid, name: "bad-instructions", instructions: false },
+      { ...valid, name: "bad-tools", tools: null },
+      { ...valid, name: "bad-tool-name", tools: [false] },
+      { ...valid, name: "blank-instructions", instructions: " " }
+    ]
+    const calls = [valid, ...invalid].map((skill, index) => {
+      const args = { card: card.id, changes: [{ field: "skills", action: "add", skill }] }
+      const chunks = call("edit_card", args, skill.name)
+      const delta = chunks[0]!.choices[0]!.delta!
+      if ("tool_calls" in delta) delta.tool_calls![0]!.index = index
+      return chunks
+    })
+    const mock = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        startMockProvider((request, res) => {
+          const body = request.body as unknown as Body
+          const task = body.messages?.findLastIndex((m) => m.role === "user" && m.content.includes("VALIDATE SKILLS"))
+          if (task === undefined || task < 0) return sse(res, completionChunks(["Ready."], {}))
+          if (body.messages.slice(task).some((m) => m.role === "tool")) return sse(res, completionChunks(["Done."], {}))
+          sse(res, [...calls.map(([chunk]) => chunk!), calls[0]![1]!])
+        })
+      ),
+      (m) => Effect.promise(() => m.close())
+    )
+    yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+      model: {}
+    })
+    const chat = yield* api.CreateWorkshop({})
+    yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "allow" })
+    yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.cards", mode: "allow" })
+    const events: Array<ChatEvent> = []
+    yield* api.SubscribeChat({ chatId: chat.id }).pipe(
+      Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+      Effect.forkScoped
+    )
+    yield* eventually(() => events.length > 0)
+    const user = yield* posted(
+      api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: chat.activeLeafSlotId,
+        branch: false,
+        content: "VALIDATE SKILLS"
+      })
+    )
+    const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: user.entry.slotId, branch: false }))
+    const check = (versionId: typeof reply.entry.version.id) =>
+      Effect.gen(function* () {
+        yield* eventually(() => finished(events, versionId) !== undefined || waiting(events, versionId) !== undefined)
+        assert.isUndefined(waiting(events, versionId), "An invalid skill reached the approval preview")
+        assert.strictEqual(finished(events, versionId)!.status, "complete")
+        const entries = (yield* api.GetRunTranscript({ versionId })).entries
+        for (const skill of invalid) {
+          const result = entries.find((e) => e.role === "toolResult" && e.toolCallId === skill.name)
+          assert.isTrue(result?.role === "toolResult" && result.isError, skill.name)
+        }
+        assert.deepStrictEqual((yield* api.OpenEditor({ refId: card.id })).doc.extensions, {
+          dreamspan: { skills: [{ ...valid, tools: [] }] }
+        })
+        assert.deepStrictEqual(
+          (yield* api.ListVersionEffects({ versionId })).map((e) => e.toolCallId),
+          [valid.name]
+        )
+      })
+    yield* check(reply.entry.version.id)
+
+    yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "ask" })
+    const reader = yield* Reader
+    const slot = yield* reader.GetSlot({ userId: me.id, slotId: reply.entry.slotId })
+    const resumed = yield* api.ResumeFromStep({
+      versionId: reply.entry.version.id,
+      step: 0,
+      expectedRowVersion: slot.entry.rowVersion
+    })
+    yield* check(resumed.version.id)
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })

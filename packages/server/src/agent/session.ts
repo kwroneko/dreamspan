@@ -870,23 +870,18 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         parameters: dispatch ? Type.Any() : tool.parameters,
         executionMode: "sequential",
         execute: async (toolCallId, params, signal) => {
-          let invalidJSON = false
-          if (dispatch) {
-            const call = agent.state.messages
-              .flatMap((m) =>
-                m.role === "assistant" ? m.content.filter((p) => p.type === "toolCall" && p.id === toolCallId) : []
-              )
-              .at(-1)
-            const refusal = call?.type === "toolCall" ? dispatchRefusal(call) : undefined
-            invalidJSON = refusal === BAD_ARGS
-            const offered = frozen.find((t) => t.name === tool.id)
-            if ((refusal && refusal !== BAD_ARGS) || !offered)
-              return {
-                content: [{ type: "text", text: refusal ?? BAD_ARGS }],
-                details: null,
-                isError: true
-              }
-          }
+          const call =
+            dispatch || tool.validateArguments
+              ? agent.state.messages
+                  .flatMap((m) =>
+                    m.role === "assistant" ? m.content.filter((p) => p.type === "toolCall" && p.id === toolCallId) : []
+                  )
+                  .at(-1)
+              : undefined
+          const offered = dispatch ? frozen.find((t) => t.name === tool.id) : undefined
+          const refusal = dispatch && call?.type === "toolCall" ? dispatchRefusal(call) : undefined
+          if (dispatch && (!offered || (refusal && refusal !== BAD_ARGS)))
+            return { content: [{ type: "text", text: refusal ?? BAD_ARGS }], details: null, isError: true }
           // Dangling calls on resume execute directly, without pi-agent's beforeToolCall hook.
           if (!admits(tool.effect))
             return {
@@ -910,6 +905,12 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               isError: true
             }
           const dangling = seed !== undefined && danglingCalls(seed).some((call) => call.id === toolCallId)
+          const validate = () => {
+            if (offered && (refusal === BAD_ARGS || !fitsTool(offered, params))) return BAD_ARGS
+            // The provider validator clones and coerces direct calls. The transcript still has the original.
+            if (tool.validateArguments)
+              return call?.type === "toolCall" ? tool.validateArguments(call.arguments) : BAD_ARGS
+          }
           // The capability's standing decides, asking the user first where it says so; without
           // a permit, a dangling call with outside effects may already have happened.
           const permitted: Effect.Effect<ToolOutput> = run.permit
@@ -927,19 +928,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                     return grantTarget ? { grantTarget } : {}
                   })(),
                   dangling,
-                  ...(dispatch
-                    ? {
-                        unavailableText: missingTool(tool.id),
-                        validate: () =>
-                          !invalidJSON &&
-                          fitsTool(
-                            frozen.find((t) => t.name === tool.id)!,
-                            params
-                          )
-                            ? undefined
-                            : BAD_ARGS
-                      }
-                    : {}),
+                  ...(dispatch ? { unavailableText: missingTool(tool.id) } : {}),
+                  ...(dispatch || tool.validateArguments ? { validate } : {}),
                   onWaiting: (prompt) => waitingChanged(toolCallId, prompt)
                 })
                 .pipe(
@@ -955,16 +945,13 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                       : Effect.succeed<ToolOutput>({ text: permit.text, isError: true })
                   )
                 )
-            : dispatch &&
-                (invalidJSON ||
-                  !fitsTool(
-                    frozen.find((t) => t.name === tool.id)!,
-                    params
-                  ))
-              ? Effect.succeed<ToolOutput>({ text: BAD_ARGS, isError: true })
-              : outsideEffect(tool.effect) && dangling
-                ? Effect.succeed<ToolOutput>({ text: UNCERTAIN_EFFECT, isError: true })
-                : tool.execute(context(toolCallId), params as never)
+            : Effect.suspend(() => {
+                const invalid = validate()
+                if (invalid) return Effect.succeed<ToolOutput>({ text: invalid, isError: true })
+                if (outsideEffect(tool.effect) && dangling)
+                  return Effect.succeed<ToolOutput>({ text: UNCERTAIN_EFFECT, isError: true })
+                return tool.execute(context(toolCallId), params as never)
+              })
           // A committed call's receipt takes precedence over validation against its own
           // changed state (a note may now exist, or its old passage may already be gone).
           const execute =

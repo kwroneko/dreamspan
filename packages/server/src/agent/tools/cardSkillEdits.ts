@@ -8,6 +8,7 @@ import {
 } from "@dreamspan/shared/cardSkills.ts"
 import { Type, type Static } from "@earendil-works/pi-ai"
 import { canonicalJson } from "@dreamspan/shared/editing.ts"
+import { BAD_ARGS, fitsTool } from "../dispatcher.ts"
 
 const strict = { additionalProperties: false } as const
 const name = Type.String({ pattern: CARD_SKILL_NAME.source, maxLength: limits.name })
@@ -39,6 +40,20 @@ export type CardSkillChange = Static<typeof cardSkillChange>
 const isObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
 const id = (entry: CardSkillEntry) => ("use" in entry ? entry.use : entry.name)
+
+/** Refuse raw skill changes that the tool validator would have to coerce. */
+export const validateCardSkillArguments = (args: unknown) => {
+  if (!isObject(args) || !Array.isArray(args.changes)) return
+  for (const change of args.changes) {
+    if (!isObject(change) || change.field !== "skills") continue
+    if (!fitsTool({ name: "edit_card", description: "Edit a card skill", parameters: cardSkillChange }, change))
+      return BAD_ARGS
+    if (change.skill !== undefined) {
+      const problems = cardSkillProblems(change.skill, 0)
+      if (problems.length > 0) return problems.join(" ")
+    }
+  }
+}
 
 /** Edit only the named entry, preserving the rest of the card's extensions and skills. */
 export const changeCardSkill = (extensions: unknown, change: CardSkillChange) => {
