@@ -5,16 +5,19 @@
 // on the next turn. Synthetic data and a scripted loopback provider only.
 import type { ServerResponse } from "node:http"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Stream } from "effect"
+import { Effect, Fiber, Stream } from "effect"
 import type { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
-import type { Chat, VersionId } from "@dreamspan/shared/chat.ts"
+import type { Chat, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import { newCardDoc, textField } from "@dreamspan/shared/editing.ts"
 import type { ApprovalAnswer } from "@dreamspan/shared/workshopApi.ts"
-import { Writer } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { makeLibrarySight } from "../src/agent/librarySight.ts"
+import { ExecutionRegistry } from "../src/execution.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 import { ALWAYS_GRANTS, CARD_GRANTS, settingsRegistry, USER_ONLY_SETTINGS } from "../src/db/settings.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -146,6 +149,66 @@ const results = (api: Api, versionId: VersionId, count: number) =>
 const READ_OTHER: Step = ["read_card", { card: "Mara Quill" }, "other"]
 
 describe("library sight", () => {
+  it.live("a reply and its subagent share a class question and its decline", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateWorkshop({})
+      const user = yield* api.Whoami()
+      const parent = "sight-parent"
+      const child = "sight-child"
+      const next = "sight-next"
+      const insert = `INSERT INTO rollouts
+        (id,chat_id,kind,status,role,request_class,created_at,updated_at,spawned_by_rollout_id,spawned_by_call_id,agent_handle)
+        VALUES (?,?,'workshop','running','assistant','interactive',1,1,?,?,?)`
+      yield* fixtureSql(config.dataDir, [
+        { sql: insert, params: [parent, chat.id, null, null, null] },
+        { sql: insert, params: [child, chat.id, parent, "agent-call", "helper-1"] },
+        { sql: insert, params: [next, chat.id, null, null, null] }
+      ])
+      const reader = yield* Reader
+      const writer = yield* Writer
+      const registries = yield* ExecutionRegistry
+      const prompts: Array<ApprovalPrompt> = []
+      const access = (rolloutId: string, toolCallId: string) =>
+        makeLibrarySight({ reader, writer, registries, userId: user.id, chatId: chat.id, rolloutId })(
+          {
+            userId: user.id,
+            chatId: chat.id,
+            forkId: chat.currentForkId,
+            slotId: chat.activeLeafSlotId as SlotId,
+            versionId: "unused" as VersionId,
+            rolloutId,
+            toolCallId,
+            leafSlotId: chat.activeLeafSlotId,
+            reader,
+            writer,
+            viewers: null,
+            cache: new Map()
+          },
+          (prompt) => {
+            if (prompt) prompts.push(prompt)
+          }
+        ).gate("library.cards", "It wants to look through your cards.")
+
+      const first = yield* access(parent, "first").pipe(Effect.forkScoped)
+      const second = yield* access(child, "second").pipe(Effect.forkScoped)
+      yield* eventually(() => prompts.length > 0)
+      yield* answer(api, prompts[0]!, "deny", "Please attach one.")
+      const denied = yield* Fiber.join(first)
+      assert.isFalse(denied.ok)
+      if (!denied.ok) assert.include(denied.text, "Please attach one.")
+      assert.deepStrictEqual(yield* Fiber.join(second), denied)
+      assert.deepStrictEqual(yield* access(parent, "third"), denied)
+      assert.lengthOf(prompts, 1)
+
+      const fresh = yield* access(next, "fresh").pipe(Effect.forkScoped)
+      yield* eventually(() => prompts.length === 2)
+      yield* answer(api, prompts[1]!, "allow")
+      assert.deepStrictEqual(yield* Fiber.join(fresh), { ok: true })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("the assistant's own card never asks; another card asks its class once for the reply", () => {
     const config = testConfig()
     return Effect.gen(function* () {

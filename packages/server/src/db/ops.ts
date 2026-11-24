@@ -6466,11 +6466,13 @@ const ReadOpsOwn = RpcGroup.make(
     },
     success: Schema.Struct({
       inView: Schema.Array(Schema.String),
+      replyId: Schema.String,
       card: Schema.NullOr(Schema.Struct({ entityId: Schema.String, name: Schema.String })),
       chat: Schema.Array(Schema.Struct({ capability: Schema.String, mode: CapabilityMode })),
       cardGrants: Schema.Record(Schema.String, Schema.Literal("allow")),
       always: Schema.Record(Schema.String, Schema.Literal("allow")),
-      replyAllowed: Schema.Array(Schema.String)
+      replyAllowed: Schema.Array(Schema.String),
+      replyDeclined: Schema.Array(Schema.Struct({ capability: Schema.String, note: Schema.NullOr(Schema.String) }))
     }),
     error: Schema.Union([NotFound, StorageError])
   }),

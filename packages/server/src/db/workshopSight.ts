@@ -35,8 +35,9 @@ const replyRuns = (sql: Sql, rolloutId: string) =>
         UNION SELECT r.spawned_by_rollout_id, up.depth + 1 FROM up JOIN rollouts r ON r.id = up.id
           WHERE r.spawned_by_rollout_id IS NOT NULL AND up.depth < 16
       ) SELECT id FROM up ORDER BY depth DESC LIMIT 1`
-    const roots = (yield* resumeLineage(sql, top?.id ?? rolloutId)).map((r) => r.id)
-    return yield* descendants(sql, roots)
+    const replyId = top?.id ?? rolloutId
+    const roots = (yield* resumeLineage(sql, replyId)).map((r) => r.id)
+    return { replyId, runs: yield* descendants(sql, roots) }
   })
 
 /** The runs and every subagent run they started, at any depth. */
@@ -174,16 +175,19 @@ export const makeWorkshopSightReadHandlers = Effect.gen(function* () {
         const [chat] = yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}
           AND kind = 'workshop' AND deleted_at IS NULL`
         if (!chat) return yield* new NotFound({ entity: "workshop", id: chatId })
-        const reply = yield* replyRuns(sql, rolloutId)
-        const { inView } = yield* pathView(sql, userId, chatId, leafSlotId, reply, entities, refs)
+        const { replyId, runs } = yield* replyRuns(sql, rolloutId)
+        const { inView } = yield* pathView(sql, userId, chatId, leafSlotId, runs, entities, refs)
         const chatGrants = yield* sql<{ capability: string; mode: "off" | "ask" | "allow" }>`SELECT capability, mode
           FROM workshop_grants WHERE chat_id = ${chatId} AND owner_user_id = ${userId} AND target = ''
             AND capability IN (SELECT value FROM json_each(${JSON.stringify(libraryClassIds)}))
             AND (expires_at IS NULL OR expires_at > ${Date.now()})`
-        const allowed = yield* sql<{ capability: string }>`SELECT DISTINCT capability FROM tool_approvals
-          WHERE rollout_id IN (SELECT value FROM json_each(${JSON.stringify(reply)}))
+        const answers = yield* sql<{ capability: string; status: "used" | "denied"; note: string | null }>`
+          SELECT capability, status, note FROM tool_approvals
+          WHERE rollout_id IN (SELECT value FROM json_each(${JSON.stringify(runs)}))
             AND capability IN (SELECT value FROM json_each(${JSON.stringify(libraryClassIds)}))
-            AND status = 'used' AND answer <> 'deny'`
+            AND json_type(prompt_json, '$.scoped') = 'object'
+            AND ((status = 'used' AND answer <> 'deny') OR status = 'denied')
+          ORDER BY answered_at DESC`
         const [named] =
           card === null
             ? []
@@ -191,11 +195,15 @@ export const makeWorkshopSightReadHandlers = Effect.gen(function* () {
                 WHERE e.id = ${card} AND e.owner_user_id = ${userId} AND e.kind = 'card'`
         return {
           inView,
+          replyId,
           card: card !== null && named ? { entityId: card, name: named.label } : null,
           chat: chatGrants,
           cardGrants: card !== null && named ? ((yield* cardGrantsOf(sql, userId))[card] ?? {}) : {},
           always: yield* alwaysGrantsOf(sql, userId),
-          replyAllowed: allowed.map((a) => a.capability)
+          replyAllowed: [...new Set(answers.filter((a) => a.status === "used").map((a) => a.capability))],
+          replyDeclined: answers
+            .filter((a) => a.status === "denied")
+            .map(({ capability, note }) => ({ capability, note }))
         }
       }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("LibraryAccess")),
     ChangedInViewSince: ({ userId, chatId, forkId, leafSlotId, entities }) =>
