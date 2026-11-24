@@ -221,7 +221,7 @@ const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
     kept("useDurableForm", "Card sources: cache size limit and unit")
   ],
   "features/cardSources/filters.tsx": times(
-    6,
+    5,
     search("a card source's filters (tag, creator lookup, dates, range ends, value)")
   ),
   "features/characters/ArchiveUnused.tsx": [kept("useDurableForm", "Archive unused: each rule's amount, as typed")],
