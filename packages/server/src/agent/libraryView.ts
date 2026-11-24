@@ -3,9 +3,10 @@
 // the inline limit is shown whole; a larger one as its summary (each field's size, never its
 // text), to be read in pages. Pure: the caller passes the model's local token counter, so the
 // same revision and model always render the same bytes.
+import { Effect } from "effect"
 import { withoutCardSkills } from "./toolLoading.ts"
 
-type LibraryKind = "card" | "lorebook" | "preset"
+export type LibraryKind = "card" | "lorebook" | "preset"
 type Doc = Readonly<Record<string, unknown>>
 type CountText = (text: string) => number
 
@@ -21,7 +22,7 @@ export const inlineLimit = (window: number | null | undefined) =>
     : INLINE_TOKENS
 
 /** The card's text fields in the order a card editor shows them, as reference-harness's TEXT_FIELDS. */
-const CARD_TEXT_FIELDS = [
+export const CARD_TEXT_FIELDS = [
   "description",
   "personality",
   "scenario",
@@ -33,7 +34,7 @@ const CARD_TEXT_FIELDS = [
 ] as const
 
 /** What the model reads of an item: a card without its skills (they're shown only once approved). */
-const visibleDoc = (kind: LibraryKind, doc: Doc): Doc =>
+export const visibleDoc = (kind: LibraryKind, doc: Doc): Doc =>
   kind === "card" ? withoutCardSkills(doc as { readonly extensions?: Readonly<Record<string, unknown>> }) : doc
 
 const text = (value: unknown) => (typeof value === "string" ? value : "")
@@ -51,15 +52,11 @@ const entryTitle = (entry: Doc, index: number) => {
 /** At most this many lorebook entries or preset prompts in a summary; the rest are counted. */
 const INDEX_PAGE = 50
 
-const bookLines = (book: Doc, count: CountText) => {
-  const entries = list(book.entries).map(record)
-  const shown = entries.slice(0, INDEX_PAGE).map((entry, index) => {
-    const keys = list(entry.keys).filter((k): k is string => typeof k === "string")
-    return `- ${entryTitle(entry, index)} (uid ${String(entry.uid)}${keys.length ? `; keys: ${keys.join(", ")}` : ""}${entry.enabled === false ? "; off" : ""}): ${number(tokens(count, text(entry.content)))} tokens`
-  })
-  const more = entries.length - shown.length
-  return more > 0 ? [...shown, `${more} more entries: read_lorebook with view index and after.`] : shown
-}
+/** The first index page in a summary, then how many more there are and how to read them. */
+const firstPage = (rows: ReadonlyArray<{ readonly line: string }>, more: string) =>
+  rows.length > INDEX_PAGE
+    ? [...rows.slice(0, INDEX_PAGE).map((row) => row.line), `${rows.length - INDEX_PAGE} more ${more}.`]
+    : rows.map((row) => row.line)
 
 /**
  * An item's summary: reference-harness's "structure plus per-field counts", in the model's tokens. A card
@@ -81,23 +78,19 @@ export const summaryLines = (kind: LibraryKind, doc: Doc, count: CountText): Rea
         ? []
         : [
             `character_book "${text(book.name) || "its lorebook"}": ${list(book.entries).length} entries`,
-            ...bookLines(book, count)
+            ...firstPage(entryRows(bookEntries(kind, doc), count), "entries: read_card with view index and after")
           ])
     ]
   }
-  if (kind === "lorebook") return [`${list(doc.entries).length} entries`, ...bookLines(doc, count)]
-  const prompts = new Map(list(doc.prompts).map((p) => [text(record(p).identifier), record(p)]))
-  const order = list(doc.order).map(record)
-  const shown = order.slice(0, INDEX_PAGE).map((entry) => {
-    const prompt = prompts.get(text(entry.identifier)) ?? {}
-    const name = text(prompt.name) || text(entry.identifier)
-    return `- ${name} (${text(entry.identifier)}; ${entry.enabled === false ? "off" : "on"}): ${number(tokens(count, text(prompt.content)))} tokens`
-  })
-  const more = order.length - shown.length
+  if (kind === "lorebook")
+    return [
+      `${list(doc.entries).length} entries`,
+      ...firstPage(entryRows(bookEntries(kind, doc), count), "entries: read_lorebook with view index and after")
+    ]
+  const rows = promptRows(doc, count)
   return [
-    `${prompts.size} prompts, ${order.length} in order`,
-    ...shown,
-    ...(more > 0 ? [`${more} more prompts: read_preset with view index and after.`] : [])
+    `${list(doc.prompts).length} prompts, ${rows.length} in order`,
+    ...firstPage(rows, "prompts: read_preset with view index and after")
   ]
 }
 
@@ -135,3 +128,122 @@ export const attachedElement = (item: AttachedItem, count: CountText, limit: num
     return `${open}>\n${ARTICLE[item.kind]} the user attached for you to work on.${played}\n${fenced(whole, tag)}\n</${tag}>`
   return `${open} whole="no">\n${ARTICLE[item.kind]} the user attached for you to work on.${played} It's too long to include whole: read it with ${READER[item.kind]} (it's attached, so that never asks).\n${fenced(summaryLines(item.kind, doc, count).join("\n"), tag)}\n</${tag}>`
 }
+
+// --- Paged reads (read_card, read_lorebook, read_preset; spec/WORKSHOP-CARDS.md §4.3 point 2).
+
+/** A token counter that may ask a worker: the tools count in the run's model's tokens. */
+export type CountEffect = (text: string) => Effect.Effect<number>
+
+/** Four characters a token, reference-harness's estimate, where no model counter is at hand. */
+export const estimateCount: CountEffect = (text) => Effect.succeed(Math.ceil(text.length / 4))
+
+/**
+ * Runs a sync view with its counts asked for up front: the view runs once to learn which texts
+ * it counts, they are counted a few at a time, then it runs again with the answers.
+ */
+export const withCounts = <A>(count: CountEffect, view: (count: CountText) => A) =>
+  Effect.gen(function* () {
+    const texts = new Set<string>()
+    view((text) => {
+      texts.add(text)
+      return 0
+    })
+    const counted = new Map<string, number>()
+    yield* Effect.forEach(texts, (text) => Effect.map(count(text), (n) => void counted.set(text, n)), {
+      concurrency: 4,
+      discard: true
+    })
+    return view((text) => counted.get(text) ?? Math.ceil(text.length / 4))
+  })
+
+const PAGE_TOKENS = { default: 2_000, minimum: 200, maximum: 8_000 } as const
+
+/** A page's size in tokens, as the call asked, within 200–8,000 (2,000 by default). */
+export const pageTokens = (asked: unknown) =>
+  typeof asked === "number" && Number.isFinite(asked)
+    ? Math.max(PAGE_TOKENS.minimum, Math.min(PAGE_TOKENS.maximum, Math.floor(asked)))
+    : PAGE_TOKENS.default
+
+/**
+ * Where one page of `text` from character `start` ends: as much as fits `maxTokens`, cut at a
+ * line end where the page has one (as reference-harness's excerpts are), never empty.
+ */
+const pageEnd = (text: string, start: number, maxTokens: number, count: CountEffect) =>
+  Effect.gen(function* () {
+    if (start >= text.length || (yield* count(text.slice(start))) <= maxTokens) return text.length
+    // The largest end that fits; no page needs more than 16 characters a token.
+    let low = start + 1
+    let high = Math.min(text.length, start + maxTokens * 16)
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2)
+      if ((yield* count(text.slice(start, middle))) <= maxTokens) low = middle
+      else high = middle - 1
+    }
+    const line = text.lastIndexOf("\n", low - 1)
+    return line >= start ? line + 1 : low
+  })
+
+/** One page of a text, with reference-harness's note on where it stopped and how to read on. */
+export const pageOf = (text: string, what: string, offset: unknown, maxTokens: number, count: CountEffect) =>
+  Effect.gen(function* () {
+    const asked = typeof offset === "number" && Number.isFinite(offset) ? Math.floor(offset) : 0
+    const start = Math.max(0, Math.min(text.length, asked))
+    const end = yield* pageEnd(text, start, maxTokens, count)
+    const body = text.slice(start, end)
+    if (start === 0 && end === text.length) return body
+    const shown = `[Showing characters ${number(Math.min(start + 1, end))}–${number(end)} of ${number(text.length)} in ${what}.`
+    return `${body}\n${end < text.length ? `${shown} Read on with offset=${end}.]` : `${shown} That's the end.]`}`
+  })
+
+/** A lorebook's entries, or a card's embedded book's. */
+const bookEntries = (kind: LibraryKind, doc: Doc) =>
+  list(kind === "card" ? record(doc.character_book).entries : doc.entries).map(record)
+
+const promptRows = (doc: Doc, count: CountText) => {
+  const prompts = new Map(list(doc.prompts).map((p) => [text(record(p).identifier), record(p)]))
+  return list(doc.order)
+    .map(record)
+    .map((entry) => {
+      const id = text(entry.identifier)
+      const prompt = prompts.get(id) ?? {}
+      return {
+        id,
+        line: `- ${text(prompt.name) || id} (${id}; ${entry.enabled === false ? "off" : "on"}): ${number(tokens(count, text(prompt.content)))} tokens`
+      }
+    })
+}
+
+const entryRows = (entries: ReadonlyArray<Doc>, count: CountText) =>
+  entries.map((entry, index) => {
+    const keys = list(entry.keys).filter((k): k is string => typeof k === "string")
+    return {
+      id: String(entry.uid),
+      line: `- ${entryTitle(entry, index)} (uid ${String(entry.uid)}${keys.length ? `; keys: ${keys.join(", ")}` : ""}${entry.enabled === false ? "; off" : ""}): ${number(tokens(count, text(entry.content)))} tokens`
+    }
+  })
+
+/**
+ * The `index` view: a book's entries (a card's embedded one, for a card) or a preset's prompts in
+ * order, 50 a page, after the one `after` names (a uid or an identifier). Null: no such one.
+ */
+export const indexLines = (kind: LibraryKind, doc: Doc, after: string | undefined, count: CountText) => {
+  const rows = kind === "preset" ? promptRows(doc, count) : entryRows(bookEntries(kind, doc), count)
+  const from = after === undefined ? 0 : rows.findIndex((row) => row.id === after) + 1
+  if (after !== undefined && from === 0) return null
+  const page = rows.slice(from, from + INDEX_PAGE)
+  const remaining = rows.length - from - page.length
+  return [
+    ...page.map((row) => row.line),
+    remaining > 0
+      ? `Remaining after this page: ${remaining}. Read on with after="${page.at(-1)!.id}".`
+      : `${rows.length} in all; that's the end.`
+  ]
+}
+
+/** One book entry by uid, or one preset prompt by identifier. */
+export const findPart = (kind: LibraryKind, doc: Doc, id: string) =>
+  kind === "preset"
+    ? (list(doc.prompts)
+        .map(record)
+        .find((p) => text(p.identifier) === id) ?? null)
+    : (bookEntries(kind, doc).find((entry) => String(entry.uid) === id) ?? null)

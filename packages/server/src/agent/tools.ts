@@ -40,6 +40,13 @@ export interface ToolContext {
   readonly reader: Reader["Service"]
   /** The run's model accepts images. */
   readonly vision?: boolean
+  /**
+   * Counts text in the run's model's own tokens (paged library reads, spec/WORKSHOP-CARDS.md
+   * §4.3). Absent outside an agent run: callers estimate at four characters a token.
+   */
+  readonly countTokens?: (text: string) => Effect.Effect<number, unknown>
+  /** The run's model's context window, where it reports one. */
+  readonly window?: number
   /** The writer, without what only the user may do: grants and approvals (`toolWriter`). */
   readonly writer: ToolWriter
   /** Values a tool works out once per rollout (the path, the summaries), by key. */
