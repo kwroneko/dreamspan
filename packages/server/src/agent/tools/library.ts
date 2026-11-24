@@ -1,8 +1,8 @@
 import { toolResultFrame } from "../toolData.ts"
-/** Library heads only; every lookup and snapshot is scoped to the rollout's owner. */
+/** Library heads and attached revisions, scoped to the rollout's owner. */
 import { withoutCardSkills } from "../toolLoading.ts"
 import { Type } from "@earendil-works/pi-ai"
-import type { EntityKind, LibraryRef } from "@dreamspan/shared/library.ts"
+import type { EntityKind, LibraryRef, RefId, RevisionId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import type { RolloutTool, ToolContext } from "../tools.ts"
 
@@ -77,6 +77,61 @@ const listLibrary: RolloutTool<{
     )
 }
 
+/** A pinned read pages one selected value or the full JSON, by exact character offset. */
+const readAttached = (
+  context: ToolContext,
+  kind: "card" | "preset" | "lorebook",
+  args: Readonly<Record<string, unknown>>
+) =>
+  Effect.gen(function* () {
+    const id = String(args[kind]) as RefId
+    const revision = String(args.revision) as RevisionId
+    if (!context.leafSlotId) return { text: "This turn has no attached library revision.", isError: true }
+    const { name, doc } = yield* context.reader.GetAttachedLibraryRevision({
+      userId: context.userId,
+      chatId: context.chatId,
+      forkId: context.forkId,
+      leafSlotId: context.leafSlotId,
+      kind,
+      refId: id,
+      revisionId: revision
+    })
+    const visible = kind === "card" ? withoutCardSkills(doc) : doc
+    const record = (value: unknown) => value as Readonly<Record<string, unknown>>
+    const selected =
+      kind === "lorebook" && args.entry !== undefined
+        ? (Array.isArray(visible.entries) ? visible.entries : []).find((entry) => record(entry).uid === args.entry)
+        : kind === "preset" && args.prompt !== undefined
+          ? (Array.isArray(visible.prompts) ? visible.prompts : []).find(
+              (prompt) => record(prompt).identifier === args.prompt
+            )
+          : visible
+    const value =
+      typeof args.field === "string" && selected !== undefined
+        ? Object.hasOwn(record(selected), args.field)
+          ? record(selected)[args.field]
+          : undefined
+        : selected
+    if (value === undefined)
+      return { text: "That field, entry or prompt is absent from the attached revision.", isError: true }
+    const identity = { id, name, revision }
+    const data = typeof value === "string" ? value : JSON.stringify(value)
+    const offset = Math.min(typeof args.offset === "number" ? args.offset : 0, data.length)
+    const end = Math.min(offset + 4_000, data.length)
+    return {
+      frame: toolResultFrame(identity),
+      text:
+        offset === 0 && end === data.length
+          ? JSON.stringify({ ...identity, doc: value })
+          : JSON.stringify({
+              ...identity,
+              excerpt: data.slice(offset, end),
+              offset,
+              nextOffset: end < data.length ? end : null
+            })
+    }
+  })
+
 const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Record<string, unknown>>> => ({
   source: import.meta.url,
   id: `read_${kind}`,
@@ -85,14 +140,26 @@ const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Re
   explanation: `Read a ${kind} from your library.`,
   effect: "read",
   capability: "library.read",
-  description: `Reads the saved library head of a ${kind}, by name, library id or entity id. Returns its revision and document. Unsaved drafts are not included.`,
+  description: `Reads the saved library head of a ${kind}, by name, library id or entity id. To read an attached revision, provide its library id and revision from the attachment. Attached reads support a field and continuation by offset.`,
   parameters: Type.Object({
-    [kind]: Type.String({ description: `The ${kind}'s name or id.` }),
-    ...(kind === "card" ? { fields: Type.Optional(Type.Array(Type.String())) } : {})
+    [kind]: Type.String({ description: `The ${kind}'s name or id. Use the library id with revision.` }),
+    revision: Type.Optional(Type.String({ description: "The revision id shown in an attachment." })),
+    field: Type.Optional(
+      Type.String({ description: "For attached revisions, the field of the document, entry or prompt to read." })
+    ),
+    offset: Type.Optional(Type.Integer({ minimum: 0, description: "The nextOffset from an attached read." })),
+    ...(kind === "card" ? { fields: Type.Optional(Type.Array(Type.String())) } : {}),
+    ...(kind === "lorebook"
+      ? { entry: Type.Optional(Type.Integer({ description: "The uid of an attached lorebook entry." })) }
+      : {}),
+    ...(kind === "preset"
+      ? { prompt: Type.Optional(Type.String({ description: "The identifier of an attached preset prompt." })) }
+      : {})
   }),
   summarize: (args) => String(args[kind]),
   execute: (context, args) =>
     Effect.gen(function* () {
+      if (args.revision !== undefined) return yield* readAttached(context, kind, args)
       const found = yield* resolveLibrary(context, kind, String(args[kind]))
       if ("error" in found) return { text: found.error, isError: true }
       const snapshot = yield* context.reader.OpenEditor({ userId: context.userId, refId: found.ref.id })

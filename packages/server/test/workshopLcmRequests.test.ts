@@ -134,6 +134,11 @@ for (const mode of ["native", "dispatcher", "every"] as const)
             description: "RAW OLD LOOKUP " + Array.from({ length: 420 }, (_, i) => `word${i}`).join(" ")
           }
         })
+        const attached = yield* api.CreateCard({
+          name: "Synthetic attachment",
+          label: "Synthetic attachment",
+          description: "PINNED CARD FACT: the ledger is blue."
+        })
         const planner = registry.orchestrationModes.get("workshop")!
         yield* registry.orchestrationModes.register({
           ...planner,
@@ -149,7 +154,16 @@ for (const mode of ["native", "dispatcher", "every"] as const)
           Effect.forkScoped
         )
         yield* eventually(() => events.length > 0)
-        let parent = chat.activeLeafSlotId
+        const attachmentOnly = yield* posted(
+          api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: chat.activeLeafSlotId,
+            branch: false,
+            content: "",
+            library: [{ kind: "card", refId: attached.id }]
+          })
+        )
+        let parent = attachmentOnly.entry.slotId
         const run = Effect.fnUntraced(function* () {
           turn++
           step = 0
@@ -194,6 +208,18 @@ for (const mode of ["native", "dispatcher", "every"] as const)
           yield* server.summarizer().runJob(job)
         }
         assert.isAbove((yield* api.GetLcmState({ chatId: chat.id, leafSlotId: parent! })).layer.length, 0)
+        const attachmentInput = mock.requests().some((request) => {
+          if (request.body?.model !== "synthetic-summary") return false
+          const messages = request.body.messages as Array<{ content?: unknown }>
+          return messages.some(
+            ({ content }) =>
+              typeof content === "string" &&
+              content.includes(attachmentOnly.entry.version.id) &&
+              content.includes(attached.headRevisionId) &&
+              content.includes("PINNED CARD FACT")
+          )
+        })
+        assert.isTrue(attachmentInput, "the attachment-only turn's frozen revision reaches a leaf summary")
         const start = mock.requests().length
         const reply = yield* run()
         const sent = mock

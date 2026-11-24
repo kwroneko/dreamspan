@@ -1459,6 +1459,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
           )
           yield* run(`DELETE FROM version_history WHERE version_id IN (SELECT id FROM versions WHERE ${versions})`)
           yield* run(`DELETE FROM version_attachments WHERE version_id IN (SELECT id FROM versions WHERE ${versions})`)
+          yield* run(`DELETE FROM version_library WHERE version_id IN (SELECT id FROM versions WHERE ${versions})`)
           yield* run(
             `DELETE FROM bin_items WHERE kind = 'version' AND target_id IN (SELECT id FROM versions WHERE ${versions})`
           )
@@ -1522,6 +1523,11 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       yield* run(`UPDATE connections SET preset_override_ref_id = NULL WHERE preset_override_ref_id IN (${entityRefs})`)
       yield* run(`DELETE FROM entity_refs WHERE entity_id IN (${targets("entity")})`)
       yield* run(`DELETE FROM entity_tags WHERE entity_id IN (${targets("entity")})`)
+      yield* run(`INSERT INTO purged_library_documents(revision_id, doc_json)
+        SELECT r.id, r.doc_json FROM entity_revisions r WHERE r.entity_id IN (${targets("entity")})
+          AND (EXISTS (SELECT 1 FROM version_library WHERE revision_id = r.id)
+            OR r.id IN (SELECT j.value ->> '$.revisionId' FROM queued_messages q, json_each(q.library_json) j
+              WHERE q.library_json <> '[]'))`)
       yield* run(`DELETE FROM entity_revisions WHERE entity_id IN (${targets("entity")})`)
       yield* run(`UPDATE entities SET purged_at = ? WHERE id IN (${targets("entity")})`, [now])
 

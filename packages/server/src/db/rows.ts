@@ -347,6 +347,7 @@ export interface PathRow extends VersionRow {
   readonly row_version: number
   readonly context_excluded: number
   readonly hidden_by_user: number
+  readonly has_library: number
   /** Media ids of the shown version's images the fork took out, as a JSON array; absent on older reads. */
   readonly excluded_images?: string
   /** Which of the shown version's thinking the fork hid (`thinkingHiddenSql`); absent on older reads. */
@@ -411,6 +412,11 @@ export const toPathEntry = (row: PathRow) => {
     ...copiesOf(row.send_copies),
     side: row.user_side === 1 ? "user" : "assistant",
     firstSpeakerEntityId: row.first_speaker as EntityId | null,
-    inContext: versionInContext(version.status, version.content, contextExcluded, version.images?.length)
+    inContext: versionInContext(
+      version.status,
+      version.content,
+      contextExcluded,
+      (version.images?.length ?? 0) + row.has_library
+    )
   })
 }
