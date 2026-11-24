@@ -1,10 +1,7 @@
 import { archivedCardActions, cardSearchExtras } from "./homeSlots.ts"
-import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { useSyncExternalStore } from "react"
-import { Link } from "@tanstack/react-router"
 import { AsyncView } from "../../actions.tsx"
-import { EmptyState } from "../../ui/Surface.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { useTitle } from "../shell.tsx"
 import { homeIntro } from "./homeSlots.ts"
@@ -14,10 +11,10 @@ import type { HomeBrowse } from "./homeSearch.ts"
 import { SourceResultLine, SourceResults, useSourceBrowse } from "../cardSources/browse.tsx"
 import { SourceChips, SourceFiltersPanel, SourceHiddenNote } from "../cardSources/filters.tsx"
 import { CardGridControls } from "./CardGridControls.tsx"
+import { CardGridEmpty } from "./CardGridEmpty.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
 import { browsable, CharacterGrid, shellAtom, type ShellLibrary } from "./shellData.tsx"
 import { PinnedChats } from "./ShellBrowser.tsx"
-import { NewCardButton } from "../editor/NewCard.tsx"
 
 // By Home's own width, not the window's: in a split frame the tiles keep their size rather than
 // shrinking to five columns of a narrow frame, where the corner toggles would cover the tile.
@@ -106,12 +103,6 @@ function LocalCards({
   const grouped = useGroupedFamilies(browse, search)
   return (
     <>
-      {browse.filter === "personas" && (
-        <div>
-          <NewCardButton persona />
-        </div>
-      )}
-      {browse.filter === "archived" && <SlotOutlet slot={archivedCardActions} props={{ place: "home" }} />}
       {browse.filter === "groups" ? (
         <GroupGrid needle={needle} sort={browse.sort} reversed={browse.reversed} className={COLUMNS} />
       ) : (
@@ -122,36 +113,14 @@ function LocalCards({
           families={grouped ? { expanded: browse.family, onToggle: (family) => setBrowse({ family }) } : undefined}
           className={COLUMNS}
         >
-          {!cards.length && (
-            <EmptyState
-              title={
-                needle
-                  ? "No characters here"
-                  : browse.filter === "favourites"
-                    ? "No favourites yet"
-                    : browse.filter === "archived"
-                      ? "No archived cards"
-                      : browse.filter === "personas"
-                        ? "No personas yet"
-                        : "No characters here"
-              }
-            >
-              {browse.filter === "archived" ? (
-                <p>Archived cards stay here until you unarchive them.</p>
-              ) : browse.filter === "favourites" && !needle ? (
-                <p>Star a character to keep it here.</p>
-              ) : browse.filter === "personas" && !needle ? (
-                <p>Cards you play as are kept here. In the library, a card’s menu adds it.</p>
-              ) : (
-                <Tooltip label="Opens the SillyTavern importer.">
-                  <Link to="/import/st" className="text-accent">
-                    Import from SillyTavern
-                  </Link>
-                </Tooltip>
-              )}
-            </EmptyState>
-          )}
+          {!cards.length && <CardGridEmpty filter={browse.filter} needle={needle} place="home" />}
         </CharacterGrid>
+      )}
+      {/* With archived cards shown, their actions follow the last tile: no row above the grid. */}
+      {browse.filter === "archived" && cards.length > 0 && (
+        <div>
+          <SlotOutlet slot={archivedCardActions} props={{ place: "home" }} />
+        </div>
       )}
       <SlotOutlet slot={cardSearchExtras} props={{ data, browse, search, className: COLUMNS }} />
     </>

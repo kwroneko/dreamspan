@@ -179,12 +179,12 @@ it("lists every multi-line text box with what keeps its text across a reload", (
 })
 
 // Every single-line field the client renders: `Input`, a raw `<input>` that takes text, and the
-// components that are one (SecretInput, PasswordInput, OneLineField, PickerSearch), listed per
+// components that are one (SecretInput, PasswordInput, OneLineField, PickerSearch, AmountInput), listed per
 // file as the boxes above are. Inputs that take no typed text (file, checkbox, radio, hidden,
 // colour) aren't counted. A secret is never kept anywhere (exempt), nor is a search or filter
 // query, which is retyped, not written; everything else is kept by a store. None may be a gap:
 // a new field is backed (the generic hooks fit any) before it's listed.
-const INPUT = /<(?:Input|input|SecretInput|PasswordInput|OneLineField|PickerSearch)\b/g
+const INPUT = /<(?:Input|input|SecretInput|PasswordInput|OneLineField|PickerSearch|AmountInput)\b/g
 const NOT_TEXT = /\btype="(?:file|checkbox|radio|hidden|color)"/
 
 const kept = (durable: Durable, what: string, via?: ReadonlyArray<string>): Site =>

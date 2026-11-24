@@ -144,6 +144,26 @@ export function Input({
   )
 }
 
+/**
+ * A whole number typed inside a sentence ("added more than [30] days ago"): as wide as `digits`
+ * digits, never a form field's width, and without the spin arrows, which would cover them.
+ */
+export function AmountInput({
+  digits,
+  className = "",
+  ...props
+}: Omit<ComponentProps<typeof BaseInput>, "type"> & { digits: number }) {
+  return (
+    <BaseInput
+      type="number"
+      inputMode="numeric"
+      style={{ width: `calc(${digits}ch + 1rem + 2px)` }}
+      className={`h-8 shrink-0 ${control} px-2! text-center tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${className}`}
+      {...props}
+    />
+  )
+}
+
 /** Sets the box's text the way typing does, so its own `onChange` (and whatever keeps the text) runs. */
 const typeInto = (input: HTMLInputElement, text: string) => {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, text)

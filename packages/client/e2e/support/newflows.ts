@@ -114,18 +114,16 @@ export function newflowTests() {
               `Second persona ${suffix}`
             )
             await page.goto(`${server().url}/?show=personas`)
+            // The Personas tab is a list, not a creation page: no New persona row under its search
+            // (owner, 2026-11-23), on Home or in the left panel.
             await expect(
-              page.getByRole("button", { name: "New persona", exact: true }).filter({ visible: true }).first()
+              page
+                .getByRole("main")
+                .getByRole("link", { name: /^Open Persona / })
+                .first()
             ).toBeVisible()
+            await expect(page.getByRole("button", { name: "New persona", exact: true })).toHaveCount(0)
             await expectLayout(page, info, `personas-home-${suffix}`, { scope: "main" })
-            await page
-              .getByRole("button", { name: "New persona", exact: true })
-              .filter({ visible: true })
-              .first()
-              .click()
-            await expect(dialog).toBeVisible()
-            await newCardForm(dialog)
-            await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
             const { chat } = await admin((api) =>
               Effect.gen(function* () {
                 const card = yield* api.CreateCard({ label: `Persona chat ${suffix}`, name: `Persona chat ${suffix}` })

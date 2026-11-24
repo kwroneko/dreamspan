@@ -10,8 +10,9 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Checkbox } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { Field, Input } from "../../ui/Field.tsx"
+import { AmountInput } from "../../ui/Field.tsx"
 import { showToast } from "../../ui/Toast.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { WindowedList } from "../../ui/WindowedList.tsx"
 
 const candidates = Atom.family((key: string) =>
@@ -35,8 +36,10 @@ function MatchCount({ id, amount }: { id: string; amount: number }) {
   if (!AsyncResult.isSuccess(result)) return null
   const count = result.value.length
   return (
-    <span className="text-sm text-muted" data-criterion-count={id}>
-      {count === 1 ? "1 card" : `${count.toLocaleString()} cards`}
+    // Kept with the words before it, so a narrow dialog never starts a line with its dot.
+    <span className="whitespace-nowrap text-muted">
+      <span aria-hidden="true"> · </span>
+      <span data-criterion-count={id}>{count === 1 ? "1 card" : `${count.toLocaleString()} cards`}</span>
     </span>
   )
 }
@@ -169,29 +172,36 @@ function ArchiveDialog({ close }: { close: () => void }) {
         if (!open) closeDialog()
       }}
       title="Archive unused cards"
+      description="Matches any checked rule. Favourites stay."
       placement="top"
     >
-      <p className="text-sm text-muted">
-        Matches any checked rule. Favourites stay. Sending a message, receiving a reply, editing or forking a card
-        counts as use; a greeting alone doesn’t.
-      </p>
-      {entries.map((entry) => {
-        const label = entry.forCardSources?.(sourceNames) ?? entry.label
-        const amount = valueOf(entry.id, entry.initial)
-        return (
-          <div key={entry.id} className="flex flex-col gap-2" data-archive-criterion={entry.id}>
-            <Checkbox
-              checked={enabled[entry.id] === true}
-              hint={`Click to ${enabled[entry.id] ? "stop matching" : "match"} this rule`}
-              hintInline={false}
-              onCheckedChange={(checked) => setEnabled((old) => ({ ...old, [entry.id]: checked }))}
+      <div className="flex flex-col gap-3">
+        {entries.map((entry) => {
+          const label = entry.forCardSources?.(sourceNames) ?? entry.label
+          const amount = valueOf(entry.id, entry.initial)
+          const on = enabled[entry.id] === true
+          return (
+            // One sentence per rule, its amount typed inline; what wraps lines up under the label.
+            <div
+              key={entry.id}
+              className="flex flex-wrap items-center gap-x-2 gap-y-1"
+              data-archive-criterion={entry.id}
             >
-              {label}
-            </Checkbox>
-            <Field label={`${entry.unit} (${label.toLowerCase()})`} labelHidden>
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-6">
-                <Input
-                  type="number"
+              <div className="-mr-6.5 min-w-0">
+                <Checkbox
+                  checked={on}
+                  hint={`Click to ${on ? "stop matching" : "match"} this rule${entry.explain ? `. ${entry.explain}` : ""}`}
+                  hintInline={false}
+                  onCheckedChange={(checked) => setEnabled((old) => ({ ...old, [entry.id]: checked }))}
+                >
+                  {label}
+                </Checkbox>
+              </div>
+              {/* Text flow, not flex: the words after the box wrap beside it, a word at a time. */}
+              <div className="ml-6.5 min-w-0 text-sm text-text">
+                <AmountInput
+                  className="mr-2 align-middle"
+                  digits={5}
                   aria-label={entry.inputLabel}
                   min={1}
                   max={36000}
@@ -201,13 +211,13 @@ function ArchiveDialog({ close }: { close: () => void }) {
                     form.edit({ amounts: { ...form.values.amounts, [entry.id]: event.currentTarget.value } })
                   }
                 />
-                <span className="text-sm text-muted">{entry.unit}</span>
+                <span>{entry.unit}</span>
                 {entry.forCardSources && <MatchCount id={entry.id} amount={amount} />}
               </div>
-            </Field>
-          </div>
-        )
-      })}
+            </div>
+          )
+        })}
+      </div>
       <AsyncView atom={candidates(key)} loading="Finding cards…">
         {(cards) => <Selection key={key} cards={cards} criteria={criteria} close={closeDialog} />}
       </AsyncView>
@@ -220,11 +230,21 @@ export function ArchiveUnused({ place }: { place: string }) {
   // two modal dialogs, each hiding the other from assistive technology.
   const [open, setOpen] = useOpenPlace(`archive-unused:${place}`)
   return (
-    <div>
-      <Button hint="Review older unused cards to archive together" aria-pressed={open} onClick={() => setOpen(true)}>
-        Archive unused cards…
-      </Button>
+    // A link-styled action, as an empty list's next step is everywhere in the app; it sits in the
+    // empty Archived view or after the archived tiles, never on a row of its own above them.
+    <>
+      <Tooltip label="Review older unused cards to archive together.">
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          className="rounded-sm text-sm text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+          onClick={() => setOpen(true)}
+        >
+          Archive unused cards…
+        </button>
+      </Tooltip>
       {open && <ArchiveDialog close={() => setOpen(false)} />}
-    </div>
+    </>
   )
 }
