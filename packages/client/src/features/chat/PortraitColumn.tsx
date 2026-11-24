@@ -80,7 +80,7 @@ function SharedColumn({
   if (shared.shown.length === 0) return null
   return createPortal(
     <PortraitViewerScope viewer={shared}>
-      <Column asTabOf={(id) => sources.sourceOf(id)?.asTab ?? null} />
+      <Column asTabOf={(id) => sources.asTabOf(state, id)} />
     </PortraitViewerScope>,
     host
   )
