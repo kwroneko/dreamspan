@@ -266,6 +266,7 @@ export const ShellSection = Schema.Literals([
   "all"
 ])
 export type ShellSection = typeof ShellSection.Type
+export const SHELL_SECTION_LIMIT = 5000
 const ShellForkSort = Schema.Literals(["recent", "created", "added", "name"])
 export const SHELL_CHAT_IDS_LIMIT = 500
 export const ShellForksView = Schema.Struct({
@@ -284,14 +285,20 @@ export const ShellForksView = Schema.Struct({
   /** The sort the other way round from its own: oldest first, or Z to A. */
   reversed: Schema.optionalKey(Schema.Boolean),
   sections: Schema.Array(
-    Schema.Struct({ id: ShellSection, limit: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 5000 })) })
+    Schema.Struct({
+      id: ShellSection,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: SHELL_SECTION_LIMIT })),
+      offset: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+      /** Include this chat's row in the section, if it matches the scope and filters. */
+      through: Schema.optionalKey(ChatId)
+    })
   ).check(Schema.isMaxLength(12))
 })
 export type ShellForksView = typeof ShellForksView.Type
 export class ShellForks extends Schema.Class<ShellForks>("ShellForks")({
   /** Counts in scope, before the name search and selected filter. */
   filterCounts: ChatFilterCounts,
-  /** In the view's order: each section's first `limit` rows, and how many it has. */
+  /** In the view's order: each section's requested rows, and its total before pagination. */
   sections: Schema.Array(Schema.Struct({ id: ShellSection, rows: Schema.Array(ShellFork), total: Schema.Int })),
   /** Every card the rows' casts name, once. */
   people: Schema.Array(CastCard),

@@ -7,13 +7,13 @@ import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import type { Chat } from "@dreamspan/shared/chat.ts"
 import { importState } from "@dreamspan/shared/stImportApi.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { type FormEvent, type ReactNode, useEffect } from "react"
+import { type FormEvent, type ReactNode } from "react"
 import { defineSlot, SlotOutlet } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Badge, Card, CardHeader } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
-import { ChatList, useRefreshChats } from "./ChatList.tsx"
+import { ChatList } from "./ChatList.tsx"
 import { KindBadge } from "./KindBadge.tsx"
 
 /** The badges a chat's title gets: its kind's, and an import still unfinished (ARCHITECTURE §13). */
@@ -105,9 +105,6 @@ export function EmptyChatCard() {
 
 export function ChatsPage() {
   useTitle("Chats")
-  // The sidebar's list may have been showing since before a chat went elsewhere.
-  const refresh = useRefreshChats()
-  useEffect(() => refresh(), [refresh])
   return (
     <div className="flex flex-col gap-4">
       <CenterHeaderContent>

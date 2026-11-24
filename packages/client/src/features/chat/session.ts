@@ -2246,10 +2246,10 @@ export class ChatSession {
 
   /** Names the chat; the header shows it at once, other tabs on the `Chat` event, lists read again. */
   async rename(name: string): Promise<Outcome<Chat>> {
-    const split = await this.call((client) =>
-      client("GetSplitChats", { chatId: this.chatId, forkId: this.view.forkId })
-    )
-    if (split.ok && split.value.group.id !== split.value.group.chatId) {
+    const forkId = this.view.forkId
+    const split = await this.call((client) => client("GetSplitChats", { chatId: this.chatId, forkId }))
+    if (!split.ok) return split
+    if (split.value.group.id !== split.value.group.chatId) {
       const named = await this.call((client) => client("NameFork", { forkId: split.value.group.rootForkId, name }))
       if (!named.ok) return named
       this.invalidate(["chats"])

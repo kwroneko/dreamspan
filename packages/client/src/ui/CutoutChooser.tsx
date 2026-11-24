@@ -5,8 +5,8 @@
 // `portrait.cutout-chooser` (portraitParts.ts), so a plugin can replace it.
 import {
   type AvatarCrop,
-  cropPixels,
   defaultCrop,
+  pictureContainsCrop,
   PORTRAIT_RATIO,
   snapCrop,
   WHOLE_PICTURE
@@ -48,6 +48,13 @@ const boxFrom = (crop: AvatarCrop, image: Size): Box => ({
   width: crop.width * image.width,
   height: crop.height * image.height
 })
+
+const picturePreview = (crop: AvatarCrop | null, image: Size | null, maxWidth: number): CSSProperties => {
+  if (!crop || !image) return { width: maxWidth }
+  const { width, height } = boxFrom(crop, image)
+  const scale = Math.min(maxWidth / width, maxWidth / PORTRAIT_RATIO / height)
+  return { width: width * scale, height: height * scale }
+}
 
 /** An image shown as a cutout of it in a 2:3 frame: the preview's portrait. */
 export const cutoutStyle = (crop: AvatarCrop): CSSProperties => ({
@@ -153,16 +160,9 @@ export function CutoutChooser({
     if (!image || !crop || next === tab) return
     if (tab === "picture") {
       setPicture(crop)
-      const kept =
-        portrait &&
-        portrait.x >= crop.x &&
-        portrait.y >= crop.y &&
-        portrait.x + portrait.width <= crop.x + crop.width &&
-        portrait.y + portrait.height <= crop.y + crop.height
-          ? portrait
-          : defaultPortrait(crop, image)
+      const kept = portrait && pictureContainsCrop(crop, portrait) ? portrait : defaultPortrait(crop, image)
       setPortrait(kept)
-      setBox(cropPixels(kept, image.width, image.height))
+      setBox(boxFrom(kept, image))
     } else {
       setPortrait(crop)
       setBox(boxFrom(picture, image))
@@ -181,14 +181,7 @@ export function CutoutChooser({
     if (!image || !crop) return
     const cut = tab === "picture" ? crop : picture
     const kept = tab === "portrait" ? crop : portrait
-    const chosen =
-      kept &&
-      kept.x >= cut.x &&
-      kept.y >= cut.y &&
-      kept.x + kept.width <= cut.x + cut.width &&
-      kept.y + kept.height <= cut.y + cut.height
-        ? kept
-        : defaultPortrait(cut, image)
+    const chosen = kept && pictureContainsCrop(cut, kept) ? kept : defaultPortrait(cut, image)
     onSave({
       ...snapCrop({ x: chosen.x, y: chosen.y, width: chosen.width, height: chosen.height }),
       ...(cut.x || cut.y || cut.width !== 1 || cut.height !== 1 ? { picture: snapCrop(cut) } : {})
@@ -501,8 +494,8 @@ export function CutoutChooser({
           <div className="flex items-start gap-4 sm:flex-col">
             {(tab === "picture"
               ? [
-                  ["Large view", "Opened large", "w-[134px]"],
-                  ["Export", "PNG export", "w-[96px]"]
+                  ["Large view", "Opened large", 134],
+                  ["Export", "PNG export", 96]
                 ]
               : [
                   // The message preview has the shape and size of the chat's own portraits (`Avatar` at `chat`).
@@ -516,12 +509,8 @@ export function CutoutChooser({
                 <span className="text-xs text-muted">{label}</span>
                 <span
                   data-cutout-preview={key}
-                  className={`relative inline-flex shrink-0 overflow-hidden rounded-sm bg-surface-raised ${size}`}
-                  style={
-                    tab === "picture" && crop && image
-                      ? { aspectRatio: `${crop.width * image.width} / ${crop.height * image.height}` }
-                      : undefined
-                  }
+                  className={`relative inline-flex shrink-0 overflow-hidden rounded-sm bg-surface-raised ${typeof size === "string" ? size : ""}`}
+                  style={typeof size === "number" ? picturePreview(crop, image, size) : undefined}
                 >
                   {crop && <img src={src} alt="" draggable={false} style={cutoutStyle(crop)} />}
                   <span

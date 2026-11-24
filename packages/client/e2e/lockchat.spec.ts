@@ -3,7 +3,9 @@ import { Effect } from "effect"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { openPanel } from "./support/panel.ts"
 import { modelChip, presetChip } from "./support/strip.ts"
+import { startWorkshopProvider } from "./support/workshopProvider.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -15,6 +17,67 @@ test.beforeAll(async () => {
 })
 test.afterAll(async () => {
   await provider?.stop()
+})
+
+test("a binned locked preset can be replaced or unlocked from either picker", async ({ page }) => {
+  const label = "Preset made by the workshop"
+  const reply = "I made the requested preset."
+  const scripted = await startWorkshopProvider({
+    calls: [{ name: "create_preset", arguments: { label } }],
+    answer: reply
+  })
+  try {
+    const { workshop, story } = await rpc((api) =>
+      Effect.gen(function* () {
+        const connection = yield* api.CreateConnection({
+          kind: "openai-chat",
+          settings: {
+            name: "Preset workshop",
+            baseUrl: scripted.baseUrl,
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          }
+        })
+        const model = yield* api.AddUserModel({ connectionId: connection.id, key: "workshop-small", overrides: {} })
+        yield* api.SetGenerationDefaults({
+          defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+        })
+        const workshop = yield* api.CreateWorkshop({})
+        yield* api.SetWorkshopGrant({ chatId: workshop.id, capability: "library.write", mode: "allow" })
+        const story = yield* api.CreateChat({ title: "Preset lock story" })
+        return { workshop, story }
+      })
+    )
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/chats/${workshop.id}`)
+    await page.getByLabel("Message", { exact: true }).fill("Create a test preset.")
+    await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+    await expect(page.getByRole("article").filter({ hasText: reply })).toHaveCount(1)
+    const preset = (await rpc((api) => api.ListLibrary({ kind: "preset" }))).find((p) => p.label === label)!
+    await rpc((api) =>
+      Effect.gen(function* () {
+        yield* api.ChangeCast({ chatId: story.id, slotId: null, change: { _tag: "Preset", ref: preset.id } })
+        const effects = yield* api.ListRolloutEffects({ chatId: workshop.id })
+        yield* api.UndoRolloutEffect(effects.find((effect) => effect.targetId === preset.entityId)!)
+      })
+    )
+    await page.goto(`${server().url}/chats/${story.id}`)
+    const chip = presetChip(page)
+    await expect(chip).toContainText("Preset unavailable")
+    await chip.click()
+    await expect(page.getByRole("switch", { name: "Lock for this chat" })).toBeChecked()
+    await expect(page.getByRole("radio", { name: "Default (built-in)", exact: true })).toBeEnabled()
+    await page.keyboard.press("Escape")
+    const panel = await openPanel(page, "Prompt preset")
+    await panel.getByRole("button", { name: /Prompt preset for the next reply: Preset unavailable/ }).click()
+    await page.getByRole("switch", { name: "Lock for this chat" }).click()
+    await expect(chip).toContainText("Default (built-in)")
+  } finally {
+    await scripted.stop()
+  }
 })
 
 for (const width of [390, 1440])
