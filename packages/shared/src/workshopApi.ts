@@ -134,11 +134,10 @@ export type WorkshopDefaults = typeof WorkshopDefaults.Type
  * this workshop (`Lock`, a preset ref of the user's, or null for the built-in one), or following
  * the account's preset (`Account`). Absent: the workshop default preset, kept for this workshop.
  */
-export const WorkshopPresetChoice = Schema.Union([
+const WorkshopPresetChoice = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal("Lock"), ref: Schema.NullOr(Schema.String) }),
   Schema.Struct({ _tag: Schema.Literal("Account") })
 ])
-export type WorkshopPresetChoice = typeof WorkshopPresetChoice.Type
 
 /** What an attached workshop is about: the story's title, or that it was deleted (no title then). */
 export const WorkshopStory = Schema.Struct({

@@ -1,16 +1,24 @@
 // The workshop beside a story before it exists (owner, 2026-11-17: "It should be a chat UI already
 // open with the composer ... The chat is created when the first message is sent."): the Workshop
-// tab opens on the chat's message area, with a brief intro, and its composer, focused; the first
-// send makes the workshop and sends the message in one action; the intro is gone after it, and a
-// reload keeps the workshop. At 1440 and 390, light and dark, with the layout audit. Synthetic
-// data and a scripted loopback provider only.
+// tab opens on a pending chat shown as a saved workshop is, "new" in its header (what it is on
+// the badge's hover), and its composer, focused; the first send starts that chat in place and
+// sends the message; "new" is gone after it, and a reload keeps the workshop. At 1440 and 390,
+// light and dark, with the layout audit. Synthetic data and a scripted loopback provider only.
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, test } from "@playwright/test"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { makeStory, SIDE_ANSWER, sidePanel, useSideChatProvider } from "./support/workshopSideChat.ts"
+import {
+  expectNewSideHint,
+  makeStory,
+  pendingSideChat,
+  SIDE_ANSWER,
+  sideChatId,
+  sidePanel,
+  useSideChatProvider
+} from "./support/workshopSideChat.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
 const shots = process.env.SCREENSHOT_DIR
@@ -39,7 +47,12 @@ test.describe("a workshop made by its first message", () => {
                 payload?: { chatId?: string }
               })
             : null
-        if (!failed && request?.tag === "ReadPath" && request.payload?.chatId && request.payload.chatId !== story.id) {
+        if (
+          !failed &&
+          request?.tag === "SendMessage" &&
+          request.payload?.chatId &&
+          request.payload.chatId !== story.id
+        ) {
           failed = true
           socket.send(
             JSON.stringify({
@@ -47,7 +60,7 @@ test.describe("a workshop made by its first message", () => {
               requestId: request.id,
               exit: {
                 _tag: "Failure",
-                cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Read interrupted" } }]
+                cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Send interrupted" } }]
               }
             })
           )
@@ -58,21 +71,22 @@ test.describe("a workshop made by its first message", () => {
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${story.id}?panel=workshop&workshop=new`)
     const panel = sidePanel(page)
+    const pending = pendingSideChat(page)
+    await expect(pending).toBeVisible({ timeout: 30_000 })
+    const workshopId = await sideChatId(pending)
     const box = panel.getByLabel("Message", { exact: true })
     const send = panel.getByRole("button", { name: /^Send( as .+)?$/ })
     await box.fill(QUESTION)
     await send.click()
     await expect(panel.getByRole("alert")).toBeVisible()
     expect(failed).toBe(true)
-    const before = await attached()
-    expect(before).toHaveLength(1)
-    const workshopId = before[0]!.id
-    const posted = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-      api.ReadPath({ chatId: workshopId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
-    )
-    expect(posted.entries.map((entry) => entry.version.content)).toContain(QUESTION)
+    // Not started: nothing beside the story yet, and the tab still shows the same new one.
+    expect(await attached()).toEqual([])
+    await expect(pending).toBeVisible()
     page.on("dialog", (dialog) => void dialog.accept())
     await page.reload()
+    await expect(pending).toBeVisible({ timeout: 30_000 })
+    expect(await sideChatId(pending)).toBe(workshopId)
     await expectTextBox(box, QUESTION)
     await send.click()
     const saved = panel.locator(`[data-side-chat="${workshopId}"]`)
@@ -100,26 +114,25 @@ test.describe("a workshop made by its first message", () => {
 
         await page.goto(`${server().url}/chats/${story.id}?panel=workshop`)
         const panel = sidePanel(page)
-        await expect(panel.getByText(/out of character/).first()).toBeVisible({ timeout: 30_000 })
+        const pending = pendingSideChat(page)
+        await expect(pending).toBeVisible({ timeout: 30_000 })
+        const draftId = await sideChatId(pending)
         await shot("opened")
 
-        // The chat's own surface, before anything exists: the intro in the message area, the
-        // composer under it, focused, with the strip's model and preset chips.
-        const intro = panel.locator("[data-side-chat-intro]")
-        await expect(intro).toBeVisible()
-        await expect(intro).toContainText("out of character")
+        // The chat's own surface, before it's started: "new" in its header, what it is on the
+        // badge's hover, the composer, focused, with the strip's model and preset chips.
+        await expectNewSideHint(page)
         await expect(panel.getByRole("button", { name: /^Start a workshop$/ })).toHaveCount(0)
         const box = panel.getByLabel("Message", { exact: true })
         await expect(box).toBeVisible()
         await expect(box).toBeFocused()
         const send = panel.getByRole("button", { name: /^Send( as .+)?$/ })
-        await expect(send).toBeVisible()
         await expect(panel.getByRole("button", { name: /^Model: / })).toBeVisible()
         await expect(panel.getByRole("button", { name: /^Prompt preset: / })).toBeVisible()
         // The saved workshop's composer before the first send (workshopstart2): the speaker
         // chip, Guidance and Generate, and the capability chip, changeable already.
         await expect(panel.getByRole("switch", { name: "Guidance" })).toBeVisible()
-        await expect(panel.getByRole("button", { name: /^Generate/ })).toBeVisible()
+        await expect(panel.getByTestId("composer-controls").getByRole("button", { name: /^Generate/ })).toBeVisible()
         const chip = panel.getByRole("button", { name: /^What the assistant may do: / })
         await expect(chip).toBeVisible()
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
@@ -139,14 +152,17 @@ test.describe("a workshop made by its first message", () => {
 
         // The first send makes the workshop and sends the message, in one action.
         await box.fill(QUESTION)
+        // Send once there is text to send, as in a saved workshop.
+        await expect(send).toBeVisible()
         await send.click()
         await expect(page).toHaveURL(/[?&]workshop=[^&]+/)
         const workshopId = new URL(page.url()).searchParams.get("workshop")!
+        expect(workshopId).toBe(draftId)
         const side = panel.locator(`[data-side-chat="${workshopId}"]`)
         await expect(side).toBeVisible()
         await expect(side.getByRole("article").filter({ hasText: QUESTION })).toHaveCount(1)
         await expect(side.getByRole("article").filter({ hasText: SIDE_ANSWER })).toHaveCount(1, { timeout: 60_000 })
-        await expect(panel.locator("[data-side-chat-intro]")).toHaveCount(0)
+        await expect(pending).toHaveCount(0)
         await expectTextBox(side.getByLabel("Message", { exact: true }), "")
         const attached = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
           api.ListAttachedWorkshops({ chatId: story.id })
@@ -160,11 +176,73 @@ test.describe("a workshop made by its first message", () => {
         await shot("sent")
         await expectLayout(page, info, `workshop-start-sent-${width}-${theme}`, { scope: panelScope })
 
-        // A reload keeps it: the same workshop, its messages, no intro.
+        // A reload keeps it: the same workshop, its messages, started.
         await page.reload()
         await expect(side.getByRole("article").filter({ hasText: QUESTION })).toHaveCount(1, { timeout: 30_000 })
         await expect(side.getByRole("article").filter({ hasText: SIDE_ANSWER })).toHaveCount(1)
-        await expect(panel.locator("[data-side-chat-intro]")).toHaveCount(0)
+        await expect(pending).toHaveCount(0)
         await shot("reloaded")
       })
+
+  for (const width of [1440, 390])
+    test(`the first send moves nothing in the tab at ${width}`, async ({ page }, info) => {
+      test.setTimeout(120_000)
+      const story = await makeStory(server, `Harbor boxes ${width}`)
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" })
+      await page.addInitScript(() => localStorage.setItem("dreamspan.theme", "dark"))
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      const shot = async (name: string) => {
+        if (!shots) return
+        mkdirSync(shots, { recursive: true })
+        await page.waitForTimeout(200)
+        await page.screenshot({ path: resolve(shots, `sidedraft-${name}-${width}-dark.png`) })
+      }
+      await page.goto(`${server().url}/chats/${story.id}?panel=workshop`)
+      const panel = sidePanel(page)
+      const pending = pendingSideChat(page)
+      await expect(pending).toBeVisible({ timeout: 30_000 })
+      // The side chat whichever it is: the pending one, then the started one in its place.
+      const side = panel.locator("[data-side-chat]")
+      const first = side.getByRole("article").first()
+      await expect(first).toBeVisible()
+      const strip = side.locator('[aria-label="Next reply"]').first()
+      const places = async () => ({
+        header: await side.locator("[data-side-chat-header]").boundingBox(),
+        greeting: await first.boundingBox(),
+        composer: await side.getByTestId("composer-box").boundingBox(),
+        strip: await strip.boundingBox(),
+        chips: await strip
+          .getByRole("button")
+          .allInnerTexts()
+          .then((texts) => texts.map((text) => text.replace(/[0-9.]+k?/g, "#")))
+      })
+      await page.waitForTimeout(300)
+      const before = await places()
+      expect(before.header).not.toBeNull()
+      expect(before.composer).not.toBeNull()
+      expect(before.chips.length).toBeGreaterThan(0)
+      await shot("before")
+      await expectLayout(page, info, `sidedraft-before-${width}`, {
+        scope: width === 390 ? '[role="dialog"]' : 'aside[aria-label="Chat panel"]'
+      })
+
+      // The first send starts it in place: its greeting stays message #1, and nothing moved.
+      await panel.getByLabel("Message", { exact: true }).fill(QUESTION)
+      await panel.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+      await expect(page).toHaveURL(/[?&]workshop=[^&]+/, { timeout: 30_000 })
+      await expect(pending).toHaveCount(0)
+      await expect(side.getByRole("article").filter({ hasText: SIDE_ANSWER })).toHaveCount(1, { timeout: 60_000 })
+      // Its answer is in: the strip is as it rests.
+      await expect(side.getByTestId("composer-controls").getByRole("button", { name: /^Generate/ })).toBeVisible()
+      // The new message and its answer sit below the greeting: the greeting is where it was
+      // once the list keeps its top (the list may scroll to the newest at this height).
+      await side.getByTestId("side-chat-messages").evaluate((list) => list.scrollTo({ top: 0 }))
+      await page.waitForTimeout(500)
+      await expect.poll(places, { timeout: 30_000 }).toEqual(before)
+      await shot("after")
+      await expectLayout(page, info, `sidedraft-after-${width}`, {
+        scope: width === 390 ? '[role="dialog"]' : 'aside[aria-label="Chat panel"]'
+      })
+    })
 })

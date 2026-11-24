@@ -38,6 +38,3 @@ export const chooseSideChat = (attached: ReadonlyArray<Chat>, wanted: string | n
   if (named) return { shown: named, missing: false }
   return { shown: attached[0] ?? null, missing: wanted !== null }
 }
-
-/** Where the first message typed in a workshop not made yet beside this story is kept. */
-export const pendingWorkshopCopy = (storyId: string) => `pending-workshop:${storyId}`

@@ -210,7 +210,7 @@ export class PendingChat {
  * A chat not made yet as the saved chat's parts read it: its cast (`characters`, and the card the
  * user plays), and nothing else yet. A workshop not made yet reads the same (features/workshop).
  */
-export const pendingView = (characters: ReadonlyArray<CastCard>, playing: CastCard | null): ChatView => {
+const pendingView = (characters: ReadonlyArray<CastCard>, playing: CastCard | null): ChatView => {
   const cards = [...characters, ...(playing ? [playing] : [])]
   return {
     chat: null,

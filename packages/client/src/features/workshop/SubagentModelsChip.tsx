@@ -22,14 +22,7 @@ import { ChipText, chipClass, LoadingChip, PopoverRow } from "../chat/nextReplyS
 import type { ChatSession } from "../chat/session.ts"
 import { PickerLockRow, PickerPopover, PickerSearch } from "../pickers/PickerParts.tsx"
 import { useReplyTools } from "../chat/agent/replyTools.ts"
-import {
-  capabilitiesAtom,
-  newCapabilitiesAtom,
-  type PendingGrants,
-  type WorkshopCapability,
-  withPendingGrants
-} from "./capabilities.ts"
-import type { ChatId } from "@dreamspan/shared/chat.ts"
+import { capabilitiesAtom, type WorkshopCapability } from "./capabilities.ts"
 
 /** The capability that allows subagents (agent/capabilities.ts on the server). */
 const SUBAGENTS = "subagents"
@@ -306,11 +299,4 @@ export function StorySubagentModelsChip({ session }: { session: ChatSession }) {
   return tools.tools.some((t) => t.subagents && allowed.includes(t.id)) ? (
     <SubagentModelsChip session={session} />
   ) : null
-}
-
-/** A workshop not made yet: the account's picks, shown while its pending grants leave subagents allowed. */
-export function PendingSubagentModelsChip({ attachTo, grants }: { attachTo: ChatId | null; grants: PendingGrants }) {
-  const result = useAtomValue(newCapabilitiesAtom(attachTo ?? ""))
-  if (!AsyncResult.isSuccess(result)) return <LoadingChip label="Subagent models" />
-  return subagentsAllowed(withPendingGrants(result.value, grants)) ? <SubagentModelsChip session={null} /> : null
 }

@@ -63,7 +63,7 @@ function Choice({
 }
 
 /** Who the new workshop starts with: the assistant's card and the user's persona. */
-export function StartChoices({
+function StartChoices({
   card,
   setCard,
   persona,

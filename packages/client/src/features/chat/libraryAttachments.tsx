@@ -462,16 +462,6 @@ export function ComposerLibraryTiles({ library }: { library: Pick<ComposerLibrar
   ))
 }
 
-/** A workshop not made yet: its first message's items, as the saved composer shows them. */
-export function PendingLibraryTiles({ library }: { library: Pick<ComposerLibrary, "items" | "remove"> }) {
-  return (
-    // Room above and to the right for the X, as the saved composer's list has.
-    <ul className="flex flex-wrap gap-3 pt-5 pr-3" aria-label="Attachments">
-      <ComposerLibraryTiles library={library} />
-    </ul>
-  )
-}
-
 /** A sent message's items (§4.2): the same tiles, by the names they had when sent. */
 export function MessageLibraryTiles({ entry }: { entry: PathEntry }) {
   const items: VersionLibrary = entry.version.library ?? []

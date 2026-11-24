@@ -127,7 +127,6 @@ const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
     { durable: "useUserDraft", what: "a kept piece's text" },
     { durable: "useUserDraft", what: "workspace instructions" }
   ],
-  "features/workshop/PendingWorkshop.tsx": [{ durable: "useUserDraft", what: "a new workshop's first message" }],
 
   // Settings and other pages.
   "features/credentials.tsx": [{ durable: "useUserDraft", what: "a new key's addresses" }],

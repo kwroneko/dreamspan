@@ -11,5 +11,3 @@ export const WORKSHOP_ATTACH_KEY = "workshopAttach"
 export const NO_PERSONA = "none"
 /** Where a new workshop's title is kept until it's made: the start card and the page share it. */
 export const NEW_WORKSHOP_TITLE = "workshop:new"
-/** Where the first message typed on that page is kept. */
-export const NEW_WORKSHOP_COPY = "pending-workshop:new"

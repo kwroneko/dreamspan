@@ -39,7 +39,8 @@ export function PendingSideDraft({
   story: ChatId
   /** The story branch shown: the workshop's first branch goes with it. */
   storyFork: ForkId | null
-  header: ReactNode
+  /** The tab's header, for the workshop once it's open (null before). */
+  header: (chat: Chat | null) => ReactNode
   onCreated: (chat: Chat) => void
   onGone: () => void
   /** The tab's chat surface for a chat, as for a saved one. */
@@ -124,10 +125,12 @@ export function PendingSideDraft({
     [onCreated]
   )
   if (chat !== null)
-    return <Surface key={chat.id} chat={chat} draft={host} storyFork={storyFork} header={header} onGone={onGone} />
+    return (
+      <Surface key={chat.id} chat={chat} draft={host} storyFork={storyFork} header={header(chat)} onGone={onGone} />
+    )
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {header}
+      {header(null)}
       {action.error ? (
         <div className="px-3 pt-2">
           <ErrorAlert
