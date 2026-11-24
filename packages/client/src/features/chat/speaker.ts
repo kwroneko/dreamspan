@@ -117,7 +117,7 @@ class ComposerChoices {
       return
     }
     const choice = result.ok ? result.value : null
-    this.setState({
+    this.applyChoice({
       draftId,
       loaded: true,
       saving: false,
@@ -125,12 +125,16 @@ class ComposerChoices {
       replyFrom: choice?.replyFromEntityId ?? null,
       noReplies: choice?.noReplies ?? false,
       guidance: choice?.guidance ?? false,
-      guidanceSlot: this.earlyGuidanceSlot !== undefined ? this.earlyGuidanceSlot : (choice?.guidanceSlotId ?? null)
+      guidanceSlot: choice?.guidanceSlotId ?? null
     })
+  }
+
+  private applyChoice(next: ChoiceState) {
     const speaker = this.early
     const guidanceSlot = this.earlyGuidanceSlot
     this.early = null
     this.earlyGuidanceSlot = undefined
+    this.setState({ ...next, guidanceSlot: guidanceSlot === undefined ? next.guidanceSlot : guidanceSlot })
     if (speaker !== null || guidanceSlot !== undefined)
       void this.change({
         ...(speaker === null ? {} : { speaker }),
@@ -141,7 +145,7 @@ class ComposerChoices {
   private receive(choice: ComposerChoice) {
     if (choice.draftId !== this.state.draftId || this.writing > 0) return
     this.reads++
-    this.setState({
+    this.applyChoice({
       ...this.state,
       loaded: true,
       saving: false,
@@ -171,6 +175,7 @@ class ComposerChoices {
       if (draftId === null && change.guidanceSlot !== undefined) this.earlyGuidanceSlot = change.guidanceSlot
       return { ok: true, value: null }
     }
+    if (change.guidanceSlot !== undefined) this.earlyGuidanceSlot = undefined
     this.reads++
     this.writing++
     this.setState({

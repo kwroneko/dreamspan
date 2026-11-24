@@ -15,12 +15,13 @@ const choice = (draftId: string, speaker: string | null = null, guidance = false
     noReplies: false
   })
 
-const fixture = () => {
+const fixture = (holdRead = false) => {
   const rows = new Map([
     ["one", choice("one", "Ana")],
     ["two", choice("two", "Bo")]
   ])
   const pending: Array<() => void> = []
+  const reads: Array<() => void> = []
   const writes: Array<Record<string, unknown>> = []
   let receive: (next: ComposerChoice | null) => void = () => {}
   const session = {
@@ -37,7 +38,11 @@ const fixture = () => {
       ) => unknown
     ) =>
       run((tag, payload) => {
-        if (tag === "GetComposerChoice") return Promise.resolve({ ok: true, value: rows.get(payload.draftId)! })
+        if (tag === "GetComposerChoice") {
+          const result = { ok: true, value: rows.get(payload.draftId)! }
+          if (holdRead) return new Promise((resolve) => reads.push(() => resolve(result)))
+          return Promise.resolve(result)
+        }
         writes.push(payload)
         return new Promise((resolve) =>
           pending.push(() => {
@@ -55,7 +60,7 @@ const fixture = () => {
       })
   } as unknown as ChatSession
   const store = composerChoice(session)
-  return { store, rows, pending, writes, receive: (next: ComposerChoice | null) => receive(next) }
+  return { store, rows, pending, reads, writes, receive: (next: ComposerChoice | null) => receive(next) }
 }
 
 it("finishes loading a new branch when an old branch's choice was still saving", async () => {
@@ -132,4 +137,14 @@ it("keeps the reply a guidance edit was opened for before the draft was known, a
   expect(store.snapshot().guidanceSlot).toBe("s1")
   await vi.waitFor(() => expect(pending).toHaveLength(1))
   expect(writes[0]).toMatchObject({ draftId: "one", guidanceSlotId: "s1" })
+})
+
+it("keeps an early guidance edit when a live choice arrives before the initial read", async () => {
+  const { store, reads, writes, receive } = fixture(true)
+  await store.change({ guidanceSlot: "s1" as SlotId })
+  store.bind("one")
+  receive(new ComposerChoice({ ...choice("one", "Bo", true), guidanceSlotId: null }))
+  reads.shift()!()
+  expect(store.snapshot()).toMatchObject({ loaded: true, guidanceSlot: "s1", speaker: "Bo", guidance: true })
+  await vi.waitFor(() => expect(writes).toEqual([{ chatId: "chat", draftId: "one", guidanceSlotId: "s1" }]))
 })
