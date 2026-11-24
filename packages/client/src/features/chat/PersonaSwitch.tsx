@@ -72,7 +72,7 @@ export function PendingPersonaSwitch({ pending, trigger }: { pending: PendingCha
         place="pending-cast"
         onPick={(card) => pending.setPersona(card.entityId)}
         onNone={() => pending.setPersona(null)}
-        footer={<SlotOutlet slot={pendingPersonaPickerRows} props={{ pending }} />}
+        header={<SlotOutlet slot={pendingPersonaPickerRows} props={{ pending }} />}
       />
     </CastContext>
   )

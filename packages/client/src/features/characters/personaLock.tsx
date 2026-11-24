@@ -1,7 +1,7 @@
 // The persona locked to a character (DESIGN §2.2, owner 2026-11-18: "an explicit lock
 // per-character"): new single chats with them start as it instead of the account default.
 // Set from a new single chat's persona pickers, the composer's and the Cast tab's (Always play
-// as <Persona> with <Name>, a row under the list); shown, and cleared, in the character's own
+// as <Persona> with <Name>, a row at the top); shown, and cleared, in the character's own
 // tab in the chat panel. A lock never changes a chat that has started. Both parts are
 // registered slot entries, so a plugin can replace or drop either. A lock is account data, so
 // another browser tab follows a change at once (the `dreamspan.personaLock` channel) and on focus, as
@@ -66,9 +66,9 @@ const writeLock = (action: ReturnType<typeof useAction>, entityId: EntityId, per
 const lockHint = (name: string) => `New chats with ${name} start with this persona. Chats already started keep theirs.`
 
 /**
- * Under the list of a new single chat's persona pickers (the composer's and the Cast tab's): lock
- * the persona picked to its character. A row of the list's own size and inset, not a settings
- * switch; none while no persona is picked.
+ * At the top of a new single chat's persona pickers (the composer's and the Cast tab's), under
+ * the search: lock the persona picked to its character. A row of the list's own inset, not a
+ * settings switch; none while no persona is picked.
  */
 function PendingPersonaLock({ pending }: { pending: PendingChat }) {
   const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
@@ -93,7 +93,8 @@ function PendingPersonaLock({ pending }: { pending: PendingChat }) {
         }
         hint={lockHint(card.name)}
       >
-        <span className="[overflow-wrap:anywhere]">
+        {/* One line, as the list's rows: long names end in an ellipsis rather than wrap. */}
+        <span data-layout-name className="block truncate">
           Always play as {persona.name} with {card.name}
         </span>
       </Checkbox>
