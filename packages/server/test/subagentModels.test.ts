@@ -6,7 +6,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { Chat } from "@dreamspan/shared/chat.ts"
-import { client, serverLayer, testConfig } from "./support/config.ts"
+import { Reader } from "../src/db/Database.ts"
+import type { SubagentModelsAt } from "../src/db/subagentSettings.ts"
+import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import {
   agentDescription,
@@ -194,6 +196,38 @@ describe("subagent models", () => {
       assert.lengthOf(completions(first.requests()).filter(isChild), 0)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
+
+  it.live("subagent model consent at a shared slot follows the requested fork", () =>
+    Effect.gen(function* () {
+      const { api, chat, other } = yield* setup([])
+      const reader = yield* Reader
+      const userId = (yield* api.GetSession()).user.id
+      const { entry } = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: chat.activeLeafSlotId,
+          branch: false,
+          content: "A shared message."
+        })
+      )
+      const slotId = entry.slotId
+      const forkId = (yield* api.GetChat({ chatId: chat.id })).currentForkId!
+      yield* api.ChangeCast({ chatId: chat.id, slotId, forkId, change: { _tag: "SubagentModels", picks: ["same"] } })
+      const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: forkId, atSlotId: slotId })
+      yield* api.ChangeCast({
+        chatId: chat.id,
+        slotId,
+        forkId: fork.id,
+        change: { _tag: "SubagentModels", picks: [other.pick] }
+      })
+      const picksAt = (forkId: Chat["currentForkId"]) =>
+        reader
+          .SubagentModelsAt({ userId, chatId: chat.id, forkId, leafSlotId: slotId })
+          .pipe(Effect.map((json) => (JSON.parse(json) as SubagentModelsAt).entries.map((entry) => entry.pick)))
+      assert.deepStrictEqual(yield* picksAt(fork.id), [other.pick])
+      assert.deepStrictEqual(yield* picksAt(forkId), ["same"])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
 
   it.live("settings refuse two models with one name; `same` keeps its own", () => {
     const config = testConfig()
