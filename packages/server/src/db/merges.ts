@@ -412,7 +412,7 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
     let verbatimFrom = messages.length
     while (verbatimFrom > 0) {
       const cost = estimateTokens(line(messages[verbatimFrom - 1]!)) + 1
-      if (used + cost > budget && verbatimFrom < messages.length) break
+      if (used + cost > budget) break
       used += cost
       verbatimFrom--
     }

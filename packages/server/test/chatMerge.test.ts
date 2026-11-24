@@ -356,6 +356,27 @@ describe("merging another chat", () => {
     )
   )
 
+  it.live("leaves out even the newest source message if it exceeds the verbatim budget", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* setup(dataDir)
+        const home = yield* t.chat("Harbor", [t.mira])
+        const away = yield* t.chat("Docks", [t.kai])
+        const large = "A long report. " + "x".repeat(24_000)
+        yield* t.many(home, t.mira, ["short"])
+        yield* t.many(away, t.kai, [large])
+        const request = { ...home, at: null, source: away }
+        const seen = yield* t.preview(request)
+        assert.strictEqual(seen.budget, 4_000)
+        assert.strictEqual(seen.verbatim, 0)
+        assert.strictEqual(seen.leftOut, 1)
+        assert.notInclude(seen.section, large)
+        const included = yield* t.preview({ ...request, includeLeftOut: true })
+        assert.include(included.section, large)
+      })
+    )
+  )
+
   it.live("keeps the merge cast positional and restores deleted joins independently of later forks", () =>
     run((dataDir) =>
       Effect.gen(function* () {
