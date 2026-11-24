@@ -137,6 +137,28 @@ test("typing and validating a token bound preserves the other bound", async ({ p
   }
 })
 
+test("a single author with a comma stays one identity when another author is added", async ({ page }) => {
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: "0" })
+  try {
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const url = new URL("/?show=src.cardex", server.url)
+    url.searchParams.set("sf", JSON.stringify({ author: "chub/anna,lee" }))
+    await page.goto(url.href)
+    const main = page.getByRole("main")
+    const chips = main.getByRole("group", { name: "Active filters", exact: true }).locator("[data-source-chip]")
+    await expect(chips.filter({ hasText: /^By / })).toHaveText(["By anna,lee"])
+    const panel = await openPanel(page, main, "Authors")
+    await panel.getByRole("list", { name: "Authors", exact: true }).getByRole("button").first().click()
+    await expect.poll(() => new URL(page.url()).searchParams.get("sf")).toContain("any_author")
+    const filters = JSON.parse(new URL(page.url()).searchParams.get("sf")!) as Record<string, string>
+    expect(filters.any_author).toMatch(/^chub\/anna\\,lee,/)
+    await expect(panel.getByRole("list", { name: "Chosen authors", exact: true }).getByRole("listitem")).toHaveCount(2)
+  } finally {
+    await server.stop()
+  }
+})
+
 for (const width of [1440, 390])
   test(`${width}: the archive's filter bar applies, clears and round-trips the URL`, async ({ page }, info) => {
     test.setTimeout(240_000)

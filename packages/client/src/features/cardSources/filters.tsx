@@ -609,7 +609,9 @@ const creatorName = (identity: string) => creatorNames.get(identity) ?? handle(i
 const creatorChoice = (caps: SourceCapabilities, filters: Filters) => {
   const c = caps.creators!
   const not = c.excludeFilterId ? splitList(filters[c.excludeFilterId]) : []
-  const by = [...splitList(filters[c.filterId]), ...(c.anyFilterId ? splitList(filters[c.anyFilterId]) : [])]
+  const author = filters[c.filterId]
+  const single = typeof author === "string" && author.trim() ? [author.trim()] : []
+  const by = [...single, ...(c.anyFilterId ? splitList(filters[c.anyFilterId]) : [])]
   return { by, not }
 }
 
