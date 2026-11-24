@@ -307,6 +307,9 @@ const createUndoer: Undoer = {
       return {}
     })
 }
+// Older assistant revert recipes predate a flag that distinguishes them from other card edits.
+const assistantRevert = (effect: RolloutEffect) => effect.title.startsWith("Reverted a change to the ")
+
 const reviseUndoer: Undoer = {
   id: "library.revise",
   unchanged: libraryUnchanged,
@@ -316,7 +319,7 @@ const reviseUndoer: Undoer = {
       // Explicit user Undo restores the recorded document exactly, including its prior
       // approvals, and leaves active drafts alone. This is never tool-reachable approval.
       const change =
-        effect.undo!.exactDocument === true
+        effect.undo!.exactDocument === true || assistantRevert(effect)
           ? yield* ctx.ops.EditRef({
               userId: ctx.userId,
               refId: ref.id as RefId,
@@ -1244,7 +1247,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                         undo: {
                           refId: before.id,
                           before: before.head_revision_id,
-                          exactDocument: before.kind === "preset" || before.kind === "lorebook",
+                          exactDocument: true,
                           archivedAt: before.archived_at,
                           beforeRowVersion: before.row_version,
                           head: change.ref.headRevisionId,
