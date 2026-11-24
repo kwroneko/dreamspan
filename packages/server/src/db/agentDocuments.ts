@@ -1,6 +1,12 @@
 // Pure document policy shared by approval previews and the writer. Executable changes
 // stay off until the user approves them through the ordinary editor controls.
-import { canonicalJson } from "@dreamspan/shared/editing.ts"
+import {
+  canonicalJson,
+  keepsRegexApproval,
+  validateDoc,
+  withHtmlApprovals,
+  withoutGrantedAgentEdits
+} from "@dreamspan/shared/editing.ts"
 import type { Doc, EntityKind } from "@dreamspan/shared/library.ts"
 import type { PresetDoc } from "@dreamspan/shared/docs/preset.ts"
 import type { LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
@@ -13,6 +19,14 @@ const html = (value: unknown): boolean =>
     : Array.isArray(value)
       ? value.some(html)
       : value !== null && typeof value === "object" && Object.values(value).some(html)
+
+/** An imported or merged document can keep existing grants and approvals. */
+export const guarded = (kind: EntityKind, head: Doc, next: Doc): Doc => {
+  const granted = withoutGrantedAgentEdits(kind, head, next)
+  if (kind !== "preset" && kind !== "card") return granted
+  const doc = withHtmlApprovals(head, granted)
+  return doc.regex_approved === true && !keepsRegexApproval(head, doc) ? { ...doc, regex_approved: false } : doc
+}
 
 export const safeAgentDocument = (kind: EntityKind, before: Doc, next: Doc): Doc => {
   if (kind === "preset") {
@@ -83,6 +97,12 @@ export const safeAgentDocument = (kind: EntityKind, before: Doc, next: Doc): Doc
     }
   }
   return next
+}
+
+/** The validated document an agent edit will save, also used by its approval preview. */
+export const validateAgentDocument = (kind: EntityKind, head: Doc, next: Doc) => {
+  const valid = validateDoc(kind, guarded(kind, head, next))
+  return valid.ok ? { ...valid, doc: safeAgentDocument(kind, head, valid.doc) } : valid
 }
 
 /** List each changed element/setting separately; retain every value for the full diff. */

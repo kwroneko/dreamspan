@@ -39,8 +39,8 @@ import { workshopLimits as limits } from "../workshopLimits.ts"
 import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
 import { visibleDoc } from "../agent/libraryView.ts"
 import { newWorkshopImportMedia } from "./workshopImportMedia.ts"
-import { guarded, insertReversal, recordAssistantRevertUndo, revisionReversal } from "./changeReversals.ts"
-import { unitName, unitPath } from "@dreamspan/shared/changeReversal.ts"
+import { insertReversal, recordAssistantRevertUndo, revisionReversal } from "./changeReversals.ts"
+import { changedUnits, unitName, unitPath, valuesOfUnits } from "@dreamspan/shared/changeReversal.ts"
 
 /** The assistant's message for a revision it writes, on one line; none when it gave none. */
 const agentMessage = (message: string | undefined) => message?.replace(/\p{Cc}+/gu, " ").trim() || undefined
@@ -1207,18 +1207,18 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               }
             if (plan.doc === null || plan.fields.length === 0) return unchanged
             const head = yield* lib.loadDoc(before.head_revision_id)
-            const valid = validateDoc(before.kind, guarded(before.kind, head, plan.doc as Doc))
-            if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
             const change = yield* ops.EditRef({
               userId: input.userId,
               refId: input.refId,
-              doc: valid.doc,
+              doc: plan.doc,
               expectedRowVersion: before.row_version,
               message: agentMessage(input.message) ?? "Reverted a change",
               commitDraft: null,
               agentOriginRef: `${input.rolloutId}:${input.toolCallId}`
             })
             if (change.ref.headRevisionId === before.head_revision_id) return unchanged
+            const saved = yield* lib.loadDoc(change.ref.headRevisionId)
+            const fields = [...new Set([...plan.fields, ...changedUnits(head, saved)])]
             const reversalId = yield* insertReversal(sql, {
               userId: input.userId,
               chatId,
@@ -1229,7 +1229,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               reversesId: null,
               headBefore: before.head_revision_id,
               headAfter: change.ref.headRevisionId,
-              plan,
+              plan: { fields, before: valuesOfUnits(head, fields), after: valuesOfUnits(saved, fields) },
               effects: covered
             })
             return {
@@ -1237,7 +1237,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                 reverted: true,
                 id: change.ref.id,
                 revision: change.ref.headRevisionId,
-                fields: plan.fields.map(unitName)
+                fields: fields.map(unitName)
               }),
               effects: [
                 {

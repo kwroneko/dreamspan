@@ -16,13 +16,8 @@ import {
   type ReversalPlan,
   valuesOfUnits
 } from "@dreamspan/shared/changeReversal.ts"
-import {
-  keepsRegexApproval,
-  validateDoc,
-  withHtmlApprovals,
-  withoutGrantedAgentEdits
-} from "@dreamspan/shared/editing.ts"
-import type { Doc, EntityKind, RefId } from "@dreamspan/shared/library.ts"
+import { validateDoc } from "@dreamspan/shared/editing.ts"
+import type { Doc, RefId } from "@dreamspan/shared/library.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { EffectUndoRefused, type ReversalOutcome, type RolloutEffect } from "@dreamspan/shared/workshopApi.ts"
@@ -34,6 +29,7 @@ import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import type { OpsOf } from "./opsOf.ts"
 import { query, transaction } from "./tx.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
+import { guarded } from "./agentDocuments.ts"
 
 type Handlers = Parameters<typeof WriteOps.of>[0]
 type ReadHandlers = Parameters<typeof ReadOps.of>[0]
@@ -258,16 +254,6 @@ export const recordAssistantRevertUndo = (
       effects
     })
   })
-
-/** The approvals a revert never gives (as a restored revision, editorWrites.ts `RestoreRevision`). */
-export const guarded = (kind: EntityKind, head: Doc, next: Doc): Doc => {
-  let doc = withoutGrantedAgentEdits(kind, head, next)
-  if (kind === "preset" || kind === "card") {
-    if (doc.regex_approved === true && !keepsRegexApproval(head, doc)) doc = { ...doc, regex_approved: false }
-    doc = withHtmlApprovals(head, doc)
-  }
-  return doc
-}
 
 interface Options {
   readonly fields?: ReadonlyArray<string> | undefined
