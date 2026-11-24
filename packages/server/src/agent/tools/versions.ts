@@ -8,7 +8,7 @@ import type { LibraryRef, Revision, RevisionId } from "@dreamspan/shared/library
 import { unifiedDiff } from "@dreamspan/shared/unifiedDiff.ts"
 import { Effect } from "effect"
 import { documentDiff } from "../../db/agentDocuments.ts"
-import { type CountEffect, estimateCount, pageTokens, visibleDoc } from "../libraryView.ts"
+import { type CountEffect, estimateCount, pageEnd, pageTokens, visibleDoc } from "../libraryView.ts"
 import { toolResultFrame } from "../toolData.ts"
 import type { RolloutTool, ToolContext } from "../tools.ts"
 import { pagedView, resolveLibrary, VIEWS, viewHelp } from "./library.ts"
@@ -187,38 +187,55 @@ const diffRevisions: RolloutTool<{
         (c) => args.fields === undefined || args.fields.includes(topField(c.field))
       )
       const head = `${args.kind} "${ref.label}" (id ${ref.id}): revision ${from.revision.number ?? from.revision.id} → ${to === null ? "now" : (to.revision.number ?? to.revision.id)}`
-      let at = Number(cursor?.[3] ?? 0)
-      let offset = Number(cursor?.[4] ?? 0)
-      if (cursor && at >= changes.length) return invalidCursor
-      if (changes.length === 0) return { text: `${head}\nNo differences${args.fields ? " in those fields" : ""}.` }
+      const start = Number(cursor?.[3] ?? 0)
+      if (cursor && start >= changes.length) return invalidCursor
       const budget = pageTokens(args.max_tokens)
       const counter = count(ctx)
-      const shown: Array<string> = [head]
-      let used = yield* counter(head)
-      for (; at < changes.length; at++) {
+      const tooSmall = "The token limit is too small to show this diff."
+      const tooSmallResult = () =>
+        Effect.map(counter(tooSmall), (size) => ({ text: size <= budget ? tooSmall : "", isError: true }))
+      if (changes.length === 0) {
+        const noDiff = `No differences${args.fields ? " in those fields" : ""}.`
+        const page = `${head}\n${noDiff}`
+        if ((yield* counter(page)) <= budget) return { text: page }
+        if ((yield* counter(noDiff)) <= budget) return { text: noDiff }
+        return yield* tooSmallResult()
+      }
+      const footer = (at: number, offset: number) =>
+        at < changes.length ? `[Continue with cursor="${from.revision.id}:${toId}:${at}:${offset}"]` : ""
+      let heading = cursor ? "" : head
+      const render = (parts: ReadonlyArray<string>, next: string) =>
+        [heading, ...parts, next].filter(Boolean).join("\n\n")
+      const shown: Array<string> = []
+      let page = ""
+      for (let at = start; at < changes.length; at++) {
+        const offset = at === start ? Number(cursor?.[4] ?? 0) : 0
         const current = section(changes[at]!)
         if (offset >= current.length) return invalidCursor
         const text = current.slice(offset)
-        const cost = yield* counter(text)
-        if (used + cost > budget) {
-          // A first field too long for the page is cut, never left out.
-          if (shown.length === 1) {
-            const size = Math.max(1, (budget - used) * 4)
-            shown.push(text.slice(0, size))
-            if (size < text.length) offset += size
-            else {
-              at++
-              offset = 0
-            }
-          }
-          break
+        const next = footer(at + 1, 0)
+        const candidate = render([...shown, text], next)
+        if ((yield* counter(candidate)) <= budget) {
+          shown.push(text)
+          page = candidate
+          continue
         }
-        shown.push(text)
-        used += cost
-        offset = 0
+        if (page) return { text: page }
+
+        // Choose the end against the exact rendering, with its continuation on the same page.
+        const renderCut = (body: string) =>
+          render([body], body.length === text.length ? next : footer(at, offset + body.length))
+        const first = String.fromCodePoint(text.codePointAt(0)!)
+        if ((yield* counter(renderCut(first))) > budget) heading = ""
+        let end = yield* pageEnd(current, offset, budget, (body) => counter(renderCut(body)))
+        if (end < current.length && (current.codePointAt(end - 1) ?? 0) > 0xffff) end--
+        const partial = renderCut(current.slice(offset, Math.max(end, offset + first.length)))
+        if ((yield* counter(partial)) <= budget) return { text: partial }
+        const minimum = renderCut(first)
+        if ((yield* counter(minimum)) <= budget) return { text: minimum }
+        return yield* tooSmallResult()
       }
-      if (at < changes.length) shown.push(`[Continue with cursor="${from.revision.id}:${toId}:${at}:${offset}"]`)
-      return { text: shown.join("\n\n") }
+      return { text: page }
     }).pipe(Effect.catch(failRead))
 }
 

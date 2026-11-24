@@ -6,8 +6,9 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { unitKey } from "@dreamspan/shared/changeReversal.ts"
+import { newLorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
 import { newCardDoc, textField } from "@dreamspan/shared/editing.ts"
-import type { RefId } from "@dreamspan/shared/library.ts"
+import type { Doc, RefId } from "@dreamspan/shared/library.ts"
 import { unifiedDiff } from "@dreamspan/shared/unifiedDiff.ts"
 import { builtinSkills } from "../src/agent/skills.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
@@ -46,10 +47,10 @@ const fixture = (dataDir: string, api: Api) =>
       viewers: null,
       cache: new Map()
     }
-    const call = (name: string, args: unknown, id: string) =>
-      toolForKind(registry, "workshop", name)!.execute({ ...context, toolCallId: id }, args as never)
-    const run = (name: string, args: unknown, id: string) =>
-      Effect.map(call(name, args, id), (out) => {
+    const call = (name: string, args: unknown, id: string, options?: Pick<ToolContext, "countTokens" | "window">) =>
+      toolForKind(registry, "workshop", name)!.execute({ ...context, ...options, toolCallId: id }, args as never)
+    const run = (name: string, args: unknown, id: string, options?: Pick<ToolContext, "countTokens" | "window">) =>
+      Effect.map(call(name, args, id, options), (out) => {
         assert.isUndefined(out.isError, out.text)
         return out.text
       })
@@ -66,7 +67,19 @@ const fixture = (dataDir: string, api: Api) =>
     const card = made.ref.id as RefId
     const revisions = () => api.ListRevisions({ refId: card, limit: 50 })
     const doc = () => Effect.map(api.OpenEditor({ refId: card }), (s) => s.doc)
-    return { chat, call, run, card, revisions, doc, registry }
+    const save = (refId: RefId, changes: Doc) =>
+      Effect.gen(function* () {
+        const { ref, doc } = yield* api.OpenEditor({ refId })
+        return yield* context.writer.EditRef({
+          userId: user.id,
+          refId,
+          expectedRowVersion: ref.rowVersion,
+          doc: { ...doc, ...changes },
+          message: null,
+          commitDraft: null
+        })
+      })
+    return { chat, call, run, card, revisions, doc, registry, context, save }
   })
 
 const userEdit = (api: Api, refId: RefId, key: string, content: string) =>
@@ -160,6 +173,43 @@ describe("version tools", () => {
       ["@@ -1,4 +1,4 @@", " a", "-b", "+B", " c", " d", "@@ -7,4 +7,4 @@", " g", " h", "-i", "+I", " j"].join("\n")
     )
     assert.strictEqual(unifiedDiff("x", "x"), "")
+  })
+
+  it.live("compares the same saved revisions across bounded pages of entries and a long field", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const book = yield* api.CreateLorebook({ label: "Fog banks" })
+      const entries = Array.from({ length: 6 }, (_, i) => ({ ...newLorebookEntry(i), content: `Old entry ${i}.` }))
+      yield* f.save(book.id, { entries })
+      const next = entries.map((entry, i) => ({
+        ...entry,
+        content: i === 2 ? "🌫️ Dense fog. ".repeat(50) : `New entry ${i}.`
+      }))
+      yield* f.save(book.id, { entries: next })
+      const args = { kind: "lorebook", item: book.id, from: "2", fields: ["entries"] }
+      const options = { countTokens: (text: string) => Effect.succeed(text.length) }
+      const full = yield* f.run("diff_revisions", { ...args, max_tokens: 8000 }, "full", options)
+      const cursors = new Set<string>()
+      let cursor: string | undefined
+      let combined = ""
+      for (let i = 0; i < 30; i++) {
+        const page = yield* f.run("diff_revisions", { ...args, max_tokens: 200, cursor }, `page-${i}`, options)
+        assert.isAtMost(page.length, 200)
+        const footer = /\n\n\[Continue with cursor="([^"]+)"\]$/.exec(page)
+        const body = footer === null ? page : page.slice(0, footer.index)
+        if (cursor?.endsWith(":0")) combined += "\n\n"
+        combined += i === 0 && body.startsWith("lorebook ") ? body.slice(body.indexOf("\n\n") + 2) : body
+        if (footer === null) break
+        cursor = footer[1]!
+        assert.isFalse(cursors.has(cursor), "the cursor must advance on each page")
+        cursors.add(cursor)
+        if (i === 0) yield* f.save(book.id, { entries: [] })
+      }
+      assert.isAbove(cursors.size, 1)
+      assert.strictEqual(combined, full.slice(full.indexOf("\n\n") + 2))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
   it.live("revert_change takes one revision's change back and keeps later edits, with its message", () => {
