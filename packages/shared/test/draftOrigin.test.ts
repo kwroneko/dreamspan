@@ -125,15 +125,70 @@ it("a new whole-field clear replaces old form values, while its later continuati
   })
 })
 
-it("a group the form dropped loses its numbers, and keeps text no clear removed", () => {
-  // A model's settings: a slider back at its default removes the only sampler, and the emptied
-  // `samplers` group with it. The draft must not get the old number back.
-  const typed = JSON.stringify({ settings: { samplers: { openai_max_context: 1100 } } })
+// A group the current edit emptied goes with its numbers and choices; one merely absent from
+// what a stale save started from stays whole (review of b79e26e1f: three stale saves lost values).
+it("a group this edit emptied goes, numbers and all (Context's End back to All)", () => {
+  const typed = JSON.stringify({ settings: { samplers: { openai_max_context: 1100 } }, drafts: {} })
   const draft = { id: "draft", rowVersion: 3, content: typed }
-  const back = JSON.stringify({ settings: {} })
+  const back = JSON.stringify({ settings: {}, drafts: {} })
   expect(reconcileForm(draft, { draftId: "draft", expectedRowVersion: 3 }, back, typed).content).toBe(back)
-  // Text in a dropped group that no edit here was seen to clear (an older snapshot) stays.
-  const withText = JSON.stringify({ settings: { samplers: { openai_max_context: 1100 }, note: { text: "Kept" } } })
-  const stale = reconcileForm({ ...draft, content: withText }, { draftId: "draft", expectedRowVersion: 2 }, back)
-  expect(JSON.parse(stale.content)).toEqual({ settings: { note: { text: "Kept" } } })
+  // What this edit never saw in the group (another tab's sampler) stays.
+  const other = JSON.stringify({ settings: { samplers: { openai_max_context: 1100, temperature: 0.4 } }, drafts: {} })
+  const kept = reconcileForm({ ...draft, content: other }, { draftId: "draft", expectedRowVersion: 2 }, back, typed)
+  expect(JSON.parse(kept.content)).toEqual({ settings: { samplers: { temperature: 0.4 } }, drafts: {} })
+})
+
+it("a stale model settings save keeps a sampler another tab typed", () => {
+  const start = JSON.stringify({ name: "", settings: {}, drafts: {} })
+  const typedInA = JSON.stringify({
+    name: "",
+    settings: { samplers: { openai_max_context: 50000 } },
+    drafts: { "settings.samplers.openai_max_context": "50000" }
+  })
+  const fromB = JSON.stringify({ name: "Renamed", settings: {}, drafts: {} })
+  const merged = reconcileForm(
+    { id: "draft", rowVersion: 3, content: typedInA },
+    { draftId: "draft", expectedRowVersion: 1 },
+    fromB,
+    start
+  )
+  expect(JSON.parse(merged.content)).toEqual({
+    name: "Renamed",
+    settings: { samplers: { openai_max_context: 50000 } },
+    drafts: { "settings.samplers.openai_max_context": "50000" }
+  })
+})
+
+it("a stale lorebook bulk edit keeps the setting another tab ticked", () => {
+  const start = JSON.stringify({ ticked: {} })
+  const tickedInA = JSON.stringify({ ticked: { order: { v: 321 } } })
+  const fromB = JSON.stringify({ ticked: { scanDepth: { v: 5 } } })
+  const merged = reconcileForm(
+    { id: "draft", rowVersion: 3, content: tickedInA },
+    { draftId: "draft", expectedRowVersion: 1 },
+    fromB,
+    start
+  )
+  expect(JSON.parse(merged.content)).toEqual({ ticked: { scanDepth: { v: 5 }, order: { v: 321 } } })
+})
+
+it("a stale preset conversion save keeps a choice's keep flag", () => {
+  const start = JSON.stringify({ name: "P (workshop)", instructions: "", choices: {} })
+  const draftedInA = JSON.stringify({
+    name: "P (workshop)",
+    instructions: "",
+    choices: { custom: { identifier: "custom", keep: true, replacement: "Replacement text" } }
+  })
+  const fromB = JSON.stringify({ name: "P (workshop)", instructions: "Workspace instructions", choices: {} })
+  const merged = reconcileForm(
+    { id: "draft", rowVersion: 3, content: draftedInA },
+    { draftId: "draft", expectedRowVersion: 1 },
+    fromB,
+    start
+  )
+  expect(JSON.parse(merged.content)).toEqual({
+    name: "P (workshop)",
+    instructions: "Workspace instructions",
+    choices: { custom: { identifier: "custom", keep: true, replacement: "Replacement text" } }
+  })
 })
