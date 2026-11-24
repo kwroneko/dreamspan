@@ -244,7 +244,20 @@ test.describe("workshop change rows", () => {
         await shot("reverted")
 
         // Redo on the row takes the revert back: the description as it was before the revert.
-        await row.locator("[data-change-redo]").click()
+        if (width === 1340 && theme === "light") {
+          await userEdit(card.id, "description", "A synthetic stargazer.")
+          await row.locator("[data-change-redo]").click()
+          await expect(row.getByRole("alert")).toContainText("Not redone: Changed since")
+          expect((await admin((api) => api.OpenEditor({ refId: card.id }))).doc.description).toBe(
+            "A synthetic stargazer."
+          )
+          await row.locator("[data-change-count]").click()
+          await view.locator("[data-change-redo]").click()
+          await expect(conflicts).toBeVisible()
+          await expect(conflicts.getByText("stargazer", { exact: false })).toBeVisible()
+          await conflicts.getByRole("button", { name: "Take before" }).click()
+          await conflicts.getByRole("button", { name: "Redo the rest" }).click()
+        } else await row.locator("[data-change-redo]").click()
         await expect(row.locator("[data-change-action]")).toHaveText("Revert", { timeout: 15_000 })
         doc = await admin((api) => api.OpenEditor({ refId: card.id }))
         expect(doc.doc.description).toBe("A synthetic keeper who logs every gull by moonlight.")

@@ -63,7 +63,7 @@ function FieldAction({
 }: {
   item: ItemChange
   unit: string
-  onConflicts: (outcome: ReversalOutcome, fields: ReadonlyArray<string>) => void
+  onConflicts: (outcome: ReversalOutcome, fields: ReadonlyArray<string>, reversalId?: string) => void
 }) {
   const action = useAction()
   if (item.created || itemUndone(item)) return null
@@ -78,7 +78,11 @@ function FieldAction({
   const redo = async () => {
     for (const reversalId of standingReverts(item)) {
       const result = await action.run((client) => client("RedoChange", { reversalId, fields: [unit] }), CHANGE_KEYS)
-      if (!result.ok || result.value.conflicts.length > 0) return
+      if (!result.ok) return
+      if (result.value.conflicts.length > 0) {
+        onConflicts(result.value, [unit], reversalId)
+        return
+      }
     }
   }
   return (
@@ -172,14 +176,15 @@ function Resolve({
   conflicts,
   head,
   fields,
+  reversalId,
   onDone
 }: {
   item: ItemChange
   kind: EntityKind
   conflicts: Conflicts
   head: string
-  /** The fields the revert was for (one field's Revert); all of the change's when absent. */
   fields: ReadonlyArray<string> | undefined
+  reversalId: string | undefined
   onDone: () => void
 }) {
   const action = useAction()
@@ -188,16 +193,14 @@ function Resolve({
   )
   const [preview, setPreview] = useState({ head, conflicts })
   const left = preview.conflicts
-  const revertRest = async () => {
+  const redo = reversalId !== undefined
+  const resolveConflicts = async () => {
+    const options = { choices, expectedHead: preview.head, ...(fields ? { fields } : {}) }
     const result = await action.run(
       (client) =>
-        client("RevertChange", {
-          effects: liveKeys(item),
-          choices,
-          expectedHead: preview.head,
-          message: revertMessage(item),
-          ...(fields ? { fields } : {})
-        }),
+        redo
+          ? client("RedoChange", { reversalId, ...options })
+          : client("RevertChange", { effects: liveKeys(item), message: revertMessage(item), ...options }),
       CHANGE_KEYS
     )
     if (!result.ok) return
@@ -215,8 +218,8 @@ function Resolve({
       <h2 className="text-sm font-semibold">Changed since</h2>
       <p className="text-xs text-muted">
         {left.length === 0
-          ? "The item changed again. Review its current state before reverting."
-          : `${left.length === 1 ? "This field was" : "These fields were"} changed after this reply, so the change can’t be taken out by itself. Choose for each, then revert the rest.`}
+          ? "The item changed again. Review its current state before continuing."
+          : `${left.length === 1 ? "This field was" : "These fields were"} changed since the ${redo ? "revert" : "reply"}. Choose what to keep in each field, then ${redo ? "redo" : "revert"} the rest.`}
       </p>
       {left.map((conflict) => {
         const path = unitPath(conflict.field)
@@ -227,7 +230,7 @@ function Resolve({
               change={{ path, before: conflict.now, after: conflict.before }}
               doc={{}}
               beforeLabel="Now"
-              afterLabel="Before this change"
+              afterLabel={redo ? "Before this revert" : "Before this change"}
               defaultOpen
             />
             <Segmented
@@ -239,7 +242,7 @@ function Resolve({
                 {
                   value: "before",
                   label: "Take before",
-                  description: "Puts this field back as it was before this change, dropping the edits made since."
+                  description: `Puts this field back as it was before this ${redo ? "revert" : "change"}, dropping the edits made since.`
                 }
               ]}
             />
@@ -249,7 +252,7 @@ function Resolve({
       <div className="flex flex-wrap items-center justify-end gap-2">
         {action.error && (
           <span role="alert" className="text-xs text-danger [overflow-wrap:anywhere]">
-            Not reverted: {action.error.message}
+            Not {redo ? "redone" : "reverted"}: {action.error.message}
           </span>
         )}
         <Button hint="Leaves everything as it is now." onClick={onDone}>
@@ -258,11 +261,15 @@ function Resolve({
         <Button
           variant="primary"
           pending={action.pending}
-          hint="Takes the change out of the other fields, and does what you chose for these, as a new revision."
-          onClick={() => void revertRest()}
+          hint={
+            redo
+              ? "Puts the change back in the other fields and applies your choices here."
+              : "Takes the change out of the other fields, and does what you chose for these, as a new revision."
+          }
+          onClick={() => void resolveConflicts()}
           data-revert-rest
         >
-          Revert the rest
+          {redo ? "Redo the rest" : "Revert the rest"}
         </Button>
       </div>
     </section>
@@ -283,6 +290,7 @@ type Resolving = {
   readonly conflicts: Conflicts
   readonly head: string
   readonly fields: ReadonlyArray<string> | undefined
+  readonly reversalId?: string | undefined
 } | null
 
 /** The conflicts to show: those a revert found, or on `resolve=1`, a dry run's. */
@@ -419,12 +427,14 @@ function ReplyParts({
 }) {
   const { item, gone } = useReplyItem(reply, match)
   const [resolving, setResolving] = useResolving(item, asked)
-  const show = (outcome: ReversalOutcome, fields?: ReadonlyArray<string>) =>
-    setResolving({ conflicts: outcome.conflicts, head: outcome.head, fields })
+  const show = (outcome: ReversalOutcome, fields?: ReadonlyArray<string>, reversalId?: string) =>
+    setResolving({ conflicts: outcome.conflicts, head: outcome.head, fields, reversalId })
   return children({
     item,
     gone: gone && !item,
-    action: item ? <ItemChangeAction item={item} reply={reply} onConflicts={(o) => show(o)} /> : null,
+    action: item ? (
+      <ItemChangeAction item={item} reply={reply} onConflicts={(o, id) => show(o, undefined, id)} />
+    ) : null,
     conflicts:
       item && resolving ? (
         <Resolve
@@ -434,6 +444,7 @@ function ReplyParts({
           conflicts={resolving.conflicts}
           head={resolving.head}
           fields={resolving.fields}
+          reversalId={resolving.reversalId}
           onDone={() => setResolving(null)}
         />
       ) : null,

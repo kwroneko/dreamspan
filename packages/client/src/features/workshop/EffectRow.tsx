@@ -66,12 +66,19 @@ export function EffectRow({
     setNote(null)
     const result = await action.run((client) => client("RevertChange", { effects: [effectKey(current)] }), keys)
     if (result.ok && result.value.conflicts.length > 0)
-      setNote("It changed since in a field this change touched. Revert it from its change row to choose what to keep.")
+      setNote(
+        "Not reverted: It changed since in a field this change touched. Revert it from its change row to choose what to keep."
+      )
   }
   const redo = async () => {
+    setNote(null)
     for (const reversalId of current.reversion?.reversals ?? []) {
       const result = await action.run((client) => client("RedoChange", { reversalId }), keys)
-      if (!result.ok || result.value.conflicts.length > 0) return
+      if (!result.ok) return
+      if (result.value.conflicts.length > 0) {
+        setNote("Not redone: Changed since. Open its change view and choose Redo to resolve the conflict.")
+        return
+      }
     }
   }
   return (
@@ -173,7 +180,7 @@ export function EffectRow({
       )}
       {note && (
         <p role="alert" className="text-danger [overflow-wrap:anywhere]">
-          Not reverted: {note}
+          {note}
         </p>
       )}
       <ConfirmDialog
