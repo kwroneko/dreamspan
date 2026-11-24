@@ -17,6 +17,8 @@ export interface StyleRequest {
   readonly id: number
   readonly text: string
   readonly html: boolean
+  /** Example dialogue (StyleOptions `examples`). */
+  readonly examples?: boolean
   /** The editor closed: its blocks can go. */
   readonly close?: boolean
 }
@@ -62,19 +64,65 @@ const styleWorker = (): Worker | null => {
 
 const setStyles = StateEffect.define<DecorationSet>()
 
+/**
+ * Fields (`StylingPlace.field`) style their text on the page as they open only so far: each at
+ * most FIELD_FIRST characters (more than its bounded box shows), and the fields opening in one
+ * task (a card's thirty greetings) FIELD_BUDGET between them, in the order they open, top first.
+ * The worker styles the rest right after. A message's own editor styles all of its text at once.
+ */
+const FIELD_FIRST = 4000
+const FIELD_BUDGET = 12_000
+let fieldBudget = FIELD_BUDGET
+let refill: ReturnType<typeof setTimeout> | undefined
+/** How much of `text` a field opening now styles on the page. */
+function fieldShare(text: string): number {
+  refill ??= setTimeout(() => {
+    fieldBudget = FIELD_BUDGET
+    refill = undefined
+  }, 0)
+  const share = Math.min(text.length, FIELD_FIRST, fieldBudget)
+  fieldBudget -= share
+  if (share === text.length || share === 0) return share
+  // To a line's end, so no line shows half styled.
+  const end = text.indexOf("\n", share)
+  return end === -1 ? text.length : end
+}
+
+/** Where the styled text is beyond a message's own editor (CodeEditorProps `messageField`). */
+export interface StylingPlace {
+  /**
+   * A form field holding message text (a card's greeting): the marks and the message's colors,
+   * with the field's own font, size, line height and padding, as the fields around it have.
+   */
+  readonly field?: boolean
+  /** Example dialogue: its `<START>` lines and speaker prefixes stay as they are (StyleOptions `examples`). */
+  readonly examples?: boolean
+}
+
 /** The message editor's styling; `html` as the message shows HTML ("Show HTML as formatting"). */
-export function messageStyling(html: boolean): Extension {
+export function messageStyling(html: boolean, place: StylingPlace = {}): Extension {
+  const examples = place.examples === true
+  const options = { html, examples }
   // The page's own copy of the blocks, for the first frame and where no worker runs.
   const local = styleCache()
+  // A field shows the start of its text (its height is bounded) and a card has many: the page
+  // styles its share (`fieldShare`) at once, and `partial` asks the worker for the rest.
+  let partial = false
+  const shown = (text: string) => {
+    if (!place.field) return text
+    const share = fieldShare(text)
+    partial = share < text.length
+    return text.slice(0, share)
+  }
   const field = StateField.define<DecorationSet>({
-    create: (state) => decorations(messageStyleRanges(state.doc.toString(), { html }, local), state.doc.length),
+    create: (state) => decorations(messageStyleRanges(shown(state.doc.toString()), options, local), state.doc.length),
     update(set, transaction) {
       // Text put in from outside rather than typed (the composer's draft arriving as the page
       // opens, a restore, another tab's text) is styled at once, as an opening editor's is, so it
       // never shows plain first; typing and pasting only map the marks and leave the rest to the worker.
       if (transaction.docChanged && transaction.annotation(Transaction.userEvent) === undefined)
         return decorations(
-          messageStyleRanges(transaction.newDoc.toString(), { html }, local),
+          messageStyleRanges(shown(transaction.newDoc.toString()), options, local),
           transaction.newDoc.length
         )
       set = set.map(transaction.changes)
@@ -99,6 +147,8 @@ export function messageStyling(html: boolean): Extension {
       constructor(view: EditorView) {
         this.view = view
         answers.set(this.editor, (response) => this.receive(response))
+        // Only part of it was styled as it opened (`shown`): the rest now.
+        if (partial) this.send()
       }
       update(update: ViewUpdate) {
         if (update.docChanged) {
@@ -125,12 +175,12 @@ export function messageStyling(html: boolean): Extension {
         this.out = { id, length: text.length, since: ChangeSet.empty(text.length) }
         this.dirty = false
         const target = styleWorker()
-        if (target) target.postMessage({ editor: this.editor, id, text, html } satisfies StyleRequest)
+        if (target) target.postMessage({ editor: this.editor, id, text, html, examples } satisfies StyleRequest)
         else {
           // No worker: after this keystroke's frame, here.
           clearTimeout(this.timer)
           this.timer = setTimeout(
-            () => this.receive({ editor: this.editor, id, ranges: messageStyleRanges(text, { html }, local) }),
+            () => this.receive({ editor: this.editor, id, ranges: messageStyleRanges(text, options, local) }),
             0
           )
         }
@@ -167,6 +217,8 @@ export function messageStyling(html: boolean): Extension {
     plugin,
     messageBlockLines,
     messageTextTheme,
+    // A field keeps the font, size, line height and surface the fields around it have.
+    place.field ? [] : messageBoxTheme,
     EditorView.editorAttributes.of({ class: "rp-message-text" })
   ]
 }
@@ -174,18 +226,11 @@ export function messageStyling(html: boolean): Extension {
 /**
  * The look of the message's text (styles.css "Message text"), in the editor's shadow root where
  * the page's rules don't reach: the same tokens, so a theme or a chosen message color applies to
- * both. Font, size, line height and wrapping come from the box the editor is in
- * (`.message-edit-text`, which shares the message's rule), with no padding of the editor's own.
+ * both.
  */
 const messageTextTheme = EditorView.theme({
-  "&.rp-message-text": {
-    fontSize: "inherit",
-    color: "var(--color-message-main)",
-    backgroundColor: "transparent"
-  },
-  "&.rp-message-text .cm-scroller": { fontFamily: "inherit", lineHeight: "inherit" },
-  "&.rp-message-text .cm-content": { padding: "var(--bare-padding, 0)", caretColor: "var(--color-message-main)" },
-  "&.rp-message-text .cm-line": { padding: "0" },
+  "&.rp-message-text": { color: "var(--color-message-main)" },
+  "&.rp-message-text .cm-content": { caretColor: "var(--color-message-main)" },
   "&.rp-message-text .cm-cursor, &.rp-message-text .cm-dropCursor": {
     borderLeftColor: "var(--color-message-main)"
   },
@@ -212,4 +257,15 @@ const messageTextTheme = EditorView.theme({
   ".rp-md-pre .rp-md-code": { background: "none" },
   // The marks themselves: still there to edit, quieter than the text they mark.
   ".rp-md-syntax": { opacity: "0.55" }
+})
+
+/**
+ * A message's own editor: font, size, line height and wrapping come from the box the editor is
+ * in (`.message-edit-text`, which shares the message's rule), with no padding of the editor's own.
+ */
+const messageBoxTheme = EditorView.theme({
+  "&.rp-message-text": { fontSize: "inherit", backgroundColor: "transparent" },
+  "&.rp-message-text .cm-scroller": { fontFamily: "inherit", lineHeight: "inherit" },
+  "&.rp-message-text .cm-content": { padding: "var(--bare-padding, 0)" },
+  "&.rp-message-text .cm-line": { padding: "0" }
 })

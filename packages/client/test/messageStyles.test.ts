@@ -5,7 +5,7 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { Markdown, messageRenderers } from "../src/ui/Markdown.tsx"
-import { messageStyleRanges, styleCache, styleList, type StyleKind } from "../src/ui/messageStyles.ts"
+import { exampleMessages, messageStyleRanges, styleCache, styleList, type StyleKind } from "../src/ui/messageStyles.ts"
 import { StMarkdown } from "../src/ui/StMarkdown.tsx"
 
 /** The ranges as [kind, the text they cover]. */
@@ -107,6 +107,61 @@ describe("styling ranges", () => {
       text = insert === "" ? text.slice(0, at) + text.slice(at + 1) : text.slice(0, at) + insert + text.slice(at)
       expect(Array.from(messageStyleRanges(text, {}, cache))).toEqual(Array.from(messageStyleRanges(text)))
     }
+  })
+})
+
+describe("example dialogue", () => {
+  const examples = (text: string, html = false) =>
+    styleList(messageStyleRanges(text, { html, examples: true })).map(({ from, to, kind }) => [
+      kind,
+      text.slice(from, to)
+    ])
+  const DIALOGUE = [
+    "<START>",
+    `{{user}}: *waves* "Hi, {{char}}."`,
+    `{{char}}: "Hello," she says. *smiles*`,
+    `  and goes on *here*`,
+    "<start>",
+    "{{Char}}: **Bold** reply"
+  ].join("\n")
+
+  it("styles each message on its own, leaving the <START> lines and speaker prefixes as they are", () => {
+    for (const html of [false, true])
+      expect(examples(DIALOGUE, html)).toEqual([
+        ["em", "*waves*"],
+        ["syntax", "*"],
+        ["syntax", "*"],
+        ["quote", `"Hi, {{char}}."`],
+        ["quote", `"Hello,"`],
+        ["em", "*smiles*"],
+        ["syntax", "*"],
+        ["syntax", "*"],
+        ["em", "*here*"],
+        ["syntax", "*"],
+        ["syntax", "*"],
+        ["strong", "**Bold**"],
+        ["syntax", "**"],
+        ["syntax", "**"]
+      ])
+  })
+
+  it("finds the messages between the separators and prefixes", () => {
+    expect(exampleMessages(DIALOGUE).map(([from, to]) => DIALOGUE.slice(from, to))).toEqual([
+      `*waves* "Hi, {{char}}."`,
+      `"Hello," she says. *smiles*\n  and goes on *here*`,
+      "**Bold** reply"
+    ])
+    expect(exampleMessages("No prefix *at all*").map(([from, to]) => [from, to])).toEqual([[0, 18]])
+    expect(exampleMessages("<START>\n<START>\n")).toEqual([])
+  })
+
+  it("is the same with a kept cache as from scratch", () => {
+    const cache = styleCache()
+    messageStyleRanges(DIALOGUE, { examples: true }, cache)
+    const edited = DIALOGUE.replace("smiles", "grins")
+    expect(Array.from(messageStyleRanges(edited, { examples: true }, cache))).toEqual(
+      Array.from(messageStyleRanges(edited, { examples: true }))
+    )
   })
 })
 
