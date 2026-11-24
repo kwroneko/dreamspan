@@ -211,8 +211,16 @@ test("stale layouts keep deleted items closable and unknown versions start fresh
   await expect(page.getByRole("alert").first()).toBeVisible()
   await missingChat.getByRole("button", { name: /^Close / }).click()
   await expect(said(page, "The tide is out")).toBeVisible()
-  // One tab left: the URL is the whole layout.
-  await expect.poll(() => storedLayout(page)).toBeNull()
+  // One kept tab left (the layout named it unmarked): the param keeps it as kept, so a reload
+  // restores it as kept, not as a preview (feabc9657); only a lone preview leaves the param out.
+  await expect
+    .poll(() => {
+      const stored = storedLayout(page)
+      return stored === null
+        ? null
+        : (JSON.parse(stored) as Array<unknown>).map((t) => (typeof t === "string" ? t.split("?")[0] : t))
+    })
+    .toEqual([0, `/chats/${fixtures.chatA}`])
   // Junk in the param: the URL's page alone.
   await page.goto(`${server().url}/chats/${fixtures.chatA}?wb=${encodeURIComponent('{"version":0}')}`)
   await expect(said(page, "The tide is out")).toBeVisible()
