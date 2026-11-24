@@ -65,6 +65,12 @@ export const attachUpload = (folder: string, name: string, bytes: Uint8Array) =>
 
 const text = (m: { content?: unknown }) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))
 
+const importApproval = (events: ReadonlyArray<ChatEvent>, versionId: string, toolCallId: string) =>
+  events
+    .flatMap((event) => (event._tag === "Steps" && event.versionId === versionId ? event.steps : []))
+    .flatMap((step) => (step.kind === "tool" && step.id === toolCallId && step.approval ? [step.approval] : []))
+    .at(-1)
+
 export const v3Card = (name: string) => ({
   spec: "chara_card_v3",
   spec_version: "3.0",
@@ -226,6 +232,12 @@ describe("card files", () => {
         )
         const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
         const id = reply.entry.version.id
+        for (const callId of ["card_6", "card_7"]) {
+          yield* eventually(() => importApproval(events, id, callId) !== undefined)
+          const { rolloutId, toolCallId, digest, once } = importApproval(events, id, callId)!
+          assert.isTrue(once)
+          yield* api.AnswerToolApproval({ rolloutId, toolCallId, digest, answer: "allow" })
+        }
         yield* eventually(() => finished(events, id) !== undefined, 120_000)
         assert.strictEqual(finished(events, id)!.status, "complete")
         const results = requests
@@ -270,5 +282,62 @@ describe("card files", () => {
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
     },
     180_000
+  )
+
+  it.live(
+    "requires approval for a card import and refuses when Files are off",
+    () =>
+      Effect.gen(function* () {
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((request, res) => {
+              const body = request.body as unknown as { messages: Array<{ role: string }> }
+              if (
+                !JSON.stringify(body.messages).includes("What can this workshop do?") ||
+                body.messages.some((m) => m.role === "tool")
+              )
+                return sse(res, completionChunks(["Ready."], {}))
+              sse(res, toolCall("import_card_file", { path: "/files/wren.png" }, "import_wren"))
+            })
+          ),
+          (m) => Effect.promise(() => m.close())
+        )
+        const api = yield* client()
+        yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+          model: { context: 200_000 }
+        })
+        yield* attachUpload("/files", "wren.png", png(cardChunk("ccv3", v3Card("Wren Hollow"))))
+        for (const filesOff of [false, true]) {
+          const chat = yield* api.CreateWorkshop({ title: "Card import consent" })
+          if (filesOff) yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "files", mode: "off" })
+          const events: Array<ChatEvent> = []
+          yield* api.SubscribeChat({ chatId: chat.id }).pipe(
+            Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+            Effect.forkScoped
+          )
+          yield* eventually(() => events.length > 0)
+          const sent = yield* posted(
+            api.SendMessage({
+              chatId: chat.id,
+              parentSlotId: chat.activeLeafSlotId,
+              branch: false,
+              content: "What can this workshop do?"
+            })
+          )
+          const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+          const id = reply.entry.version.id
+          if (!filesOff) {
+            yield* eventually(() => importApproval(events, id, "import_wren") !== undefined)
+            const { rolloutId, toolCallId, digest } = importApproval(events, id, "import_wren")!
+            assert.isFalse((yield* api.ListLibrary({ kind: "card" })).some((ref) => ref.label === "Wren Hollow"))
+            yield* api.AnswerToolApproval({ rolloutId, toolCallId, digest, answer: "deny" })
+          }
+          yield* eventually(() => finished(events, id) !== undefined)
+          if (filesOff) assert.isUndefined(importApproval(events, id, "import_wren"))
+          assert.isFalse((yield* api.ListLibrary({ kind: "card" })).some((ref) => ref.label === "Wren Hollow"))
+        }
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig()))),
+    60_000
   )
 })

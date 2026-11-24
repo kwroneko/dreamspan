@@ -2833,6 +2833,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       toolCallId: Schema.String,
       capability: Schema.String,
       approvalDigest: Schema.optionalKey(Schema.String),
+      cardFileImport: Schema.optionalKey(Schema.Literal(true)),
       expected: Schema.Unknown,
       operation: Schema.String,
       payload: Schema.Unknown
@@ -6311,6 +6312,7 @@ const ReadOpsOwn = RpcGroup.make(
       capability: Schema.String,
       digest: Schema.optionalKey(Schema.String),
       requireApproval: Schema.Boolean,
+      requireFiles: Schema.optionalKey(Schema.Literal(true)),
       rollback: Schema.optionalKey(Schema.Boolean)
     },
     success: User,
