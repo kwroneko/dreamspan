@@ -228,7 +228,14 @@ export function cardexCriteriaTests() {
               if (title) await closePanel(page, title)
             }
             // Every sort and every available direction remains reachable in both toolbars.
-            for (const label of ["Popular", "Newest added", "Newest created", "Name, A to Z", "Most tokens", "Relevance"]) {
+            for (const label of [
+              "Popular",
+              "Newest added",
+              "Newest created",
+              "Name, A to Z",
+              "Most tokens",
+              "Relevance"
+            ]) {
               if (place === "home")
                 await scope
                   .getByRole("group", { name: "Sort by", exact: true })

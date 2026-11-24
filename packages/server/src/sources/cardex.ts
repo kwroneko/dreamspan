@@ -257,7 +257,12 @@ const SORTS: ReadonlyArray<{
 }> = [
   { id: "popular", label: "Popular", needs: ["popular"], defaultOrder: "popular cards" },
   { id: "newest", label: "Newest added", needs: ["newest", "oldest"], defaultOrder: "newest first" },
-  { id: "created", label: "Newest created", needs: ["created_desc", "created_asc"], defaultOrder: "newest created first" },
+  {
+    id: "created",
+    label: "Newest created",
+    needs: ["created_desc", "created_asc"],
+    defaultOrder: "newest created first"
+  },
   { id: "name", label: "Name, A to Z", needs: ["name", "name_desc"], defaultOrder: "A to Z" },
   { id: "tokens", label: "Most tokens", needs: ["tokens_desc", "tokens_asc"], defaultOrder: "most tokens first" },
   { id: "relevance", label: "Relevance", needs: ["relevance"], defaultOrder: "best matches" }
@@ -441,10 +446,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       multi: true,
       options: sites.map((value) => ({
         value,
-        label:
-          valueLabel("source", value) ??
-          CARDEX_SITE_LABELS[value] ??
-          value
+        label: valueLabel("source", value) ?? CARDEX_SITE_LABELS[value] ?? value
       })),
       about: FILTER_HELP.source!
     })
@@ -510,7 +512,11 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
         kind: "toggle",
         ...(name.startsWith("chub_")
           ? {
-              requires: { filterId: "source", values: ["chub"], about: "Choose Chub as the only included source first." },
+              requires: {
+                filterId: "source",
+                values: ["chub"],
+                about: "Choose Chub as the only included source first."
+              },
               about: "Available when Chub is the only source selected."
             }
           : FILTER_HELP[name]
