@@ -426,7 +426,8 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       about: `About how many tokens of the model's context the card takes up (an estimate). Characters under ${typeof named.get("min_tokens")?.default === "number" ? named.get("min_tokens")!.default : 300} tokens are hidden by default, since most are stubs; lorebooks never are.`
     })
   }
-  if (named.has("exclude_forks")) filters.push({ id: "exclude_forks", label: "Hide forks", kind: "toggle", about: FILTER_HELP.exclude_forks! })
+  if (named.has("exclude_forks"))
+    filters.push({ id: "exclude_forks", label: "Hide forks", kind: "toggle", about: FILTER_HELP.exclude_forks! })
   const sites = allowed("source")
   if (sites.length) {
     filters.push({

@@ -152,7 +152,12 @@ function LoadMore({ suggestions }: { suggestions: ReturnType<typeof useSuggestio
     return (
       <div className="flex items-center gap-2 px-2 py-1 text-sm text-muted">
         <span className="min-w-0">{problemText("the archive", suggestions.problem)}</span>
-        <Button variant="ghost" className="h-7 px-2" hint="Asks for these suggestions again." onClick={suggestions.retry}>
+        <Button
+          variant="ghost"
+          className="h-7 px-2"
+          hint="Asks for these suggestions again."
+          onClick={suggestions.retry}
+        >
           Retry
         </Button>
       </div>
@@ -432,12 +437,7 @@ function TagInput({ browse, inline = false }: { browse: SourceBrowse; inline?: b
   )
   return (
     <div ref={box} className="relative flex min-w-0 flex-col gap-1.5" onFocus={() => setOpen(true)}>
-      <Field
-        label="Tags"
-        labelHidden={!inline}
-        aboutInfo
-        about={tagsAbout}
-      >
+      <Field label="Tags" labelHidden={!inline} aboutInfo about={tagsAbout}>
         <Input
           value={text}
           placeholder={canExclude ? "Add tag… (−tag excludes)" : "Add tag…"}
@@ -765,8 +765,7 @@ function RangePanel({
       : `Clear the ${filter.label.toLowerCase()} range`
   // While a thumb is dragged, the fields follow it; an untouched end keeps its exact value.
   const shownMin = drag && drag[0] !== committed[0] ? scale.valueAt(drag[0]) : min
-  const shownMax =
-    drag && drag[1] !== committed[1] ? (drag[1] >= STEPS ? undefined : scale.valueAt(drag[1])) : max
+  const shownMax = drag && drag[1] !== committed[1] ? (drag[1] >= STEPS ? undefined : scale.valueAt(drag[1])) : max
   return (
     <div className={`flex max-w-full flex-col gap-3 ${popover ? "w-80" : "w-full"}`} data-range-filter={filter.id}>
       <RangeSlider
@@ -1414,7 +1413,8 @@ function FiltersSheet({ browse, set }: { browse: SourceBrowse; set: SetFilters }
                     className="flex min-h-11 min-w-0 flex-1 items-center justify-between gap-2 text-left text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-focus"
                   >
                     <span className="min-w-0 truncate">
-                      {panel.title} <span className="font-normal text-muted">· {sheetSummary(panel, summaryOf(browse, panel))}</span>
+                      {panel.title}{" "}
+                      <span className="font-normal text-muted">· {sheetSummary(panel, summaryOf(browse, panel))}</span>
                     </span>
                     <Icon name="down" className={open ? "rotate-180" : ""} />
                   </button>
