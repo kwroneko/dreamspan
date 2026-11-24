@@ -270,15 +270,16 @@ async function main() {
   }
   const origin = new URL(args[0]).origin
   const fromRaw = flag("--from-raw")
+  const verify = args.includes("--verify")
   const raw = fromRaw ? readRaw(fromRaw) : await fetchAll(origin)
-  if (!fromRaw) {
+  if (!verify && !fromRaw) {
     const dir = flag("--raw") ?? mkdtempSync(join(tmpdir(), "cardex-capture-"))
     mkdirSync(dir, { recursive: true })
     for (const capture of raw) writeFileSync(join(dir, `${capture.name}.json`), `${JSON.stringify(capture, null, 2)}\n`)
     console.error(`untouched responses (never commit them): ${dir}`)
   }
   const synthetic = synthesize(raw, origin)
-  if (args.includes("--verify")) {
+  if (verify) {
     const missing = missingShapes(committed(), synthetic)
     for (const line of missing) console.log(line)
     console.error(
