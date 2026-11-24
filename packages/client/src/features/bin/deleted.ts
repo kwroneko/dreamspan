@@ -7,6 +7,7 @@ import { Context, Effect } from "effect"
 import { AtomRegistry, Reactivity } from "effect/reactivity"
 import { useCallback, useContext } from "react"
 import { describeCause } from "../../errors.ts"
+import { notifyEntriesChanged, notifyLibraryChange } from "../../libraryChanges.ts"
 import { AppClient } from "../../rpc.ts"
 import { showToast } from "../../ui/Toast.tsx"
 import { binTitle } from "./titles.ts"
@@ -24,6 +25,8 @@ export const restoreItem = (registry: AtomRegistry.AtomRegistry, itemId: string,
         services as unknown as Context.Context<Reactivity.Reactivity>,
         Reactivity.Reactivity
       ).invalidateUnsafe(keys)
+      // Editors of what came back read it again, here and in other tabs, so its unsaved markers return.
+      notifyLibraryChange(keys)
       return item
     })
   )
@@ -38,6 +41,7 @@ const restoreItems = (registry: AtomRegistry.AtomRegistry, itemIds: ReadonlyArra
         services as unknown as Context.Context<Reactivity.Reactivity>,
         Reactivity.Reactivity
       ).invalidateUnsafe(RESTORED_KEYS)
+      notifyLibraryChange(RESTORED_KEYS)
       return items
     })
   )
@@ -53,8 +57,11 @@ export const useDeletedManyToast = () => {
     (
       items: ReadonlyArray<BinItem>,
       more: ReadonlyArray<{ readonly label: string; readonly hint?: string; readonly onClick: () => void }> = []
-    ) =>
-      showToast({
+    ) => {
+      // Every delete shows this toast: editors whose entry, chat or branch went read it again,
+      // so no unsaved marker stays on what's gone (features/editor/store.ts, `recheck`).
+      notifyEntriesChanged()
+      return showToast({
         title:
           items.length === 1
             ? `${binTitle(items[0]!)} moved to the bin.`
@@ -79,7 +86,8 @@ export const useDeletedManyToast = () => {
             onClick: () => void navigate({ to: "/bin" })
           }
         ]
-      }),
+      })
+    },
     [registry, navigate]
   )
 }
@@ -97,8 +105,9 @@ export const useDeletedToast = () => {
       item: BinItem,
       onRestored?: () => void,
       more: ReadonlyArray<{ readonly label: string; readonly hint?: string; readonly onClick: () => void }> = []
-    ) =>
-      showToast({
+    ) => {
+      notifyEntriesChanged()
+      return showToast({
         title: `${binTitle(item)} moved to the bin.`,
         // Long enough to reach Undo after reading it; hovering or focusing it holds it.
         timeout: 10_000,
@@ -121,7 +130,8 @@ export const useDeletedToast = () => {
             onClick: () => void navigate({ to: "/bin" })
           }
         ]
-      }),
+      })
+    },
     [registry, navigate]
   )
 }
