@@ -6,7 +6,7 @@
 
 - **[D]** A workshop beside a story is a parallel thread of one story branch. Each workshop branch is paired with exactly one story branch, stored, not inferred from what a tab shows. A message reads its paired branch up to that branch's newest message when it's sent, wherever the workshop is displayed (side panel, its own pane, the center column, another device).
 - **[D]** Branching the story branches each attached workshop. The new story branch B gets a new branch of each workshop, paired with B, and they evolve independently. Going back to the original branch A shows A's workshop as it was, whatever was said in B's.
-- **[D]** By default B's workshop is the workshop **as it was when the story stood at B's fork point**: it ends at the newest workshop message sent while A's newest message was at or before the fork point. Branching at the newest message therefore copies the whole workshop. **[D]** When a workshop has messages after that point, the existing "Branch from here" note dialog asks for it too: **As it was then** (default) / **As it is now**, with the dialog's set-all switch covering it.
+- **[D]** By default B's workshop is the workshop **as it was when the story stood at B's fork point**: it ends at the newest workshop message sent while A's newest message was at or before the fork point. Branching at the newest message therefore copies the whole workshop. **[P]** When a workshop has messages after that point, the existing "Branch from here" note dialog asks for it too: **As it was then** (default) / **As it is now**, with the dialog's set-all switch covering it.
 - Storage is one fork row per attached workshop per story branch (no message, version, state or rollout row is copied), one state-event key for the pairing, one version-scoped state-event key for each workshop message's story position, and one partial index. The baseline is still editable, so these go into `baseline.ts` (BASELINE CHANGED, fresh deploy).
 - **[O]** What the workshop knows of the story without a tool call (§9) is undecided; the build plan leaves it out.
 
@@ -61,7 +61,7 @@ There is no edit-as-branch path (editing writes a new version or an amendment in
 
 ### 3.2 The default cut: the workshop as it was when the story stood at N
 
-**[D]** Owner, 2026-11-17: "We have established that branching from an earlier point by default means that connected data is branched from the state it had at that point - so the workshop would be branched from its own earlier state, in this case. That said, I am not certain this is the correct/expected behaviour in practice." (The doubt is resolved by the choice in §4.)
+**[D]** Owner, 2026-11-17: "We have established that branching from an earlier point by default means that connected data is branched from the state it had at that point - so the workshop would be branched from its own earlier state, in this case. That said, I am not certain this is the correct/expected behaviour in practice."
 
 The cut message M is the newest message on the source workshop branch's display path whose recorded story position (§2.2) is on A's display path at or before N, or has none. B's workshop is the source's path up to M: a conversation is kept as a prefix, so an earlier message with a later position (possible when the story's tip moved back, e.g. after deleting messages) comes along with M. With N the newest message of A, every position qualifies and M is the source's tip: the whole workshop. One set-based query per workshop: the path's `workshop.story_at` leaves against their display positions on A (the positions `GetSlot { onForkOnly }` validates) and N's.
 
@@ -79,9 +79,9 @@ A merged ST import with hundreds of branches makes one workshop fork per branch 
 
 ## 4. The choice in "Branch from here"
 
-**[D]** Owner, 2026-11-17: "With author's notes, we explicitly let the user choose. I think we should consider asking for the workshop chat as well, maybe in the same UI (only if there is a workshop chat, and it changed since after the forking point, of course)".
+**[P]** Owner, 2026-11-17: "With author's notes, we explicitly let the user choose. I think we should consider asking for the workshop chat as well, maybe in the same UI (only if there is a workshop chat, and it changed since after the forking point, of course)".
 
-The existing dialog (DESIGN §3.4 "Human note inheritance on fork" [D]; `ForkNotesDialog.tsx`) gains a row per attached workshop:
+The proposed mechanics use the existing dialog (DESIGN §3.4 "Human note inheritance on fork" [D]; `ForkNotesDialog.tsx`) with a row per attached workshop:
 
 - **Shown only** when the workshop's default cut differs from its source's tip, i.e. it has messages sent after the story stood at N. With no changed note and no such workshop, no dialog appears and the branch is made at once, as today.
 - **Row**: the workshop's title, a subtitle "Workshop · 3 messages after this point", and the same Segmented choice: **As it was then** ("The workshop as it was when the story was at this message.") / **As it is now** ("The whole workshop as it is now, including what was said after this message."). Then is the default, matching notes.
