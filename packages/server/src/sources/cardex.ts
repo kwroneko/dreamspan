@@ -330,15 +330,15 @@ const FILTER_HELP: Record<string, string> = {
  * checkboxes after the panels; the picture only through a card's own link.
  */
 const PLACEMENT: Record<string, { readonly group?: string; readonly place?: "search" | "switches" | "none" }> = {
-  author: { group: "Creators" },
-  any_author: { group: "Creators" },
-  not_author: { group: "Creators" },
-  source: { group: "Sites" },
-  not_source: { group: "Sites" },
-  chub_verified: { group: "Sites" },
-  chub_recommended: { group: "Sites" },
+  author: { group: "Authors" },
+  any_author: { group: "Authors" },
+  not_author: { group: "Authors" },
+  source: { group: "Sources" },
+  not_source: { group: "Sources" },
+  chub_verified: { group: "Sources" },
+  chub_recommended: { group: "Sources" },
   kind: { group: "Kind" },
-  nsfw: { group: "Rating" },
+  nsfw: { group: "NSFW" },
   tokens: { group: "Tokens" },
   added_after: { group: "Added" },
   added_before: { group: "Added" },
@@ -510,8 +510,8 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
         kind: "toggle",
         ...(name.startsWith("chub_")
           ? {
-              requires: { filterId: "source", values: ["chub"], about: "Choose Chub as the only included site first." },
-              about: "Available when Chub is the only site included."
+              requires: { filterId: "source", values: ["chub"], about: "Choose Chub as the only included source first." },
+              about: "Available when Chub is the only source selected."
             }
           : FILTER_HELP[name]
             ? { about: FILTER_HELP[name] }

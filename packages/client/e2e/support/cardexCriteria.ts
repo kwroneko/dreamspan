@@ -88,9 +88,9 @@ export function cardexCriteriaTests() {
             await expect(suggestedTags).toHaveCount(0)
             await expect(controls).toBeVisible()
             await closeSheet(page)
-            let panel = await openPanel(page, scope, "Creators")
+            let panel = await openPanel(page, scope, "Authors")
             await panel.getByRole("searchbox", { name: "Add a creator", exact: true }).fill("/")
-            const creatorList = panel.getByRole("list", { name: "Creators", exact: true })
+            const creatorList = panel.getByRole("list", { name: "Authors", exact: true })
             // More load as the list scrolls to its end.
             const rows = creatorList.getByRole("button")
             await expect(rows.first()).toBeVisible()
@@ -104,15 +104,15 @@ export function cardexCriteriaTests() {
               panel.getByRole("list", { name: "Chosen creators", exact: true }).getByRole("listitem")
             ).toHaveCount(2)
             await panel.getByRole("button", { name: "Not by any of", exact: true }).click()
-            await closePanel(page, "Creators")
+            await closePanel(page, "Authors")
             await expect(chips.locator("[data-source-chip]").filter({ hasText: /^Not by / })).toHaveCount(2)
             await clear()
             // Sites: included, or left out.
             const pickSite = async (mode: "Include" | "Exclude", site: string) => {
-              const sites = await openPanel(page, scope, "Sites")
+              const sites = await openPanel(page, scope, "Sources")
               await sites.getByRole("button", { name: mode, exact: true }).click()
               await sites.getByRole("checkbox", { name: site, exact: true }).click()
-              await closePanel(page, "Sites")
+              await closePanel(page, "Sources")
             }
             await pickSite("Include", "Chub")
             await check("Chub")
@@ -120,7 +120,7 @@ export function cardexCriteriaTests() {
             await check("Not Chub")
             // Each single choice has a chip and can be cleared again.
             for (const [title, option, chip] of [
-              ["Rating", "Hide NSFW", "Hide NSFW"],
+              ["NSFW", "Hide NSFW", "Hide NSFW"],
               ["Kind", "Characters with a lorebook", "Kind: Characters with a lorebook"]
             ]) {
               panel = await openPanel(page, scope, title!)
@@ -131,7 +131,7 @@ export function cardexCriteriaTests() {
             // Under the search: Match, and the parts searched.
             await scope
               .getByRole("group", { name: "Match", exact: true })
-              .getByRole("button", { name: "Meaning", exact: true })
+              .getByRole("button", { name: "Semantic", exact: true })
               .click()
             await check("Match: Meaning")
             await scope.getByRole("button", { name: "Search in: All text", exact: true }).click()
@@ -187,18 +187,18 @@ export function cardexCriteriaTests() {
               await controls.getByRole("checkbox", { name: label, exact: true }).click()
               await check(label)
             }
-            panel = await openPanel(page, scope, "Sites")
+            panel = await openPanel(page, scope, "Sources")
             await expect(panel.getByRole("checkbox", { name: "Chub verified", exact: true })).toBeDisabled()
-            await closePanel(page, "Sites")
+            await closePanel(page, "Sources")
             await pickSite("Include", "Chub")
-            panel = await openPanel(page, scope, "Sites")
+            panel = await openPanel(page, scope, "Sources")
             await panel.getByRole("checkbox", { name: "Chub verified", exact: true }).click()
             await panel.getByRole("checkbox", { name: "Chub recommended", exact: true }).click()
-            await closePanel(page, "Sites")
+            await closePanel(page, "Sources")
             await expect(chips).toContainText("Chub verified")
             await expect(chips).toContainText("Chub recommended")
             // Another site too removes the marks, rather than asking a refused query.
-            await pickSite("Include", "RisuRealm")
+            await pickSite("Include", "RisuAI")
             await expect(chips).not.toContainText("Chub verified")
             await clear()
             // Enter requires a tag, a leading "-" leaves it out; a chip's click switches between the two.
@@ -219,7 +219,7 @@ export function cardexCriteriaTests() {
             // The sidebar's narrow bar (Show, sort, Filters) and its cards, with the sheet closed.
             const sidebarBar = ":has(> [data-shell-list])"
             // Audit the bar, and with a panel open: its popover, or the sheet that covers the page.
-            for (const title of ["", "Sites", "Creators", "Tokens", "Created"]) {
+            for (const title of ["", "Sources", "Authors", "Tokens", "Created"]) {
               if (title) await openPanel(page, scope, title)
               const inSheet = await page.locator("[data-filter-sheet]").isVisible()
               await expectLayout(page, info, `cardex-panel-${place}-${title || "folded"}-${width}-${theme}`, {
@@ -228,7 +228,7 @@ export function cardexCriteriaTests() {
               if (title) await closePanel(page, title)
             }
             // Every sort and every available direction remains reachable in both toolbars.
-            for (const label of ["Popular", "Newest", "Created", "Name", "Tokens", "Best match"]) {
+            for (const label of ["Popular", "Newest added", "Newest created", "Name, A to Z", "Most tokens", "Relevance"]) {
               if (place === "home")
                 await scope
                   .getByRole("group", { name: "Sort by", exact: true })
@@ -239,7 +239,7 @@ export function cardexCriteriaTests() {
                 await page.getByRole("menuitemcheckbox", { name: label, exact: true }).click()
               }
               const direction = scope.getByRole("button", { name: /^Order:/ })
-              if (["Newest", "Created", "Name", "Tokens"].includes(label)) {
+              if (["Newest added", "Newest created", "Name, A to Z", "Most tokens"].includes(label)) {
                 await direction.click()
                 await expect(page).toHaveURL(/(?:sreverse|sideSreverse)=true/)
               } else await expect(direction).toBeDisabled()
@@ -251,11 +251,11 @@ export function cardexCriteriaTests() {
             if (place === "home")
               await scope
                 .getByRole("group", { name: "Sort by", exact: true })
-                .getByRole("button", { name: "Name", exact: true })
+                .getByRole("button", { name: "Name, A to Z", exact: true })
                 .click()
             else {
               await scope.getByRole("button", { name: /^Sort by:/ }).click()
-              await page.getByRole("menuitemcheckbox", { name: "Name", exact: true }).click()
+              await page.getByRole("menuitemcheckbox", { name: "Name, A to Z", exact: true }).click()
             }
             const search = scope.getByRole("searchbox", { name: "Search cardex", exact: true })
             // Twice: on a phone the sheet's side panel and the wide one each ask, and when their two

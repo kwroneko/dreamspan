@@ -526,7 +526,7 @@ interface Panel {
 }
 
 /** The panels the bar has a control for, in the archive's order; any other group renders nothing. */
-const PANEL_KEYS = ["Creators", "Sites", "Kind", "Rating", "Tokens", "Added", "Created"]
+const PANEL_KEYS = ["Authors", "Sources", "Kind", "NSFW", "Tokens", "Added", "Created"]
 
 /** The bar from the capabilities: the panels, the checkboxes, and what sits by the search. */
 const layoutOf = (caps: SourceCapabilities) => {
@@ -614,13 +614,13 @@ const summaryOf = (browse: SourceBrowse, panel: Panel): string => {
     (first.kind === "choice" ? first.options.find((o) => o.value === value)?.label : undefined) ?? value
   const exclude = first.kind === "choice" ? first.excludeId : undefined
   switch (panel.key) {
-    case "Creators": {
+    case "Authors": {
       const { mode, chosen } = creatorChoice(caps, filters)
       if (chosen.length === 0) return "Any author"
       if (mode === "not") return `Not by ${chosen.length} ${chosen.length === 1 ? "author" : "authors"}`
       return chosen.length === 1 ? "By 1 author" : `Any of ${chosen.length} authors`
     }
-    case "Sites": {
+    case "Sources": {
       const names = (values: ReadonlyArray<string>) =>
         values.length <= 2 ? values.map((v) => labelOf(v)).join(", ") : `${values.length} sources`
       const shown = [
@@ -633,7 +633,7 @@ const summaryOf = (browse: SourceBrowse, panel: Panel): string => {
       const value = text(first.id)
       return value && value !== "both" ? labelOf(value) : "All kinds"
     }
-    case "Rating": {
+    case "NSFW": {
       const value = text(first.id) || caps.ratings?.default || "include"
       return value === "exclude" ? "NSFW hidden" : value === "only" ? "NSFW only" : "NSFW included"
     }
@@ -1073,7 +1073,7 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
         />
       </Field>
       <ul
-        aria-label="Creators"
+        aria-label="Authors"
         // Each row: the name filling and truncating, then the site, the count in a fixed
         // right-aligned column and the mark, with one gap between them however wide the list.
         className={`flex flex-col ${
@@ -1175,16 +1175,16 @@ function PanelBody({
   const filters = browse.remote.filters
   const first = panel.filters[0]!
   switch (panel.key) {
-    case "Creators":
+    case "Authors":
       return creatorIds(caps).includes(first.id) ? <CreatorsPanel browse={browse} set={set} popover={popover} /> : null
-    case "Sites":
+    case "Sources":
       return first.kind === "choice" && first.excludeId ? (
         <IncludeExcludePanel panel={panel} browse={browse} set={set} />
       ) : first.kind === "choice" ? (
         <ChecksPanel filter={first} filters={filters} set={set} />
       ) : null
     case "Kind":
-    case "Rating":
+    case "NSFW":
       return first.kind === "choice" && !first.multi ? (
         <ChoicePanel filter={first} filters={filters} set={set} browse={browse} />
       ) : null

@@ -59,7 +59,7 @@ export function cardexLorebookTests() {
 
           // The Kind choice offers all four.
           const kind = await openFilterPanel(page, main, "Kind")
-          for (const option of ["Characters and lorebooks", "Characters", "Characters with a lorebook", "Lorebooks"])
+          for (const option of ["All", "Characters", "Characters with a lorebook", "Lorebooks"])
             await expect(kind.getByRole("radio", { name: option, exact: true })).toBeVisible()
           await expectLayout(page, info, `lorebook-kind-${width}-${theme}`)
           await kind.getByRole("radio", { name: "Lorebooks", exact: true }).click()

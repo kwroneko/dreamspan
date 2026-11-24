@@ -112,15 +112,15 @@ describe("v1 as card sources", () => {
       assert.deepStrictEqual(
         caps.filters.map((f) => [f.id, f.label, f.group ?? f.place ?? ""]),
         [
-          ["author", "Creator", "Creators"],
-          ["any_author", "Any of these creators", "Creators"],
-          ["not_author", "Exclude creators", "Creators"],
-          ["source", "Site", "Sites"],
-          ["not_source", "Exclude sites", "Sites"],
-          ["chub_verified", "Chub verified", "Sites"],
-          ["chub_recommended", "Chub recommended", "Sites"],
+          ["author", "Author", "Authors"],
+          ["any_author", "Any of these authors", "Authors"],
+          ["not_author", "Not by these authors", "Authors"],
+          ["source", "Sources", "Sources"],
+          ["not_source", "Exclude sources", "Sources"],
+          ["chub_verified", "Chub verified", "Sources"],
+          ["chub_recommended", "Chub recommended", "Sources"],
           ["kind", "Kind", "Kind"],
-          ["nsfw", "Rating", "Rating"],
+          ["nsfw", "NSFW", "NSFW"],
           ["tokens", "Tokens", "Tokens"],
           ["added_after", "Added after", "Added"],
           ["added_before", "Added before", "Added"],
@@ -129,9 +129,9 @@ describe("v1 as card sources", () => {
           ["fields", "Search in", "search"],
           ["mode", "Match", "search"],
           ["exclude_forks", "Hide forks", "switches"],
-          ["has_cover", "Cover", "switches"],
-          ["deleted_from_source", "Deleted from all sites", "switches"],
-          ["deleted_from_any_source", "Deleted from a site", "switches"],
+          ["has_cover", "Only cards with a cover", "switches"],
+          ["deleted_from_source", "Deleted from all sources", "switches"],
+          ["deleted_from_any_source", "Deleted from a source", "switches"],
           ["any_tags", "Any of these tags", "none"],
           ["picture", "Picture", "none"]
         ]
@@ -159,9 +159,9 @@ describe("v1 as card sources", () => {
       )
       const rating = caps.filters.find((f) => f.id === "nsfw")!
       assert.deepStrictEqual(rating.kind === "choice" ? rating.options.map((o) => o.label) : [], [
-        "Safe",
-        "Everything",
-        "Mature only"
+        "Hide NSFW",
+        "Show NSFW",
+        "Only NSFW"
       ])
       // Safe is the narrowest choice: an assistant may narrow the user's rating to it (cardextools1).
       assert.deepStrictEqual(caps.ratings, { filterId: "nsfw", default: "include", safe: "exclude" })
@@ -507,7 +507,7 @@ describe("v1 as card sources", () => {
       assert.isTrue(fields.kind === "choice" && fields.multi)
       const kind = caps.filters.find((f) => f.id === "kind")!
       assert.deepStrictEqual(kind.kind === "choice" ? kind.options.map((o) => [o.value, o.label]) : [], [
-        ["both", "Characters and lorebooks"],
+        ["both", "All"],
         ["character", "Characters"],
         ["character_lorebook", "Characters with a lorebook"],
         ["lorebook", "Lorebooks"]
@@ -922,7 +922,7 @@ describe("v1 as card sources", () => {
     assert.strictEqual(summary.url, `${CARDEX_ORIGIN}/c/amber-lantern-1`)
     assert.strictEqual(summary.creator, "Someone")
     assert.strictEqual(summary.creatorQuery, "chub/someone")
-    assert.strictEqual(summary.rating, "Mature")
+    assert.strictEqual(summary.rating, "NSFW")
     assert.deepStrictEqual(summary.tags, ["fantasy"])
     assert.deepStrictEqual(summary.version, {
       id: sha,

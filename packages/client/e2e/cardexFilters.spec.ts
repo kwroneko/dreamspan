@@ -51,8 +51,8 @@ for (const width of [1440, 390])
         // Wide: every panel says what's chosen, always shown; no Filters button.
         await expect(filters).toBeHidden()
         for (const name of [
-          "Creators: Any creator",
-          "Sites: All sites",
+          "Authors: Any author",
+          "Sources: All sources",
           "Kind: All kinds",
           "Tokens: ≥ 300 tokens",
           "Added: any date",
@@ -60,7 +60,7 @@ for (const width of [1440, 390])
         ])
           await expect(main.locator("[data-filter-panels]").getByRole("button", { name, exact: true })).toBeVisible()
         await expect(
-          main.locator("[data-filter-panels]").getByRole("button", { name: /^Rating: NSFW (hidden|included|only)$/ })
+          main.locator("[data-filter-panels]").getByRole("button", { name: /^NSFW: NSFW (hidden|included|only)$/ })
         ).toBeVisible()
         await expect(main.getByRole("checkbox", { name: "Only cards with a cover", exact: true })).toBeChecked()
       } else await expect(filters).toBeVisible()

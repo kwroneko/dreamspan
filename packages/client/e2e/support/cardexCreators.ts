@@ -93,11 +93,11 @@ export function cardexCreatorTests() {
             if (place === "home")
               await scope
                 .getByRole("group", { name: "Sort by", exact: true })
-                .getByRole("button", { name: "Name", exact: true })
+                .getByRole("button", { name: "Name, A to Z", exact: true })
                 .click()
             else {
               await scope.getByRole("button", { name: /^Sort by:/ }).click()
-              await page.getByRole("menuitemcheckbox", { name: "Name", exact: true }).click()
+              await page.getByRole("menuitemcheckbox", { name: "Name, A to Z", exact: true }).click()
             }
             await expect(page).toHaveURL(/(?:ssort|sideSsort)=name/)
             await expect(header).toBeVisible()
