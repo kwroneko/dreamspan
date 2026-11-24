@@ -347,3 +347,60 @@ describe("kind affinity", () => {
     expect(titles(layout)).toEqual([["/chats/a", "/chats/b"], ["/chats/a/context/1"]])
   })
 })
+
+// Per-open affinity (spec/WORKSHOP-CARDS.md §7.3): a workshop's change row opens the card, or its
+// change view, where a card editor is shown beside the chat, without making every card open so.
+describe("per-open affinity", () => {
+  const editor = (href: string) => /^\/library\/[^/]+$/.test(keyOf(href))
+  const change = (href: string) => keyOf(href).endsWith("/change")
+  const thatCard = (href: string) => keyOf(href) === "/library/mara"
+  /** A kept workshop on the left and `beside` kept in a frame of its own; focus on the workshop. */
+  const workshopAndCard = (beside: string) => {
+    let layout = initialLayout("/chats/w")
+    layout = pinTab(layout, focusedTab(layout)!.id)
+    const chatFrame = focusedFrame(layout).id
+    layout = splitFrame(layout, chatFrame, "row", { empty: true })
+    const cardFrame = focusedFrame(layout).id
+    layout = openTab(layout, beside, keyOf, { frame: cardFrame, preview: false })
+    return { layout: focusFrame(layout, chatFrame), chatFrame, cardFrame }
+  }
+
+  it("opens the card where a card editor is shown, the workshop keeping its frame", () => {
+    const { layout: start, chatFrame, cardFrame } = workshopAndCard("/library/ove")
+    const layout = openTab(start, "/library/mara", keyOf, { frame: chatFrame, near: [editor] })
+    expect(titles(layout)).toEqual([["/chats/w"], ["/library/ove", "/library/mara"]])
+    expect(focusedFrame(layout).id).toBe(cardFrame)
+  })
+
+  it("reveals the item where it's shown, before another frame of its kind", () => {
+    const { layout: start, chatFrame } = workshopAndCard("/library/ove")
+    let layout = splitFrame(start, chatFrame, "row", { empty: true })
+    const third = focusedFrame(layout).id
+    layout = focusFrame(openTab(layout, "/library/mara", keyOf, { frame: third, preview: false }), chatFrame)
+    const next = openTab(layout, "/library/mara?tab=notes", keyOf, { frame: chatFrame, near: [editor] })
+    expect(focusedFrame(next).id).toBe(third)
+    expect(titles(next)).toEqual(titles(layout))
+  })
+
+  it("tries the tests in order: a change view first, then that card's editor", () => {
+    const { layout: start, chatFrame, cardFrame } = workshopAndCard("/library/mara")
+    const near = [change, thatCard]
+    const layout = openTab(start, "/library/mara/change?from=1&to=2", keyOf, { frame: chatFrame, near })
+    expect(titles(layout)).toEqual([["/chats/w"], ["/library/mara", "/library/mara/change"]])
+    expect(focusedFrame(layout).id).toBe(cardFrame)
+    // Another card's editor isn't that card's: the change view opens where it was clicked.
+    const other = workshopAndCard("/library/ove")
+    const elsewhere = openTab(other.layout, "/library/mara/change?from=1&to=2", keyOf, {
+      frame: other.chatFrame,
+      near
+    })
+    expect(titles(elsewhere)).toEqual([["/chats/w", "/library/mara/change"], ["/library/ove"]])
+  })
+
+  it("opens as before when no shown tab passes", () => {
+    let layout = initialLayout("/chats/w")
+    layout = pinTab(layout, focusedTab(layout)!.id)
+    const plain = openTab(layout, "/library/mara", keyOf, { id: "t" })
+    expect(openTab(layout, "/library/mara", keyOf, { id: "t", near: [editor] })).toEqual(plain)
+  })
+})

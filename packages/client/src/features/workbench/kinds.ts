@@ -58,6 +58,28 @@ export const affinityOf = (href: string) => {
   return kind?.opensWhereShown ? kind.id : null
 }
 
+/**
+ * A link's own affinity (spec/WORKSHOP-CARDS.md §7.3): where a plain click opens it, tried in
+ * order, each a tab kind's id (a frame showing an item of that kind) or an app path (a frame
+ * showing that item). Spread on a plain `<a href>`: the workbench's link gestures read it.
+ */
+export const openNearProps = (...near: ReadonlyArray<string>) => ({ [OPEN_NEAR]: near.join(" ") })
+const OPEN_NEAR = "data-open-near"
+
+/** A link's `openNearProps` as tests on a frame's shown tab (model.ts `OpenOptions.near`). */
+export const nearOf = (anchor: Element): ReadonlyArray<(href: string) => boolean> | undefined => {
+  const spec = anchor.getAttribute(OPEN_NEAR)
+  if (!spec) return undefined
+  return spec
+    .split(" ")
+    .filter((token) => token !== "")
+    .map((token) =>
+      token.startsWith("/")
+        ? (href: string) => itemKey(href) === itemKey(token)
+        : (href: string) => tabKind(href)?.id === token
+    )
+}
+
 export const defaultTitle = (href: string) => {
   const url = parse(href)
   return kindOf(url)?.kind.title?.(url) ?? "Page"
