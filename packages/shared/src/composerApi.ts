@@ -114,7 +114,12 @@ export const SetComposerLibraryFields = {
   ...ComposerImageKey,
   /** Attached after those there, by id (the server knows each one's kind); one already there stays where it is. */
   add: Schema.Array(RefId).check(Schema.isMaxLength(16)),
-  remove: Schema.Array(RefId).check(Schema.isMaxLength(16))
+  remove: Schema.Array(RefId).check(Schema.isMaxLength(16)),
+  /**
+   * A new chat swept (`chatId` opened in its place) whose handed-over items `add` carries on:
+   * only those its composer still held when it was swept are attached (rev-dd5 #2).
+   */
+  carriedFrom: Schema.optionalKey(Schema.String)
 }
 
 export class ComposerApi extends RpcGroup.make(

@@ -101,6 +101,37 @@ describe("a new workshop's pending chat", () => {
     )
   )
 
+  it.live("a workshop opened in a swept one's place carries on only the items its composer still held (rev-dd5 #2)", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, quill } = yield* setup
+        const kept = yield* api.CreateLorebook({ label: "Harbour charts" })
+        const removed = yield* api.CreateLorebook({ label: "Harbour rules" })
+        const first = yield* api.OpenDraftChat({ draftFor: `workshop:${quill}:` })
+        const composer = yield* api.OpenComposer({ chatId: first.id, forkId: null })
+        const key = { chatId: first.id, draftId: composer.id }
+        // Both handed over; another tab removes one; then the workshop is swept.
+        yield* api.SetComposerLibrary({ ...key, add: [kept.id, removed.id], remove: [] })
+        yield* api.SetComposerLibrary({ ...key, add: [], remove: [removed.id] })
+        yield* (yield* Writer).SweepPendingChat({ userId, chatId: first.id })
+        // The tab that handed both over carries them on to the workshop opened in its place.
+        const again = yield* api.OpenDraftChat({ draftFor: `workshop:${quill}:` })
+        const next = yield* api.OpenComposer({ chatId: again.id, forkId: null })
+        const carried = yield* api.SetComposerLibrary({
+          chatId: again.id,
+          draftId: next.id,
+          add: [kept.id, removed.id],
+          remove: [],
+          carriedFrom: first.id
+        })
+        assert.deepStrictEqual(
+          carried.map((item) => item.name),
+          ["Harbour charts"]
+        )
+      })
+    )
+  )
+
   it.live("ten new workshops opened and left make the seeds once, and nothing more in the library", () =>
     run(
       Effect.gen(function* () {
