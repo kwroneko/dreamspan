@@ -119,7 +119,7 @@ export function ThinkingEditor({
       if (!ended.ok) return setError(ended.error.message)
       return session.closeEditor(editor)
     }
-    const outcome = await session.edit({ ...entry, version: source }, source.content, null, undefined, {
+    const outcome = await session.edit({ ...entry, version: source }, undefined, null, undefined, {
       text: thought.text,
       draft: thought.draft
     })

@@ -8,6 +8,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Type } from "@earendil-works/pi-ai"
 import { NewVersion, type EntityId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { StoredRewrite } from "@dreamspan/shared/regexScripts.ts"
 import { Effect } from "effect"
 import type { ServerResponse } from "node:http"
 import type { RolloutTool } from "../src/agent/tools.ts"
@@ -24,7 +25,7 @@ import { type Recorded, startMockProvider } from "./support/mockProvider.ts"
 type Api = Effect.Success<ReturnType<typeof client>>
 
 /** A chat whose one message is a model reply with thinking, as a provider's reply has it. */
-const replyWithThinking = (api: Api) =>
+const replyWithThinking = (api: Api, rewrite?: StoredRewrite) =>
   Effect.gen(function* () {
     const writer = yield* Writer
     const userId = (yield* api.Whoami()).id as UserId
@@ -51,7 +52,8 @@ const replyWithThinking = (api: Api) =>
         reasoning: "Model plan: light the lamp.",
         status: "complete",
         macroMode: "verbatim",
-        origin: "greeting"
+        origin: "greeting",
+        ...(rewrite ? { rewrite } : {})
       })
     })
     const slotId = chat.activeLeafSlotId!
@@ -63,6 +65,92 @@ const replyWithThinking = (api: Api) =>
   })
 
 describe("thinking in a message's edit", () => {
+  it.live("a thinking-only save keeps the body and its rewrite when making a swipe or an amend", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const originalScript = { scope: "global", id: "first", name: "First rewrite" } as const
+      const { chat, slotId, entry } = yield* replyWithThinking(api, {
+        applied: [originalScript],
+        failed: [],
+        raw: "The candle is lit.",
+        rawReasoning: null
+      })
+      const original = yield* entry()
+      const common = {
+        trim_strings: [],
+        disabled: false,
+        markdown_only: false,
+        prompt_only: false,
+        run_on_edit: true,
+        substitute_regex: "none",
+        min_depth: null,
+        max_depth: null
+      } as const
+      yield* api.SetGlobalRegex({
+        expectedRevision: (yield* api.GetGlobalRegex()).revision,
+        scripts: [
+          {
+            ...common,
+            id: "body",
+            name: "Body edit",
+            find_regex: "lamp",
+            replace_string: "lantern",
+            placement: [1, 2]
+          },
+          {
+            ...common,
+            id: "thought",
+            name: "Thinking edit",
+            find_regex: "plan",
+            replace_string: "idea",
+            placement: [6]
+          }
+        ]
+      })
+      const draftFor = (versionId: typeof original.version.id, content: string) =>
+        api
+          .SaveMessageDraft({
+            target: { _tag: "EditThinking", versionId },
+            draftId: null,
+            content,
+            expectedRowVersion: null,
+            expectedSession: null
+          })
+          .pipe(Effect.map(({ id, session }) => ({ draftId: id, session })))
+      const first = "First plan."
+      const added = yield* api.EditVersion({
+        slotId,
+        sourceVersionId: original.version.id,
+        reasoning: first,
+        expectedRowVersion: original.rowVersion,
+        reasoningDraft: yield* draftFor(original.version.id, first)
+      })
+      const second = "Second plan."
+      const amended = yield* api.AmendVersion({
+        versionId: added.version.id,
+        reasoning: second,
+        expectedRowVersion: added.version.rowVersion,
+        reasoningDraft: yield* draftFor(added.version.id, second)
+      })
+      assert.equal(amended.id, added.version.id)
+      for (const version of [added.version, amended]) {
+        assert.equal(version.content, original.version.content)
+        assert.deepStrictEqual(version.rewrite?.applied, [
+          originalScript,
+          { scope: "global", id: "thought", name: "Thinking edit" }
+        ])
+      }
+      assert.equal(added.version.reasoning, "First idea.")
+      assert.equal(amended.reasoning, "Second idea.")
+      assert.deepStrictEqual(yield* api.RawVersionText({ versionId: amended.id }), {
+        content: "The candle is lit.",
+        reasoning: second,
+        sections: null
+      })
+      assert.deepStrictEqual(yield* api.MessageDrafts({ chatId: chat.id }), [])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
   it.live("an edit of a reply keeps, replaces or removes its thinking on the new version only", () =>
     Effect.gen(function* () {
       const api = yield* client()
