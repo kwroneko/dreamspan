@@ -621,6 +621,48 @@ main:has(> [data-fill]) {
   }
 }
 
+/*
+ * A scrollbar that has to be seen (the frames, when the window is too narrow for them;
+ * minframe2): every scrollbar's thumb, at its hover strength all the time, on a track in the
+ * surface color with a border line, so the row reads as scrolling before it's hovered.
+ */
+.scroll-visible,
+.scroll-visible:hover {
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+@supports not selector(::-webkit-scrollbar) {
+  .scroll-visible,
+  .scroll-visible:hover {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-hover) var(--surface);
+  }
+}
+.scroll-visible::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.scroll-visible::-webkit-scrollbar-track {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.scroll-visible::-webkit-scrollbar-track:vertical {
+  border-top: 0;
+  border-left: 1px solid var(--border);
+}
+.scroll-visible::-webkit-scrollbar-corner {
+  background: var(--surface);
+}
+.scroll-visible::-webkit-scrollbar-button {
+  display: none;
+}
+.scroll-visible::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-hover);
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
+}
+
 /* What Base UI would add as an inline <style>, which the CSP refuses (ui/CspProvider.tsx). */
 .base-ui-disable-scrollbar {
   scrollbar-width: none;

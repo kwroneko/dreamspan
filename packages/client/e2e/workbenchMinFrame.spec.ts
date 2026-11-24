@@ -14,6 +14,8 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { gotoWithLayout } from "./support/workbench.ts"
 
 const server = serverPerFile(withAdmin)
+// Headless Chromium hides scrollbars by default; the frames' scrollbar is part of what's tested.
+test.use({ launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] } })
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 
 const shots = process.env.SCREENSHOT_DIR
@@ -176,7 +178,10 @@ test("a window narrowed below the frames' least widths scrolls the frames, clipp
   await gotoWithLayout(page, server().url, `/chats/${chat}`, [
     "r",
     [0.25, 0.25, 0.25, 0.25],
-    ...[0, 1, 2, 3].map(() => [0, "="])
+    [0, "="],
+    [0, "="],
+    [0, "=", "/library"],
+    [0, "="]
   ])
   await expect(frames(page)).toHaveCount(4)
   await expectWholeStrips(page)
@@ -184,6 +189,28 @@ test("a window narrowed below the frames' least widths scrolls the frames, clipp
   await expectWholeStrips(page)
   // Nothing outside the frames scrolls the page itself.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+  // The row scrolls, with a scrollbar that takes room (a track), not one drawn over the frames.
+  const center = page.locator("[data-workbench]")
+  expect(await center.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
+  expect(await center.evaluate((el) => el.offsetHeight - el.clientHeight)).toBeGreaterThanOrEqual(8)
+
+  // A tab moved to a frame partly out of view scrolls that frame into view.
+  await center.evaluate((el) => el.scrollTo({ left: 0 }))
+  const last = frames(page).last()
+  expect((await last.boundingBox())!.x + (await last.boundingBox())!.width).toBeGreaterThan(1340)
+  await frames(page)
+    .nth(2)
+    .getByRole("tab", { name: /Library/ })
+    .click({ button: "right" })
+  await page.getByRole("menuitem", { name: "Move to the frame on the right" }).click()
+  await expect(last.getByRole("tab", { name: /Library/ })).toBeVisible()
+  await expect
+    .poll(async () => {
+      const box = (await last.boundingBox())!
+      return box.x + box.width
+    })
+    .toBeLessThanOrEqual(1340.5)
+  await center.evaluate((el) => el.scrollTo({ left: el.scrollWidth / 2 }))
   await shot(page, "narrowed-1340-dark")
   if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "minframe-narrowed-1340")
 })
