@@ -64,7 +64,7 @@ const CUTOUT_HELP = "Drag the box to move it, or a corner to resize it. Arrow ke
 /** What the box chooses on each tab, for the ? beside the size slider. */
 const SIZE_HELP: Record<string, string> = {
   picture:
-    "The box marks the part of the image shown when the picture is opened large and in exported card files. Cutout size makes the box bigger or smaller around its centre; the rest of the image is kept, just not shown.",
+    "The box marks the part of the image shown when the picture is opened large and in PNG exports. Cutout size makes the box bigger or smaller around its centre. Dreamspan keeps the original image.",
   portrait:
     "The box marks the small portrait shown beside messages, in the cast and in lists and tiles. It always stays inside the full picture. Cutout size makes it bigger or smaller around its centre."
 }
@@ -299,7 +299,7 @@ export function CutoutChooser({
             {
               value: "picture",
               label: "Full picture",
-              description: "The picture shown when it's opened large, and in exported card files"
+              description: "The picture shown when it's opened large and in PNG exports"
             },
             {
               value: "portrait",
@@ -502,7 +502,7 @@ export function CutoutChooser({
             {(tab === "picture"
               ? [
                   ["Large view", "Opened large", "w-[134px]"],
-                  ["Export", "Exported file", "w-[96px]"]
+                  ["Export", "PNG export", "w-[96px]"]
                 ]
               : [
                   // The message preview has the shape and size of the chat's own portraits (`Avatar` at `chat`).
