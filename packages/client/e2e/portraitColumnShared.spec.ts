@@ -383,6 +383,30 @@ test("a portrait open while the chat splits into two panes shows once, after clo
   await expect(column(page)).toHaveCount(0)
 })
 
+for (const width of [1340, 1920])
+  test(`opening the same portrait from another pane preserves its zoom at ${width}`, async ({ page }) => {
+    await openChat(page, width)
+    await page.getByRole("button", { name: "Split right" }).click()
+    await expect(frames(page)).toHaveCount(2)
+    const [left, right] = [frames(page).first(), frames(page).nth(1)]
+    await openPortrait(left)
+    const viewer = viewers(page).first()
+    const actualSize = viewer.getByRole("button", { name: "100%", exact: true })
+    await actualSize.click()
+    await expect(actualSize).toHaveAttribute("aria-pressed", "true")
+
+    await openPortrait(right)
+    await expect(viewers(page)).toHaveCount(1)
+    await expect(actualSize).toHaveAttribute("aria-pressed", "true")
+    await expect(viewer.locator("[data-zoom-percent]")).toHaveText("100%")
+
+    await viewer.getByRole("button", { name: "Viewer options", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Open as a tab", exact: true }).click()
+    await expect(pictureTab(right)).toBeVisible()
+    await expect(pictureTab(left)).toHaveCount(0)
+    await expect(column(page)).toHaveCount(0)
+  })
+
 test("browser Back leaves the portrait open in the other pane", async ({ page }) => {
   await openChat(page, 1340)
   await page.getByRole("button", { name: "Split right" }).click()

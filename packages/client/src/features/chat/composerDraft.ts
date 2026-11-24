@@ -519,6 +519,14 @@ export class ComposerDraft {
     if (this.replayedAt !== null && saved.value.draft?.displaced != null)
       this.conflict = { ...saved.value.draft.displaced, typedAt: this.replayedAt }
     this.replayedAt = null
+    if (!saved.value.accepted && saved.value.draft === null) {
+      // Its chat is gone (a pending chat swept meanwhile): the server filed the text to the
+      // recovered texts and there's no draft to save on. Nothing more is saved here; the page
+      // opens a fresh chat in its place.
+      this.base = null
+      this.emit()
+      return
+    }
     const now = saved.value.draft ?? (await this.reopen())
     if (saved.value.accepted && now !== null && shown(now) === sent && (unchanged || descendant)) {
       // The draft holds this tab's text: it's the base now, and what's typed since was typed
@@ -533,7 +541,7 @@ export class ComposerDraft {
     }
     // Otherwise what's typed here since goes on top of it.
     this.emit()
-    if (this.unsaved) this.schedule(0)
+    if (this.unsaved && now !== null) this.schedule(0)
   }
 
   /** The composer of the fork asked for, read again. */
