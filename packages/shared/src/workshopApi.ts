@@ -390,6 +390,7 @@ export class WorkshopApi extends RpcGroup.make(
   Rpc.make("RedoChange", {
     payload: {
       reversalId: Schema.String,
+      effect: Schema.optionalKey(Schema.Struct(EffectKey)),
       message: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
       ...ReversalOptions
     },

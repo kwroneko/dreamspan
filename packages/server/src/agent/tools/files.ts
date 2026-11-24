@@ -106,6 +106,18 @@ export type ApproveCopy = (copy: {
   readonly again?: boolean
 }) => Effect.Effect<boolean>
 
+export interface WrittenCardFileReversal {
+  readonly before: string
+  readonly after: string
+  readonly name: string
+  readonly plan: ReversalPlan
+}
+
+interface CardFileReversal {
+  readonly patches: ReadonlyArray<ReversalPatch>
+  readonly record: (written: WrittenCardFileReversal) => Effect.Effect<string, unknown>
+}
+
 export interface SubagentWorkspaces {
   readonly id: string
   readonly folderOf: (ctx: ToolContext) => Effect.Effect<string, unknown>
@@ -2140,16 +2152,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
     input: {
       readonly path: string
       readonly host: boolean
-      readonly patches: ReadonlyArray<ReversalPatch>
+      readonly prepare: Effect.Effect<CardFileReversal, unknown>
       readonly choices?: Readonly<Record<string, ConflictChoice>> | undefined
       readonly expectedHead?: string | undefined
       readonly dryRun?: boolean | undefined
-      readonly record: (written: {
-        readonly before: string
-        readonly after: string
-        readonly name: string
-        readonly plan: ReversalPlan
-      }) => Effect.Effect<string, unknown>
     }
   ) =>
     Effect.gen(function* () {
@@ -2168,8 +2174,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
           if (!info) return yield* new EffectUndoRefused({ message: "The file isn't a card file any more." })
           const beforeHash = sha256(current.bytes)
           const matches = matchesReversalHead(beforeHash, input)
+          const { patches, record } = yield* input.prepare
           const plan = planGroupedReversal(
-            input.patches,
+            patches,
             visibleDoc("card", info.doc) as Record<string, unknown>,
             matches ? input.choices : undefined
           )
@@ -2211,7 +2218,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
               error instanceof QuotaExceeded ? new EffectUndoRefused({ message: error.message }) : error
             )
           )
-          const id = yield* input.record({
+          const id = yield* record({
             before: beforeHash,
             after: sha256(next),
             name: edited.after.name,

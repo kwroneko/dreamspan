@@ -180,6 +180,44 @@ export const withReversions = (sql: SqlClient.SqlClient, effects: ReadonlyArray<
     })
   })
 
+/** Each covered field whose latest action on this effect is still this particular revert. */
+const standingCoverage = (sql: SqlClient.SqlClient, record: ReversalRow, selected?: EffectKey) =>
+  Effect.gen(function* () {
+    const rows = yield* sql<{
+      rollout_id: string
+      tool_call_id: string
+      seq: number
+      of_json: string
+      fields_json: string
+    }>`SELECT x.rollout_id, x.tool_call_id, x.seq, x.of_json, json_group_array(field.value) AS fields_json
+      FROM change_reversal_effects x JOIN rollout_effects e USING (rollout_id, tool_call_id, seq)
+      JOIN change_reversals original ON original.id = x.reversal_id
+      CROSS JOIN json_each(x.fields_json) field
+      WHERE x.reversal_id = ${record.id} AND e.undone_at IS NULL AND NOT EXISTS (
+        SELECT 1 FROM change_reversal_effects y JOIN change_reversals newer ON newer.id = y.reversal_id
+        CROSS JOIN json_each(y.fields_json) taken
+        WHERE y.rollout_id = x.rollout_id AND y.tool_call_id = x.tool_call_id AND y.seq = x.seq
+          AND (newer.created_at, newer.rowid) > (original.created_at, original.rowid)
+          AND taken.value = field.value
+      )
+      GROUP BY x.rollout_id, x.tool_call_id, x.seq`
+    const effects = rows.map((row): CoveredEffect => ({
+      rolloutId: row.rollout_id,
+      toolCallId: row.tool_call_id,
+      seq: row.seq,
+      of: JSON.parse(row.of_json) as Array<string>,
+      fields: JSON.parse(row.fields_json) as Array<string>
+    }))
+    const chosen = selected
+      ? effects.filter(
+          (e) => e.rolloutId === selected.rolloutId && e.toolCallId === selected.toolCallId && e.seq === selected.seq
+        )
+      : effects
+    const covered = new Set(chosen.flatMap((effect) => effect.fields))
+    const fields = (JSON.parse(record.fields_json) as Array<string>).filter((field) => covered.has(field))
+    return { fields, effects }
+  })
+
 /** The approvals a revert never gives (as a restored revision, editorWrites.ts `RestoreRevision`). */
 export const guarded = (kind: EntityKind, head: Doc, next: Doc): Doc => {
   let doc = withoutGrantedAgentEdits(kind, head, next)
@@ -365,7 +403,7 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
           )
         }).pipe(transaction(sql, "RevertLibraryChange")),
 
-      RedoLibraryChange: ({ userId, reversalId, ...options }) =>
+      RedoLibraryChange: ({ userId, reversalId, effect, ...options }) =>
         Effect.gen(function* () {
           const [record] = yield* sql<ReversalRow>`SELECT * FROM change_reversals
             WHERE id = ${reversalId} AND user_id = ${userId} AND action = 'revert' AND target_kind = 'entity'`
@@ -378,8 +416,8 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
           if (!ref?.id) return yield* new NotFound({ entity: "ref", id: record.target_id })
           const head = yield* lib.ownedRef(userId, ref.id)
           if (head.entity_id !== record.target_id) return yield* new NotFound({ entity: "ref", id: ref.id })
-          const recorded = JSON.parse(record.fields_json) as Array<string>
-          const fields = options.fields ? recorded.filter((f) => options.fields!.includes(f)) : recorded
+          const coverage = yield* standingCoverage(sql, record, effect)
+          const fields = options.fields ? coverage.fields.filter((f) => options.fields!.includes(f)) : coverage.fields
           const plan = planReversal({
             original:
               record.head_before === null
@@ -395,13 +433,6 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
               ? { choices: options.choices }
               : {})
           })
-          const effects = yield* sql<{
-            rollout_id: string
-            tool_call_id: string
-            seq: number
-            fields_json: string
-            of_json: string
-          }>`SELECT * FROM change_reversal_effects WHERE reversal_id = ${record.id}`
           return yield* apply(
             userId,
             head,
@@ -411,13 +442,7 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
               chatId: record.chat_id,
               action: "redo",
               reversesId: record.id,
-              effects: effects.map((e) => ({
-                rolloutId: e.rollout_id,
-                toolCallId: e.tool_call_id,
-                seq: e.seq,
-                of: JSON.parse(e.of_json) as Array<string>,
-                fields: JSON.parse(e.fields_json) as Array<string>
-              }))
+              effects: coverage.effects
             },
             "Redid the assistant's change"
           )
@@ -467,37 +492,23 @@ export const makeChangeReversalReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
     /** One revert of the account's card file, with the changes it covers: the host's Redo reads it. */
-    FileReversal: ({ userId, reversalId }) =>
+    FileReversal: ({ userId, reversalId, effect }) =>
       Effect.gen(function* () {
         const [record] = yield* sql<ReversalRow>`SELECT * FROM change_reversals
           WHERE id = ${reversalId} AND user_id = ${userId} AND action = 'revert'`
         if (!record) return yield* new NotFound({ entity: "revert", id: reversalId })
-        const effects = yield* sql<{
-          rollout_id: string
-          tool_call_id: string
-          seq: number
-          fields_json: string
-          of_json: string
-          host: number | null
-        }>`SELECT x.*, json_extract(e.undo_json, '$.host') AS host
+        const [host] = yield* sql<{ host: number | null }>`SELECT json_extract(e.undo_json, '$.host') AS host
           FROM change_reversal_effects x JOIN rollout_effects e USING (rollout_id, tool_call_id, seq)
-          WHERE x.reversal_id = ${record.id}`
+          WHERE x.reversal_id = ${record.id} LIMIT 1`
         return {
           id: record.id,
           targetKind: record.target_kind,
           targetId: record.target_id,
-          host: effects.some((e) => e.host === 1),
+          host: host?.host === 1,
           label: record.label,
-          fields: JSON.parse(record.fields_json) as Array<string>,
           before: JSON.parse(record.before_json) as Record<string, unknown>,
           after: JSON.parse(record.after_json) as Record<string, unknown>,
-          effects: effects.map((e) => ({
-            rolloutId: e.rollout_id,
-            toolCallId: e.tool_call_id,
-            seq: e.seq,
-            of: JSON.parse(e.of_json) as Array<string>,
-            fields: JSON.parse(e.fields_json) as Array<string>
-          }))
+          ...(yield* standingCoverage(sql, record, effect))
         }
       }).pipe(query("FileReversal")),
     /**

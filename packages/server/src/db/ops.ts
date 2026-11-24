@@ -3324,6 +3324,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     payload: {
       userId: UserId,
       reversalId: Schema.String,
+      effect: Schema.optionalKey(Schema.Struct(EffectKey)),
       message: Schema.optionalKey(Schema.String),
       ...ReversalOptions
     },
@@ -6566,7 +6567,7 @@ const ReadOpsOwn = RpcGroup.make(
   }),
   /** One revert of the account's, with the changes it covers (db/changeReversals.ts): a card file's Redo. */
   Rpc.make("FileReversal", {
-    payload: { userId: UserId, reversalId: Schema.String },
+    payload: { userId: UserId, reversalId: Schema.String, effect: Schema.optionalKey(Schema.Struct(EffectKey)) },
     success: Schema.Struct({
       id: Schema.String,
       targetKind: Schema.Literals(["entity", "file"]),

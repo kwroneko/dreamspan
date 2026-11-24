@@ -343,6 +343,25 @@ describe("revert a change", () => {
 })
 
 describe("redo", () => {
+  it.live("redoes only the selected effect's fields from a grouped revert", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      yield* agentEdit(f, [{ field: "description", text: "Assistant description." }], "c1")
+      yield* agentEdit(f, [{ field: "personality", text: "Loud." }], "c2")
+      const reverted = yield* api.RevertChange({ effects: yield* f.editKeys(["c1", "c2"]) })
+      const [effect] = yield* f.editKeys(["c2"])
+      const redone = yield* api.RedoChange({ reversalId: reverted.reversalId!, effect: effect! })
+      assert.deepStrictEqual(redone.fields, [PERSONALITY])
+      const now = yield* f.doc()
+      assert.include(String(now.description), "lighthouse")
+      assert.strictEqual(now.personality, "Loud.")
+      const repeated = yield* api.RedoChange({ reversalId: reverted.reversalId!, effect: effect! })
+      assert.isNull(repeated.reversalId)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("redoes an insertion after its original neighbor", () => {
     const config = testConfig()
     return Effect.gen(function* () {

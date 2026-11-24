@@ -73,7 +73,10 @@ export function EffectRow({
   const redo = async () => {
     setNote(null)
     for (const reversalId of current.reversion?.reversals ?? []) {
-      const result = await action.run((client) => client("RedoChange", { reversalId }), keys)
+      const result = await action.run(
+        (client) => client("RedoChange", { reversalId, effect: effectKey(current) }),
+        keys
+      )
       if (!result.ok) return
       if (result.value.conflicts.length > 0) {
         setNote("Not redone: Changed since. Open its change view and choose Redo to resolve the conflict.")
