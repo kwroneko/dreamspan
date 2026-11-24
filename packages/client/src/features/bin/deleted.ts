@@ -55,9 +55,10 @@ export const useDeletedManyToast = () => {
   const navigate = useNavigate()
   return useCallback(
     (
-      items: ReadonlyArray<BinItem>,
+      groups: ReadonlyArray<ReadonlyArray<BinItem>>,
       more: ReadonlyArray<{ readonly label: string; readonly hint?: string; readonly onClick: () => void }> = []
     ) => {
+      const items = groups.flat()
       // Every delete shows this toast: editors whose entry, chat or branch went read it again,
       // so no unsaved marker stays on what's gone (features/editor/store.ts, `recheck`).
       notifyEntriesChanged()
@@ -71,13 +72,26 @@ export const useDeletedManyToast = () => {
           {
             label: "Undo",
             hint: items.length === 1 ? "Puts the message back where it was." : "Puts them all back where they were.",
-            onClick: () =>
-              void restoreItems(
-                registry,
-                items.map((item) => item.id)
-              ).then((exit) => {
-                if (exit._tag === "Failure") showToast({ title: describeCause(exit.cause).message })
-              })
+            onClick: async () => {
+              let failed = 0
+              let error: string | undefined
+              for (const group of groups) {
+                const exit = await restoreItems(
+                  registry,
+                  group.map((item) => item.id)
+                )
+                if (exit._tag === "Failure") {
+                  failed += group.length
+                  error ??= describeCause(exit.cause).message
+                }
+              }
+              if (error !== undefined)
+                showToast(
+                  groups.length === 1
+                    ? { title: error }
+                    : { title: `Couldn't restore ${failed} of ${items.length} messages.`, description: error }
+                )
+            }
           },
           ...more,
           {
