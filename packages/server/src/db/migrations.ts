@@ -105,7 +105,18 @@ export const migrationDefinitions = {
     ]
   },
   // DESIGN §2.1 (owner, 2026-11-23): the new-chat page's chat, pending until its first turn, and the entry it was opened for.
-  "0018_pending_chats": { statements: pendingChatsMigration }
+  "0018_pending_chats": { statements: pendingChatsMigration },
+  // 0018 named the old new-chat pages' recovered texts by the card their draft's key named, whoever
+  // owned it: a card that isn't the account's own names nothing of its (rev-draftchats3b #10).
+  "0019_recovered_label_owner": {
+    statements: [
+      `UPDATE recovered_texts SET source_label = 'New chat'
+        WHERE source_kind = 'user_field' AND source_id LIKE 'pending-chat:%'
+          AND source_id NOT LIKE 'pending-chat:src:%' AND source_label LIKE 'New chat with %'
+          AND NOT EXISTS (SELECT 1 FROM entities e
+            WHERE e.id = substr(recovered_texts.source_id, 14) AND e.owner_user_id = recovered_texts.user_id)`
+    ]
+  }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 
 const runAll = (statements: ReadonlyArray<string>) =>

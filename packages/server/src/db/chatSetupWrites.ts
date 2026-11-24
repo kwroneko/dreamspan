@@ -1,3 +1,4 @@
+import type { StoredStateEventData } from "@dreamspan/shared/state.ts"
 import { refusePending } from "./chatKindPolicy.ts"
 import { fileTyped, pendingRow, type SweptDraft, sweepPendingChat, titleFor } from "./pendingChats.ts"
 import { presenceAt, presenceJson } from "./participation.ts"
@@ -667,7 +668,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         }).pipe(transaction("OpenDraftChat")),
       SweepPendingChat: ({ userId, chatId }) =>
         sweepPendingChat(sql, bin, userId, chatId).pipe(transaction("SweepPendingChat")),
-      SyncPendingGreetings: ({ userId, chatId, forkId, events, candidates }) =>
+      SyncPendingGreetings: ({ userId, chatId, forkId, events, persona, candidates }) =>
         Effect.gen(function* () {
           const chat = yield* pendingRow(sql, chatId)
           if (chat === null || chat.owner_user_id !== userId) return { pending: false, changed: false, fellBack: false }
@@ -679,6 +680,25 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           const fork = { id: forkOf, chatId }
           // The change is the chat's start's: nothing is said yet (DESIGN §2.1).
           for (const event of events) yield* graph.insertStateEvent(userId, chatId, null, null, null, event, forkOf)
+          if (persona !== undefined) {
+            const was = yield* chatStateAt(sql, chatId as ChatId, null, forkOf)
+            const personas = new Set(
+              (yield* sql<{ id: string }>`SELECT entity_id AS id FROM entity_tags WHERE tag = 'persona'
+                AND entity_id IN ${sql.in(was.playedByMe.length === 0 ? [""] : [...was.playedByMe])}`).map(
+                (row) => row.id
+              )
+            )
+            const switched: Array<typeof StoredStateEventData.Type> = [
+              ...(was.participants.includes(persona)
+                ? []
+                : [{ key: "participant.join", value: { entity: persona } } as typeof StoredStateEventData.Type]),
+              { key: "played_by_me.set", value: { entities: [persona] } } as typeof StoredStateEventData.Type,
+              ...was.playedByMe
+                .filter((e) => e !== persona && was.participants.includes(e) && personas.has(e))
+                .map((e) => ({ key: "participant.leave", value: { entity: e } }) as typeof StoredStateEventData.Type)
+            ]
+            for (const event of switched) yield* graph.insertStateEvent(userId, chatId, null, null, null, event, forkOf)
+          }
           const state = yield* chatStateAt(sql, chatId as ChatId, null, forkOf)
           const playing = new Set<string>(state.playedByMe)
           const characters = [...new Set(state.participants.filter((entity) => !playing.has(entity)))]
@@ -709,7 +729,14 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           const slots = yield* sql<{ id: string; parent: string | null; depth: number; selected: string }>`
             SELECT id, parent_slot_id AS parent, depth, selected_version_id AS selected FROM slots
             WHERE chat_id = ${chatId} ORDER BY depth`
-          type Row = { id: string; ordinal: number; speaker: string | null; ref: string | null; content: string; frozen: string | null }
+          type Row = {
+            id: string
+            ordinal: number
+            speaker: string | null
+            ref: string | null
+            content: string
+            frozen: string | null
+          }
           const versionsOf = (slotId: string) =>
             sql<Row>`
               SELECT id, ordinal, speaker_entity_id AS speaker, greeting_ref AS ref, content, frozen_macros AS frozen
@@ -853,7 +880,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               [...(before?.versions ?? new Map<number, Row>()).entries()].map(([card, version]) => ({
                 index: greeter?.greetingIndexes.indexOf(card) ?? -1,
                 text: version.content,
-                frozen: version.frozen === null ? null : (JSON.parse(version.frozen) as { readonly [x: string]: string }),
+                frozen:
+                  version.frozen === null ? null : (JSON.parse(version.frozen) as { readonly [x: string]: string }),
                 card
               }))
             if (greeter === undefined || options.length === 0) {
@@ -869,7 +897,11 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             const versions = options.map((option) => {
               const old = before?.versions.get(option.card)
               const frozen =
-                old === undefined ? option.frozen : old.frozen === null ? null : (JSON.parse(old.frozen) as { readonly [x: string]: string })
+                old === undefined
+                  ? option.frozen
+                  : old.frozen === null
+                    ? null
+                    : (JSON.parse(old.frozen) as { readonly [x: string]: string })
               return greetingVersionOf(greeter, { ...option, frozen })
             })
             const inserted = yield* graph.insertSlot(
@@ -889,7 +921,9 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             for (const [card, drafts] of before?.edits ?? new Map<number, Array<SweptDraft>>()) {
               const version = made.find((row) => refIndex(row.ref) === card)
               if (version === undefined) lost.push(...drafts)
-              else for (const draft of drafts) yield* sql`UPDATE drafts SET target_id = ${version.id} WHERE id = ${draft.id}`
+              else
+                for (const draft of drafts)
+                  yield* sql`UPDATE drafts SET target_id = ${version.id} WHERE id = ${draft.id}`
             }
             for (const draft of before?.scratchpads ?? [])
               yield* sql`UPDATE drafts SET target_id = ${inserted.slotId} WHERE id = ${draft.id}`

@@ -172,7 +172,8 @@ describe("0002_files", () => {
           "composer_commits",
           "workshop_starts",
           "library_attachments",
-          "pending_chats"
+          "pending_chats",
+          "recovered_label_owner"
         ]
       )
       // The existing row is kept, an image by default.
@@ -260,14 +261,44 @@ describe("0018_pending_chats", () => {
       assert.deepStrictEqual(
         yield* sql`SELECT source_id, source_label, content, created_at FROM recovered_texts ORDER BY created_at`,
         [
-          { source_id: "pending-chat:e1", source_label: "New chat", content: "Hello, lighthouse keeper.", created_at: 5 },
-          { source_id: "pending-group-chat:e1,e2:Crew", source_label: "New chat", content: "Hello, crew.", created_at: 6 }
+          {
+            source_id: "pending-chat:e1",
+            source_label: "New chat",
+            content: "Hello, lighthouse keeper.",
+            created_at: 5
+          },
+          {
+            source_id: "pending-group-chat:e1,e2:Crew",
+            source_label: "New chat",
+            content: "Hello, crew.",
+            created_at: 6
+          }
         ]
       )
       assert.deepStrictEqual(
         (yield* sql<{ id: string }>`SELECT id FROM drafts ORDER BY id`).map((row) => row.id),
         ["source"]
       )
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
+describe("0019_recovered_label_owner", () => {
+  it.effect("names an old new chat's recovered text by its card only when the card is the account's", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* migrate(upTo(18))
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES
+        ('u', 'u', 'Owner', 'user', 0), ('v', 'v', 'Other', 'user', 0)`
+      yield* sql`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('mine', 'u', 'card', 0), ('theirs', 'v', 'card', 0)`
+      yield* sql`INSERT INTO recovered_texts (id, user_id, source_kind, source_id, source_field, source_label, reason, content, byte_size, created_at) VALUES
+        ('a', 'u', 'user_field', 'pending-chat:mine', 'First message', 'New chat with Mira', 'discard', 'Hello.', 6, 1),
+        ('b', 'u', 'user_field', 'pending-chat:theirs', 'First message', 'New chat with Secret', 'discard', 'Hi.', 3, 2)`
+      yield* migrate(migrationDefinitions)
+      assert.deepStrictEqual(yield* sql`SELECT id, source_label FROM recovered_texts ORDER BY id`, [
+        { id: "a", source_label: "New chat with Mira" },
+        { id: "b", source_label: "New chat" }
+      ])
     }).pipe(Effect.provide(layer()))
   )
 })
@@ -486,7 +517,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0015_composer_commits",
       "0016_workshop_starts",
       "0017_library_attachments",
-      "0018_pending_chats"
+      "0018_pending_chats",
+      "0019_recovered_label_owner"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -767,7 +799,7 @@ describe("0018_pending_chats", () => {
   it.effect("adds the pending chat's entry, NULL on every chat there was, and the index that finds them", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0018_pending_chats": _new, ...before } = migrations
+      const { "0018_pending_chats": _new, "0019_recovered_label_owner": _next, ...before } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, title, created_at, last_message_at)

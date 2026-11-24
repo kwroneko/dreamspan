@@ -15,12 +15,12 @@ import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { cleanName, renamedTitle } from "@dreamspan/shared/chatName.ts"
-import { composerKey, type DraftKey, parseDraftTarget } from "@dreamspan/shared/drafts.ts"
+import { composerKey, DraftHistoryPolicy, DraftKey, parseDraftTarget } from "@dreamspan/shared/drafts.ts"
 import { legacyPendingDraft } from "./migrationPendingChats.ts"
 import type { Bin } from "./bin.ts"
 import { EDIT_THINKING_FIELD, NotAmendable } from "@dreamspan/shared/chatApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
-import { NotFound, StaleWrite, WriteOps } from "./ops.ts"
+import { DraftTooLarge, NotFound, StaleWrite, WriteOps } from "./ops.ts"
 import { newChatLcmSettings, ownedModel } from "./generationSettings.ts"
 import { forkColumns, forkThrough, shownElsewhere, withDisplayEnd } from "./forks.ts"
 import {
@@ -163,7 +163,7 @@ export const makeWriteHandlers = (bin: Bin) =>
     /** The bodies of SaveDraft and SaveComposer: one transaction each, or all in SaveDraftBatch. */
     const saveDraft = ({
       userId,
-      key,
+      key: asked,
       draftId,
       content,
       images,
@@ -175,7 +175,18 @@ export const makeWriteHandlers = (bin: Bin) =>
       editingFrom
     }: Parameters<WriteHandlers["SaveDraft"]>[0]) =>
       Effect.gen(function* () {
+        let key = asked
         if (images !== undefined) yield* checkImages(userId, images)
+        // An edit of a new chat's greeting that was made again (its cast changed in another tab):
+        // its draft moved to the greeting made in its place, so a save naming the old greeting
+        // goes there.
+        if (key.targetKind === "version_edit" && draftId !== null) {
+          const [moved] = yield* sql<{ target_id: string }>`SELECT d.target_id FROM drafts d
+            WHERE d.id = ${draftId} AND d.user_id = ${userId} AND d.target_kind = 'version_edit'
+              AND d.field = ${key.field} AND d.target_id <> ${key.targetId}
+              AND NOT EXISTS (SELECT 1 FROM versions v WHERE v.id = ${key.targetId})`
+          if (moved !== undefined) key = new DraftKey({ ...key, targetId: moved.target_id })
+        }
         const saved = yield* drafts.save({
           userId,
           key,
@@ -231,6 +242,9 @@ export const makeWriteHandlers = (bin: Bin) =>
           sql<{ n: number }>`SELECT count(*) AS n FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}`
         )
         if (live?.n === 0) {
+          // Held to the size a live save is held to, before anything is filed.
+          if (content.length > DraftHistoryPolicy.maxContentChars)
+            return yield* new DraftTooLarge({ length: content.length, max: DraftHistoryPolicy.maxContentChars })
           const [swept] = yield* sql<{ label: string }>`
             SELECT label FROM swept_pending_chats WHERE chat_id = ${chatId} AND user_id = ${userId}`
           if (swept === undefined) return yield* new NotFound({ entity: "chat", id: chatId })

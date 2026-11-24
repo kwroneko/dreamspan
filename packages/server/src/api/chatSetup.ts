@@ -295,6 +295,21 @@ const bindingsOf = (state: ChatState) =>
   )
 
 export const makeChatSetupHandlers = Effect.gen(function* () {
+  // A pending chat's cast changes, one at a time per chat (ChangeCast).
+  const castQueues = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>()
+  const oneCastChangeAt = <A, E, R>(chatId: string, effect: Effect.Effect<A, E, R>) =>
+    Effect.suspend(() => {
+      const entry = castQueues.get(chatId) ?? { lock: Semaphore.makeUnsafe(1), users: 0 }
+      castQueues.set(chatId, entry)
+      entry.users++
+      return entry.lock.withPermit(effect).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (--entry.users === 0) castQueues.delete(chatId)
+          })
+        )
+      )
+    })
   const reader = yield* Reader
   const writer = yield* Writer
   const files = yield* WorkshopFiles
@@ -842,55 +857,70 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         // first: an ordinary cast change, after what was said, not at its start.
         if (shownPending === true && asked === null && chat.status !== "pending") slotId = chat.activeLeafSlotId
         if (["Join", "Leave", "Swap", "PlayedByMe", "Persona"].includes(change._tag) && chat.status === "pending") {
-          const before = yield* castAt(id, chatId, null, forkId, displayEnd)
-          const persona = new Set(before.cards.flatMap((card) => (card.persona ? [card.entityId] : [])))
-          const events =
-            change._tag === "Persona"
-              ? [
-                  ...(before.participants.includes(change.entityId)
-                    ? []
-                    : [toEvent({ _tag: "Join", entityId: change.entityId })]),
-                  toEvent({ _tag: "PlayedByMe", entityIds: [change.entityId] }),
-                  ...before.playedByMe
-                    .filter((e) => e !== change.entityId && before.participants.includes(e) && persona.has(e))
-                    .map((e) => toEvent({ _tag: "Leave", entityId: e }))
-                ]
-              : [toEvent(change as Exclude<CastChange, { readonly _tag: "Persona" }>)]
-          // Greetings for everyone the change may leave in the cast; the writer takes the cast's.
-          const player =
-            change._tag === "Persona"
-              ? change.entityId
-              : change._tag === "PlayedByMe"
-                ? (change.entityIds[0] ?? null)
-                : (before.playedByMe[0] ?? null)
-          const playing = new Set<string>(
-            change._tag === "Persona"
-              ? [change.entityId]
-              : change._tag === "PlayedByMe"
-                ? change.entityIds
-                : before.playedByMe
-          )
-          const joining = change._tag === "Join" || change._tag === "Swap" ? [change.entityId] : []
-          const candidates = [...new Set([...before.participants, ...joining])].filter((entity) => !playing.has(entity))
-          const drawn = yield* drawGreeters(
-            reader,
-            id,
-            {
-              cards: candidates,
-              persona: player,
-              greeting: null,
-              frozen: undefined,
-              greeters: candidates.map((entityId) => ({ entityId, greeting: 0 }))
-            },
-            (entityId) => reader.GetCardForChat({ userId: id, entityId })
-          )
-          const synced = yield* writer.SyncPendingGreetings({
-            userId: id,
+          // One pending cast change at a time per chat: each draws its greetings for the cast the
+          // one before it left (two joins at once each see the other, group-only greetings and all).
+          const synced = yield* oneCastChangeAt(
             chatId,
-            forkId: forkId ?? null,
-            events,
-            candidates: drawn
-          })
+            Effect.gen(function* () {
+              const before = yield* castAt(id, chatId, null, forkId, displayEnd)
+              // A persona switch is worked out by the writer, from the cast in its transaction: two at
+              // once go one after the other.
+              const events =
+                change._tag === "Persona" ? [] : [toEvent(change as Exclude<CastChange, { readonly _tag: "Persona" }>)]
+              // Greetings for everyone the change may leave in the cast; the writer takes the cast's.
+              const player =
+                change._tag === "Persona"
+                  ? change.entityId
+                  : change._tag === "PlayedByMe"
+                    ? (change.entityIds[0] ?? null)
+                    : (before.playedByMe[0] ?? null)
+              const playing = new Set<string>(
+                change._tag === "Persona"
+                  ? [change.entityId]
+                  : change._tag === "PlayedByMe"
+                    ? change.entityIds
+                    : before.playedByMe
+              )
+              const joining = change._tag === "Join" || change._tag === "Swap" ? [change.entityId] : []
+              // Not who the change takes out, nor one already there that can't be read for a chat any
+              // more (moved to the bin): those keep the message they have, or go with the change.
+              const leaving =
+                change._tag === "Leave" ? [change.entityId] : change._tag === "Swap" ? [change.replaces] : []
+              const readable = (entity: EntityId) =>
+                joining.includes(entity)
+                  ? Effect.succeed(true)
+                  : reader.GetCardForChat({ userId: id, entityId: entity }).pipe(
+                      Effect.as(true),
+                      Effect.catchTag("NotFound", () => Effect.succeed(false))
+                    )
+              const candidates = yield* Effect.filter(
+                [...new Set([...before.participants, ...joining])].filter(
+                  (entity) => !playing.has(entity) && !leaving.includes(entity)
+                ),
+                readable
+              )
+              const drawn = yield* drawGreeters(
+                reader,
+                id,
+                {
+                  cards: candidates,
+                  persona: player,
+                  greeting: null,
+                  frozen: undefined,
+                  greeters: candidates.map((entityId) => ({ entityId, greeting: 0 }))
+                },
+                (entityId) => reader.GetCardForChat({ userId: id, entityId })
+              )
+              return yield* writer.SyncPendingGreetings({
+                userId: id,
+                chatId,
+                forkId: forkId ?? null,
+                events,
+                ...(change._tag === "Persona" ? { persona: change.entityId } : {}),
+                candidates: drawn
+              })
+            })
+          )
           if (synced.pending) {
             if (synced.changed) hub.publish(chatId, { _tag: "Reload" })
             hub.publish(chatId, { _tag: "State" })
