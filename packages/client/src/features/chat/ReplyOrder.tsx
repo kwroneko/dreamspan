@@ -1,12 +1,10 @@
 import { cardChoiceLabel } from "./CardVersion.tsx"
 // Who replies when nobody is picked, per chat (ST's group "Group reply strategy",
 // `activation_strategy`): the Cast tab's `cast.reply-order` section (a `castSections` entry, so
-// a plugin can replace or remove it). The choices are the reply policies that have a label
+// a plugin can replace or remove it), in Cast's reply settings row. The choices are the reply policies that have a label
 // (`replyPolicy.ts`), each explained beside it; a plugin's policy with a label is offered too.
 // The choice is a `reply.order` state event at the leaf shown, imported from ST's group.
 import { useState, useSyncExternalStore } from "react"
-import { SlotOutlet } from "../../slots.tsx"
-import { castSections } from "./presentation.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
@@ -32,26 +30,24 @@ export function ReplyOrderSection({ session }: { session: ChatSession }) {
     setPending(null)
     setError(outcome.ok ? null : `Couldn't change who replies: ${outcome.error.message}`)
   }
+  // One item of Cast's reply settings row (`ReplySettingsRow`, CastTab.tsx); One reply at a time
+  // and Auto replies are registered apart and stay beside it when this is replaced. The error
+  // takes a line of its own under the row.
   return (
-    <section aria-label="Who replies" className="flex flex-col gap-2 border-t border-border pt-3">
-      <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
-        <Field
-          label="Who replies"
-          about="Who replies to what you send when you haven't picked anyone under Next, with two or more characters here."
-          className="w-72 max-w-full shrink-0"
-        >
-          <Select items={items} value={current} onValueChange={(order) => void choose(order)} />
-        </Field>
-        <SlotOutlet slot={castSections} only="cast.one-reply" props={{ session }} />
-        {/* Auto replies (features/autoRun/), out of the way beside it. */}
-        <SlotOutlet slot={castSections} only="cast.auto-replies" props={{ session }} />
-      </div>
+    <>
+      <Field
+        label="Who replies"
+        about="Who replies to what you send when you haven't picked anyone under Next, with two or more characters here."
+        className="w-72 max-w-full shrink-0"
+      >
+        <Select items={items} value={current} onValueChange={(order) => void choose(order)} />
+      </Field>
       {error && (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="order-last basis-full text-sm text-danger">
           {error}
         </p>
       )}
-    </section>
+    </>
   )
 }
 
