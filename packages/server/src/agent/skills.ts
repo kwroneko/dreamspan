@@ -22,7 +22,7 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     kinds: workshop,
     description: "Read, create, edit and copy character cards, and mark favourites; read and edit card files.",
     instructions:
-      "Find a card with list_library first and use its id when names repeat. Read a card before editing it, and change only the fields asked for. To keep the original, copy it with clone_card and edit the copy. A field too long to read in pages can be saved to a file with export_to_file, for search_files and bash; the file is a copy, so change the card with edit_card.",
+      "Find a card with list_library first and use its id when names repeat. Read a card before editing it, and change only the fields asked for. To keep the original, copy it with clone_card and edit the copy.",
     tools: [
       "read_card",
       "create_card",

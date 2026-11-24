@@ -7,8 +7,11 @@ import { Effect } from "effect"
 import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
-import type { FrozenTool, ToolContext } from "../src/agent/tools.ts"
+import { frozenTool, type FrozenTool, type ToolContext } from "../src/agent/tools.ts"
+import { offeredByGrants } from "../src/agent/approvals.ts"
+import { skillsFor } from "../src/agent/toolLoading.ts"
 import { FILE_TOOLS } from "../src/agent/tools/files.ts"
+import { makeLoadSkill } from "../src/agent/tools/loading.ts"
 import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { cardDoc, presetDoc } from "./support/docs.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
@@ -273,6 +276,27 @@ describe("export_to_file", () => {
         yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "files", mode: "off" })
         const off = yield* run("export_to_file", { kind: "card", item: card.id, path: "off.txt" })
         assert.include(off.text, "off in this workshop")
+
+        const offered = yield* offeredByGrants(
+          { registries: registry, reader: base.reader, userId: me.id, chatId: chat.id },
+          [toolForKind(registry, "workshop", "read_card")!, tool]
+        )
+        const names = offered.tools.map((tool) => tool.id)
+        assert.deepEqual(names, ["read_card"])
+        const cards = yield* makeLoadSkill().execute(
+          {
+            ...base,
+            offer: {
+              kind: "workshop",
+              tools: offered.tools.map((tool) => ({ ...frozenTool(tool), deferred: true })),
+              loaded: new Set(),
+              cardSkills: skillsFor(registry.skills.list(), names)
+            }
+          },
+          { name: "cards" }
+        )
+        assert.deepEqual(cards.loaded, ["read_card"])
+        assert.notInclude(cards.text, "export_to_file")
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
     },
     120_000
