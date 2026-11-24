@@ -44,8 +44,10 @@ const choose = async (page: Page, tile: Locator, item: RegExp) => {
  */
 const walk = async (page: Page, tiles: Locator, names: ReadonlyArray<string>, item: RegExp, shot: string) => {
   const grid = frames(page).first()
-  const before = await scrollOf(tiles.nth(0))
   for (let i = 0; i < 3; i++) {
+    // The tile in view first (the split narrows the grid, which reflows), then its scroll.
+    await tiles.nth(i).scrollIntoViewIfNeeded()
+    const before = await scrollOf(tiles.nth(i))
     await choose(page, tiles.nth(i), item)
     await expect(frames(page)).toHaveCount(2)
     const side = frames(page).nth(1)
