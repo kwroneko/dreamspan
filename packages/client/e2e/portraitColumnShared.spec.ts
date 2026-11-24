@@ -329,8 +329,8 @@ for (const theme of ["light", "dark"] as const)
     await closeAll(page)
     await openPortrait(frames(page).nth(0))
     await expect(viewers(page)).toHaveCount(1)
-    await openPortrait(frames(page).nth(1))
-    await expect(viewers(page)).toHaveCount(1)
+    await openFromCast(page, frames(page).nth(1))
+    await expect.poll(() => names(page)).toEqual([STANDARD.name])
     await viewers(page).first().getByRole("button", { name: "Viewer options", exact: true }).click()
     await page.getByRole("menuitemcheckbox", { name: "Keep one image open", exact: true }).click()
     await closeAll(page)
@@ -381,6 +381,26 @@ test("a portrait open while the chat splits into two panes shows once, after clo
   await expect(frames(page)).toHaveCount(2)
   await expect(frames(page).nth(1).locator("article[data-slot]").first()).toBeVisible()
   await expect(column(page)).toHaveCount(0)
+})
+
+test("browser Back leaves the portrait open in the other pane", async ({ page }) => {
+  await openChat(page, 1340)
+  await page.getByRole("button", { name: "Split right" }).click()
+  const [left, right] = [frames(page).nth(0), frames(page).nth(1)]
+  await expect(messagePortrait(right)).toBeVisible()
+  await openPortrait(left)
+  await expect(viewers(page)).toHaveCount(1)
+
+  await focusFrame(right)
+  await expect.poll(() => new URL(page.url()).searchParams.has("portraits")).toBe(false)
+  await messagePortrait(right).click()
+  await expect.poll(() => new URL(page.url()).searchParams.has("portraits")).toBe(true)
+  await page.goBack()
+  await expect.poll(() => new URL(page.url()).searchParams.has("portraits")).toBe(false)
+  await expect(frames(page)).toHaveCount(2)
+  await expect.poll(() => names(page)).toEqual([TALL.name])
+  await focusFrame(left)
+  await expect.poll(() => new URL(page.url()).searchParams.has("portraits")).toBe(true)
 })
 
 test("each frame's portrait height survives reload when frames show the same card", async ({ page }, info) => {
