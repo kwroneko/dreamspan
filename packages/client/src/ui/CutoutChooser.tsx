@@ -316,7 +316,11 @@ export function CutoutChooser({
             onValueChange={choosePreset}
             options={[
               { value: "free", label: "Free", description: "Crop the full picture to any shape" },
-              { value: "portrait", label: "2:3", description: "Crop the full picture two wide by three high, like a portrait" },
+              {
+                value: "portrait",
+                label: "2:3",
+                description: "Crop the full picture two wide by three high, like a portrait"
+              },
               { value: "square", label: "1:1", description: "Crop the full picture to a square" }
             ]}
           />

@@ -48,10 +48,12 @@ for (const [width, sidebar] of [
       })
       // Live: a narrower window moves the centre column, and the dialog with it.
       await page.setViewportSize({ width: width - 200, height: 1000 })
-      await expect.poll(async () => {
-        const next = await centres(page)
-        return Math.abs(next.dialog - next.main)
-      }).toBeLessThanOrEqual(1)
+      await expect
+        .poll(async () => {
+          const next = await centres(page)
+          return Math.abs(next.dialog - next.main)
+        })
+        .toBeLessThanOrEqual(1)
     } finally {
       await server.stop()
     }

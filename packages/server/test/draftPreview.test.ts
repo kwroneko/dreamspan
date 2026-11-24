@@ -484,7 +484,8 @@ describe("a chat not sent yet", () => {
         subtitle: "",
         doc: cardDoc("Ilse", {
           description: "{{char}} keeps the lighthouse.",
-          first_mes: '*{{char}} looks up from the lamp.* "You\'re late, {{user}}."\r\n\r\n*She sets down the oil can.* "Sit."'
+          first_mes:
+            '*{{char}} looks up from the lamp.* "You\'re late, {{user}}."\r\n\r\n*She sets down the oil can.* "Sit."'
         }) as never,
         schemaVersion: 1,
         origin: "user",

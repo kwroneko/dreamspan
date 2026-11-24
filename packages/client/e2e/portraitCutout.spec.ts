@@ -161,7 +161,9 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   await page.keyboard.press("Home")
   const reset = chooser.getByRole("button", { name: "Reset the cutout", exact: true })
   await reset.hover()
-  await expect(page.getByText("Put the portrait back at its default place in the full picture", { exact: true }).last()).toBeVisible()
+  await expect(
+    page.getByText("Put the portrait back at its default place in the full picture", { exact: true }).last()
+  ).toBeVisible()
   await reset.click()
   expect((await boxOf(chooser)).width).toBeCloseTo(box.width, 0)
   expect((await boxOf(chooser)).x).toBeCloseTo(box.x, 0)
@@ -201,9 +203,7 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   expect(Number(await size.getAttribute("aria-valuenow"))).toBeGreaterThan(smaller)
   await chooser.getByRole("button", { name: "About cutout controls" }).hover()
   await expect(
-    page
-      .getByText("Drag the box to move it, or a corner to resize it. Arrow keys move it; + and − resize it.")
-      .last()
+    page.getByText("Drag the box to move it, or a corner to resize it. Arrow keys move it; + and − resize it.").last()
   ).toBeVisible()
   await chooser.getByRole("button", { name: "Save picture" }).click()
   await expect(chooser).toHaveCount(0)
@@ -455,7 +455,10 @@ test("Picture presets, free shape, reset and replace preserve the original", asy
   await page.getByRole("tabpanel", { name: "Metadata" }).getByRole("button", { name: "Picture", exact: true }).click()
   await page.getByLabel("Choose a new picture").setInputFiles(file("tall.png", shapeCard(tall, 30)))
   dialog = page.getByRole("dialog", { name: "Tall's new picture" })
-  await expect(dialog.getByRole("button", { name: "Full picture", exact: true })).toHaveAttribute("aria-pressed", "true")
+  await expect(dialog.getByRole("button", { name: "Full picture", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  )
   await expect
     .poll(async () => {
       stage = await stageOf(dialog)
