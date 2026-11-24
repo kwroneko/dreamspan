@@ -75,6 +75,21 @@ describe("macro highlighting", () => {
     ])
   })
 
+  it("limits repeated pairing work for deeply nested scopes", () => {
+    const text = "{{user}}\n" + "{{#if::1}}\n".repeat(2500) + "{{/if}}\n".repeat(2500) + "{{char}}"
+    let lookups = 0
+    const marks = highlightMacros(text, {
+      get: (name) => {
+        lookups++
+        return registry.get(name)
+      }
+    })
+    expect(lookups).toBeLessThan(120_000)
+    expect(marks.map(({ from, to }) => text.slice(from, to))).toEqual(
+      expect.arrayContaining(["{{user}}", "{{#if::1}}", "{{/if}}", "{{char}}"])
+    )
+  })
+
   it("leaves unknown and malformed macros unstyled while finding known children", () => {
     expect(spans("{{unknown::{{user}}}} {{unknown}}hello{{/unknown}} {{not known")).toEqual([["{{user}}", "value"]])
     expect(spans("{{random::{{unknown}}::{{user}}}}")).toEqual([
