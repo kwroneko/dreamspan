@@ -86,7 +86,7 @@ export function ChatPictureSetting({ session }: { session: ChatSession }) {
         )}
         <div className="flex min-w-28 flex-1 flex-col">
           <span className="text-xs text-muted">Cover Image for this chat</span>
-          <span className="font-medium [overflow-wrap:anywhere]">
+          <span className="leading-5 font-medium [overflow-wrap:anywhere]">
             {picture !== null ? "Custom image" : `The ${portraits}`}
           </span>
         </div>

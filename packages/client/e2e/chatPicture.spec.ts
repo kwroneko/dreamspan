@@ -87,7 +87,10 @@ for (const width of [1440, 390])
 
         // It survives a reload, and the header shows it where it shows faces.
         await page.reload()
-        const again = (await openPanel(page, "This chat")).getByRole("region", { name: "Chat cover image", exact: true })
+        const again = (await openPanel(page, "This chat")).getByRole("region", {
+          name: "Chat cover image",
+          exact: true
+        })
         await expect(again.getByText("Custom image", { exact: true })).toBeVisible()
         if (width === 1440) {
           await expect(page.locator("[data-chat-picture] img")).toBeVisible()
