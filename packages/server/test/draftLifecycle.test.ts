@@ -1,0 +1,613 @@
+// A pending chat's life (DESIGN §2.1, owner 2026-11-23; db/pendingChats.ts): the new-chat page
+// opens one, its first turn commits it as if it had been made then, a saved greeting edit is a
+// turn, and one left behind is swept with its typing filed to recovered texts.
+import { assert, describe, it } from "@effect/vitest"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { Effect, Layer, Queue } from "effect"
+import { vi } from "vitest"
+import { PENDING_LEFT_MS } from "../src/api/draftChats.ts"
+import { ChatHub } from "../src/chat/ChatHub.ts"
+import { Generator } from "../src/chat/Generator.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { client, serverLayer, testConfig } from "./support/config.ts"
+import { cardDoc } from "./support/docs.ts"
+
+type Api = Effect.Success<ReturnType<typeof client>>
+
+const card = (userId: UserId, name: string) =>
+  Effect.gen(function* () {
+    const made = yield* (yield* Writer).CreateEntity({
+      userId,
+      kind: "card",
+      label: name,
+      subtitle: "",
+      doc: cardDoc(name, { first_mes: `${name} waves from the pier.` }),
+      schemaVersion: 1,
+      origin: "user",
+      sourcePath: null
+    })
+    return made.entityId
+  })
+
+const listed = (api: Api) =>
+  Effect.map(api.ListChats({ limit: 100, before: null }), (chats) => chats.map((chat) => chat.id))
+
+const greetingOf = (userId: UserId, chatId: string) =>
+  Effect.gen(function* () {
+    const reader = yield* Reader
+    const chat = yield* reader.GetChat({ userId, chatId: chatId as never })
+    return yield* reader.GetSlot({ userId, slotId: chat.activeLeafSlotId! })
+  })
+
+const setup = Effect.gen(function* () {
+  const api = yield* client()
+  const userId = (yield* api.Whoami()).id as UserId
+  const mira = yield* card(userId, "Mira")
+  return { api, userId, mira }
+})
+
+const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+
+/** `run`, with the server's own ChatHub, which the server doesn't expose (taken where the generator gets it). */
+const withHub = <A, E, R>(test: (hub: ChatHub["Service"]) => Effect.Effect<A, E, R>) => {
+  let hub: ChatHub["Service"] | undefined
+  const generator = Layer.merge(
+    Generator.none,
+    Layer.effectDiscard(
+      Effect.gen(function* () {
+        hub = yield* ChatHub
+      })
+    )
+  )
+  return Effect.suspend(() => test(hub!)).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), generator)))
+}
+
+describe("pending chats", () => {
+  it.live("open with the card's greeting, unlisted, and commit on the first message as if made then", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, mira } = yield* setup
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        assert.strictEqual(draft.status, "pending")
+        assert.isNull(draft.lastMessageAt)
+        const greeting = yield* greetingOf(userId, draft.id)
+        assert.strictEqual(greeting.entry.version.content, "Mira waves from the pier.")
+        assert.notInclude(yield* listed(api), draft.id)
+        // Reopening it from its URL gives the same chat; the same URL for another entry doesn't.
+        assert.strictEqual((yield* api.OpenDraftChat({ draftFor: `card:${mira}`, reopen: draft.id })).id, draft.id)
+        const other = yield* api.OpenDraftChat({ draftFor: "empty", reopen: draft.id })
+        assert.notStrictEqual(other.id, draft.id)
+
+        yield* Effect.sleep("20 millis")
+        const sentAt = Date.now()
+        yield* api.SendMessage({
+          chatId: draft.id,
+          parentSlotId: greeting.entry.slotId,
+          branch: false,
+          content: "Hello from the boat."
+        })
+        const chat = yield* api.GetChat({ chatId: draft.id })
+        assert.strictEqual(chat.status, "active")
+        assert.isAtLeast(chat.createdAt, sentAt)
+        assert.isAtLeast(chat.lastMessageAt!, sentAt)
+        assert.match(chat.title, /^Mira, /)
+        assert.include(yield* listed(api), draft.id)
+        // Its page's URL now names a saved chat: reopening it returns it as it is.
+        assert.strictEqual((yield* api.OpenDraftChat({ draftFor: `card:${mira}`, reopen: draft.id })).id, draft.id)
+        // A committed chat is never swept.
+        assert.isFalse(yield* (yield* Writer).SweepPendingChat({ userId, chatId: draft.id }))
+        assert.strictEqual((yield* api.GetChat({ chatId: draft.id })).status, "active")
+      })
+    )
+  )
+
+  it.live("a saved edit of the greeting commits it", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, mira } = yield* setup
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const greeting = yield* greetingOf(userId, draft.id)
+        yield* api.EditVersion({
+          slotId: greeting.entry.slotId,
+          sourceVersionId: greeting.entry.version.id,
+          expectedRowVersion: greeting.entry.rowVersion,
+          content: "Mira waves twice."
+        })
+        assert.strictEqual((yield* api.GetChat({ chatId: draft.id })).status, "active")
+        assert.include(yield* listed(api), draft.id)
+      })
+    )
+  )
+
+  it.live("a group's keeps the group's name when committed", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, mira } = yield* setup
+        const ana = yield* card(userId, "Ana")
+        const group = yield* api.StartChat({
+          cards: [mira, ana],
+          persona: null,
+          greeting: null,
+          first: { _tag: "Send", content: "Hi both.", speakerEntityId: null },
+          title: "Pier friends"
+        })
+        const draft = yield* api.OpenDraftChat({ draftFor: `group:${group.chat.id}` })
+        assert.strictEqual(draft.title, "Pier friends")
+        const cast = yield* api.GetCast({ chatId: draft.id, slotId: null })
+        const members = new Set<EntityId>(cast.participants)
+        assert.isTrue(members.has(mira) && members.has(ana))
+        const leaf = (yield* api.GetChat({ chatId: draft.id })).activeLeafSlotId
+        yield* api.SendMessage({ chatId: draft.id, parentSlotId: leaf, branch: false, content: "Again." })
+        const chat = yield* api.GetChat({ chatId: draft.id })
+        assert.strictEqual(chat.status, "active")
+        assert.strictEqual(chat.title, "Pier friends")
+      })
+    )
+  )
+
+  it.live("one left behind is swept, its typing filed to recovered texts", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, mira } = yield* setup
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const composer = yield* api.OpenComposer({ chatId: draft.id, forkId: null })
+        yield* api.SaveComposer({
+          chatId: draft.id,
+          draftId: composer.id,
+          rowVersion: composer.rowVersion,
+          session: composer.session,
+          next: false,
+          operationId: crypto.randomUUID(),
+          content: "Remember the tide tables."
+        })
+        const greeting = yield* greetingOf(userId, draft.id)
+        yield* api.SaveMessageDraft({
+          target: { _tag: "Edit", versionId: greeting.entry.version.id },
+          draftId: null,
+          content: "Mira waves, edited but not saved.",
+          expectedRowVersion: null,
+          expectedSession: null
+        })
+        yield* api.LeaveDraftChat({ chatId: draft.id })
+        yield* Effect.sleep(PENDING_LEFT_MS + 500)
+        const gone = yield* Effect.flip(api.GetChat({ chatId: draft.id }))
+        assert.strictEqual(gone._tag, "NotFound")
+        const recovered = yield* api.ListRecoveredTexts({ limit: 10, before: null })
+        const texts = recovered.map((text) => [text.content, text.sourceLabel])
+        assert.deepInclude(texts, ["Remember the tide tables.", "New chat with Mira"])
+        assert.deepInclude(texts, ["Mira waves, edited but not saved.", "New chat with Mira"])
+        // An untouched one files nothing; neither reaches the bin.
+        const untouched = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        assert.isTrue(yield* (yield* Writer).SweepPendingChat({ userId, chatId: untouched.id }))
+        assert.lengthOf(yield* api.ListRecoveredTexts({ limit: 10, before: null }), recovered.length)
+        assert.lengthOf(yield* (yield* Reader).ListBin({ userId, limit: 10, before: null }), 0)
+        assert.lengthOf(yield* (yield* Reader).PendingChats({ userId }), 0)
+      })
+    )
+  )
+
+  it.live(
+    "its greetings follow its cast: a character who joins greets, group greetings come and go, and nothing commits",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const api = yield* client()
+          const userId = (yield* api.Whoami()).id as UserId
+          const writer = yield* Writer
+          const make = (name: string, fields: Record<string, unknown>) =>
+            Effect.map(
+              writer.CreateEntity({
+                userId,
+                kind: "card",
+                label: name,
+                subtitle: "",
+                doc: cardDoc(name, fields),
+                schemaVersion: 1,
+                origin: "user",
+                sourcePath: null
+              }),
+              (made) => made.entityId as EntityId
+            )
+          const mira = yield* make("Mira", {
+            first_mes: "Mira opens the door.",
+            alternate_greetings: ["Mira waves."],
+            group_only_greetings: ["Mira welcomes the crew."]
+          })
+          const tobin = yield* make("Tobin", {
+            first_mes: "Tobin nods.",
+            group_only_greetings: ["Tobin greets everyone."]
+          })
+          const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+          const forkId = draft.currentForkId!
+          const path = () =>
+            Effect.map(
+              api.ReadPath({ chatId: draft.id, forkId: null, leafSlotId: null, range: { _tag: "Bottom" }, limit: 20 }),
+              (read) => read.entries
+            )
+          const contents = (slotId: string) =>
+            Effect.map(api.ListVersions({ slotId: slotId as never }), (versions) =>
+              versions.map((version) => version.content)
+            )
+          const [first] = yield* path()
+          assert.deepStrictEqual(yield* contents(first!.slotId), ["Mira opens the door.", "Mira waves."])
+          // Mira's alternate shown, then Tobin joins: his greeting is a message after hers, and
+          // both offer their group greetings now; hers still shows what it showed.
+          const waves = (yield* api.ListVersions({ slotId: first!.slotId })).find((v) => v.content === "Mira waves.")!
+          yield* api.SelectVersion({
+            slotId: first!.slotId,
+            versionId: waves.id,
+            forkId,
+            expectedVersionId: first!.version.id
+          })
+          yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Join", entityId: tobin } })
+          const joined = yield* path()
+          assert.deepStrictEqual(
+            joined.map((entry) => entry.version.content),
+            ["Mira waves.", "Tobin nods."]
+          )
+          assert.sameMembers(yield* contents(joined[0]!.slotId), [
+            "Mira opens the door.",
+            "Mira waves.",
+            "Mira welcomes the crew."
+          ])
+          assert.sameMembers(yield* contents(joined[1]!.slotId), ["Tobin nods.", "Tobin greets everyone."])
+          // Mira's group greeting shown, then Tobin leaves: his message goes, hers falls back.
+          const crew = (yield* api.ListVersions({ slotId: joined[0]!.slotId })).find(
+            (v) => v.content === "Mira welcomes the crew."
+          )!
+          yield* api.SelectVersion({
+            slotId: joined[0]!.slotId,
+            versionId: crew.id,
+            forkId,
+            expectedVersionId: joined[0]!.version.id
+          })
+          yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Leave", entityId: tobin } })
+          const left = yield* path()
+          assert.deepStrictEqual(
+            left.map((entry) => entry.version.content),
+            ["Mira opens the door."]
+          )
+          assert.deepStrictEqual(yield* contents(left[0]!.slotId), ["Mira opens the door.", "Mira waves."])
+          // Playing a card leaves its greeting out; none of this started the chat.
+          yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Join", entityId: tobin } })
+          assert.strictEqual((yield* path()).length, 2)
+          yield* api.ChangeCast({
+            chatId: draft.id,
+            slotId: null,
+            forkId,
+            change: { _tag: "PlayedByMe", entityIds: [tobin] }
+          })
+          assert.deepStrictEqual(
+            (yield* path()).map((entry) => entry.version.content),
+            ["Mira opens the door."]
+          )
+          assert.strictEqual((yield* api.GetChat({ chatId: draft.id })).status, "pending")
+          assert.notInclude(yield* listed(api), draft.id)
+        })
+      )
+  )
+
+  it.live("a group's: a member who leaves takes their greeting, and a group greeting shown falls back", () =>
+    run(
+      Effect.gen(function* () {
+        const api = yield* client()
+        const userId = (yield* api.Whoami()).id as UserId
+        const writer = yield* Writer
+        const make = (name: string) =>
+          Effect.map(
+            writer.CreateEntity({
+              userId,
+              kind: "card",
+              label: name,
+              subtitle: "",
+              doc: cardDoc(name, { first_mes: `${name} waves.`, group_only_greetings: [`${name} welcomes everyone.`] }),
+              schemaVersion: 1,
+              origin: "user",
+              sourcePath: null
+            }),
+            (made) => made.entityId as EntityId
+          )
+        const mira = yield* make("Mira")
+        const tobin = yield* make("Tobin")
+        const group = yield* api.StartChat({
+          cards: [mira, tobin],
+          persona: null,
+          greeting: 0,
+          first: { _tag: "Send", content: "Hello group.", speakerEntityId: null }
+        })
+        const draft = yield* api.OpenDraftChat({ draftFor: `group:${group.chat.id}` })
+        const forkId = draft.currentForkId!
+        const path = () =>
+          Effect.map(
+            api.ReadPath({ chatId: draft.id, forkId: null, leafSlotId: null, range: { _tag: "Bottom" }, limit: 20 }),
+            (read) => read.entries
+          )
+        const [first] = yield* path()
+        const versions = yield* api.ListVersions({ slotId: first!.slotId })
+        assert.sameMembers(
+          versions.map((v) => v.content),
+          ["Mira waves.", "Mira welcomes everyone."]
+        )
+        const welcome = versions.find((v) => v.content === "Mira welcomes everyone.")!
+        if (first!.version.id !== welcome.id)
+          yield* api.SelectVersion({
+            slotId: first!.slotId,
+            versionId: welcome.id,
+            forkId,
+            expectedVersionId: first!.version.id
+          })
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Leave", entityId: tobin } })
+        const left = yield* path()
+        assert.deepStrictEqual(
+          left.map((entry) => entry.version.content),
+          ["Mira waves."]
+        )
+        assert.strictEqual(left[0]!.versionCount, 1)
+      })
+    )
+  )
+
+  it.live("duplicating the greeting commits it", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, mira } = yield* setup
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const greeting = yield* greetingOf(userId, draft.id)
+        const inserted = yield* api.InsertMessage({
+          chatId: draft.id,
+          forkId: draft.currentForkId!,
+          anchor: greeting.entry.slotId,
+          expectedRowVersion: greeting.entry.rowVersion,
+          body: { _tag: "Duplicate", versionId: greeting.entry.version.id }
+        })
+        assert.strictEqual(inserted.chat.status, "active")
+        assert.strictEqual((yield* api.GetChat({ chatId: draft.id })).status, "active")
+        assert.isFalse(yield* (yield* Writer).SweepPendingChat({ userId, chatId: draft.id }))
+      })
+    )
+  )
+
+  it.live("a History replacement in its greetings commits it, one at a time or in bulk", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, mira } = yield* setup
+        const replace = (chatId: string, forkId: string, versions: ReadonlyArray<{ id: string; content: string }>) =>
+          api.ApplyHistoryEdits({
+            title: "Rename",
+            applications: [
+              {
+                chatId: chatId as never,
+                forkId: forkId as never,
+                edits: versions.map((version) => ({
+                  kind: "version_replace" as const,
+                  targetId: version.id,
+                  beforeId: version.id,
+                  before: version.content,
+                  after: version.content.replace("waves", "nods")
+                }))
+              }
+            ]
+          })
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const greeting = yield* greetingOf(userId, draft.id)
+        yield* replace(draft.id, draft.currentForkId!, [greeting.entry.version])
+        assert.strictEqual((yield* api.GetChat({ chatId: draft.id })).status, "active")
+        assert.isFalse(yield* (yield* Writer).SweepPendingChat({ userId, chatId: draft.id }))
+
+        // Two greetings at once take the bulk path.
+        const ana = yield* card(userId, "Ana")
+        const group = yield* api.StartChat({
+          cards: [mira, ana],
+          persona: null,
+          greeting: null,
+          first: { _tag: "Send", content: "Hi both.", speakerEntityId: null },
+          title: "Pier friends"
+        })
+        const both = yield* api.OpenDraftChat({ draftFor: `group:${group.chat.id}` })
+        const last = yield* greetingOf(userId, both.id)
+        const first = yield* (yield* Reader).GetSlot({ userId, slotId: last.entry.parentSlotId! })
+        yield* replace(both.id, both.currentForkId!, [first.entry.version, last.entry.version])
+        assert.strictEqual((yield* api.GetChat({ chatId: both.id })).status, "active")
+      })
+    )
+  )
+
+  it.live("a sweep files the composer's protected history, even once it was cleared", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, mira } = yield* setup
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const composer = yield* api.OpenComposer({ chatId: draft.id, forkId: null })
+        const paragraph = "The lighthouse keeper counted the boats twice before dawn, then wrote them down."
+        const typed = yield* api.SaveComposer({
+          chatId: draft.id,
+          draftId: composer.id,
+          rowVersion: composer.rowVersion,
+          session: composer.session,
+          next: false,
+          operationId: crypto.randomUUID(),
+          content: paragraph
+        })
+        // Select all and clear it: the paragraph is only in the draft's history now.
+        yield* api.SaveComposer({
+          chatId: draft.id,
+          draftId: composer.id,
+          rowVersion: typed.draft!.rowVersion,
+          session: typed.draft!.session,
+          next: false,
+          operationId: crypto.randomUUID(),
+          content: ""
+        })
+        assert.isTrue(yield* (yield* Writer).SweepPendingChat({ userId, chatId: draft.id }))
+        const recovered = yield* api.ListRecoveredTexts({ limit: 10, before: null })
+        assert.deepInclude(
+          recovered.map((text) => [text.content, text.sourceLabel]),
+          [paragraph, "New chat with Mira"]
+        )
+      })
+    )
+  )
+})
+
+describe("a pending chat's names", () => {
+  it.live("come from the card revision it uses, for recovered texts and the title it commits with", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId } = yield* setup
+        const writer = yield* Writer
+        const made = yield* writer.CreateEntity({
+          userId,
+          kind: "card",
+          label: "Pilot",
+          subtitle: "",
+          doc: cardDoc("Oriel", { first_mes: "Oriel checks the charts." }),
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
+        const first = made.ref.headRevisionId
+        yield* writer.EditRef({
+          userId,
+          refId: made.ref.id,
+          doc: cardDoc("Renamed", { first_mes: "Oriel checks the charts." }),
+          expectedRowVersion: made.ref.rowVersion,
+          message: null,
+          commitDraft: null
+        })
+        // A draft that uses the card's first revision, named Oriel there.
+        const pinned = (chatId: string) =>
+          writer.AddStateEvent({
+            userId,
+            chatId: chatId as never,
+            slotId: null,
+            versionId: null,
+            scope: null,
+            data: { key: "card.binding", value: { entity: made.entityId, revision: first } }
+          })
+        const left = yield* api.OpenDraftChat({ draftFor: `card:${made.entityId}` })
+        yield* pinned(left.id)
+        const composer = yield* api.OpenComposer({ chatId: left.id, forkId: null })
+        yield* api.SaveComposer({
+          chatId: left.id,
+          draftId: composer.id,
+          rowVersion: composer.rowVersion,
+          session: composer.session,
+          next: false,
+          operationId: crypto.randomUUID(),
+          content: "Check the charts again."
+        })
+        assert.isTrue(yield* writer.SweepPendingChat({ userId, chatId: left.id }))
+        const [recovered] = yield* api.ListRecoveredTexts({ limit: 1, before: null })
+        assert.strictEqual(recovered!.sourceLabel, "New chat with Oriel")
+
+        const sent = yield* api.OpenDraftChat({ draftFor: `card:${made.entityId}` })
+        yield* pinned(sent.id)
+        const greeting = yield* greetingOf(userId, sent.id)
+        yield* api.SendMessage({
+          chatId: sent.id,
+          parentSlotId: greeting.entry.slotId,
+          branch: false,
+          content: "Hello."
+        })
+        assert.match((yield* api.GetChat({ chatId: sent.id })).title, /^Oriel, /)
+      })
+    )
+  )
+})
+
+describe("a pending chat's card purged", () => {
+  it.live("sweeps the drafts that name it, their typing filed, and tells their tabs", () =>
+    withHub((hub) =>
+      Effect.gen(function* () {
+        const { api, userId, mira } = yield* setup
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const composer = yield* api.OpenComposer({ chatId: draft.id, forkId: null })
+        yield* api.SaveComposer({
+          chatId: draft.id,
+          draftId: composer.id,
+          rowVersion: composer.rowVersion,
+          session: composer.session,
+          next: false,
+          operationId: crypto.randomUUID(),
+          content: "Ask about the lantern."
+        })
+        const queue = yield* hub.subscribe(draft.id, () => ({ _tag: "Hello", live: [] }))
+        const item = yield* (yield* Writer).DeleteEntity({ userId, entityId: mira })
+        // Binned only: the draft stays.
+        assert.strictEqual((yield* api.GetChat({ chatId: draft.id })).status, "pending")
+        yield* api.PurgeBinItem({ itemId: item.id })
+        assert.strictEqual((yield* Effect.flip(api.GetChat({ chatId: draft.id })))._tag, "NotFound")
+        const recovered = yield* api.ListRecoveredTexts({ limit: 10, before: null })
+        assert.deepInclude(
+          recovered.map((text) => [text.content, text.sourceLabel]),
+          ["Ask about the lantern.", "New chat with Mira"]
+        )
+        assert.deepStrictEqual((yield* Queue.takeAll(queue)).flat().at(-1), { _tag: "Deleted" })
+      })
+    )
+  )
+})
+
+describe("what a pending chat can't own", () => {
+  it.live("no note or snippet of its own: the library would list it and the sweep would strand it", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, mira } = yield* setup
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const refused = <A, E extends { readonly _tag: string }, R>(effect: Effect.Effect<A, E, R>) =>
+          Effect.map(Effect.flip(effect), (error) => error._tag)
+        assert.strictEqual(yield* refused(api.CreateChatNote({ chatId: draft.id, title: "Tides" })), "NotFound")
+        assert.strictEqual(
+          yield* refused(api.CreateSnippet({ chatId: draft.id, title: "Only here", content: "Synthetic." })),
+          "NotFound"
+        )
+        // A snippet for all chats is made from a draft as from anywhere, but can't become the draft's.
+        const global = yield* api.CreateSnippet({ chatId: null, title: "Everywhere", content: "Synthetic." })
+        assert.strictEqual(
+          yield* refused(api.SetSnippetScope({ chatId: draft.id, refId: global.ref.id, global: false })),
+          "NotFound"
+        )
+        assert.deepStrictEqual(
+          (yield* api.ListLibrary({ kind: "note", archived: false })).map((ref) => ref.label),
+          ["Everywhere"]
+        )
+      })
+    )
+  )
+})
+
+describe("pending chats and the tabs that have them", () => {
+  it.live("a draft just opened is kept until its tab subscribes, long after the server started", () => {
+    let offset = 0
+    const now = Date.now.bind(Date)
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now() + offset)
+    return run(
+      Effect.gen(function* () {
+        const { api, mira } = yield* setup
+        offset = 120_000
+        // Tab A is given its draft; tab B opens another before A's subscription arrives.
+        const a = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        yield* api.OpenDraftChat({ draftFor: "empty" })
+        assert.strictEqual((yield* api.GetChat({ chatId: a.id })).status, "pending")
+      })
+    ).pipe(Effect.ensuring(Effect.sync(() => clock.mockRestore())))
+  })
+
+  it.live("a tab that subscribed as its draft was being swept is told the chat is gone", () =>
+    withHub((hub) =>
+      Effect.gen(function* () {
+        const { api, mira } = yield* setup
+        const a = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        // Nobody had it when the sweep looked; a tab subscribes before the sweep is written.
+        const held = vi.spyOn(hub, "held").mockImplementation(() => false)
+        const queue = yield* hub.subscribe(a.id, () => ({ _tag: "Hello", live: [] }))
+        yield* api.OpenDraftChat({ draftFor: "empty" }).pipe(Effect.ensuring(Effect.sync(() => held.mockRestore())))
+        assert.strictEqual((yield* Effect.flip(api.GetChat({ chatId: a.id })))._tag, "NotFound")
+        const events = (yield* Queue.takeAll(queue)).flat()
+        assert.deepStrictEqual(events.at(-1), { _tag: "Deleted" })
+      })
+    )
+  )
+})

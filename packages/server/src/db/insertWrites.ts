@@ -11,6 +11,7 @@ import type { Bin } from "./bin.ts"
 import { onDisplayPath, pathPieces, placedMoves, positionOf, slotPlace } from "./displayPath.ts"
 import { selectionIn, shownIn, slotDeletedIn, versionAsShown, writeInsert, writeOverride } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
+import { commitPendingChat } from "./pendingChats.ts"
 import { presenceAt, presenceJson } from "./participation.ts"
 import { InsertRefused } from "@dreamspan/shared/messagesApi.ts"
 import { InsertResult, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
@@ -155,6 +156,9 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
             const there = yield* presenceAt(sql, chatId, anchor!.id, fork.id)
             yield* sql`UPDATE version_records SET cast_json = ${JSON.stringify(there.cast)},
               presence_json = ${presenceJson(there.presence)} WHERE id = ${versionId}`
+            // A copy is a message of its own, a greeting's too: it commits a pending chat, as
+            // insertSlot does for the others.
+            yield* commitPendingChat(sql, chatId, at)
           }
 
           yield* writeInsert(sql, { id: fork.id, chatId }, slotId, 1)
@@ -182,9 +186,7 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
           // Inserting adds a message: the fork is chatted in (ARCHITECTURE §3.8).
           yield* graph.chatIn(fork.id, at)
           const [chat] = yield* sql<ChatRow>`
-            UPDATE chats SET last_message_at = ${at},
-              status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
-              row_version = row_version + 1
+            UPDATE chats SET last_message_at = ${at}, row_version = row_version + 1
             WHERE id = ${chatId} RETURNING *`
           const [tip] = yield* sql<{ tip: string | null }>`SELECT tip_slot_id AS tip FROM forks WHERE id = ${fork.id}`
           const pieces = yield* pathPieces(sql, chatId, fork.id, tip!.tip)

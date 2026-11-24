@@ -375,10 +375,12 @@ export class WorkbenchStore {
     options: Omit<OpenOptions, "affinity"> & { state?: HistoryState; mirror?: Action; affinity?: boolean } = {}
   ) {
     const href = withoutLayoutParams(link)
-    const { state, mirror = "PUSH", affinity = true, ...rest } = options
+    const { state, mirror = "PUSH", affinity = true, near, ...rest } = options
     const { layout: next, tabId } = openTabAt(this.layout, href, itemKey, {
       ...rest,
       ...(affinity && this.wide() ? { affinity: affinityOf } : {}),
+      // A phone opens in place: affinity is for frames side by side.
+      ...(near && this.wide() ? { near } : {}),
       id: rest.id ?? newId("t")
     })
     // A tab already mounted (the item's own, or the preview taking it) navigates in place.

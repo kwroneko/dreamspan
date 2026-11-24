@@ -1,5 +1,5 @@
 // The Chats page's start cards open a chat not made yet (owner, 2026-11-17: "The chat is created
-// when the first message is sent"): New chat opens the pending chat page with no characters, New
+// when the first message is sent"): New chat opens a pending chat with no characters, New
 // workshop the workshop's own pending page with the saved workshop's composer (speaker chip,
 // Guidance, Generate, the model, preset and capability chips); nothing exists until the first
 // send, and a reload keeps the page, its title and what's typed. A workshop's grants chosen
@@ -39,10 +39,10 @@ test.describe("chats started from the Chats page", () => {
       await page.goto(`${server().url}/chats`)
       await page.getByLabel("Title of the new chat").fill(title)
       await page.getByRole("button", { name: "New chat", exact: true }).click()
-      await expect(page).toHaveURL(/\/new\/chat$/)
+      // A pending chat (DraftChatPage.tsx), named by the title typed, which its URL names.
+      await expect(page).toHaveURL(/\/new\/chat\?draft=[^&]+$/)
       await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible()
       await expect(page.locator("[data-empty-chat-intro]")).toBeVisible()
-      await expect(page.getByLabel("Title of the new chat")).toHaveValue(title)
       const box = page.getByLabel("Message", { exact: true })
       await box.fill("A note to keep.")
       await expect(page.getByRole("button", { name: /^Generate/ })).toBeVisible()
@@ -50,11 +50,10 @@ test.describe("chats started from the Chats page", () => {
       await shot(page, `new-chat-pending-${width}`)
       await expectLayout(page, info, `new-chat-pending-${width}`)
 
-      // A reload keeps the pending page, its title and what's typed; still nothing is made.
+      // A reload keeps the pending chat, its title and what's typed; still nothing is listed.
       await page.waitForTimeout(800)
       await page.reload()
       await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible({ timeout: 30_000 })
-      await expect(page.getByLabel("Title of the new chat")).toHaveValue(title)
       await expectTextBox(box, "A note to keep.")
       expect((await chats()).length).toBe(before)
 
@@ -144,6 +143,60 @@ test.describe("chats started from the Chats page", () => {
       await expect.poll(() => provider().bodies.length, { timeout: 30_000 }).toBeGreaterThan(asked)
       await expect(page.locator("[data-workshop-intro]")).toHaveCount(0)
       await shot(page, `new-workshop-made-${width}`)
+    })
+
+    test(`New workshop with a card shows its portrait and greeting, kept by the first send at ${width}`, async ({
+      page
+    }, info) => {
+      test.setTimeout(120_000)
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ reducedMotion: "reduce" })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      const name = `Quill ${width}`
+      const greeting = `Quill sharpens a pen at ${width}.`
+      const imported = await page.request.post(`${server().url}/library/import?name=quill.json`, {
+        data: Buffer.from(
+          JSON.stringify({
+            spec: "chara_card_v2",
+            spec_version: "2.0",
+            data: { name, description: "A cardmaker who writes tidy cards.", first_mes: greeting }
+          })
+        ),
+        headers: { origin: server().url, "content-type": "application/octet-stream" }
+      })
+      expect(imported.status()).toBe(200)
+      const card = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListCards()).then((cards) =>
+        cards.find((c) => c.name === name)!
+      )
+      const workshops = async () => (await chats()).filter((chat) => chat.kind === "workshop")
+      const before = (await workshops()).length
+      await page.goto(`${server().url}/new/workshop?workshopCard=${card.entityId}`)
+      // The card as the workshop's personality (spec/WORKSHOP-CARDS.md §3): its greeting where the
+      // messages will be, its portrait in the header, the start choices under it.
+      const shown = page.getByRole("article", { name: `Greeting from ${name}` })
+      await expect(shown).toContainText(greeting)
+      await expect(page.locator("[data-workshop-intro]")).toBeVisible()
+      await expect(page.locator("[data-workshop-pending]").getByText("new", { exact: true })).toBeVisible()
+      await expect(page.getByLabel("Message", { exact: true })).toBeFocused()
+      const portrait = page.locator('[data-layout-audit-ignore^="overlap: Header portraits"]')
+      if (width > 640) await expect(portrait).toBeVisible()
+      await expect(page.locator("[data-workshop-pending] p.truncate").first()).toHaveText(name)
+      const at = width > 640 ? await portrait.boundingBox() : null
+      expect((await workshops()).length).toBe(before)
+      await shot(page, `new-workshop-card-${width}`)
+      await expectLayout(page, info, `new-workshop-card-${width}`)
+
+      // The first send makes it with that greeting as its first message; the portrait stays put.
+      await page.getByLabel("Message", { exact: true }).fill("Write me a card about a lighthouse.")
+      await page.getByRole("button", { name: /^Send/ }).click()
+      await expect(page).toHaveURL(/\/chats\/[^/?]+/, { timeout: 30_000 })
+      const chatId = new URL(page.url()).pathname.split("/").at(-1)!
+      await expect(page.getByRole("article").filter({ hasText: greeting })).toHaveCount(1)
+      await expect(page.getByRole("article").filter({ hasText: "Write me a card about a lighthouse." })).toHaveCount(1)
+      if (at !== null)
+        expect(await page.locator('[data-layout-audit-ignore^="overlap: Header portraits"]').boundingBox()).toEqual(at)
+      expect((await workshops()).map((chat) => chat.id)).toContain(chatId)
+      await shot(page, `new-workshop-card-sent-${width}`)
     })
   }
 })

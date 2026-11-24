@@ -5,6 +5,9 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { activeRunSummaries, summarySafeText } from "../agent/compaction.ts"
 import { messageBounds, placedSteps } from "../agent/steps.ts"
+import { attachedElements, inlineLimit } from "../agent/libraryView.ts"
+import type { HistoryLibraryItem } from "../assembler/types.ts"
+import { libraryDocuments } from "./libraryAttachments.ts"
 import type { FrozenTool } from "../agent/tools.ts"
 
 /** One set-based, owner/chat-scoped read. A rollout's prefix is never summary material. */
@@ -12,13 +15,30 @@ export const workshopTranscript = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
   userId: UserId,
   chatId: string,
-  versions: ReadonlyArray<string>
+  versions: ReadonlyArray<string>,
+  countText: Effect.Effect<(text: string) => number>,
+  window: number | null | undefined
 ) {
-  const found = new Map<string, string>()
+  const found = new Map<string, { transcript?: string; library?: ReadonlyArray<string> }>()
   const [chat] = yield* sql<{
     kind: string
   }>`SELECT kind FROM chats WHERE id=${chatId} AND owner_user_id=${userId} AND deleted_at IS NULL`
   if (!chatKinds.get(chat?.kind ?? "")?.summaryTranscript || !versions.length) return found
+  const attachments = yield* sql<{ id: string; library: string }>`
+    SELECT v.id, ${libraryDocuments(sql)} AS library
+    FROM json_each(${JSON.stringify(versions)}) wanted CROSS JOIN versions v ON v.id = wanted.value
+    JOIN slots s ON s.id = v.slot_id
+    WHERE s.chat_id = ${chatId} AND EXISTS (SELECT 1 FROM version_library l WHERE l.version_id = v.id)`
+  if (attachments.length) {
+    const count = yield* countText
+    for (const { id, library } of attachments) {
+      const items = JSON.parse(library) as ReadonlyArray<HistoryLibraryItem>
+      if (items.length) {
+        // The message's items share the inline limit, as in its request (`attachedElements`).
+        found.set(id, { library: attachedElements(items, count, inlineLimit(window)) })
+      }
+    }
+  }
   const rows = yield* sql<{ id: string; transcript: string | null; snapshot: string | null; rollout: string }>`
     SELECT v.id,p.transcript_json AS transcript,p.context_snapshot_json AS snapshot,r.id AS rollout
     FROM json_each(${JSON.stringify(versions)}) wanted CROSS JOIN versions v ON v.id=wanted.value
@@ -47,9 +67,9 @@ export const workshopTranscript = Effect.fnUntraced(function* (
     const effects = yield* sql<{ call: string; kind: string; target: string; title: string; undone: number | null }>`
       SELECT tool_call_id AS call,kind,target_id AS target,title,undone_at AS undone FROM rollout_effects
       WHERE rollout_id=${row.rollout} AND tool_call_id IN (SELECT value FROM json_each(${JSON.stringify(steps.flatMap(({ step }) => (step.kind === "tool" ? [step.id] : [])))})) ORDER BY created_at,tool_call_id,seq`
-    found.set(
-      row.id,
-      summarySafeText(
+    found.set(row.id, {
+      ...found.get(row.id),
+      transcript: summarySafeText(
         JSON.stringify({
           version: row.id,
           summaries: summaries.map((s) => ({ id: s.id, from: s.from, through: s.through, content: s.content })),
@@ -57,7 +77,13 @@ export const workshopTranscript = Effect.fnUntraced(function* (
           changes: effects.map((e) => ({ ...e, state: e.undone === null ? "completed" : "undone" }))
         })
       )
-    )
+    })
   }
   return found
 })
+
+/** Estimate the same attachment and transcript material the leaf request will carry. */
+export const workshopText = (
+  text: string,
+  material: { transcript?: string; library?: ReadonlyArray<string> } | undefined
+) => [text, ...(material?.library ?? []), material?.transcript ?? ""].filter(Boolean).join("\n")

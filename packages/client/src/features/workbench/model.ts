@@ -241,7 +241,17 @@ export interface OpenOptions {
    * in place of `frame` and the focused one; with none showing one, as without it.
    */
   readonly affinity?: AffinityOf
+  /**
+   * Affinity per open (spec/WORKSHOP-CARDS.md §7.3): tests on a frame's shown tab, tried in
+   * order. The first that a shown tab passes names the frames to open in (one showing the item
+   * first, else the one focused most recently), in place of `affinity`, `frame` and the focused
+   * one; with none passing, as without it.
+   */
+  readonly near?: ReadonlyArray<ShownTest>
 }
+
+/** A test on a frame's shown tab's URL, for `OpenOptions.near`. */
+export type ShownTest = (href: string) => boolean
 
 /** The kind an item's tab opens beside (`TabKind.opensWhereShown`), or null when it has none. */
 export type AffinityOf = (href: string) => string | null
@@ -254,11 +264,28 @@ export type AffinityOf = (href: string) => string | null
 export const affinityFrame = (layout: Layout, href: string, keyOf: KeyOf, affinity: AffinityOf) => {
   const group = affinity(href)
   if (group === null) return undefined
+  return shownFrame(layout, href, keyOf, (shown) => affinity(shown) === group)
+}
+
+/** The first frame `near`'s tests find, in their order (`OpenOptions.near`). */
+const nearFrame = (layout: Layout, href: string, keyOf: KeyOf, near: ReadonlyArray<ShownTest>) => {
+  for (const test of near) {
+    const frame = shownFrame(layout, href, keyOf, test)
+    if (frame) return frame
+  }
+  return undefined
+}
+
+/**
+ * Of the frames whose shown tab passes `test` (a frame behind a maximized one doesn't count),
+ * the one already showing the item, else the one focused most recently.
+ */
+const shownFrame = (layout: Layout, href: string, keyOf: KeyOf, test: ShownTest) => {
   const shown = (f: Frame) => f.tabs.find((t) => t.id === f.active)
   const candidates = frames(layout.root).filter((f) => {
     if (layout.maximized && layout.maximized !== f.id) return false
     const tab = shown(f)
-    return tab !== undefined && affinity(tab.href) === group
+    return tab !== undefined && test(tab.href)
   })
   if (candidates.length === 0) return undefined
   const key = keyOf(href)
@@ -293,7 +320,9 @@ export const openTabAt = (
   const key = keyOf(href)
   // An item of a kind with an affinity opens where its kind is shown (the request inspector
   // beside a chat), not in the opener's frame.
-  const affine = options.affinity ? affinityFrame(layout, href, keyOf, options.affinity) : undefined
+  const affine =
+    (options.near ? nearFrame(layout, href, keyOf, options.near) : undefined) ??
+    (options.affinity ? affinityFrame(layout, href, keyOf, options.affinity) : undefined)
   const target = affine ?? ((options.frame && findFrame(layout, options.frame)) || focusedFrame(layout))
   const existing =
     target.tabs.find((t) => keyOf(t.href) === key) ??

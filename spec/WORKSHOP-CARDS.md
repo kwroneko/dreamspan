@@ -1,6 +1,6 @@
 # Workshop cards: a coding agent for cards
 
-**Status**: Proposed, 2026-11-24 (job `workshopcardsspec`). Partly built: unit C2's storage and assembly (§4.3 whole or reference, §4.4) and unit C2b's paged reads (§4.3 point 2, except `to_file`) are implemented and documented in ARCHITECTURE §18 "Cards, lorebooks and presets attached to workshop messages"; the rest is not built. A delta from master `89eb816f` (ARCHITECTURE §14.2–§14.3 and §14.6 "History", §5 "The workbench", §3.8 "Change markers in the timeline", §16 "Workshop chats, client", "Workshop setup tools and undo", "Workshop approvals and undo", "Workshop presets and lorebooks", "Workshop skills in every mode", "Workshop side chat", "Workshop context", §18 "Attachments of any type"; spec/WORKSHOP.md §3; spec/WORKSHOP-CONTEXT.md §4.3) and from reference-harness `latest` (`src/tools/character-card.ts`, `src/tools/side-effects.ts`, `src/tools/file.ts`, the per-agent `tools` and `mcp_servers` allowlists in `src/config/schema.ts`). The owner's statements of 2026-11-24 are recorded in DESIGN §7.7 as **[D]**; everything else here is **[P]** unless it quotes them. §13: no questions are open.
+**Status**: Proposed, 2026-11-24 (job `workshopcardsspec`). Partly built: unit C2's storage and assembly (§4.3 whole or reference, §4.4) and unit C2b's paged reads (§4.3 point 2, except `to_file`) are implemented and documented in ARCHITECTURE §18 "Cards, lorebooks and presets attached to workshop messages"; unit C8's change rows, change view and per-open affinity (§7) in §18 "Change rows between a workshop's turns" and §5 "Tab kinds"; the rest is not built. A delta from master `89eb816f` (ARCHITECTURE §14.2–§14.3 and §14.6 "History", §5 "The workbench", §3.8 "Change markers in the timeline", §16 "Workshop chats, client", "Workshop setup tools and undo", "Workshop approvals and undo", "Workshop presets and lorebooks", "Workshop skills in every mode", "Workshop side chat", "Workshop context", §18 "Attachments of any type"; spec/WORKSHOP.md §3; spec/WORKSHOP-CONTEXT.md §4.3) and from reference-harness `latest` (`src/tools/character-card.ts`, `src/tools/side-effects.ts`, `src/tools/file.ts`, the per-agent `tools` and `mcp_servers` allowlists in `src/config/schema.ts`). The owner's statements of 2026-11-24 are recorded in DESIGN §7.7 as **[D]**; everything else here is **[P]** unless it quotes them. §13: no questions are open.
 
 The workshop already has most of the machinery a coding agent for cards needs: library read and write tools, an approval prompt inside the steps, per-workshop grants, an effects table with Undo, a Changes tab, immutable card revisions with History and field comparisons, and the workbench's kind-affinity opens. What it lacks is the part a coding agent's user relies on most: a way to hand it the thing to work on, a gate on what else it may look at, a visible record between turns of what it changed, a revert for one change that survives later edits, and git-like version tools for the agent itself.
 
@@ -282,6 +282,8 @@ Nothing new for the rows: they're `ListVersionEffects` (built) grouped by target
 
 **Build units.** C8 (rows, change view, open affinity).
 
+**As built (C8, workshopcards-u8).** §7.1 to §7.5 are implemented, with these choices: a made item's change view and count set its non-blank fields against empty (empty fields aren't listed); the change view's URL also carries the reply (`reply`, `chat`, `slot`) for its link back and its action; the action runs the built per-change undo over the item's changes newest first (C10 replaces it with the three-way revert, adds Redo and per-field Revert); "Reverted"/"Undone" show without Redo until C10. The attached element's "changed since" tail line (§4.3) is left for the next change to `libraryView.ts`.
+
 ## 8. Flow 6: undo from a row
 
 Owner [D]: "Undoing changes: we already have a checkpoint/version system of course. I am wondering how we can make it easier for users to revert specific recent changes they just saw happen in chat."
@@ -353,7 +355,7 @@ The same model, with their existing tools and diffs:
 
 | Unit | What | Depends on |
 |---|---|---|
-| C1 | New workshop with this card in card menus | — |
+| C1 | **Built** (workshopcards-u1): New workshop with this card in card menus | — |
 | C2 | **Built** (workshopcards-u2): `library` attachments: migration, writer validation (owned, live), assembly (whole or reference with summary); the shared turn budget (§4.3 point 1) built in workshopcards-u2b, chosen at assembly from the pinned revisions rather than stored at send, and without the send-time refusal. In-view derivation moved to C7, the "changed since" tail line to C8 | — |
 | C2b | **Built** (workshopcards-u2b): paged reads: `view`, `offset`, `max_tokens` and indexes on `read_card`, `read_lorebook`, `read_preset`. `to_file` moved to C2c | — |
 | C2c | `to_file` on the read tools, through the Files write path (quota, versions, undo) | C2b |
@@ -362,7 +364,7 @@ The same model, with their existing tools and diffs:
 | C5 | Work on in a workshop (card, lorebook and preset menus; `workshopAttach`) | C2 |
 | C6 | Creations in view | C2 |
 | C7 | The in-view derivation (story cast and books included), resource classes, view-aware resolution in every library tool, the scoped prompt and its wording, card and always grants with their resolution, the card editor's Extra-tab section and the Settings section, the fixed instruction paragraph | C2, C6 |
-| C8 | Change rows, the change view tab kind, per-open affinity, the attached element's "changed since" tail line | — |
+| C8 | **Built** (workshopcards-u8): change rows, the change view tab kind, per-open affinity. Not yet: the attached element's "changed since" tail line (needs `libraryView.ts` after the review fixes) | — |
 | C9 | `read_revision`, `diff_revisions`, `revert_change`, `message`, the Versions skill | C10's merge |
 | C10 | Revert: field and hunk three-way, conflicts in the change view, Redo, Revert all, created-item bin asks, the tail line | C8 |
 | C11 | Card files as file attachments (§4.5): recognition, the card tile, the attachment line and note, `read_card_file`, `edit_card_file`, `import_card_file`, lorebook and preset JSON where cheap, the round-trip and end-to-end tests | C2b, C8, C10 |

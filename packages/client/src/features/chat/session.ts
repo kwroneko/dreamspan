@@ -726,6 +726,13 @@ export class ChatSession {
         // A dropped socket ends the stream: subscribe again, and its Hello reloads.
         Effect.tapError(() => Effect.sync(() => this.activity(null))),
         Effect.retry({ schedule: Schedule.spaced("1 second"), while: (error) => !this.notFound(error) }),
+        // A new chat swept while this tab was away (its Deleted went out meanwhile): as if it
+        // came now, so the page opens another for the same entry.
+        Effect.catch((error) =>
+          this.notFound(error) && this.view.chat?.status === "pending"
+            ? Effect.sync(() => this.update({ deleted: true, loading: false }))
+            : Effect.fail(error)
+        ),
         Effect.catchCause((cause) =>
           Effect.sync(() => {
             if (!Cause.hasInterruptsOnly(cause)) this.update({ error: describeCause(cause).message, loading: false })
@@ -1213,15 +1220,21 @@ export class ChatSession {
         // Another fork's flags or copy aren't this one's (spec/FORK-INDEPENDENCE-DELTA.md §2.2).
         if (event.forkId !== undefined && this.view.forkId !== null && event.forkId !== this.view.forkId) return
       // falls through
-      case "Slot":
+      case "Slot": {
+        // A new chat's first turn started it on the server (a send, a reply, a greeting's swipe,
+        // edit or duplicate): read it. Any change while pending, since a duplicate is a greeting too.
+        if (this.view.chat?.status === "pending") void this.readStarted()
         this.update({ pathRevision: this.view.pathRevision + 1 })
         for (const events of this.readEvents) events.push(event)
         return this.applyState(event)
+      }
       case "Chat":
         forksChanged(this.chatId)
         for (const events of this.readEvents) events.push(event)
         return this.applyState(event)
       case "Reload":
+        // A History replacement on a new chat starts it, and arrives as a reload.
+        if (this.view.chat?.status === "pending") void this.readStarted()
         if (event.forkId !== undefined) void this.refreshContext()
         forksChanged(this.chatId)
         return this.reload()
@@ -1301,6 +1314,12 @@ export class ChatSession {
       return false
     const current = this.view.entries.find((e) => e.slotId === entry.slotId)
     return current !== undefined && current.version.id !== entry.version.id
+  }
+
+  /** A pending chat whose first turn was just written: the chat as the server has it now (started). */
+  private async readStarted() {
+    const chat = await this.call((client) => client("GetChat", { chatId: this.chatId }))
+    if (chat.ok && !this.disposed) this.applyState({ _tag: "Chat", chat: chat.value })
   }
 
   /** Applies a change to loaded state; applying it again, or after a newer one, changes nothing. */
@@ -1748,13 +1767,35 @@ export class ChatSession {
   /** Changes who's in the chat, or a setting, from the leaf shown on (DESIGN §3.4). */
   async changeCast(change: CastChange): Promise<Outcome<Cast>> {
     const { forkId, leafSlotId } = this.view
-    const result = await this.call((client) =>
-      client("ChangeCast", { chatId: this.chatId, slotId: leafSlotId, forkId, change })
+    // A pending chat's cast is its start's (DESIGN §2.1): nothing is said yet, so a persona or
+    // character picked before the first send applies before the greetings, and `{{user}}` in
+    // them follows it, then and once started.
+    const pending = this.view.chat?.status === "pending"
+    const slotId = pending ? null : leafSlotId
+    // Its greetings follow who's in it (the server's SyncPendingGreetings): what each showed.
+    // By speaker: a greeting message may be made again (a slot keeps the selection it was made with).
+    const shown = new Map(
+      this.view.entries.map((entry) => [entry.version.speakerEntityId as string | null, entry.version.content])
     )
+    const result = await this.call((client) => client("ChangeCast", { chatId: this.chatId, slotId, forkId, change }))
     // The save's snapshot may predate another pin. Read the current cast after it commits.
     if (result.ok && !this.disposed && forkId === this.view.forkId && leafSlotId === this.view.leafSlotId) {
       this.forgetPositions()
       await this.refreshCast()
+    }
+    if (result.ok && pending && !this.disposed) {
+      const read = await this.call((client) =>
+        client("ReadPath", { chatId: this.chatId, forkId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 60 })
+      )
+      // A group greeting shown that two characters no longer offer gave way to the card's first.
+      if (
+        read.ok &&
+        read.value.entries.some((entry) => {
+          const before = shown.get(entry.version.speakerEntityId)
+          return before !== undefined && before !== entry.version.content
+        })
+      )
+        this.notice("The selected group greeting is no longer available. Using the card’s first greeting.")
     }
     return result
   }

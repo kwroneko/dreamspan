@@ -39,15 +39,17 @@ import { CHAT_VIEW_PARAMS } from "./chatViewParams.ts"
 
 // The chat view carries the Markdown renderer, most of the bundle: it loads with the first chat opened.
 const ChatPage = lazy(loadChatPage)
-const StartChatPage = lazy(() => import("./StartChatPage.tsx").then((module) => ({ default: module.StartChatPage })))
+const CardDraftChatPage = lazy(() =>
+  import("./DraftChatPage.tsx").then((module) => ({ default: module.CardDraftChatPage }))
+)
 const RemoteStartChatPage = lazy(() =>
   import("./StartChatPage.tsx").then((module) => ({ default: module.RemoteStartChatPage }))
 )
-const StartEmptyChatPage = lazy(() =>
-  import("./StartChatPage.tsx").then((module) => ({ default: module.StartEmptyChatPage }))
+const EmptyDraftChatPage = lazy(() =>
+  import("./DraftChatPage.tsx").then((module) => ({ default: module.EmptyDraftChatPage }))
 )
-const StartGroupChatPage = lazy(() =>
-  import("./StartChatPage.tsx").then((module) => ({ default: module.StartGroupChatPage }))
+const GroupDraftChatPage = lazy(() =>
+  import("./DraftChatPage.tsx").then((module) => ({ default: module.GroupDraftChatPage }))
 )
 const ContextPage = lazy(() => import("./ContextPage.tsx").then((module) => ({ default: module.ContextPage })))
 
@@ -110,26 +112,27 @@ function LazyContextPage() {
   )
 }
 
-function LazyStartGroupChatPage() {
+// A new chat is the chat page (DraftChatPage.tsx): it loads as the chat page does.
+function LazyGroupDraftChatPage() {
   return (
-    <Suspense fallback={<Loading label="Loading the group…" onRetry={reloadPage} />}>
-      <StartGroupChatPage />
+    <Suspense fallback={<ChatSkeleton onRetry={reloadPage} />}>
+      <GroupDraftChatPage />
     </Suspense>
   )
 }
 
-function LazyStartEmptyChatPage() {
+function LazyEmptyDraftChatPage() {
   return (
-    <Suspense fallback={<Loading label="Loading…" onRetry={reloadPage} />}>
-      <StartEmptyChatPage />
+    <Suspense fallback={<ChatSkeleton onRetry={reloadPage} />}>
+      <EmptyDraftChatPage />
     </Suspense>
   )
 }
 
-function LazyStartChatPage() {
+function LazyCardDraftChatPage() {
   return (
-    <Suspense fallback={<Loading label="Loading the card…" onRetry={reloadPage} />}>
-      <StartChatPage />
+    <Suspense fallback={<ChatSkeleton onRetry={reloadPage} />}>
+      <CardDraftChatPage />
     </Suspense>
   )
 }
@@ -294,7 +297,7 @@ export const register = () => {
     id: "chat.start",
     parent: "app",
     path: "/cards/$entityId/chat",
-    component: LazyStartChatPage,
+    component: LazyCardDraftChatPage,
     fill: true,
     retainSearch: sidebarSearch
   })
@@ -312,7 +315,7 @@ export const register = () => {
     id: "chat.startEmpty",
     parent: "app",
     path: "/new/chat",
-    component: LazyStartEmptyChatPage,
+    component: LazyEmptyDraftChatPage,
     fill: true,
     retainSearch: sidebarSearch
   })
@@ -320,7 +323,7 @@ export const register = () => {
     id: "chat.startGroup",
     parent: "app",
     path: "/groups/$chatId/new",
-    component: LazyStartGroupChatPage,
+    component: LazyGroupDraftChatPage,
     fill: true,
     retainSearch: sidebarSearch
   })

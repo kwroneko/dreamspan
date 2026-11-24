@@ -139,14 +139,16 @@ export function SnippetLarge({
         {item && (
           <Switch
             checked={item.global}
-            disabled={item.global && state.chatId === null}
+            disabled={item.global && (state.chatId === null || state.notStarted !== null)}
             onCheckedChange={(global) => void workspace.setGlobal(refId, global)}
             hint={
-              item.global
-                ? state.chatId === null
-                  ? "In every chat. Open a chat to make it that chat's own."
-                  : "In every chat. Switch it off to keep it only in this chat, every branch of it."
-                : "Only in this chat, every branch of it. Switch it on to have it in every chat."
+              item.global && state.notStarted !== null
+                ? state.notStarted
+                : item.global
+                  ? state.chatId === null
+                    ? "In every chat. Open a chat to make it that chat's own."
+                    : "In every chat. Switch it off to keep it only in this chat, every branch of it."
+                  : "Only in this chat, every branch of it. Switch it on to have it in every chat."
             }
           >
             All chats

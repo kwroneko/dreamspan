@@ -28,10 +28,31 @@ import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
+import { useAtomValue } from "@effect/atom-react"
+import { AsyncResult, Atom } from "effect/reactivity"
+import { AppClient } from "../../rpc.ts"
 
 type Resolved = LcmSettingsView["resolved"]
 type Misfit = LcmSettingsView["fit"][number]
 type Source = "chat" | "account" | "builtin"
+
+/** The summary styles the server has, for the names and hovers of the ones parts add. */
+const summaryStylesAtom = Atom.keepAlive(AppClient.query("ListSummaryStyles", undefined))
+
+/** The built-in ways a summary is written, always offered. */
+const BUILTIN_STYLES = [
+  {
+    value: "direct",
+    label: "A reply",
+    description: "The model's reply is the summary. Works with every model."
+  },
+  {
+    value: "tool",
+    label: "With tools",
+    description: "The model writes the summary through a tool. Needs a model that can call tools."
+  }
+] as const
+const isBuiltinStyle = (style: string) => BUILTIN_STYLES.some((option) => option.value === style)
 
 const tokens = (n: number) => n.toLocaleString("en-US")
 
@@ -371,6 +392,33 @@ export function LcmFields({
     setProblem(message === null ? null : { field, message })
     return message
   }
+  const registered = useAtomValue(summaryStylesAtom)
+  const styleInfo = (style: string) =>
+    AsyncResult.isSuccess(registered) ? registered.value.find((entry) => entry.id === style) : undefined
+  const fallbackStyle = (fallback.style ?? LCM_BUILTIN.style) as string
+  // A style a part added shows as a segment while it's in effect. On a chat, the account default it
+  // would go back to shows too, so Reset doesn't widen the row; once shown, it stays for the visit.
+  const reachable = [resolved.style, ...(scope === "chat" ? [fallbackStyle] : [])].filter(
+    (style) => !isBuiltinStyle(style)
+  )
+  const [shown, setShown] = useState<ReadonlyArray<string>>([])
+  const unseen = reachable.filter((style, index) => !shown.includes(style) && reachable.indexOf(style) === index)
+  if (unseen.length > 0) setShown([...shown, ...unseen])
+  const customStyles = [...shown, ...unseen]
+  const styleOption = (style: string) => {
+    const info = styleInfo(style)
+    return {
+      value: style,
+      label: info?.label ?? style,
+      ...(info?.description
+        ? { description: info.description }
+        : AsyncResult.isSuccess(registered) && !info
+          ? { description: "This style isn't available now: summaries can't be written with it." }
+          : {})
+    }
+  }
+  const styleName = (style: string) =>
+    style === "tool" ? "with tools" : style === "direct" ? "a reply" : (styleInfo(style)?.label ?? style)
   const errorFor = (field: LcmField) => (problem?.field === field ? problem.message : null)
   const chunk =
     fitted?.chunk ?? chunkSize(resolved.leafInput, { target: resolved.recentTarget, maximum: resolved.recentMax })
@@ -528,24 +576,13 @@ export function LcmFields({
           wrap
           value={resolved.style}
           onValueChange={(style) => void choose({ style })}
-          options={[
-            {
-              value: "direct",
-              label: "A reply",
-              description: "The model's reply is the summary. Works with every model."
-            },
-            {
-              value: "tool",
-              label: "With tools",
-              description: "The model writes the summary through a tool. Needs a model that can call tools."
-            }
-          ]}
+          options={[...BUILTIN_STYLES, ...customStyles.map(styleOption)]}
         />
         <Origin
           scope={scope}
           from={resolved.from.style ?? "builtin"}
-          same={resolved.style === (fallback.style ?? LCM_BUILTIN.style)}
-          fallback={(fallback.style ?? LCM_BUILTIN.style) === "tool" ? "with tools" : "a reply"}
+          same={resolved.style === fallbackStyle}
+          fallback={styleName(fallbackStyle)}
           disabled={disabled}
           onReset={() => void choose({ style: null })}
         />

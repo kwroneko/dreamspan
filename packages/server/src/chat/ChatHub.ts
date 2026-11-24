@@ -15,6 +15,8 @@ interface Subscriber {
 const BATCH_MS = 16
 /** Batches a subscriber may fall behind by, about eight seconds of a busy chat, before it starts over. */
 const BACKLOG = 512
+/** The longest grace `held` is asked for: when each chat was last left is forgotten after this. */
+export const HELD_MAX_MS = 10 * 60_000
 
 /**
  * Queues a batch for a subscriber. One that has fallen a whole backlog behind (a stalled
@@ -78,6 +80,17 @@ export class ChatHub extends Context.Service<
      * event but streamed text and the cache estimate, which follows from the others.
      */
     readonly listen: (listener: (chatId: ChatId, event?: ChatEvent) => void) => Effect.Effect<void, never, Scope.Scope>
+    /**
+     * Whether a tab may still have the chat open: someone is subscribed, or the last one left
+     * (or it was given out, `touch`) less than `graceMs` ago, at most HELD_MAX_MS (or the server
+     * started less than that ago, as after a deploy, while tabs reconnect). A pending chat is
+     * swept only when nobody has it (db/pendingChats.ts).
+     */
+    readonly held: (chatId: ChatId, graceMs: number) => boolean
+    /** The chat was just given to a tab that hasn't subscribed yet: `held` counts it as just left. */
+    readonly touch: (chatId: ChatId) => void
+    /** When the chat was last given out (`touch`), 0 if not lately: a leave keeps a chat given out since. */
+    readonly touchedAt: (chatId: ChatId) => number
   }
 >()("rp/chat/ChatHub") {
   static readonly layer = ChatHub.layerWith({ backlog: BACKLOG })
@@ -90,6 +103,21 @@ export class ChatHub extends Context.Service<
         const subscribers = new Map<ChatId, Set<Subscriber>>()
         const listeners = new Set<(chatId: ChatId, event?: ChatEvent) => void>()
         const pending = new Map<ChatId, Array<ChatEvent>>()
+        // When each chat's last subscriber left, for `held`, oldest first: kept HELD_MAX_MS, then
+        // forgotten, so a long-running server holds only the chats left lately.
+        const left = new Map<ChatId, number>()
+        const startedAt = Date.now()
+        // When each chat was last given out, kept as `left` is.
+        const touched = new Map<ChatId, number>()
+        const leave = (chatId: ChatId) => {
+          const now = Date.now()
+          left.delete(chatId)
+          left.set(chatId, now)
+          for (const [id, at] of left) {
+            if (now - at < HELD_MAX_MS) break
+            left.delete(id)
+          }
+        }
         let timer: ReturnType<typeof setTimeout> | undefined
 
         const flush = () => {
@@ -127,6 +155,20 @@ export class ChatHub extends Context.Service<
             }
             subscribers.delete(chatId)
           },
+          held: (chatId, graceMs) =>
+            (subscribers.get(chatId)?.size ?? 0) > 0 ||
+            Date.now() - Math.max(startedAt, left.get(chatId) ?? 0) < Math.min(graceMs, HELD_MAX_MS),
+          touch: (chatId) => {
+            const now = Date.now()
+            touched.delete(chatId)
+            touched.set(chatId, now)
+            for (const [id, at] of touched) {
+              if (now - at < HELD_MAX_MS) break
+              touched.delete(id)
+            }
+            if ((subscribers.get(chatId)?.size ?? 0) === 0) leave(chatId)
+          },
+          touchedAt: (chatId) => touched.get(chatId) ?? 0,
           listen: (listener) =>
             Effect.acquireRelease(
               Effect.sync(() => listeners.add(listener)),
@@ -150,6 +192,7 @@ export class ChatHub extends Context.Service<
                     if (set?.size === 0) {
                       subscribers.delete(chatId)
                       pending.delete(chatId)
+                      leave(chatId)
                     }
                   })
               )

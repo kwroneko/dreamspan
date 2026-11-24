@@ -68,6 +68,7 @@ import {
   AuthenticatedPanelDataApi,
   AuthenticatedCardArchiveApi,
   AuthenticatedPersonaLockApi,
+  AuthenticatedDraftChatApi,
   AuthenticatedTextSearchApi,
   AuthenticatedDraftPreviewApi,
   AuthenticatedCardSourcesApi,
@@ -152,6 +153,7 @@ import * as Secrets from "./secrets.ts"
 import { makeTextSearchHandlers } from "./api/textSearch.ts"
 import { makeMcpHandlers } from "./api/mcp.ts"
 import { makePersonaLockHandlers } from "./api/personaLock.ts"
+import { makeDraftChatHandlers } from "./api/draftChats.ts"
 import * as McpConnections from "./mcp/McpConnections.ts"
 
 const VERSION = "0.0.0"
@@ -260,6 +262,7 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
   AuthenticatedCardArchiveApi.toLayer(makeCardArchiveHandlers),
   AuthenticatedPersonaLockApi.toLayer(makePersonaLockHandlers),
+  AuthenticatedDraftChatApi.toLayer(makeDraftChatHandlers),
   AuthenticatedCardSourcesApi.toLayer(makeCardSourceHandlers),
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
   AuthenticatedProviderListApi.toLayer(makeProviderListHandlers),

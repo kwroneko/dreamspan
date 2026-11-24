@@ -2,64 +2,69 @@
 // rows, one per card, lorebook or preset, at the revision that was its head when the message was
 // written, and its name then. Written inside the version insert's transaction; a new version
 // made from another (an edit, a copy into a fork or a changeset) carries its source's list.
-import type { MessageLibrary } from "@dreamspan/shared/chat.ts"
+import type { MessageLibrary, NewVersion } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { NotFound } from "./ops.ts"
 
-/** A live library entry of `ownerId`'s of the kind named: its head revision and its name now. */
-const liveRef = (sql: SqlClient.SqlClient, ownerId: string, item: MessageLibrary[number]) =>
-  Effect.map(
-    sql<{ head: string; label: string }>`
-      SELECT r.head_revision_id AS head, r.label FROM entity_refs r JOIN entities e ON e.id = r.entity_id
-      WHERE r.id = ${item.refId} AND e.owner_user_id = ${ownerId} AND e.kind = ${item.kind}
-        AND e.deleted_at IS NULL AND e.purged_at IS NULL`,
-    ([ref]) => ref ?? null
-  )
+/** Whether the selected version (`v`) has content to send, without loading the payload. */
+export const hasVersionPayload = (sql: SqlClient.SqlClient) => sql`(v.content_length > 0
+  OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)
+  OR EXISTS (SELECT 1 FROM version_library l WHERE l.version_id = v.id))`
+
+export type LibraryPin = MessageLibrary[number] & {
+  readonly revisionId: string
+  readonly name: string
+}
+
+export type VersionWithLibraryPins = NewVersion & { readonly libraryPins?: ReadonlyArray<LibraryPin> }
 
 /**
- * What a send must hold before anything is written: only a workshop's messages carry library
- * items, and each must be a live entry of the sender's of the kind named; otherwise NotFound
- * (the same answer as another user's id).
+ * Resolve the sender's live workshop items in the send transaction. Keep their order and
+ * capture their names and revisions before the message waits behind a running reply.
  */
-export const checkLibrary = (sql: SqlClient.SqlClient, ownerId: string, chatId: string, items: MessageLibrary) =>
+export const pinLibrary = (sql: SqlClient.SqlClient, ownerId: string, chatId: string, items: MessageLibrary) =>
   Effect.gen(function* () {
-    if (items.length === 0) return
+    const pins: Array<LibraryPin> = []
+    if (items.length === 0) return pins
     const [chat] = yield* sql<{ kind: string }>`SELECT kind FROM chats WHERE id = ${chatId}`
     if (chat?.kind !== "workshop") return yield* new NotFound({ entity: "ref", id: items[0]!.refId })
-    for (const item of items)
-      if ((yield* liveRef(sql, ownerId, item)) === null) return yield* new NotFound({ entity: "ref", id: item.refId })
+    const seen = new Set<string>()
+    for (const item of items) {
+      if (seen.has(item.refId + ":" + item.kind)) continue
+      seen.add(item.refId + ":" + item.kind)
+      const [ref] = yield* sql<{ revisionId: string; name: string }>`
+        SELECT r.head_revision_id AS revisionId, r.label AS name
+        FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+        WHERE r.id = ${item.refId} AND e.owner_user_id = ${ownerId} AND e.kind = ${item.kind}
+          AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL`
+      if (!ref) return yield* new NotFound({ entity: "ref", id: item.refId })
+      pins.push({ ...item, ...ref })
+    }
+    return pins
   })
 
-/**
- * Records `items` on version `versionId` of a chat of `chatKind` owned by `ownerId`, each at its
- * head revision now. A send checked them first (`checkLibrary`); a queued message posting later
- * leaves out an item deleted meanwhile rather than fail the queue. A repeated item is kept once,
- * and nothing is recorded outside a workshop.
- */
-export const attachLibrary = (
-  sql: SqlClient.SqlClient,
-  ownerId: string,
-  chatKind: string,
-  versionId: string,
-  items: MessageLibrary
-) =>
-  Effect.gen(function* () {
-    if (chatKind !== "workshop") return
-    const seen = new Set<string>()
-    let ordinal = 0
-    for (const item of items) {
-      if (seen.has(item.refId)) continue
-      seen.add(item.refId)
-      const ref = yield* liveRef(sql, ownerId, item)
-      if (ref === null) continue
-      yield* sql`INSERT INTO version_library (version_id, ordinal, kind, ref_id, revision_id, name)
-        VALUES (${versionId}, ${ordinal}, ${item.kind}, ${item.refId}, ${ref.head}, ${ref.label})`
-      ordinal++
-    }
-  })
+/** Write the revisions captured by the send, even if the item's head or bin status has changed. */
+export const attachLibrary = (sql: SqlClient.SqlClient, versionId: string, pins: ReadonlyArray<LibraryPin>) =>
+  Effect.forEach(
+    pins,
+    ({ kind, refId, revisionId, name }, ordinal) => sql`
+      INSERT INTO version_library (version_id, ordinal, kind, ref_id, revision_id, name)
+      VALUES (${versionId}, ${ordinal}, ${kind}, ${refId}, ${revisionId}, ${name})`,
+    { discard: true }
+  )
 
 /** Version `to`, made from `from`, carries `from`'s library items as they were recorded. */
 export const copyLibrary = (sql: SqlClient.SqlClient, from: string, to: string) =>
   sql`INSERT INTO version_library (version_id, ordinal, kind, ref_id, revision_id, name)
     SELECT ${to}, ordinal, kind, ref_id, revision_id, name FROM version_library WHERE version_id = ${from}`
+
+/** A version's library documents, in their sent order, including purged library revisions it holds. */
+export const libraryDocuments = (sql: SqlClient.SqlClient) => sql`(
+  SELECT json_group_array(json_object('kind', l.kind, 'refId', l.ref_id, 'revisionId', l.revision_id,
+      'name', l.name, 'doc', json(coalesce(r.doc_json, p.doc_json))) ORDER BY l.ordinal)
+  FROM version_library l
+  LEFT JOIN entity_revisions r ON r.id = l.revision_id
+  LEFT JOIN purged_library_documents p ON p.revision_id = l.revision_id
+  WHERE l.version_id = v.id AND (r.id IS NOT NULL OR p.revision_id IS NOT NULL)
+)`

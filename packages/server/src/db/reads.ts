@@ -1,3 +1,4 @@
+import { listed } from "./listedChats.ts"
 import { operationInfo } from "./operationPolicies.ts"
 import { archiveCandidates } from "./cardArchive.ts"
 import { LibraryRef } from "@dreamspan/shared/library.ts"
@@ -120,6 +121,7 @@ const pathColumns = (fork: string) => `${shownVersionColumns}, s.parent_slot_id,
   s.row_version + max(coalesce(so.seq, 0), coalesce(ro.seq, 0), coalesce(dso.seq, 0), coalesce(hso.seq, 0))
     AS row_version,
   coalesce(hso.flag, ${contextExcluded()}) AS context_excluded, coalesce(hso.flag, s.hidden_by_user) AS hidden_by_user,
+  EXISTS (SELECT 1 FROM version_library l WHERE l.version_id = v.id) AS has_library,
   (SELECT json_group_array(a.media_id) FROM version_attachments a
     WHERE a.version_id = v.id AND ${imageExcludedSql(fork, "o.id", "a.media_id")}) AS excluded_images,
   ${thinkingHiddenSql(fork, "o.id")} AS hidden_thinking,
@@ -846,6 +848,16 @@ export const makeReadHandlers = Effect.gen(function* () {
     // Most recent first, by last message, else creation (DESIGN §2.1). A card's list puts
     // its chats with a message before those without, so its first is the chat Continue
     // opens (CardUsage). `search` finds a chat by its title or by a card in it.
+    PendingChats: ({ userId }) =>
+      sql<{
+        id: ChatId
+        draft_for: string | null
+      }>`SELECT id, draft_for FROM chats /* chat:includes-pending: the pending chats themselves */
+        WHERE owner_user_id = ${userId} AND status = 'pending' ORDER BY created_at, id`.pipe(
+        Effect.map((rows) => rows.map((row) => ({ chatId: row.id, draftFor: row.draft_for }))),
+        query("PendingChats")
+      ),
+
     ListChats: ({ userId, limit, before, entityId, search }) =>
       Effect.gen(function* () {
         if (entityId !== undefined) {
@@ -863,7 +875,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         // ref's head of a card in the chat (the derived label and subtitle caches, and the
         // nickname), or any revision a binding in the chat pins.
         const rows = yield* sql<ChatRow>`
-          SELECT * FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL
+          SELECT * FROM chats WHERE owner_user_id = ${userId} AND ${listed(sql, "chats")}
             AND (${before?.id ?? null} IS NULL
               OR (${ranked} * (last_message_at IS NOT NULL), coalesce(last_message_at, created_at), id)
                 < (${ranked * (before?.empty === true ? 0 : 1)}, ${before?.at ?? null}, ${before?.id ?? null}))

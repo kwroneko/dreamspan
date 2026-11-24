@@ -1,3 +1,4 @@
+import { listed } from "./listedChats.ts"
 // Read handlers for importing and exporting library files (ARCHITECTURE.md §11).
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect, Predicate } from "effect"
@@ -110,7 +111,7 @@ export const makeImportReadHandlers = Effect.gen(function* () {
         // revision there, it keeps it; otherwise it reads the card's latest.
         const chats = yield* sql<{ id: string; leaf: string | null }>`
           SELECT c.id, c.active_leaf_slot_id AS leaf FROM card_chat_membership m CROSS JOIN chats c ON c.id = m.chat_id
-          WHERE m.entity_id = ${ref.entity_id} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+          WHERE m.entity_id = ${ref.entity_id} AND c.owner_user_id = ${userId} AND ${listed(sql, "c")}`
         let pinned = 0
         for (const chat of chats) {
           const state = yield* chatStateAt(sql, chat.id as ChatId, chat.leaf)

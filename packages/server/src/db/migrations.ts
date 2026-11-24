@@ -14,6 +14,7 @@ import { shareBirthMigration } from "./migrationShareBirth.ts"
 import { guidanceTargetMigration } from "./migrationGuidanceTarget.ts"
 import { reasoningStatsMigration } from "./migrationReasoningStats.ts"
 import { nativeReasoningMigration } from "./migrationNativeReasoning.ts"
+import { pendingChatsMigration } from "./migrationPendingChats.ts"
 import { rebuildTable, type OutsideStep } from "./tableRebuild.ts"
 
 /**
@@ -101,6 +102,82 @@ export const migrationDefinitions = {
       `CREATE INDEX version_library_ref ON version_library(ref_id)`,
       `CREATE INDEX version_library_revision ON version_library(revision_id)`,
       `ALTER TABLE queued_messages ADD COLUMN library_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(library_json))`
+    ]
+  },
+  // DESIGN §2.1 (owner, 2026-11-23): the new-chat page's chat, pending until its first turn, and the entry it was opened for.
+  "0018_pending_chats": { statements: pendingChatsMigration },
+  // Older queued sends stored no revision. Capture the head present at upgrade for those rows.
+  // The original payload check predates library-only sends.
+  "0019_queue_library_revisions": {
+    outsideTransaction: [
+      {
+        table: "queued_messages",
+        create: baseline
+          .find((statement) => statement.startsWith("CREATE TABLE queued_messages ("))!
+          // 0004 dropped story_at_json; 0017 added library_json in its place at the end.
+          .replace(
+            "    -- A side chat's story position for the reply this entry asks for (spec/WORKSHOP.md §4).\n" +
+              "    story_at_json TEXT CHECK (story_at_json IS NULL OR json_valid(story_at_json)),",
+            "    library_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(library_json)),"
+          )
+          .replace(
+            "json_array_length(images_json) > 0)",
+            "json_array_length(images_json) > 0 OR json_array_length(library_json) > 0)"
+          )
+      },
+      `UPDATE queued_messages AS q SET library_json = (
+        SELECT json_group_array(json_object('kind', kind, 'refId', id, 'revisionId', revision, 'name', label))
+        FROM (
+          SELECT e.kind, r.id, r.head_revision_id AS revision, r.label
+          FROM json_each(q.library_json) j
+          JOIN entity_refs r ON r.id = j.value ->> '$.refId'
+          JOIN entities e ON e.id = r.entity_id AND e.kind = j.value ->> '$.kind'
+          JOIN chats c ON c.id = q.chat_id AND c.kind = 'workshop' AND c.owner_user_id = e.owner_user_id
+          WHERE e.purged_at IS NULL
+          GROUP BY r.id ORDER BY min(j.key)
+        )
+      ) WHERE library_json <> '[]'`
+    ]
+  },
+  // Message and queue attachments outlive their library entry. Keep purged documents only
+  // while a version or queued send still carries the revision.
+  "0020_retained_library_attachments": {
+    statements: [
+      `CREATE TABLE purged_library_documents (
+        revision_id TEXT PRIMARY KEY,
+        doc_json TEXT NOT NULL CHECK (json_valid(doc_json))
+      ) STRICT, WITHOUT ROWID`,
+      `CREATE TABLE retained_version_library (
+        version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('card', 'lorebook', 'preset')),
+        ref_id TEXT NOT NULL,
+        revision_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        PRIMARY KEY (version_id, ordinal)
+      ) STRICT, WITHOUT ROWID`,
+      `INSERT INTO retained_version_library SELECT * FROM version_library`,
+      `DROP TABLE version_library`,
+      `ALTER TABLE retained_version_library RENAME TO version_library`,
+      `CREATE INDEX version_library_ref ON version_library(ref_id)`,
+      `CREATE INDEX version_library_revision ON version_library(revision_id)`,
+      `CREATE TRIGGER version_library_release_document AFTER DELETE ON version_library
+      WHEN EXISTS (SELECT 1 FROM purged_library_documents WHERE revision_id = OLD.revision_id)
+      BEGIN
+        DELETE FROM purged_library_documents WHERE revision_id = OLD.revision_id
+          AND NOT EXISTS (SELECT 1 FROM version_library WHERE revision_id = OLD.revision_id)
+          AND NOT EXISTS (SELECT 1 FROM queued_messages q, json_each(q.library_json) j
+            WHERE j.value ->> '$.revisionId' = OLD.revision_id);
+      END`,
+      `CREATE TRIGGER queued_library_release_documents AFTER DELETE ON queued_messages
+      WHEN OLD.library_json <> '[]'
+      BEGIN
+        DELETE FROM purged_library_documents
+          WHERE revision_id IN (SELECT value ->> '$.revisionId' FROM json_each(OLD.library_json))
+          AND NOT EXISTS (SELECT 1 FROM version_library WHERE revision_id = purged_library_documents.revision_id)
+          AND NOT EXISTS (SELECT 1 FROM queued_messages q, json_each(q.library_json) j
+            WHERE j.value ->> '$.revisionId' = purged_library_documents.revision_id);
+      END`
     ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>

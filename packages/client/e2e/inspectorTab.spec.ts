@@ -125,18 +125,19 @@ test("each plain open makes an inspector tab beside the chat, never replacing it
   await expect(replies).toHaveCount(2)
 })
 
-test("a chat not sent yet's first request opens beside it, the draft kept, at 1440", async ({ page }) => {
+test("a new chat's request opens beside it, the draft kept, at 1440", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  // A new chat is a pending chat (DraftChatPage.tsx): its next request is the chat's own.
   await page.goto(`${server().url}/cards/${entityId}/chat`)
+  await expect(page).toHaveURL(/[?&]draft=/)
   const box = page.getByRole("textbox", { name: "Message", exact: true })
   await box.fill("The nets are dry.")
-  await page.getByRole("button", { name: /^Context: about [\d,]+ of [\d,]+ tokens in your first request/ }).click()
+  await page.getByRole("button", { name: /^Context: about / }).click()
   await page.getByRole("dialog", { name: "Context" }).getByRole("link", { name: "View request" }).click()
-  await expect(page.getByRole("heading", { name: "Your first request" })).toBeVisible()
+  await expect(page).toHaveURL(/\/request\/next/)
   const tabs = tabsOf(page)
   await expect(tabs).toHaveCount(2)
-  await expect(tabs.nth(1)).toHaveText(/Your first request/)
   await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true")
   await tabs.nth(0).click()
   await expect(box).toBeVisible()

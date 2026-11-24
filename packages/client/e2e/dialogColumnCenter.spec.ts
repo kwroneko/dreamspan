@@ -44,7 +44,7 @@ for (const [width, sidebar] of [
       expect(Math.abs(at.dialog - at.main)).toBeLessThanOrEqual(1)
       await expectLayout(page, info, `archive-dialog-column-${width}-${sidebar}`, { scope: '[role="dialog"]' })
       await page.screenshot({
-        path: `/tmp/dreamspan-shots/dialogcenter1/${width}-dark-sidebar-${sidebar ? "open" : "closed"}.png`
+        path: info.outputPath(`${width}-dark-sidebar-${sidebar ? "open" : "closed"}.png`)
       })
       // Live: a narrower window moves the centre column, and the dialog with it.
       await page.setViewportSize({ width: width - 200, height: 1000 })

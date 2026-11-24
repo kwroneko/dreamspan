@@ -267,7 +267,8 @@ for (const width of [1440, 390])
             `${page.url().split("?")[0]}?panel=${encodeURIComponent(`card:src:cardex:${/\/cards\/([^/]+)\/chat/.exec(page.url())![1]}`)}`
           )
         await expect(page).toHaveURL(/panel=card(:|%3A)src/)
-        const tab = page.getByRole("tabpanel", { name: `${edited} · 1.0`, exact: true })
+        // The tab says the character's name only: no other tab reads alike (c32d4320f, 89c3c57ce).
+        const tab = page.getByRole("tabpanel", { name: edited, exact: true })
         await expect(tab.getByText("From cardex · not in your cards", { exact: true })).toBeVisible({
           timeout: 30_000
         })

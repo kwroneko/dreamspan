@@ -618,6 +618,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.GetSummaryRevisionRequest({ revisionId: owner.summary.revisionId }), "NotFound")
   },
+  ListSummaryStyles: { createOnly: "read-only list of the server's registered summary styles; no user data" },
   GetSummaryDetails: {
     probe: (actor, owner) => refused(actor.api.GetSummaryDetails({ summaryId: owner.summary.id }), "NotFound")
   },
@@ -3063,6 +3064,25 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         yield* refused(actor.api.SetPersonaLock({ entityId: owner.cardId, persona: null }), "NotFound")
         // Their own character, someone else's persona.
         yield* refused(actor.api.SetPersonaLock({ entityId: actor.cardId, persona: owner.cardId }), "NotFound")
+      })
+  },
+  OpenDraftChat: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Their card's new chat, or their group's.
+        yield* refused(actor.api.OpenDraftChat({ draftFor: `card:${owner.cardId}` }), "NotFound")
+        yield* refused(actor.api.OpenDraftChat({ draftFor: `group:${owner.chat.chatId}` }), "NotFound")
+        // Their chat named as the page's own: a fresh chat of the actor's, never theirs.
+        const opened = yield* actor.api.OpenDraftChat({ draftFor: "empty", reopen: owner.chat.chatId })
+        assert.notStrictEqual(opened.id, owner.chat.chatId)
+      })
+  },
+  LeaveDraftChat: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const pending = yield* owner.api.OpenDraftChat({ draftFor: "empty" })
+        yield* refused(actor.api.LeaveDraftChat({ chatId: pending.id }), "NotFound")
+        yield* refused(actor.api.LeaveDraftChat({ chatId: owner.chat.chatId }), "NotFound")
       })
   },
   StartChat: {

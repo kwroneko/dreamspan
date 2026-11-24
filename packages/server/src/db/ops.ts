@@ -772,7 +772,9 @@ const StartChatFields = {
         Schema.Struct({
           index: Schema.Int,
           text: Schema.String,
-          frozen: Schema.NullOr(FrozenMacros)
+          frozen: Schema.NullOr(FrozenMacros),
+          /** Offered only with two characters or more (a pending chat's cast change drops it with fewer). */
+          groupOnly: Schema.optionalKey(Schema.Boolean)
         })
       )
     })
@@ -2951,6 +2953,55 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       title: StartChatFields.title
     },
     success: Chat,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The new-chat page's chat (DESIGN §2.1): `StartGreetingChat`'s chat, pending, with no last
+   * message, opened for `draftFor` (`card:<entity>`, `group:<chat>`, `empty`). No reader across
+   * the account sees it until its first turn commits it (db/pendingChats.ts).
+   */
+  Rpc.make("OpenDraftChat", {
+    payload: {
+      userId: UserId,
+      draftFor: Schema.String,
+      cards: StartChatFields.cards,
+      persona: StartChatFields.persona,
+      greeters: StartChatFields.greeters,
+      title: StartChatFields.title
+    },
+    success: Chat,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Removes a pending chat of the user's, its typing filed to recovered texts first (as "New
+   * chat with <names>"). False: it wasn't a pending chat of theirs (committed, gone).
+   */
+  Rpc.make("SweepPendingChat", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.Boolean,
+    error: StorageError
+  }),
+  /**
+   * A cast change of a pending chat and its greetings, in one transaction (DESIGN §2.1; a group
+   * start's rule), so a first send or another change sees both or neither: `events` are written
+   * at the chat's start, then each character it has (who the user plays left out), in cast
+   * order, has a greeting message with the greetings offered to it now. `candidates` are drawn
+   * for everyone the change may leave in the cast (a group-only greeting is dropped with one
+   * character); a character without one (another change's, written since) keeps its message. A
+   * message made again keeps its greetings' frozen macros and the edits typed into them; a
+   * removed greeting's edit goes to recovered texts; a greeting shown and no longer offered
+   * falls back to the card's first (`fellBack`). Every greeting records the cast it starts
+   * with. `pending: false`: the chat isn't pending (it started), and nothing was written.
+   */
+  Rpc.make("SyncPendingGreetings", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      events: Schema.Array(StoredStateEventData),
+      candidates: StartChatFields.greeters
+    },
+    success: Schema.Struct({ pending: Schema.Boolean, changed: Schema.Boolean, fellBack: Schema.Boolean }),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("AgentStartChat", {
@@ -5366,6 +5417,12 @@ const ReadOpsOwn = RpcGroup.make(
    * The user's chats, most recent first (DESIGN §2.1: by last message, else creation); a
    * card's, those with a message first. NotFound: the card isn't the user's.
    */
+  /** The user's pending chats (db/pendingChats.ts), oldest first: for the sweep, never listed. */
+  Rpc.make("PendingChats", {
+    payload: { userId: UserId },
+    success: Schema.Array(Schema.Struct({ chatId: ChatId, draftFor: Schema.NullOr(Schema.String) })),
+    error: StorageError
+  }),
   Rpc.make("ListChats", {
     payload: {
       userId: UserId,
@@ -5719,6 +5776,20 @@ const ReadOpsOwn = RpcGroup.make(
   Rpc.make("GetRevisionDoc", {
     payload: { userId: UserId, refId: RefId, revisionId: RevisionId },
     success: Doc,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A frozen revision attached to a visible message on the workshop's path. */
+  Rpc.make("GetAttachedLibraryRevision", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: SlotId,
+      kind: Schema.Literals(["card", "lorebook", "preset"]),
+      refId: RefId,
+      revisionId: RevisionId
+    },
+    success: Schema.Struct({ name: Schema.String, doc: Doc }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The existing first imported card note, using the same identity as ImportFile. */

@@ -1,3 +1,4 @@
+import { commitPendingChat } from "./pendingChats.ts"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { readSetting, putUserSetting } from "./settings.ts"
 import type { StImportPrefix } from "./stImportPrefix.ts"
@@ -764,7 +765,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         yield* sql`UPDATE forks SET tip_slot_id = ${input.leaf}, row_version = row_version + 1 WHERE id = ${fileFork.id} AND tip_slot_id IS NOT ${input.leaf}`
       if (!payload.merged && payload.title !== undefined)
         yield* sql`UPDATE chats SET title = ${payload.title} WHERE id = ${chatId} AND title = ${unfinishedTitle(payload.title)}`
-      yield* sql`UPDATE chats SET status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
+      yield* commitPendingChat(sql, chatId, Date.now())
+      yield* sql`UPDATE chats SET
         last_message_at = max(coalesce(last_message_at, 0), coalesce(${input.lastMessageAt}, 0)), row_version = row_version + 1
         WHERE id = ${chatId}`
       const updated: RecordPayload = {

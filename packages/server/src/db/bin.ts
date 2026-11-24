@@ -41,6 +41,7 @@ import type { ForkRow } from "./rows.ts"
 import { binItemForks } from "./binForks.ts"
 import { placeAsShown } from "./forkOrder.ts"
 import { makeDraftStore } from "./drafts.ts"
+import { sweepPendingChat } from "./pendingChats.ts"
 import { NotFound } from "./ops.ts"
 import { pairedWorkshopForks } from "./workshopPairing.ts"
 import { setSplitApplied } from "./threads.ts"
@@ -1416,8 +1417,20 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
    * Deletes for good the bin items `where` (a condition on bin_items, with its `params`)
    * selects. Set-based, so emptying a large bin takes a few statements, not a few per item.
    */
+  /** Purges the items `where` picks; returns the pending chats swept with a card they name. */
   const purgeWhere = (where: string, params: ReadonlyArray<unknown>) =>
     Effect.gen(function* () {
+      // A pending chat (db/pendingChats.ts) that names a card purged here is swept first, its
+      // typing filed while the card's name can still be read: no draft outlives its card.
+      const pending = yield* sql.unsafe<{ id: string; owner_user_id: UserId }>(
+        `SELECT DISTINCT c.id, c.owner_user_id FROM chats c JOIN state_events ev ON ev.chat_id = c.id
+         WHERE c.status = 'pending' AND ev.key IN ('participant.join', 'card.swap') /* chat:includes-pending: sweeps them */
+           AND ev.value_json ->> '$.entity' IN (SELECT target_id FROM bin_items WHERE kind = 'entity' AND (${where}))`,
+        params
+      )
+      const swept: Array<string> = []
+      for (const draft of pending)
+        if (yield* sweepPendingChat(sql, { drafts, recover }, draft.owner_user_id, draft.id)) swept.push(draft.id)
       const chats = yield* sql.unsafe<{ chat_id: string }>(
         `SELECT DISTINCT chat_id FROM bin_items WHERE chat_id IS NOT NULL AND (${where})`,
         params
@@ -1446,6 +1459,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
           )
           yield* run(`DELETE FROM version_history WHERE version_id IN (SELECT id FROM versions WHERE ${versions})`)
           yield* run(`DELETE FROM version_attachments WHERE version_id IN (SELECT id FROM versions WHERE ${versions})`)
+          yield* run(`DELETE FROM version_library WHERE version_id IN (SELECT id FROM versions WHERE ${versions})`)
           yield* run(
             `DELETE FROM bin_items WHERE kind = 'version' AND target_id IN (SELECT id FROM versions WHERE ${versions})`
           )
@@ -1509,6 +1523,11 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       yield* run(`UPDATE connections SET preset_override_ref_id = NULL WHERE preset_override_ref_id IN (${entityRefs})`)
       yield* run(`DELETE FROM entity_refs WHERE entity_id IN (${targets("entity")})`)
       yield* run(`DELETE FROM entity_tags WHERE entity_id IN (${targets("entity")})`)
+      yield* run(`INSERT INTO purged_library_documents(revision_id, doc_json)
+        SELECT r.id, r.doc_json FROM entity_revisions r WHERE r.entity_id IN (${targets("entity")})
+          AND (EXISTS (SELECT 1 FROM version_library WHERE revision_id = r.id)
+            OR r.id IN (SELECT j.value ->> '$.revisionId' FROM queued_messages q, json_each(q.library_json) j
+              WHERE q.library_json <> '[]'))`)
       yield* run(`DELETE FROM entity_revisions WHERE entity_id IN (${targets("entity")})`)
       yield* run(`UPDATE entities SET purged_at = ? WHERE id IN (${targets("entity")})`, [now])
 
@@ -1563,6 +1582,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       for (const item of erasedMessages)
         yield* sql`DELETE FROM bin_items WHERE kind = 'message' AND target_id = ${item.target_id}`
       for (const chatId of new Set(erasedMessages.map((item) => item.chat_id))) yield* relocateLeaf(chatId)
+      return swept
     })
 
   const confirmForks = (
@@ -1581,16 +1601,17 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
   const purgeWithCompanions = (itemId: string) =>
     Effect.gen(function* () {
       const companions = yield* companionsOf(itemId)
-      yield* purgeWhere("id = ?", [itemId])
-      for (const companion of companions) yield* purgeWhere("id = ?", [companion])
+      const swept = yield* purgeWhere("id = ?", [itemId])
+      for (const companion of companions) swept.push(...(yield* purgeWhere("id = ?", [companion])))
+      return swept
     })
 
   const purge = (userId: UserId, itemId: string, expectedForkIds?: ReadonlyArray<string>) =>
     Effect.gen(function* () {
       const item = yield* loadItem(userId, itemId)
       yield* confirmForks(userId, [itemId], expectedForkIds)
-      yield* purgeWithCompanions(item.id)
-      return item.chat_id === null ? [] : [item.chat_id]
+      const swept = yield* purgeWithCompanions(item.id)
+      return [...(item.chat_id === null ? [] : [item.chat_id]), ...swept]
     })
 
   const emptyBin = (userId: UserId, itemIds: ReadonlyArray<string>, expectedForkIds?: ReadonlyArray<string>) =>
@@ -1608,10 +1629,10 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       }
       yield* confirmForks(userId, itemIds, expectedForkIds)
       // The comparison and purge share this writer transaction: every current item was confirmed.
-      yield* purgeWhere("user_id = ?", [userId])
+      const swept = yield* purgeWhere("user_id = ?", [userId])
       return {
         purged: rows.length,
-        chatIds: [...new Set(rows.flatMap((row) => (row.chat_id === null ? [] : [row.chat_id])))]
+        chatIds: [...new Set([...rows.flatMap((row) => (row.chat_id === null ? [] : [row.chat_id])), ...swept])]
       }
     })
 
@@ -1736,14 +1757,21 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
     })
 
   /** Saves draft text that a commit or discard would otherwise lose. Never shown as a toast. */
-  const recover = (userId: UserId, key: DraftKey, texts: ReadonlyArray<string>, reason: "commit" | "discard") =>
+  const recover = (
+    userId: UserId,
+    key: DraftKey,
+    texts: ReadonlyArray<string>,
+    reason: "commit" | "discard",
+    /** Where it came from, when the source is about to go (a pending chat swept); else read from it. */
+    sourceName?: string
+  ) =>
     Effect.gen(function* () {
       // `texts` come newest first; inserting oldest first keeps "newest first" listings right.
       // A value draft of `null` removed a list element (a lorebook entry, say): it holds no text.
       const removal = (t: string) => key.field.startsWith("=") && t === "null"
       const unique = [...new Set(texts)].filter((t) => t.trim().length > 0 && !removal(t)).reverse()
       if (unique.length === 0) return
-      const label = yield* sourceLabel(key)
+      const label = sourceName ?? (yield* sourceLabel(key))
       const now = Date.now()
       for (const content of unique) {
         yield* sql`INSERT INTO recovered_texts ${sql.insert({

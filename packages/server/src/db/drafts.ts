@@ -423,6 +423,14 @@ export const makeDraftStore = (
   const entries = (draftId: string) =>
     sql<EntryRow>`SELECT * FROM draft_history WHERE draft_id = ${draftId} ORDER BY seq DESC`
 
+  /**
+   * What deleting a draft with its target would lose, newest first: its text and the text from
+   * before each kept change in its history (a destructive one, or another tab's text), less any
+   * inside `kept`. For a pending chat's sweep, which deletes the draft without ending it.
+   */
+  const unsaved = (draftId: string, content: string, kept: ReadonlyArray<string>) =>
+    Effect.map(entries(draftId), (history) => stillLost([content, ...beforeKept(content, history)], kept))
+
   const listActive = (userId: UserId) =>
     sql<DraftRow>`
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
@@ -1406,6 +1414,7 @@ export const makeDraftStore = (
     save,
     restore,
     end,
+    unsaved,
     clear,
     commit,
     moveTo,

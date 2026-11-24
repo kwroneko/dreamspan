@@ -1,3 +1,6 @@
+import { refusePending } from "./chatKindPolicy.ts"
+import { fileTyped, pendingRow, type SweptDraft, sweepPendingChat, titleFor } from "./pendingChats.ts"
+import { presenceAt, presenceJson } from "./participation.ts"
 import { composerKey, Draft } from "@dreamspan/shared/drafts.ts"
 import { composerImages } from "./composerImages.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
@@ -27,27 +30,27 @@ import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
-import { loadCards } from "./cards.ts"
+import { chatStateAt, loadCards } from "./cards.ts"
 import { forkRecency, forkThrough, onForkPath } from "./forks.ts"
-import { selectedIn, slotDeletedIn, nextSeq } from "./forkState.ts"
+import { selectedIn, slotDeletedIn, nextSeq, writeSelect } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { LeafMoved, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
-import { chatQueue, ownedQueued, type QueuedRow, toQueued } from "./queueRows.ts"
+import { chatQueue, ownedQueued, type QueuedRow, queuedLibrary, toQueued } from "./queueRows.ts"
 import { type ChatRow, rewriteColumns, toVersion, toChat } from "./rows.ts"
 import { separateThreads } from "./threads.ts"
 import type { StoredRewrite } from "@dreamspan/shared/regexScripts.ts"
 import { transaction as runTransaction } from "./tx.ts"
 import { checkAutoTurn, claimAutoTurn } from "./autoGuard.ts"
-import { checkLibrary } from "./libraryAttachments.ts"
+import { pinLibrary, type LibraryPin, type VersionWithLibraryPins } from "./libraryAttachments.ts"
 
 const userMessage = (
   content: string,
   speakerEntityId: EntityId | null,
   images?: import("@dreamspan/shared/chat.ts").MessageImages,
   rewrite?: StoredRewrite,
-  library?: import("@dreamspan/shared/chat.ts").MessageLibrary
-) =>
-  new NewVersion({
+  libraryPins?: ReadonlyArray<LibraryPin>
+): VersionWithLibraryPins => ({
+  ...new NewVersion({
     speakerEntityId,
     writer: "human",
     content,
@@ -55,13 +58,10 @@ const userMessage = (
     macroMode: "verbatim",
     origin: "user_written",
     ...(images === undefined ? {} : { images }),
-    ...(library === undefined || library.length === 0 ? {} : { library }),
     ...(rewrite === undefined ? {} : { rewrite })
-  })
-
-/** A queued message's library items (spec/WORKSHOP-CARDS.md §4.4), recorded when it posts. */
-const queuedLibrary = (row: QueuedRow): import("@dreamspan/shared/chat.ts").MessageLibrary =>
-  JSON.parse(row.library_json ?? "[]")
+  }),
+  ...(libraryPins?.length ? { libraryPins } : {})
+})
 
 /** A queued message's rewrite, as SendOrQueue stored it, for the version it posts as. */
 const queuedRewrite = (row: QueuedRow): StoredRewrite | undefined =>
@@ -85,16 +85,6 @@ const reply = (speakerEntityId: EntityId | null, direction: string | null, autoP
     origin: "generated",
     ...(direction !== null && direction.trim() !== "" ? { direction } : {})
   })
-
-/**
- * A chat's default title: its characters, never just the first character's name (DESIGN §2.1).
- * The persona the user plays is left out, as the client's automatic name leaves it out
- * (`chatTitle.ts` `castCharacters`), so a 1:1 reads "Mira, Oct 31" much as an imported one does.
- */
-const titleFor = (names: ReadonlyArray<string>, at: number) =>
-  names.length > 1
-    ? names.join(" & ")
-    : `${names[0] ?? "Chat"}, ${new Date(at).toLocaleDateString("en", { day: "numeric", month: "short" })}`
 
 type WriteHandlers = Parameters<typeof WriteOps.of>[0]
 
@@ -215,7 +205,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           ORDER BY f.id = ${queuedIn} DESC, ${sql.literal(forkRecency("f"))} DESC LIMIT 1`
         let forkId: ForkId | null = fork?.id ?? null
         // A live slot of a live chat: neither NotFound nor LeafMoved can happen.
-        const append = (parentSlotId: string, version: NewVersion) =>
+        const append = (parentSlotId: string, version: VersionWithLibraryPins) =>
           graph
             .appendMessage({
               userId: owner,
@@ -378,13 +368,39 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         { discard: true }
       )
 
+    /** One of a card's greetings as a version of its greeting message (DESIGN §5.6). */
+    const greetingVersionOf = (
+      greeter: Effect.Success<ReturnType<typeof loadCards>>[number],
+      option: {
+        readonly index: number
+        readonly text: string
+        readonly frozen: { readonly [x: string]: string } | null
+      }
+    ) => {
+      const originalIndex = greeter.greetingIndexes[option.index]
+      return new NewVersion({
+        speakerEntityId: greeter.card.entityId,
+        writer: "model",
+        content: option.text,
+        status: "complete",
+        macroMode: "template",
+        origin: "greeting",
+        ...(originalIndex === undefined
+          ? {}
+          : { greetingRef: { entity: greeter.card.entityId, index: originalIndex } }),
+        ...(option.frozen && Object.keys(option.frozen).length > 0 ? { frozenMacros: option.frozen } : {})
+      })
+    }
+
+    /** `draftFor`: a pending chat (the new-chat page's) opened for that entry, with no last message. */
     const greetingChat = ({
       userId,
       cards,
       persona,
       greeters,
-      title
-    }: Parameters<WriteHandlers["StartGreetingChat"]>[0]) =>
+      title,
+      draftFor
+    }: Parameters<WriteHandlers["StartGreetingChat"]>[0] & { readonly draftFor?: string }) =>
       Effect.gen(function* () {
         const ids = [...new Set([...cards, ...(persona === null ? [] : [persona])])]
         const loaded = yield* loadCards(sql, userId, ids)
@@ -404,9 +420,10 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           id: chatId,
           owner_user_id: userId,
           kind: "rp",
-          status: "active",
+          status: draftFor === undefined ? "active" : "pending",
           title: title?.trim() || titleFor(names, at),
-          created_at: at
+          created_at: at,
+          ...(draftFor === undefined ? {} : { draft_for: draftFor })
         })}`
         yield* graph.insertStateEvent(userId, chatId, null, null, null, {
           key: "lcm.settings",
@@ -432,22 +449,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         for (const { entityId, greeting, options } of greeters) {
           const greeter = byId.get(entityId)!
           if (options.length === 0) continue
-          const greetingVersion = (i: number) => {
-            const option = options[i]!
-            const originalIndex = greeter.greetingIndexes[option.index]
-            return new NewVersion({
-              speakerEntityId: greeter.card.entityId,
-              writer: "model",
-              content: options[i]!.text,
-              status: "complete",
-              macroMode: "template",
-              origin: "greeting",
-              ...(originalIndex === undefined
-                ? {}
-                : { greetingRef: { entity: greeter.card.entityId, index: originalIndex } }),
-              ...(option.frozen && Object.keys(option.frozen).length > 0 ? { frozenMacros: option.frozen } : {})
-            })
-          }
+          const greetingVersion = (i: number) => greetingVersionOf(greeter, options[i]!)
           const parent = root === null ? null : { id: root, depth }
           const more = options.slice(1).map((_, i) => greetingVersion(i + 1))
           const picked = Math.max(
@@ -456,7 +458,10 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           )
           const inserted = yield* graph.insertSlot(chatId, parent, greetingVersion(0), at, null, more, picked)
           const slotId = inserted.slotId as SlotId
-          yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, last_message_at = ${at} WHERE id = ${chatId}`
+          // A pending chat has no last message until it is committed: its greetings use nothing.
+          yield* draftFor === undefined
+            ? sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, last_message_at = ${at} WHERE id = ${chatId}`
+            : sql`UPDATE chats SET active_leaf_slot_id = ${slotId} WHERE id = ${chatId}`
           root = slotId
           depth++
         }
@@ -508,7 +513,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             : []
         for (const id of round ?? []) yield* graph.checkSpeaker(userId, id)
         yield* graph.checkImages(userId, images ?? [], chatId)
-        if (kind === "message") yield* checkLibrary(sql, userId, chatId, library ?? [])
+        const libraryPins = kind === "message" ? yield* pinLibrary(sql, userId, chatId, library ?? []) : []
         yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
         yield* graph.checkSpeaker(userId, speakerEntityId)
         if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)
@@ -558,7 +563,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                   }
                 : {}),
               images_json: JSON.stringify(images ?? []),
-              library_json: JSON.stringify(kind === "message" ? (library ?? []) : []),
+              library_json: JSON.stringify(libraryPins),
               speaker_entity_id: speakerEntityId,
               reply_speaker_entity_id: kind === "message" ? replySpeakerEntityId : null,
               no_reply: kind === "message" && noReply === true ? 1 : 0,
@@ -597,7 +602,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           branch,
           version:
             kind === "message"
-              ? userMessage(content, speakerEntityId, images, rewrite, library)
+              ? userMessage(content, speakerEntityId, images, rewrite, libraryPins)
               : reply(speakerEntityId, direction, autoPick === true),
           commitDraft
         })
@@ -651,6 +656,251 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           yield* graph.ownedFork(input.userId, chatId, null)
           return toChat(yield* graph.ownedChat(input.userId, chatId))
         }).pipe(transaction("StartGreetingChat")),
+      OpenDraftChat: ({ userId, draftFor, cards, persona, greeters, title }) =>
+        Effect.gen(function* () {
+          const { chatId } = yield* greetingChat({ userId, cards, persona, greeters, title, draftFor })
+          yield* graph.ownedFork(userId, chatId, null)
+          return toChat(yield* graph.ownedChat(userId, chatId))
+        }).pipe(transaction("OpenDraftChat")),
+      SweepPendingChat: ({ userId, chatId }) =>
+        sweepPendingChat(sql, bin, userId, chatId).pipe(transaction("SweepPendingChat")),
+      SyncPendingGreetings: ({ userId, chatId, forkId, events, candidates }) =>
+        Effect.gen(function* () {
+          const chat = yield* pendingRow(sql, chatId)
+          if (chat === null || chat.owner_user_id !== userId) return { pending: false, changed: false, fellBack: false }
+          const [current] = yield* sql<{ fork: string | null }>`
+            SELECT current_fork_id AS fork FROM chats /* chat:includes-pending: only a pending chat's greetings follow its cast */
+            WHERE id = ${chatId}`
+          const forkOf = forkId ?? current?.fork ?? null
+          if (forkOf === null) return yield* new NotFound({ entity: "fork", id: chatId })
+          const fork = { id: forkOf, chatId }
+          // The change is the chat's start's: nothing is said yet (DESIGN §2.1).
+          for (const event of events) yield* graph.insertStateEvent(userId, chatId, null, null, null, event, forkOf)
+          const state = yield* chatStateAt(sql, chatId as ChatId, null, forkOf)
+          const playing = new Set<string>(state.playedByMe)
+          const characters = [...new Set(state.participants.filter((entity) => !playing.has(entity)))]
+          const loaded = yield* loadCards(sql, userId, characters as unknown as ReadonlyArray<EntityId>)
+          const byId = new Map(loaded.map((card) => [card.card.entityId as string, card]))
+          // Each character's greetings now (a group-only one needs two characters), or none
+          // drawn: another change's, which keeps the message it has.
+          const wantedOf = new Map(
+            characters.flatMap((entity) => {
+              const drawn = candidates.find((candidate) => candidate.entityId === entity)
+              if (drawn === undefined) return []
+              return [
+                [
+                  entity,
+                  {
+                    ...drawn,
+                    options: drawn.options.filter((option) => characters.length > 1 || option.groupOnly !== true)
+                  }
+                ] as const
+              ]
+            })
+          )
+          const refIndex = (ref: string | null) =>
+            ref === null ? null : ((JSON.parse(ref) as { index?: number }).index ?? null)
+          // A greeting's index in the card, as its version's greeting_ref has it.
+          const cardIndex = (entity: string, option: { readonly index: number }) =>
+            byId.get(entity)?.greetingIndexes[option.index] ?? -1
+          const slots = yield* sql<{ id: string; parent: string | null; depth: number; selected: string }>`
+            SELECT id, parent_slot_id AS parent, depth, selected_version_id AS selected FROM slots
+            WHERE chat_id = ${chatId} ORDER BY depth`
+          type Row = { id: string; ordinal: number; speaker: string | null; ref: string | null; content: string; frozen: string | null }
+          const versionsOf = (slotId: string) =>
+            sql<Row>`
+              SELECT id, ordinal, speaker_entity_id AS speaker, greeting_ref AS ref, content, frozen_macros AS frozen
+              FROM version_records WHERE slot_id = ${slotId} ORDER BY ordinal`
+          const shownOf = (slotId: string, selected: string) =>
+            Effect.map(
+              sql<{
+                id: string | null
+              }>`SELECT ${selectedIn(sql, forkOf, "s")} AS id FROM slots s WHERE s.id = ${slotId}`,
+              ([row]) => row?.id ?? selected
+            )
+          const edits = (versionIds: ReadonlyArray<string>) =>
+            versionIds.length === 0
+              ? Effect.succeed([] as Array<SweptDraft>)
+              : sql<SweptDraft>`SELECT id, target_kind, target_id, field, content FROM drafts
+                  WHERE user_id = ${userId} AND status = 'active' AND target_kind = 'version_edit'
+                    AND target_id IN ${sql.in(versionIds)}`
+          const at = Date.now()
+          let changed = false
+          let fellBack = false
+          const lost: Array<SweptDraft> = []
+          const speakers: Array<string | null> = []
+          for (const slot of slots) {
+            const [first] = yield* versionsOf(slot.id)
+            speakers.push(first?.speaker ?? null)
+          }
+          // Messages stay while they are the cast's in order; the rest go, from the last one up,
+          // and come back after. A slot keeps the selection it was made with: one whose own
+          // greeting is no longer offered is made again too.
+          let keep = 0
+          while (keep < slots.length && keep < characters.length && speakers[keep] === characters[keep]) {
+            const wanted = wantedOf.get(characters[keep]!)
+            const [own] = yield* sql<{ ref: string | null }>`
+              SELECT greeting_ref AS ref FROM version_records WHERE id = ${slots[keep]!.selected}`
+            const index = refIndex(own?.ref ?? null)
+            if (
+              wanted !== undefined &&
+              index !== null &&
+              !wanted.options.some((option) => cardIndex(characters[keep]!, option) === index)
+            )
+              break
+            keep++
+          }
+          // What a message made again keeps: by speaker, the greeting it showed, each greeting's
+          // frozen macros and the edits typed into it, and its scratchpad. Its drafts are set
+          // aside (re-keyed) so the deletion doesn't take them.
+          interface Gone {
+            shown: number | null
+            versions: Map<number, Row>
+            edits: Map<number, Array<SweptDraft>>
+            scratchpads: Array<SweptDraft>
+          }
+          const gone = new Map<string, Gone>()
+          const aside = (draft: SweptDraft) =>
+            sql`UPDATE drafts SET target_id = ${`aside:${draft.id}`} WHERE id = ${draft.id}`
+          for (let i = slots.length - 1; i >= keep; i--) {
+            const slot = slots[i]!
+            const versions = yield* versionsOf(slot.id)
+            const shown = yield* shownOf(slot.id, slot.selected)
+            const record: Gone = {
+              shown: refIndex(versions.find((version) => version.id === shown)?.ref ?? null),
+              versions: new Map(),
+              edits: new Map(),
+              scratchpads: []
+            }
+            const typed = yield* edits(versions.map((version) => version.id))
+            for (const version of versions) {
+              const index = refIndex(version.ref)
+              const its = typed.filter((draft) => draft.target_id === version.id)
+              if (index === null) {
+                lost.push(...its.map((draft) => ({ ...draft, greeting: version.content })))
+                continue
+              }
+              record.versions.set(index, version)
+              record.edits.set(
+                index,
+                its.map((draft) => ({ ...draft, greeting: version.content }))
+              )
+            }
+            record.scratchpads = [
+              ...(yield* sql<SweptDraft>`SELECT id, target_kind, target_id, field, content FROM drafts
+                WHERE user_id = ${userId} AND status = 'active' AND target_kind = 'scratchpad' AND target_id = ${slot.id}`)
+            ]
+            for (const draft of [...typed, ...record.scratchpads]) yield* aside(draft)
+            if (speakers[i] !== null && !gone.has(speakers[i]!)) gone.set(speakers[i]!, record)
+            else lost.push(...[...record.edits.values()].flat(), ...record.scratchpads)
+            yield* sql`UPDATE forks SET tip_slot_id = ${slot.parent}, row_version = row_version + 1 WHERE tip_slot_id = ${slot.id}`
+            yield* sql`UPDATE chats SET active_leaf_slot_id = ${slot.parent} WHERE active_leaf_slot_id = ${slot.id}`
+            yield* sql`DELETE FROM state_events WHERE slot_id = ${slot.id}`
+            yield* sql`DELETE FROM slots WHERE id = ${slot.id}`
+            changed = true
+          }
+          // The greetings kept: those offered now, no other.
+          for (let i = 0; i < keep; i++) {
+            const slot = slots[i]!
+            const entity = characters[i]!
+            const greeter = byId.get(entity)
+            const wanted = wantedOf.get(entity)
+            if (greeter === undefined || wanted === undefined) continue
+            const offered = new Map(wanted.options.map((option) => [cardIndex(entity, option), option]))
+            const versions = yield* versionsOf(slot.id)
+            const have = new Set(versions.map((version) => refIndex(version.ref)))
+            let ordinal = Math.max(-1, ...versions.map((version) => version.ordinal)) + 1
+            for (const [index, option] of offered)
+              if (!have.has(index)) {
+                yield* graph.insertVersion(slot.id, ordinal++, greetingVersionOf(greeter, option), at, forkOf, userId)
+                changed = true
+              }
+            const removed = versions.filter((version) => {
+              const index = refIndex(version.ref)
+              return index !== null && !offered.has(index)
+            })
+            if (removed.length === 0) continue
+            const stays = versions
+              .filter((version) => !removed.includes(version))
+              .sort((a, b) => (refIndex(a.ref) ?? 0) - (refIndex(b.ref) ?? 0))[0]
+            if (stays === undefined) continue
+            const shown = yield* shownOf(slot.id, slot.selected)
+            if (removed.some((version) => version.id === shown)) fellBack = true
+            // An edit typed into a greeting no longer offered is kept in recovered texts.
+            for (const draft of yield* edits(removed.map((version) => version.id))) {
+              lost.push({ ...draft, greeting: removed.find((version) => version.id === draft.target_id)!.content })
+              yield* aside(draft)
+            }
+            for (const version of removed) yield* sql`DELETE FROM versions WHERE id = ${version.id}`
+            // Overrides stay with their chat: a newer one shows the greeting that stays.
+            if (removed.some((version) => version.id === shown)) yield* writeSelect(sql, fork, slot.id, stays.id)
+            changed = true
+          }
+          // Each character after them gets its greeting message, as a group start gives one: a
+          // message made again as it was (its frozen macros, its edits), a new one as drawn.
+          let parent = keep === 0 ? null : { id: slots[keep - 1]!.id, depth: slots[keep - 1]!.depth }
+          for (const entity of characters.slice(keep)) {
+            const greeter = byId.get(entity)
+            const before = gone.get(entity)
+            gone.delete(entity)
+            const drawn = wantedOf.get(entity)
+            // Another change's character, drawn there: its message as it was.
+            const options =
+              drawn?.options.map((option) => ({ ...option, card: cardIndex(entity, option) })) ??
+              [...(before?.versions ?? new Map<number, Row>()).entries()].map(([card, version]) => ({
+                index: greeter?.greetingIndexes.indexOf(card) ?? -1,
+                text: version.content,
+                frozen: version.frozen === null ? null : (JSON.parse(version.frozen) as { readonly [x: string]: string }),
+                card
+              }))
+            if (greeter === undefined || options.length === 0) {
+              if (before !== undefined) lost.push(...[...before.edits.values()].flat(), ...before.scratchpads)
+              continue
+            }
+            const shownBefore = before?.shown ?? null
+            const pick = options.findIndex((option) =>
+              shownBefore === null ? option.index === (drawn?.greeting ?? 0) : option.card === shownBefore
+            )
+            // The greeting it showed isn't offered now: the card's first instead.
+            if (pick < 0 && shownBefore !== null) fellBack = true
+            const versions = options.map((option) => {
+              const old = before?.versions.get(option.card)
+              const frozen =
+                old === undefined ? option.frozen : old.frozen === null ? null : (JSON.parse(old.frozen) as { readonly [x: string]: string })
+              return greetingVersionOf(greeter, { ...option, frozen })
+            })
+            const inserted = yield* graph.insertSlot(
+              chatId,
+              parent,
+              versions[0]!,
+              at,
+              forkOf,
+              versions.slice(1),
+              Math.max(0, pick)
+            )
+            yield* sql`UPDATE chats SET active_leaf_slot_id = ${inserted.slotId} WHERE id = ${chatId}`
+            parent = { id: inserted.slotId, depth: (parent?.depth ?? -1) + 1 }
+            changed = true
+            // The edits set aside go to the greetings made again, the rest to recovered texts.
+            const made = yield* versionsOf(inserted.slotId)
+            for (const [card, drafts] of before?.edits ?? new Map<number, Array<SweptDraft>>()) {
+              const version = made.find((row) => refIndex(row.ref) === card)
+              if (version === undefined) lost.push(...drafts)
+              else for (const draft of drafts) yield* sql`UPDATE drafts SET target_id = ${version.id} WHERE id = ${draft.id}`
+            }
+            for (const draft of before?.scratchpads ?? [])
+              yield* sql`UPDATE drafts SET target_id = ${inserted.slotId} WHERE id = ${draft.id}`
+          }
+          for (const record of gone.values()) lost.push(...[...record.edits.values()].flat(), ...record.scratchpads)
+          yield* fileTyped(sql, bin, chat, lost)
+          // What is still set aside was filed: it goes, as its message's deletion would have taken it.
+          yield* sql`DELETE FROM drafts WHERE user_id = ${userId} AND target_id = 'aside:' || id`
+          // Every greeting records the cast the chat starts with, which the library counts it in.
+          const start = yield* presenceAt(sql, chatId, null, forkOf)
+          yield* sql`UPDATE version_texts SET cast_json = ${JSON.stringify(start.cast)}, presence_json = ${presenceJson(start.presence)}
+            WHERE version_seq IN (SELECT v.seq FROM versions v JOIN slots s ON s.id = v.slot_id WHERE s.chat_id = ${chatId})`
+          return { pending: true, changed, fellBack }
+        }).pipe(transaction("SyncPendingGreetings")),
       StartChat: ({ guidance, userId, cards, persona, greeters, first, title }) =>
         Effect.gen(function* () {
           const { chatId, root } = yield* greetingChat({ userId, cards, persona, greeters, title })
@@ -680,6 +930,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       SendToThreads: ({ userId, chatId, images, imageDraftIds, commitDraft, targets }) =>
         Effect.gen(function* () {
           yield* graph.ownedChat(userId, chatId)
+          yield* refusePending(sql, chatId)
           const forks = yield* Effect.forEach(targets, (target) => graph.ownedFork(userId, chatId, target.forkId))
           if (
             new Set(forks.map((fork) => fork.id)).size !== forks.length ||

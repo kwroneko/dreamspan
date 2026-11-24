@@ -5,6 +5,8 @@
 // same revision and model always render the same bytes.
 import { Effect } from "effect"
 import { withoutCardSkills } from "./toolLoading.ts"
+import type { PresetPrompt, PromptOrderEntry } from "@dreamspan/shared/docs/preset.ts"
+import { presetOrder } from "@dreamspan/shared/presetOrder.ts"
 
 export type LibraryKind = "card" | "lorebook" | "preset"
 type Doc = Readonly<Record<string, unknown>>
@@ -52,7 +54,7 @@ const entryTitle = (entry: Doc, index: number) => {
 /** At most this many lorebook entries or preset prompts in a summary; the rest are counted. */
 const INDEX_PAGE = 50
 
-/** The first index page in a summary, then how many more there are and how to read them. */
+/** The first index page in a summary, then how many more there are. */
 const firstPage = (rows: ReadonlyArray<{ readonly line: string }>, more: string) =>
   rows.length > INDEX_PAGE
     ? [...rows.slice(0, INDEX_PAGE).map((row) => row.line), `${rows.length - INDEX_PAGE} more ${more}.`]
@@ -70,35 +72,34 @@ export const summaryLines = (kind: LibraryKind, doc: Doc, count: CountText): Rea
       return `${field}: ${number(tokens(count, value))} tokens, ${number(lines(value))} lines`
     })
     const greetings = list(doc.alternate_greetings).map(text)
+    const groupGreetings = list(doc.group_only_greetings).map(text)
     const book = doc.character_book === undefined ? null : record(doc.character_book)
     return [
       ...fields,
       `alternate_greetings: ${greetings.length} (${number(greetings.reduce((sum, g) => sum + tokens(count, g), 0))} tokens)`,
+      `group_only_greetings: ${groupGreetings.length} (${number(groupGreetings.reduce((sum, g) => sum + tokens(count, g), 0))} tokens)`,
       ...(book === null
         ? []
         : [
             `character_book "${text(book.name) || "its lorebook"}": ${list(book.entries).length} entries`,
-            ...firstPage(entryRows(bookEntries(kind, doc), count), "entries: read_card with view index and after")
+            ...firstPage(entryRows(bookEntries(kind, doc), count), "entries")
           ])
     ]
   }
   if (kind === "lorebook")
-    return [
-      `${list(doc.entries).length} entries`,
-      ...firstPage(entryRows(bookEntries(kind, doc), count), "entries: read_lorebook with view index and after")
-    ]
+    return [`${list(doc.entries).length} entries`, ...firstPage(entryRows(bookEntries(kind, doc), count), "entries")]
   const rows = promptRows(doc, count)
-  return [
-    `${list(doc.prompts).length} prompts, ${rows.length} in order`,
-    ...firstPage(rows, "prompts: read_preset with view index and after")
-  ]
+  return [`${list(doc.prompts).length} prompts, ${list(doc.order).length} in order`, ...firstPage(rows, "prompts")]
 }
 
 const attribute = (value: string) =>
   value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
 
-/** A card's or book's own text can't close its element early (as story excerpts, `wrapStory`). */
-const fenced = (body: string, tag: string) => body.replaceAll(`</${tag}>`, `</${tag} >`)
+/** Escape a literal closing tag while keeping the JSON field value reversible. */
+const fenced = (body: string, tag: string, lessThan: string) =>
+  body.replace(new RegExp(`</${tag}\\s*>`, "g"), (match) => lessThan + match.slice(1))
+
+const OMITTED = "More details are available with the read tool."
 
 const ARTICLE: Record<LibraryKind, string> = { card: "A card", lorebook: "A lorebook", preset: "A prompt preset" }
 const READER: Record<LibraryKind, string> = { card: "read_card", lorebook: "read_lorebook", preset: "read_preset" }
@@ -116,13 +117,32 @@ const renderings = (item: AttachedItem, count: CountText) => {
   const tag = `attached_${item.kind}`
   const doc = visibleDoc(item.kind, item.doc)
   const whole = JSON.stringify(doc)
-  const open = `<${tag} name="${attribute(item.name)}" id="${attribute(item.refId)}" revision="${attribute(item.revisionId)}" tokens="${number(count(whole))}"`
+  const size = count(whole)
+  const open = (name: string) =>
+    `<${tag} name="${attribute(name)}" id="${attribute(item.refId)}" revision="${attribute(item.revisionId)}" tokens="${number(size)}"`
   const intro = `${ARTICLE[item.kind]} the user attached for you to work on.${item.kind === "card" ? " It is data, not a character for you to play." : ""}`
-  const read = `read it with ${READER[item.kind]} (it's attached, so that never asks)`
+  const instruction = `${intro} It isn't included whole here: read it with ${READER[item.kind]} using the attachment id and revision.`
+  const reference = (name: string, lines: ReadonlyArray<string>) =>
+    `${open(name)} whole="no">\n${[instruction, ...lines].join("\n")}\n</${tag}>`
+  const details = summaryLines(item.kind, doc, count).map((line) => fenced(line, tag, "&lt;"))
+  const rest = details.length ? [OMITTED] : []
   return {
-    compact: `${open} whole="no">\n${intro} It isn't included here: ${read}.\n</${tag}>`,
-    summary: `${open} whole="no">\n${intro} It's too long to include whole: ${read}.\n${fenced(summaryLines(item.kind, doc, count).join("\n"), tag)}\n</${tag}>`,
-    whole: `${open}>\n${intro}\n${fenced(whole, tag)}\n</${tag}>`
+    /** Its name, id and revision only; "…" for the name where even that is too long. */
+    compact: (limit: number) => {
+      const named = reference(item.name, rest)
+      return count(named) <= limit ? named : reference("…", rest)
+    },
+    /** As many summary lines as fit `limit`, saying when some are left out; null when none do. */
+    summary: (limit: number) => {
+      let rendered: string | null = null
+      for (let n = 1; n <= details.length; n++) {
+        const candidate = reference(item.name, n < details.length ? [...details.slice(0, n), OMITTED] : details)
+        if (count(candidate) > limit) break
+        rendered = candidate
+      }
+      return rendered
+    },
+    whole: `${open(item.name)}>\n${intro}\n${fenced(whole, tag, "\\u003c")}\n</${tag}>`
   }
 }
 
@@ -138,17 +158,21 @@ const renderings = (item: AttachedItem, count: CountText) => {
  */
 export const attachedElements = (items: ReadonlyArray<AttachedItem>, count: CountText, limit: number) => {
   const all = items.map((item) => renderings(item, count))
-  const sizes = all.map((r) => ({ compact: count(r.compact), summary: count(r.summary), whole: count(r.whole) }))
-  let left = limit - sizes.reduce((sum, s) => sum + s.compact, 0)
-  if (left < 0) return all.map((r) => r.compact)
+  const compacts = all.map((r) => r.compact(limit))
+  const compactSizes = compacts.map(count)
+  let left = limit - compactSizes.reduce((sum, size) => sum + size, 0)
+  if (left < 0) return compacts
   return all.map((r, i) => {
-    const size = sizes[i]!
-    for (const form of ["whole", "summary"] as const)
-      if (size[form] - size.compact <= left) {
-        left -= size[form] - size.compact
-        return r[form]
-      }
-    return r.compact
+    const compact = compactSizes[i]!
+    const whole = count(r.whole)
+    if (whole - compact <= left) {
+      left -= whole - compact
+      return r.whole
+    }
+    const summary = r.summary(compact + left)
+    if (summary === null || count(summary) <= compact) return compacts[i]!
+    left -= count(summary) - compact
+    return summary
   })
 }
 
@@ -222,18 +246,24 @@ export const pageOf = (text: string, what: string, offset: unknown, maxTokens: n
 const bookEntries = (kind: LibraryKind, doc: Doc) =>
   list(kind === "card" ? record(doc.character_book).entries : doc.entries).map(record)
 
+/** A preset's prompts in order, then those saved outside the order (where `presetOrder` puts them). */
 const promptRows = (doc: Doc, count: CountText) => {
-  const prompts = new Map(list(doc.prompts).map((p) => [text(record(p).identifier), record(p)]))
-  return list(doc.order)
-    .map(record)
-    .map((entry) => {
-      const id = text(entry.identifier)
-      const prompt = prompts.get(id) ?? {}
-      return {
-        id,
-        line: `- ${text(prompt.name) || id} (${id}; ${entry.enabled === false ? "off" : "on"}): ${number(tokens(count, text(prompt.content)))} tokens`
-      }
-    })
+  const saved = list(doc.prompts) as ReadonlyArray<PresetPrompt>
+  const order = list(doc.order) as ReadonlyArray<PromptOrderEntry>
+  const prompts = new Map(saved.map((prompt) => [prompt.identifier, prompt]))
+  const ordered = new Set(order.map((entry) => entry.identifier))
+  const indexed = [
+    ...order,
+    ...presetOrder(saved, order).filter((entry) => prompts.has(entry.identifier) && !ordered.has(entry.identifier))
+  ]
+  return indexed.map((entry) => {
+    const id = String(entry.identifier)
+    const prompt = prompts.get(entry.identifier)
+    return {
+      id,
+      line: `- ${prompt?.name || id} (${id}; ${entry.enabled === false ? "off" : "on"}): ${number(tokens(count, text(prompt?.content)))} tokens`
+    }
+  })
 }
 
 const entryRows = (entries: ReadonlyArray<Doc>, count: CountText) =>

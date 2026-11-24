@@ -149,6 +149,37 @@ describe("workshop card and persona", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("starts with the card's first greeting that has text, as its new-workshop page shows it", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const me = yield* api.Whoami()
+      const { entityId } = yield* (yield* Writer).CreateEntity({
+        userId: me.id,
+        kind: "card",
+        label: "Quill",
+        subtitle: "",
+        doc: {
+          ...cardDoc("Quill", { first_mes: "  ", alternate_greetings: ["", "Quill uncaps a pen."] })
+        } as never,
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      const shown = yield* api.GetCardForChat({ entityId: entityId as EntityId })
+      const workshop = yield* api.CreateWorkshop({ card: entityId as EntityId })
+      const path = yield* api.ReadPath({
+        chatId: workshop.id,
+        leafSlotId: workshop.activeLeafSlotId,
+        range: { _tag: "Bottom" },
+        limit: 5
+      })
+      const greeting = path.entries[0]!.version
+      assert.strictEqual(shown.greetings[0], "Quill uncaps a pen.")
+      assert.strictEqual(greeting.content, "Quill uncaps a pen.")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("starts with a chosen card and lets the cast swap it afterwards", () => {
     const config = testConfig()
     return Effect.gen(function* () {

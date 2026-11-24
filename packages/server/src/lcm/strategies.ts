@@ -24,6 +24,10 @@ export interface SummaryExecutionInput {
 
 export interface SummaryStrategy {
   readonly id: string
+  /** Its name in the summary settings' "Written as" picker; absent, the id. The built-ins are named there. */
+  readonly label?: string
+  /** For the user, on hover in that picker: what it does, in a short sentence. */
+  readonly description?: string
   /** Output instructions appended during worker assembly, before budgeting and freezing. */
   readonly instruction?: (tools: SummaryTools) => string
   readonly create: (

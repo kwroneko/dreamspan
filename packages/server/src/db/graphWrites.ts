@@ -1,7 +1,8 @@
-import { requireSummaries } from "./chatKindPolicy.ts"
+import { commitPendingChat, commitPendingChatOf } from "./pendingChats.ts"
+import { kindAllows } from "./chatKindPolicy.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
-import { attachLibrary as attachLibraryRows, copyLibrary } from "./libraryAttachments.ts"
+import { attachLibrary, copyLibrary, pinLibrary, type VersionWithLibraryPins } from "./libraryAttachments.ts"
 // What the writer's chat operations share (writes.ts, chatSetupWrites.ts): ownership
 // checks, inserting versions, slots and state events, and appending a message. Each runs
 // inside the calling operation's transaction.
@@ -121,7 +122,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
   const insertVersion = (
     slotId: string,
     ordinal: number,
-    version: NewVersion,
+    version: VersionWithLibraryPins,
     at: number,
     authoringForkId: string,
     owner?: string,
@@ -157,6 +158,10 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
       })}`
       const [insertedRow] = yield* sql<VersionRow>`SELECT * FROM version_records WHERE id = ${id}`
       const inserted = insertedRow!
+      // Anything but a greeting is a pending chat's first turn: a reply, a Continue or swipe of a
+      // greeting, a saved edit of one. It commits the chat here, in the write that makes it.
+      // (Within insertSlot the slot isn't there yet: insertSlot commits.)
+      if (version.origin !== "greeting") yield* commitPendingChatOf(sql, slotId, at)
       if (version.images !== undefined) {
         const [chat] = yield* sql<{
           owner: string
@@ -172,11 +177,16 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
         yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text, name, path)
           SELECT ${inserted.id}, ordinal, media_id, kind, alt_text, name, path FROM version_attachments WHERE version_id=${version.sourceVersionId}`
       }
-      if (version.library !== undefined && version.library.length > 0) {
+      if (version.libraryPins !== undefined) {
+        yield* attachLibrary(sql, inserted.id, version.libraryPins)
+      } else if (version.library?.length) {
         // By its fork: a new message's slot may not be written yet.
-        const [chat] = yield* sql<{ owner: string; kind: string }>`SELECT c.owner_user_id AS owner, c.kind
+        const [chat] = yield* sql<{ id: string; owner: string }>`SELECT c.id, c.owner_user_id AS owner
           FROM forks f JOIN chats c ON c.id = f.chat_id WHERE f.id = ${authoringForkId}`
-        yield* attachLibraryRows(sql, chat?.owner ?? owner ?? "", chat?.kind ?? "", inserted.id, version.library)
+        if (chat) {
+          const pins = yield* pinLibrary(sql, chat.owner, chat.id, version.library)
+          yield* attachLibrary(sql, inserted.id, pins)
+        }
       } else if (version.library === undefined && version.sourceVersionId) {
         yield* copyLibrary(sql, version.sourceVersionId, inserted.id)
       }
@@ -199,7 +209,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
   const insertSlot = (
     chatId: string,
     parent: { id: string; depth: number } | null,
-    version: NewVersion,
+    version: VersionWithLibraryPins,
     at: number,
     forkId: string | null = null,
     more: ReadonlyArray<NewVersion> = [],
@@ -235,6 +245,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
         created_at: at,
         ...(inserted ? { inserted: 1 } : {})
       })}`
+      if (version.origin !== "greeting") yield* commitPendingChat(sql, chatId, at)
       // A workshop beside a story records where the story stands (spec/WORKSHOP-BRANCHES.md §2.2).
       yield* recordStoryAt(
         sql,
@@ -269,7 +280,9 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
         return yield* new NotFound({ entity: "workshop pairing", id: chatId })
       if (data.key === "lcm.settings" && (slotId !== null || versionId !== null || scope !== null))
         return yield* new NotFound({ entity: "chat-wide settings", id: chatId })
-      if (data.key === "lcm.settings" && data.value.enabled) yield* requireSummaries(sql, chatId)
+      // A pending chat keeps the settings it will start with (DESIGN §2.1): only its kind is checked here.
+      if (data.key === "lcm.settings" && data.value.enabled && !(yield* kindAllows(sql, chatId, "allowsSummaries")))
+        return yield* new NotFound({ entity: "summarizable chat", id: chatId })
       const fork = forkId ?? (yield* forkAt(sql, chatId, slotId))
       if (fork === null) return yield* new NotFound({ entity: "fork", id: chatId })
       const [owned] = yield* sql<{
@@ -463,7 +476,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
     readonly forkId?: ForkId | null
     readonly parentSlotId: SlotId | null
     readonly branch: boolean
-    readonly version: NewVersion
+    readonly version: VersionWithLibraryPins
     readonly commitDraft: CommitDraft | null
     /** False for the queue posting what was sent earlier: the fork was chatted in then. */
     readonly chatted?: boolean
@@ -507,9 +520,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
       yield* sql`UPDATE forks SET tip_slot_id = ${slotId}, row_version = row_version + 1 WHERE id = ${fork.id}`
       if (chatted) yield* chatIn(fork.id, at)
       const [chat] = yield* sql<ChatRow>`
-          UPDATE chats SET last_message_at = ${at},
-            status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
-            row_version = row_version + 1
+          UPDATE chats SET last_message_at = ${at}, row_version = row_version + 1
           WHERE id = ${chatId} RETURNING *`
       // The composer is the fork's, so text typed while something else was appended stays
       // in view without moving.

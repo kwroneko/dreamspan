@@ -38,7 +38,6 @@ it("refreshes a pending chat's cards before selecting a newly created persona", 
         scenario: ""
       })
     ],
-    null,
     call
   )
   const before = pending.view()
@@ -78,7 +77,7 @@ it("keeps a joined character available to play as after refreshing the persona p
     return Effect.succeed(greeter(guest))
   }) as unknown as AppClient["Service"]
   const call: Caller = async (execute) => ({ ok: true, value: await Effect.runPromise(execute(client)) })
-  const pending = new PendingChat([guest, keeper], [greeter(host)], null, call)
+  const pending = new PendingChat([guest, keeper], [greeter(host)], call)
   await pending.join(guest.entityId)
   pending.setReplier(guest.entityId)
   pending.pick(0, 1)
@@ -107,23 +106,15 @@ it("starts a single chat with the persona locked to its character, a group's wit
   const greeter = (c: CastCard) =>
     new CardForChat({ card: c, greetings: ["Hi."], groupGreetings: [], description: "", personality: "", scenario: "" })
   const call: Caller = async () => ({ ok: true, value: undefined as never })
-  const start = (greeters: ReadonlyArray<CastCard>, lock: EntityId | null, group = false) =>
-    new PendingChat(
-      [pilot, mapmaker],
-      greeters.map(greeter),
-      group ? { name: "Voyage", chatId: "chat" as never } : null,
-      call,
-      mapmaker.entityId,
-      false,
-      lock
-    )
+  const start = (greeters: ReadonlyArray<CastCard>, lock: EntityId | null) =>
+    new PendingChat([pilot, mapmaker], greeters.map(greeter), call, mapmaker.entityId, false, lock)
   const single = start([host], pilot.entityId)
   expect(single.snapshot().persona).toBe(pilot.entityId)
   expect(single.lockCard()).toEqual(host)
   expect(start([host], null).snapshot().persona).toBe(mapmaker.entityId)
   // A lock naming a card that is no longer a persona falls back to the default.
   expect(start([host], guest.entityId).snapshot().persona).toBe(mapmaker.entityId)
-  const group = start([host, guest], pilot.entityId, true)
+  const group = start([host, guest], pilot.entityId)
   expect(group.snapshot().persona).toBe(mapmaker.entityId)
   expect(group.lockCard()).toBeNull()
   // A character joining the single chat makes it no longer single; leaving makes it single again.

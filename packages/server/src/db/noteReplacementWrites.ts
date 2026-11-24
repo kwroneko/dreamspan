@@ -1,3 +1,4 @@
+import { listedOr } from "./listedChats.ts"
 // One replacing note per target, including off notes. Run inside the writer's transaction so
 // two clients cannot both claim a target. Resolve branch bindings and card swaps as assembly does.
 import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
@@ -56,7 +57,7 @@ export const replacementConflict = Effect.fnUntraced(function* (
   const fork = position ? yield* chatFork(sql, userId, position.chatId, position.forkId ?? null) : null
   const forks = yield* sql<{ id: ForkId; chat_id: ChatId; tip_slot_id: SlotId | null }>`
     SELECT f.id, f.chat_id, f.tip_slot_id FROM forks f JOIN chats c ON c.id = f.chat_id
-    WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL
+    WHERE c.owner_user_id = ${userId} AND ${listedOr(sql, "c", position?.chatId ?? owner.chat ?? null)} AND f.deleted_at IS NULL
       AND (${fork} IS NULL OR f.id = ${fork})
       AND (${owner.chat ?? null} IS NULL OR c.id = ${owner.chat ?? null})`
   for (const view of forks) {

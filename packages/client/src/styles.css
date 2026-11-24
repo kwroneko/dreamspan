@@ -562,6 +562,12 @@ main:has(> [data-fill]) {
       scrollbar-color: var(--scrollbar-hover) transparent;
     }
   }
+  @supports selector(::-webkit-scrollbar) {
+    /* Chromium refreshes the thumb's pseudo-style when the scroll container also has a hover rule. */
+    *:hover {
+      scrollbar-color: auto;
+    }
+  }
   ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
@@ -984,6 +990,12 @@ main:has(> [data-fill]) {
  * ⋯ and the panel's toggle; 9.25rem also the hidden sidebar's Show. */
 [data-tab-strip] {
   container: tab-strip / inline-size;
+}
+@container tab-strip (width < 5rem) {
+  /* Keep both controls and the strip's edge padding within very narrow frames. */
+  [data-strip-actions] button {
+    width: 1.75rem;
+  }
 }
 @container tab-strip (width < 6.5rem) {
   [data-strip-maximize] {

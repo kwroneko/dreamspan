@@ -10,7 +10,9 @@ import { composerControls } from "../chat/composerControls.tsx"
 import { chatCommands } from "../chat/commands.tsx"
 import { chatKindLooks, kindShows, takesSideChat } from "../chat/kindLooks.ts"
 import { chatPanels, lazyPanel, type PanelProps } from "../chat/panels.tsx"
-import { chatHeaderAbout, chatRowAbout } from "../chat/presentation.tsx"
+import { chatHeaderAbout, chatRowAbout, messageStream } from "../chat/presentation.tsx"
+import { CHANGE_KIND, ChangeRows } from "./ChangeRows.tsx"
+import { CHANGE_PATH } from "./changeRows.ts"
 import { WorkshopStoryLink, WorkshopStoryName } from "./storyLink.tsx"
 import { WorkshopBranchNote } from "./workshopBranches.tsx"
 import { branchControlParts } from "../chat/branchParts.ts"
@@ -31,6 +33,7 @@ import { NewWorkshopStart, NewWorkshopWithCharacter, WorkshopStartCard } from ".
 import { characterChatActions, sidebarChatStarts } from "../characters/homeSlots.ts"
 import { ConvertPresetButton } from "./ConvertPreset.tsx"
 import { registerWorkshopPersona } from "./workshopPersona.tsx"
+import { registerWorkshopWithCard } from "./workshopWithCard.tsx"
 import { editorActions } from "../editor/editorSlots.ts"
 import { panelEditorActions } from "../editor/panelActions.tsx"
 import type { EditorStore } from "../editor/store.ts"
@@ -65,6 +68,15 @@ function LazyStartWorkshopPage() {
   )
 }
 
+const ChangePage = lazy(() => import("./ChangePage.tsx").then((m) => ({ default: m.ChangePage })))
+function LazyChangePage() {
+  return (
+    <Suspense fallback={<Loading label="Loading…" onRetry={reloadPage} />}>
+      <ChangePage />
+    </Suspense>
+  )
+}
+
 export const register = () => [
   chatKindLooks.register(workshopLook),
   // The way back to the story an attached workshop is about, in its header and its list rows.
@@ -73,6 +85,7 @@ export const register = () => [
   // In its own pane or the center, each workshop branch names the story branch it goes with.
   branchControlParts.register({ id: "workshop.story-branch", order: 20, RowNote: WorkshopBranchNote }),
   ...registerWorkshopPersona(),
+  ...registerWorkshopWithCard(),
   chatStartSections.register({ id: "workshop.start", order: 20, component: WorkshopStartCard }),
   sidebarChatStarts.register({ id: "workshop.sidebar-start", order: 20, component: NewWorkshopStart }),
   characterChatActions.register({ id: "workshop.character-start", order: 20, component: NewWorkshopWithCharacter }),
@@ -168,6 +181,7 @@ export const register = () => [
   }),
   chatCommands.register({
     id: "workshop.talk-about",
+    needsStarted: true,
     label: TALK_ABOUT,
     description: "Opens a workshop beside this chat to talk about it out of character",
     order: 3.5,
@@ -175,6 +189,29 @@ export const register = () => [
     panel: SIDE_CHAT_TAB,
     available: ({ view, navigate }) => navigate !== undefined && takesSideChat(view.chat),
     run: (context) => void talkAbout(context)
+  }),
+  // Between turns: the library items a turn made or edited (spec/WORKSHOP-CARDS.md §7), and the
+  // tab each one's change opens in, one per item and revision pair.
+  messageStream.register({ id: "workshop.change-rows", order: 15, component: ChangeRows }),
+  routes.register({
+    id: CHANGE_KIND,
+    parent: "app",
+    path: "/library/$refId/change",
+    component: LazyChangePage,
+    fillBelowHeader: true
+  }),
+  tabKinds.register({
+    id: CHANGE_KIND,
+    order: 190,
+    match: (url) => {
+      const ref = CHANGE_PATH.exec(url.pathname)?.[1]
+      return ref === undefined
+        ? null
+        : `${ref}:${url.searchParams.get("from") ?? ""}:${url.searchParams.get("to") ?? ""}`
+    },
+    title: () => "Changes",
+    icon: "compare",
+    document: true
   }),
   // After the answer to a waiting call: what the call changed, once it's done.
   stepActions.register({ id: "workshop.step-effects", order: 20, component: StepEffects }),

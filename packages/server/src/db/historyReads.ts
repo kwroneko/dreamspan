@@ -1,3 +1,4 @@
+import { listed } from "./listedChats.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 import { HistoryRejected, type HistoryEdit, type HistoryHit } from "@dreamspan/shared/historyApi.ts"
 import { NotFound } from "@dreamspan/shared/errors.ts"
@@ -297,7 +298,7 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
         if (!card) return yield* new NotFound({ entity: "card", id: entityId })
         const forks = yield* sql<{ chatId: ChatId; forkId: ForkId; tip: SlotId | null }>`
         SELECT c.id AS chatId, f.id AS forkId, f.tip_slot_id AS tip FROM chats c JOIN forks f ON f.chat_id=c.id
-        WHERE c.owner_user_id=${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL AND f.purged_at IS NULL`
+        WHERE c.owner_user_id=${userId} AND ${listed(sql, "c")} AND f.deleted_at IS NULL AND f.purged_at IS NULL`
         const targets: Array<{ chatId: ChatId; forkId: ForkId }> = []
         for (const fork of forks) {
           // The fork as it stands: through its display end, an inserted message after the tip included.

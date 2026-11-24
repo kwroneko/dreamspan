@@ -1,3 +1,4 @@
+import { isPendingChat, notStarted } from "./chatStarted.ts"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { showToast } from "../../ui/Toast.tsx"
 import { SlotOutlet } from "../../slots.tsx"
@@ -799,8 +800,15 @@ export function SummaryPanel({
           <Alert
             tone="warning"
             actions={
-              <Tooltip label="Asks how to start and shows what it costs first.">
-                <Button variant="primary" onClick={onEnable}>
+              <Tooltip
+                label={notStarted(session.snapshot().chat) ?? "Asks how to start and shows what it costs first."}
+              >
+                <Button
+                  variant="primary"
+                  onClick={onEnable}
+                  disabled={isPendingChat(session.snapshot().chat)}
+                  focusableWhenDisabled
+                >
                   Enable summaries
                 </Button>
               </Tooltip>

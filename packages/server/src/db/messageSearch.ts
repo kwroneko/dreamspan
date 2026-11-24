@@ -1,3 +1,4 @@
+import { listed } from "./listedChats.ts"
 // Message text search across all of the user's chats (SearchMessages; @dreamspan/shared/messageSearch.ts,
 // ARCHITECTURE §12 "Finding a message"). A hit is a message version, the text as written, with
 // the live branches that show it: a message a hundred branches share is one hit. Read newest
@@ -101,7 +102,7 @@ const matchPhases = (parsed: ParsedQuery): ReadonlyArray<string> => {
  * Whether a match is a message someone may see: in a live chat (its owner's: checked beside it),
  * finished, not deleted, and its slot's selection or a branch's selection or replacement.
  */
-const ELIGIBLE = `c.deleted_at IS NULL AND v.status NOT IN ('generating', 'failed')
+const ELIGIBLE = `v.status NOT IN ('generating', 'failed')
   AND v.deleted_at IS NULL AND v.purged_at IS NULL AND s.deleted_at IS NULL AND s.purged_at IS NULL
   AND (s.selected_version_id = v.id
     OR EXISTS (SELECT 1 FROM fork_overrides o WHERE o.target_id = s.id AND o.kind = 'select' AND o.value_id = v.id)
@@ -128,7 +129,7 @@ const batchOf = (
       ORDER BY rowid ${sql.literal(down ? "DESC" : "ASC")} LIMIT ${BATCH})
   SELECT h.seq, v.id, v.slot_id, v.speaker_entity_id, v.writer, v.created_at, s.chat_id, s.chain_id,
     s.depth, s.inserted,
-    (c.owner_user_id = ${userId} AND ${sql.literal(ELIGIBLE)}
+    (c.owner_user_id = ${userId} AND ${listed(sql, "c")} AND ${sql.literal(ELIGIBLE)}
       AND (${chats} IS NULL OR s.chat_id IN (SELECT value FROM json_each(${chats})))) AS eligible
   FROM h LEFT JOIN versions v ON v.seq = h.seq LEFT JOIN slots s ON s.id = v.slot_id
     LEFT JOIN chats c ON c.id = s.chat_id
@@ -169,7 +170,7 @@ const searchMessages = (
       // By chat name: the caller's list says the order (every chat, when it gave none).
       const order =
         chatList ??
-        (yield* sql<{ id: string }>`SELECT id FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL
+        (yield* sql<{ id: string }>`SELECT id FROM chats WHERE owner_user_id = ${userId} AND ${listed(sql, "chats")}
           ORDER BY title, id`).map((row) => row.id)
       // A chat at a time, in that order, each newest first between its first and last version.
       const chatOrder = createHash("sha256").update(JSON.stringify(order)).digest("base64url")

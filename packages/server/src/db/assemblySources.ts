@@ -1,5 +1,6 @@
 import { loreEffectsAt, type LoreReceipt, type LoreTimeline } from "../assembler/loreTiming.ts"
 import { refSourcePathSql } from "./library.ts"
+import { hasVersionPayload, libraryDocuments } from "./libraryAttachments.ts"
 import { bookSourceName } from "@dreamspan/shared/lorebookLink.ts"
 import { sharedNote } from "./sharedNotes.ts"
 import { originalReply, type ReplySections } from "@dreamspan/shared/replySections.ts"
@@ -51,6 +52,7 @@ import {
   type ModelInput,
   type CardInput,
   type HistoryEntry,
+  type HistoryLibraryItem,
   type HistoryMerge,
   type NoteInput,
   type LorebookInput,
@@ -679,10 +681,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
                 'excluded', json(CASE WHEN a.kind <> 'file' AND ${imageExcludedIn(sql, fork, "o.id", "a.media_id")} THEN 'true' ELSE 'false' END))) FROM
               (SELECT va.media_id, va.kind, va.name, va.path, m.mime, m.byte_size FROM version_attachments va
                 JOIN media_assets m ON m.id = va.media_id WHERE va.version_id=v.id AND va.path IS NOT NULL ORDER BY va.ordinal) a) AS attachments_json,
-            (SELECT json_group_array(json_object('kind', l.kind, 'refId', l.ref_id, 'revisionId', l.revision_id,
-                'name', l.name, 'doc', json(r.doc_json))) FROM
-              (SELECT * FROM version_library WHERE version_id = v.id ORDER BY ordinal) l
-              JOIN entity_revisions r ON r.id = l.revision_id) AS library_json,
+            ${libraryDocuments(sql)} AS library_json,
             (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.fork_id IS NULL
               AND NOT ${versionDeletedIn(sql, fork, "c")}) AS version_count,
             f.writer AS first_writer, f.origin AS first_origin,
@@ -760,7 +759,10 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         pins.history.push({
           key: keyOf(leaf, limit, after ?? null),
           older,
-          entries: read.map(({ content: _, replySections: _sections, ...pinned }) => pinned)
+          entries: read.map(({ content: _, replySections: _sections, library, ...pinned }) => ({
+            ...pinned,
+            ...(library ? { library: library.map(({ doc: _, ...item }) => item) } : {})
+          }))
         })
         return { entries: read.map(({ amends: _, ...entry }) => entry), older }
       }),
@@ -891,7 +893,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           ...(yield* sql<{ eligible: number; receipts: string }>`
           ${path}
           SELECT CASE WHEN ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed'
-            AND (v.content_length > 0 OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN 1 ELSE 0 END AS eligible, ${receipts(sql`v.id`)} AS receipts
+            AND ${hasVersionPayload(sql)} THEN 1 ELSE 0 END AS eligible, ${receipts(sql`v.id`)} AS receipts
           FROM path JOIN slots s ON s.id = path.id JOIN versions v ON v.id = ${selected}
           WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${owned} ORDER BY path.position`)
         ]
@@ -935,7 +937,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const onDisplay = yield* display(leaf)
         const counted = sql`count(*) AS n FROM path JOIN slots s ON s.id = path.id
         JOIN versions v ON v.id = ${selected}
-        WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed' AND (v.content_length > 0 OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id = v.id))`
+        WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed' AND ${hasVersionPayload(sql)}`
         const [row] =
           onDisplay === null
             ? yield* sql<{ n: number }>`
@@ -1267,28 +1269,48 @@ const replaySources = (
       Effect.gen(function* () {
         const window = yield* pinned(pins.history, keyOf(leaf, limit, after ?? null), "part of the chat")
         const ids = window.entries.map((e) => e.versionId)
+        const needsLibrary = window.entries.some((e) => e.library?.some((item) => item.doc === undefined))
         const rows =
           ids.length === 0
             ? []
-            : yield* sql<{ id: string; content: string; reply_sections: string | null; amends: number }>`
+            : yield* sql<{
+                id: string
+                content: string
+                reply_sections: string | null
+                amends: number
+                library: string
+              }>`
                 SELECT v.id, v.content, v.reply_sections,
-                  (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amends
+                  (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amends,
+                  ${needsLibrary ? libraryDocuments(sql) : sql`'[]'`} AS library
                 FROM version_records v JOIN slots s ON s.id = v.slot_id
                 WHERE s.chat_id = ${chatId} AND ${owned} AND v.id IN ${sql.in(ids)}`
         const byId = new Map(rows.map((row) => [row.id, row]))
-        const entries = yield* Effect.forEach(window.entries, ({ amends, ...entry }) =>
+        const entries = yield* Effect.forEach(window.entries, ({ amends, library, ...entry }) =>
           Effect.gen(function* () {
             const row = byId.get(entry.versionId)
             if (!row) return yield* unpinned("a message")
+            const held = JSON.parse(row.library) as ReadonlyArray<HistoryLibraryItem>
+            const documents: Array<HistoryLibraryItem> = []
+            for (const item of library ?? []) {
+              const doc =
+                item.doc ??
+                held.find((h) => h.refId === item.refId && h.revisionId === item.revisionId && h.kind === item.kind)
+                  ?.doc
+              if (!doc) return yield* unpinned("a message's library attachment")
+              documents.push({ ...item, doc })
+            }
+            const attachments = library ? { library: documents } : {}
             // A reply's sections are the model's, frozen with it; an amend changes only the text.
             const sections = sectionsOf(row.reply_sections)
-            if (row.amends === amends) return { ...entry, content: row.content, ...sections } satisfies HistoryEntry
+            if (row.amends === amends)
+              return { ...entry, content: row.content, ...sections, ...attachments } satisfies HistoryEntry
             // Amended since: its text then is what the next amend replaced.
             const [earlier] = yield* sql<{ content: string }>`
               SELECT content FROM version_history WHERE version_id = ${entry.versionId}
               ORDER BY id LIMIT 1 OFFSET ${amends}`
             if (!earlier) return yield* unpinned("a message's earlier text")
-            return { ...entry, content: earlier.content, ...sections } satisfies HistoryEntry
+            return { ...entry, content: earlier.content, ...sections, ...attachments } satisfies HistoryEntry
           })
         )
         return { entries, older: window.older }

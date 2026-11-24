@@ -18,6 +18,7 @@ import { iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { popupOpen } from "../../ui/openPopups.ts"
 import type { ChatSession, ChatView } from "./session.ts"
+import { notStarted } from "./chatStarted.ts"
 
 export interface ChatCommandContext {
   readonly splitRootId?: string | undefined
@@ -49,6 +50,8 @@ interface ChatCommand {
   /** Hide the command and its shortcut while its target panel is absent or unavailable. */
   readonly panel?: string
   readonly available?: (context: ChatCommandContext) => boolean
+  /** The server refuses it on a new chat not started yet: listed disabled there, saying so (chatStarted.ts). */
+  readonly needsStarted?: boolean
   readonly shortcut?: { readonly key: string; readonly mod: boolean; readonly alt?: boolean }
   readonly acceptsKey?: (event: CommandKeyEvent, context: ChatCommandContext) => boolean
   /** Listed in the ⋯ menu: by default, the commands without a shortcut. */
@@ -109,21 +112,25 @@ export function ChatCommandMenu({ context }: { context: ChatCommandContext }) {
           </Tooltip>
         }
       >
-        {commands.map((entry, i) => (
-          <Fragment key={entry.id}>
-            {entry.tone === "danger" && i > 0 && commands[i - 1]!.tone !== "danger" && <MenuSeparator />}
-            <MenuItem
-              icon={entry.icon}
-              tone={entry.tone ?? "default"}
-              description={entry.description}
-              onClick={() =>
-                entry.dialog ? (entry.dialogInUrl ? setPlace(entry.id) : setDialog(entry)) : entry.run?.(context)
-              }
-            >
-              {entry.label}
-            </MenuItem>
-          </Fragment>
-        ))}
+        {commands.map((entry, i) => {
+          const refused = entry.needsStarted === true ? notStarted(context.view.chat) : null
+          return (
+            <Fragment key={entry.id}>
+              {entry.tone === "danger" && i > 0 && commands[i - 1]!.tone !== "danger" && <MenuSeparator />}
+              <MenuItem
+                icon={entry.icon}
+                tone={entry.tone ?? "default"}
+                description={refused ?? entry.description}
+                {...(refused === null ? {} : { disabled: true })}
+                onClick={() =>
+                  entry.dialog ? (entry.dialogInUrl ? setPlace(entry.id) : setDialog(entry)) : entry.run?.(context)
+                }
+              >
+                {entry.label}
+              </MenuItem>
+            </Fragment>
+          )
+        })}
       </Menu>
       {Open && (
         <Open
@@ -167,6 +174,7 @@ export const emptyComposerTarget = (event: CommandKeyEvent) => {
 
 export const invokeChatCommand = (id: string, context: ChatCommandContext) => {
   const command = availableCommands(context).find((entry) => entry.id === id)
+  if (command?.needsStarted === true && notStarted(context.view.chat)) return
   command?.run?.(context)
 }
 
@@ -186,7 +194,7 @@ export const runCommandShortcut = (event: CommandKeyEvent, context: ChatCommandC
       !!entry.shortcut.alt === !!event.altKey &&
       (entry.acceptsKey ? entry.acceptsKey(event, context) : !typingTarget(event))
   )
-  if (!command?.run) return false
+  if (!command?.run || (command.needsStarted === true && notStarted(context.view.chat))) return false
   command.run(context)
   return true
 }
