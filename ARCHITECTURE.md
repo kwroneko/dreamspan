@@ -651,6 +651,7 @@ This applies to every kind of draft but the three that keep their history (`keep
 - A field's first save, typed on a revision, first records the revision's text as the draft's starting state (`revisionContent`), so the text from before the first edit is a state too.
 - A resting draft typed on a revision whose text it doesn't hold (one restored or merged in since) first moves to that text, as an entry of kind `revision` (`DraftState.kind`), then takes the typing.
 - A discard still ends the session the old way (history deleted, text to the bin), except that the revision text the history started from, which that revision keeps, isn't sent to the bin.
+- For value fields, `binTexts` recovers only lorebook entries' primary and secondary keys, one per line. This applies to standalone and card-embedded lorebooks.
 
 **Note editors resolve the current display end** (`noteHere` in `db/noteAt.ts`), including an inserted message after the structural tip. The returned edit position is used by Save, revision restore and shared-note link writes; a stale caller naming a deleted message of the same chat still edits the branch's current state. Precise historical reads retain `noteAt`. Draft carry resolves the source at that same display end, so taking a note **As it is now** carries typing on a binding at a trailing insertion too. `test/chatNoteBranches.test.ts` and `test/forkDrafts.test.ts` cover these cases.
 
