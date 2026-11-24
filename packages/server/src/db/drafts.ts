@@ -23,7 +23,7 @@ import {
   invertPatch,
   isDestructive,
   isEmptyPatch,
-  isFormContent,
+  isUserDraftForm,
   parseDraftTarget,
   type Patch,
   type ObservedDeletion
@@ -560,10 +560,14 @@ export const makeDraftStore = (
     kind: "edit" | "restore" | "revision",
     now: number,
     displaced: boolean,
-    imagesJson: string | null
+    imagesJson: string | null,
+    trim = true
   ) =>
     Effect.gen(function* () {
-      const form = draft.target_kind === "user_field" ? formChange(draft.content, content) : null
+      const form =
+        draft.target_kind === "user_field" && isUserDraftForm(draft.target_id, draft.field)
+          ? formChange(draft.content, content)
+          : null
       const keep = displaced || form?.destructive === true
       const [last] =
         yield* sql<EntryRow>`SELECT * FROM draft_history WHERE draft_id = ${draft.id} ORDER BY seq DESC LIMIT 1`
@@ -610,7 +614,7 @@ export const makeDraftStore = (
         images_after_json: imagesJson,
         displaced: keep ? 1 : 0
       })}`
-      return yield* retain(draft, content)
+      return trim ? yield* retain(draft, content) : 0
     })
 
   /** The draft the client named, as it saw it: another draft at its key, or a newer version, is stale. */
@@ -639,7 +643,7 @@ export const makeDraftStore = (
       const deletions = trackDeletions(
         toDraft(draft),
         content,
-        draft.target_kind === "user_field",
+        draft.target_kind === "user_field" && isUserDraftForm(draft.target_id, draft.field),
         deliberate,
         formEdit
       )
@@ -738,6 +742,7 @@ export const makeDraftStore = (
   ) =>
     Effect.gen(function* () {
       const ended = base !== null && base.session !== null && base.session !== draft.session
+      const form = draft.target_kind === "user_field" && isUserDraftForm(draft.target_id, draft.field)
       // Deliberate deletion wins over writes typed before it, including keepalive and
       // Browser recovery retries. Sending a composer ends its session without deleting
       // its separately typed `next` text; manual deletion always wins.
@@ -767,28 +772,19 @@ export const makeDraftStore = (
       // without it), and the answer names it, so its tab can show the current one and offer it back.
       if (
         !deleted &&
-        draft.target_kind === "user_field" &&
+        form &&
         draft.status === "active" &&
-        !ended &&
-        (base === null || draft.text_version > base.rowVersion) &&
-        content !== draft.content &&
-        isFormContent(content) &&
-        isFormContent(draft.content)
+        (base === null || ended || draft.text_version > base.rowVersion) &&
+        content !== draft.content
       ) {
         const at = now()
         let recovered = 0
         // A form's starting snapshot (`seed`) was never typed: nothing to keep.
         if (options.deliberate !== false) {
-          recovered += yield* record(
-            draft,
-            content,
-            diffPatch(draft.content, content),
-            "edit",
-            at,
-            true,
-            draft.images_json
-          )
-          recovered += yield* record(
+          // The refused snapshot is only an intermediate history state. Trim against
+          // the actual current snapshot after both entries are in place.
+          yield* record(draft, content, diffPatch(draft.content, content), "edit", at, true, draft.images_json, false)
+          recovered = yield* record(
             { ...draft, content },
             draft.content,
             diffPatch(content, draft.content),
@@ -805,11 +801,9 @@ export const makeDraftStore = (
           accepted: false
         }
       }
-      const reconciled = reconcileDeletedFields(
-        toDraft(draft),
-        options.deliberate === false ? null : deletionBase,
-        content
-      )
+      const reconciled = form
+        ? reconcileDeletedFields(toDraft(draft), options.deliberate === false ? null : deletionBase, content)
+        : { content, changed: false, rejected: false }
       if (deleted || reconciled.rejected || (ended && options.ended === "recover" && options.next !== true)) {
         // A different session's text cannot account for an old composer copy.
         const kept =
@@ -1001,7 +995,7 @@ export const makeDraftStore = (
         const deletions = trackDeletions(
           { ...toDraft(created), content: "", rowVersion: created.row_version - 1 },
           options.content,
-          true,
+          isUserDraftForm(options.key.targetId, options.key.field),
           true,
           { before: options.editingFrom, content: options.content }
         )

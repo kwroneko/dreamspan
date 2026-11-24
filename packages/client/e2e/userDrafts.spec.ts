@@ -602,30 +602,32 @@ for (const width of [1440, 390])
       await authenticate(page)
       await page.goto(`${server().url}/settings/chats`)
       const box = page.getByLabel("Summarization instruction", { exact: true })
+      const instruction = (text: string) => JSON.stringify({ instruction: text })
       const local = `Keep the lighthouse keeper's promises, debts and unresolved questions. ${width} ${theme}`
-      await box.fill(local)
-      await expect.poll(() => draftText("Settings → Chats", "Summarization instruction")).toBe(local)
+      await box.fill(instruction(local))
+      await expect.poll(() => draftText("Settings → Chats", "Summarization instruction")).toBe(instruction(local))
       const context = await browser.newContext()
       try {
         const device = await context.newPage()
         await authenticate(device)
         await device.goto(`${server().url}/settings/chats`)
-        await expect(device.getByLabel("Summarization instruction", { exact: true })).toHaveValue(local)
+        await expect(device.getByLabel("Summarization instruction", { exact: true })).toHaveValue(instruction(local))
         // Keep a save on the old observed base in flight. A clean editor now learns
         // the other device's draft immediately, so merely editing afterwards isn't stale.
         hold = true
-        await box.fill(`${local} Continued locally.`)
+        await box.fill(instruction(`${local} Continued locally.`))
         await expect.poll(() => !!release).toBe(true)
-        const other = `Another device's instruction: retain the journey's language and the keeper's voice. ${width} ${theme}`
+        const other = instruction(
+          `Another device's instruction: retain the journey's language and the keeper's voice. ${width} ${theme}`
+        )
         await device.getByLabel("Summarization instruction", { exact: true }).fill(other)
         await expect.poll(() => draftText("Settings → Chats", "Summarization instruction")).toBe(other)
         hold = false
         release!()
         await expect(page.getByText(/Another edit from .* is kept in field undo history/)).toBeVisible()
-        await box.fill(`${local} Continued locally, once more.`)
-        await expect
-          .poll(() => draftText("Settings → Chats", "Summarization instruction"))
-          .toBe(`${local} Continued locally, once more.`)
+        const later = instruction(`${local} Continued locally, once more.`)
+        await box.fill(later)
+        await expect.poll(() => draftText("Settings → Chats", "Summarization instruction")).toBe(later)
         await page.getByText("Preview the other edit", { exact: true }).click()
         await expect(page.locator("pre").filter({ hasText: other })).toBeVisible()
         await page.getByRole("button", { name: "Use the other edit", exact: true }).scrollIntoViewIfNeeded()

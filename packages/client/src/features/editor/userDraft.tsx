@@ -11,7 +11,7 @@ import {
   type Draft,
   type DraftDisplacement,
   type DraftState,
-  isFormContent
+  isUserDraftForm
 } from "@dreamspan/shared/drafts.ts"
 import type { UserDraftSave } from "@dreamspan/shared/editorApi.ts"
 import { useAction } from "../../actions.tsx"
@@ -23,6 +23,7 @@ import { Popover } from "../../ui/Popover.tsx"
 import { iconButtonClass } from "../../ui/Tooltip.tsx"
 import { chromeButton } from "../../ui/FieldFrame.tsx"
 import { copiesOf, dropCopy, keepCopy, makeCopy, pendingOf, type Copy } from "./backup.ts"
+import { clearRefusedDraft, keepRefusedDraft, readRefusedDraft } from "./refusedDraft.ts"
 
 import { readTypedBackup, keepTypedBackup, dropTypedBackup } from "./typedBackup.ts"
 
@@ -62,6 +63,7 @@ export class UserDraftStore {
   private lastPersistAcknowledged = false
   /** The last save was a form's, refused as out of date (`Draft.refused`). */
   private lastPersistRefused = false
+  private refusedEdit: { edit: number; content: string } | null = null
   private edits = 0
   private acknowledgedEdit = -1
   private pendingTypes = new Set<{
@@ -94,11 +96,13 @@ export class UserDraftStore {
   private userId: UserId
   private targetId: string
   private field: string
+  private readonly isForm: boolean
   private run: Run
   constructor(userId: UserId, targetId: string, field: string, run: Run) {
     this.userId = userId
     this.targetId = targetId
     this.field = field
+    this.isForm = isUserDraftForm(targetId, field)
     this.run = run
   }
   subscribe = (listener: () => void) => {
@@ -116,6 +120,7 @@ export class UserDraftStore {
     if (this.state.saved !== saved) this.update({ saved })
   }
   private address = () => ({ ownerId: this.userId, targetId: this.targetId, field: this.field })
+  private refusalKey = () => `dreamspan.refusedDraft:${JSON.stringify(this.address())}`
   private payload = (content: string, seed = false, editingFrom = this.editingFrom) => ({
     ...this.address(),
     content,
@@ -162,6 +167,7 @@ export class UserDraftStore {
     }
     this.lastPersistAcknowledged = true
     this.lastPersistRefused = result.value.refused !== undefined
+    if (this.lastPersistRefused && !seed) this.refusedEdit = { edit, content }
     this.draft = result.value
     // A deletion may have won while this request was in flight. Recovery acknowledges
     // the copy into the bin, not as new field text; never rebase later typing onto it unseen.
@@ -191,7 +197,8 @@ export class UserDraftStore {
     if (accepted && this.copy !== null && this.state.text !== null) await this.remember(this.state.text, true).kept
     // A form refused as out of date (owner, 2026-11-24): the field now shows the current version,
     // and this tab's one is offered back. Another tab's draft seen meanwhile is the one shown.
-    const refused = !seed && result.value.refused !== undefined && showing ? result.value.refused : null
+    const refused = !seed && showing && this.edits === edit ? (result.value.refused ?? null) : null
+    if (refused !== null) keepRefusedDraft(this.refusalKey(), result.value, refused)
     if (
       refused !== null &&
       this.state.remote?.id === result.value.id &&
@@ -204,8 +211,9 @@ export class UserDraftStore {
         accepted || result.value.refused !== undefined
           ? null
           : deletedSince(result.value, copy.save.kind === "userDraft" ? copy.save.payload : null) ||
-              reconcileDeletedFields(result.value, copy.save.kind === "userDraft" ? copy.save.payload : null, content)
-                .changed
+              (this.isForm &&
+                reconcileDeletedFields(result.value, copy.save.kind === "userDraft" ? copy.save.payload : null, content)
+                  .changed)
             ? "This text was deleted elsewhere. Find your copy in recovered texts."
             : "This text changed elsewhere. Review the updated text.",
       displaced: result.value.displaced ?? this.state.displaced,
@@ -251,7 +259,7 @@ export class UserDraftStore {
           continue
         }
         const safeCopy =
-          this.draft === null
+          this.draft === null || !this.isForm
             ? { content: copy.content, changed: false, rejected: false }
             : reconcileDeletedFields(
                 this.draft,
@@ -316,6 +324,8 @@ export class UserDraftStore {
         const replay = await this.run((client) => client("SaveUserDraft", save.payload))
         if (replay.ok) {
           this.draft = replay.value
+          const refused = this.edits === 0 && save.payload.seed !== true ? replay.value.refused : undefined
+          if (refused !== undefined) keepRefusedDraft(this.refusalKey(), replay.value, refused)
           if (this.edits === 0) {
             this.base = baseOf(replay.value)
             this.editingFrom = replay.value.status === "active" ? replay.value.content : null
@@ -324,9 +334,7 @@ export class UserDraftStore {
           }
           this.update({
             // A form copy typed on an older version is refused: offered back, the field showing the current one.
-            ...(this.edits === 0 && save.payload.seed !== true && replay.value.refused !== undefined
-              ? { refused: replay.value.refused }
-              : {}),
+            ...(refused === undefined ? {} : { refused }),
             displaced: replay.value.displaced ?? this.state.displaced,
             recovered: this.state.recovered + replay.value.recovered
           })
@@ -362,7 +370,12 @@ export class UserDraftStore {
       this.update({
         ready: true,
         savedAt: this.draft?.updatedAt ?? null,
-        text: this.state.text ?? (this.draft?.status === "active" ? this.draft.content : null)
+        text: this.state.text ?? (this.draft?.status === "active" ? this.draft.content : null),
+        refused:
+          this.state.refused ??
+          (this.edits === 0 && (this.state.text === null || this.state.text === this.draft?.content)
+            ? readRefusedDraft(this.refusalKey(), this.draft)
+            : null)
       })
     })
   }
@@ -409,13 +422,7 @@ export class UserDraftStore {
       // local text into recovered texts instead of reopening a deleted field.
       if (!load) this.observedDeletion = observeDeletion(remote)
       // A form on its old version would be refused: keeping it is choosing it over the remote one.
-      if (
-        !load &&
-        remote.status === "active" &&
-        this.state.text !== null &&
-        isFormContent(this.state.text) &&
-        isFormContent(remote.content)
-      ) {
+      if (!load && this.isForm && remote.status === "active" && this.state.text !== null) {
         this.base = baseOf(remote)
         this.editingFrom = remote.content
       }
@@ -482,6 +489,7 @@ export class UserDraftStore {
     this.editingFrom = editingOrigin(this.editingFrom, initial, content)
     this.edits++
     // Editing the version shown is going on from it: a refused one stays in the field's history.
+    clearRefusedDraft(this.refusalKey())
     this.update({ text: content, history: null, refused: null })
     void this.remember(content, true).kept
     const pending = { initial, content, editingFrom: this.editingFrom, edit: this.edits }
@@ -511,6 +519,8 @@ export class UserDraftStore {
     const edit = this.edits
     const editingFrom = this.editingFrom
     const operation = this.queue.then(async () => {
+      // An autosave can replace the displayed form and base while this Save is queued.
+      if (this.refusedEdit?.edit === edit && this.refusedEdit.content === content) return false
       if (!(await this.persist(content, false, editingFrom, edit))) return false
       const draft = this.draft!
       if (!(await save())) return false
@@ -542,6 +552,7 @@ export class UserDraftStore {
         if (this.copy !== null && this.state.text !== null) await this.remember(this.state.text, true).kept
       }
       if (this.state.text === content) this.editingFrom = null
+      clearRefusedDraft(this.refusalKey())
       this.update({
         text: this.state.text === content ? null : this.state.text,
         error: ended.ok ? null : ended.error.message,

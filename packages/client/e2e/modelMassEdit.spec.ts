@@ -284,6 +284,12 @@ test("a stale tab's save is refused; it shows the current values and can bring i
   if (process.env.SCREENSHOT_DIR)
     await other.screenshot({ path: `${process.env.SCREENSHOT_DIR}/mass-edit-refused-1920-dark.png` })
   await expectLayout(other, info, "model-mass-edit-refused-1920-dark", { scope: "[role=dialog]" })
+  // Reloading the dialog keeps this tab's offer, scoped to the same active draft.
+  await other.reload()
+  await expect(use).toBeVisible()
+  await expect(temperature(theirs)).toHaveValue("0.65")
+  await expect(temperature(mine)).toHaveValue("0.65")
+  await expect(mine.getByRole("button", { name: "Use this tab's version", exact: true })).toHaveCount(0)
   // Its own version back: Top P 0.8 and Temperature 0.55, both ticked; the other tab sees it.
   await use.click()
   await expect(use).toHaveCount(0)

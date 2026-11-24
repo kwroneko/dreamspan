@@ -21,7 +21,7 @@ vi.mock("../src/features/editor/backup.ts", async (original) => ({
 }))
 const { UserDraftStore, newerText } = await import("../src/features/editor/userDraft.tsx")
 const ownerId = "author" as UserId
-const key = new DraftKey({ targetKind: "user_field", targetId: "test", field: "Instruction" })
+const key = new DraftKey({ targetKind: "user_field", targetId: "Settings → Chats", field: "Summarization instruction" })
 const draft = (content: string, rowVersion = 1) =>
   new Draft({
     id: "draft",
@@ -583,6 +583,39 @@ it("a deletion that wins during a save does not let a stale form commit its text
   expect(store.snapshot().recovered).toBe(1)
 })
 
+it("a queued Save cannot commit a form snapshot its autosave refused", async () => {
+  const initial = JSON.stringify({ temperature: 0.55, topP: 1 })
+  const local = JSON.stringify({ temperature: 0.55, topP: 0.8 })
+  const remote = JSON.stringify({ temperature: 0.65, topP: 1 })
+  const { store, handlers, saves } = harness(draft(initial))
+  store.open()
+  await until(() => store.snapshot().ready)
+  const held = deferred<Draft>()
+  const persist = handlers.SaveUserDraft
+  let started = false
+  handlers.SaveUserDraft = () => {
+    started = true
+    handlers.SaveUserDraft = persist
+    return held.promise
+  }
+  store.type(local, initial)
+  await until(() => started)
+  const save = vi.fn(async () => true)
+  const queued = store.commit(local, save)
+  held.resolve(new Draft({ ...draft(remote, 2), refused: { at: 2, content: local } }))
+
+  expect(await queued).toBe(false)
+  expect(save).not.toHaveBeenCalled()
+  expect(saves).toEqual([])
+  expect(store.snapshot().text).toBe(remote)
+  expect(store.snapshot().refused?.content).toBe(local)
+
+  store.type(local, remote)
+  expect(await store.commit(local, save)).toBe(true)
+  expect(saves[0]).toMatchObject({ content: local, expectedRowVersion: 2 })
+  expect(save).toHaveBeenCalledOnce()
+})
+
 it("typing into the empty field before its tombstone read finishes starts from that deletion", async () => {
   const tombstone = new Draft({ ...draft("", 5), clearedVersion: 5 })
   const { store, handlers, saves } = harness(tombstone, "First message")
@@ -601,13 +634,20 @@ it("typing into the empty field before its tombstone read finishes starts from t
 
 it("a refused compound replay protects cleared inputs while retaining other last keystrokes", async () => {
   const raw = JSON.stringify({ name: "deleted name", baseUrl: "https://example.invalid/last-keystroke" })
-  const old = makeCopy(ownerId, key.targetId, key.field, { kind: "userDraft", payload: payload(raw) }, 1)
+  const address = { targetId: "connection:synthetic", field: "Settings" }
+  const old = makeCopy(
+    ownerId,
+    address.targetId,
+    address.field,
+    { kind: "userDraft", payload: { ...payload(raw), ...address } },
+    1
+  )
   await keepCopy(old)
   const cleared = new Draft({
     ...draft(JSON.stringify({ name: "", baseUrl: "https://example.invalid" }), 5),
     deletions: { '["name"]': { draftId: "draft", rowVersion: 5, value: "" } }
   })
-  const { store, handlers, saves } = harness(cleared)
+  const { store, handlers, saves } = harness(cleared, address.field, address.targetId)
   const save = handlers.SaveUserDraft
   handlers.SaveUserDraft = async () => {
     throw new Error("offline during replay")

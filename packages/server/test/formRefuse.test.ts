@@ -157,6 +157,70 @@ describe("a stale form save is refused and the current version kept", () => {
     }).pipe(Effect.provide(layer()))
   )
 
+  it.effect("refuses a save from an ended session when a newer form is active", () =>
+    Effect.gen(function* () {
+      const { save, writer, user, states } = yield* setup("refuse-old-session")
+      const start = yield* save(form({ name: "First form", note: "" }), null)
+      const ended = yield* writer.ClearDraft({
+        userId: user.id,
+        key,
+        draftId: start.id,
+        expectedRowVersion: start.rowVersion,
+        outcome: "committed"
+      })
+      const current = yield* save(form({ name: "Second form", note: "" }), start)
+      assert.strictEqual(current.status, "active")
+      assert.strictEqual(current.session, ended.session)
+      assert.isUndefined(current.refused)
+      const stale = form({ name: "First form", note: "Old tab's edit" })
+
+      assertRefused(yield* save(stale, start), current, stale)
+      assert.strictEqual((yield* states())[0], stale)
+    }).pipe(Effect.provide(layer()))
+  )
+
+  it.effect("retains history against the active form without evicting unrelated recovered text", () =>
+    Effect.gen(function* () {
+      const { save, writer, reader, user, states } = yield* setup("refuse-retention")
+      yield* writer.ChangeBinLimit({ userId: user.id, key: "recoveredTexts", value: 2 })
+      const unrelatedKey = { ...key, targetId: "unrelated-draft" }
+      const unrelated = yield* writer.SaveDraft({
+        userId: user.id,
+        key: unrelatedKey,
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevision: null,
+        content: "Only recovered copy of an unrelated draft"
+      })
+      yield* writer.ClearDraft({
+        userId: user.id,
+        key: unrelatedKey,
+        draftId: unrelated.id,
+        expectedRowVersion: unrelated.rowVersion,
+        outcome: "discarded"
+      })
+      const activeText = form({ note: "A".repeat(250_000) })
+      const first = yield* save(activeText, null)
+      const second = yield* save(form({ note: "B".repeat(100_000) }), first)
+      const current = yield* save(activeText, second)
+      const stale = form({ note: "C".repeat(100_000) })
+
+      const refused = yield* save(stale, second)
+      assertRefused(refused, current, stale)
+      assert.strictEqual(refused.recovered, 1)
+      assert.strictEqual((yield* states())[0], stale)
+      const recovered = yield* reader.ListRecoveredTexts({ userId: user.id, source: null, limit: 100, before: null })
+      const full = yield* Effect.forEach(recovered, (entry) =>
+        reader.GetRecoveredText({ userId: user.id, id: entry.id })
+      )
+      assert.sameMembers(
+        full.map((entry) => entry.content),
+        [second.content, unrelated.content]
+      )
+    }).pipe(Effect.provide(layer()))
+  )
+
   it.effect("a stale starting snapshot is refused without a history step; the current tab saves on", () =>
     Effect.gen(function* () {
       const { save, reader, user } = yield* setup("refuse-seed")
@@ -180,22 +244,32 @@ describe("a stale form save is refused and the current version kept", () => {
         targetId: "Settings → Chats",
         field: "Summarization instruction"
       }
+      const textSave = (content: string, on: Draft | null) => ({
+        key: textKey,
+        content,
+        draftId: on?.id ?? null,
+        expectedRowVersion: on?.rowVersion ?? null,
+        expectedSession: on?.session ?? null,
+        baseRevision: null
+      })
       const saveText = (content: string, on: Draft | null) =>
-        writer.SaveDraft({
-          userId: user.id,
-          key: textKey,
-          content,
-          draftId: on?.id ?? null,
-          expectedRowVersion: on?.rowVersion ?? null,
-          expectedSession: on?.session ?? null,
-          baseRevision: null
-        })
-      const start = yield* saveText("Synthetic instruction.", null)
-      yield* saveText("Synthetic instruction, typed in A.", start)
-      const b = yield* saveText("Synthetic instruction, typed in B.", start)
-      assert.strictEqual(b.content, "Synthetic instruction, typed in B.")
+        writer.SaveDraft({ userId: user.id, ...textSave(content, on) })
+      const start = yield* saveText(form({ instruction: "Synthetic instruction." }), null)
+      const a = yield* saveText(form({ instruction: "", note: "Typed in A." }), start)
+      const local = form({ instruction: "Typed in B." })
+      const b = yield* saveText(local, start)
+      assert.strictEqual(b.content, local)
       assert.isUndefined(b.refused)
-      assert.strictEqual(b.displaced?.content, "Synthetic instruction, typed in A.")
+      assert.strictEqual(b.displaced?.content, a.content)
+
+      const closing = form({ instruction: "Typed in a closing tab." })
+      const [filed] = yield* writer.SaveDraftBatch({
+        userId: user.id,
+        entries: [{ _tag: "draft", ...textSave(closing, start) }]
+      })
+      assert.strictEqual(filed?.draft?.content, closing)
+      assert.isUndefined(filed?.draft?.refused)
+      assert.strictEqual(filed?.draft?.displaced?.content, local)
     }).pipe(Effect.provide(layer()))
   )
 })
