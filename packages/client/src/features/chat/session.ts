@@ -1205,10 +1205,14 @@ export class ChatSession {
         // Another fork's flags or copy aren't this one's (spec/FORK-INDEPENDENCE-DELTA.md §2.2).
         if (event.forkId !== undefined && this.view.forkId !== null && event.forkId !== this.view.forkId) return
       // falls through
-      case "Slot":
+      case "Slot": {
+        // A new chat's first turn (anything but a greeting) started it on the server: read it.
+        const version = event._tag === "Slot" ? event.entry.version : event.version
+        if (this.view.chat?.status === "pending" && version.origin !== "greeting") void this.readStarted()
         this.update({ pathRevision: this.view.pathRevision + 1 })
         for (const events of this.readEvents) events.push(event)
         return this.applyState(event)
+      }
       case "Chat":
         forksChanged(this.chatId)
         for (const events of this.readEvents) events.push(event)
@@ -1295,6 +1299,12 @@ export class ChatSession {
       return false
     const current = this.view.entries.find((e) => e.slotId === entry.slotId)
     return current !== undefined && current.version.id !== entry.version.id
+  }
+
+  /** A pending chat whose first turn was just written: the chat as the server has it now (started). */
+  private async readStarted() {
+    const chat = await this.call((client) => client("GetChat", { chatId: this.chatId }))
+    if (chat.ok && !this.disposed) this.applyState({ _tag: "Chat", chat: chat.value })
   }
 
   /** Applies a change to loaded state; applying it again, or after a newer one, changes nothing. */

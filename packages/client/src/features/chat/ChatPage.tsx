@@ -831,16 +831,26 @@ export function MessageList({
   )
 }
 
-function OpenChat({
+/**
+ * What a new-chat page (DraftChatPage.tsx) asks of the chat page it shows: told once when its
+ * pending chat is started (its first turn committed it), with the view as it stands then.
+ */
+export interface DraftHost {
+  readonly onStarted: (view: ChatView) => void
+}
+
+export function OpenChat({
   chatId,
   fork,
   slot,
-  panel
+  panel,
+  draft = null
 }: {
   chatId: ChatId
   fork: ForkId | null
   slot: SlotId | null
   panel: PanelTab | null
+  draft?: DraftHost | null
 }) {
   const registry = useContext(RegistryContext)
   const userId = useSession().user.id
@@ -896,6 +906,7 @@ function OpenChat({
         panel={pending ? surface.panel : panel}
         restore={active.restore}
         pending={pending}
+        draft={draft}
       />
     </div>
   )
@@ -907,7 +918,8 @@ function ChatSurface({
   slot,
   panel: urlPanel,
   restore,
-  pending
+  pending,
+  draft
 }: {
   session: ChatSession
   fork: ForkId | null
@@ -915,8 +927,14 @@ function ChatSurface({
   panel: PanelTab | null
   restore: ReadingPosition | null
   pending: boolean
+  draft: DraftHost | null
 }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
+  // A new chat's page hands over to the chat's own once its first turn started it.
+  const started = view.chat !== null && view.chat.status !== "pending"
+  useEffect(() => {
+    if (draft !== null && started) draft.onStarted(session.snapshot())
+  }, [draft, started, session])
   const navigate = useNavigate()
   const router = useRouter()
   const { panel, show, withPanel, wide, userId } = usePanel(urlPanel, view)
@@ -1127,6 +1145,9 @@ function ChatSurface({
                 <Alert tone="danger">{view.error ?? branchError}</Alert>
               </div>
             )}
+            {!view.loading && view.chat?.status === "pending" && view.entries.length === 0 && (
+              <PendingIntro view={view} />
+            )}
             {view.loading ? (
               // Takes the messages' place, so the composer is where it will stay.
               <SkeletonMessages onRetry={() => void session.open(slot ?? null)} />
@@ -1171,6 +1192,23 @@ function ChatSurface({
         {enabling && <EnableLcmDialog session={session} onOpenChange={setEnabling} />}
       </CastContext>
     </ChatSurfaceProviders>
+  )
+}
+
+/**
+ * A new chat with nothing in it yet (no greeting to show): what it is, where its messages
+ * will be. Its first message starts it.
+ */
+function PendingIntro({ view }: { view: ChatView }) {
+  const characters = castCharacters(view)
+  return (
+    <div className="chat-column pt-4">
+      <p data-empty-chat-intro="" className="mx-3 rounded-lg bg-surface-raised px-3 py-2 text-sm text-muted">
+        {characters.length === 0
+          ? "A chat with no characters yet: for notes, or trying a model. Characters can join from the Cast tab. Your first message starts the chat."
+          : `${characters.length === 1 ? `${characters[0]!.name} has no greeting.` : "None of them has a greeting."} Your first message starts the chat.`}
+      </p>
+    </div>
   )
 }
 
