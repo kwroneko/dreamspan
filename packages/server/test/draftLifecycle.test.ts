@@ -191,4 +191,49 @@ describe("pending chats", () => {
       })
     )
   )
+
+  it.live("a History replacement in its greetings commits it, one at a time or in bulk", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, mira } = yield* setup
+        const replace = (chatId: string, forkId: string, versions: ReadonlyArray<{ id: string; content: string }>) =>
+          api.ApplyHistoryEdits({
+            title: "Rename",
+            applications: [
+              {
+                chatId: chatId as never,
+                forkId: forkId as never,
+                edits: versions.map((version) => ({
+                  kind: "version_replace" as const,
+                  targetId: version.id,
+                  beforeId: version.id,
+                  before: version.content,
+                  after: version.content.replace("waves", "nods")
+                }))
+              }
+            ]
+          })
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const greeting = yield* greetingOf(userId, draft.id)
+        yield* replace(draft.id, draft.currentForkId!, [greeting.entry.version])
+        assert.strictEqual((yield* api.GetChat({ chatId: draft.id })).status, "active")
+        assert.isFalse(yield* (yield* Writer).SweepPendingChat({ userId, chatId: draft.id }))
+
+        // Two greetings at once take the bulk path.
+        const ana = yield* card(userId, "Ana")
+        const group = yield* api.StartChat({
+          cards: [mira, ana],
+          persona: null,
+          greeting: null,
+          first: { _tag: "Send", content: "Hi both.", speakerEntityId: null },
+          title: "Pier friends"
+        })
+        const both = yield* api.OpenDraftChat({ draftFor: `group:${group.chat.id}` })
+        const last = yield* greetingOf(userId, both.id)
+        const first = yield* (yield* Reader).GetSlot({ userId, slotId: last.entry.parentSlotId! })
+        yield* replace(both.id, both.currentForkId!, [first.entry.version, last.entry.version])
+        assert.strictEqual((yield* api.GetChat({ chatId: both.id })).status, "active")
+      })
+    )
+  )
 })

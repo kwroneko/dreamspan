@@ -1,5 +1,6 @@
 import { consumeHistoryStage, prepareHistoryStage } from "./historyStages.ts"
 import { bulkUndoHistory, makeBulkHistory } from "./historyBulk.ts"
+import { commitPendingChat } from "./pendingChats.ts"
 import { FoldableEvent, branchOwned } from "@dreamspan/shared/state.ts"
 import { checkStateReferences } from "./stateRefs.ts"
 import { HistoryRejected, type HistoryEdit } from "@dreamspan/shared/historyApi.ts"
@@ -92,6 +93,9 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
           if (plan && record.id !== plan.changesetId)
             return yield* new HistoryRejected({ message: "History changed while this edit was prepared." })
           changesetIds.push(record.id)
+          // A replacement saved is the user's text: a pending chat's greeting edited here commits
+          // it, as a saved edit of the greeting does (db/pendingChats.ts).
+          yield* commitPendingChat(sql, chatId, Date.now())
           const previousItems = yield* sql<{
             id: number
             target_kind: string
