@@ -4,18 +4,30 @@
 // patch returns what it replaced as a patch of the same shape: applied again, that is the Undo.
 import { Schema } from "effect"
 import { ModelId, ModelIds, ModelOverrides } from "./providers.ts"
+import { SAMPLER_KEYS } from "./samplerRules.ts"
 
-/** Keys a path may never name: they'd reach an object's prototype. */
-const RESERVED = new Set(["__proto__", "constructor", "prototype"])
+// The schema supplies the editable leaves. Lists and free-form maps are edited as whole fields.
+// Learned context has its own operation, and the legacy samplers without controls stay as stored.
+const { settings, cacheLayout, learned: _learned, ...overrideFields } = ModelOverrides.fields
+const { samplers: _samplers, ...settingFields } = settings.schema.fields
+const editablePaths = new Set(
+  [
+    ...Object.keys(overrideFields).map((key) => [key]),
+    ...Object.keys(cacheLayout.schema.fields).map((key) => ["cacheLayout", key]),
+    ...Object.keys(settingFields).map((key) => ["settings", key]),
+    ...[...SAMPLER_KEYS, "reasoning_effort", "verbosity", "openai_max_context", "openai_max_tokens"].map((key) => [
+      "settings",
+      "samplers",
+      key
+    ])
+  ].map((path) => JSON.stringify(path))
+)
 
 /** A path into a model's overrides (["settings", "samplers", "temperature"]). */
-const ModelPath = Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))).check(
-  Schema.isMinLength(1),
-  Schema.isMaxLength(4),
+const ModelPath = Schema.Array(Schema.String).check(
+  Schema.isMaxLength(3),
   Schema.makeFilter(
-    (path: ReadonlyArray<string>) =>
-      // The learned context size is saved and forgotten by its own operation only.
-      (path[0] !== "learned" && !path.some((key) => RESERVED.has(key))) || "Not a path a model's settings take"
+    (path: ReadonlyArray<string>) => editablePaths.has(JSON.stringify(path)) || "Not an editable model field"
   )
 )
 
