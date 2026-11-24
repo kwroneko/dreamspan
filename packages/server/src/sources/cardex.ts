@@ -318,7 +318,7 @@ const FILTER_HELP: Record<string, string> = {
   created_before: "Cards their creator made before this day, as far as cardex knows.",
   // What each panel and checkbox explains behind its (i), as the archive's own page does.
   author:
-    "By any of: cards by any of the creators you add. Not by any of: cards by none of them. A creator is one account on one site. The number beside a name is how many of their cards cardex has.",
+    "By any of: cards by any of the authors you add. Not by any of: cards by none of them. An author is one account on one site. The number beside a name is how many of their cards cardex has.",
   source:
     "The sites a card is listed on. Include: cards on any of the ticked sites. Exclude: cards on none of them. Chub verified and Chub recommended work when Chub is the only site included.",
   kind: "Characters, only characters whose card has a lorebook (its own or one the site attaches), standalone lorebooks, or all of them.",

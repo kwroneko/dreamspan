@@ -1049,7 +1049,7 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
     <div className={`flex min-h-0 flex-col gap-2 ${popover ? "" : "w-full"}`} data-creator-picker>
       {c.excludeFilterId && (
         <Segmented
-          label="Creator mode"
+          label="Author mode"
           inlineDescription={false}
           value={mode}
           onValueChange={(next) => {
@@ -1057,17 +1057,17 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
             if (chosen.length) write(next, chosen)
           }}
           options={[
-            { value: "by", label: "By any of", description: "Only cards by one of the creators chosen." },
-            { value: "not", label: "Not by any of", description: "Leaves out the cards of the creators chosen." }
+            { value: "by", label: "By any of", description: "Only cards by one of the authors chosen." },
+            { value: "not", label: "Not by any of", description: "Leaves out the cards of the authors chosen." }
           ]}
         />
       )}
-      <Field label={mode === "not" ? "Creator to leave out" : "Add a creator"} labelHidden>
+      <Field label={mode === "not" ? "Author to leave out" : "Add an author"} labelHidden>
         <Input
           type="search"
           value={text}
           placeholder={
-            mode === "not" ? "Creator to leave out…" : chosen.length ? "Add another creator…" : "Add a creator…"
+            mode === "not" ? "Author to leave out…" : chosen.length ? "Add another author…" : "Add an author…"
           }
           onChange={(event) => setText(event.currentTarget.value)}
         />
@@ -1115,7 +1115,7 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
           )
         })}
         {!suggestions.loading && !suggestions.problem && suggestions.items.length === 0 && (
-          <li className="px-3 py-1.5 text-sm text-muted">{text.trim() ? "No creators match" : "No creators listed"}</li>
+          <li className="px-3 py-1.5 text-sm text-muted">{text.trim() ? "No authors match" : "No authors listed"}</li>
         )}
         <li>
           <LoadMore suggestions={suggestions} />
@@ -1123,7 +1123,7 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
       </ul>
       {chosen.length > 0 && (
         <ul
-          aria-label="Chosen creators"
+          aria-label="Chosen authors"
           data-layout-audit-ignore="inset: A chip's remove button sits in the pill's compact end, as in MultiSelect"
           className={`flex flex-wrap content-start items-start gap-1.5 ${popover ? "max-h-24 shrink-0 overflow-y-auto" : ""}`}
         >
@@ -1140,7 +1140,7 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
               </span>
               <IconButton
                 label={`Remove ${nameOf(identity)}`}
-                hint="Takes this creator out of the filter."
+                hint="Takes this author out of the filter."
                 icon="close"
                 className="size-6! shrink-0"
                 onClick={() =>

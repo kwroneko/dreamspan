@@ -60,7 +60,7 @@ for (const width of [1440, 390])
         ])
           await expect(main.locator("[data-filter-panels]").getByRole("button", { name, exact: true })).toBeVisible()
         await expect(
-          main.locator("[data-filter-panels]").getByRole("button", { name: /^NSFW: NSFW (hidden|included|only)$/ })
+          main.locator("[data-filter-panels]").getByRole("button", { name: /^NSFW (hidden|included|only)$/ })
         ).toBeVisible()
         await expect(main.getByRole("checkbox", { name: "Only cards with a cover", exact: true })).toBeChecked()
       } else await expect(filters).toBeVisible()

@@ -89,7 +89,7 @@ export function cardexCriteriaTests() {
             await expect(controls).toBeVisible()
             await closeSheet(page)
             let panel = await openPanel(page, scope, "Authors")
-            await panel.getByRole("searchbox", { name: "Add a creator", exact: true }).fill("/")
+            await panel.getByRole("searchbox", { name: "Add an author", exact: true }).fill("/")
             const creatorList = panel.getByRole("list", { name: "Authors", exact: true })
             // More load as the list scrolls to its end.
             const rows = creatorList.getByRole("button")
@@ -101,7 +101,7 @@ export function cardexCriteriaTests() {
             await rows.nth(0).click()
             await rows.nth(1).click()
             await expect(
-              panel.getByRole("list", { name: "Chosen creators", exact: true }).getByRole("listitem")
+              panel.getByRole("list", { name: "Chosen authors", exact: true }).getByRole("listitem")
             ).toHaveCount(2)
             await panel.getByRole("button", { name: "Not by any of", exact: true }).click()
             await closePanel(page, "Authors")
@@ -133,7 +133,7 @@ export function cardexCriteriaTests() {
               .getByRole("group", { name: "Match", exact: true })
               .getByRole("button", { name: "Semantic", exact: true })
               .click()
-            await check("Match: Meaning")
+            await check("Match: Semantic")
             await scope.getByRole("button", { name: "Search in: All text", exact: true }).click()
             const parts = page.getByRole("dialog", { name: "Search in", exact: true })
             await parts.getByRole("checkbox").first().click()
@@ -182,7 +182,7 @@ export function cardexCriteriaTests() {
             await panel.getByRole("spinbutton", { name: "Max tokens", exact: true }).fill("2000")
             await closePanel(page, "Tokens")
             await check("100–2,000 tokens")
-            for (const label of ["Hide forks", "Deleted from all sites", "Deleted from a site"]) {
+            for (const label of ["Hide forks", "Deleted from all sources", "Deleted from a source"]) {
               controls = await filterControls(page, scope)
               await controls.getByRole("checkbox", { name: label, exact: true }).click()
               await check(label)
