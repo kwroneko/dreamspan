@@ -203,12 +203,14 @@ export const makeWorkshopSightReadHandlers = Effect.gen(function* () {
         const [chat] = yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}
           AND kind = 'workshop' AND deleted_at IS NULL`
         if (!chat) return yield* new NotFound({ entity: "workshop", id: chatId })
-        // What the assistant saw last: the items as they stood when its latest reply here ended.
-        const [last] = yield* sql<{ at: number | null }>`SELECT max(completed_at) AS at FROM rollouts
-          WHERE chat_id = ${chatId}`
-        if (!last?.at) return []
         const { inView, versions } = yield* pathView(sql, userId, chatId, leafSlotId, [], entities, [])
         if (inView.length === 0) return []
+        // A reply on another path hasn't seen the items on this path.
+        const [last] = yield* sql<{ at: number | null }>`SELECT max(r.completed_at) AS at
+          FROM versions v JOIN rollouts r ON r.id = v.rollout_id
+          WHERE v.id IN (SELECT value FROM json_each(${versions}))
+            AND r.chat_id = ${chatId} AND r.status = 'completed'`
+        if (last?.at == null) return []
         const rows = yield* sql<{
           kind: string
           label: string
