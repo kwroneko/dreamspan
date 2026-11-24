@@ -104,7 +104,11 @@ it("links a cardex card from its URL, its cardex: id and extensions.cardex, with
     url
   })
   const doc = card({
-    source: ["cardex:synthetic-lantern-2", "https://cardex.zip/c/synthetic-lantern-1"],
+    source: [
+      "cardex:synthetic-lantern-2",
+      "https://cardex.zip/c/synthetic-lantern-1",
+      "https://cardex.zip/u/synthcreator"
+    ],
     extensions: {
       cardex: {
         origins: [
@@ -118,9 +122,10 @@ it("links a cardex card from its URL, its cardex: id and extensions.cardex, with
     }
   })
   expect(cardSources(doc)).toEqual([
-    { kind: "link", site: "cardex", url: `https://cardex.zip/chub/${id}` },
+    { kind: "link", site: "cardex", url: `https://cardex.zip/chub/${id}`, label: `Chub: ${id}` },
     { kind: "link", site: "cardex", url: "https://cardex.zip/c/synthetic-lantern-2", label: "synthetic-lantern-2" },
     { kind: "link", site: "cardex", url: "https://cardex.zip/c/synthetic-lantern-1", label: "synthetic-lantern-1" },
+    { kind: "link", site: "cardex", url: "https://cardex.zip/u/synthcreator" },
     { kind: "link", site: "Chub", url: "https://chub.ai/characters/synthcreator/lantern" },
     { kind: "link", site: "cards.example", url: "https://cards.example/lantern" }
   ])

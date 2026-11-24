@@ -1315,15 +1315,13 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
             )
               return yield* bad()
             const currentId = detail.card.slug
-            const files = detail.files
+            // A card's current file may be one cardex built from the site's data rather than an
+            // original (provenance "source_build"); it counts, but an original wins when both exist.
+            const current = detail.files
               .filter(isRecord)
-              .filter(
-                (f) =>
-                  f.current !== false &&
-                  f.is_original === true &&
-                  typeof f.sha256 === "string" &&
-                  /^[0-9a-f]{64}$/.test(f.sha256)
-              )
+              .filter((f) => f.current !== false && typeof f.sha256 === "string" && /^[0-9a-f]{64}$/.test(f.sha256))
+            const originals = current.filter((f) => f.is_original === true)
+            const files = originals.length > 0 ? originals : current
             if (detail.card.hidden === true || files.length === 0) return [absent(id)]
             if (files.length === 1) {
               const file = files[0]!
@@ -1331,7 +1329,7 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
               if (file.hidden === true || mode === "refused" || mode === null) return [absent(id)]
               return [{ remoteId: id, currentId, locator, version: { id: file.sha256 as string }, available: true }]
             }
-            // With several originals, batch lookup is the archive's canonical file choice.
+            // With several such files, batch lookup is the archive's canonical file choice.
             const raw = yield* read(batchUrl([currentId], origin))
             const items = isRecord(raw) ? summaries(raw.items, origin) : null
             const item = items?.find((item) => item.remoteId === currentId)
