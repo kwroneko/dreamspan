@@ -61,6 +61,13 @@ export const cutoutStyle = (crop: AvatarCrop): CSSProperties => ({
 
 type Corner = "nw" | "ne" | "sw" | "se"
 const CUTOUT_HELP = "Drag the box to move it, or a corner to resize it. Arrow keys move it; + and − resize it."
+/** What the box chooses on each tab, for the ? beside the size slider. */
+const SIZE_HELP: Record<string, string> = {
+  picture:
+    "The box marks the part of the image shown when the picture is opened large and in exported card files. Cutout size makes the box bigger or smaller around its centre; the rest of the image is kept, just not shown.",
+  portrait:
+    "The box marks the small portrait shown beside messages, in the cast and in lists and tiles. It always stays inside the full picture. Cutout size makes it bigger or smaller around its centre."
+}
 
 const CORNERS: ReadonlyArray<Corner> = ["nw", "ne", "sw", "se"]
 const CORNER_CLASS: Record<Corner, string> = {
@@ -291,13 +298,13 @@ export function CutoutChooser({
           options={[
             {
               value: "picture",
-              label: "Picture",
-              description: "Click to choose the picture shown in large views and exports"
+              label: "Full picture",
+              description: "The picture shown when it's opened large, and in exported card files"
             },
             {
               value: "portrait",
               label: "Portrait",
-              description: "Click to choose the small portrait inside the picture"
+              description: "The small portrait shown beside messages, in the cast, and in lists and tiles"
             }
           ]}
         />
@@ -308,9 +315,9 @@ export function CutoutChooser({
             value={preset}
             onValueChange={choosePreset}
             options={[
-              { value: "free", label: "Free", description: "Click to crop to any rectangular shape" },
-              { value: "portrait", label: "2:3", description: "Click to crop two wide by three high" },
-              { value: "square", label: "1:1", description: "Click to crop a square" }
+              { value: "free", label: "Free", description: "Crop the full picture to any shape" },
+              { value: "portrait", label: "2:3", description: "Crop the full picture two wide by three high, like a portrait" },
+              { value: "square", label: "1:1", description: "Crop the full picture to a square" }
             ]}
           />
         )}
@@ -435,7 +442,13 @@ export function CutoutChooser({
             <span className="shrink-0 text-xs text-muted">Cutout size</span>
             <ToolbarSlider
               label="Cutout size"
-              hint={image ? "Resize the cutout" : "The picture must load before resizing the cutout"}
+              hint={
+                image
+                  ? tab === "picture"
+                    ? "Make the full picture's box bigger or smaller"
+                    : "Make the portrait's box bigger or smaller"
+                  : "The picture must load before resizing the cutout"
+              }
               value={box?.width ?? 0}
               min={image ? minWidth(image) : 0}
               max={image ? maxWidth(image) : 1}
@@ -452,8 +465,8 @@ export function CutoutChooser({
               hint={
                 image
                   ? tab === "picture"
-                    ? "Reset to the original picture and its default portrait"
-                    : "Reset the portrait inside the picture"
+                    ? "Go back to the whole image as the full picture, with the default portrait"
+                    : "Put the portrait back at its default place in the full picture"
                   : "The picture must load before resetting the cutout"
               }
               disabled={!image}
@@ -469,7 +482,9 @@ export function CutoutChooser({
             >
               <Icon name="regenerate" size={16} />
             </Button>
-            <AboutHint heading="cutout controls">{CUTOUT_HELP}</AboutHint>
+            <AboutHint heading="cutout controls">
+              {SIZE_HELP[tab]} {CUTOUT_HELP}
+            </AboutHint>
           </div>
           {hidden && (
             <p className="text-center text-xs text-muted">
@@ -482,20 +497,21 @@ export function CutoutChooser({
           <div className="flex items-start gap-4 sm:flex-col">
             {(tab === "picture"
               ? [
-                  ["Large view", "w-[134px]"],
-                  ["Export", "w-[96px]"]
+                  ["Large view", "Opened large", "w-[134px]"],
+                  ["Export", "Exported file", "w-[96px]"]
                 ]
               : [
-                  ["Message", AVATAR_SIZES.chat],
-                  ["Cast", AVATAR_SIZES.chip],
+                  // The message preview has the shape and size of the chat's own portraits (`Avatar` at `chat`).
+                  ["Message", "In messages", AVATAR_SIZES.chat],
+                  ["Cast", "In the cast", AVATAR_SIZES.chip],
                   // The 8.5rem minimum library/home tile has a 1px border on each side.
-                  ["Tile", "h-[201px] w-[134px]"]
+                  ["Tile", "Library tile", "h-[201px] w-[134px]"]
                 ]
-            ).map(([label, size]) => (
-              <div key={label} className="flex flex-col items-start gap-1.5">
+            ).map(([key, label, size]) => (
+              <div key={key} className="flex flex-col items-start gap-1.5">
                 <span className="text-xs text-muted">{label}</span>
                 <span
-                  data-cutout-preview={label}
+                  data-cutout-preview={key}
                   className={`relative inline-flex shrink-0 overflow-hidden rounded-sm bg-surface-raised ${size}`}
                   style={
                     tab === "picture" && crop && image

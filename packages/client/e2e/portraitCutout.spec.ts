@@ -198,9 +198,7 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   await chooser.getByRole("button", { name: "About cutout controls" }).hover()
   await expect(
     page
-      .getByText("Drag the box to move it, or a corner to resize it. Arrow keys move it; + and − resize it.", {
-        exact: true
-      })
+      .getByText("Drag the box to move it, or a corner to resize it. Arrow keys move it; + and − resize it.")
       .last()
   ).toBeVisible()
   await chooser.getByRole("button", { name: "Save picture" }).click()
@@ -453,7 +451,7 @@ test("Picture presets, free shape, reset and replace preserve the original", asy
   await page.getByRole("tabpanel", { name: "Metadata" }).getByRole("button", { name: "Picture", exact: true }).click()
   await page.getByLabel("Choose a new picture").setInputFiles(file("tall.png", shapeCard(tall, 30)))
   dialog = page.getByRole("dialog", { name: "Tall's new picture" })
-  await expect(dialog.getByRole("button", { name: "Picture", exact: true })).toHaveAttribute("aria-pressed", "true")
+  await expect(dialog.getByRole("button", { name: "Full picture", exact: true })).toHaveAttribute("aria-pressed", "true")
   await expect
     .poll(async () => {
       stage = await stageOf(dialog)
@@ -465,4 +463,66 @@ test("Picture presets, free shape, reset and replace preserve the original", asy
   await expectPreviews(dialog, false)
   await dialog.getByRole("button", { name: "Save picture", exact: true }).click()
   await expect(dialog).toHaveCount(0)
+})
+
+test("every choice in the Picture dialog explains where it's shown, and Portrait previews the chat portrait", async ({
+  page
+}) => {
+  const shots = process.env.PICTUREHELP_SHOTS
+  if (shots) await page.emulateMedia({ colorScheme: "dark" })
+  await page.setViewportSize({ width: 1340, height: 900 })
+  const { refId } = await open(page)
+  await page.goto(`${server().url}/library/${refId}`)
+  await cardFieldsTab(page, "Metadata")
+  await page.getByLabel("Choose an avatar, or drop it here").setInputFiles(file("wide.png", shapeCard(wide, 90)))
+  const dialog = page.getByRole("dialog", { name: "Tall's new picture" })
+  await expect(dialog.locator("[data-cutout-box]")).toBeVisible()
+  const explains = async (name: string, text: string, role: "button" | "slider" = "button") => {
+    await dialog.getByRole(role, { name, exact: true }).hover()
+    await expect(page.getByText(text, { exact: true }).last()).toBeVisible()
+  }
+  await explains("Full picture", "The picture shown when it's opened large, and in exported card files")
+  await explains("Portrait", "The small portrait shown beside messages, in the cast, and in lists and tiles")
+  await explains("Free", "Crop the full picture to any shape")
+  await explains("2:3", "Crop the full picture two wide by three high, like a portrait")
+  await explains("1:1", "Crop the full picture to a square")
+  await explains("Cutout size", "Make the full picture's box bigger or smaller", "slider")
+  await explains("Reset to the original", "Go back to the whole image as the full picture, with the default portrait")
+  await dialog.getByRole("button", { name: "About cutout controls" }).hover()
+  await expect(page.getByText(/opened large and in exported card files/).last()).toBeVisible()
+  const previews = dialog.getByRole("region", { name: "Previews" })
+  await expect(previews.getByText("Opened large", { exact: true })).toBeVisible()
+  await expect(previews.getByText("Exported file", { exact: true })).toBeVisible()
+  await page.mouse.move(0, 0)
+  const places = async () => {
+    const stage = (await dialog.locator("[data-cutout-stage]").boundingBox())!
+    const controls = (await dialog.locator("[data-cutout-controls]").boundingBox())!
+    return { stage: Math.round(stage.y), controls: Math.round(controls.y) }
+  }
+  const before = await places()
+  if (shots) await dialog.screenshot({ path: join(shots, "1340-dark-picture.png") })
+  await dialog.getByRole("button", { name: "Portrait", exact: true }).click()
+  expect(await places()).toEqual(before)
+  await explains("Cutout size", "Make the portrait's box bigger or smaller", "slider")
+  await explains("Reset the cutout", "Put the portrait back at its default place in the full picture")
+  for (const label of ["In messages", "In the cast", "Library tile"])
+    await expect(previews.getByText(label, { exact: true })).toBeVisible()
+  // The message preview is the chat's own portrait: its class, 2:3 shape and rounded corners.
+  const message = previews.locator('[data-cutout-preview="Message"]')
+  await expect(message).toHaveClass(/chat-portrait/)
+  const shape = await message.evaluate((node) => {
+    const rect = node.getBoundingClientRect()
+    return { ratio: rect.height / rect.width, radius: parseFloat(getComputedStyle(node).borderTopLeftRadius) }
+  })
+  expect(shape.ratio).toBeCloseTo(1.5, 1)
+  expect(shape.radius).toBeGreaterThan(0)
+  await page.mouse.move(0, 0)
+  if (shots) {
+    await dialog.screenshot({ path: join(shots, "1340-dark-portrait.png") })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await dialog.screenshot({ path: join(shots, "390-dark-portrait.png") })
+    await dialog.getByRole("button", { name: "Full picture", exact: true }).click()
+    await page.mouse.move(0, 0)
+    await dialog.screenshot({ path: join(shots, "390-dark-picture.png") })
+  }
 })
