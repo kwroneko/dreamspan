@@ -215,6 +215,18 @@ describe("parser differentials", () => {
     )
   })
 
+  it("queues media only for declarations that reach the scoped sheet", () => {
+    const out = scopeCss(
+      ".a { background: url(https://media.invalid/discarded.png), image-set(var(--source)); " +
+        "background-image: url(https://media.invalid/kept.png) }",
+      "chat=s",
+      "prefix"
+    )
+    expect(out.css).not.toContain("discarded")
+    expect(out.css).toContain("kept.png")
+    expect(out.media).toEqual(["/media/external?chat=s&url=https%3A%2F%2Fmedia.invalid%2Fkept.png"])
+  })
+
   it("bounds nesting and size before anything recursive walks the input", () => {
     expect(scoped("@media all{".repeat(5000) + ".a{color:red}" + "}".repeat(5000))).toBe("")
     expect(scoped(".a{width:" + "calc(".repeat(100_000) + "1px" + ")".repeat(100_000) + "}")).toBe("")
