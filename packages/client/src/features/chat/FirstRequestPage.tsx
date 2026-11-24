@@ -9,7 +9,8 @@ import { openOnPlainClick } from "../../ui/links.ts"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useTitle } from "../shell.tsx"
-import { findTab } from "../workbench/model.ts"
+import { itemKey } from "../workbench/kinds.ts"
+import { allTabs, findTab } from "../workbench/model.ts"
 import { useWorkbenchTab } from "../workbench/tab.tsx"
 import { firstRequestOf, firstRequests } from "./firstRequest.ts"
 
@@ -23,12 +24,22 @@ export function FirstRequestPage() {
   const request = draft?.preview?.request ?? null
   const navigate = useNavigate()
   const tab = useWorkbenchTab()
-  // Back to the new chat's own view, wherever it is: another view of it would start over.
-  const back = () => {
+  // The request has its own tab (owner, 2026-11-24): the link switches to the new chat's own tab,
+  // whose view holds the chat's choices (another view of it would start over), and this tab stays
+  // as it is. With that tab closed, the chat opens as a new tab beside this one, kept. Only where
+  // both share one view (no workbench, or the same tab) does it go back.
+  const separate = tab !== null && pendingTab !== tab.tabId
+  const goToChat = () => {
     if (pending === null) return
-    const own = tab && pendingTab ? findTab(tab.store.layout, pendingTab) : undefined
-    if (tab && own) tab.store.focusTab(own.id)
-    else void navigate({ href: pending })
+    if (tab === null || !separate) return void navigate({ href: pending })
+    // Its own tab, else any tab showing that chat (a reload gives tabs new ids).
+    const own =
+      (pendingTab === null ? undefined : findTab(tab.store.layout, pendingTab)) ??
+      allTabs(tab.store.layout).find((t) => t.id !== tab.tabId && itemKey(t.href) === itemKey(pending))
+    if (own) return tab.store.focusTab(own.id)
+    // Kept first, so the chat can't take this tab's place as a preview tab's item.
+    tab.store.pin(tab.tabId)
+    tab.store.openIn(tab.store.frameOf(tab.tabId), pending, { preview: false })
   }
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
@@ -42,9 +53,13 @@ export function FirstRequestPage() {
         </p>
       </header>
       {pending !== null && (
-        <Tooltip label="Returns to the new chat.">
-          <a href={pending} onClick={openOnPlainClick(back)} className="self-start text-sm text-muted hover:text-text">
-            ← Back to the new chat
+        <Tooltip label={separate ? "Switches to the new chat's tab." : "Returns to the new chat."}>
+          <a
+            href={pending}
+            onClick={openOnPlainClick(goToChat)}
+            className="self-start text-sm text-muted hover:text-text"
+          >
+            {separate ? "← Go to the new chat" : "← Back to the new chat"}
           </a>
         </Tooltip>
       )}

@@ -52,6 +52,52 @@ export function draftRequestTests() {
     await provider.stop()
   })
 
+  test("the first request's link switches to the new chat's own tab", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.SetGenerationDefaults({ defaults: { model: originalModel, preset: null } })
+    )
+    await page.goto(`${server().url}/cards/${entityId}/chat`)
+    const box = page.getByRole("textbox", { name: "Message", exact: true })
+    await box.fill("The lantern by the ferry is lit.")
+    // One tab shows no strip; the request's own tab makes two.
+    const strip = page.getByRole("tablist", { name: "Open tabs", exact: true })
+    const tabs = strip.getByRole("tab")
+    await expect(strip).toHaveCount(0)
+    await page.getByRole("button", { name: /^Context: about [\d,]+ of [\d,]+ tokens in your first request/ }).click()
+    await page.getByRole("dialog", { name: "Context" }).getByRole("link", { name: "View request" }).click()
+    const heading = page.getByRole("heading", { name: "Your first request" })
+    await expect(heading).toBeVisible()
+    await expect(tabs).toHaveCount(2)
+    const requestTab = strip.getByRole("tab", { name: /Your first request/ })
+    const chatTab = tabs.filter({ hasNotText: "Your first request" })
+    await expect(requestTab).toHaveAttribute("aria-selected", "true")
+    await expect(chatTab).toHaveAttribute("aria-selected", "false")
+
+    const link = page.getByRole("link", { name: "← Go to the new chat", exact: true })
+    await link.hover()
+    await expect(page.getByText("Switches to the new chat's tab.", { exact: true })).toBeVisible()
+    await link.click()
+    // The new chat's own tab is shown, with its text; the request's tab stays; no second chat tab.
+    await expect(chatTab).toHaveAttribute("aria-selected", "true")
+    await expect(requestTab).toHaveAttribute("aria-selected", "false")
+    await expectTextBox(box, "The lantern by the ferry is lit.")
+    await expect(tabs).toHaveCount(2)
+    await requestTab.click()
+    await expect(heading).toBeVisible()
+    await expect(page.locator("[data-workbench-tab]:visible")).toContainText("Nothing has been sent.")
+
+    // With the chat's tab closed, the link opens the chat in a new tab; the request's tab stays.
+    await chatTab.click({ button: "middle" })
+    await expect(strip).toHaveCount(0)
+    await link.click()
+    await expect(tabs).toHaveCount(2)
+    await expect(chatTab).toHaveAttribute("aria-selected", "true")
+    await expect(requestTab).toHaveAttribute("aria-selected", "false")
+    await expect(box).toBeVisible()
+  })
+
   for (const width of [1440, 390]) {
     for (const theme of ["light", "dark"] as const) {
       test(`a chat not sent yet shows its first request: ${width} ${theme}`, async ({ page }, info) => {
@@ -104,7 +150,7 @@ export function draftRequestTests() {
         await expectTextBox(page.getByRole("textbox", { name: "Message", exact: true }), content)
         await page.goForward()
         await expect(page.getByRole("region", { name: "Messages", exact: true })).toContainText(content)
-        await page.getByRole("link", { name: "← Back to the new chat" }).click()
+        await page.getByRole("link", { name: "← Go to the new chat" }).click()
         await expectTextBox(page.getByRole("textbox", { name: "Message", exact: true }), content)
 
         // None of it reached the model's provider.
