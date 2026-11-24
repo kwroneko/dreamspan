@@ -3,6 +3,7 @@
 // names (else its type's default), and only on one of them; the chat's lock keeps its own picks
 // as the model chip's lock does; "summary" is the chat's summary model, as `fast`. Synthetic data
 // and scripted loopback providers only.
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { Chat } from "@dreamspan/shared/chat.ts"
@@ -91,7 +92,7 @@ const setup = (parent: ReadonlyArray<ReturnType<typeof agentCall>>) =>
     const api = yield* client()
     yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${first.url}/v1` }, model: {} })
     const other = yield* secondConnection(api, second.url)
-    const chat: Chat = yield* api.CreateWorkshop({})
+    const chat: Chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events = yield* watch(api, chat)
     return { api, chat, events, first, second, other }
   })

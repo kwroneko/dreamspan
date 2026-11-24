@@ -24,6 +24,14 @@ export const WorkshopCapability = Schema.Struct({
   modes: Schema.Array(CapabilityMode),
   /** This workshop chose `mode` (it isn't the default). */
   chosen: Schema.Boolean,
+  /**
+   * Where the standing comes from when this workshop chose nothing (spec/WORKSHOP-CARDS.md §2.5):
+   * an Allow always for the workshop's assistant card (`name`), or for every workshop. Then
+   * `defaultMode` is that standing, which "Use the default" goes back to.
+   */
+  standing: Schema.optionalKey(
+    Schema.Struct({ from: Schema.Literals(["card", "always"]), name: Schema.optionalKey(Schema.String) })
+  ),
   /** Only one choice: it can't be changed. */
   always: Schema.optionalKey(Schema.Boolean),
   /**
@@ -67,7 +75,11 @@ export class GrantRefused extends Schema.TaggedError<GrantRefused>()("GrantRefus
   message: Schema.String
 }) {}
 
-export const ApprovalAnswer = Schema.Literals(["allow", "allow_chat", "deny"])
+/**
+ * `allow_card` and `allow_always` answer only a library class's question (spec/WORKSHOP-CARDS.md
+ * §2.4): Allow always for the workshop's assistant card, or in every workshop.
+ */
+export const ApprovalAnswer = Schema.Literals(["allow", "allow_chat", "allow_card", "allow_always", "deny"])
 export type ApprovalAnswer = typeof ApprovalAnswer.Type
 
 export class EffectUndoRefused extends Schema.TaggedError<EffectUndoRefused>()("EffectUndoRefused", {
@@ -254,7 +266,38 @@ export const WorkshopBranch = Schema.Struct({
 })
 export type WorkshopBranch = typeof WorkshopBranch.Type
 
+/**
+ * What the assistant may look at without asking, beyond one workshop (spec/WORKSHOP-CARDS.md
+ * §2.5): the classes allowed in every workshop, and those allowed for each assistant card.
+ */
+export const LibraryGrants = Schema.Struct({
+  /** Each class's id and its plain label ("Look through your cards"), in registry order. */
+  classes: Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String })),
+  always: Schema.Array(Schema.String),
+  cards: Schema.Array(
+    Schema.Struct({
+      entityId: EntityId,
+      /** The card's library id; null once it's gone from the library. */
+      refId: Schema.NullOr(Schema.String),
+      name: Schema.String,
+      classes: Schema.Array(Schema.String)
+    })
+  )
+})
+export type LibraryGrants = typeof LibraryGrants.Type
+
 export class WorkshopApi extends RpcGroup.make(
+  Rpc.make("ListLibraryGrants", {
+    payload: {},
+    success: LibraryGrants,
+    error: Schema.Union([ServerError])
+  }),
+  /** Takes back an Allow always: for one assistant card (`entityId`), or for every workshop. */
+  Rpc.make("RemoveLibraryGrant", {
+    payload: { capability: Schema.String, entityId: Schema.optionalKey(EntityId) },
+    success: LibraryGrants,
+    error: Schema.Union([ServerError])
+  }),
   Rpc.make("ListWorkshopCapabilities", {
     payload: { chatId: Chat.fields.id },
     success: Schema.Array(WorkshopCapability),

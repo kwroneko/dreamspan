@@ -1,3 +1,4 @@
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import { toolData } from "../src/agent/toolData.ts"
 // Workshop context sizing and long runs (spec/WORKSHOP-CONTEXT.md §1, §2, §3): the window and
 // the reply reserve come from the model, a carried run leaves older tool results out before it
@@ -126,7 +127,7 @@ describe("workshop context", () => {
       )
       const api = yield* client()
       const { model } = yield* useModel(api, `${mock.url}/v1`, { context: 200_000, maxOutput: 64_000 })
-      const chat = yield* api.CreateWorkshop({})
+      const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
       const events = yield* watch(api, chat)
       yield* api.GetWorkshopDefaults({})
       yield* api.GetNextContext({ chatId: chat.id, leafSlotId: chat.activeLeafSlotId })
@@ -168,7 +169,7 @@ describe("workshop context", () => {
       )
       const api = yield* client()
       yield* useModel(api, `${mock.url}/v1`, {})
-      const chat = yield* api.CreateWorkshop({})
+      const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
       const events = yield* watch(api, chat)
       const { id } = yield* turn(api, chat, events, "Hello.")
       const budget = yield* budgetOf(api, id)
@@ -221,7 +222,7 @@ describe("workshop context", () => {
         ] as const)
           yield* api.CreateCard({ label, name: label, description: `Marker ${label}. ${filler(seed, words)}` })
         yield* useModel(api, `${mock.url}/v1`, { context: window, maxOutput: 2_000 })
-        const chat = yield* api.CreateWorkshop({})
+        const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
         // Keep this library-result boundary independent of optional authoring definitions.
         // Every-tool mode intentionally includes every offered tool; Off removes these tools.
         yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "plugins.write", mode: "off" })
@@ -321,7 +322,7 @@ describe("workshop context", () => {
       )
       const api = yield* client()
       yield* useModel(api, `${mock.url}/v1`, { context: 200_000, maxOutput: 8_000 })
-      const chat = yield* api.CreateWorkshop({})
+      const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
       const events = yield* watch(api, chat)
       // Message 1 is the greeting: 2 and 3, 4 and 5, 6 and 7 are the turns.
       yield* turn(api, chat, events, "Plan the first card.")

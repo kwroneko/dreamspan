@@ -42,7 +42,10 @@ export interface OperationExposure {
   readonly storyRead?: WorkshopStoryRead
   readonly id: string
   readonly operation: { readonly rpc: string } | { readonly command: string }
-  readonly capability: string
+  /** Absent only for a read the library classes gate (`gatedBy`, spec/WORKSHOP-CARDS.md §2.2), or one nothing gates. */
+  readonly capability?: string
+  /** The library classes its reads ask for what is outside view (`RolloutTool.gatedBy`). */
+  readonly gatedBy?: ReadonlyArray<string>
   readonly effect: "read" | "library" | "setup" | "outside"
   /** Asks every time, even where the capability is Allowed (as plugin_enable does). */
   readonly approval?: "always"
@@ -118,7 +121,11 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
             )
         )
           throw new Error(`Operation ${operation} already has a tool name.`)
-        if (!entry.capability || !capabilities.workshopCapabilities.get(entry.capability))
+        if (
+          entry.capability === undefined
+            ? entry.effect !== "read"
+            : !capabilities.workshopCapabilities.get(entry.capability)
+        )
           throw new Error(`Tool ${entry.id} needs exactly one registered capability.`)
       }).pipe(Effect.andThen(entries.register(entry)))
   }
@@ -238,7 +245,8 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
             userId: ctx.userId,
             rolloutId: ctx.rolloutId,
             toolCallId: ctx.toolCallId,
-            capability: entry.capability,
+            // A read the library classes gate has no capability: it writes nothing a capability covers.
+            capability: entry.capability ?? "",
             expected: prepared ?? next,
             ...(ctx.approvalDigest ? { approvalDigest: ctx.approvalDigest } : {})
           })

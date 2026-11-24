@@ -10,7 +10,7 @@ import type { UserId } from "@dreamspan/shared/domain.ts"
 import { User } from "@dreamspan/shared/domain.ts"
 import type { ChatId, SlotId, ForkId } from "@dreamspan/shared/chat.ts"
 import { foldState } from "@dreamspan/shared/state.ts"
-import { settingsRegistry, readSetting, writeSetting } from "./settings.ts"
+import { settingsRegistry, readSetting, USER_ONLY_SETTINGS, writeSetting } from "./settings.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
 import type { Rpc } from "effect/rpc"
@@ -564,7 +564,7 @@ export const operationInfo = (
     }>`SELECT id, handle, display_name, role FROM users WHERE id = ${input.userId} AND disabled_at IS NULL`
     if (!row) return yield* new NotFound({ entity: "user", id: input.userId })
     const settings = yield* Effect.forEach(
-      settingsRegistry.list().filter((e) => e.scope === "user" && e.agent),
+      settingsRegistry.list().filter((e) => e.scope === "user" && e.agent && !USER_ONLY_SETTINGS.has(e.id)),
       (entry) =>
         readSetting(sql, "user", input.userId, entry.id).pipe(
           Effect.map((value) => ({ key: entry.id, description: entry.agent!.description, ...value }))

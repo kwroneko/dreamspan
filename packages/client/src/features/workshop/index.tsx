@@ -24,6 +24,7 @@ import { CAPABILITY_CHIP, STORY_SUBAGENT_MODELS_CHIP, SUBAGENT_MODELS_CHIP, work
 import { SavedSubagentModelsChip, StorySubagentModelsChip } from "./SubagentModelsChip.tsx"
 import { SubagentLimitsSection, SubagentModelsSection } from "./SubagentSettings.tsx"
 import { SubagentTypesSection } from "./SubagentTypes.tsx"
+import { CardLibraryGrants, LibraryGrantsSection } from "./LibraryGrants.tsx"
 import { assistantToolsSections } from "../assistantTools/index.tsx"
 import { askBeforeReply } from "./regenerateWarning.ts"
 import { SIDE_CHAT_TAB, TALK_ABOUT } from "./sideChat.ts"
@@ -120,6 +121,8 @@ export const register = () => [
   }),
   // The skills a card carries for a workshop assistant (spec/TOOL-LOADING.md §6), in its Extra tab.
   cardEditorSections.register({ id: "card.skills", order: 112, component: CardSkillsSection }),
+  // What this card, as a workshop's assistant, may look at always (spec/WORKSHOP-CARDS.md §2.5), beside Skills.
+  cardEditorSections.register({ id: "card.library-grants", order: 113, component: CardLibraryGrants }),
   // A story preset made into a workshop one (spec/WORKSHOP-CONTEXT.md §4.4), in the large and side-panel editors.
   editorActions.register({ id: "workshop.convert-preset", order: 20, component: convert(false) }),
   panelEditorActions.register({ id: "workshop.convert-preset", order: 30, component: convert(true) }),
@@ -128,6 +131,8 @@ export const register = () => [
   assistantToolsSections.register({ id: "subagent-limits", order: 20, component: SubagentLimitsSection }),
   // The kinds of subagents, built in, from plugins and the user's own (spec/SUBAGENTS.md §10).
   assistantToolsSections.register({ id: "subagent-types", order: 30, component: SubagentTypesSection }),
+  // Every Allow always of the library classes, and Remove (spec/WORKSHOP-CARDS.md §2.5).
+  assistantToolsSections.register({ id: "library-grants", order: 5, component: LibraryGrantsSection }),
   // Right after the model chip, whose extension it is, while subagents are allowed here (spec/SUBAGENTS.md §5.1a).
   composerControls.register({
     id: SUBAGENT_MODELS_CHIP,

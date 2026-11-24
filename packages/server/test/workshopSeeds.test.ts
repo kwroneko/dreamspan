@@ -1,3 +1,4 @@
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
@@ -20,7 +21,7 @@ describe("workshop seed lifecycle", () => {
         const writer = yield* Writer
         const reader = yield* Reader
         const chats = yield* Effect.all(
-          Array.from({ length: 8 }, () => api.CreateWorkshop({})),
+          Array.from({ length: 8 }, () => api.CreateWorkshop({ grants: OPEN_LIBRARY })),
           { concurrency: 8 }
         )
         // The workshop persona is made once with the first seeds, however many workshops start at once.
@@ -44,13 +45,13 @@ describe("workshop seed lifecycle", () => {
           assert.strictEqual(state.presetBindings[""]?.ref, preset.id)
         }
         for (const ref of [card, preset]) yield* api.SetRefArchived({ refId: ref.id, archived: true })
-        const archived = yield* api.CreateWorkshop({})
+        const archived = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
         assert.deepStrictEqual((yield* stateOf(archived)).participants, [card.entityId, persona])
         assert.strictEqual((yield* stateOf(archived)).presetBindings[""]?.ref, preset.id)
         for (const kind of ["card", "preset"] as const)
           assert.lengthOf(yield* api.ListLibrary({ kind, archived: true }), 1)
         for (const ref of [card, preset]) yield* writer.DeleteEntity({ userId: user.id, entityId: ref.entityId })
-        const replacement = yield* api.CreateWorkshop({})
+        const replacement = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
         const newCard = (yield* api.ListLibrary({ kind: "card" })).find((r) => r.entityId !== persona)!
         const newPreset = (yield* api.ListLibrary({ kind: "preset" }))[0]!
         assert.notStrictEqual(newCard.entityId, card.entityId)
@@ -164,7 +165,7 @@ describe("workshop seed lifecycle", () => {
           origin: "user",
           sourcePath: null
         })
-        const chat = yield* api.CreateWorkshop({})
+        const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
         const events: Array<ChatEvent> = []
         yield* api.SubscribeChat({ chatId: chat.id }).pipe(
           Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),

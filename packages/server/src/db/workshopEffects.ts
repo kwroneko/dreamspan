@@ -13,7 +13,7 @@ import {
   refuseOperation,
   type OperationHandlers
 } from "./operationPolicies.ts"
-import { settingsRegistry, writeSetting } from "./settings.ts"
+import { settingsRegistry, USER_ONLY_SETTINGS, writeSetting } from "./settings.ts"
 import { Schema } from "effect"
 // Setup tools compose the same typed user operations in one outer writer transaction.
 // The receipt and all undo recipes commit with them. No external work occurs here.
@@ -995,7 +995,12 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                 let result: unknown
                 if (input.operation === "SetAgentSetting") {
                   const entry = settingsRegistry.get(String(value.key))
-                  if (!entry?.agent || entry.scope !== "user" || !entry.accepts(value.value))
+                  if (
+                    !entry?.agent ||
+                    entry.scope !== "user" ||
+                    USER_ONLY_SETTINGS.has(entry.id) ||
+                    !entry.accepts(value.value)
+                  )
                     return yield* refuseOperation("This setting is not agent-changeable, or its value is invalid.")
                   result = yield* writeSetting(
                     sql,

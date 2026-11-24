@@ -4,9 +4,16 @@ import type { OrchestrationMode } from "./modes.ts"
 import { STORY_TOOLS } from "./tools/history.ts"
 import { WORKSHOP_HISTORY_TOOLS } from "./tools/runs.ts"
 
+/**
+ * What the assistant may look at without asking (spec/WORKSHOP-CARDS.md §2.1): the same bytes
+ * every turn, so carrying the run and the cache are unaffected.
+ */
+const IN_VIEW =
+  "Cards, lorebooks and presets {{user}} attaches, and those you make here, are yours to read and change. To look at anything else in their library or their chats, use the tools anyway: the app asks {{user}} first, and they may decline."
+
 // What a capability turned off in this workshop is (spec/WORKSHOP.md §3.4) is named in the instructions.
 const workshopInstructions = (off: ReadonlyArray<string>) =>
-  `Use the tools to look things up and to make changes. Before a long piece of work, tell {{user}} in a short message (send_message) what you'll do. Everything you change can be undone by {{user}}. Some tools ask {{user}} first: call them anyway; if {{user}} declines, say so and carry on. Turned off in this workshop: ${off.length > 0 ? off.join("; ") : "nothing"}.`
+  `Use the tools to look things up and to make changes. Before a long piece of work, tell {{user}} in a short message (send_message) what you'll do. Everything you change can be undone by {{user}}. Some tools ask {{user}} first: call them anyway; if {{user}} declines, say so and carry on. ${IN_VIEW} Turned off in this workshop: ${off.length > 0 ? off.join("; ") : "nothing"}.`
 
 /** A side chat beside a story (§4) says so, while its story tools are offered. */
 const SIDE_CHAT =

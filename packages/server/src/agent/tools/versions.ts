@@ -11,6 +11,7 @@ import { documentDiff } from "../../db/agentDocuments.ts"
 import { type CountEffect, estimateCount, pageEnd, pageTokens, visibleDoc } from "../libraryView.ts"
 import { toolResultFrame } from "../toolData.ts"
 import type { RolloutTool, ToolContext } from "../tools.ts"
+import { libraryClassIds } from "../capabilities.ts"
 import { pagedView, resolveLibrary, VIEWS, viewHelp } from "./library.ts"
 
 type Kind = "card" | "preset" | "lorebook"
@@ -69,7 +70,7 @@ const readRevision: RolloutTool<Readonly<Record<string, unknown>>> = {
   label: "Read a revision",
   explanation: "Read a library item as it was at an earlier revision.",
   effect: "read",
-  capability: "library.read",
+  gatedBy: libraryClassIds,
   description: `Reads a card, preset or lorebook as it was at one revision (as git show): by number from list_revisions, id, or latest. fields picks a card's fields. Read like read_card, read_preset and read_lorebook, whole when that fits, otherwise in pages. ${viewHelp.card}`,
   parameters: Type.Object({
     kind: KINDS,
@@ -152,7 +153,7 @@ const diffRevisions: RolloutTool<{
   label: "Compared revisions",
   explanation: "Compare two revisions of a library item.",
   effect: "read",
-  capability: "library.read",
+  gatedBy: libraryClassIds,
   description:
     "Shows what changed in a card, preset or lorebook between two revisions (as git diff): from, and to (default: the saved item now; unsaved drafts aren't included), each a number from list_revisions, an id, or latest. Prose comes as a unified diff (- taken out, + put in), lorebook entries and preset prompts by their uid or identifier, settings as before → after. fields limits it to some fields. If the result ends with a cursor, repeat the request with that cursor and the same fields to read on.",
   parameters: Type.Object({

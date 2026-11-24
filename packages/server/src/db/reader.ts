@@ -35,6 +35,7 @@ import { makeSubagentSettingReadHandlers } from "./subagentSettings.ts"
 import { makeMessageSearchHandlers } from "./messageSearch.ts"
 import { makeLibraryReplaceReadHandlers } from "./libraryReplace.ts"
 import { makeWorkshopGrantReadHandlers } from "./workshopGrants.ts"
+import { makeWorkshopSightReadHandlers } from "./workshopSight.ts"
 import { makeChangeReversalReadHandlers } from "./changeReversals.ts"
 import { makePersonaLockReadHandlers } from "./personaLocks.ts"
 import { makeWorkshopAttachReadHandlers } from "./workshopAttach.ts"
@@ -85,6 +86,7 @@ RpcServer.layer<OpsOf<typeof ReadOps>>(ReadOps, { concurrency: 1, disableFatalDe
               makeMessageSearchHandlers,
               makeLibraryReplaceReadHandlers,
               makeWorkshopGrantReadHandlers,
+              makeWorkshopSightReadHandlers,
               makeWorkshopAttachReadHandlers,
               makePluginReadHandlers,
               makeMcpReadHandlers,
@@ -117,6 +119,7 @@ RpcServer.layer<OpsOf<typeof ReadOps>>(ReadOps, { concurrency: 1, disableFatalDe
               messageSearch,
               libraryReplace,
               grants,
+              sight,
               attached,
               plugins,
               mcp,
@@ -153,6 +156,7 @@ RpcServer.layer<OpsOf<typeof ReadOps>>(ReadOps, { concurrency: 1, disableFatalDe
                       ...messageSearch,
                       ...libraryReplace,
                       ...grants,
+                      ...sight,
                       ...attached,
                       ...plugins,
                       ...mcp,

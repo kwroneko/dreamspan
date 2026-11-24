@@ -1,6 +1,7 @@
 // A loopback workshop for subagents that work on files (spec/SUBAGENTS.md §3.3): the reply makes
 // its calls in turn, and each subagent (a fork too) runs the script its task names (`[[name]]`),
 // then reports. A subagent's request can be held after n of its results. Synthetic data only.
+import { OPEN_LIBRARY } from "./libraryGrants.ts"
 import type { ServerResponse } from "node:http"
 import { execFileSync } from "node:child_process"
 import { Effect, Stream } from "effect"
@@ -122,7 +123,7 @@ export const filesWorkshop = (handler: (request: Recorded, res: ServerResponse) 
       connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
       model: { context: 200000 }
     })
-    const chat = yield* api.CreateWorkshop({})
+    const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events: Array<ChatEvent> = []
     yield* api.SubscribeChat({ chatId: chat.id }).pipe(
       Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),

@@ -60,7 +60,8 @@ import {
   WorkshopStartFields,
   WorkshopStarted,
   WorkshopBranch,
-  WorkshopStory
+  WorkshopStory,
+  LibraryGrants
 } from "@dreamspan/shared/workshopApi.ts"
 import { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@dreamspan/shared/cardArchive.ts"
@@ -3386,6 +3387,12 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     success: Schema.Int,
     error: StorageError
   }),
+  /** Takes back an Allow always of a library class: one card's (`entityId`), or every workshop's. */
+  Rpc.make("RemoveLibraryGrant", {
+    payload: { userId: UserId, capability: Schema.String, entityId: Schema.optionalKey(Schema.String) },
+    success: LibraryGrants,
+    error: StorageError
+  }),
   /** A tool call starts waiting for the user: its approval row, pending. */
   Rpc.make("RequestToolApproval", {
     payload: {
@@ -6403,6 +6410,62 @@ const ReadOpsOwn = RpcGroup.make(
     payload: { userId: UserId, chatIds: Schema.Array(ChatId) },
     success: Schema.Array(WorkshopStory),
     error: StorageError
+  }),
+  /** The account's Allow always grants of library classes (workshopSight.ts), with card names. */
+  Rpc.make("LibraryGrants", {
+    payload: { userId: UserId },
+    success: LibraryGrants,
+    error: StorageError
+  }),
+  /**
+   * The items in view on a workshop's path (with `entities`, its cast) that someone other than
+   * this workshop changed since its latest reply ended (workshopSight.ts, spec/WORKSHOP-CARDS.md
+   * §4.3): each one's name, kind, the top-level fields that differ, and the origins that changed it.
+   */
+  Rpc.make("ChangedInViewSince", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: Schema.NullOr(SlotId),
+      entities: Schema.Array(Schema.String)
+    },
+    success: Schema.Array(
+      Schema.Struct({
+        kind: Schema.String,
+        name: Schema.String,
+        fields: Schema.Array(Schema.String),
+        by: Schema.Array(Schema.String)
+      })
+    ),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * What a workshop reply sees without asking and how its library classes stand
+   * (workshopSight.ts, spec/WORKSHOP-CARDS.md §2.1, §2.5): the entities in view on its path, with
+   * the caller's `entities` and `refs` (its cast, a story's cast and books); the workshop's own
+   * class grants, its assistant card's (`card`) and the account's; the classes allowed for the reply.
+   */
+  Rpc.make("LibraryAccess", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: Schema.NullOr(SlotId),
+      rolloutId: Schema.String,
+      entities: Schema.Array(Schema.String),
+      refs: Schema.Array(Schema.String),
+      card: Schema.NullOr(Schema.String)
+    },
+    success: Schema.Struct({
+      inView: Schema.Array(Schema.String),
+      card: Schema.NullOr(Schema.Struct({ entityId: Schema.String, name: Schema.String })),
+      chat: Schema.Array(Schema.Struct({ capability: Schema.String, mode: CapabilityMode })),
+      cardGrants: Schema.Record(Schema.String, Schema.Literal("allow")),
+      always: Schema.Record(Schema.String, Schema.Literal("allow")),
+      replyAllowed: Schema.Array(Schema.String)
+    }),
+    error: Schema.Union([NotFound, StorageError])
   }),
   /** A workshop's grants (workshopGrants.ts): capability → mode, expired ones left out. */
   Rpc.make("WorkshopGrants", {

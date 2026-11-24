@@ -51,7 +51,10 @@ for (const workers of ["source", "bundle"] as const) {
         assert.sameMembers(
           (yield* api.ListWorkshopCapabilities({ chatId: chat.id })).map((c) => c.id),
           [
-            "library.read",
+            "library.cards",
+            "library.lorebooks",
+            "library.presets",
+            "library.notes",
             "chats.read",
             "library.write",
             "chats.setup",

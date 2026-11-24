@@ -25,7 +25,7 @@ import { ExecutionRegistry, toolForKind } from "../execution.ts"
 import { COMMANDS_UNSANDBOXED, consentTarget, MCP_CAPABILITY } from "../agent/capabilities.ts"
 import { mcpHostOf } from "../agent/tools/mcp.ts"
 import { type ChatState, foldState } from "@dreamspan/shared/state.ts"
-import { capabilityView, SIDE_STORY_READ_MODE } from "../agent/capabilities.ts"
+import { capabilityView, SIDE_STORY_READ_MODE, type StandingGrants } from "../agent/capabilities.ts"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { Forbidden, NotFound } from "@dreamspan/shared/errors.ts"
 import type { McpConnection } from "@dreamspan/shared/mcp.ts"
@@ -285,10 +285,27 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       const plan = execution.orchestrationModes.get(profile.planner)?.plan({ state, kind })
       const offered = new Set(
         (plan?.tools ?? []).flatMap((name) => {
-          const capability = toolForKind(execution, kind, name)?.capability
-          return capability ? [capability] : []
+          const tool = toolForKind(execution, kind, name)
+          // A library tool's classes (spec/WORKSHOP-CARDS.md §2.2) show wherever it's offered.
+          return [...(tool?.capability ? [tool.capability] : []), ...(tool?.gatedBy ?? [])]
         })
       )
+      // A class's Allow always, for this workshop's assistant card or every workshop (§2.5).
+      const userId = (yield* CurrentUser).id
+      const libraryGrants = yield* reader.LibraryGrants({ userId })
+      const card = state.participants.find((id) => !state.playedByMe.includes(id))
+      const cardGrants = libraryGrants.cards.find((c) => c.entityId === card)
+      const standing: StandingGrants = {
+        ...(cardGrants
+          ? {
+              card: {
+                name: cardGrants.name,
+                grants: Object.fromEntries(cardGrants.classes.map((id) => [id, "allow" as const]))
+              }
+            }
+          : {}),
+        always: Object.fromEntries(libraryGrants.always.map((id) => [id, "allow" as const]))
+      }
       // A setting shown with the capability it belongs to (Internet from commands, with Run commands).
       for (const entry of execution.workshopCapabilities.list())
         if (entry.alongside && offered.has(entry.alongside)) offered.add(entry.id)
@@ -342,7 +359,8 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
                 ? { ...capability, explanation: `${capability.explanation} Not available here: ${noCommands}` }
                 : capability.id === "commands" && commandsNote
                   ? { ...capability, explanation: `${capability.explanation} ${commandsNote}` }
-                  : capability
+                  : capability,
+            standing
           )
         )
       return [...builtins, ...servers]
@@ -413,6 +431,15 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
     })
 
   return {
+    // Only the user's own requests reach these: no tool is given them (exclusions.ts).
+    ListLibraryGrants: () =>
+      Effect.flatMap(CurrentUser, (user) => reader.LibraryGrants({ userId: user.id })).pipe(
+        internal("ListLibraryGrants")
+      ),
+    RemoveLibraryGrant: ({ capability, entityId }) =>
+      Effect.flatMap(CurrentUser, (user) =>
+        writer.RemoveLibraryGrant({ userId: user.id, capability, ...(entityId ? { entityId } : {}) })
+      ).pipe(internal("RemoveLibraryGrant")),
     ListWorkshopCapabilities: ({ chatId }) =>
       Effect.gen(function* () {
         const userId = (yield* CurrentUser).id

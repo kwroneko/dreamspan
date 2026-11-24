@@ -8,7 +8,7 @@ import { useCaller } from "../../editor/caller.ts"
 import { useDurableText } from "../../editor/durable.tsx"
 import { StoryScope } from "../../workshop/StoryScope.tsx"
 import type { ApprovalAnswer } from "@dreamspan/shared/workshopApi.ts"
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 import { ErrorAlert, useAction } from "../../../actions.tsx"
 import { Button } from "../../../ui/Button.tsx"
 import { Field, Textarea } from "../../../ui/Field.tsx"
@@ -56,8 +56,10 @@ function WaitingApproval({ approval, version }: { approval: Prompt; version: Ste
           answer: choice,
           ...(choice === "deny" && trimmed !== "" ? { note: trimmed } : {})
         }),
-      // Allowing it in this workshop changes what the chip shows.
-      choice === "allow_chat" ? ["workshop-capabilities"] : []
+      // Allowing it in this workshop, or always, changes what the chip (and Settings) shows.
+      choice === "allow_chat" || choice === "allow_card" || choice === "allow_always"
+        ? ["workshop-capabilities", "library-grants"]
+        : []
     )
     setAnswering(null)
     // Sent with Decline, the note is the answer's; with another answer it goes to the bin.
@@ -87,6 +89,30 @@ function WaitingApproval({ approval, version }: { approval: Prompt; version: Ste
   }
   const busy = answering !== null
   const rerun = approval.rerun
+  if (approval.scoped)
+    return (
+      <ScopedPanel
+        approval={approval}
+        scoped={approval.scoped}
+        answer={answer}
+        answering={answering}
+        error={action.error}
+        note={
+          noting ? (
+            <Field label="Note for the assistant" description="Sent with Decline, so it knows why. Optional.">
+              <Textarea
+                value={note}
+                readOnly={!durable.ready}
+                maxLength={2000}
+                rows={2}
+                onChange={(event) => durable.setText(event.target.value)}
+              />
+            </Field>
+          ) : null
+        }
+        onAddNote={noting ? null : () => setAdding(true)}
+      />
+    )
   if (approval.restart)
     return (
       <RestartPanel
@@ -248,6 +274,86 @@ function WaitingApproval({ approval, version }: { approval: Prompt; version: Ste
 }
 
 type Prompt = NonNullable<StepActionProps["step"]["approval"]>
+
+/**
+ * A library class's question (spec/WORKSHOP-CARDS.md §2.4): what the call does, then the four
+ * scopes, Decline and Add a note. Allow is the smallest scope: it covers this reply, not one call.
+ */
+function ScopedPanel({
+  approval,
+  scoped,
+  answer,
+  answering,
+  error,
+  note,
+  onAddNote
+}: {
+  approval: Prompt
+  scoped: NonNullable<Prompt["scoped"]>
+  answer: (choice: ApprovalAnswer) => Promise<void>
+  answering: ApprovalAnswer | null
+  error: Parameters<typeof ErrorAlert>[0]["error"]
+  note: ReactNode
+  onAddNote: (() => void) | null
+}) {
+  const busy = answering !== null
+  const what = approval.capabilityLabel.replace(/^Look through /, "look through ")
+  const choice = (value: ApprovalAnswer, label: string, hint: string, primary = false) => (
+    <Button
+      key={value}
+      {...(primary ? { variant: "primary" as const } : {})}
+      pending={answering === value}
+      disabled={busy}
+      hint={hint}
+      onClick={() => void answer(value)}
+    >
+      {label}
+    </Button>
+  )
+  return (
+    <div
+      data-approval={approval.toolCallId}
+      data-approval-scoped={approval.capability}
+      role="group"
+      aria-label={`The assistant asks: ${approval.title}`}
+      className="ml-5 flex flex-col gap-2 rounded-md border border-warning/50 bg-surface p-3 text-sm"
+    >
+      <div className="flex flex-col gap-0.5">
+        <p className="font-medium [overflow-wrap:anywhere]">{approval.title}</p>
+        <p className="text-xs text-muted [overflow-wrap:anywhere]">{scoped.line}</p>
+      </div>
+      {approval.uncertain && <Alert tone="warning">{UNCERTAIN_TEXT}</Alert>}
+      {note}
+      <ErrorAlert error={error} title="Your answer wasn’t taken" />
+      <div className="flex flex-wrap gap-2">
+        {choice("allow", "Allow", `Lets it ${what} until this reply ends.`, true)}
+        {choice(
+          "allow_chat",
+          "Allow in this chat",
+          "In this workshop, until you change it from the strip’s “Can” chip."
+        )}
+        {scoped.card &&
+          choice(
+            "allow_card",
+            `Allow always for ${scoped.card.name}`,
+            `In every workshop whose assistant is ${scoped.card.name}. Change it on ${scoped.card.name}’s Extra tab or in Settings → Assistant tools.`
+          )}
+        {choice("allow_always", "Allow always", "In every workshop. Change it in Settings → Assistant tools.")}
+        {choice("deny", "Decline", "Tells the assistant not to, and to ask you to attach what it needs.")}
+        {onAddNote && (
+          <Button
+            variant="ghost"
+            disabled={busy}
+            hint="Adds a note the assistant gets with Decline, saying why or what to do instead."
+            onClick={onAddNote}
+          >
+            Add a note
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
 
 /**
  * A subagent that couldn't be resumed with its reply (spec/SUBAGENTS.md §8): start its task again,

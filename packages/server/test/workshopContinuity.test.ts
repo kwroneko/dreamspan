@@ -1,3 +1,4 @@
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import { assert, describe, it } from "@effect/vitest"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import type { Chat, MessageLibrary, VersionId } from "@dreamspan/shared/chat.ts"
@@ -103,7 +104,7 @@ describe("workshop messages and continuity", () => {
         model: {},
         preset: { openai_max_context: 32768 }
       })
-      const chat = yield* api.CreateWorkshop({})
+      const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
       const events = yield* watch(api, chat)
       const start = yield* send(api, chat, "Do the work.")
       const path = yield* done(api, chat, events)
@@ -285,7 +286,7 @@ for (const [kind, cacheMode] of [
         model: { cacheBreakpoints: cacheMode },
         preset: { openai_max_context: 32768 }
       })
-      const chat = yield* api.CreateWorkshop({})
+      const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
       yield* api.ChangeLcmSettings({ chatId: chat.id, change: { enabled: false } })
       const events = yield* watch(api, chat)
       const first = yield* send(api, chat, "First request.")
@@ -372,7 +373,7 @@ it.live("removes the empty working slot after a final empty answer, with no bin 
       model: {},
       preset: { openai_max_context: 32768 }
     })
-    const chat = yield* api.CreateWorkshop({})
+    const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events = yield* watch(api, chat)
     const first = yield* send(api, chat, "One message please.")
     yield* eventually(() => events.some((e) => e._tag === "Reload"))
@@ -428,7 +429,7 @@ for (const ending of ["stop", "failure"] as const)
         model: {},
         preset: { openai_max_context: 32768 }
       })
-      const chat = yield* api.CreateWorkshop({})
+      const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
       const events = yield* watch(api, chat)
       const start = yield* send(api, chat, "Work then wait.")
       yield* eventually(() => waiting)
@@ -524,7 +525,7 @@ for (const change of [
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: { context: 32768 }
       })
-      const chat = yield* api.CreateWorkshop({})
+      const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
       yield* api.ChangeLcmSettings({ chatId: chat.id, change: { enabled: false } })
       const events = yield* watch(api, chat)
       const first = yield* send(api, chat, "First request.")
@@ -788,7 +789,7 @@ it.live("each posted message starts a fresh parser and passes through the final 
         }
       ]
     })
-    const chat = yield* api.CreateWorkshop({})
+    const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events = yield* watch(api, chat)
     yield* send(api, chat, "Post, then finish.")
     yield* eventually(() =>
@@ -838,7 +839,7 @@ it.live("a queued user message posts below the last send without leaving an empt
       model: {},
       preset: { openai_max_context: 32768 }
     })
-    const chat = yield* api.CreateWorkshop({})
+    const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events = yield* watch(api, chat)
     const first = yield* send(api, chat, "Please work.")
     yield* eventually(() => finish !== undefined)
@@ -911,7 +912,7 @@ it.live("Stop during the posting transaction's acknowledgement leaves the next m
       model: {},
       preset: { openai_max_context: 32768 }
     })
-    const chat = yield* api.CreateWorkshop({})
+    const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events = yield* watch(api, chat)
     const first = yield* send(api, chat, "Post and wait.")
     yield* Deferred.await(committed)

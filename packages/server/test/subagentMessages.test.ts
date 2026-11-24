@@ -4,6 +4,7 @@
 // (delivered at its next request) and to a finished one (a continuation that remembers its run),
 // `report_progress`, causal handle lookup, and Resume carrying background subagents on.
 // Synthetic data and a scripted loopback provider only.
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import type { ServerResponse } from "node:http"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
@@ -117,7 +118,7 @@ const workshop = (handler: (request: Recorded, res: ServerResponse) => void) =>
     )
     const api = yield* client()
     yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
-    const chat = yield* api.CreateWorkshop({})
+    const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events: Array<ChatEvent> = []
     yield* api.SubscribeChat({ chatId: chat.id }).pipe(
       Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),

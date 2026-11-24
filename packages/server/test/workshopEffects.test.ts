@@ -1,3 +1,4 @@
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import { cardSourceExposures } from "../src/agent/exposures/cardSources.ts"
 import { builtinOperationExposures } from "../src/agent/exposures/builtins.ts"
 import { assert, describe, it } from "@effect/vitest"
@@ -96,7 +97,7 @@ const edit = (api: Api, refId: RefId, content: string, key = "description") =>
 const fixture = (dataDir: string, api: Api) =>
   Effect.gen(function* () {
     const user = yield* api.Whoami()
-    const chat = yield* api.CreateWorkshop({})
+    const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const rolloutId = `r-${chat.id}`
     yield* fixtureSql(dataDir, [
       {
@@ -212,7 +213,10 @@ describe("workshop setup effects", () => {
       assert.deepStrictEqual(
         capabilities.map((c) => c.id),
         [
-          "library.read",
+          "library.cards",
+          "library.lorebooks",
+          "library.presets",
+          "library.notes",
           "chats.read",
           "library.write",
           "chats.setup",
@@ -235,6 +239,10 @@ describe("workshop setup effects", () => {
       assert.deepStrictEqual(
         capabilities.map((c) => c.mode),
         [
+          // The four library classes, allowed by the fixture (OPEN_LIBRARY).
+          "allow",
+          "allow",
+          "allow",
           "allow",
           "ask",
           "allow",
@@ -256,9 +264,8 @@ describe("workshop setup effects", () => {
       assert.deepStrictEqual(
         capabilities.map((c) => c.modes),
         [
-          ["allow"],
-          // chats.read to network, then files and commands.
-          ...Array.from({ length: 9 }, () => ["off", "ask", "allow"] as const),
+          // The four library classes, then chats.read to network, then files and commands.
+          ...Array.from({ length: 13 }, () => ["off", "ask", "allow"] as const),
           // Internet from commands: Off or On.
           ["off", "allow"],
           ["off", "ask", "allow"],
@@ -287,7 +294,7 @@ describe("workshop setup effects", () => {
       })
       assert.deepStrictEqual(
         (yield* api.ListWorkshopCapabilities({ chatId: f.chat.id })).map((c) => c.id),
-        ["library.read"]
+        ["library.cards", "library.lorebooks", "library.presets", "library.notes"]
       )
       const story = yield* api.CreateChat({ title: "Story" })
       assert.isEmpty(yield* api.ListWorkshopCapabilities({ chatId: story.id }))
@@ -334,7 +341,7 @@ describe("workshop setup effects", () => {
         )
         const api = yield* client()
         yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
-        const chat = yield* api.CreateWorkshop({})
+        const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
         const events = yield* watch(api, chat)
         const sent = yield* posted(
           api.SendMessage({
@@ -584,7 +591,7 @@ describe("workshop setup effects", () => {
         )
         const api = yield* client()
         yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
-        const chat = yield* api.CreateWorkshop({})
+        const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
         const events = yield* watch(api, chat)
         const sent = yield* posted(
           api.SendMessage({
@@ -847,7 +854,7 @@ describe("workshop setup effects", () => {
         )
         const api = yield* client()
         yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
-        const chat = yield* api.CreateWorkshop({})
+        const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
         const initial = (yield* api.ListLibrary({ kind: "card" })).map((r) => r.id)
         const events = yield* watch(api, chat)
         const sent = yield* posted(

@@ -352,10 +352,11 @@ describe("notes and files tools", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const f = yield* fixture(config.dataDir)
-      const capabilities: Record<string, string> = {
-        read_note: "library.read",
-        list_shared_notes: "library.read",
-        list_export_formats: "library.read",
+      const capabilities: Record<string, string | undefined> = {
+        // Reads gated by the library classes for what is outside view (spec/WORKSHOP-CARDS.md §2.2).
+        read_note: undefined,
+        list_shared_notes: undefined,
+        list_export_formats: undefined,
         list_chat_notes: "chats.read",
         list_imports: "chats.read",
         read_import: "chats.read",
@@ -373,7 +374,7 @@ describe("notes and files tools", () => {
       for (const name of NEW_TOOLS) {
         const tool = toolForKind(f.registry, "workshop", name)!
         assert.strictEqual(tool.capability, capabilities[name], name)
-        assert.strictEqual(tool.effect === "read", capabilities[name]!.endsWith(".read"), name)
+        assert.strictEqual(tool.effect === "read", capabilities[name]?.endsWith(".read") ?? true, name)
         assert.isDefined(tool.storyRead, name)
         assert.include(plan.tools, name)
         for (const kind of ["rp", "unknown"])

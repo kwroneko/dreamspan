@@ -14,6 +14,27 @@ export const capabilitiesAtom = Atom.family((chatId: ChatId) =>
   AppClient.query("ListWorkshopCapabilities", { chatId }, { reactivityKeys: [CAPABILITIES_KEY, chatId] })
 )
 
+/** The account's Allow always grants of library classes (spec/WORKSHOP-CARDS.md §2.5). */
+export const LIBRARY_GRANTS_KEY = "library-grants"
+export const libraryGrantsAtom = AppClient.query("ListLibraryGrants", {}, { reactivityKeys: [LIBRARY_GRANTS_KEY] })
+
+/**
+ * Where a library class's standing comes from when this workshop chose nothing (§2.5): "Allowed
+ * always for Quillwright", "Allowed always"; null for the app's default or this workshop's choice.
+ */
+export const standingText = (capability: WorkshopCapability) =>
+  capability.chosen || !capability.standing
+    ? null
+    : capability.standing.from === "card"
+      ? `Allowed always for ${capability.standing.name ?? "this assistant"}.`
+      : "Allowed always."
+
+/** Where to change that standing, for its hover. */
+export const standingWhere = (capability: WorkshopCapability) =>
+  capability.standing?.from === "card"
+    ? `Change it on ${capability.standing.name ?? "the assistant card"}’s Extra tab or in Settings → Assistant tools.`
+    : "Change it in Settings → Assistant tools."
+
 const modeLabel: Record<CapabilityMode, string> = { off: "Off", ask: "Ask first", allow: "Allowed" }
 
 /** Each choice's hover explanation. */

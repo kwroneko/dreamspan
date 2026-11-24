@@ -27,6 +27,8 @@ import {
   modeDescriptionOf,
   modeLabelOf,
   modeText,
+  standingText,
+  standingWhere,
   type WorkshopCapability
 } from "./capabilities.ts"
 
@@ -43,6 +45,7 @@ function CapabilityRow({
   error?: ReactNode
 }) {
   const choices = choicesOf(capability)
+  const standing = standingText(capability)
   // A capability with a consent (no sandbox, spec/FILES-AND-ENVIRONMENT.md §3.7) asks before it's turned on.
   const [asking, setAsking] = useState<CapabilityMode | null>(null)
   const ask = (mode: CapabilityMode | null) => {
@@ -82,13 +85,29 @@ function CapabilityRow({
           <span className="text-right text-xs text-muted">{modeText(capability)}</span>
         )}
       </div>
-      <span className="text-xs text-muted [overflow-wrap:anywhere]">{capability.explanation}</span>
+      <span className="text-xs text-muted [overflow-wrap:anywhere]">
+        {capability.explanation}
+        {standing && (
+          <>
+            {" "}
+            <Tooltip label={standingWhere(capability)}>
+              <span className="font-medium text-text" tabIndex={0} data-capability-standing>
+                {standing}
+              </span>
+            </Tooltip>
+          </>
+        )}
+      </span>
       {capability.chosen && choices.length > 1 && (
         <Button
           variant="ghost"
           className="h-7 self-start px-2 text-xs"
           pending={pending}
-          hint={`Goes back to the default here: ${modeLabelOf(capability, capability.defaultMode)}.`}
+          hint={
+            capability.standing
+              ? `Goes back to what's set beyond this workshop: ${modeLabelOf(capability, capability.defaultMode)} (${capability.standing.from === "card" ? `always for ${capability.standing.name ?? "this assistant"}` : "always"}).`
+              : `Goes back to the default here: ${modeLabelOf(capability, capability.defaultMode)}.`
+          }
           onClick={() => ask(null)}
         >
           Use the default

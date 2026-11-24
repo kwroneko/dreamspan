@@ -8,6 +8,9 @@ import type { ChatState } from "@dreamspan/shared/state.ts"
 interface TurnNoteInput {
   readonly userId: string
   readonly chatId: string
+  /** The reply's branch and the message it answers: where its path, and what's in view, ends. */
+  readonly forkId?: string | null
+  readonly leafSlotId?: string | null
   readonly kind: string
   /** The branch's state before the reply (causal order). */
   readonly state: ChatState

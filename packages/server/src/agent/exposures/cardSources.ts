@@ -265,7 +265,6 @@ export const cardSourceExposures: ReadonlyArray<OperationExposure> = [
     id: "list_card_sources",
     storyRead: "account",
     operation: { rpc: "ListCardSources" },
-    capability: "library.read",
     effect: "read",
     label: "Looked at your card sources",
     explanation: "List your card sources",

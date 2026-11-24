@@ -180,7 +180,8 @@ describe("0002_files", () => {
           "card_files",
           "workshop_import_media_quota",
           "change_reversals",
-          "bin_reply_edits"
+          "bin_reply_edits",
+          "library_classes"
         ]
       )
       // The existing row is kept, an image by default.
@@ -535,7 +536,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0023_card_files",
       "0024_workshop_import_media_quota",
       "0025_change_reversals",
-      "0026_bin_reply_edits"
+      "0026_bin_reply_edits",
+      "0027_library_classes"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -971,6 +973,30 @@ describe("0019_queue_library_revisions", () => {
       )
       assert.deepStrictEqual(yield* attached(), attachedBefore)
       assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, [])
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
+describe("0027_library_classes", () => {
+  it.effect("carries a workshop's choice for reading the library to each of the four classes", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* migrate(upTo(26))
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      for (const chat of ["off", "plain"])
+        yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES (${chat}, 'u', 'workshop', 'active', 0)`
+      yield* sql`INSERT INTO workshop_grants (chat_id, capability, target, owner_user_id, mode, updated_at)
+        VALUES ('off', 'library.read', '', 'u', 'off', 5), ('off', 'library.write', '', 'u', 'ask', 5)`
+      yield* migrate(upTo(27))
+      const rows = yield* sql<{ chat_id: string; capability: string; mode: string }>`
+        SELECT chat_id, capability, mode FROM workshop_grants ORDER BY chat_id, capability`
+      assert.deepStrictEqual(rows, [
+        { chat_id: "off", capability: "library.cards", mode: "off" },
+        { chat_id: "off", capability: "library.lorebooks", mode: "off" },
+        { chat_id: "off", capability: "library.notes", mode: "off" },
+        { chat_id: "off", capability: "library.presets", mode: "off" },
+        { chat_id: "off", capability: "library.write", mode: "ask" }
+      ])
     }).pipe(Effect.provide(layer()))
   )
 })

@@ -18,6 +18,7 @@ import { Type } from "@earendil-works/pi-ai"
 import type { EntityKind, LibraryRef, RefId, RevisionId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import type { RolloutTool, ToolContext } from "../tools.ts"
+import { classOfKind, libraryClassIds } from "../capabilities.ts"
 
 const failRead = (error: unknown) =>
   Effect.logWarning("Workshop library read failed", error).pipe(
@@ -27,11 +28,33 @@ const failRead = (error: unknown) =>
 const entries = (context: ToolContext, kind: EntityKind, archived = false) =>
   context.reader.ListLibrary({ userId: context.userId, kind, tag: null, archived, withFilterData: true })
 
+const kindNoun: Record<EntityKind, string> = {
+  card: "card",
+  lorebook: "lorebook",
+  preset: "preset",
+  note: "note",
+  preset_overlay: "preset overlay"
+}
+
+/**
+ * A library item by name, library id or entity id, through what the reply may see
+ * (spec/WORKSHOP-CARDS.md §2): an item in view resolves without asking; anything else, a miss or
+ * an ambiguous name included, asks the kind's class first, so no name outside view is told
+ * before the user allows it. Every library tool, setup tool and version tool resolves here.
+ */
 export const resolveLibrary = (context: ToolContext, kind: EntityKind, name: string) =>
   Effect.gen(function* () {
     const refs = [...(yield* entries(context, kind)), ...(yield* entries(context, kind, true))]
     const id = refs.find((ref) => ref.id === name || ref.entityId === name)
     const matches = id ? [id] : refs.filter((ref) => ref.label.toLocaleLowerCase() === name.toLocaleLowerCase())
+    if (context.sight) {
+      const sight = context.sight
+      const seen = yield* Effect.filter(matches, (ref) => sight.inView(ref.entityId))
+      if (seen.length === 1) return { ref: seen[0]! }
+      const shown = matches.length === 1 ? matches[0]!.label : name
+      const allowed = yield* sight.gate(classOfKind(kind), `It wants to open the ${kindNoun[kind]} “${shown}”.`)
+      if (!allowed.ok) return { error: allowed.text }
+    }
     return matches.length === 1
       ? { ref: matches[0]! }
       : {
@@ -61,7 +84,7 @@ const listLibrary: RolloutTool<{
   label: "Looked in your library",
   explanation: "Find cards, presets, lorebooks and notes in your library.",
   effect: "read",
-  capability: "library.read",
+  gatedBy: libraryClassIds,
   description: "Lists your library entries with names, ids, subtitles and tags. Use an id when names are ambiguous.",
   parameters: Type.Object({
     kind: Type.Union([Type.Literal("card"), Type.Literal("preset"), Type.Literal("lorebook"), Type.Literal("note")]),
@@ -70,25 +93,49 @@ const listLibrary: RolloutTool<{
   }),
   summarize: ({ query, kind }) => query ?? kind,
   execute: (context, { kind, query, limit }) =>
-    entries(context, kind).pipe(
-      Effect.map((refs) => {
-        const words = (query ?? "").toLocaleLowerCase().split(/\s+/).filter(Boolean)
-        const matches = refs
-          .map(identity)
-          .filter((ref) =>
-            words.every((word) =>
-              `${ref.name} ${ref.subtitle} ${ref.tags.join(" ")}`.toLocaleLowerCase().includes(word)
-            )
-          )
-        const cap = limit ?? 20
-        return {
-          frame: toolResultFrame({ entries: matches.slice(0, cap), remaining: Math.max(0, matches.length - cap) }),
-          text: JSON.stringify({ entries: matches.slice(0, cap), remaining: Math.max(0, matches.length - cap) })
-        }
-      }),
-      Effect.catch(failRead)
-    )
+    Effect.gen(function* () {
+      const refused = yield* gateListing(context, kind, query)
+      if (refused !== null) return { text: refused, isError: true }
+      const refs = yield* entries(context, kind)
+      const words = (query ?? "").toLocaleLowerCase().split(/\s+/).filter(Boolean)
+      const matches = refs
+        .map(identity)
+        .filter((ref) =>
+          words.every((word) => `${ref.name} ${ref.subtitle} ${ref.tags.join(" ")}`.toLocaleLowerCase().includes(word))
+        )
+      const cap = limit ?? 20
+      return {
+        frame: toolResultFrame({ entries: matches.slice(0, cap), remaining: Math.max(0, matches.length - cap) }),
+        text: JSON.stringify({ entries: matches.slice(0, cap), remaining: Math.max(0, matches.length - cap) })
+      }
+    }).pipe(Effect.catch(failRead))
 }
+
+/** What a listing's question names (§2.4): "your characters and personas". */
+const listedNoun: Record<EntityKind, string> = {
+  card: "your characters and personas",
+  lorebook: "your lorebooks",
+  preset: "your presets",
+  note: "your notes",
+  preset_overlay: "your preset overlays"
+}
+
+/**
+ * Listing names is covered by the class that reads them (spec/WORKSHOP-CARDS.md §2.2): a card's
+ * name and tags often say what it is. Null: it may list; otherwise why not, for the model.
+ */
+export const gateListing = (context: ToolContext, kind: EntityKind, query: string | undefined) =>
+  Effect.gen(function* () {
+    if (!context.sight) return null
+    const words = query?.trim()
+    const allowed = yield* context.sight.gate(
+      classOfKind(kind),
+      words
+        ? `It wants to search ${listedNoun[kind]} for “${words}”, and to read what it finds.`
+        : `It wants to list ${listedNoun[kind]}, and to read what it finds.`
+    )
+    return allowed.ok ? null : allowed.text
+  })
 
 export const VIEWS = ["whole", "summary", "field", "index", "entry", "prompt"] as const
 
@@ -241,7 +288,7 @@ const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Re
   label: `Read a ${kind}`,
   explanation: `Read a ${kind} from your library.`,
   effect: "read",
-  capability: "library.read",
+  gatedBy: libraryClassIds,
   description: `Reads a ${kind} by name, library id or entity id: the saved library head, or, with revision, the revision a workshop message attached (by its library id). Whole when that fits, otherwise in pages. Page sizes are in tokens (max_tokens, 2,000 by default, 200 to 8,000); a cut page says the offset to read on from. ${viewHelp[kind]} Without a view, an attached revision reads one field, entry or prompt by character offset (nextOffset). Unsaved drafts are not included.`,
   parameters: Type.Object({
     [kind]: Type.String({ description: `The ${kind}'s name or id. Use the library id with revision.` }),
@@ -360,7 +407,7 @@ const readNote: RolloutTool<{ readonly note: string }> = {
   label: "Read a note",
   explanation: "Read a shared note or a card's note from your library.",
   effect: "read",
-  capability: "library.read",
+  gatedBy: libraryClassIds,
   description:
     "Reads a shared note or a card's note, by id or name: its saved revision and document. A chat's own notes are read with list_chat_notes.",
   parameters: Type.Object({ note: Type.String({ description: "The note's name or id." }) }),

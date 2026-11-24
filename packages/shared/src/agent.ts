@@ -48,6 +48,17 @@ export const ApprovalPrompt = Schema.Struct({
   changes: Schema.optionalKey(
     Schema.Array(Schema.Struct({ field: Schema.String, before: Schema.String, after: Schema.String }))
   ),
+  /**
+   * A library class's question (spec/WORKSHOP-CARDS.md §2.4): answered Allow (until the reply
+   * ends), Allow in this chat, Allow always for `card` (the workshop's assistant card; absent
+   * when it has none) or Allow always. `line` says what this call does, from its real arguments.
+   */
+  scoped: Schema.optionalKey(
+    Schema.Struct({
+      line: Schema.String,
+      card: Schema.optionalKey(Schema.Struct({ entityId: Schema.String, name: Schema.String }))
+    })
+  ),
   /** Only this one call can be allowed: no "Allow in this workshop" (a server plugin's commit from Files). */
   once: Schema.optionalKey(Schema.Boolean),
   /** The app stopped while it may have been running: it may already have happened. */

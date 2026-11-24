@@ -352,7 +352,7 @@ describe("card-source tools", () => {
         assert.strictEqual(tool.effect, id === "adopt_remote_card" ? "library" : "read", id)
         assert.strictEqual(
           tool.capability,
-          id === "adopt_remote_card" ? "library.write" : id === "list_card_sources" ? "library.read" : "network",
+          id === "adopt_remote_card" ? "library.write" : id === "list_card_sources" ? undefined : "network",
           id
         )
       }

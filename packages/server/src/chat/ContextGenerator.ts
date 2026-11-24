@@ -47,6 +47,7 @@ import {
   toolWriter
 } from "../agent/tools.ts"
 import { makePermit, offeredByGrants } from "../agent/approvals.ts"
+import { makeLibrarySight } from "../agent/librarySight.ts"
 import { loaderFor, loadingWireFor, offerableTools, planToolLoading, skillMarkerInput } from "../agent/loadingPlan.ts"
 import { dispatcherDefinition } from "../agent/dispatcher.ts"
 import { frozenOffer, loadedSet, type Skill } from "../agent/toolLoading.ts"
@@ -235,6 +236,18 @@ export const layer = Layer.effect(
             ...(loadingWireFor(execution, model) ? { loadingWire: loadingWireFor(execution, model)! } : {}),
             reader,
             writer,
+            ...(profile.allowsOutside
+              ? {
+                  sight: makeLibrarySight({
+                    registries: execution,
+                    reader,
+                    writer,
+                    userId: request.userId,
+                    chatId: request.chatId,
+                    rolloutId
+                  })
+                }
+              : {}),
             permit: makePermit({
               registries: execution,
               reader,
@@ -433,7 +446,15 @@ export const layer = Layer.effect(
           const notes = plan.assembly?.workshop
             ? (yield* Effect.forEach(execution.turnNotes.list(), (note) =>
                 note
-                  .line({ userId, chatId, kind: chat.kind, state, offered: tools.map((t) => t.id) })
+                  .line({
+                    userId,
+                    chatId,
+                    forkId,
+                    leafSlotId: parent,
+                    kind: chat.kind,
+                    state,
+                    offered: tools.map((t) => t.id)
+                  })
                   .pipe(Effect.orElseSucceed(() => null))
               )).flatMap((line) => {
                 const note = typeof line === "string" ? { text: line, events: [] } : line
@@ -897,6 +918,11 @@ export const layer = Layer.effect(
                     ...(loadingWireFor(execution, model) ? { loadingWire: loadingWireFor(execution, model)! } : {}),
                     reader,
                     writer,
+                    ...(profile.allowsOutside
+                      ? {
+                          sight: makeLibrarySight({ registries: execution, reader, writer, userId, chatId, rolloutId })
+                        }
+                      : {}),
                     permit: makePermit({
                       registries: execution,
                       reader,
