@@ -66,6 +66,43 @@ test("the cover checkbox follows an explicit setting in a saved search", async (
   }
 })
 
+test("excluding a result's author keeps the included authors editable", async ({ page }) => {
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: "0" })
+  try {
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto(new URL("/?show=src.cardex", server.url).href)
+    const main = page.getByRole("main")
+    await expect(main.locator("[data-filter-panels]")).toBeVisible()
+    let panel = await openPanel(page, main, "Authors")
+    const rows = panel.getByRole("list", { name: "Authors", exact: true }).getByRole("button")
+    await rows.nth(0).click()
+    await rows.nth(1).click()
+    await closePanel(page, "Authors")
+    const filters = () => JSON.parse(new URL(page.url()).searchParams.get("sf") ?? "{}") as Record<string, string>
+    const included = filters().any_author
+    expect(included).toBeTruthy()
+    await expect(main.locator("[data-source-results]")).toHaveAttribute("aria-busy", "false")
+    const byline = main.locator("[data-remote-card]").filter({ has: page.locator("[data-remote-creator]") })
+    await byline.first().getByRole("link").click({ button: "right" })
+    await page.getByRole("menuitem", { name: /^Not by / }).click()
+
+    const chips = main.getByRole("group", { name: "Active filters", exact: true }).locator("[data-source-chip]")
+    const exclusion = chips.filter({ hasText: /^Not by / })
+    await expect(exclusion).toHaveCount(1)
+    await expect(chips.filter({ hasText: /^By / })).toHaveCount(2)
+    await expect(await panelSummary(page, main, "Authors")).toHaveAccessibleName(/Any of 2 authors.*Not by 1 author/)
+    panel = await openPanel(page, main, "Authors")
+    await expect(panel.getByRole("list", { name: "Chosen authors", exact: true }).getByRole("listitem")).toHaveCount(3)
+    await closePanel(page, "Authors")
+    await exclusion.getByRole("button", { name: "Remove", exact: true }).click()
+    await expect(exclusion).toHaveCount(0)
+    expect(filters()).toEqual({ any_author: included })
+  } finally {
+    await server.stop()
+  }
+})
+
 for (const width of [1440, 390])
   test(`${width}: the archive's filter bar applies, clears and round-trips the URL`, async ({ page }, info) => {
     test.setTimeout(240_000)

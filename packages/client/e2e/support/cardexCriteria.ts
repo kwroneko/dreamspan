@@ -101,7 +101,7 @@ export function cardexCriteriaTests() {
             const rows = creatorList.getByRole("button")
             await expect(rows.first()).toBeVisible()
             const firstPage = await rows.count()
-            await rows.last().scrollIntoViewIfNeeded()
+            await creatorList.getByRole("listitem").last().scrollIntoViewIfNeeded()
             await expect.poll(() => rows.count()).toBeGreaterThan(firstPage)
             // Two chosen are by any of them; Not by any of turns the same two into those left out.
             await rows.nth(0).click()

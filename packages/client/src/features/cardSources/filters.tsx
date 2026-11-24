@@ -596,12 +596,24 @@ const handle = (identity: string) => identity.slice(identity.indexOf("/") + 1)
 const creatorNames = new Map<string, string>()
 const creatorName = (identity: string) => creatorNames.get(identity) ?? handle(identity)
 
-/** The creators chosen and whether they're left out. */
+/** The included and excluded authors, which can both constrain the search. */
 const creatorChoice = (caps: SourceCapabilities, filters: Filters) => {
   const c = caps.creators!
   const not = c.excludeFilterId ? splitList(filters[c.excludeFilterId]) : []
   const by = [...splitList(filters[c.filterId]), ...(c.anyFilterId ? splitList(filters[c.anyFilterId]) : [])]
-  return not.length ? { mode: "not" as const, chosen: not } : { mode: "by" as const, chosen: by }
+  return { by, not }
+}
+
+type AuthorMode = "by" | "not"
+const creatorPatch = (c: NonNullable<SourceCapabilities["creators"]>, mode: AuthorMode, list: ReadonlyArray<string>) => {
+  const patch: Patch = {}
+  if (mode === "not") {
+    if (c.excludeFilterId) patch[c.excludeFilterId] = list.length ? joinList(list) : undefined
+  } else {
+    patch[c.filterId] = list.length === 1 || !c.anyFilterId ? list[0] : undefined
+    if (c.anyFilterId) patch[c.anyFilterId] = list.length > 1 ? joinList(list) : undefined
+  }
+  return patch
 }
 
 /** The floor the source applies to a range while nothing lifts it. */
@@ -623,10 +635,10 @@ const summaryOf = (browse: SourceBrowse, panel: Panel): string => {
   const exclude = first.kind === "choice" ? first.excludeId : undefined
   switch (panel.key) {
     case "Authors": {
-      const { mode, chosen } = creatorChoice(caps, filters)
-      if (chosen.length === 0) return "Any author"
-      if (mode === "not") return `Not by ${chosen.length} ${chosen.length === 1 ? "author" : "authors"}`
-      return chosen.length === 1 ? "By 1 author" : `Any of ${chosen.length} authors`
+      const { by, not } = creatorChoice(caps, filters)
+      const included = by.length === 1 ? "By 1 author" : by.length ? `Any of ${by.length} authors` : ""
+      const excluded = not.length ? `Not by ${not.length} ${not.length === 1 ? "author" : "authors"}` : ""
+      return [included, excluded].filter(Boolean).join(" · ") || "Any author"
     }
     case "Sources": {
       const names = (values: ReadonlyArray<string>) =>
@@ -1020,21 +1032,13 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
   const c = caps.creators!
   const filters = browse.remote.filters
   const current = creatorChoice(caps, filters)
-  const [picked, setPicked] = useState<"by" | "not">("by")
-  const mode = current.chosen.length ? current.mode : picked
-  const chosen = current.chosen
+  const [picked, setPicked] = useState<AuthorMode | null>(null)
+  const mode = picked ?? (current.by.length === 0 && current.not.length > 0 ? "not" : "by")
+  const chosen = current[mode]
+  const selected = (["by", "not"] as const).flatMap((side) => current[side].map((identity) => ({ side, identity })))
   const [text, setText] = useState("")
   const suggestions = useSuggestions(browse, "creators", text.trim())
   const full = chosen.length >= 20
-  const write = (next: "by" | "not", list: ReadonlyArray<string>) => {
-    const patch: Record<string, SourceFilterValue | undefined> = { [c.filterId]: undefined }
-    if (c.anyFilterId) patch[c.anyFilterId] = undefined
-    if (c.excludeFilterId) patch[c.excludeFilterId] = undefined
-    if (list.length && next === "not" && c.excludeFilterId) patch[c.excludeFilterId] = joinList(list)
-    else if (list.length === 1 || (list.length && !c.anyFilterId)) patch[c.filterId] = list[0]!
-    else if (list.length && c.anyFilterId) patch[c.anyFilterId] = joinList(list)
-    set(patch)
-  }
   const nameOf = creatorName
   useEffect(() => {
     for (const item of suggestions.items) creatorNames.set(item.value, item.label)
@@ -1053,7 +1057,9 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
           value={mode}
           onValueChange={(next) => {
             setPicked(next)
-            if (chosen.length) write(next, chosen)
+            // With one selection list the toggle moves it. With both, it chooses which list to edit.
+            if (next !== mode && chosen.length && current[next].length === 0)
+              set({ ...creatorPatch(c, mode, []), ...creatorPatch(c, next, chosen) })
           }}
           options={[
             { value: "by", label: "By any of", description: "Only cards by one of the authors chosen." },
@@ -1077,7 +1083,7 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
         // right-aligned column and the mark, with one gap between them however wide the list.
         className={`flex flex-col ${
           popover
-            ? `-mx-3 max-h-80 min-h-0 overflow-y-auto overscroll-contain border-t border-border py-1 pl-1.5 [scrollbar-gutter:stable] ${chosen.length ? "border-b" : "-mb-3"}`
+            ? `-mx-3 max-h-80 min-h-0 overflow-y-auto overscroll-contain border-t border-border py-1 pl-1.5 [scrollbar-gutter:stable] ${selected.length ? "border-b" : "-mb-3"}`
             : ""
         }`}
       >
@@ -1091,7 +1097,7 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
                 disabled={!on && full}
                 onClick={() => {
                   creatorNames.set(item.value, item.label)
-                  write(mode, on ? chosen.filter((v) => v !== item.value) : [...chosen, item.value])
+                  set(creatorPatch(c, mode, on ? chosen.filter((v) => v !== item.value) : [...chosen, item.value]))
                 }}
                 className={`flex h-8 min-w-0 flex-1 items-center gap-3 rounded-md text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset disabled:opacity-50 pointer-coarse:h-11 ${popover ? "pr-1 pl-[1.125rem]" : "px-3"}`}
               >
@@ -1120,33 +1126,27 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
           <LoadMore suggestions={suggestions} />
         </li>
       </ul>
-      {chosen.length > 0 && (
+      {selected.length > 0 && (
         <ul
           aria-label="Chosen authors"
           data-layout-audit-ignore="inset: A chip's remove button sits in the pill's compact end, as in MultiSelect"
           className={`flex flex-wrap content-start items-start gap-1.5 ${popover ? "max-h-24 shrink-0 overflow-y-auto" : ""}`}
         >
-          {chosen.map((identity) => (
+          {selected.map(({ side, identity }) => (
             <li
-              key={identity}
-              className={`${chipClass} ${mode === "not" ? "border-danger/60 text-danger" : "border-accent/60"}`}
+              key={`${side}:${identity}`}
+              className={`${chipClass} ${side === "not" ? "border-danger/60 text-danger" : "border-accent/60"}`}
             >
-              <span
-                className={`min-w-0 truncate ${mode === "not" ? "line-through decoration-1" : ""}`}
-                title={identity}
-              >
+              <span className={`min-w-0 truncate ${side === "not" ? "line-through decoration-1" : ""}`} title={identity}>
                 {nameOf(identity)}
               </span>
               <IconButton
-                label={`Remove ${nameOf(identity)}`}
+                label={`Remove ${side === "not" ? "exclusion of " : ""}${nameOf(identity)}`}
                 hint="Takes this author out of the filter."
                 icon="close"
                 className="size-6! shrink-0"
                 onClick={() =>
-                  write(
-                    mode,
-                    chosen.filter((v) => v !== identity)
-                  )
+                  set(creatorPatch(c, side, current[side].filter((v) => v !== identity)))
                 }
               />
             </li>
@@ -1697,27 +1697,20 @@ export function SourceChips({ browse }: { browse: SourceBrowse }) {
   const { panels } = layoutOf(caps)
   const done = new Set<string>()
   if (creators.length) {
-    const { mode, chosen } = creatorChoice(caps, filters)
-    for (const identity of chosen)
-      chips.push(
-        <Chip
-          key={`creator:${identity}`}
-          tone={mode === "not" ? "exclude" : "plain"}
-          onRemove={() => {
-            const rest = chosen.filter((v) => v !== identity)
-            const c = caps.creators!
-            const patch: Record<string, SourceFilterValue | undefined> = { [c.filterId]: undefined }
-            if (c.anyFilterId) patch[c.anyFilterId] = undefined
-            if (c.excludeFilterId) patch[c.excludeFilterId] = undefined
-            if (rest.length && mode === "not" && c.excludeFilterId) patch[c.excludeFilterId] = joinList(rest)
-            else if (rest.length === 1 || (rest.length && !c.anyFilterId)) patch[c.filterId] = rest[0]!
-            else if (rest.length && c.anyFilterId) patch[c.anyFilterId] = joinList(rest)
-            change(patch)
-          }}
-        >
-          {mode === "not" ? `Not by ${creatorName(identity)}` : `By ${creatorName(identity)}`}
-        </Chip>
-      )
+    const current = creatorChoice(caps, filters)
+    for (const mode of ["by", "not"] as const) {
+      const chosen = current[mode]
+      for (const identity of chosen)
+        chips.push(
+          <Chip
+            key={`creator:${mode}:${identity}`}
+            tone={mode === "not" ? "exclude" : "plain"}
+            onRemove={() => change(creatorPatch(caps.creators!, mode, chosen.filter((v) => v !== identity)))}
+          >
+            {mode === "not" ? `Not by ${creatorName(identity)}` : `By ${creatorName(identity)}`}
+          </Chip>
+        )
+    }
     for (const id of creators) done.add(id)
   }
   for (const panel of panels) {
