@@ -46,6 +46,44 @@ const card = (description: string, note: string) => ({
 
 const field = (page: Page, name: string) => page.getByRole("textbox", { name: new RegExp(`^${name}`) })
 
+test("a file stays selected while its merge upload is pending", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const response = await page.request.post(`${server().url}/library/import?name=wren.png`, {
+    headers: { "content-type": "application/octet-stream", origin: server().url },
+    data: cardPng(card("A lighthouse keeper.", ""), 128)
+  })
+  expect(response.status()).toBe(200)
+  const refId = ((await response.json()) as { library: { ref: { id: string } } }).library.ref.id
+  await page.goto(`${server().url}/library/${refId}`)
+  await page.getByRole("button", { name: "Import a new version…", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Import a new version of Wren" })
+  await dialog.getByLabel(/^Choose the new version's file/).setInputFiles({
+    name: "wren-2.png",
+    mimeType: "image/png",
+    buffer: cardPng(card("A retired lighthouse keeper.", ""), 40)
+  })
+
+  const started = Promise.withResolvers<void>()
+  const upload = Promise.withResolvers<void>()
+  await page.route(
+    (url) => url.pathname === "/library/import" && url.searchParams.get("mode") === "merge",
+    async (route) => {
+      started.resolve()
+      await upload.promise
+      await route.continue()
+    }
+  )
+  try {
+    await dialog.getByRole("button", { name: "Merge…", exact: true }).click()
+    await started.promise
+    await expect(dialog.getByRole("button", { name: "Choose another file" })).toBeDisabled()
+    await expect(dialog.getByRole("button", { name: "Replace", exact: true })).toBeDisabled()
+  } finally {
+    upload.resolve()
+  }
+  await expect(page.getByRole("dialog", { name: "Merge into Wren" })).toContainText("wren-2.png")
+})
+
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
     test(`a card takes a new version of its file wholesale ${width} ${theme}`, async ({ page }) => {
