@@ -2,14 +2,14 @@
 // entry, a preset prompt or a whole item written to the working folder through the file tools'
 // own path: the folder, never replacing a file, quota, an undoable change, the Files capability,
 // and the library classes for what's outside view. Synthetic items only.
-import { assert, describe, it } from "@effect/vitest"
+import { assert, describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { FrozenTool, ToolContext } from "../src/agent/tools.ts"
 import { FILE_TOOLS } from "../src/agent/tools/files.ts"
-import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { cardDoc, presetDoc } from "./support/docs.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
@@ -306,36 +306,55 @@ describe("export_to_file", () => {
         label: "Archive",
         subtitle: "",
         doc: cardDoc("Archive", {
-          description: Array.from({ length: 3000 }, (_, i) => `Shelf ${i + 1}.`).join("\n")
+          description: Array.from({ length: 3000 }, (_, i) => `Shelf ${i + 1}.`).join("\n"),
+          first_mes: "Read on with offset= is part of this greeting."
         }) as never,
         schemaVersion: cardDoc("Archive").schema_version,
         origin: "user",
         sourcePath: null
       })
-      const offer = (names: ReadonlyArray<string>) => ({
+      const offer = (names: ReadonlyArray<string>): NonNullable<ToolContext["offer"]> => ({
         kind: "workshop",
         tools: names.map((name) => ({ name }) as FrozenTool),
-        loaded: new Set<string>()
+        loaded: new Set(),
+        cardSkills: []
       })
       const read = (context: Partial<ToolContext>, args: unknown) =>
         toolForKind(registry, "workshop", "read_card")!.execute({ ...base, ...context } as ToolContext, args as never)
       const page = { card: ref.id, view: "field", field: "description", max_tokens: 200 }
-      const offered = yield* read({ offer: offer(["read_card", "export_to_file"]) as never }, page)
+      const withExport = offer(["read_card", "export_to_file"])
+      const withoutExport = offer(["read_card"])
+      const offered = yield* read({ offer: withExport }, page)
       assert.include(offered.text, "save it to a file with export_to_file")
-      const summary = yield* read({ offer: offer(["read_card", "export_to_file"]) as never }, { card: ref.id })
+      const summary = yield* read({ offer: withExport }, { card: ref.id })
       assert.include(summary.text, "export_to_file")
-      const without = yield* read({ offer: offer(["read_card"]) as never }, page)
+      const without = yield* read({ offer: withoutExport }, page)
       assert.notInclude(without.text, "export_to_file")
-      // A page that is the whole field says nothing.
-      const short = yield* read(
-        { offer: offer(["read_card", "export_to_file"]) as never },
-        {
-          ...page,
-          max_tokens: 8000,
-          offset: 30_000
-        }
+      const last = yield* read({ offer: withExport }, { ...page, offset: 30_000, max_tokens: 8000 })
+      assert.notInclude(last.text, "export_to_file")
+      const short = yield* read({ offer: withExport }, { ...page, field: "first_mes" })
+      assert.include(short.text, "Read on with offset= is part of this greeting.")
+      expect.soft(short.text).not.toContain("export_to_file")
+
+      const sent = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: chat.activeLeafSlotId,
+          branch: false,
+          content: "",
+          library: [{ kind: "card", refId: ref.id }]
+        })
       )
-      assert.notInclude(short.text, "export_to_file")
+      const pinned = { card: ref.id, revision: ref.headRevisionId }
+      const attached = { leafSlotId: sent.entry.slotId, forkId: sent.chat.currentForkId }
+      const cut = yield* read({ ...attached, offer: withExport }, pinned)
+      assert.strictEqual(JSON.parse(cut.text).nextOffset, 4000)
+      expect.soft(cut.text).toContain("save it to a file with export_to_file")
+      const noTool = yield* read({ ...attached, offer: withoutExport }, pinned)
+      assert.notInclude(noTool.text, "export_to_file")
+      const complete = yield* read({ ...attached, offer: withExport }, { ...pinned, field: "first_mes" })
+      assert.strictEqual(JSON.parse(complete.text).doc, "Read on with offset= is part of this greeting.")
+      assert.notInclude(complete.text, "export_to_file")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

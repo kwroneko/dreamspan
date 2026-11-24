@@ -143,7 +143,7 @@ export const makeCardFileTools = (deps: CardFileToolDeps) => {
         const visible = visibleDoc("card", info.doc)
         const head = headOf(place.full, info)
         const viewed = yield* pagedView("card", visible, visible, head, args, countOf(ctx), ctx.window)
-        if (viewed !== null) return viewed
+        if (viewed !== null) return viewed.result
         return {
           text: JSON.stringify({
             path: place.full,
