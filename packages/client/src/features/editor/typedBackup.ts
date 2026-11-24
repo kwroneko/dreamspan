@@ -18,7 +18,8 @@ export const readTypedBackup = (userId: string, targetId: string): Copy | null =
     // reject that unversioned copy; the legacy time rule applies otherwise.
     if (copy && !("save" in copy))
       return {
-        key: `legacy:${copy.at}`,
+        // Its owner and draft too: two such backups of the same moment are two copies (rev-dd3 #3).
+        key: `legacy:${userId}:${targetId}:${copy.at}`,
         userId,
         refId: targetId,
         field: "First message",
@@ -63,22 +64,28 @@ export const dropTypedBackup = (copy: Copy) => {
 /**
  * The old pages' typed backups of this user, moved into the browser copies (rev-dfu1 #7): no
  * page opens their keys now, so Browser recovery lists them and Retry saving sends them (the
- * server files them to recovered texts). Each leaves localStorage once IndexedDB has it.
+ * server files them to recovered texts). Each leaves localStorage only once its exact copy is
+ * read back from IndexedDB (a put that IndexedDB couldn't make keeps it: rev-dd3 #1), and only
+ * while localStorage still holds that copy, not newer text another tab wrote since (#2).
  */
 export const adoptTypedBackups = async (userId: string) => {
   const prefix = `dreamspan.pendingTyped:${userId}:`
-  let keys: Array<string>
+  const keys: Array<string> = []
   try {
-    keys = Object.keys(localStorage).filter((name) => name.startsWith(prefix))
+    for (let i = 0; i < localStorage.length; i++) {
+      const name = localStorage.key(i)
+      if (name?.startsWith(prefix)) keys.push(name)
+    }
   } catch {
     return
   }
   for (const name of keys) {
     const copy = readTypedBackup(userId, name.slice(prefix.length))
+    if (copy === null) continue
     try {
-      if (copy !== null && !(await copiesOf(userId, copy.refId)).some((there) => there.key === copy.key))
-        await keepCopy(copy)
-      localStorage.removeItem(name)
+      const has = async () => (await copiesOf(userId, copy.refId)).some((there) => there.key === copy.key)
+      if (!(await has())) await keepCopy(copy)
+      if (await has()) dropTypedBackup(copy)
     } catch {
       // Kept for the next opening.
     }
