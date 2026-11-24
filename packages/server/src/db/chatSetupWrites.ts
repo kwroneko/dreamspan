@@ -733,6 +733,14 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           // A greeting's index in the card, as its version's greeting_ref has it.
           const cardIndex = (entity: string, option: { readonly index: number }) =>
             byId.get(entity)?.greetingIndexes[option.index] ?? -1
+          /** A card's ordinary greetings, by their index in the card. */
+          const ordinaryOf = (greeter: {
+            readonly greetingIndexes: ReadonlyArray<number>
+            readonly greetings: ReadonlyArray<string>
+          }) =>
+            new Map(
+              greeter.greetingIndexes.slice(0, greeter.greetings.length).map((card, k) => [card, greeter.greetings[k]!])
+            )
           const slots = yield* sql<{ id: string; parent: string | null; depth: number; selected: string }>`
             SELECT id, parent_slot_id AS parent, depth, selected_version_id AS selected FROM slots
             WHERE chat_id = ${chatId} ORDER BY depth`
@@ -785,17 +793,19 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               !wanted.options.some((option) => cardIndex(characters[keep]!, option) === index)
             )
               break
-            // None drawn (its card in the bin): made with a group-only greeting and alone now, it
-            // is made again from its ordinary greetings, or goes if it has none (rev-dfu1 #3).
+            // None drawn (its card in the bin) and alone now: a message made with a greeting that
+            // isn't one of the card's ordinary ones as the card has it (a group-only one, or one
+            // whose index an edit of the card moved) is made again from its ordinary greetings, or
+            // goes if it has none (rev-dfu1 #3, rev-dd2 #4). Its other such greetings go below.
             const greeter = byId.get(characters[keep]!)
-            if (
-              wanted === undefined &&
-              characters.length === 1 &&
-              index !== null &&
-              greeter !== undefined &&
-              greeter.greetingIndexes.slice(greeter.greetings.length).includes(index)
-            )
-              break
+            if (wanted === undefined && characters.length === 1 && greeter !== undefined) {
+              const ordinary = ordinaryOf(greeter)
+              const [selected] = (yield* versionsOf(slots[keep]!.id)).filter(
+                (version) => version.id === slots[keep]!.selected
+              )
+              const card = refIndex(selected?.ref ?? null)
+              if (card !== null && ordinary.get(card) !== selected!.content) break
+            }
             keep++
           }
           // What a message made again keeps: by speaker, the greeting it showed, each greeting's
@@ -857,7 +867,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             // None drawn for it (its card moved to the bin since): it keeps the greetings it has,
             // except that a group-only one goes once it is the chat's only character.
             if (wanted === undefined && characters.length > 1) continue
-            const groupOnly = new Set(greeter.greetingIndexes.slice(greeter.greetings.length))
+            // Alone with none drawn: only the card's ordinary greetings, as the card has them now.
+            const ordinary = ordinaryOf(greeter)
             const offered =
               wanted === undefined ? null : new Map(wanted.options.map((option) => [cardIndex(entity, option), option]))
             const versions = yield* versionsOf(slot.id)
@@ -870,7 +881,9 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               }
             const removed = versions.filter((version) => {
               const index = refIndex(version.ref)
-              return index !== null && (offered === null ? groupOnly.has(index) : !offered.has(index))
+              return (
+                index !== null && (offered === null ? ordinary.get(index) !== version.content : !offered.has(index))
+              )
             })
             if (removed.length === 0) continue
             const stays = versions
@@ -897,32 +910,43 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             const before = gone.get(entity)
             gone.delete(entity)
             const drawn = wantedOf.get(entity)
-            // Another change's character, drawn there: its message as it was.
-            // A chat of one character keeps none of its group-only greetings.
-            const groupOnly = new Set(greeter?.greetingIndexes.slice(greeter.greetings.length) ?? [])
+            // Another change's character, drawn there: its message as it was. Alone with none
+            // drawn (its card in the bin), its card's ordinary greetings as the card has them: what
+            // the message kept (frozen macros, edits, the one shown) only where its text still
+            // matches (rev-dd2 #4).
+            const fromCard = drawn === undefined && characters.length === 1 && greeter !== undefined
+            const ordinary = greeter === undefined ? new Map<number, string>() : ordinaryOf(greeter)
+            const matches = (card: number) => !fromCard || before?.versions.get(card)?.content === ordinary.get(card)
             const options =
               drawn?.options.map((option) => ({ ...option, card: cardIndex(entity, option) })) ??
-              [...(before?.versions ?? new Map<number, Row>()).entries()]
-                .filter(([card]) => characters.length > 1 || !groupOnly.has(card))
-                .map(([card, version]) => ({
-                  index: greeter?.greetingIndexes.indexOf(card) ?? -1,
-                  text: version.content,
-                  frozen:
-                    version.frozen === null ? null : (JSON.parse(version.frozen) as { readonly [x: string]: string }),
-                  card
-                }))
+              (fromCard
+                ? [...ordinary.entries()].map(([card, text]) => ({
+                    index: greeter.greetingIndexes.indexOf(card),
+                    text,
+                    frozen: null,
+                    card
+                  }))
+                : [...(before?.versions ?? new Map<number, Row>()).entries()].map(([card, version]) => ({
+                    index: greeter?.greetingIndexes.indexOf(card) ?? -1,
+                    text: version.content,
+                    frozen:
+                      version.frozen === null ? null : (JSON.parse(version.frozen) as { readonly [x: string]: string }),
+                    card
+                  })))
             if (greeter === undefined || options.length === 0) {
               if (before !== undefined) lost.push(...[...before.edits.values()].flat(), ...before.scratchpads)
               continue
             }
             const shownBefore = before?.shown ?? null
             const pick = options.findIndex((option) =>
-              shownBefore === null ? option.index === (drawn?.greeting ?? 0) : option.card === shownBefore
+              shownBefore === null
+                ? option.index === (drawn?.greeting ?? 0)
+                : option.card === shownBefore && matches(option.card)
             )
             // The greeting it showed isn't offered now: the card's first instead.
             if (pick < 0 && shownBefore !== null) fellBack = true
             const versions = options.map((option) => {
-              const old = before?.versions.get(option.card)
+              const old = matches(option.card) ? before?.versions.get(option.card) : undefined
               const frozen =
                 old === undefined
                   ? option.frozen
@@ -946,7 +970,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             // The edits set aside go to the greetings made again, the rest to recovered texts.
             const made = yield* versionsOf(inserted.slotId)
             for (const [card, drafts] of before?.edits ?? new Map<number, Array<SweptDraft>>()) {
-              const version = made.find((row) => refIndex(row.ref) === card)
+              const version = matches(card) ? made.find((row) => refIndex(row.ref) === card) : undefined
               if (version === undefined) lost.push(...drafts)
               else
                 for (const draft of drafts)

@@ -110,6 +110,52 @@ describe("a pending chat's edges", () => {
     )
   )
 
+  it.live("a card edited before it was binned keeps no group-only greeting once alone in the draft (rev-dd2 #4)", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make, writer, userId } = yield* setup
+        const created = yield* writer.CreateEntity({
+          userId,
+          kind: "card",
+          label: "Mira",
+          subtitle: "",
+          doc: cardDoc("Mira", { first_mes: "", group_only_greetings: ["Mira greets everyone."] }),
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
+        const mira = created.entityId as EntityId
+        const tobin = yield* make("Tobin")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${tobin}` })
+        const forkId = draft.currentForkId!
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Join", entityId: mira } })
+        const shown = () =>
+          Effect.gen(function* () {
+            const texts: Array<string> = []
+            for (const entry of yield* path(api, draft.id))
+              for (const version of yield* api.ListVersions({ slotId: entry.slotId })) texts.push(version.content)
+            return texts
+          })
+        assert.include(yield* shown(), "Mira greets everyone.")
+        // Mira gets an alternate greeting, which moves her group greeting's index; then the bin.
+        const opened = yield* api.OpenEditor({ refId: created.ref.id })
+        yield* writer.EditRef({
+          userId: userId as UserId,
+          refId: created.ref.id,
+          doc: { ...opened.doc, alternate_greetings: ["Mira nods."] },
+          expectedRowVersion: opened.ref.rowVersion,
+          message: null,
+          commitDraft: null
+        })
+        yield* writer.DeleteEntity({ userId, entityId: mira })
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Leave", entityId: tobin } })
+        const after = yield* shown()
+        assert.notInclude(after, "Mira greets everyone.")
+        assert.include(after, "Mira nods.")
+      })
+    )
+  )
+
   it.live("a binned card with only a group greeting loses its message once left alone in the draft (rev-dfu1 #3)", () =>
     run(
       Effect.gen(function* () {
