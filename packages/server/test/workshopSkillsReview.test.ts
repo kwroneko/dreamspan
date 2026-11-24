@@ -5,8 +5,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
-import { valueField } from "@dreamspan/shared/editing.ts"
-import type { RefId } from "@dreamspan/shared/library.ts"
+import { cardSkillList } from "@dreamspan/shared/cardSkills.ts"
 import { Effect, Stream } from "effect"
 import { compose, type StPrompt } from "../src/assembler/st.ts"
 import { loadSkillDescription, type Skill } from "../src/agent/toolLoading.ts"
@@ -112,15 +111,16 @@ for (const mode of ["every", "auto", "dispatcher"] as const) {
         yield* eventually(() => events.length > 0)
         return { chatId: chat.id as ChatId, events, leaf: chat.activeLeafSlotId as SlotId | null }
       })
-      /** One turn that calls load_skill; `answer` null expects that nothing asks. */
+      /** `answer` null expects that the call finishes without asking. */
       const turn = (
         shop: { chatId: ChatId; events: Array<ChatEvent>; leaf: SlotId | null },
         callId: string,
         answer: "allow" | "allow_chat" | "deny" | null,
-        expectRows?: string
+        expectRows?: string,
+        calls = [toolUse(callId, "load_skill", { name: "proofread" })]
       ) =>
         Effect.gen(function* () {
-          script.push(toolUse(callId, "load_skill", { name: "proofread" }), text("Done."))
+          script.push(...calls, text("Done."))
           const from = mock.requests().length
           const sent = yield* posted(
             api.SendMessage({ chatId: shop.chatId, parentSlotId: shop.leaf, branch: false, content: "Proofread." })
@@ -145,7 +145,7 @@ for (const mode of ["every", "auto", "dispatcher"] as const) {
               // The user is shown the words they are asked about; no request has carried them yet.
               assert.include(JSON.stringify(step.approval.rows), expectRows)
               if (answer === "deny")
-                for (const r of mock.requests()) assert.notInclude(JSON.stringify(r.body), expectRows)
+                for (const r of mock.requests().slice(from)) assert.notInclude(JSON.stringify(r.body), expectRows)
             }
             yield* api.AnswerToolApproval({
               rolloutId: step.approval.rolloutId,
@@ -194,31 +194,25 @@ for (const mode of ["every", "auto", "dispatcher"] as const) {
       const elsewhere = yield* turn(b, "load_3", "deny")
       for (const body of elsewhere.bodies) assert.notInclude(body, first)
 
-      // The skill changes (an edit, a re-import or a tool writes the same field): it asks again,
-      // shows the new words, and declined, they never reach the model.
-      const refId = helper.ref.id as RefId
-      const opened = yield* api.OpenEditor({ refId })
-      const field = valueField(["extensions", "dreamspan"])
-      const draft = yield* api.SaveEditorDraft({
-        refId,
-        field,
-        content: JSON.stringify({ skills: [skill(second)] }),
-        draftId: null,
-        expectedRowVersion: null,
-        expectedSession: null,
-        baseRevisionId: opened.ref.headRevisionId
-      })
-      yield* api.CommitEditorDrafts({
-        refId,
-        expectedRowVersion: opened.ref.rowVersion,
-        fields: [{ field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
-        message: null
-      })
+      // The assistant rewrites the skill. The other workshop's old grant can't load the new words.
+      const args = {
+        card: helper.ref.id,
+        changes: [{ field: "skills", action: "edit", name: "proofread", skill: skill(second) }]
+      }
+      yield* turn(b, "edit_skill", null, undefined, [
+        toolUse("load_cards", "load_skill", { name: "cards" }),
+        mode === "dispatcher"
+          ? toolUse("edit_skill", "call_tool", { name: "edit_card", arguments: args })
+          : toolUse("edit_skill", "edit_card", args)
+      ])
+      const saved = yield* api.OpenEditor({ refId: helper.ref.id })
+      assert.deepStrictEqual(cardSkillList(saved.doc.extensions as Record<string, unknown>), [skill(second)])
+      assert.isTrue((yield* api.ListRolloutEffects({ chatId: b.chatId })).some((e) => e.toolCallId === "edit_skill"))
       const changed = yield* turn(a, "load_4", "deny", second)
       assert.isTrue(changed.asked)
-      for (const r of mock.requests()) {
-        assert.notInclude(JSON.stringify(r.body), second)
-        assert.notInclude(JSON.stringify(r.body), "UNTRUSTED INDEX TEXT")
+      for (const body of changed.bodies) {
+        assert.notInclude(body, second)
+        assert.notInclude(body, "UNTRUSTED INDEX TEXT")
       }
       // A decline isn't remembered either: the next load asks again.
       const later = yield* turn(a, "load_5", "allow", second)

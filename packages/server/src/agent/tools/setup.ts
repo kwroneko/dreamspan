@@ -1,4 +1,5 @@
 import { editDocument, presetEditArguments, lorebookEditArguments } from "./documents.ts"
+import { cardSkillChange, changeCardSkill, type CardSkillChange } from "./cardSkillEdits.ts"
 import { toolResultFrame } from "../toolData.ts"
 import { boundedArguments } from "../operations.ts"
 import { documentDiff, documentChangeRows, executableNotice, validateAgentDocument } from "../../db/agentDocuments.ts"
@@ -217,19 +218,30 @@ const fields = [
   "creator_notes",
   "creator"
 ]
-type CardChanges = ReadonlyArray<{
-  readonly field: string
-  readonly text?: string
-  readonly find?: string
-  readonly replace?: string
-  readonly items?: ReadonlyArray<string>
-}>
+type CardChanges = ReadonlyArray<
+  | {
+      readonly field: string
+      readonly text?: string
+      readonly find?: string
+      readonly replace?: string
+      readonly items?: ReadonlyArray<string>
+    }
+  | CardSkillChange
+>
 /** The other greetings, as one text an approval can show before and after. */
 const greetingsShown = (value: unknown) => (Array.isArray(value) ? value.map(String).join("\n\n---\n\n") : "")
 /** A card's saved document with the changes made, or why they can't be. */
 const changed = (saved: Record<string, unknown>, changes: CardChanges) => {
   const doc = { ...saved }
+  const skillPreviews: Array<{ field: string; before: string; after: string }> = []
   for (const change of changes) {
+    if ("action" in change) {
+      const skill = changeCardSkill(doc.extensions, change)
+      if ("error" in skill) return { error: skill.error }
+      doc.extensions = skill.extensions
+      if (skill.preview) skillPreviews.push(skill.preview)
+      continue
+    }
     const field =
       ({ first_message: "first_mes", example_messages: "mes_example" } as Record<string, string>)[change.field] ??
       change.field
@@ -247,7 +259,7 @@ const changed = (saved: Record<string, unknown>, changes: CardChanges) => {
       doc[field] = current.replace(change.find, () => change.replace ?? "")
     }
   }
-  return { doc }
+  return { doc, skillPreviews }
 }
 const editCard: RolloutTool<{
   readonly card: string
@@ -263,7 +275,7 @@ const editCard: RolloutTool<{
   effect: "library",
   capability: "library.write",
   description:
-    "Edits a library card by name or id. Each change replaces a whole text field with text, or one exact find with replace, or sets alternate_greetings to a whole list with items. A find must occur exactly once. All changes save together on the head read; a moved head is an error. Does not grant permissions or approvals. Unsaved drafts remain unsaved.",
+    'Edits a library card by name or id. Set a field with text, replace one exact find with replace, or set alternate_greetings with items. For field "skills", add takes skill, edit takes name and replacement skill, and remove takes name. A skill is {name, description, instructions, tools?} or {use} for an installed skill reference. Saves all changes together on the head read. Card-authored skill loads require approval for their exact content.',
   parameters: Type.Object(
     {
       card: name,
@@ -277,7 +289,8 @@ const editCard: RolloutTool<{
           Type.Object(
             { field: Type.Literal("alternate_greetings"), items: Type.Array(text, { maxItems: limits.listItems }) },
             strict
-          )
+          ),
+          cardSkillChange
         ]),
         { minItems: 1, maxItems: limits.listItems }
       ),
@@ -303,7 +316,7 @@ const editCard: RolloutTool<{
       const greetings = [greetingsShown(saved.doc.alternate_greetings), greetingsShown(result.doc.alternate_greetings)]
       if (greetings[0] !== greetings[1])
         changes.push({ field: "alternate_greetings", before: greetings[0]!, after: greetings[1]! })
-      return { title, rows: [], changes }
+      return { title, rows: [], changes: [...changes, ...result.skillPreviews] }
     }),
   execute: (ctx, args) =>
     safely(

@@ -16,7 +16,7 @@ export const CARD_SKILL_LIMITS = {
 } as const
 
 /** A skill's name: lower-case letters, digits, `-` and `_`, starting with a letter or digit. */
-const CARD_SKILL_NAME = /^[a-z0-9][a-z0-9_-]{0,47}$/
+export const CARD_SKILL_NAME = /^[a-z0-9][a-z0-9_-]{0,47}$/
 
 interface OwnCardSkill {
   readonly name: string

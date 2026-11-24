@@ -22,7 +22,7 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     kinds: workshop,
     description: "Read, create, edit and copy character cards, and mark favourites; read and edit card files.",
     instructions:
-      "Find a card with list_library first and use its id when names repeat. Read a card before editing it, and change only the fields asked for. To keep the original, copy it with clone_card and edit the copy.",
+      'Find a card with list_library first and use its id when names repeat. Read a card before editing it, and change only the fields asked for. To keep the original, copy it with clone_card and edit the copy. Write a card skill with edit_card: use field "skills" and action "add" with its name, description, instructions and optional tools inside skill. Use "edit" with the existing name and a complete replacement skill, or "remove" with the existing name. For an installed skill reference, the skill object has only use, the installed id. Use the name from the user or the available skills list when editing or removing a skill. Loading a card-authored skill requires the user\'s approval for its exact content.',
     tools: [
       "read_card",
       "create_card",

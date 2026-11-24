@@ -3,6 +3,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
+import { CARD_SKILL_LIMITS } from "@dreamspan/shared/cardSkills.ts"
 import { newCardDoc } from "@dreamspan/shared/editing.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
@@ -86,6 +87,89 @@ const cardFile = (name: string, data: Record<string, unknown> = {}) =>
   })
 
 describe("notes and files tools", () => {
+  it.live("edits card skills atomically, with Undo and Revert", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* fixture(config.dataDir)
+      const initialSkills = Array.from({ length: CARD_SKILL_LIMITS.entries - 1 }, (_, i) => ({ use: `installed-${i}` }))
+      const original = { dreamspan: { skills: initialSkills, marker: "keep" }, other: { existing: true } }
+      const card = (yield* f.writer.CreateEntity({
+        userId: f.user.id,
+        kind: "card",
+        label: "Skill card",
+        subtitle: "",
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null,
+        doc: { ...newCardDoc("Skill card"), extensions: original }
+      })).ref
+      const open = () => f.api.OpenEditor({ refId: card.id })
+      const definition = { name: "proofread", description: "Check spelling.", instructions: "List typos." }
+      const skill = { ...definition, tools: [] }
+      const add = { field: "skills", action: "add", skill: definition }
+      const args = (change: object) => ({ card: card.id, changes: [change] })
+
+      yield* f.ok("edit_card", args(add), "add-skill")
+      const added = { ...original, dreamspan: { ...original.dreamspan, skills: [...initialSkills, skill] } }
+      const head = yield* open()
+      assert.deepStrictEqual(head.doc.extensions, added)
+      const read = yield* f.run("read_card", { card: card.id })
+      assert.isUndefined(read.isError, read.text)
+      assert.notInclude(read.text, skill.instructions)
+
+      const replacement = { ...skill, instructions: "List typos by field." }
+      const edit = { field: "skills", action: "edit", name: skill.name, skill: replacement }
+      for (const [i, change] of [
+        { ...add, skill: { ...skill, name: "beyond-cap" } },
+        { ...edit, skill: { ...skill, instructions: " " } },
+        { ...edit, skill: { ...skill, name: "Bad Name" } },
+        { ...edit, skill: { ...skill, tools: ["x".repeat(CARD_SKILL_LIMITS.tool + 1)] } },
+        { ...edit, skill: { ...skill, description: "x".repeat(CARD_SKILL_LIMITS.description + 1) } },
+        { ...edit, skill: { use: initialSkills[0]!.use } },
+        { field: "skills", action: "edit", name: skill.name },
+        { field: "skills", action: "remove", name: skill.name, skill },
+        { field: "skills", action: "remove", name: "missing" },
+        { field: "extensions", text: "{}" }
+      ].entries()) {
+        const invalid = yield* f.run(
+          "edit_card",
+          {
+            card: card.id,
+            changes: [{ field: "description", text: "Must not be saved." }, change]
+          },
+          `invalid-${i}`
+        )
+        assert.isTrue(invalid.isError, invalid.text)
+      }
+      assert.strictEqual((yield* open()).ref.headRevisionId, head.ref.headRevisionId)
+      assert.deepStrictEqual(
+        (yield* f.effects()).map((e) => e.toolCallId),
+        ["add-skill"]
+      )
+
+      yield* f.ok("edit_card", args(edit), "edit-skill")
+      yield* f.ok("edit_card", args({ field: "skills", action: "remove", name: skill.name }), "remove-skill")
+      assert.deepStrictEqual((yield* open()).doc.extensions, original)
+      yield* f.undo("remove-skill")
+      const restored = yield* open()
+      const editedExtensions = { ...added, dreamspan: { ...added.dreamspan, skills: [...initialSkills, replacement] } }
+      assert.deepStrictEqual(restored.doc.extensions, editedExtensions)
+
+      yield* f.writer.EditRef({
+        userId: f.user.id,
+        refId: card.id,
+        expectedRowVersion: restored.ref.rowVersion,
+        doc: { ...restored.doc, extensions: { ...editedExtensions, other: { later: true } } },
+        commitDraft: null,
+        message: "Edit a different extension"
+      })
+      const effect = (yield* f.effects()).find((e) => e.toolCallId === "edit-skill")!
+      const revert = yield* f.api.RevertChange({ effects: [effect] })
+      assert.isEmpty(revert.conflicts)
+      assert.deepStrictEqual((yield* open()).doc.extensions, { ...added, other: { later: true } })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("library note tools only see snippets shared across chats", () => {
     const config = testConfig()
     return Effect.gen(function* () {
