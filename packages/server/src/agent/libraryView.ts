@@ -219,7 +219,7 @@ export const pageTokens = (asked: unknown) =>
  * Where one page of `text` from character `start` ends: as much as fits `maxTokens`, cut at a
  * line end where the page has one (as reference-harness's excerpts are), never empty.
  */
-const pageEnd = (text: string, start: number, maxTokens: number, count: CountEffect) =>
+export const pageEnd = (text: string, start: number, maxTokens: number, count: CountEffect) =>
   Effect.gen(function* () {
     if (start >= text.length || (yield* count(text.slice(start))) <= maxTokens) return text.length
     // The largest end that fits; no page needs more than 16 characters a token.

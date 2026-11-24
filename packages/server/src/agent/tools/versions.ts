@@ -8,7 +8,7 @@ import type { LibraryRef, Revision, RevisionId } from "@dreamspan/shared/library
 import { unifiedDiff } from "@dreamspan/shared/unifiedDiff.ts"
 import { Effect } from "effect"
 import { documentDiff } from "../../db/agentDocuments.ts"
-import { type CountEffect, estimateCount, pageTokens, visibleDoc } from "../libraryView.ts"
+import { type CountEffect, estimateCount, pageEnd, pageTokens, visibleDoc } from "../libraryView.ts"
 import { toolResultFrame } from "../toolData.ts"
 import type { RolloutTool, ToolContext } from "../tools.ts"
 import { pagedView, resolveLibrary, VIEWS, viewHelp } from "./library.ts"
@@ -17,8 +17,7 @@ type Kind = "card" | "preset" | "lorebook"
 const KINDS = Type.Union([Type.Literal("card"), Type.Literal("preset"), Type.Literal("lorebook")])
 const item = Type.String({ minLength: 1, maxLength: 200, description: "The item's name or id." })
 const revisionArg = (description: string) => Type.String({ minLength: 1, maxLength: 100, description })
-/** How far back a revision is looked for by number: enough for any item's whole history. */
-const HISTORY_PAGES = 20
+const HISTORY_PAGE_SIZE = 500
 
 /** The ref's revision a tool names: "latest", a number from list_revisions (also "#3"), or an id. */
 export const findRevision = (ctx: ToolContext, ref: LibraryRef, wanted: string) =>
@@ -27,16 +26,16 @@ export const findRevision = (ctx: ToolContext, ref: LibraryRef, wanted: string) 
     const number = /^#?(\d+)$/.exec(target)?.[1]
     const id = target === "latest" ? ref.headRevisionId : wanted.trim()
     let before: RevisionId | undefined
-    for (let page = 0; page < HISTORY_PAGES; page++) {
+    for (;;) {
       const revisions: ReadonlyArray<Revision> = yield* ctx.reader.RefHistory({
         userId: ctx.userId,
         refId: ref.id,
-        limit: 500,
+        limit: HISTORY_PAGE_SIZE,
         ...(before ? { before } : {})
       })
       const found = revisions.find((r) => (number !== undefined ? r.number === Number(number) : r.id === id))
       if (found) return { revision: found }
-      if (revisions.length < 500) break
+      if (revisions.length < HISTORY_PAGE_SIZE) break
       before = revisions.at(-1)!.id
     }
     return { error: `${ref.label} has no revision ${wanted}. Use list_revisions to see its revisions.` }
@@ -108,7 +107,8 @@ const readRevision: RolloutTool<Readonly<Record<string, unknown>>> = {
           ? Object.fromEntries(Object.entries(visible).filter(([key]) => fields.includes(key)))
           : visible
       const number = found.revision.number === undefined ? "" : ` number ${found.revision.number}`
-      const head = `${kind} "${resolved.ref.label}" (id ${resolved.ref.id}) at revision ${found.revision.id}${number}`
+      const message = found.revision.message ? `, message ${JSON.stringify(found.revision.message)}` : ""
+      const head = `${kind} "${resolved.ref.label}" (id ${resolved.ref.id}) at revision ${found.revision.id}${number}${message}`
       const frame = toolResultFrame({
         id: resolved.ref.id,
         entityId: resolved.ref.entityId,
@@ -127,10 +127,9 @@ const readRevision: RolloutTool<Readonly<Record<string, unknown>>> = {
 const topField = (path: string) => /^[^[.:\s]+/.exec(path)?.[0] ?? path
 
 /** One field's difference as the assistant reads it: prose as a unified diff, settings in words. */
-const section = (change: { readonly field: string; readonly before: string; readonly after: string }) => {
-  const absent = "(absent)"
-  if (change.before === absent) return `${change.field}: added\n${change.after}`
-  if (change.after === absent) return `${change.field}: removed (it was:)\n${change.before}`
+const section = (change: ReturnType<typeof documentDiff>[number]) => {
+  if (change.beforeAbsent) return `${change.field}: added\n${change.after}`
+  if (change.afterAbsent) return `${change.field}: removed (it was:)\n${change.before}`
   const prose =
     change.before.includes("\n") || change.after.includes("\n") || change.before.length + change.after.length > 160
   return prose
@@ -145,6 +144,7 @@ const diffRevisions: RolloutTool<{
   readonly to?: string
   readonly fields?: ReadonlyArray<string>
   readonly max_tokens?: number
+  readonly cursor?: string
 }> = {
   source: import.meta.url,
   id: "diff_revisions",
@@ -154,14 +154,15 @@ const diffRevisions: RolloutTool<{
   effect: "read",
   capability: "library.read",
   description:
-    "Shows what changed in a card, preset or lorebook between two revisions (as git diff): from, and to (default: the saved item now; unsaved drafts aren't included), each a number from list_revisions, an id, or latest. Prose comes as a unified diff (- taken out, + put in), lorebook entries and preset prompts by their uid or identifier, settings as before → after. fields limits it to some fields. Long diffs end with the fields left to ask for.",
+    "Shows what changed in a card, preset or lorebook between two revisions (as git diff): from, and to (default: the saved item now; unsaved drafts aren't included), each a number from list_revisions, an id, or latest. Prose comes as a unified diff (- taken out, + put in), lorebook entries and preset prompts by their uid or identifier, settings as before → after. fields limits it to some fields. If the result ends with a cursor, repeat the request with that cursor and the same fields to read on.",
   parameters: Type.Object({
     kind: KINDS,
     item,
     from: revisionArg("The earlier revision: number, id or latest."),
     to: Type.Optional(revisionArg("The later revision; the saved item now when left out.")),
     fields: Type.Optional(Type.Array(Type.String())),
-    max_tokens: Type.Optional(Type.Integer({ minimum: 200, maximum: 8000 }))
+    max_tokens: Type.Optional(Type.Integer({ minimum: 200, maximum: 8000 })),
+    cursor: Type.Optional(Type.String({ maxLength: 224, description: "The cursor returned on the previous page." }))
   }),
   summarize: (args) => `${args.item}: ${args.from} → ${args.to ?? "now"}`,
   execute: (ctx, args) =>
@@ -169,46 +170,72 @@ const diffRevisions: RolloutTool<{
       const resolved = yield* resolveLibrary(ctx, args.kind, args.item)
       if ("error" in resolved) return { text: resolved.error, isError: true }
       const ref = resolved.ref
-      const from = yield* findRevision(ctx, ref, args.from)
+      const invalidCursor = { text: "Use the cursor from the previous diff page with the same fields.", isError: true }
+      const cursor = /^([\w-]{1,100}):([\w-]{1,100}):(\d{1,9}):(\d{1,9})$/.exec(args.cursor ?? "")
+      if (args.cursor !== undefined && cursor === null) return invalidCursor
+      const from = yield* findRevision(ctx, ref, cursor?.[1] ?? args.from)
       if ("error" in from) return { text: from.error, isError: true }
-      const to = args.to === undefined ? null : yield* findRevision(ctx, ref, args.to)
+      const wantedTo = cursor?.[2] ?? args.to
+      const to = wantedTo === undefined ? null : yield* findRevision(ctx, ref, wantedTo)
       if (to !== null && "error" in to) return { text: to.error, isError: true }
+      const toId = to?.revision.id ?? ref.headRevisionId
       const read = (revisionId: RevisionId) =>
         ctx.reader.GetRevisionDoc({ userId: ctx.userId, refId: ref.id, revisionId })
       const before = visibleDoc(args.kind, yield* read(from.revision.id))
-      const after = visibleDoc(args.kind, yield* read(to === null ? ref.headRevisionId : to.revision.id))
+      const after = visibleDoc(args.kind, yield* read(toId))
       const changes = documentDiff(before, after).filter(
         (c) => args.fields === undefined || args.fields.includes(topField(c.field))
       )
       const head = `${args.kind} "${ref.label}" (id ${ref.id}): revision ${from.revision.number ?? from.revision.id} → ${to === null ? "now" : (to.revision.number ?? to.revision.id)}`
-      if (changes.length === 0) return { text: `${head}\nNo differences${args.fields ? " in those fields" : ""}.` }
+      const start = Number(cursor?.[3] ?? 0)
+      if (cursor && start >= changes.length) return invalidCursor
       const budget = pageTokens(args.max_tokens)
       const counter = count(ctx)
-      const shown: Array<string> = [head]
-      let used = yield* counter(head)
-      let at = 0
-      for (; at < changes.length; at++) {
-        const text = section(changes[at]!)
-        const cost = yield* counter(text)
-        if (used + cost > budget) {
-          // A first field too long for the page is cut, never left out.
-          if (at === 0) {
-            shown.push(
-              `${text.slice(0, Math.max(0, (budget - used) * 4))}\n[cut: ask for fewer fields or a larger max_tokens]`
-            )
-            at++
-          }
-          break
-        }
-        shown.push(text)
-        used += cost
+      const tooSmall = "The token limit is too small to show this diff."
+      const tooSmallResult = () =>
+        Effect.map(counter(tooSmall), (size) => ({ text: size <= budget ? tooSmall : "", isError: true }))
+      if (changes.length === 0) {
+        const noDiff = `No differences${args.fields ? " in those fields" : ""}.`
+        const page = `${head}\n${noDiff}`
+        if ((yield* counter(page)) <= budget) return { text: page }
+        if ((yield* counter(noDiff)) <= budget) return { text: noDiff }
+        return yield* tooSmallResult()
       }
-      const left = [...new Set(changes.slice(at).map((c) => topField(c.field)))]
-      if (left.length > 0)
-        shown.push(
-          `[${left.length} more field${left.length === 1 ? "" : "s"}: diff_revisions with fields=${left.join(",")}]`
-        )
-      return { text: shown.join("\n\n") }
+      const footer = (at: number, offset: number) =>
+        at < changes.length ? `[Continue with cursor="${from.revision.id}:${toId}:${at}:${offset}"]` : ""
+      let heading = cursor ? "" : head
+      const render = (parts: ReadonlyArray<string>, next: string) =>
+        [heading, ...parts, next].filter(Boolean).join("\n\n")
+      const shown: Array<string> = []
+      let page = ""
+      for (let at = start; at < changes.length; at++) {
+        const offset = at === start ? Number(cursor?.[4] ?? 0) : 0
+        const current = section(changes[at]!)
+        if (offset >= current.length) return invalidCursor
+        const text = current.slice(offset)
+        const next = footer(at + 1, 0)
+        const candidate = render([...shown, text], next)
+        if ((yield* counter(candidate)) <= budget) {
+          shown.push(text)
+          page = candidate
+          continue
+        }
+        if (page) return { text: page }
+
+        // Choose the end against the exact rendering, with its continuation on the same page.
+        const renderCut = (body: string) =>
+          render([body], body.length === text.length ? next : footer(at, offset + body.length))
+        const first = String.fromCodePoint(text.codePointAt(0)!)
+        if ((yield* counter(renderCut(first))) > budget) heading = ""
+        let end = yield* pageEnd(current, offset, budget, (body) => counter(renderCut(body)))
+        if (end < current.length && (current.codePointAt(end - 1) ?? 0) > 0xffff) end--
+        const partial = renderCut(current.slice(offset, Math.max(end, offset + first.length)))
+        if ((yield* counter(partial)) <= budget) return { text: partial }
+        const minimum = renderCut(first)
+        if ((yield* counter(minimum)) <= budget) return { text: minimum }
+        return yield* tooSmallResult()
+      }
+      return { text: page }
     }).pipe(Effect.catch(failRead))
 }
 

@@ -1,7 +1,7 @@
 import { editDocument, presetEditArguments, lorebookEditArguments } from "./documents.ts"
 import { toolResultFrame } from "../toolData.ts"
 import { boundedArguments } from "../operations.ts"
-import { documentDiff, documentChangeRows, executableNotice } from "../../db/agentDocuments.ts"
+import { documentDiff, documentChangeRows, executableNotice, validateAgentDocument } from "../../db/agentDocuments.ts"
 import { ToolInputRefused } from "../tools.ts"
 import { LibraryLabel } from "@dreamspan/shared/editorApi.ts"
 import { offeredGreetings } from "@dreamspan/shared/greetings.ts"
@@ -16,7 +16,7 @@ import type { RolloutTool, ToolContext, ToolOutput } from "../tools.ts"
 import { resolveLibrary } from "./library.ts"
 import { findRevision } from "./versions.ts"
 import { changedUnits, pickedUnits, planReversal, unitName } from "@dreamspan/shared/changeReversal.ts"
-import type { Doc, RevisionId } from "@dreamspan/shared/library.ts"
+import type { RevisionId } from "@dreamspan/shared/library.ts"
 import { workshopLimits as limits } from "../../workshopLimits.ts"
 
 const receiptFirst = <A>(tool: RolloutTool<A>): RolloutTool<A> => ({
@@ -705,7 +705,7 @@ const prepareRevert = (ctx: ToolContext, args: RevertArgs) =>
     remember(ctx, args.kind, args.item, ref)
     const found = yield* findRevision(ctx, ref, args.revision)
     if ("error" in found) return yield* Effect.fail(new ToolInputRefused(found.error))
-    const parent = found.revision.parents[0]
+    const parent = found.revision.parents[0] ?? found.revision.forkedFrom?.revisionId
     if (parent === undefined)
       return yield* Effect.fail(
         new ToolInputRefused("That's the item's first revision: it has no change to take back.")
@@ -714,7 +714,7 @@ const prepareRevert = (ctx: ToolContext, args: RevertArgs) =>
       ctx.reader.GetRevisionDoc({ userId: ctx.userId, refId: ref.id, revisionId: revisionId as RevisionId })
     const original = yield* read(parent)
     const changed = yield* read(found.revision.id)
-    const head = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: ref.id })
+    const head = yield* ctx.reader.GetRef({ userId: ctx.userId, refId: ref.id })
     const units = changedUnits(original, changed)
     const plan = planReversal({ original, changed, now: head.doc, fields: pickedUnits(units, args.fields) })
     return { ref, revision: found.revision, plan, head: head.doc }
@@ -750,7 +750,9 @@ const revertChange: RolloutTool<RevertArgs> = {
           title,
           rows: [{ label: "Changed since", value: plan.conflicts.map((c) => unitName(c.field)).join(", ") }]
         }
-      const changes = documentDiff(head, plan.doc as Doc)
+      const valid = validateAgentDocument(ref.kind, head, plan.doc)
+      if (!valid.ok) return yield* Effect.fail(new ToolInputRefused(valid.problems.join(" ")))
+      const changes = documentDiff(head, valid.doc)
       return { title, rows: documentChangeRows(changes), changes }
     }).pipe(
       Effect.mapError((error) =>

@@ -1,7 +1,7 @@
 import { checkStoryWrite } from "./storyWriteScope.ts"
 import { displayEndOf } from "./displayPath.ts"
 import type { StoryAt } from "@dreamspan/shared/chat.ts"
-import { safeAgentDocument } from "./agentDocuments.ts"
+import { safeAgentDocument, validateAgentDocument } from "./agentDocuments.ts"
 import { historyCurrent, historyFork } from "./historyShared.ts"
 import { nextReceiptTime, pendingOperationResult, unwrapOperationResult } from "./operationReceipts.ts"
 import { isDeepStrictEqual } from "node:util"
@@ -37,9 +37,10 @@ import { makeLibraryQueries } from "./library.ts"
 import { transaction } from "./tx.ts"
 import { workshopLimits as limits } from "../workshopLimits.ts"
 import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
+import { visibleDoc } from "../agent/libraryView.ts"
 import { newWorkshopImportMedia } from "./workshopImportMedia.ts"
-import { guarded, insertReversal, revisionReversal } from "./changeReversals.ts"
-import { unitName } from "@dreamspan/shared/changeReversal.ts"
+import { insertReversal, recordAssistantRevertUndo, revisionReversal } from "./changeReversals.ts"
+import { changedUnits, unitName, unitPath, valuesOfUnits } from "@dreamspan/shared/changeReversal.ts"
 
 /** The assistant's message for a revision it writes, on one line; none when it gave none. */
 const agentMessage = (message: string | undefined) => message?.replace(/\p{Cc}+/gu, " ").trim() || undefined
@@ -306,16 +307,21 @@ const createUndoer: Undoer = {
       return {}
     })
 }
+// Older assistant revert recipes predate a flag that distinguishes them from other card edits.
+const assistantRevert = (effect: RolloutEffect) =>
+  typeof effect.undo?.reversalId === "string" || effect.title.startsWith("Reverted a change to the ")
+
 const reviseUndoer: Undoer = {
   id: "library.revise",
   unchanged: libraryUnchanged,
   run: (ctx, effect) =>
     Effect.gen(function* () {
       const ref = yield* checkedRef(ctx, effect)
+      const reverted = assistantRevert(effect)
       // Explicit user Undo restores the recorded document exactly, including its prior
       // approvals, and leaves active drafts alone. This is never tool-reachable approval.
       const change =
-        effect.undo!.exactDocument === true
+        effect.undo!.exactDocument === true || reverted
           ? yield* ctx.ops.EditRef({
               userId: ctx.userId,
               refId: ref.id as RefId,
@@ -330,6 +336,8 @@ const reviseUndoer: Undoer = {
               revisionId: String(effect.undo!.before) as RevisionId,
               expectedRowVersion: ref.row_version
             })
+      if (reverted)
+        yield* recordAssistantRevertUndo(ctx.sql, ctx.userId, effect, ref.head_revision_id, change.ref.headRevisionId)
       return { restoredHead: change.ref.headRevisionId, restoredRowVersion: change.ref.rowVersion }
     })
 }
@@ -1011,7 +1019,9 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                         yield* lib.loadDoc(ref.head_revision_id),
                         yield* lib.loadDoc(String(value.revisionId))
                       ),
-                      message: "Restored in the workshop",
+                      message:
+                        agentMessage(typeof value.message === "string" ? value.message : undefined) ??
+                        "Restored in the workshop",
                       commitDraft: null,
                       agentOriginRef: `${input.rolloutId}:${input.toolCallId}`
                     })
@@ -1171,12 +1181,19 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
             const before = yield* lib.ownedRef(input.userId, input.refId)
             const { plan, covered, chatId } = yield* revisionReversal(
               sql,
-              input.userId,
+              input.rolloutId,
               before,
               input.revisionId,
               input.fields
             )
-            const unchanged = { result: "", effects: [] }
+            const unchanged = {
+              result: JSON.stringify({ reverted: false, note: "That change has nothing left to take back." }),
+              effects: []
+            }
+            const conflictValue = (field: string, value: unknown) =>
+              before.kind === "card" && unitPath(field)[0] === "extensions"
+                ? (visibleDoc("card", { extensions: value }).extensions ?? null)
+                : (value ?? null)
             if (plan.conflicts.length > 0)
               return {
                 ...unchanged,
@@ -1185,29 +1202,29 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                   note: "Nothing was written: these fields were changed since in the same places. Edit them yourself if they should change.",
                   conflicts: plan.conflicts.map((c) => ({
                     field: unitName(c.field),
-                    now: c.now ?? null,
-                    before_the_change: c.before ?? null
+                    now: conflictValue(c.field, c.now),
+                    before_the_change: conflictValue(c.field, c.before)
                   }))
                 })
               }
-            if (plan.doc === null || plan.fields.length === 0)
-              return {
-                ...unchanged,
-                result: JSON.stringify({ reverted: false, note: "That change has nothing left to take back." })
-              }
+            if (plan.doc === null || plan.fields.length === 0) return unchanged
             const head = yield* lib.loadDoc(before.head_revision_id)
-            const valid = validateDoc(before.kind, guarded(before.kind, head, plan.doc as Doc))
+            const valid = validateAgentDocument(before.kind, head, plan.doc)
             if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
+            yield* checkDocument(valid.doc)
             const change = yield* ops.EditRef({
               userId: input.userId,
               refId: input.refId,
-              doc: valid.doc,
+              doc: plan.doc,
               expectedRowVersion: before.row_version,
               message: agentMessage(input.message) ?? "Reverted a change",
               commitDraft: null,
               agentOriginRef: `${input.rolloutId}:${input.toolCallId}`
             })
-            yield* insertReversal(sql, {
+            if (change.ref.headRevisionId === before.head_revision_id) return unchanged
+            const saved = yield* lib.loadDoc(change.ref.headRevisionId)
+            const fields = [...new Set([...plan.fields, ...changedUnits(head, saved)])]
+            const reversalId = yield* insertReversal(sql, {
               userId: input.userId,
               chatId,
               targetKind: "entity",
@@ -1217,7 +1234,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               reversesId: null,
               headBefore: before.head_revision_id,
               headAfter: change.ref.headRevisionId,
-              plan,
+              plan: { fields, before: valuesOfUnits(head, fields), after: valuesOfUnits(saved, fields) },
               effects: covered
             })
             return {
@@ -1225,28 +1242,26 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                 reverted: true,
                 id: change.ref.id,
                 revision: change.ref.headRevisionId,
-                fields: plan.fields.map(unitName)
+                fields: fields.map(unitName)
               }),
-              effects:
-                change.ref.headRevisionId === before.head_revision_id
-                  ? []
-                  : [
-                      {
-                        kind: "library.revise",
-                        targetKind: "entity",
-                        targetId: before.entity_id,
-                        title: `Reverted a change to the ${before.kind} ${before.label}`,
-                        undo: {
-                          refId: before.id,
-                          before: before.head_revision_id,
-                          exactDocument: before.kind === "preset" || before.kind === "lorebook",
-                          archivedAt: before.archived_at,
-                          beforeRowVersion: before.row_version,
-                          head: change.ref.headRevisionId,
-                          rowVersion: change.ref.rowVersion
-                        }
-                      }
-                    ]
+              effects: [
+                {
+                  kind: "library.revise",
+                  targetKind: "entity",
+                  targetId: before.entity_id,
+                  title: `Reverted a change to the ${before.kind} ${before.label}`,
+                  undo: {
+                    refId: before.id,
+                    before: before.head_revision_id,
+                    exactDocument: true,
+                    reversalId,
+                    archivedAt: before.archived_at,
+                    beforeRowVersion: before.row_version,
+                    head: change.ref.headRevisionId,
+                    rowVersion: change.ref.rowVersion
+                  }
+                }
+              ]
             }
           })
         ),

@@ -86,6 +86,27 @@ describe("planReversal", () => {
     expect(planReversal({ original, changed, now, fields }).doc).toEqual({ entries: [one, extra, two, three] })
   })
 
+  it("reverts one greeting and keeps a later edit to a different greeting", () => {
+    const original = { alternate_greetings: ["One", "Two", "Three"] }
+    const changed = { alternate_greetings: ["First", "Two", "Three"] }
+    const fields = changedUnits(original, changed)
+    const now = { alternate_greetings: ["First", "Second", "Three"] }
+    expect(planReversal({ original, changed, now, fields }).doc?.alternate_greetings).toEqual([
+      "One",
+      "Second",
+      "Three"
+    ])
+    for (const alternate_greetings of [
+      ["Overlapping edit", "Two", "Three"],
+      ["Two", "First", "Three"],
+      ["Added", "First", "Two", "Three"],
+      ["First", "Three", "Three"]
+    ]) {
+      const plan = planReversal({ original, changed, now: { alternate_greetings }, fields })
+      expect(plan.conflicts.map((conflict) => conflict.field)).toEqual(fields)
+    }
+  })
+
   it("replays separate file patches around an intervening save to the same field", () => {
     const oldest = {
       original: { description: "The ferry runs at dawn. The inn is quiet." },
