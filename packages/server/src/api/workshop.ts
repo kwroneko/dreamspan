@@ -12,9 +12,10 @@ import {
   GrantRefused,
   type RolloutEffect,
   type WorkshopApi,
-  type WorkshopCapability
+  type WorkshopCapability,
+  type WorkshopGrantChoice
 } from "@dreamspan/shared/workshopApi.ts"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"
 import { ExecutionRegistry, toolForKind } from "../execution.ts"
@@ -30,6 +31,9 @@ import { CARD_SKILLS } from "../agent/tools/loading.ts"
 import { matchPatterns } from "../agent/toolLoading.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
+import { Generations } from "../chat/Generations.ts"
+import { Generator } from "../chat/Generator.ts"
+import { GenerationUnavailable } from "@dreamspan/shared/chatApi.ts"
 
 /** The kind a workshop is made as (db/workshopWrites.ts). */
 const WORKSHOP_KIND = "workshop"
@@ -42,6 +46,8 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
   const files = yield* WorkshopFiles
   const hub = yield* ChatHub
   const warmth = yield* CacheWarmth
+  const generator = yield* Generator
+  const generations = yield* Generations
   // Undo runs the recorded worker operation, bypassing the original UI handler's
   // notifications. Publish only after that transaction commits, on its recorded fork.
   // A library entry back or binned (a note, a card) changes what the user's open chats send
@@ -250,6 +256,19 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         : []
       return yield* capabilitiesFrom(WORKSHOP_KIND, state, grants, story, connections)
     })
+  // Grants on a pending workshop must be choices that the saved workshop would offer.
+  const checkNewGrants = (userId: UserId, attachTo: ChatId | undefined, grants: ReadonlyArray<WorkshopGrantChoice>) =>
+    Effect.gen(function* () {
+      if (grants.length === 0) return
+      const offered = yield* newCapabilitiesOf(userId, attachTo)
+      for (const grant of grants) {
+        const row = offered.find((c) => c.id === grant.capability && (c.target ?? "") === (grant.target ?? ""))
+        if (!row) return yield* new GrantRefused({ message: "A new workshop doesn't offer that." })
+        if (grant.mode !== null && !row.modes.includes(grant.mode))
+          return yield* new GrantRefused({ message: `“${row.label}” can't be set that way.` })
+      }
+    })
+
   return {
     ListWorkshopCapabilities: ({ chatId }) =>
       Effect.gen(function* () {
@@ -394,22 +413,57 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
             })
         })
       }).pipe(internal("ListHostFolders")),
-    // Grants chosen before the first message: only what a new workshop offers, each as
-    // `SetWorkshopGrant` would take it there, so nothing the strip couldn't set gets in.
     CreateWorkshop: (input) =>
       Effect.gen(function* () {
         const userId = (yield* CurrentUser).id
-        const grants = input.grants ?? []
-        if (grants.length > 0) {
-          const offered = yield* newCapabilitiesOf(userId, input.attachTo)
-          for (const grant of grants) {
-            const row = offered.find((c) => c.id === grant.capability && (c.target ?? "") === (grant.target ?? ""))
-            if (!row) return yield* new GrantRefused({ message: "A new workshop doesn't offer that." })
-            if (grant.mode !== null && !row.modes.includes(grant.mode))
-              return yield* new GrantRefused({ message: `“${row.label}” can't be set that way.` })
-          }
-        }
+        yield* checkNewGrants(userId, input.attachTo, input.grants ?? [])
         return yield* writer.CreateWorkshop({ ...input, userId })
-      }).pipe(internal("CreateWorkshop"))
+      }).pipe(internal("CreateWorkshop")),
+    StartWorkshop: (input) =>
+      Effect.gen(function* () {
+        const userId = (yield* CurrentUser).id
+        const existing = yield* reader.GetWorkshopStart({ userId, requestId: input.requestId })
+        if (existing) return existing
+        if (input.first._tag === "Generate" && Option.isNone(generator))
+          return yield* new GenerationUnavailable({
+            message: "This server has nothing to generate with yet: the context assembler isn't built."
+          })
+        yield* checkNewGrants(userId, input.attachTo, input.grants ?? [])
+        let prepared: Parameters<typeof writer.StartWorkshop>[0] = { ...input, userId }
+        if (input.first._tag === "Send" && input.first.content !== "") {
+          const { first, ...choices } = input
+          const rewritten = yield* reader
+            .RewriteWorkshopStart({ ...choices, userId, content: first.content })
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.as(
+                  Effect.logWarning("rewriting the first workshop message failed; it's kept as it is", cause),
+                  null
+                )
+              )
+            )
+          if (rewritten && (rewritten.applied.length || rewritten.failed.length))
+            prepared = {
+              ...prepared,
+              first: { ...first, content: rewritten.text },
+              rewrite: {
+                applied: rewritten.applied,
+                failed: rewritten.failed,
+                raw: rewritten.text === first.content ? null : first.content,
+                rawReasoning: null
+              }
+            }
+        }
+        const { generate, ...started } = yield* writer.StartWorkshop(prepared)
+        if (generate !== undefined)
+          yield* generations.start({
+            userId,
+            chatId: started.chat.id,
+            slotId: started.slotId,
+            forkId: started.forkId,
+            versionId: generate
+          })
+        return started
+      }).pipe(Effect.uninterruptible, internal("StartWorkshop"))
   } satisfies Parameters<typeof WorkshopApi.of>[0]
 })

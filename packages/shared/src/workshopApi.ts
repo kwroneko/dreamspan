@@ -1,8 +1,9 @@
-import { ForkId } from "./chat.ts"
+import { EntityId, ForkId, SlotId } from "./chat.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Chat } from "./chat.ts"
 import { Forbidden, NotFound, ServerError } from "./errors.ts"
+import { GenerationUnavailable } from "./chatApi.ts"
 
 /** What the assistant may do with a capability in one workshop (spec/WORKSHOP.md §3.4). */
 export const CapabilityMode = Schema.Literals(["allow", "ask", "off"])
@@ -160,6 +161,36 @@ export const WorkshopGrantChoice = Schema.Struct({
 })
 export type WorkshopGrantChoice = typeof WorkshopGrantChoice.Type
 
+export const WorkshopCreationFields = {
+  title: Schema.optionalKey(Schema.String),
+  attachTo: Schema.optionalKey(Chat.fields.id),
+  /** Absent: the story's current fork. */
+  attachFork: Schema.optionalKey(ForkId),
+  card: Schema.optionalKey(Schema.String),
+  persona: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  preset: Schema.optionalKey(WorkshopPresetChoice),
+  grants: Schema.optionalKey(Schema.Array(WorkshopGrantChoice).check(Schema.isMaxLength(256)))
+}
+
+export const WorkshopStartFields = {
+  ...WorkshopCreationFields,
+  requestId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  first: Schema.Union([
+    Schema.TaggedStruct("Send", { content: Schema.String }),
+    Schema.TaggedStruct("Generate", { direction: Schema.String })
+  ]),
+  /** The picked speaker, if still in the new workshop's cast. Otherwise use its persona. */
+  speaker: Schema.NullOr(EntityId)
+}
+
+export const WorkshopStarted = Schema.Struct({
+  chat: Chat,
+  forkId: ForkId,
+  slotId: SlotId,
+  speaker: Schema.NullOr(EntityId),
+  kind: Schema.Literals(["Send", "Generate"])
+})
+
 /**
  * One branch of a workshop beside a story and the story branch it goes with
  * (spec/WORKSHOP-BRANCHES.md §8): `story` null when that branch isn't live, or for a workshop
@@ -204,18 +235,15 @@ export class WorkshopApi extends RpcGroup.make(
    * a new workshop offers (`ListNewWorkshopCapabilities`), else `GrantRefused` and nothing is made.
    */
   Rpc.make("CreateWorkshop", {
-    payload: {
-      title: Schema.optionalKey(Schema.String),
-      attachTo: Schema.optionalKey(Chat.fields.id),
-      /** The story branch it's started beside (spec/WORKSHOP-BRANCHES.md §2.1); absent: the story's current one. */
-      attachFork: Schema.optionalKey(ForkId),
-      card: Schema.optionalKey(Schema.String),
-      persona: Schema.optionalKey(Schema.NullOr(Schema.String)),
-      preset: Schema.optionalKey(WorkshopPresetChoice),
-      grants: Schema.optionalKey(Schema.Array(WorkshopGrantChoice).check(Schema.isMaxLength(256)))
-    },
+    payload: WorkshopCreationFields,
     success: Chat,
     error: Schema.Union([NotFound, GrantRefused, ServerError])
+  }),
+  /** Creates a workshop and writes its first turn together. Retries keep the first result. */
+  Rpc.make("StartWorkshop", {
+    payload: WorkshopStartFields,
+    success: WorkshopStarted,
+    error: Schema.Union([NotFound, GrantRefused, GenerationUnavailable, ServerError])
   }),
   /** The workshops beside a story, newest first; with `forkId`, those with a branch going with that story branch. */
   Rpc.make("ListAttachedWorkshops", {

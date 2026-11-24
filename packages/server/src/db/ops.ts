@@ -54,8 +54,9 @@ import {
   ReplyEffects,
   UndoAllReport,
   WorkshopDefaults,
-  WorkshopGrantChoice,
-  WorkshopPresetChoice,
+  WorkshopCreationFields,
+  WorkshopStartFields,
+  WorkshopStarted,
   WorkshopBranch,
   WorkshopStory
 } from "@dreamspan/shared/workshopApi.ts"
@@ -3224,17 +3225,14 @@ const WriteOpsLibraryOwn = RpcGroup.make(
   Rpc.make("CreateWorkshop", {
     payload: {
       userId: UserId,
-      title: Schema.optionalKey(Schema.String),
-      attachTo: Schema.optionalKey(ChatId),
-      /** The story branch it starts beside (WORKSHOP-BRANCHES §2.1); absent: the story's current one. */
-      attachFork: Schema.optionalKey(ForkId),
-      card: Schema.optionalKey(Schema.String),
-      persona: Schema.optionalKey(Schema.NullOr(Schema.String)),
-      preset: Schema.optionalKey(WorkshopPresetChoice),
-      /** Grants chosen before its first message, checked by the API against what it offers. */
-      grants: Schema.optionalKey(Schema.Array(WorkshopGrantChoice))
+      ...WorkshopCreationFields
     },
     success: Chat,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("StartWorkshop", {
+    payload: { userId: UserId, ...WorkshopStartFields, rewrite: Schema.optionalKey(StoredRewrite) },
+    success: Schema.Struct({ ...WorkshopStarted.fields, generate: Schema.optionalKey(VersionId) }),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("SetWorkshopPersona", {
@@ -6095,6 +6093,11 @@ const ReadOpsOwn = RpcGroup.make(
     success: WorkshopDefaults,
     error: StorageError
   }),
+  Rpc.make("GetWorkshopStart", {
+    payload: { userId: UserId, requestId: WorkshopStartFields.requestId },
+    success: Schema.NullOr(WorkshopStarted),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** A saved chat-state call result, checked before a resume revalidates already-applied state. */
   Rpc.make("ListRolloutEffects", {
     payload: { userId: UserId, ...EffectList },
@@ -6693,6 +6696,19 @@ const ReadOpsOwn = RpcGroup.make(
       items: Schema.Array(Schema.Struct({ text: Schema.String, kind: Schema.Literals(["message", "reasoning"]) }))
     },
     success: Schema.Array(TextRewrite),
+    error: Schema.Union([NotFound, AssemblyFailed, StorageError])
+  }),
+  Rpc.make("RewriteWorkshopStart", {
+    payload: {
+      userId: UserId,
+      attachTo: WorkshopStartFields.attachTo,
+      card: WorkshopStartFields.card,
+      persona: WorkshopStartFields.persona,
+      preset: WorkshopStartFields.preset,
+      speaker: WorkshopStartFields.speaker,
+      content: Schema.String
+    },
+    success: TextRewrite,
     error: Schema.Union([NotFound, AssemblyFailed, StorageError])
   }),
   /** What the preset the user's chats use does with a card's own prompts (DESIGN §5.0). */

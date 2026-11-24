@@ -6,15 +6,44 @@ import { createHash } from "node:crypto"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps } from "./ops.ts"
-import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import { attachedStory, pairedWorkshopForks, storyPositionOf, workshopForkPairs } from "./workshopPairing.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
 import { onDisplayPath, pathPieces } from "./displayPath.ts"
 
+export const getWorkshopStart = (sql: SqlClient.SqlClient, userId: UserId, requestId: string) =>
+  Effect.gen(function* () {
+    const [row] = yield* sql<
+      ChatRow & {
+        start_chat_id: ChatId
+        start_fork_id: ForkId
+        start_slot_id: SlotId
+        speaker_id: EntityId | null
+        start_kind: "Send" | "Generate"
+      }
+    >`SELECT c.*, s.chat_id AS start_chat_id, s.fork_id AS start_fork_id,
+      s.slot_id AS start_slot_id, s.speaker_id, s.kind AS start_kind
+      FROM workshop_starts s LEFT JOIN chats c
+        ON c.id = s.chat_id AND c.owner_user_id = s.user_id AND c.deleted_at IS NULL
+      WHERE s.user_id = ${userId} AND s.request_id = ${requestId}`
+    if (!row) return null
+    if (!row.id) return yield* new NotFound({ entity: "chat", id: row.start_chat_id })
+    return {
+      chat: toChat(row),
+      forkId: row.start_fork_id,
+      slotId: row.start_slot_id,
+      speaker: row.speaker_id,
+      kind: row.start_kind
+    }
+  })
+
 export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
+    GetWorkshopStart: ({ userId, requestId }) =>
+      getWorkshopStart(sql, userId, requestId).pipe(query("GetWorkshopStart")),
     StoryReadStamp: ({ userId, chatId }) =>
       Effect.gen(function* () {
         // Only metadata leaves this worker. Include current speaker/library heads because

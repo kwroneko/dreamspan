@@ -1,11 +1,12 @@
 // What new workshops start with (spec/WORKSHOP-CONTEXT.md §4.3): the assistant card, the preset and
 // the workshop persona, the user setting `workshop.defaults`. The persona is the workshop's own,
 // independent of the story default (`chat.persona`): changing either never changes the other.
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { WorkshopDefaults } from "@dreamspan/shared/workshopApi.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { ownedPersona } from "./generationSettings.ts"
+import { ownedPersona, readDefaults } from "./generationSettings.ts"
 import { readSetting } from "./settings.ts"
 
 export interface StoredWorkshopDefaults {
@@ -43,3 +44,20 @@ export const workshopDefaultsOf = (sql: SqlClient.SqlClient, userId: UserId) =>
       ...(stored.persona === undefined ? { makesPersona: true } : {})
     } satisfies WorkshopDefaults
   })
+
+/** Whether a persona is the account's story persona, or a card cast, played or speaking in `story`. */
+export const personaInStory = (sql: SqlClient.SqlClient, userId: UserId, story: string, persona: string) =>
+  Effect.gen(function* () {
+    if ((yield* readDefaults(sql, userId)).persona === persona) return true
+    const [hit] = yield* sql<{ n: number }>`SELECT 1 AS n FROM state_events
+      WHERE chat_id = ${story} AND key IN ('participant.join', 'played_by_me.set')
+        AND (value_json ->> '$.entity' = ${persona}
+          OR EXISTS (SELECT 1 FROM json_each(value_json, '$.entities') WHERE value = ${persona}))
+      UNION ALL SELECT 1 FROM versions v JOIN slots s ON s.id = v.slot_id
+        WHERE s.chat_id = ${story} AND v.speaker_entity_id = ${persona}
+      LIMIT 1`
+    return hit !== undefined
+  })
+
+export const workshopSpeaker = (picked: EntityId | null, assistant: EntityId, persona: EntityId | null) =>
+  picked === assistant ? assistant : persona
