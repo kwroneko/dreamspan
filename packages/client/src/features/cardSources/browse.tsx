@@ -28,6 +28,7 @@ import type { RemoteBrowse } from "../characters/homeSearch.ts"
 import { SortDirection, type SortOrder, SortScroller } from "../characters/cardBrowse.tsx"
 import { TILE_CLASS, TILE_SURFACE_CLASS, TileFace, useOpenCharacter } from "../characters/shellData.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
+import { OPEN_BESIDE_HINT, OPEN_NEW_TAB_HINT, openBeside, useCanOpenBeside } from "../../ui/openBeside.ts"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { canHideCreator, CreatorHeader, hideCreator, showCreator, shownCreator } from "./creator.tsx"
 import {
@@ -512,7 +513,9 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
   const view = cardSourceViews.get(info.id)
   const link = cardLink(info.id, card.remoteId)
   const chat = chatLink(info.id, card.remoteId)
-  const href = `/sources/${encodeURIComponent(info.id)}/cards/${encodeURIComponent(card.remoteId)}/chat`
+  // The card's read-only page (Inspect's), what Open beside and a new browser tab show.
+  const pageHref = `/sources/${encodeURIComponent(info.id)}/cards/${encodeURIComponent(card.remoteId)}`
+  const canBeside = useCanOpenBeside()
   const navigate = useNavigate()
   const ratingShown = card.rating !== undefined
   const adopt = useAdoptRemote()
@@ -632,6 +635,19 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
             Open
           </MenuItem>
         )}
+        {/* The open items of every card tile (owner, 2026-11-24): its read-only page, beside or in a new browser tab, to inspect many cards. */}
+        {canBeside && (
+          <MenuItem icon="split-right" description={OPEN_BESIDE_HINT} onClick={() => openBeside(pageHref)}>
+            Open beside
+          </MenuItem>
+        )}
+        <MenuItem
+          icon="external"
+          description={OPEN_NEW_TAB_HINT}
+          onClick={() => window.open(pageHref, "_blank", "noopener")}
+        >
+          Open in a new browser tab
+        </MenuItem>
         {mine === null && (
           <MenuItem
             icon="eye"
@@ -668,13 +684,6 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
             Show on {info.name}
           </MenuItem>
         )}
-        <MenuItem
-          icon="external"
-          description="Opens it in a new tab of the browser."
-          onClick={() => window.open(href, "_blank", "noopener")}
-        >
-          Open in a new browser tab
-        </MenuItem>
         {card.url !== undefined && (
           <MenuItem
             icon="external"
