@@ -8,6 +8,7 @@ import type { User } from "@dreamspan/shared/domain.ts"
 import type { PluginCopyTarget, PluginWorkingCopy } from "../agent/pluginWorkingCopies.ts"
 import { FILES_MOUNT } from "./environment.ts"
 import { listFolder, readRegularFile, removeFile, statPath, writeRegularFile } from "./safePath.ts"
+import { withFileTree } from "./treeLocks.ts"
 
 /** The repository's limits (plugins/repo.ts `limits`), checked here first for a plain message. */
 const LIMITS = { file: 512 * 1024, bytes: 8 * 1024 * 1024, files: 256, depth: 24 }
@@ -163,7 +164,7 @@ export const makePluginCopies = (deps: PluginCopyDeps): PluginWorkingCopy => {
         yield* Effect.promise(() => deps.initGit!(actor.id, folder).catch(() => undefined))
       }
       return { path: where(target), overwritten }
-    })
+    }).pipe(Effect.uninterruptible, (effect) => withFileTree(actor.id, effect))
 
   return { id: "files.pluginCopies", where, read, sync }
 }

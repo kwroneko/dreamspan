@@ -14,8 +14,9 @@ import { useTabShown } from "../workbench/tab.tsx"
 import { useWorkspaceChanges } from "../editor/PresetWorkspace.tsx"
 import { UnsavedBranchShown, UnsavedScope, useUnsavedTabs } from "../../ui/UnsavedChanges.tsx"
 import { SubjectTabs } from "../../ui/PanelTabs.tsx"
-import { inOrder, storedOrder } from "../../ui/tabOrder.ts"
+import { inOrder, MAX_STORED, storedOrder } from "../../ui/tabOrder.ts"
 import { ToolTabs } from "../../ui/ToolTabs.tsx"
+import { showToast } from "../../ui/Toast.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
@@ -264,7 +265,14 @@ export function ChatSidePanel({
           label="Chat panel"
           focusOnMount={restoreFocus && tools.some((tab) => tab.value === focusTab)}
           moreLabel="More tools"
-          onReorder={(values) => viewPrefs.change({ panelTabOrder: storedOrder(tabOrder, values) })}
+          onReorder={(values) => {
+            const order = storedOrder(tabOrder, values)
+            if (inOrder(usualTools, order).some((tool, index) => tool.value !== values[index])) {
+              showToast({ title: `This tab order can't be saved. Only ${MAX_STORED} positions can be stored.` })
+              return
+            }
+            viewPrefs.change({ panelTabOrder: order })
+          }}
           onResetOrder={() => viewPrefs.change({ panelTabOrder: [] })}
           reordered={reordered}
         />

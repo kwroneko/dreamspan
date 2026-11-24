@@ -52,6 +52,7 @@ import { zipStream, type ZipStreamEntry } from "../formats/zipStream.ts"
 import { isSafePath } from "../formats/zip.ts"
 import { WorkshopFiles } from "./WorkshopFiles.ts"
 import { BinContentGone } from "./bin.ts"
+import { withFileTree } from "./treeLocks.ts"
 import { accountEnv, prepareAccount, resolveFilesPath } from "./environment.ts"
 import { folderShareRefusal } from "./pluginCopies.ts"
 import {
@@ -488,29 +489,6 @@ export const filesRoutes = Layer.unwrap(
         if (!(yield* sharedFolderInfo(now)).available)
           return yield* Effect.fail(
             new Answer(404, "Its owner moved or deleted this folder. It opens again once they share it again.")
-          )
-      })
-
-    /**
-     * One change at a time to a file (§8.2): the editor's content check, the version kept and the
-     * rename that lands it run under one lock per path of the tree, so two saves on the same base
-     * can't both pass and the second overwrite the first unkept.
-     */
-    const pathLocks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>()
-    const withPathLock = <A, E, R>(root: string, segments: ReadonlyArray<string>, effect: Effect.Effect<A, E, R>) =>
-      Effect.suspend(() => {
-        const key = `${root}\0${segments.join("/")}`
-        const entry = pathLocks.get(key) ?? { lock: Semaphore.makeUnsafe(1), users: 0 }
-        pathLocks.set(key, entry)
-        entry.users++
-        return entry.lock
-          .withPermits(1)(effect)
-          .pipe(
-            Effect.ensuring(
-              Effect.sync(() => {
-                if (--entry.users === 0) pathLocks.delete(key)
-              })
-            )
           )
       })
 
@@ -1043,13 +1021,12 @@ export const filesRoutes = Layer.unwrap(
             clearTimeout(idle)
           }
         })
-        // It lands under the path's lock (§8.2): the share is checked again, an editor save's base
+        // It lands under the owner's tree lock (§8.2): the share is checked again, an editor save's base
         // is checked again just before the rename, and the content replaced is kept as a version
         // as it is at that moment. A name taken meanwhile (not replacing) is never written over.
         const target = [...parent, name]
-        const landed = yield* withPathLock(
-          root,
-          target,
+        const landed = yield* withFileTree(
+          userId,
           Effect.gen(function* () {
             yield* stillPlaced(placed)
             if (base !== null && (yield* currentHash(root, target)) !== base) return false
@@ -1112,9 +1089,12 @@ export const filesRoutes = Layer.unwrap(
       const problem = nameProblem(segments.at(-1)!)
       if (problem) return refuse(400, problem)
       const dir = yield* Effect.tryPromise(() => openFolder(root, segments.slice(0, -1)))
-      yield* Effect.tryPromise(() => mkdir(at(dir, segments.at(-1)!), { mode: 0o755 })).pipe(
-        Effect.ensuring(Effect.promise(() => dir.close()))
-      )
+      yield* withFileTree(
+        userId,
+        stillPlaced(placed).pipe(
+          Effect.andThen(Effect.tryPromise(() => mkdir(at(dir, segments.at(-1)!), { mode: 0o755 })))
+        )
+      ).pipe(Effect.ensuring(Effect.promise(() => dir.close())))
       quota.wrote(userId, FOLDER_BYTES)
       changedAt(placed)
       return HttpServerResponse.jsonUnsafe({ path: full })
@@ -1144,7 +1124,10 @@ export const filesRoutes = Layer.unwrap(
           const toName = at(target, to.segments.at(-1)!)
           const moving = yield* Effect.tryPromise(() => lstat(fromName))
           // Never over what's there, even something a command makes meanwhile (EEXIST: 409).
-          yield* Effect.tryPromise(() => renameNoReplace(fromName, toName))
+          yield* withFileTree(
+            from.userId,
+            stillPlaced(from).pipe(Effect.andThen(Effect.tryPromise(() => renameNoReplace(fromName, toName))))
+          )
           // The working folders stored for it (and for folders in it) follow (§1 "Paths are the names").
           // In a shared folder, the owner's (by their names) as well as the caller's.
           if (moving.isDirectory())
@@ -1183,12 +1166,19 @@ export const filesRoutes = Layer.unwrap(
       const stopping = (yield* reader.SharedByMe({ userId: userId as never }))
         .filter((share) => isWithin(share.path, placed.ownerFull))
         .map((share) => share.granteeUserId)
-      const item = yield* bin.toBin(
+      const item = yield* withFileTree(
         userId,
-        root,
-        segments,
-        placed.ownerFull,
-        placed.share ? { userId: user.id, handle: user.handle } : undefined
+        stillPlaced(placed).pipe(
+          Effect.andThen(
+            bin.toBin(
+              userId,
+              root,
+              segments,
+              placed.ownerFull,
+              placed.share ? { userId: user.id, handle: user.handle } : undefined
+            )
+          )
+        )
       )
       changedAt(placed)
       if (stopping.length > 0) yield* recheckCommands([...new Set(stopping)])
@@ -1559,9 +1549,8 @@ export const filesRoutes = Layer.unwrap(
         return refuse(410, "That version's content isn't kept.")
       const bytes = yield* Effect.tryPromise(() => readFile(join(config.dataDir, version.mediaPath!)))
       // One change at a time to a path: what was there is kept as it was when written over.
-      const kept = yield* withPathLock(
-        root,
-        segments,
+      const kept = yield* withFileTree(
+        userId,
         Effect.gen(function* () {
           yield* stillPlaced(placed)
           const current = yield* Effect.tryPromise(() => statPath(root, segments))
@@ -1589,7 +1578,7 @@ export const filesRoutes = Layer.unwrap(
     const restore = Effect.gen(function* () {
       const body = yield* jsonBody(RestoreBody)
       const { userId } = yield* place(FILES_TOP)
-      const { path } = yield* bin.restore(userId, body.binItemId)
+      const { path } = yield* withFileTree(userId, bin.restore(userId, body.binItemId))
       changed(userId, [path])
       return HttpServerResponse.jsonUnsafe({ path })
     })

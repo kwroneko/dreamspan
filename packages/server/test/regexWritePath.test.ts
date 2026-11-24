@@ -54,6 +54,44 @@ const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 const presetWith = (scripts: ReadonlyArray<RegexScript>) => ({ extensions: { regex_scripts: regexToSt(scripts) } })
 
 it.live(
+  "the first workshop message is rewritten and repeated requests keep one post",
+  () =>
+    run(
+      Effect.gen(function* () {
+        const api = yield* client()
+        const { revision } = yield* api.GetGlobalRegex()
+        yield* api.SetGlobalRegex({
+          expectedRevision: revision,
+          scripts: [script("first", { find_regex: "/flood/g", replace_string: "storm", placement: [1] })]
+        })
+        const input = {
+          requestId: "first-workshop-message",
+          first: { _tag: "Send" as const, content: "A flood." },
+          speaker: null
+        }
+        const [started, concurrent] = yield* Effect.all([api.StartWorkshop(input), api.StartWorkshop(input)], {
+          concurrency: 2
+        })
+        const retried = yield* api.StartWorkshop({ ...input, first: { _tag: "Send", content: "Retry text" } })
+        assert.strictEqual(concurrent.slotId, started.slotId)
+        assert.strictEqual(retried.chat.id, started.chat.id)
+        assert.strictEqual(retried.slotId, started.slotId)
+        const path = yield* api.ReadPath({
+          chatId: started.chat.id,
+          leafSlotId: null,
+          range: { _tag: "Bottom" },
+          limit: 10
+        })
+        assert.lengthOf(path.entries, 2)
+        const sent = path.entries[1]!.version
+        assert.strictEqual(sent.content, "A storm.")
+        assert.strictEqual((yield* api.RawVersionText({ versionId: sent.id })).content, "A flood.")
+      })
+    ),
+  60_000
+)
+
+it.live(
   "a reply's chain of thought is stripped as it finishes; its raw text shows and restores",
   () =>
     run(

@@ -70,6 +70,20 @@ export const migrationDefinitions = {
         PRIMARY KEY (draft_id, session)
       ) STRICT, WITHOUT ROWID`
     ]
+  },
+  "0016_workshop_starts": {
+    statements: [
+      `CREATE TABLE workshop_starts (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        request_id TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        fork_id TEXT NOT NULL,
+        slot_id TEXT NOT NULL,
+        speaker_id TEXT,
+        kind TEXT NOT NULL CHECK (kind IN ('Send', 'Generate')),
+        PRIMARY KEY (user_id, request_id)
+      ) STRICT, WITHOUT ROWID`
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

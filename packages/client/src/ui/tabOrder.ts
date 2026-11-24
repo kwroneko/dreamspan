@@ -36,7 +36,7 @@ export const storedOrder = (previous: ReadonlyArray<string>, shown: ReadonlyArra
   // go, from the end, so the write never fails the setting's check.
   for (let at = next.length - 1; next.length > MAX_STORED && at >= 0; at--)
     if (!present.has(next[at]!)) next.splice(at, 1)
-  return next
+  return next.slice(0, MAX_STORED)
 }
 
 /** The most values the stored order holds (panelTabOrder's limit in chatApi.ts). */

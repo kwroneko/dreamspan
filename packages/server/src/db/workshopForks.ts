@@ -108,15 +108,17 @@ const workshopCuts = (sql: SqlClient.SqlClient, storyId: string, story: ForkRow,
         WHERE id IN ${sql.in([...sources.keys()])}`).map((c) => [c.id, c.title])
     )
     const cuts: Array<WorkshopCut> = []
+    const atEnd = at !== null && at === (yield* displayEndOf(sql, storyId, story))
     for (const [workshopId, source] of sources) {
-      const path = yield* workshopPath(sql, workshopId, source)
-      const index = yield* cutIndex(sql, storyId, story, at, path)
+      const tip = (yield* displayEndOf(sql, workshopId, source)) ?? null
+      const path = atEnd ? [] : yield* workshopPath(sql, workshopId, source)
+      const index = atEnd ? -1 : yield* cutIndex(sql, storyId, story, at, path)
       cuts.push({
         workshopId,
         title: titles.get(workshopId)?.trim() || "Workshop",
         source,
-        tip: (yield* displayEndOf(sql, workshopId, source)) ?? null,
-        then: index < 0 ? null : path[index]!.id,
+        tip,
+        then: atEnd ? tip : index < 0 ? null : path[index]!.id,
         leftOut: path.slice(index + 1)
       })
     }

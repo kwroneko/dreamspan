@@ -118,6 +118,18 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
     })
   )
 
+  it.effect("branching at the display end keeps workshop messages about a deleted story tip", () =>
+    Effect.gen(function* () {
+      const h = yield* setup
+      yield* h.writer.DeleteMessage({ userId: h.userId, forkId: h.main, slotId: h.s3.slotId })
+      const { preview, fork } = yield* h.branchStory(h.s2.slotId)
+      assert.isEmpty(preview.workshops)
+      const [paired] = yield* h.pairedIn(h.workshop, fork)
+      assert.isDefined(paired)
+      assert.deepStrictEqual(yield* h.texts(h.workshop.id, paired!), yield* h.texts(h.workshop.id, h.w))
+    })
+  )
+
   it.effect("the dialog offers then and now, lists what then leaves out, and each choice does what it says", () =>
     Effect.gen(function* () {
       const h = yield* setup

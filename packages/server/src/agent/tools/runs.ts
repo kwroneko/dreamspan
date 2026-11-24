@@ -190,12 +190,15 @@ const readRun: RolloutTool<{
         // without changing any tool declaration in an existing chat's provider prefix.
         const cursor = steps.some((s) => s.id === call)
           ? undefined
-          : call?.match(/^page:v1:(\d+):(\d+):([a-f0-9]{24})$/)
+          : call?.match(/^page:(v[12]):(\d+):(\d+):([a-f0-9]{24})$/)
+        const offset = Number(cursor?.[3] ?? 0)
         // Provider call ids and plugin tool names are source text too, not app metadata. A stored
         // quoted result is paged from its original, so the page quotes it once, by its offsets.
-        const payload = (s: (typeof steps)[number]) =>
-          `${JSON.stringify({ call: s.id, tool: s.tool })}\n${JSON.stringify(s.args)}\n${s.result === undefined || s.result === null ? "(no result)" : toolDataBody(s.result)}`
-        const fingerprint = (s: (typeof steps)[number]) =>
+        const payload = (s: (typeof steps)[number], legacy: boolean) => {
+          const result = s.result ?? "(no result)"
+          return `${JSON.stringify({ call: s.id, tool: s.tool })}\n${JSON.stringify(s.args)}\n${legacy ? result : toolDataBody(result)}`
+        }
+        const fingerprint = (s: (typeof steps)[number], content: string) =>
           createHash("sha256")
             .update(
               JSON.stringify([
@@ -206,39 +209,41 @@ const readRun: RolloutTool<{
                 s.n,
                 s.id,
                 s.tool,
-                payload(s)
+                content
               ])
             )
             .digest("hex")
             .slice(0, 24)
+        const cursorStep = cursor && steps.find((s) => s.n === Number(cursor[2]))
+        // For a time v1 was also emitted for decoded bodies. The digest identifies which was paged.
+        const legacy =
+          cursor?.[1] === "v1" && !!cursorStep && fingerprint(cursorStep, payload(cursorStep, true)) === cursor[4]
+        const pageVersion = legacy ? "v1" : "v2"
         const chosen = steps.filter(
           (s) =>
             s.n >= from_step &&
-            (cursor ? s.n === Number(cursor[1]) : call === undefined || s.id === call) &&
-            words.every((w) => payload(s).toLowerCase().includes(w))
+            (cursor ? s.n === Number(cursor[2]) : call === undefined || s.id === call) &&
+            words.every((w) => payload(s, legacy).toLowerCase().includes(w))
         )
         if (chosen.length === 0)
           return { text: `No step of message ${message} matches (it has ${steps.length}).`, isError: true }
-        const first = chosen[0]!
-        if (
-          cursor &&
-          (fingerprint(first) !== cursor[3] ||
-            !Number.isSafeInteger(Number(cursor[2])) ||
-            Number(cursor[2]) >= payload(first).length)
-        )
-          return {
-            text: "That result page is unavailable. Read the step again without its page cursor.",
-            isError: true
-          }
+        if (cursor) {
+          const first = chosen[0]!
+          const content = payload(first, legacy)
+          if (fingerprint(first, content) !== cursor[4] || !Number.isSafeInteger(offset) || offset >= content.length)
+            return {
+              text: "That result page is unavailable. Read the step again without its page cursor.",
+              isError: true
+            }
+        }
         // Identities, counts, offsets and recovery directions are app-owned framing. A
         // response can hold several complete steps, then a page within one large step.
         const limit = Math.min(TOOL_RESULT_CHARS, max_tokens * 4)
         const shown: Array<string> = []
         let used = 0
         for (const step of chosen) {
-          const stamp = fingerprint(step)
-          const content = payload(step)
-          const offset = cursor ? Number(cursor[2]) : 0
+          const content = payload(step, legacy)
+          const stamp = fingerprint(step, content)
           const frame = `<step n="${step.n}"${step.status === "error" ? ' failed="true"' : ""} offset="${offset}" total_characters="${content.length}" />`
           const next = chosen.find((s) => s.n > step.n)?.n ?? (cursor ? steps.find((s) => s.n > step.n)?.n : undefined)
           const following =
@@ -249,7 +254,7 @@ const readRun: RolloutTool<{
             frame,
             notice: shown.length === 0,
             more: (end) =>
-              `[Result continues: read_run with message ${message} and call "page:v1:${step.n}:${end}:${stamp}"; keep query and from_step unchanged.]`
+              `[Result continues: read_run with message ${message} and call "page:${pageVersion}:${step.n}:${end}:${stamp}"; keep query and from_step unchanged.]`
           })
           if (!page.text) {
             shown.push(`[More steps: read_run with message ${message} and from_step=${step.n}.]`)

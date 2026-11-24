@@ -90,6 +90,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   CreateSnippet: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   CreateUser: "User-only security, consent, account, credential or network configuration.",
   CreateWorkshop: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  StartWorkshop: "Starts a new workshop and posts its first turn from the pending composer.",
   DecideMediaApproval: "User-only security, consent, account, credential or network configuration.",
   ConvertPresetToWorkshop: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   GetWorkshopDefaults: "Not in W6's first exposures; use the bounded workshop read tools.",

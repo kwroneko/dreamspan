@@ -16,7 +16,8 @@ import { Effect, Layer } from "effect"
 import type { SqlClient } from "effect/sql"
 import { AssemblySources, type PositionedEvent } from "../assembler/pipeline.ts"
 import { mediaHeldBy } from "./media.ts"
-import type { CardInput, HistoryEntry, NoteInput } from "../assembler/types.ts"
+import type { CardInput, HistoryEntry, NoteInput, PresetInput } from "../assembler/types.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
 import type { ChatId } from "@dreamspan/shared/chat.ts"
@@ -50,6 +51,8 @@ export interface Draft {
     readonly notes: ReadonlyArray<string>
   }>
   readonly now: number
+  /** A pending workshop can choose its own preset before its first message. */
+  readonly preset?: RefId | PresetInput | null
 }
 
 const at = (data: FoldableEvent["data"]): PositionedEvent => ({ depth: null, event: { scope: null, data } })
@@ -62,8 +65,12 @@ export const draftSources = (sql: SqlClient.SqlClient, draft: Draft) =>
     // last, once), and the persona played by the user.
     const joined = [...new Set([...draft.cards, ...(draft.persona === null ? [] : [draft.persona])])]
     const lcm = yield* newChatLcmSettings(sql, draft.userId)
+    const preset = draft.preset
     const events: ReadonlyArray<PositionedEvent> = [
       at({ key: "lcm.settings", value: lcm } as FoldableEvent["data"]),
+      ...(preset === null || typeof preset === "string"
+        ? [at({ key: "preset.binding", value: preset === null ? {} : { ref: preset } })]
+        : []),
       ...joined.map((entity) => at({ key: "participant.join", value: { entity } } as FoldableEvent["data"])),
       ...(draft.persona === null
         ? []
@@ -140,6 +147,7 @@ export const draftSources = (sql: SqlClient.SqlClient, draft: Draft) =>
     const index = (slotId: string | null) => (slotId === null ? -1 : entries.findIndex((e) => e.slotId === slotId))
     const sources = AssemblySources.of({
       ...live,
+      ...(typeof preset === "object" && preset !== null ? { preset: () => Effect.succeed(preset) } : {}),
       viewLayers: true,
       summaryLayer: () => Effect.succeed({ summaries: [], cursor: null, cursorDepth: -1, failures: [] }),
       target: Effect.succeed({

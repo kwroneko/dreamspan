@@ -37,6 +37,13 @@ describe("storedOrder", () => {
     expect(next.length).toBe(MAX_STORED)
     expect(next.filter((value) => value === "a" || value === "b")).toEqual(["b", "a"])
   })
+  it("keeps a reorder of 201 offered tools within the limit", () => {
+    const offered = Array.from({ length: MAX_STORED + 1 }, (_, index) => `tool${index}`)
+    const arranged = [...offered].reverse()
+    const order = storedOrder([], arranged)
+    expect(order).toHaveLength(MAX_STORED)
+    expect(names(inOrder(tabs(...offered), order))).toEqual(arranged)
+  })
 })
 
 describe("moves", () => {

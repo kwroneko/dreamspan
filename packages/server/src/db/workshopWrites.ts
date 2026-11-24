@@ -8,7 +8,6 @@ import { Effect } from "effect"
 import type { Bin } from "./bin.ts"
 import type { LibrarySteps } from "./editorWrites.ts"
 import { newChatLcmSettings, ownedPersona, readDefaults } from "./generationSettings.ts"
-import type { UserId } from "@dreamspan/shared/domain.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
@@ -19,6 +18,8 @@ import { putUserSetting } from "./settings.ts"
 import { transaction } from "./tx.ts"
 import {
   ownedCard,
+  personaInStory,
+  workshopSpeaker,
   readStoredWorkshopDefaults,
   type StoredWorkshopDefaults,
   workshopDefaultsOf
@@ -27,25 +28,13 @@ import { WORKSHOP_SUMMARY_INSTRUCTION, workshopLcmSizes } from "@dreamspan/share
 import { resolveModel } from "@dreamspan/shared/providers.ts"
 import { toModel, type ModelRow } from "./providers.ts"
 import { defaultSeed } from "./workshopSeeds.ts"
+import { getWorkshopStart } from "./workshopAttach.ts"
 
 export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
   const { sql } = steps
   const graph = makeGraphWrites(sql, bin.drafts, true)
-  /** Whether a persona is the account's story persona, or a card cast, played or speaking in `story`. */
-  const inStory = (userId: UserId, story: string, persona: string) =>
-    Effect.gen(function* () {
-      if ((yield* readDefaults(sql, userId)).persona === persona) return true
-      const [hit] = yield* sql<{ n: number }>`SELECT 1 AS n FROM state_events
-        WHERE chat_id = ${story} AND key IN ('participant.join', 'played_by_me.set')
-          AND (value_json ->> '$.entity' = ${persona}
-            OR EXISTS (SELECT 1 FROM json_each(value_json, '$.entities') WHERE value = ${persona}))
-        UNION ALL SELECT 1 FROM versions v JOIN slots s ON s.id = v.slot_id
-          WHERE s.chat_id = ${story} AND v.speaker_entity_id = ${persona}
-        LIMIT 1`
-      return hit !== undefined
-    })
-  return {
-    CreateWorkshop: ({
+  const stepsFor = {
+    createWorkshop: ({
       userId,
       title,
       attachTo,
@@ -54,7 +43,7 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
       persona: chosenPersona,
       preset: chosenPreset,
       grants
-    }) =>
+    }: Parameters<Parameters<typeof WriteOps.of>[0]["CreateWorkshop"]>[0]) =>
       Effect.gen(function* () {
         // A side chat's story: the user's, live, of a kind that takes one (spec/WORKSHOP.md §4).
         const [story] =
@@ -202,7 +191,7 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         const played =
           attachTo === undefined || !account.persona
             ? account.persona
-            : (yield* inStory(userId, attachTo, account.persona))
+            : (yield* personaInStory(sql, userId, attachTo, account.persona))
               ? null
               : account.persona
         for (const entity of new Set([card.entity_id, ...(played ? [played] : [])]))
@@ -249,8 +238,69 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         )
         yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, last_message_at = ${at} WHERE id = ${chatId}`
         const [row] = yield* sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId}`
-        return toChat(row!)
-      }).pipe(transaction(sql, "CreateWorkshop")),
+        return { chat: toChat(row!), assistant: card.entity_id as EntityId, persona: played as EntityId | null }
+      })
+  }
+  return {
+    CreateWorkshop: (input) =>
+      stepsFor.createWorkshop(input).pipe(
+        Effect.map(({ chat }) => chat),
+        transaction(sql, "CreateWorkshop")
+      ),
+    StartWorkshop: ({ requestId, first, speaker: picked, rewrite, ...input }) =>
+      Effect.gen(function* () {
+        const { userId } = input
+        const existing = yield* getWorkshopStart(sql, userId, requestId)
+        if (existing) return existing
+        const { chat, assistant, persona } = yield* stepsFor.createWorkshop(input)
+        const speaker = workshopSpeaker(picked, assistant, persona)
+        const version = new NewVersion({
+          speakerEntityId: speaker,
+          macroMode: "verbatim",
+          ...(first._tag === "Send"
+            ? {
+                writer: "human",
+                content: first.content,
+                status: "complete",
+                origin: "user_written",
+                ...(rewrite === undefined ? {} : { rewrite })
+              }
+            : {
+                writer: "model",
+                content: "",
+                status: "generating",
+                origin: "generated",
+                ...(first.direction.trim() === "" ? {} : { direction: first.direction })
+              })
+        })
+        const posted = yield* graph
+          .appendMessage({
+            userId,
+            chatId: chat.id,
+            parentSlotId: chat.activeLeafSlotId,
+            branch: false,
+            version,
+            commitDraft: null
+          })
+          .pipe(Effect.catchTag("LeafMoved", (error) => Effect.die(error)))
+        yield* sql`INSERT INTO workshop_starts ${sql.insert({
+          user_id: userId,
+          request_id: requestId,
+          chat_id: chat.id,
+          fork_id: posted.forkId,
+          slot_id: posted.slotId,
+          speaker_id: speaker,
+          kind: first._tag
+        })}`
+        return {
+          chat: posted.chat,
+          forkId: posted.forkId,
+          slotId: posted.slotId,
+          speaker,
+          kind: first._tag,
+          ...(first._tag === "Generate" ? { generate: posted.version.id } : {})
+        }
+      }).pipe(transaction(sql, "StartWorkshop")),
     /** The workshop persona only; the story default persona (`chat.persona`) never changes here. */
     SetWorkshopPersona: ({ userId, persona }) =>
       Effect.gen(function* () {
