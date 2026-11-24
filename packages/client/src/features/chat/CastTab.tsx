@@ -255,6 +255,29 @@ function You({
   )
 }
 
+/** The `castSections` entries Cast lays out in its reply settings row, in this order. */
+export const REPLY_SETTINGS = ["cast.reply-order", "cast.one-reply", "cast.auto-replies"]
+
+/**
+ * Cast's reply settings row (owner, 2026-11-03): Who replies, One reply at a time and Auto
+ * replies side by side, wrapping below when they don't fit. Cast owns the row and mounts each
+ * entry itself, so a plugin can replace or remove any of them and the others stay. Each entry
+ * is a flex item here (an error takes a line of its own with `order-last basis-full`); with none
+ * shown, the row is hidden.
+ */
+export function ReplySettingsRow({ session }: { session: ChatSession }) {
+  return (
+    <section
+      aria-label="Who replies"
+      className="flex flex-wrap items-end gap-x-4 gap-y-2 border-t border-border pt-3 empty:hidden"
+    >
+      {REPLY_SETTINGS.map((id) => (
+        <SlotOutlet key={id} slot={castSections} only={id} props={{ session }} />
+      ))}
+    </section>
+  )
+}
+
 export function CastTab({ session }: { session: ChatSession }) {
   // Only the cast: the tab doesn't re-render as messages arrive.
   const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
@@ -350,8 +373,9 @@ export function CastTab({ session }: { session: ChatSession }) {
           </ul>
         )}
       </div>
+      <ReplySettingsRow session={session} />
       {/* Add characters, and what a plugin adds (castSections). */}
-      <SlotOutlet slot={castSections} except={["cast.one-reply", "cast.auto-replies"]} props={{ session }} />
+      <SlotOutlet slot={castSections} except={REPLY_SETTINGS} props={{ session }} />
       {AsyncResult.isFailure(infoResult) && (
         <p className="text-sm text-muted">The cards' details couldn't be read; editing them may not work.</p>
       )}
