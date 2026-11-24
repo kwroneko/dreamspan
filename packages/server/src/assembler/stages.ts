@@ -2798,8 +2798,12 @@ const endOfRequestStage = sync("end-of-request", (assembly) => {
       const own = doc.prompts.find((p) => p.identifier === agentInstructionsPrompt.identifier) ?? null
       const sent =
         own === null || (triggersFor(own, need(assembly, "cast").type) && conditionHolds(assembly, conditionOf(own)))
-      const text = sent ? agentInstructionsText(assembly, own, own ? conditionOf(own) : "always") : null
-      if (text) parts.push(text)
+      const text = sent
+        ? withReplacement(assembly, `preset:${agentInstructionsPrompt.identifier}`, () =>
+            agentInstructionsText(assembly, own, own ? conditionOf(own) : "always")
+          )
+        : null
+      if (text?.text.trim()) parts.push(text)
     }
     if (parts.length === 0) return
     return {
