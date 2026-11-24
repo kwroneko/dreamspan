@@ -1,8 +1,9 @@
 // Toasts: short notices in a corner, announced politely, with up to two actions. Base UI
 // carries the timing, focus and announcements; `showToast` works from anywhere.
 import { Toast as BaseToast } from "@base-ui/react/toast"
-import { Tooltip } from "./Tooltip.tsx"
+import { iconButtonClass, Tooltip } from "./Tooltip.tsx"
 import { buttonClass } from "./Button.tsx"
+import { Icon } from "./Icon.tsx"
 
 interface ToastAction {
   readonly label: string
@@ -40,17 +41,24 @@ function ToastList() {
       key={toast.id}
       toast={toast}
       data-toast
-      className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 text-sm text-text shadow-lg outline-none transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none"
+      // A toast past the limit stays in Base UI's list, inert until one above it goes: hidden
+      // meanwhile, where it used to show as a toast whose buttons did nothing.
+      className="relative flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 text-sm text-text shadow-lg outline-none transition-opacity duration-150 data-ending-style:opacity-0 data-limited:hidden data-starting-style:opacity-0 motion-reduce:transition-none"
     >
-      <div className="flex items-start gap-2">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <BaseToast.Title className="font-medium [overflow-wrap:anywhere]" />
-          <BaseToast.Description className="truncate text-muted" />
-        </div>
-        <BaseToast.Close aria-label="Dismiss" className={buttonClass("ghost")}>
-          ×
-        </BaseToast.Close>
+      {/* Room on the right for the corner's × (its 28px, less the padding it overlaps). */}
+      <div className="flex min-w-0 flex-col gap-0.5 pr-6">
+        <BaseToast.Title className="font-medium [overflow-wrap:anywhere]" />
+        <BaseToast.Description className="truncate text-muted" />
       </div>
+      <Tooltip label="Dismiss">
+        <BaseToast.Close
+          aria-label="Dismiss"
+          data-toast-close
+          className={`${iconButtonClass()} absolute top-1.5 right-1.5 size-7`}
+        >
+          <Icon name="close" />
+        </BaseToast.Close>
+      </Tooltip>
       {(toast.data?.actions.length ?? 0) > 0 && (
         <div className="flex flex-wrap gap-2">
           {toast.data!.actions.map((action) => (
