@@ -1026,6 +1026,7 @@ const McpWriteOps = RpcGroup.make(
    * A user's own sign-in with a connection (spec/MCP.md §2.4), encrypted, bound to
    * "mcp:<connection>:<user>:oauth" and to the server's origin; null forgets it. `expectedEnc`
    * (a refresh): stored only while the sign-in is still the one refreshed, else StaleWrite.
+   * `expectedCacheRevision` guards the final write of a sign-in against changes to the connection.
    */
   Rpc.make("SetMcpOAuth", {
     payload: {
@@ -1035,6 +1036,7 @@ const McpWriteOps = RpcGroup.make(
         Schema.Struct({ enc: Schema.Uint8Array, origin: Schema.String, expiresAt: Schema.NullOr(Schema.Number) })
       ),
       expectedEnc: Schema.optionalKey(Schema.Uint8Array),
+      expectedCacheRevision: Schema.optionalKey(Schema.Int),
       at: Schema.Number
     },
     success: McpConnection,

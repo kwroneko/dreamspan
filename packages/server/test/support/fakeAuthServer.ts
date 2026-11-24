@@ -13,6 +13,8 @@ export interface FakeAuthState {
   refuseRefresh: boolean
   /** Registration answers 400 with this body, which isn't an OAuth error (a page from elsewhere). */
   registerBody: string | null
+  /** Lets a test pause an authorization-code exchange after it arrives. */
+  beforeCodeExchange?: () => Promise<void>
 }
 
 interface Issued {
@@ -133,6 +135,7 @@ export const startFakeAuthServer = async (initial: Partial<FakeAuthState> = {}):
       const grant = form.get("grant_type")
       recorded.push(`token:${grant}`)
       if (grant === "authorization_code") {
+        await state.beforeCodeExchange?.()
         const entry = codes.get(form.get("code") ?? "")
         codes.delete(form.get("code") ?? "")
         const verifier = form.get("code_verifier") ?? ""

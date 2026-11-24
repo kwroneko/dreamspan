@@ -1476,21 +1476,25 @@ export const layer = Layer.effect(
         if (error !== null) return yield* refused(`${name} didn't sign you in: ${prepared.scrub(error).slice(0, 200)}`)
         if (code === null || code === "") return yield* refused(`${name} didn't sign you in.`)
         const url = prepared.url
+        const changed = () => refused(`${name}'s address changed while you were signing in. Start again.`)
         if (prepared.connection.cacheRevision !== entry.cacheRevision || url === null || url.origin !== entry.origin)
-          return yield* refused(`${name}'s address changed while you were signing in. Start again.`)
+          return yield* changed()
         const stored = yield* signInStep(userId, prepared, prepared.network, url, (fetchFn) =>
           finishFlow(fetchFn, url, entry.pending, code, Date.now())
         )
-        yield* writer.SetMcpOAuth({
-          userId,
-          connectionId: entry.connectionId,
-          oauth: {
-            enc: secrets.encrypt(JSON.stringify(stored), oauthBinding(entry.connectionId, userId)),
-            origin: entry.origin,
-            expiresAt: stored.expiresAt
-          },
-          at: Date.now()
-        })
+        yield* writer
+          .SetMcpOAuth({
+            userId,
+            connectionId: entry.connectionId,
+            oauth: {
+              enc: secrets.encrypt(JSON.stringify(stored), oauthBinding(entry.connectionId, userId)),
+              origin: entry.origin,
+              expiresAt: stored.expiresAt
+            },
+            expectedCacheRevision: entry.cacheRevision,
+            at: Date.now()
+          })
+          .pipe(Effect.catchTag("StaleWrite", changed))
         yield* closeKeptFor(entry.connectionId, userId)
         // A new sign-in is checked once, as a new address is (spec/MCP.md §2.5).
         yield* check(userId, entry.connectionId).pipe(Effect.ignore)
