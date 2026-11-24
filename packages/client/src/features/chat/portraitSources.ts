@@ -161,7 +161,7 @@ class PortraitSources {
     const next = change(entries.map((e) => ({ portrait: { ...e.owned.portrait, id: e.key }, weight: e.weight })))
     // Each change applies to every view that shows the picture: closing it closes it in all.
     this.order = next.flatMap((e) => holders.get(e.portrait.id) ?? [e.portrait.id])
-    for (const [tabId, source] of this.sources) {
+    for (const source of this.sources.values()) {
       const own = new Map(source.viewer.shown.map((s) => [s.portrait.id, s.portrait]))
       const part: Array<StackEntry<Portrait>> = next.flatMap((e) => {
         const key = (holders.get(e.portrait.id) ?? []).find((k) => this.sourceOf(k) === source)
