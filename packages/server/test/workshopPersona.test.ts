@@ -229,6 +229,19 @@ describe("workshop card and persona", () => {
         ),
         "NotFound"
       )
+      // Review of 7e301b2d9 (6): new text for a prompt since deleted from the source isn't
+      // dropped by a conversion that succeeds; the conversion refuses, so the draft stays.
+      assert.strictEqual(
+        yield* outcome(
+          api.ConvertPresetToWorkshop({
+            refId: ref.id,
+            label: "Story preset (workshop)",
+            choices: [{ identifier: "deletedPrompt", keep: true, content: "Replacement text" }],
+            instructions: ""
+          })
+        ),
+        "InvalidDocument"
+      )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

@@ -91,7 +91,10 @@ function ConvertDialog({
           client("ConvertPresetToWorkshop", {
             refId: refId as never,
             label: name.trim(),
-            choices: Object.values(choices),
+            // Only the pieces shown: a choice for a prompt gone from the preset can't apply.
+            choices: Object.values(choices).filter((choice) =>
+              items.some((item) => item.identifier === choice.identifier)
+            ),
             instructions
           }),
         ["library"]

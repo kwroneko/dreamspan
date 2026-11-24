@@ -3,7 +3,7 @@
 // Documents from the client are validated against their kind's schema here or in the writer.
 import { type AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
 import { PRESET_SCHEMA_VERSION, type PresetDoc, promptPreset } from "@dreamspan/shared/docs/preset.ts"
-import { convertToWorkshop } from "@dreamspan/shared/workshopPreset.ts"
+import { convertToWorkshop, goneReplacements } from "@dreamspan/shared/workshopPreset.ts"
 import { builtinPreset } from "../db/assemblySources.ts"
 import { CARD_SCHEMA_VERSION } from "@dreamspan/shared/docs/card.ts"
 import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@dreamspan/shared/docs/lorebook.ts"
@@ -596,6 +596,15 @@ export const makeWorkshopPresetHandlers = Effect.gen(function* () {
         const owner = (yield* CurrentUser).id
         const source = yield* reader.OpenEditor({ userId: owner, refId })
         if (source.ref.kind !== "preset") return yield* new NotFound({ entity: "preset", id: refId })
+        // New text for a prompt the preset no longer has would be dropped: refuse, so it stays.
+        const gone = goneReplacements(source.doc as PresetDoc, choices)
+        if (gone.length > 0)
+          return yield* new InvalidDocument({
+            problems: gone.map(
+              (choice) =>
+                `“${choice.identifier}” was deleted from the preset since you opened this, so the new text you wrote for it can’t go in. Copy it if you want it, then close and reopen this to go on.`
+            )
+          })
         const { ref } = yield* writer.CreateEntity({
           userId: owner,
           kind: "preset",

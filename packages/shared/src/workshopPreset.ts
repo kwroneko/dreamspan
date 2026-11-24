@@ -109,6 +109,13 @@ export interface ConversionChoice {
   readonly content?: string
 }
 
+/** The choices with new text for a prompt `doc` no longer has: a conversion would drop the text. */
+export const goneReplacements = (doc: Pick<PresetDoc, "prompts">, choices: ReadonlyArray<ConversionChoice>) =>
+  choices.filter(
+    (choice) =>
+      choice.keep && choice.content !== undefined && !doc.prompts.some((p) => p.identifier === choice.identifier)
+  )
+
 /**
  * The workshop preset made from `doc`: dropped pieces leave the prompts and the order, kept ones
  * take their new text, and the workshop pieces are added after the main prompt and the card
