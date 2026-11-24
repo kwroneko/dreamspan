@@ -111,7 +111,7 @@ export function NewCharacterChat({ entityId, label }: { entityId: EntityId; labe
       to="/cards/$entityId/chat"
       params={{ entityId }}
       search={{ ...sidebarCleared, character: entityId, panel: `card:${entityId}` }}
-      icon="plus"
+      icon="chat"
       label="New Roleplay"
       name={label}
       hint={`Start a new roleplay with ${label}.`}
@@ -124,7 +124,7 @@ export function NewRoleplayStart() {
   return (
     <SidebarStartLink
       to="/new/chat"
-      icon="plus"
+      icon="chat"
       label="New Roleplay"
       hint="Start a new roleplay chat. Add characters from the Cast tab, or send with nobody in it."
     />
