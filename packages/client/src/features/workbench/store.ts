@@ -647,14 +647,20 @@ export class WorkbenchStore {
       const tab = findTab(this.layout, id)
       if (!tab) continue
       if (this.panelTabs.has(id)) return id
-      const params = new URL(tab.href, "http://tab.invalid").searchParams
+      const url = new URL(tab.href, "http://tab.invalid")
+      const params = url.searchParams
       const chat = params.get("chat")
       if (!chat) continue
       const key = itemKey(`/chats/${chat}`)
+      const fork = params.get("chatFork")
+      const matches = (candidate: typeof tab) =>
+        this.panelTabs.has(candidate.id) &&
+        itemKey(candidate.href) === key &&
+        (fork === null || new URL(candidate.href, url).searchParams.get("fork") === fork)
       const sourceId = params.get("chatTab")
       const source = sourceId ? findTab(this.layout, sourceId) : undefined
-      if (source && this.panelTabs.has(source.id) && itemKey(source.href) === key) return source.id
-      const owner = allTabs(this.layout).find((t) => this.panelTabs.has(t.id) && itemKey(t.href) === key)
+      if (source && matches(source)) return source.id
+      const owner = allTabs(this.layout).find(matches)
       if (owner) return owner.id
     }
     return null
