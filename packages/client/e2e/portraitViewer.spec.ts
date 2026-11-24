@@ -117,7 +117,7 @@ test("every editable portrait: one Picture button lower right, a click opens the
   await shoot(page, "persona-tab")
   // Hover shows the explanation; no camera badge or dot over the picture.
   await personaTab.getByRole("button", { name: "View Juniper's picture", exact: true }).hover()
-  await expect(page.getByText("View the whole picture", { exact: true })).toBeVisible()
+  await expect(page.getByText("Opens this portrait at full size.", { exact: true })).toBeVisible()
   await expect(personaPortrait.locator("svg")).toHaveCount(1)
   await personaTab.getByRole("button", { name: "View Juniper's picture", exact: true }).click()
   await expect(page.getByRole("complementary", { name: "Juniper's portrait", exact: true })).toBeVisible()
