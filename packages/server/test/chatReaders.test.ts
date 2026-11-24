@@ -56,6 +56,7 @@ const SCOPED: Readonly<Record<string, number>> = {
   "db/chatSetupReads.ts": 6,
   "db/chatSetupWrites.ts": 4,
   "db/composerImages.ts": 2,
+  "db/composerLibrary.ts": 1,
   "db/decisions.ts": 3,
   "db/editorReads.ts": 2,
   "db/editorWrites.ts": 1,
