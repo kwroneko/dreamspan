@@ -1,7 +1,7 @@
 import { checkStoryWrite } from "./storyWriteScope.ts"
 import { displayEndOf } from "./displayPath.ts"
 import type { StoryAt } from "@dreamspan/shared/chat.ts"
-import { safeAgentDocument } from "./agentDocuments.ts"
+import { safeAgentDocument, validateAgentDocument } from "./agentDocuments.ts"
 import { historyCurrent, historyFork } from "./historyShared.ts"
 import { nextReceiptTime, pendingOperationResult, unwrapOperationResult } from "./operationReceipts.ts"
 import { isDeepStrictEqual } from "node:util"
@@ -1209,6 +1209,9 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               }
             if (plan.doc === null || plan.fields.length === 0) return unchanged
             const head = yield* lib.loadDoc(before.head_revision_id)
+            const valid = validateAgentDocument(before.kind, head, plan.doc)
+            if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
+            yield* checkDocument(valid.doc)
             const change = yield* ops.EditRef({
               userId: input.userId,
               refId: input.refId,
