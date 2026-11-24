@@ -31,6 +31,7 @@ import { NewWorkshopStart, NewWorkshopWithCharacter, WorkshopStartCard } from ".
 import { characterChatActions, sidebarChatStarts } from "../characters/homeSlots.ts"
 import { ConvertPresetButton } from "./ConvertPreset.tsx"
 import { registerWorkshopPersona } from "./workshopPersona.tsx"
+import { registerWorkshopWithCard } from "./workshopWithCard.tsx"
 import { editorActions } from "../editor/editorSlots.ts"
 import { panelEditorActions } from "../editor/panelActions.tsx"
 import type { EditorStore } from "../editor/store.ts"
@@ -73,6 +74,7 @@ export const register = () => [
   // In its own pane or the center, each workshop branch names the story branch it goes with.
   branchControlParts.register({ id: "workshop.story-branch", order: 20, RowNote: WorkshopBranchNote }),
   ...registerWorkshopPersona(),
+  ...registerWorkshopWithCard(),
   chatStartSections.register({ id: "workshop.start", order: 20, component: WorkshopStartCard }),
   sidebarChatStarts.register({ id: "workshop.sidebar-start", order: 20, component: NewWorkshopStart }),
   characterChatActions.register({ id: "workshop.character-start", order: 20, component: NewWorkshopWithCharacter }),

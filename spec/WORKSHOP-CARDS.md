@@ -351,7 +351,7 @@ The same model, with their existing tools and diffs:
 
 | Unit | What | Depends on |
 |---|---|---|
-| C1 | New workshop with this card in card menus | — |
+| C1 | **Built** (workshopcards-u1): New workshop with this card in card menus | — |
 | C2 | **Built** (workshopcards-u2): `library` attachments: migration, writer validation (owned, live), assembly of the frozen element (whole or reference with summary). In-view derivation moved to C7, the "changed since" tail line to C8 | — |
 | C2b | Paged reads: `view`, `offset`, `max_tokens`, indexes and `to_file` on `read_card`, `read_lorebook`, `read_preset` | — |
 | C3 | The paperclip menu in workshops, the multi-select card picker and the lorebook and preset pickers | C2 |
