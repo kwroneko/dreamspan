@@ -991,6 +991,12 @@ main:has(> [data-fill]) {
 [data-tab-strip] {
   container: tab-strip / inline-size;
 }
+@container tab-strip (width < 5rem) {
+  /* Keep both controls and the strip's edge padding within very narrow frames. */
+  [data-strip-actions] button {
+    width: 1.75rem;
+  }
+}
 @container tab-strip (width < 6.5rem) {
   [data-strip-maximize] {
     display: none;
